@@ -47,12 +47,13 @@ type inputScope struct {
 type inputScopeContextKey struct{}
 
 type inputFrame struct {
-	id      string
-	scope   inputScope
-	focus   inputFocus
-	mapper  CoordinateMapper
-	expires time.Time
-	used    bool
+	id       string
+	scope    inputScope
+	focus    inputFocus
+	mapper   CoordinateMapper
+	expires  time.Time
+	used     bool
+	activity *inputActivity
 }
 
 // One process-wide lock serializes desktop transactions across enrollments.
@@ -60,13 +61,18 @@ type inputFrame struct {
 // the worker. New screenshots, tokens, runs and window_focus cannot clear it.
 // Read-only screenshots remain available. No application name is special-cased.
 type inputTargetGuard struct {
-	mu        sync.Mutex
-	frame     *inputFrame
-	selection *windowSelection
-	anchor    inputFocus
-	halted    bool
-	backend   inputTargetBackend
-	now       func() time.Time
+	mu                 sync.Mutex
+	frame              *inputFrame
+	selection          *windowSelection
+	anchor             inputFocus
+	halted             bool
+	backend            inputTargetBackend
+	now                func() time.Time
+	anchorActivity     *inputActivity
+	pendingObservation bool
+	pendingScope       inputScope
+	pendingUntil       time.Time
+	firstInterruption  *InputInterruption
 }
 
 var desktopInputGuard = &inputTargetGuard{now: time.Now}
@@ -78,7 +84,7 @@ var desktopRuntimeDisabled atomic.Bool
 func DisableDesktopRuntime() {
 	desktopRuntimeDisabled.Store(true)
 	desktopInputGuard.mu.Lock()
-	desktopInputGuard.halted = true
+	desktopInputGuard.stop("runtime", "startup", "desktop_runtime_disabled")
 	desktopInputGuard.mu.Unlock()
 }
 
@@ -95,6 +101,8 @@ type InputTargetStatus struct {
 	Error                      string             `json:"error,omitempty"`
 	AcquisitionMilliseconds    int64              `json:"acquisition_milliseconds"`
 	DiagnosticProbes           []InputTargetProbe `json:"diagnostic_probes,omitempty"`
+	PendingObservation         bool               `json:"pending_observation"`
+	FirstInterruption          *InputInterruption `json:"first_interruption,omitempty"`
 }
 
 // InputTargetProbe is observation only; no diagnostic path grants input.
@@ -117,6 +125,7 @@ func (g *inputTargetGuard) targetStatus() InputTargetStatus {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	status := InputTargetStatus{Bound: g.anchor != nil, Halted: g.halted, PostEventAccess: g.postingAccess(), PointerCoordinateAccessors: g.pointerCoordinateAccessors()}
+	status.PendingObservation, status.FirstInterruption = g.pendingObservation, g.firstInterruption
 	if g.backend == nil {
 		status.Error = "No target-addressed input backend is available."
 		return status
@@ -180,6 +189,8 @@ func (g *inputTargetGuard) screenshot(ctx context.Context, args map[string]any, 
 		return nil, failure("cancelled", err.Error())
 	}
 	g.clearFrame() // Every new observation invalidates any earlier receipt, but not the focus anchor.
+	owner, _ := inputOwner(ctx)
+	transition := g.canObserveTransition(owner)
 	if _, requested := args["windowId"]; !requested {
 		// Read-only screenshots still observe interruptions when a target was
 		// established. They never erase its anchor or silently re-acquire it.
@@ -188,17 +199,19 @@ func (g *inputTargetGuard) screenshot(ctx context.Context, args map[string]any, 
 				return
 			}
 			if g.backend == nil {
-				g.halted = true
+				g.stop("screenshot", "read_only", "backend_unavailable")
 				return
 			}
 			live, err := g.backend.focus()
 			if err != nil {
-				g.halted = true
+				g.stopFocus("screenshot", "read_only", err)
 				return
 			}
 			defer live.close()
-			if !g.anchor.same(live, true) {
-				g.halted = true
+			if !g.undisturbed(g.anchorActivity) {
+				g.stop("screenshot", "read_only", "human_activity_or_activation")
+			} else if !g.anchor.same(live, !transition) {
+				g.stop("screenshot", "read_only", focusDifference(g.anchor, live))
 			}
 		}
 		observe()
@@ -228,10 +241,22 @@ func (g *inputTargetGuard) screenshot(ctx context.Context, args map[string]any, 
 	if g.backend == nil {
 		return nil, failure("targeted_input_unavailable", "This platform has no verified target-addressed input backend. Read-only screenshots are available without windowId.")
 	}
+	activity := g.activity()
+	if _, supported := g.backend.(inputActivityBackend); supported && activity == nil {
+		if g.anchor != nil {
+			g.stop("screenshot", "before_capture", "activity_monitor_unavailable_or_input_held")
+			return nil, g.interrupted()
+		}
+		return nil, failure("input_activity_unavailable", "Cannot establish an undisturbed input baseline. No receipt was granted.")
+	}
+	if g.anchorActivity != nil && !g.undisturbed(g.anchorActivity) {
+		g.stop("screenshot", "before_capture", "human_activity_or_activation")
+		return nil, g.interrupted()
+	}
 	before, err := g.backend.focus()
 	if err != nil {
 		if g.anchor != nil {
-			g.halted = true
+			g.stopFocus("screenshot", "before_capture", err)
 			return nil, g.interrupted()
 		}
 		return nil, failure("input_focus_unavailable", err.Error())
@@ -243,11 +268,11 @@ func (g *inputTargetGuard) screenshot(ctx context.Context, args map[string]any, 
 		}
 	}()
 	if before.window().ID != id {
-		g.halted = true
+		g.stop("screenshot", "before_capture", "requested_window_changed")
 		return nil, g.interrupted()
 	}
-	if g.anchor != nil && !g.anchor.same(before, true) {
-		g.halted = true
+	if g.anchor != nil && !g.anchor.same(before, !transition) {
+		g.stop("screenshot", "before_capture", focusDifference(g.anchor, before))
 		return nil, g.interrupted()
 	}
 	shot, refusal := capture(args)
@@ -256,17 +281,32 @@ func (g *inputTargetGuard) screenshot(ctx context.Context, args map[string]any, 
 	}
 	after, err := g.backend.focus()
 	if err != nil {
-		g.halted = true
+		g.stopFocus("screenshot", "after_capture", err)
 		return nil, g.interrupted()
 	}
 	same := before.same(after, true)
-	if same && g.anchor == nil {
+	if !g.undisturbed(activity) {
+		after.close()
+		g.stop("screenshot", "after_capture", "human_activity_or_activation")
+		return nil, g.interrupted()
+	}
+	if transition && !g.canObserveTransition(owner) {
+		after.close()
+		g.stop("screenshot", "after_capture", "transition_observation_expired_or_interrupted")
+		return nil, g.interrupted()
+	}
+	if same {
+		if g.anchor != nil {
+			g.anchor.close()
+		}
 		g.anchor = after
+		g.anchorActivity = activity
+		g.pendingObservation = false
 	} else {
 		after.close()
 	}
 	if !same {
-		g.halted = true
+		g.stop("screenshot", "after_capture", "focus_changed_during_capture")
 		return nil, g.interrupted()
 	}
 	var payload map[string]any
@@ -284,7 +324,7 @@ func (g *inputTargetGuard) screenshot(ctx context.Context, args map[string]any, 
 		return nil, failure("input_target_unavailable", "Cannot create an input receipt.")
 	}
 	g.clearFrame()
-	g.frame = &inputFrame{id: hex.EncodeToString(nonce[:]), scope: owner, focus: before, mapper: mapper, expires: g.now().Add(inputTargetLifetime)}
+	g.frame = &inputFrame{id: hex.EncodeToString(nonce[:]), scope: owner, focus: before, mapper: mapper, expires: g.now().Add(inputTargetLifetime), activity: activity}
 	keep = true
 	w := before.window()
 	payload["inputTarget"] = map[string]any{"id": g.frame.id, "windowId": w.ID, "pid": w.PID, "expiresAt": g.frame.expires.UTC(), "singleUse": true}
@@ -320,17 +360,31 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 	}
 	check := func(element bool) bool {
 		if ctx.Err() != nil || !g.now().Before(f.expires) {
+			g.stop(action, "transaction", "cancelled_or_expired")
+			return false
+		}
+		if !g.undisturbed(f.activity) {
+			g.stop(action, "transaction", "human_activity_or_activation")
 			return false
 		}
 		live, err := g.backend.focus()
 		if err != nil {
+			g.stopFocus(action, "transaction", err)
 			return false
 		}
 		defer live.close()
-		return f.focus.same(live, element)
+		if !f.focus.same(live, element) {
+			g.stop(action, "transaction", focusDifference(f.focus, live))
+			return false
+		}
+		if ctx.Err() != nil || !g.now().Before(f.expires) {
+			g.stop(action, "transaction", "cancelled_or_expired")
+			return false
+		}
+		return true
 	}
 	if !check(true) {
-		g.halted = true
+		g.stop(action, "before_transaction", "target_unverified")
 		return nil, g.interrupted()
 	}
 	// Attempt release only to the original PID after interruption. A failed
@@ -339,7 +393,7 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 	defer func() {
 		if release != nil {
 			if err := g.backend.emit(f.focus, *release); err != nil {
-				g.halted = true
+				g.stop(action, "release", "release_failed")
 				prior := ""
 				if fail != nil {
 					prior = fail.GetErrorMessage() + " "
@@ -352,7 +406,7 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 	emitted := 0
 	for _, event := range events {
 		if !check((action == "key_type" || action == "key_combo") && !event.release) {
-			g.halted = true
+			g.stop(action, "transaction", "target_unverified")
 			return nil, inputInterruptedAfter(emitted)
 		}
 		if event.down {
@@ -361,7 +415,7 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 			release = &up
 		}
 		if err := g.backend.emit(f.focus, event); err != nil {
-			g.halted = true
+			g.stop(action, "emit", "delivery_failed")
 			return nil, failure("input_interrupted", fmt.Sprintf("Target-addressed input failed after %d events; no retry: %v", emitted, err))
 		}
 		emitted++
@@ -374,18 +428,29 @@ func (g *inputTargetGuard) input(ctx context.Context, action string, args map[st
 	// sampled enforcement, not attribution of who caused a focus change.
 	after, err := g.backend.focus()
 	if err != nil {
-		g.halted = true
+		g.stopFocus(action, "after_transaction", err)
 		return nil, inputInterruptedAfter(emitted)
 	}
-	if !f.focus.same(after, !inputMayChangeField(action, args)) {
+	if !g.undisturbed(f.activity) {
 		after.close()
-		g.halted = true
+		g.stop(action, "after_transaction", "human_activity_or_activation")
+		return nil, inputInterruptedAfter(emitted)
+	}
+	transition := f.activity != nil && (action == "key_combo" || action == "mouse_click")
+	if !f.focus.same(after, !(transition || inputMayChangeField(action, args))) {
+		reason := focusDifference(f.focus, after)
+		after.close()
+		g.stop(action, "after_transaction", reason)
 		return nil, inputInterruptedAfter(emitted)
 	}
 	if g.anchor != nil {
 		g.anchor.close()
 	}
 	g.anchor = after
+	g.anchorActivity = f.activity
+	// This observation-only lifetime starts after the gesture. The spent input
+	// receipt is never renewed, including when the gesture finished near expiry.
+	g.pendingObservation, g.pendingScope, g.pendingUntil = transition, f.scope, g.now().Add(inputTargetLifetime)
 	return successComputerJSON(map[string]any{"targetWindowId": f.focus.window().ID, "targetPid": f.focus.window().PID, "eventsSent": emitted, "text_redacted": true, "requiresFreshScreenshot": true}, "input posted to target process; inspect a fresh screenshot before continuing", 0), nil
 }
 

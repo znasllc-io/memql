@@ -155,6 +155,7 @@ func computeCapabilitiesForRuntime(goos string, getenv func(string) string, desk
 			"key_type":                   "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",
 			"mouse_click":                "explicit x/y, optional left/right/middle button and cmd/ctrl/alt/shift modifiers; single click only",
 			"interruption":               "latched until operator review and worker restart; no automatic retry or reacquisition",
+			"withinWindowObservation":    "On macOS a completed click/key gesture consumes its receipt. With unchanged HID counters and activation generation, a fresh stable screenshot may observe a replaced field in the identical retained window within 60 seconds. No input is allowed before that new receipt. Focus-query errors and target changes still latch.",
 			"limitation":                 "process-addressed delivery; AX window/field checks are sampled, not atomic; delayed effects may stop input",
 		}
 	}

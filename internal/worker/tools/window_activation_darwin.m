@@ -5,7 +5,8 @@
 #include <stdatomic.h>
 
 static id activationObserver;
-static unsigned long activationGeneration;
+static atomic_ulong activationGeneration;
+static atomic_bool activationWatching;
 static pid_t lastActivatedPID;
 extern void targetMainLoopTurn(void);
 
@@ -17,8 +18,10 @@ void targetActivationWatchStart(void) {
             lastActivatedPID = [note.userInfo[NSWorkspaceApplicationKey] processIdentifier];
         }];
     [activationObserver retain];
+    atomic_store(&activationWatching, activationObserver != nil);
 }
 void targetActivationWatchStop(void) {
+    atomic_store(&activationWatching, false);
     if (activationObserver) {
         [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:activationObserver];
         [activationObserver release]; activationObserver = nil;
@@ -69,6 +72,18 @@ static int activationInputHeld(void) {
     for (CGMouseButton button=0; button<32; button++)
         if (CGEventSourceButtonState(kCGEventSourceStateHIDSystemState,button)) return 1;
     return 0;
+}
+
+// Called from the worker transaction thread. No AppKit object is read here;
+// the main-loop observer publishes only a monotonic activation generation.
+// HID counters deliberately exclude the worker's private event source.
+int targetInputActivity(uint32_t *counters, uint64_t *generation) {
+    if (!atomic_load(&activationWatching) || activationInputHeld()) return 0;
+    unsigned long before=atomic_load(&activationGeneration);
+    for (size_t i=0; i<ACTIVITY_COUNT; i++)
+        counters[i]=CGEventSourceCounterForEventType(kCGEventSourceStateHIDSystemState,activityTypes[i]);
+    *generation=before;
+    return atomic_load(&activationWatching) && !activationInputHeld() && before==atomic_load(&activationGeneration);
 }
 
 static int activationStagesUndisturbed(targetActivation *a) {

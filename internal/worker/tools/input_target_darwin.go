@@ -12,6 +12,8 @@ extern pid_t targetKeyboardPID(void);
 extern long targetEventAppKitWindow(CGEventRef);
 extern CGPoint targetEventWindowPoint(CGEventRef);
 extern int targetWindowCoordinateAccessorsAvailable(void);
+extern int targetInputActivity(uint32_t *, uint64_t *);
+extern void targetMainLoopTurn(void);
 extern CGEventRef targetCreateWindowMouse(CGEventSourceRef, CGEventType, CGPoint, CGMouseButton, uint32_t, CGRect);
 
 typedef struct {
@@ -174,6 +176,7 @@ static int targetEventSourceState(targetEvent *e) {
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"time"
 	"unicode/utf16"
@@ -200,6 +203,27 @@ func (f *darwinInputFocus) close() { C.targetFree(f.ptr); f.ptr = nil }
 
 type darwinInputBackend struct{}
 
+func (darwinInputBackend) inputActivity() (inputActivity, bool) {
+	var counters [16]C.uint32_t
+	var generation C.uint64_t
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	available := false
+	err := desktopMainJobs.call(ctx, func() error {
+		C.targetMainLoopTurn()
+		available = C.targetInputActivity(&counters[0], &generation) != 0
+		return nil
+	})
+	if err != nil || !available {
+		return inputActivity{}, false
+	}
+	value := inputActivity{activation: uint64(generation)}
+	for i := range counters {
+		value.counters[i] = uint32(counters[i])
+	}
+	return value, true
+}
+
 func (darwinInputBackend) canPostEvents() bool { return bool(C.CGPreflightPostEventAccess()) }
 func (darwinInputBackend) pointerCoordinateAccessors() bool {
 	return C.targetWindowCoordinateAccessorsAvailable() != 0
@@ -215,8 +239,19 @@ func (darwinInputBackend) focus() (inputFocus, error) {
 }
 
 func targetReadFailure(problem C.targetReadError) error {
+	return darwinFocusReadError{problem: problem}
+}
+
+type darwinFocusReadError struct{ problem C.targetReadError }
+
+func (e darwinFocusReadError) inputFocusDiagnostic() InputFocusDiagnostic {
 	stages := map[int]string{1: "system AX allocation", 2: "focused application", 3: "focused application PID", 4: "focused window", 5: "focused UI element", 6: "window position", 7: "window size", 8: "window geometry", 9: "on-screen CG window list", 10: "unique AX-to-CG window match", 11: "NSWorkspace keyboard recipient", 12: "NSWorkspace keyboard recipient changed"}
-	return fmt.Errorf("Cannot establish exact target at %s (AX error %d, matching windows %d); input refused. Do not retry input or activate a different app.", stages[int(problem.stage)], int(problem.code), int(problem.matches))
+	return InputFocusDiagnostic{Stage: stages[int(e.problem.stage)], ErrorCode: int(e.problem.code), MatchingWindows: int(e.problem.matches)}
+}
+
+func (e darwinFocusReadError) Error() string {
+	d := e.inputFocusDiagnostic()
+	return fmt.Sprintf("Cannot establish exact target at %s (AX error %d, matching windows %d); input refused. Do not retry input or activate a different app.", d.Stage, d.ErrorCode, d.MatchingWindows)
 }
 
 func (darwinInputBackend) diagnosticProbes() []InputTargetProbe {

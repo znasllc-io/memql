@@ -133,7 +133,7 @@ func (g *inputTargetGuard) selectWindow(ctx context.Context, args map[string]any
 		if focused != nil {
 			focused.close()
 		}
-		g.halted = true
+		g.stop("window_focus", "activation", "activation_unverified")
 		message := "Exact-window activation could not be verified."
 		if err != nil {
 			message += " " + err.Error()
@@ -142,7 +142,7 @@ func (g *inputTargetGuard) selectWindow(ctx context.Context, args map[string]any
 	}
 	if activationCtx.Err() != nil || !g.now().Before(s.expires) || !sameWindowRecord(s.window, focused.window()) {
 		focused.close()
-		g.halted = true
+		g.stop("window_focus", "activation", "expired_or_window_changed")
 		return nil, g.interrupted()
 	}
 	g.anchor = focused
@@ -151,17 +151,17 @@ func (g *inputTargetGuard) selectWindow(ctx context.Context, args map[string]any
 
 func (g *inputTargetGuard) refuseBoundActivation() *memqlv1.Failure {
 	if g.backend == nil {
-		g.halted = true
+		g.stop("window_focus", "already_bound", "backend_unavailable")
 		return g.interrupted()
 	}
 	current, err := g.backend.focus()
 	if err != nil {
-		g.halted = true
+		g.stopFocus("window_focus", "already_bound", err)
 		return g.interrupted()
 	}
 	defer current.close()
 	if !g.anchor.same(current, true) {
-		g.halted = true
+		g.stop("window_focus", "already_bound", focusDifference(g.anchor, current))
 		return g.interrupted()
 	}
 	return failure("input_focus_already_bound", "This worker already has a desktop target. Initial window selection cannot replace it; request a fresh screenshot of that target.")

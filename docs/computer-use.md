@@ -251,10 +251,12 @@ Input requires existing consent and a run ID, plus a one-action receipt:
 
 A screenshot without `windowId` remains read-only and grants no input target.
 The independent focus anchor survives read-only captures, new tokens and new
-runs. A detected app/window/field or geometry mismatch stops all desktop input
+runs. A detected app/window or geometry mismatch stops all desktop input
 until operator review and worker restart. A new screenshot cannot clear the
 interruption. Input is serialized across enrollments in one worker process.
 There is no automatic retry, focus stealing, or global-event fallback.
+Unobserved field changes also stop input, except for the bounded observation
+after a completed gesture described below.
 
 An operator can inspect the running worker's exact-target acquisition with
 `memql worker control --action=input-target-status`. This explicit local control
@@ -267,6 +269,10 @@ macOS diagnostics also compare a public NSWorkspace application snapshot with
 direct application AX reads and report elapsed time. That snapshot can be cached
 between main-run-loop turns; it is diagnostic only and never substitutes for
 the guard's focused-application read.
+`first_interruption` preserves the first stop's UTC time, action kind, phase and
+reason. AX failures additionally retain only the stage, numeric error and match
+count. It contains no keys, text, titles, field contents or receipt tokens, and
+later observations cannot overwrite it. `pending_observation` is not permission.
 
 The macOS computer-use `worker run` initializes AppKit on the original process
 thread with activation prohibited, then pumps its main run loop while the worker
@@ -288,10 +294,20 @@ point addressing with the same sampled-focus checks. Window hints do not
 acknowledge application delivery or atomically bind an AX field. Before each
 press/text event the guard checks the AX window and field; releases check the
 window and always address the original PID. Cleanup releases only an already
-attempted down event to that same PID. After a click, Tab, Escape, Cmd-L or Cmd-F, an observed field change
-within the same window becomes the next anchor. Other actions must preserve
-the focused field even after their last release; a change stops input with
-partial-event reporting. A window change always stops input.
+attempted down event to that same PID. macOS also checks content-free HID event
+counters, held hardware input and a main-loop activation generation around
+capture and before each event. The worker's events use a private source.
+
+A completed click or key gesture can replace its field after the final release.
+Its input receipt is already spent. For 60 seconds after completion, a new
+screenshot in the same run may observe that change only if the exact retained
+AX app/window, PID, CG window and geometry still match, no hardware input or
+activation occurred, and focus stays stable across capture. The deadline is
+checked after capture too. This observation does not repeat input, activate an
+app or clear a latch. A fresh single-use receipt is required before more input.
+Text, move and scroll actions keep the strict field anchor; unsupported activity
+monitors retain the older strict behavior. Unavailable macOS monitoring, focus
+query errors, unstable capture, identity changes and human activity fail closed.
 
 For process-addressed move/click delivery, public `CGEventSetLocation` invalidates
 the packet's window-local point. The Darwin backend therefore dynamically resolves
@@ -313,10 +329,12 @@ means this backend cannot report it, not permission granted.
 
 **Limits:** process-addressed events have no delivery acknowledgement and
 are not atomically bound to an AX window or field. Checks sample focus; they
-cannot identify who caused a change, detect an away-and-back between samples,
-or prevent every same-process race. Delayed intended focus changes can be
-indistinguishable from user intervention and therefore stop input on the next
-observation. Pointer events do not warp the global cursor; applications may
+cannot atomically attribute an application's field replacement or prevent every
+same-process race. HID counters and delivered activation notifications add
+interruption evidence; they are not an atomic OS input lock. Focus-query errors
+still stop input, including transient errors during navigation. The earlier live
+stops did not retain their initial reason, so their exact cause remains unknown.
+Pointer events do not warp the global cursor; applications may
 ignore synthetic hover/scroll delivery. This is not a claim of uninterrupted
 multi-app support or that automation can never compete with a user. Normal
 live interactions still require controlled validation before sustained use.
