@@ -13060,6 +13060,28 @@ QueryClient.prototype.workGoalsForResponsibility = function (this: QueryClient, 
   return this.executeNamed("workGoalsForResponsibility", buildWorkGoalsForResponsibility(args), opts);
 };
 
+/** Search original tool fields across execution receipts and compaction archives. The engine projects public source fields; these raw rows are not model context. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workHistorySearchSourcesForOwnerRun"] in generated_concepts.ts).
+export interface WorkHistorySearchSourcesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkHistorySearchSourcesForOwnerRun(args: WorkHistorySearchSourcesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workHistorySearchSourcesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workHistorySearchSourcesForOwnerRun(args: WorkHistorySearchSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workHistorySearchSourcesForOwnerRun = function (this: QueryClient, args: WorkHistorySearchSourcesForOwnerRunArgs = {} as WorkHistorySearchSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workHistorySearchSourcesForOwnerRun", buildWorkHistorySearchSourcesForOwnerRun(args), opts);
+};
+
 /** Reconcile a late completion against its exact durable receipt. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallReceiptForOwnerRun"] in generated_concepts.ts).
 export interface WorkModelCallReceiptForOwnerRunArgs {

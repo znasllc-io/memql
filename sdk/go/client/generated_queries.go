@@ -13743,6 +13743,28 @@ func WorkGoalsForResponsibilityBuild(args WorkGoalsForResponsibilityArgs) string
 	return b.String()
 }
 
+// WorkHistorySearchSourcesForOwnerRun -- Search original tool fields across execution receipts and compaction archives. The engine projects public source fields; these raw rows are not model context.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workHistorySearchSourcesForOwnerRun"] in generated_concepts.go).
+type WorkHistorySearchSourcesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkHistorySearchSourcesForOwnerRun calls the engine query workHistorySearchSourcesForOwnerRun.
+func (qc *QueryClient) WorkHistorySearchSourcesForOwnerRun(ctx context.Context, args WorkHistorySearchSourcesForOwnerRunArgs) (*Result, error) {
+	call := WorkHistorySearchSourcesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workHistorySearchSourcesForOwnerRun", call)
+}
+
+func WorkHistorySearchSourcesForOwnerRunBuild(args WorkHistorySearchSourcesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workHistorySearchSourcesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkModelCallReceiptForOwnerRun -- Reconcile a late completion against its exact durable receipt.
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallReceiptForOwnerRun"] in generated_concepts.go).
