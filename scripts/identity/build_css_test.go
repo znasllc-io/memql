@@ -57,14 +57,18 @@ func TestBuildCSSUsesOnlyThePinnedCompilerOnPath(t *testing.T) {
 			write("brand/fonts/probe.woff2", "font")
 			write("brand/favicon.svg", "icon")
 			compiler := func(name, help string) string {
-				return fmt.Sprintf("#!/usr/bin/env bash\nset -eu\nif [[ ${1:-} == --help ]]; then\n%s\nexit 0\nfi\nprintf '%%s' '%s' > component/identity/web/static/app.css\n", help, name)
+				return fmt.Sprintf("#!/usr/bin/env bash\nset -eu\n[[ ${BUN_JSC_useJIT:-} == 0 ]] || { echo 'Tailwind requires interpreter mode' >&2; exit 97; }\nif [[ ${1:-} == --help ]]; then\n%s\nexit 0\nfi\nprintf '%%s' '%s' > component/identity/web/static/app.css\n", help, name)
 			}
 			write("path/tailwindcss", compiler("installed", tc.help))
 			write("bin/tools/tailwindcss-"+suffix, compiler("fallback", "exit 1"))
 			write("path/curl", "#!/bin/sh\necho unexpected download >&2\nexit 99\n")
+			// The override belongs to the compiler process only. An inherited
+			// JIT setting must not reach either --help or compilation, while
+			// unrelated build tools retain the caller's environment.
+			write("path/cp", "#!/bin/sh\n[ \"${BUN_JSC_useJIT:-}\" = 1 ] || exit 98\nexec /bin/cp \"$@\"\n")
 			cmd := exec.Command("bash", "scripts/identity/build-css.sh")
 			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "path")+string(os.PathListSeparator)+os.Getenv("PATH"))
+			cmd.Env = append(os.Environ(), "BUN_JSC_useJIT=1", "PATH="+filepath.Join(root, "path")+string(os.PathListSeparator)+os.Getenv("PATH"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("build-css: %v\n%s", err, out)
 			}
