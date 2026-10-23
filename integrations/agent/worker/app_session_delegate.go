@@ -460,6 +460,10 @@ func (d *AppSessionDelegate) planSession(ctx context.Context, owner string, h me
 // INSTRUCTIONS, and a session handed only those would lose its goal: the
 // handed-over prompt is kept, and the instructions are added unless the seam
 // already put them in it (the tool loops do; a procedure's hand-back does not).
+// A native continuation is the SAME suspended execution. Its handover already
+// contains the restored override, completed effects and current decision; it
+// must not be replaced by the original rerun's prompt a second time. Validate
+// that binding and preserve the handover verbatim while retaining model knobs.
 //
 // THE KNOBS go through ApplyStepOverride, the function every prompt seam uses,
 // so a level means one thing everywhere and an invalid one refuses here rather
@@ -486,6 +490,23 @@ func (d *AppSessionDelegate) applyOverride(ctx context.Context, plan *sessionPla
 			d.logger.Warn("app session: the step's override pins a door other than the app this session runs in; the override's model is not applied",
 				"step_id", h.StepId, "app", h.AppId, "override_model", pinned)
 		}
+	}
+	if run, ok := common.RunFromContext(ctx); ok && run.Continuation != nil {
+		proof := run.Continuation
+		key, keyErr := common.StepOverrideFingerprint(ov)
+		if keyErr != nil || key != proof.OverrideKey || proof.ObservationID == "" || proof.ApprovalID == "" ||
+			proof.StepKey != run.StepKey || run.Mode == common.RunModeReplay ||
+			memqlengine.BareShortId(run.RunId) != memqlengine.BareShortId(h.RunId) ||
+			memqlengine.BareShortId(run.StepKey) != memqlengine.BareShortId(h.StepId) ||
+			memqlengine.BareShortId(run.OwnerUserId) != memqlengine.BareShortId(h.ActingUserId) {
+			return fmt.Errorf("app session: handover does not match its native continuation")
+		}
+		// PrepareWorkContinuation/RestoreWorkContinuation already checked the
+		// owned immutable checkpoint and decision. Reapplying WholePrompt here
+		// erased that recovered state and made every new App session start the
+		// same recovery again. Retaining text grants no authority: delegated
+		// tools still recheck exact permissions, expiry and remaining uses.
+		return nil
 	}
 	if strings.TrimSpace(ov.Prompt) != "" {
 		if ov.WholePrompt {

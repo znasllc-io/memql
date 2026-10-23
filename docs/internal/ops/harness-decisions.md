@@ -56,10 +56,28 @@ exact rendering prevents the delegate's missing-instruction fallback from
 re-appending them. The two bounded override messages belong only to the current
 step/context and do not alter model, effort, input or permission bindings. A
 missing decision time refuses instead of inventing chronology. Explicit whole
-session prompt replacement remains its separate existing contract; this repair
-does not claim to redesign that path. The database regression
+session prompt replacement remains a separate contract for a fresh rerun. The
+database regression
 `TestStepOverrideKeepsItsPlaceBeforeLaterHumanCorrection` checks both older and
 newer human corrections around the override and the flattened Apps prompt.
+
+An approval continuation keeps the recovered handover at the last Apps delegate
+boundary, including when the original rerun used whole-prompt replacement. The
+delegate previously reapplied that old replacement after the engine had restored
+the completed tool results, pending operation and latest recorded decision. The
+saved continuation was intact, but the new App received only the original short
+override and repeatedly restarted recovery. On a native continuation, the
+delegate checks the run, owner, step, checkpoint/decision presence and override
+fingerprint, then preserves the handed-over prompt verbatim. Model and effort
+overrides still apply; a fresh explicit rerun still replaces its whole prompt.
+This changes context delivery, not permission: dispatch continues to enforce
+the approved operation, remaining use, expiry, revocation and local consent.
+`TestSessionWholePromptOverridePreservesApprovedNativeContinuation` follows the
+delegate through the actual AppSessionStart specification, checks completed
+source and pending-operation retention, rejects mismatched bindings before
+launch, and retains the fresh-rerun control. The existing database continuation
+test covers cross-replica checkpoint/decision validation upstream. These checks
+do not establish model adherence or completion of the downstream task.
 
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
@@ -243,6 +261,26 @@ an operation ran. Existing continuation validation still refuses missing or
 changed required checkpoints. Previously accumulated copies can still require
 compaction, and end-to-end latency depends on the selected model and remaining
 work; the regression is not a timing guarantee.
+
+Default history discovery searches original tool fields across owned execution
+receipts and compaction archives. Searching serialized consolidated context had
+ranked newer recall requests, nested recalled answers, and generated call-ID
+substrings ahead of the underlying evidence. The source search skips those
+derived matches and reads at most eight pages of four records before yielding a
+cursor. It does not silently fall back to recursive context search. Original
+tool results saved only by compaction remain searchable, while explicit
+checkpoint/conversation selectors retain exact bytes, indexes and offsets.
+Argument-only matches select their completed tool result and identify the match
+field; they never return raw assistant prose alongside the call. The bounded
+directory filters excluded call arguments while preserving index slots.
+Owner and earlier-conversation-run checks remain authoritative across replicas.
+`TestWorkHistoryDefaultSearchSkipsRecallEchoesAndOpaqueIDsAcrossReplicas`
+reproduces forty newer echoes and ID-only false positives ahead of an original
+receipt, checks source hashes and archive-only recovery, and denies a foreign
+owner. `TestWorkHistoryOriginalSearchPreservesOffsetsAndExcludesPrivateArchiveFields`
+checks Unicode/JSON offsets, argument-only results and filtered directories.
+These retrieval tests establish source selection and preservation, not improved
+model completion time or successful downstream execution.
 
 The active compiled instruction has a native retention marker separate from
 the first and latest human messages. Approvals and guidance can arrive after
@@ -491,6 +529,17 @@ the shared run decision lock. The
 old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
+
+Recovery observes that same current cumulative window. `ModelCallBudget`
+previously reloaded the original goal estimate after calculating the renewed
+allowance, so a run beyond its first window appeared permanently exhausted to
+compaction. This forced exact archival even when the current window could fund
+a semantic checkpoint. The observation now uses the fresh progress-adjusted
+allowance and unchanged reconciled usage. It cannot renew a window or admit a
+call; provider caps, monetary limits and dispatch checks still apply. Unit and
+cross-replica database regressions cover peer renewals, workload allowance
+changes and usage retention without writes. This restores the compactor's
+budget choice; it does not guarantee that a model follows archived evidence.
 
 Counters never reset on renewal. A human-directed restart opens a new evidence
 epoch; receipts older than that epoch cannot fund another window. Automatic

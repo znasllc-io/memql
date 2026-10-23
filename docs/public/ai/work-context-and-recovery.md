@@ -475,13 +475,23 @@ calculation does not grant permission or execute the approved operation.
    memory incomplete. It never truncates a claim or source URL to make it
    fit. Exact source messages are saved before the bounded memory replaces
    them, so verbosity alone does not stop the goal or spend another model call.
-4. **Retrieve only what is needed.** `recallWorkHistory` searches a bounded
-   page of archive records. An exact checkpoint and message index retrieve
+4. **Retrieve only what is needed.** By default, `recallWorkHistory` searches
+   original tool results and call arguments across current-run execution
+   receipts and compaction archives. It excludes earlier recall requests and
+   their nested answers, assistant prose, approval requests, and generated call
+   IDs from matching. An argument-only hit returns the completed result with
+   `matchedField: "arguments"`; its directory identifies the corresponding call.
+   Search directories omit excluded calls without renumbering source indexes.
+   An exact checkpoint and message index retrieve
    character pages of the original serialized message, including tool-call
    arguments. `nextOffset` continues that message; `cursor` continues a
    search. An empty page with `hasMore` does not mean the evidence is absent.
-   When searching earlier tool receipts in the same owned conversation, one
-   call scans at most eight four-receipt pages before returning its cursor.
+   Current-run search and searches of earlier tool receipts in the same owned
+   conversation scan at most eight four-receipt pages per call before returning
+   a cursor. Keep `sourceRunId` when returned with a receipt reference; context
+   archive references retain their existing checkpoint route without it.
+   `checkpoint: "conversation"` selects original input conversation messages.
+   Explicit checkpoint reads preserve their original contents and offsets.
    Search stops at a page with matches; directory browsing skips receipts
    without original sources. Derived retrieval responses stay in the journal
    but are excluded from the original-source projection, including when a
@@ -527,6 +537,12 @@ uses at most eight attempts, each limited to 4 MiB of exact source; these bytes
 are never sent to a summarizer. It preserves the same protected requests,
 authority and pending exchanges, and labels the replacement preview incomplete.
 If the request still exceeds its budget, it fails and retains the originals.
+
+The call reserve for recovery uses the current renewed work window and the
+full cumulative usage. Spending the original estimate does not permanently
+force archive-only compaction after progress has renewed the window. Reading
+that allowance does not grant another renewal or bypass provider call caps,
+monetary limits or execution permissions.
 
 Semantic summaries are cached by both exact source bytes and request relevance.
 An unchanged pair can be reused on another replica without inference. New human
@@ -582,6 +598,14 @@ resumes the same saved work after the appropriate recorded decision; ordinary
 guidance does not approve a blocked operation. Empty workspace snapshots can
 resume without filesystem restoration. Populated snapshots remain refused
 where restoration is unsupported, rather than pretending their files survived.
+
+An approval resume also preserves that recovered context through the final App
+handoff. If the original rerun replaced the whole prompt, that old replacement
+is not applied again over completed results, a prepared operation or the latest
+recorded decision. The delegate checks the continuation's owner, run, step and
+override binding before launch. Model and effort choices still apply, and a
+fresh explicit rerun still honors whole-prompt replacement. Retained context
+does not extend permissions or bypass the operation's execution checks.
 
 Useful documents, scripts, patches, screenshots and verification receipts can
 be retained as bounded artifacts with provenance. File metadata alone does not
