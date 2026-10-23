@@ -32,6 +32,7 @@ toolchain go1.27.3
 
 use (
 	.
+	./cockpit
 	./component/actions
 	./component/architecture
 	./component/auth

@@ -152,7 +152,9 @@ function acts(): string[] {
 }
 
 async function selectStep(key: string) {
-  fireEvent.click(screen.getByLabelText(new RegExp(`^Step \\d+, ${key},`)));
+  fireEvent.click(screen.getByLabelText(new RegExp(`^Step \\d+, ${key === "publish" ? "Publish the prepared result" : key[0]!.toUpperCase() + key.slice(1)},`)));
+  const details = screen.getByText("Execution evidence and versions").closest("details")!;
+  if (!details.open) fireEvent.click(details.querySelector("summary")!);
   await screen.findByRole("heading", { name: /^Version \d/ });
 }
 
@@ -178,7 +180,7 @@ describe("the bar follows the selection (rule 12)", () => {
     expect(within(bar()).getByText("draft, version 2 of 3 -- version 3 is current")).toBeTruthy();
 
     // Closing the step hands the bar back to the run.
-    fireEvent.click(screen.getByLabelText(/^Step 2, draft,/));
+    fireEvent.click(screen.getByLabelText(/^Step 2, Draft,/));
     expect(acts()).toEqual(["Replay"]);
   });
 
@@ -570,9 +572,9 @@ describe("the validator", () => {
 describe("versions on the spine", () => {
   it("says a step's versions in its name, and which one is current", async () => {
     await openRun();
-    expect(screen.getByLabelText(/^Step 2, draft, .*3 versions, version 3 is current$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Step 2, Draft, .*3 versions, version 3 is current$/)).toBeTruthy();
     // One version says nothing about versions.
-    expect(screen.getByLabelText(/^Step 1, fetch,/).getAttribute("aria-label")).not.toContain("version");
+    expect(screen.getByLabelText(/^Step 1, Fetch,/).getAttribute("aria-label")).not.toContain("version");
   });
 
   it("says in words when the run went back to an earlier version", async () => {
@@ -597,7 +599,7 @@ describe("versions on the spine", () => {
 
   it("marks the steps that will run again", async () => {
     await openRun({ runs: [reportRun({ staleSteps: ["publish"] })] });
-    expect(screen.getByLabelText(/^Step 3, publish, .*runs again$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Step 3, Publish the prepared result, .*runs again$/)).toBeTruthy();
     expect(screen.getByText("runs again")).toBeTruthy();
   });
 

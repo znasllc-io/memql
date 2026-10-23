@@ -7,6 +7,7 @@ import {
   Head,
   LiveList,
   Refine,
+  Select,
   RecordRow as KitRow,
   listCount,
   SortControl,
@@ -81,6 +82,7 @@ export function GoalsSection({
   onOpenGoal,
   selectedGoalId,
 }: GoalsSectionProps) {
+  const [includePipelines, setIncludePipelines] = useState(false);
   const [search, setSearch] = useState("");
   const [ascending, setAscending] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -117,11 +119,11 @@ export function GoalsSection({
         .join(","),
     [runs],
   );
-  const viewKey = `goals:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}:${liveToken}`;
+  const viewKey = `goals:${includePipelines}:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}:${liveToken}`;
   const view = useLiveView<Row, GoalRow>(goals, viewKey, (rows) => {
     const projected = rows
       .map(goalFromRow)
-      .filter((goal) => goal.id !== "")
+      .filter((goal) => goal.id !== "" && (includePipelines || !["pipeline", "pipelines"].includes(goal.requestedVia)))
       .filter((goal) => goalMatches(goal, search));
     projected.sort((a, b) => {
       const band = Number(isLive(b, runs)) - Number(isLive(a, runs));
@@ -142,7 +144,7 @@ export function GoalsSection({
           onSearch={setSearch}
           placeholder="What you asked for"
           label="Search your goals"
-        />
+        ><Select id="nexus-goal-scope" label="Include routine pipeline work" value={includePipelines ? "all" : "goals"} onChange={value => setIncludePipelines(value === "all")}><option value="goals">Goals</option><option value="all">Goals and pipeline work</option></Select></Refine>
         {/* THE HEAD'S ONE ACTION (rule 1). Everything else on this surface is
             a way of reading; this is the way of asking. */}
         <AddButton

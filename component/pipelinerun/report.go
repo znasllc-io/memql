@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -60,13 +59,7 @@ func (dr *runDriver) runSARIFReport(ctx context.Context, t *stepTrack) {
 	}
 	var observed SARIFPublication
 	result := func() map[string]any { return map[string]any{"state": observed.State, "publicationId": observed.ID} }
-	_, err = workflowhost.Run(callCtx, "pipelineSARIFDelivery", nil, workflowhost.Options{
-		Load: func(name string) (*automations.Automation, error) {
-			if dr.workflow == nil || dr.workflow.definitions[name] == nil {
-				return nil, fmt.Errorf("report recipe was not pinned")
-			}
-			return dr.workflow.definitions[name], nil
-		},
+	_, err = dr.runPinnedWorkflowWithOptions(callCtx, "pipelineSARIFDelivery", nil, workflowhost.Options{
 		Operations: map[string]workflowhost.Operation{
 			"pipelineReportPublish": func(ctx context.Context, args map[string]any) (any, error) {
 				if len(args) != 0 {

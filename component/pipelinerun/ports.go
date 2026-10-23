@@ -115,6 +115,7 @@ type Store interface {
 	RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error)
 	// RunsUnfinished answers oldest first: recovery's read (Task 10b).
 	RunsUnfinished(ctx context.Context) ([]Run, error)
+	RunsAwaitingMaintenance(ctx context.Context) ([]Run, error)
 	// RunsUnfinishedForPullRequest is every queued or in-progress run of one
 	// pipeline's pull request, in EVERY mode and in no order: what a new push
 	// to the pull request supersedes (supersede.go), whose caller applies

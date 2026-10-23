@@ -5788,6 +5788,32 @@ func RefreshComputerPermissionBuild(args RefreshComputerPermissionArgs) string {
 	return b.String()
 }
 
+// ReleaseApplyInstallation -- Apply the exact separately reviewed native plan with fresh receiving evidence.
+type ReleaseApplyInstallationArgs struct {
+	InstallationId string
+	PlanId         string
+}
+
+// ReleaseApplyInstallation calls the engine builtin releaseApplyInstallation.
+func (qc *QueryClient) ReleaseApplyInstallation(ctx context.Context, args ReleaseApplyInstallationArgs) (*Result, error) {
+	call := ReleaseApplyInstallationBuild(args)
+	return qc.executeNamed(ctx, "releaseApplyInstallation", call)
+}
+
+func ReleaseApplyInstallationBuild(args ReleaseApplyInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseApplyInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseApproveCandidate -- Separately approve the exact reviewed candidate after fresh verification.
 type ReleaseApproveCandidateArgs struct {
 	CandidateId string
@@ -5850,6 +5876,32 @@ func ReleaseAssembleCandidateBuild(args ReleaseAssembleCandidateArgs) string {
 	}
 	b.WriteString("runs: ")
 	b.WriteString(renderMemQLValue(args.Runs))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseCancelInstallation -- Cancel the original operator's current plan only before application begins.
+type ReleaseCancelInstallationArgs struct {
+	InstallationId string
+	PlanId         string
+}
+
+// ReleaseCancelInstallation calls the engine builtin releaseCancelInstallation.
+func (qc *QueryClient) ReleaseCancelInstallation(ctx context.Context, args ReleaseCancelInstallationArgs) (*Result, error) {
+	call := ReleaseCancelInstallationBuild(args)
+	return qc.executeNamed(ctx, "releaseCancelInstallation", call)
+}
+
+func ReleaseCancelInstallationBuild(args ReleaseCancelInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCancelInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6146,6 +6198,41 @@ func ReleaseGetPublishedCandidateBuild(args ReleaseGetPublishedCandidateArgs) st
 	return b.String()
 }
 
+// ReleaseInstallationHealth -- Authenticated receiving probe. Returns the native build and migration evidence.
+type ReleaseInstallationHealthArgs struct {
+	Nonce string
+}
+
+// ReleaseInstallationHealth calls the engine builtin releaseInstallationHealth.
+func (qc *QueryClient) ReleaseInstallationHealth(ctx context.Context, args ReleaseInstallationHealthArgs) (*Result, error) {
+	call := ReleaseInstallationHealthBuild(args)
+	return qc.executeNamed(ctx, "releaseInstallationHealth", call)
+}
+
+func ReleaseInstallationHealthBuild(args ReleaseInstallationHealthArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseInstallationHealth(")
+	b.WriteString("nonce: ")
+	b.WriteString(quoteMemQL(args.Nonce))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseInstallationStatus -- Read this receiving installation and its reviewed release choices; no credentials.
+type ReleaseInstallationStatusArgs struct {
+}
+
+// ReleaseInstallationStatus calls the engine builtin releaseInstallationStatus.
+func (qc *QueryClient) ReleaseInstallationStatus(ctx context.Context, args ReleaseInstallationStatusArgs) (*Result, error) {
+	call := ReleaseInstallationStatusBuild(args)
+	return qc.executeNamed(ctx, "releaseInstallationStatus", call)
+}
+
+func ReleaseInstallationStatusBuild(args ReleaseInstallationStatusArgs) string {
+	_ = args
+	return "builtin releaseInstallationStatus()"
+}
+
 // ReleaseListPublishedCandidates -- List verified published releases; identified developers, admins and owners may read.
 type ReleaseListPublishedCandidatesArgs struct {
 	Cursor string
@@ -6176,6 +6263,32 @@ func ReleaseListPublishedCandidatesBuild(args ReleaseListPublishedCandidatesArgs
 	return b.String()
 }
 
+// ReleaseObserveInstallation -- Observe the selected installation; controller health is not a completion receipt.
+type ReleaseObserveInstallationArgs struct {
+	InstallationId string
+	PlanId         string
+}
+
+// ReleaseObserveInstallation calls the engine builtin releaseObserveInstallation.
+func (qc *QueryClient) ReleaseObserveInstallation(ctx context.Context, args ReleaseObserveInstallationArgs) (*Result, error) {
+	call := ReleaseObserveInstallationBuild(args)
+	return qc.executeNamed(ctx, "releaseObserveInstallation", call)
+}
+
+func ReleaseObserveInstallationBuild(args ReleaseObserveInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseObserveInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleasePrepareCandidate -- Verify an immutable candidate using complete work evidence and operator configuration. This retains artifacts for review and does not approve or publish them.
 type ReleasePrepareCandidateArgs struct {
 	Candidate map[string]any
@@ -6192,6 +6305,56 @@ func ReleasePrepareCandidateBuild(args ReleasePrepareCandidateArgs) string {
 	b.WriteString("builtin releasePrepareCandidate(")
 	b.WriteString("candidate: ")
 	b.WriteString(renderMemQLValue(args.Candidate))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleasePrepareInstallation -- Prepare one explicit release selection against the exact reviewed current revision. Verification retains a durable plan; this does not apply or publish anything.
+type ReleasePrepareInstallationArgs struct {
+	InstallationId          string
+	RequestId               string
+	CandidateId             string
+	CatalogDigest           string
+	OverlayRevision         string
+	ExpectedCurrentRevision string
+}
+
+// ReleasePrepareInstallation calls the engine builtin releasePrepareInstallation.
+func (qc *QueryClient) ReleasePrepareInstallation(ctx context.Context, args ReleasePrepareInstallationArgs) (*Result, error) {
+	call := ReleasePrepareInstallationBuild(args)
+	return qc.executeNamed(ctx, "releasePrepareInstallation", call)
+}
+
+func ReleasePrepareInstallationBuild(args ReleasePrepareInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releasePrepareInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("catalogDigest: ")
+	b.WriteString(quoteMemQL(args.CatalogDigest))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("overlayRevision: ")
+	b.WriteString(quoteMemQL(args.OverlayRevision))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedCurrentRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedCurrentRevision))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6304,6 +6467,32 @@ func ReleaseReadDiscoveredCandidateBuild(args ReleaseReadDiscoveredCandidateArgs
 	return b.String()
 }
 
+// ReleaseResumeInstallation -- Resume the original saved preparation after interruption; applies nothing.
+type ReleaseResumeInstallationArgs struct {
+	InstallationId string
+	PreparationId  string
+}
+
+// ReleaseResumeInstallation calls the engine builtin releaseResumeInstallation.
+func (qc *QueryClient) ReleaseResumeInstallation(ctx context.Context, args ReleaseResumeInstallationArgs) (*Result, error) {
+	call := ReleaseResumeInstallationBuild(args)
+	return qc.executeNamed(ctx, "releaseResumeInstallation", call)
+}
+
+func ReleaseResumeInstallationBuild(args ReleaseResumeInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseResumeInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("preparationId: ")
+	b.WriteString(quoteMemQL(args.PreparationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseRetireCandidate -- Permanently retire an unpublished candidate and release its retention pins.
 type ReleaseRetireCandidateArgs struct {
 	CandidateId string
@@ -6411,6 +6600,164 @@ func ReplayRunBuild(args ReplayRunArgs) string {
 		b.WriteString("policy: ")
 		b.WriteString(quoteMemQL(args.Policy))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeAccess -- Read current GitHub write authority and the configured request route. A local owner role alone never grants upstream repository write permission.
+type RepositoryChangeAccessArgs struct {
+	SourceId string
+}
+
+// RepositoryChangeAccess calls the engine builtin repositoryChangeAccess.
+func (qc *QueryClient) RepositoryChangeAccess(ctx context.Context, args RepositoryChangeAccessArgs) (*Result, error) {
+	call := RepositoryChangeAccessBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeAccess", call)
+}
+
+func RepositoryChangeAccessBuild(args RepositoryChangeAccessArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeAccess(")
+	b.WriteString("sourceId: ")
+	b.WriteString(quoteMemQL(args.SourceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeReceive -- Authenticated peer request intake; sender ownership and decisions are never imported.
+type RepositoryChangeReceiveArgs struct {
+	Transfer map[string]any
+}
+
+// RepositoryChangeReceive calls the engine builtin repositoryChangeReceive.
+func (qc *QueryClient) RepositoryChangeReceive(ctx context.Context, args RepositoryChangeReceiveArgs) (*Result, error) {
+	call := RepositoryChangeReceiveBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeReceive", call)
+}
+
+func RepositoryChangeReceiveBuild(args RepositoryChangeReceiveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeReceive(")
+	b.WriteString("transfer: ")
+	b.WriteString(renderMemQLValue(args.Transfer))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeRequest -- Submit an immutable bounded request. Its maintainer and workflow come only from operator-bound installed DSL. Request-only authority never permits writes.
+type RepositoryChangeRequestArgs struct {
+	SourceId        string
+	RequestId       string
+	Statement       string
+	Operation       string
+	Paths           []string
+	ParentRequestId string
+}
+
+// RepositoryChangeRequest calls the engine builtin repositoryChangeRequest.
+func (qc *QueryClient) RepositoryChangeRequest(ctx context.Context, args RepositoryChangeRequestArgs) (*Result, error) {
+	call := RepositoryChangeRequestBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeRequest", call)
+}
+
+func RepositoryChangeRequestBuild(args RepositoryChangeRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeRequest(")
+	b.WriteString("sourceId: ")
+	b.WriteString(quoteMemQL(args.SourceId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("statement: ")
+	b.WriteString(quoteMemQL(args.Statement))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("operation: ")
+	b.WriteString(quoteMemQL(args.Operation))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("paths: ")
+	b.WriteString(renderMemQLValue(args.Paths))
+	if args.ParentRequestId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("parentRequestId: ")
+		b.WriteString(quoteMemQL(args.ParentRequestId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeRequests -- List durable requests for a visible source, restricted to requester or maintainer.
+type RepositoryChangeRequestsArgs struct {
+	SourceId string
+}
+
+// RepositoryChangeRequests calls the engine builtin repositoryChangeRequests.
+func (qc *QueryClient) RepositoryChangeRequests(ctx context.Context, args RepositoryChangeRequestsArgs) (*Result, error) {
+	call := RepositoryChangeRequestsBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeRequests", call)
+}
+
+func RepositoryChangeRequestsBuild(args RepositoryChangeRequestsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeRequests(")
+	b.WriteString("sourceId: ")
+	b.WriteString(quoteMemQL(args.SourceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeRevoke -- Revoke this maintainer's delegation with a recorded explanation.
+type RepositoryChangeRevokeArgs struct {
+	RequestId string
+	Reason    string
+}
+
+// RepositoryChangeRevoke calls the engine builtin repositoryChangeRevoke.
+func (qc *QueryClient) RepositoryChangeRevoke(ctx context.Context, args RepositoryChangeRevokeArgs) (*Result, error) {
+	call := RepositoryChangeRevokeBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeRevoke", call)
+}
+
+func RepositoryChangeRevokeBuild(args RepositoryChangeRevokeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeRevoke(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reason: ")
+	b.WriteString(quoteMemQL(args.Reason))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeStatus -- Read only a request owned by the caller or assigned to that exact maintainer.
+type RepositoryChangeStatusArgs struct {
+	RequestId string
+}
+
+// RepositoryChangeStatus calls the engine builtin repositoryChangeStatus.
+func (qc *QueryClient) RepositoryChangeStatus(ctx context.Context, args RepositoryChangeStatusArgs) (*Result, error) {
+	call := RepositoryChangeStatusBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeStatus", call)
+}
+
+func RepositoryChangeStatusBuild(args RepositoryChangeStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeStatus(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }

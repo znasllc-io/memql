@@ -42,3 +42,27 @@ builtin installationRevisionApply { }
 /// Record fresh controller facts without completing the installation.
 @executor("integration.installation.installationRevisionObserve")
 builtin installationRevisionObserve { }
+
+/// Observe the exact owned Argo revision and its convergence.
+@executor("integration.installation.installationCompletionRead")
+builtin installationCompletionRead { }
+
+/// Read fresh receiving configuration bound to the applied intent.
+@executor("integration.installation.installationCompletionConfiguration")
+builtin installationCompletionConfiguration { }
+
+/// Bind complete rendered workload obligations to verified image bytes.
+@executor("integration.installation.installationCompletionPrepareWorkloads")
+builtin installationCompletionPrepareWorkloads { }
+
+/// Verify original authenticated session, signed serving revision and applied migrations.
+@executor("integration.installation.installationCompletionContinuity")
+builtin installationCompletionContinuity { }
+
+/// Fence controller, configuration and proof freshness after verification.
+@executor("integration.installation.installationCompletionReobserve")
+builtin installationCompletionReobserve { }
+
+/// Record native completion and release only this installation attempt slot.
+@executor("integration.installation.installationCompletionRecord")
+builtin installationCompletionRecord { }

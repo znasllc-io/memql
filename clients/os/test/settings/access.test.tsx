@@ -239,7 +239,7 @@ describe("the pure half", () => {
     const deployables = rows.findIndex((r) => r.resource === "app:deployables");
     expect(rows[deployables]?.label).toBe("Deployables");
     const parts = rows.filter((r) => r.appId === "deployables" && r.part !== "").map((r) => r.part);
-    expect(parts).toEqual(expect.arrayContaining(["sources", "deploy", "publish", "retire", "domains", "logs"]));
+    expect(parts).toEqual(expect.arrayContaining(["deploy", "publish", "retire", "domains", "logs"]));
     // A part is `execute`; a floored section is `read`, named as the section.
     expect(rows.find((r) => r.resource === "app:deployables/publish")?.verb).toBe("execute");
     expect(rows.find((r) => r.resource === "app:settings/cluster")).toMatchObject({ verb: "read", label: "Cluster" });
@@ -319,7 +319,7 @@ describe("by person: the matrix", () => {
     // The re-read after the write answers the new grant.
     state.grantsBySubject["user:u-ada"] = [grantRow({ id: "grant-new", resource: "app:cluster/origins", verb: "read", effect: "allow" })];
     await act(async () => {
-      fireEvent.click(within(rowFor("app:cluster/origins")).getByRole("button", { name: "Allow Data origins to Ada Lovelace" }));
+      fireEvent.click(within(rowFor("app:cluster/origins")).getByRole("button", { name: "Allow Data to Ada Lovelace" }));
     });
 
     await waitFor(() => expect(rowFor("app:cluster/origins").textContent).toContain("allowed, by you"));
@@ -341,10 +341,10 @@ describe("by person: the matrix", () => {
     await pickSubject("Ada Lovelace");
     await waitFor(() => expect(rowFor("app:cluster/origins").querySelector('[data-state="off"]')).not.toBeNull());
     await act(async () => {
-      fireEvent.click(within(rowFor("app:cluster/origins")).getByRole("button", { name: "Allow Data origins to Ada Lovelace" }));
+      fireEvent.click(within(rowFor("app:cluster/origins")).getByRole("button", { name: "Allow Data to Ada Lovelace" }));
     });
     const refusal = await screen.findByText("They rank above you");
-    // Beside the row: the notice's row follows the Data origins row.
+    // Beside the row: the notice's row follows the Data row.
     expect(refusal.closest("tr")?.previousElementSibling).toBe(rowFor("app:cluster/origins"));
     expect(screen.getByText(/u-ada ranks 300/)).toBeTruthy();
   });
@@ -368,7 +368,7 @@ describe("by app: who holds it", () => {
     mount(state);
     fireEvent.click(screen.getByRole("button", { name: "By app" }));
     const trigger = await screen.findByLabelText("App or part");
-    await waitFor(() => chooseOption(trigger, "Cluster: Data origins"));
+    await waitFor(() => chooseOption(trigger, "Cluster: Data"));
     await waitFor(() => expect(screen.getByText("By role: Owner.")).toBeTruthy());
     const list = screen.getByRole("list", { name: "Granted by name" });
     expect(within(list).getByText("Ada Lovelace")).toBeTruthy();
@@ -386,7 +386,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    const list = await pickResource("Cluster: Data origins");
+    const list = await pickResource("Cluster: Data");
     expect(within(list).getByText("Not on this roster")).toBeTruthy();
     expect(list.textContent).not.toContain("u-ghost");
     // The act's label says the same thing, for the same reason.
@@ -402,7 +402,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    const list = await pickResource("Cluster: Data origins");
+    const list = await pickResource("Cluster: Data");
     expect(within(list).getByText("you")).toBeTruthy();
     expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
     expect(screen.getByText(/Nobody revokes their own grant/)).toBeTruthy();
@@ -417,7 +417,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    const list = await pickResource("Cluster: Data origins");
+    const list = await pickResource("Cluster: Data");
     expect(within(list).getByRole("button", { name: "Revoke allow for Acme" })).toBeTruthy();
     expect(screen.queryByText(/Nobody revokes their own grant/)).toBeNull();
   });
@@ -474,7 +474,7 @@ describe("a canonical viewer id against bare subjects", () => {
       },
     });
     mount(state, "owner", CANONICAL_ME);
-    const list = await pickResource("Cluster: Data origins");
+    const list = await pickResource("Cluster: Data");
     expect(within(list).getByText("you")).toBeTruthy();
     expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
   });

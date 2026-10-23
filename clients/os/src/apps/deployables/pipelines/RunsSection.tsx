@@ -238,8 +238,8 @@ function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilt
             Try another source, branch or outcome.
           </EmptyState>
         ) : (
-          <EmptyState icon={ListChecks} title="No runs yet" action={<Button onClick={onOpenSources}>Open Sources</Button>}>
-            A run starts with the next push or pull request to a source whose pipeline is connected. Connect one from a source's page.
+          <EmptyState icon={ListChecks} title="No runs yet" action={<Button onClick={onOpenSources}>Open Repositories</Button>}>
+            A run starts with the next push or pull request to a source whose pipeline is connected. Connect one from its repository page.
           </EmptyState>
         )
       ) : (

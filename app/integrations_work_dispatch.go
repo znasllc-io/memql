@@ -190,8 +190,10 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 		executor = automations.NewExecutor(automations.ExecutorOptions{Logger: log, Engine: d.app.engine, EventBus: d.app.eventBus, StepRegistry: d.app.stepRegistry, TerminalFailures: true})
 		defer executor.Close()
 	}
-	if template.registry != nil {
-		ctx = memql.ContextWithAuthoredExecution(ctx, journal.OwnerUserId, template.registry)
+	if template.registry != nil || template.prepared != nil {
+		if template.registry != nil {
+			ctx = memql.ContextWithAuthoredExecution(ctx, journal.OwnerUserId, template.registry)
+		}
 		ctx = context.WithValue(ctx, workTemplateStackKey{}, []string{auto.Name})
 		trigger := &workTemplateTrigger{app: d.app, template: template}
 		executor = trigger.executor()

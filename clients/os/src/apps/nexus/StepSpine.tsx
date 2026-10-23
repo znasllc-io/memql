@@ -1,3 +1,4 @@
+import { stepTitle, stepOutcome } from "../../nexus/presentation";
 import { ChevronRight } from "lucide-react";
 
 import { Chip, formatDuration } from "../../kit";
@@ -5,7 +6,6 @@ import {
   decisionLine,
   formatMoney,
   formatTokens,
-  stepCallLine,
   stepThought,
   type StepDecision,
   type StepRow,
@@ -144,7 +144,7 @@ export function StepSpineRow({
   // mark ride on the same contract.
   const spoken = [
     `Step ${position}`,
-    step.key,
+    stepTitle(step),
     stepKindWord(step.kind),
     stepKindMeaning(step.kind),
     stepStatusWord(step.status),
@@ -205,14 +205,14 @@ export function StepSpineRow({
 
       <span className="os-nexus-step-body">
         <span className="os-nexus-step-name">
-          <span className="os-nexus-step-key os-mono">{step.key}</span>
+          <span className="os-nexus-step-key">{stepTitle(step)}</span>
           {behind ? (
             <Chip tone="muted" title={`Version ${current} of ${count} is current; the newer ones are kept`}>
               version {current} of {count}
             </Chip>
           ) : null}
         </span>
-        <span className="os-nexus-step-call">{stepCallLine(step)}</span>
+        <span className="os-nexus-step-call">{stepOutcome(step)}</span>
         {/* WHICH DOOR ANSWERED, ON THE STEP THAT ASKED. It sits in the body
             slot with the symptom and the error, for the same reason they do:
             it is a sentence about this step, and a sentence in a column is a
@@ -245,7 +245,7 @@ export function StepSpineRow({
             {symptomWord(step.symptom)}
           </span>
         ) : null}
-        {failed && step.errorMessage !== "" ? (
+        {failed && step.errorMessage !== "" && stepOutcome(step) !== step.errorMessage ? (
           <span className="os-nexus-step-error os-mono">{step.errorMessage}</span>
         ) : null}
       </span>
@@ -257,11 +257,11 @@ export function StepSpineRow({
             many of each there are. */}
         {thought ? (
           <span className="os-nexus-step-spend os-mono">
-            {step.tokens === null ? null : <span>{formatTokens(step.tokens)} tok</span>}
+            {step.tokens === null ? null : <span>{formatTokens(step.tokens)} tokens</span>}
             {step.cost === null ? null : <span>{formatMoney(step.cost)}</span>}
           </span>
         ) : null}
-        <span className="os-nexus-step-kind">{stepKindWord(step.kind)}</span>
+
         <span className="os-nexus-step-duration os-mono">
           {step.durationMs === null ? "" : formatDuration(step.durationMs)}
         </span>

@@ -23,6 +23,8 @@ export interface RefusalCopy {
 }
 
 const COPY: Record<string, RefusalCopy> = {
+  repository_identity_unavailable: { title: "GitHub could not confirm this repository", next: "Check the repository connection and try again." },
+  repository_write_not_authorized: { title: "This GitHub identity cannot approve changes to this repository", next: "Request approval from the repository’s maintainer." },
   source_connection_unavailable: {
     title: "This Source is no longer available",
     next: "Return to Source and reconnect or choose another.",

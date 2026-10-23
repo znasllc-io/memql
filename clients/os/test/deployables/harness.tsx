@@ -4,9 +4,11 @@ import { vi } from "vitest";
 import { QueryClient, Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { SessionProvider } from "../../src/chrome/access";
-import { OsProvider } from "../../src/chrome/state";
+import { OsProvider, useOs } from "../../src/chrome/state";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
 import { OS_REGISTRY } from "../../src/apps/registry";
+import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
+import { PipelinesApp } from "../../src/apps/pipelines/PipelinesApp";
 import { installSeededAccess } from "../seededAccess";
 import { setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
 
@@ -125,6 +127,10 @@ function fakeSubscriptions(): FakeSubscriptions {
 }
 
 export interface FakeSeed {
+  repositoryAuthority?: Row;
+  repositoryAuthorityError?: string;
+  changeRequests?: Row[];
+  repositoryChangeError?: string;
   accounts?: Row[];
   sites?: Row[];
   sitesError?: string;
@@ -430,6 +436,18 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const selected = JSON.parse(selection) as string[];
         const files = (seed.expiredRunFiles?.[id] ?? []).filter(file => selected.includes(file.fileId));
         return builtinReply("pipelinesExpiredArtifacts", [{ files } as unknown as Row]);
+      }
+      if (call.startsWith("builtin repositoryChangeAccess(")) {
+        if (seed.repositoryAuthorityError) throw new Error(seed.repositoryAuthorityError);
+        const sourceId = /sourceId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return builtinReply("repositoryChangeAccess", [{sourceId, repository:"acme/shop", repositoryId:42, canWrite:false, canRequest:false, route:"unavailable", ...seed.repositoryAuthority}]);
+      }
+      if (call.startsWith("builtin repositoryChangeRequests(")) return builtinReply("repositoryChangeRequests", [{requests:seed.changeRequests ?? []} as Row]);
+      if (call.startsWith("builtin repositoryChangeStatus(")) return builtinReply("repositoryChangeStatus", seed.changeRequests?.slice(0,1) ?? []);
+      if (call.startsWith("builtin repositoryChangeRequest(")) {
+        if (seed.repositoryChangeError) throw new Error(seed.repositoryChangeError);
+        const receipt = {id:"request-one", repository:"acme/shop", repositoryId:42, state:seed.repositoryAuthority?.canWrite ? "approved" : "pending", statement:"Improve the requested component", paths:["clients/os/"], goalId:"goal-request", reason:"", expiresAt:"2026-12-01T00:00:00Z"} as Row;
+        seed.changeRequests=[receipt]; return builtinReply("repositoryChangeRequest", [receipt]);
       }
       if (call.startsWith("builtin pipelinesPreview(")) {
         if (seed.pipelinePreviewError !== undefined) throw new Error(seed.pipelinePreviewError);
@@ -892,6 +910,18 @@ export function withSession(
       </OsProvider>
     </SessionProvider>
   );
+}
+
+/** A real cross-app destination for tests that follow a Deployables context link. */
+function DeliveryDestination({ children }: { children: ReactNode }) {
+  const { state, actions } = useOs();
+  const focused = state.shell.focusedWindowId ? state.shell.windows[state.shell.focusedWindowId] : null;
+  if (!focused || !["pipelines", "deployables"].includes(focused.appId)) return <>{children}</>;
+  const App = focused.appId === "pipelines" ? PipelinesApp : DeployablesApp;
+  return <App key={focused.id} sectionId={focused.sectionId} navigate={(section, options) => actions.navigateSection(focused.id, section, options?.fromContent ? "content" : "peer")} askContext={() => {}} intent={focused.intent} consumeIntent={id => actions.consumeWindowIntent(focused.id, id)} />;
+}
+export function withDeliverySession(children: ReactNode, overrides: Parameters<typeof withSession>[1] = {}) {
+  return withSession(<DeliveryDestination>{children}</DeliveryDestination>, overrides);
 }
 
 // ---------------------------------------------------------------------------

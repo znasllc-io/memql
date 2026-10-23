@@ -134,6 +134,9 @@ export interface RunRow {
   checkRunState: "" | "written" | "refused" | "unavailable";
   notes: RunNote[];
   workRunId: string;
+  maintenanceState?: string;
+  maintenanceGoalId?: string;
+  maintenanceMessage?: string;
   cancelRequested: boolean;
   stages: StageRow[];
   queuedAt: string;
@@ -189,6 +192,9 @@ export function runFromRow(raw: Row): RunRow {
     checkRunState: (["written", "refused", "unavailable"].includes(checkRunState) ? checkRunState : "") as RunRow["checkRunState"],
     notes: notesOf(objectsOf(row, "notes")),
     workRunId: idTail(rowString(row, "workRunId")),
+    maintenanceState: rowString(row, "maintenanceState"),
+    maintenanceGoalId: rowString(row, "maintenanceGoalId"),
+    maintenanceMessage: rowString(row, "maintenanceMessage"),
     cancelRequested: boolOr(row, "cancelRequested", false),
     stages: objectsOf(row, "stages").map((s) => {
       const st = rowString(s, "status");

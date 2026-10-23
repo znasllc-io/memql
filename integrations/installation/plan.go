@@ -1,7 +1,7 @@
 // Package installation holds the native authority and effect journal for an
-// installation revision. The workflow belongs in sealed DSL. Nothing in this
-// package is registered yet: the candidate/render/compatibility verifier and
-// scoped workflow must be complete before the effect can be reached.
+// installation revision. Operator-selected installed DSL owns sequencing;
+// native scoped ports verify authority, artifacts, preserved resources and
+// runtime health before recording preparation, application or completion.
 package installation
 
 import (
@@ -11,6 +11,7 @@ import (
 	"io"
 	"regexp"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/argocd"
 )
@@ -27,23 +28,25 @@ var (
 // preparedPlan is native-only input, never a client/DSL argument. The binding
 // digests name the independently verified published candidate, full rendered
 // resource diff, and immutable rollback render. Persisting these bindings does
-// NOT verify them. The future scoped preparer must supply their actual proofs
-// before using this journal; there is no public prepare/start escape hatch.
+// NOT verify them. The scoped preparer supplies actual proofs before using
+// this journal; public selections never supply evidence or effect authority.
 type preparedPlan struct {
-	FormatVersion           int                 `json:"formatVersion"`
-	InstallationID          string              `json:"installationId"`
-	RequestedBy             string              `json:"requestedBy"`
-	WorkflowDigest          string              `json:"workflowDigest"`
-	ExecutionWorkflowDigest string              `json:"executionWorkflowDigest"`
-	CandidateID             string              `json:"candidateId"`
-	CandidateApprovalID     string              `json:"candidateApprovalId"`
-	PublicationDigest       string              `json:"publicationDigest"`
-	RenderDigest            string              `json:"renderDigest"`
-	ResourceDiffDigest      string              `json:"resourceDiffDigest"`
-	RollbackRevision        string              `json:"rollbackRevision"`
-	RollbackRenderDigest    string              `json:"rollbackRenderDigest"`
-	Preparation             *preparationBinding `json:"preparation,omitempty"`
-	Intent                  argocd.Intent       `json:"intent"`
+	CompletionWorkflow      *workflowhost.Snapshot `json:"completionWorkflow,omitempty"`
+	HealthBaseline          *HealthObservation     `json:"healthBaseline,omitempty"`
+	FormatVersion           int                    `json:"formatVersion"`
+	InstallationID          string                 `json:"installationId"`
+	RequestedBy             string                 `json:"requestedBy"`
+	WorkflowDigest          string                 `json:"workflowDigest"`
+	ExecutionWorkflowDigest string                 `json:"executionWorkflowDigest"`
+	CandidateID             string                 `json:"candidateId"`
+	CandidateApprovalID     string                 `json:"candidateApprovalId"`
+	PublicationDigest       string                 `json:"publicationDigest"`
+	RenderDigest            string                 `json:"renderDigest"`
+	ResourceDiffDigest      string                 `json:"resourceDiffDigest"`
+	RollbackRevision        string                 `json:"rollbackRevision"`
+	RollbackRenderDigest    string                 `json:"rollbackRenderDigest"`
+	Preparation             *preparationBinding    `json:"preparation,omitempty"`
+	Intent                  argocd.Intent          `json:"intent"`
 }
 
 func (p preparedPlan) canonical() ([]byte, string, error) {
@@ -54,6 +57,14 @@ func (p preparedPlan) canonical() ([]byte, string, error) {
 	for _, digest := range []string{p.WorkflowDigest, p.ExecutionWorkflowDigest, p.RenderDigest, p.ResourceDiffDigest, p.RollbackRenderDigest} {
 		if !internalDigest.MatchString(digest) {
 			return nil, "", errors.New("installation plan requires exact native evidence bindings")
+		}
+	}
+	if p.CompletionWorkflow != nil && (p.CompletionWorkflow.Contract != completionContract || p.CompletionWorkflow.CheckArgs(nil) != nil) {
+		return nil, "", errors.New("installation completion recipe is invalid")
+	}
+	if p.HealthBaseline != nil {
+		if err := p.HealthBaseline.validate(); err != nil {
+			return nil, "", err
 		}
 	}
 	if p.Preparation != nil {

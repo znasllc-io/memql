@@ -26,7 +26,7 @@ function mount(connection: FakeConnection, runId = "r-1", role = "owner") {
   h.connection = connection;
   return render(
     withSession(
-      <DeployablesApp sectionId="runs" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} intent={{ id: `open-${runId}`, payload: { runId } }} consumeIntent={vi.fn()} />,
+      <DeployablesApp surface="pipelines" sectionId="runs" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} intent={{ id: `open-${runId}`, payload: { runId } }} consumeIntent={vi.fn()} />,
       { role, userId: VIEWER },
     ),
   );

@@ -1,0 +1,75 @@
+/// Read current GitHub write authority and the configured request route. A local
+/// owner role alone never grants upstream repository write permission.
+@sdk
+@executor("integration.repositoryauthority.access")
+@args(profile="object")
+@requiresCapability("read", "app:pipelines")
+builtin repositoryChangeAccess { sourceId string! }
+
+/// Submit an immutable bounded request. Its maintainer and workflow come only
+/// from operator-bound installed DSL. Request-only authority never permits writes.
+@sdk
+@executor("integration.repositoryauthority.request")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/requests")
+builtin repositoryChangeRequest {
+ sourceId string!
+ requestId string!
+ statement string!
+ operation string!
+ paths []string!
+ parentRequestId string
+}
+
+/// Authenticated peer request intake; sender ownership and decisions are never imported.
+@sdk
+@executor("integration.repositoryauthority.receive")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/requests")
+builtin repositoryChangeReceive { transfer object! }
+
+/// Read only a request owned by the caller or assigned to that exact maintainer.
+@sdk
+@executor("integration.repositoryauthority.status")
+@args(profile="object")
+@requiresCapability("read", "app:pipelines")
+builtin repositoryChangeStatus { requestId string! }
+
+/// List durable requests for a visible source, restricted to requester or maintainer.
+@sdk
+@executor("integration.repositoryauthority.requests")
+@args(profile="object")
+@requiresCapability("read", "app:pipelines")
+builtin repositoryChangeRequests { sourceId string! }
+
+/// Revoke this maintainer's delegation with a recorded explanation.
+@sdk
+@executor("integration.repositoryauthority.revoke")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/requests")
+builtin repositoryChangeRevoke { requestId string! reason string! }
+
+/// Native effect guard: requires the actual live bound Work execution and fresh
+/// decision/provider authority. This observation is never a transferable grant.
+@executor("integration.repositoryauthority.authorize")
+@args(profile="object")
+builtin authorizeRepositoryChange { requestId string! operation string! paths []string! }
+
+/// Publish one bounded immutable file proposal in its approved Work execution.
+/// No caller-chosen branch, writer token, merge or deployment authority is exposed.
+@executor("integration.repositoryauthority.propose")
+@args(profile="object")
+builtin repositoryChangePropose {
+ requestId string!
+ expectedHead string!
+ baseBranch string!
+ title string!
+ body string!
+ files []object!
+}
+
+/// Read a bounded immutable snapshot of the approved paths from the configured
+/// repository's default branch, only inside the request's actual execution.
+@executor("integration.repositoryauthority.context")
+@args(profile="object")
+builtin repositoryChangeContext { requestId string! }

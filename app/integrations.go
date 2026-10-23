@@ -24,6 +24,7 @@ func (a *App) integrationsCore() {
 	// Pipelines borrow that same GitHub App client and grant path, so they
 	// are wired after it (epic memql#5477).
 	a.wirePipelines()
+	a.wireRepositoryAuthority()
 	// agent() and the produceArtifact tool open a work goal rather than
 	// minting a Plan (memql#5048). Both plug-ins are core, so this is core
 	// too -- produceArtifact is called from an Assistant's tool loop, which

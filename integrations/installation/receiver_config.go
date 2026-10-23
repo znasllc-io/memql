@@ -92,6 +92,7 @@ type receiverDependency struct {
 	Requires  string `json:"requires"`
 }
 type receiverConfiguration struct {
+	Health         *receiverHealth        `json:"health,omitempty"`
 	FormatVersion  int                    `json:"formatVersion"`
 	InstallationID string                 `json:"installationId"`
 	Platform       string                 `json:"platform"`
@@ -109,21 +110,22 @@ type receiverConfiguration struct {
 // The snapshot owns private configuration and credentials. Only its digest can
 // be persisted; every replacement receiver obtains and validates fresh reads.
 type receiverSnapshot struct {
-	configuration     receiverConfiguration
-	digest            string
-	invariantDigest   string
-	observed          time.Time
-	application       argocd.Snapshot
-	applicationTarget argocd.Target
-	render            argocd.RenderSpec
-	catalog           Catalog
-	registries        []ociregistry.Target
-	bindings          []imageBinding
-	dependencies      []pipelines.ReleaseDependency
-	protected         []resourceIdentity
-	pullCredential    string
-	rendererAddress   string
-	rendererTLS       *tls.Config
+	healthCredential, healthRoots string
+	configuration                 receiverConfiguration
+	digest                        string
+	invariantDigest               string
+	observed                      time.Time
+	application                   argocd.Snapshot
+	applicationTarget             argocd.Target
+	render                        argocd.RenderSpec
+	catalog                       Catalog
+	registries                    []ociregistry.Target
+	bindings                      []imageBinding
+	dependencies                  []pipelines.ReleaseDependency
+	protected                     []resourceIdentity
+	pullCredential                string
+	rendererAddress               string
+	rendererTLS                   *tls.Config
 }
 
 func (s *receiverSnapshot) String() string {
@@ -165,6 +167,19 @@ func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name str
 		return nil, errors.New("installation collector image must be immutable")
 	}
 	s := &receiverSnapshot{configuration: cfg, observed: time.Now().UTC()}
+	if cfg.Health != nil {
+		var err error
+		s.healthCredential, err = r.secret(ctx, namespace, cfg.Health.Credential)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Health.RootCA != nil {
+			s.healthRoots, err = r.secret(ctx, namespace, *cfg.Health.RootCA)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	token, err := r.secret(ctx, namespace, cfg.Catalog.Credential)
 	if err != nil {
 		return nil, err

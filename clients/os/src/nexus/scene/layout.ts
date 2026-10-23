@@ -1,3 +1,4 @@
+import { stepTitle } from "../presentation";
 // Where every node in a goal's world goes, in two dimensions.
 //
 // ===========================================================================
@@ -226,7 +227,7 @@ const TEMPLATE_X = 5;
 /** Where the first column starts. Far enough past the template that the road
  *  has a visible run before the work begins. */
 const COLUMN_X0 = 11.5;
-const COLUMN_GAP = 5.6;
+const COLUMN_GAP = 8.5;
 const COLUMN_WIDTH = 3.6;
 /** A fold is wider than a column so its count has somewhere to sit, and so a
  *  reader can see at a glance that it stands for more than one. */
@@ -234,7 +235,7 @@ const FOLD_WIDTH = 5.2;
 const GOAL_GAP = 9;
 
 /** Vertical gap between two steps sharing a column. */
-const STEP_Y_GAP = 2.8;
+const STEP_Y_GAP = 4;
 
 /**
  * The lanes read top to bottom as: what went in, the work, what it needed
@@ -276,7 +277,7 @@ export const MIN_SEPARATION = 1.5;
 const FINISHED = new Set(["done", "skipped", "cancelled"]);
 
 function labelOfStep(step: StepRow): string {
-  return step.key !== "" ? step.key : step.callName;
+  return stepTitle(step);
 }
 
 function bindingLabel(step: StepRow): string {
@@ -356,7 +357,7 @@ export function layout(world: GoalWorld, options: LayoutOptions = {}): LayoutRes
     lane: "road",
     x: TEMPLATE_X,
     y: 0,
-    label: run.automationName !== "" ? run.automationName : "compiling",
+    label: run.automationName.startsWith("pipeline:") ? "Repository workflow" : "Work begins",
     rowId: run.id,
     conceptId: conceptIdForKind("template"),
     stepKey: "",
@@ -545,7 +546,7 @@ export function layout(world: GoalWorld, options: LayoutOptions = {}): LayoutRes
       lane: "asked",
       x: ax,
       y: ay,
-      label: approval.kind !== "" ? approval.kind : "approval",
+      label: approval.question || "Review a decision",
       rowId: approval.id,
       conceptId: conceptIdForKind("approval"),
       stepKey: approval.stepKey,

@@ -389,7 +389,7 @@ automation knowledgeSeedCatalog {
       Description: "Engineering practices, languages, SDLC, version control.",
       Category: "technical",
       RelevantForRoles: nil,
-      RequiredByToolSlugs: nil,
+      RequiredByToolSlugs: ["inspectRepositoryAuthority", "requestRepositoryChange", "repositoryChangeRequestStatus", "listRepositoryChangeRequests"],
       Source: "",
       Tier: "",
       BroadSurvey: false

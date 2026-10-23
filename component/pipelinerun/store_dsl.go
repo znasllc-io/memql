@@ -47,9 +47,10 @@ const (
 	qPipelineRunsForKey         = "pipelineRunsForKey"         // (runKey)
 	qPipelineRunsForPipelineSha = "pipelineRunsForPipelineSha" // (pipelineId, sha)
 	qPipelineRunByCheckRun      = "pipelineRunByCheckRun"      // (repository, checkRunId)
-	qPipelineRunsUnfinished     = "pipelineRunsUnfinished"     // ()
-	qPipelineRunByID            = "pipelineRunById"            // (runId)
-	qPipelinesActive            = "pipelinesActive"            // ()
+	qPipelineRunsMaintenance    = "pipelineRunsAwaitingMaintenance"
+	qPipelineRunsUnfinished     = "pipelineRunsUnfinished" // ()
+	qPipelineRunByID            = "pipelineRunById"        // (runId)
+	qPipelinesActive            = "pipelinesActive"        // ()
 
 	// Recovery's other read, likewise server-only: concluded runs whose
 	// final check run did not land, which it republishes.
@@ -393,6 +394,10 @@ func (s *dslStore) RunByCheckRun(ctx context.Context, repository string, checkRu
 	}))
 }
 
+func (s *dslStore) RunsAwaitingMaintenance(ctx context.Context) ([]Run, error) {
+	return allRuns(s.systemRead(ctx, qPipelineRunsMaintenance, nil))
+}
+
 func (s *dslStore) RunsUnfinished(ctx context.Context) ([]Run, error) {
 	return allRuns(s.systemRead(ctx, qPipelineRunsUnfinished, nil))
 }
@@ -583,9 +588,13 @@ func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
 	setIfSet(args, "deliveryId", r.DeliveryID)
 	setIfSet(args, "inboundRequestId", bareID(r.InboundRequestID))
 	setIfSet(args, "headBranch", r.HeadBranch)
+	setIfSet(args, "releaseTag", r.ReleaseTag)
 	setIfSet(args, "baseSha", strings.ToLower(strings.TrimSpace(r.BaseSHA)))
 	setIfSet(args, "title", r.Title)
 	setIfSet(args, "version", r.Version)
+	if r.PolicySnapshot != nil {
+		args["policySnapshot"] = r.PolicySnapshot
+	}
 	setIfSet(args, "conclusion", r.Conclusion)
 	setIfSet(args, "refusalCode", r.RefusalCode)
 	setIfSet(args, "refusalMessage", r.RefusalMessage)
@@ -616,6 +625,9 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 		return err
 	}
 	args := map[string]any{"runId": bareID(runID)}
+	setNamed(args, "maintenanceState", patch.MaintenanceState)
+	setNamed(args, "maintenanceGoalId", patch.MaintenanceGoalID)
+	setNamed(args, "maintenanceMessage", patch.MaintenanceMessage)
 	setNamed(args, "status", patch.Status)
 	setNamed(args, "conclusion", patch.Conclusion)
 	setNamed(args, "refusalCode", patch.RefusalCode)
@@ -989,46 +1001,52 @@ func pipelineFromRow(row map[string]any) Pipeline {
 }
 
 func runFromRow(row map[string]any) Run {
+	policySnapshot, _ := row["policySnapshot"].(map[string]any)
 	r := Run{
-		ID:                bareID(rowString(row, "id")),
-		OwnerUserID:       rowString(row, "ownerUserId"),
-		AccountID:         bareID(rowString(row, "accountId")),
-		PipelineID:        bareID(rowString(row, "pipelineId")),
-		Repository:        normalizeRepository(rowString(row, "repository")),
-		SHA:               strings.ToLower(rowString(row, "sha")),
-		Mode:              pipelines.Mode(rowString(row, "mode")),
-		Event:             pipelines.Event(rowString(row, "event")),
-		RunKey:            rowString(row, "runKey"),
-		Attempt:           rowInt(row, "attempt"),
-		Trigger:           rowString(row, "trigger"),
-		RerunOf:           bareID(rowString(row, "rerunOf")),
-		RerunFailedOnly:   rowBool(row, "rerunFailedOnly"),
-		DeliveryID:        rowString(row, "deliveryId"),
-		InboundRequestID:  bareID(rowString(row, "inboundRequestId")),
-		PullRequest:       rowInt(row, "pullRequest"),
-		HeadBranch:        rowString(row, "headBranch"),
-		BaseSHA:           strings.ToLower(rowString(row, "baseSha")),
-		Title:             rowString(row, "title"),
-		Version:           rowString(row, "version"),
-		Status:            rowString(row, "status"),
-		Conclusion:        rowString(row, "conclusion"),
-		RefusalCode:       rowString(row, "refusalCode"),
-		RefusalMessage:    rowString(row, "refusalMessage"),
-		RefusalScope:      rowString(row, "refusalScope"),
-		CheckRunID:        rowID(row, "checkRunId"),
-		CheckRunState:     rowString(row, "checkRunState"),
-		WorkRunID:         rowString(row, "workRunId"),
-		WorkGoalID:        bareID(rowString(row, "workGoalId")),
-		DriverNodeID:      rowString(row, "driverNodeId"),
-		DriverLeaseID:     rowString(row, "driverLeaseId"),
-		DriverHeartbeatAt: rowTime(row, "driverHeartbeatAt"),
-		CancelRequested:   rowBool(row, "cancelRequested"),
-		CancelledBy:       rowString(row, "cancelledBy"),
-		QueuedAt:          rowTime(row, "queuedAt"),
-		StartedAt:         rowTime(row, "startedAt"),
-		FinishedAt:        rowTime(row, "finishedAt"),
-		DurationMs:        rowInt64(row, "durationMs"),
-		CreatedAt:         rowTime(row, "createdAt"),
+		MaintenanceState:   rowString(row, "maintenanceState"),
+		MaintenanceGoalID:  rowString(row, "maintenanceGoalId"),
+		MaintenanceMessage: rowString(row, "maintenanceMessage"),
+		PolicySnapshot:     policySnapshot,
+		ID:                 bareID(rowString(row, "id")),
+		OwnerUserID:        rowString(row, "ownerUserId"),
+		AccountID:          bareID(rowString(row, "accountId")),
+		PipelineID:         bareID(rowString(row, "pipelineId")),
+		Repository:         normalizeRepository(rowString(row, "repository")),
+		SHA:                strings.ToLower(rowString(row, "sha")),
+		Mode:               pipelines.Mode(rowString(row, "mode")),
+		Event:              pipelines.Event(rowString(row, "event")),
+		RunKey:             rowString(row, "runKey"),
+		Attempt:            rowInt(row, "attempt"),
+		Trigger:            rowString(row, "trigger"),
+		RerunOf:            bareID(rowString(row, "rerunOf")),
+		RerunFailedOnly:    rowBool(row, "rerunFailedOnly"),
+		DeliveryID:         rowString(row, "deliveryId"),
+		InboundRequestID:   bareID(rowString(row, "inboundRequestId")),
+		PullRequest:        rowInt(row, "pullRequest"),
+		HeadBranch:         rowString(row, "headBranch"),
+		ReleaseTag:         rowString(row, "releaseTag"),
+		BaseSHA:            strings.ToLower(rowString(row, "baseSha")),
+		Title:              rowString(row, "title"),
+		Version:            rowString(row, "version"),
+		Status:             rowString(row, "status"),
+		Conclusion:         rowString(row, "conclusion"),
+		RefusalCode:        rowString(row, "refusalCode"),
+		RefusalMessage:     rowString(row, "refusalMessage"),
+		RefusalScope:       rowString(row, "refusalScope"),
+		CheckRunID:         rowID(row, "checkRunId"),
+		CheckRunState:      rowString(row, "checkRunState"),
+		WorkRunID:          rowString(row, "workRunId"),
+		WorkGoalID:         bareID(rowString(row, "workGoalId")),
+		DriverNodeID:       rowString(row, "driverNodeId"),
+		DriverLeaseID:      rowString(row, "driverLeaseId"),
+		DriverHeartbeatAt:  rowTime(row, "driverHeartbeatAt"),
+		CancelRequested:    rowBool(row, "cancelRequested"),
+		CancelledBy:        rowString(row, "cancelledBy"),
+		QueuedAt:           rowTime(row, "queuedAt"),
+		StartedAt:          rowTime(row, "startedAt"),
+		FinishedAt:         rowTime(row, "finishedAt"),
+		DurationMs:         rowInt64(row, "durationMs"),
+		CreatedAt:          rowTime(row, "createdAt"),
 	}
 	for _, obj := range rowObjects(row, "notes") {
 		r.Notes = append(r.Notes, Note{Code: rowString(obj, "code"), Message: rowString(obj, "message")})
@@ -1091,6 +1109,7 @@ func workStepFromRow(row map[string]any) WorkStep {
 	if call, ok := row["call"].(map[string]any); ok {
 		s.PipelineKind = pipelines.StepKind(rowString(call, "pipelineKind"))
 		s.DefinitionFingerprint = rowString(call, "definitionFingerprint")
+		s.VerificationFingerprint = rowString(call, "verificationFingerprint")
 		s.Stage = rowString(call, "stage")
 		s.Name = rowString(call, "name")
 		s.Packages = rowStrings(call, "packages")

@@ -20,6 +20,9 @@ func (s *streamingApps) Call(ctx context.Context, req AppCallRequest) (AppCallRe
 }
 
 func TestAppStreamPublishesBeforeCompletionAndCancels(t *testing.T) {
+	// Streaming/cancellation must not spend the process-wide budget of unrelated
+	// inference tests; guard behavior has its own admission tests.
+	offTheSharedRateCeiling(t)
 	for _, cancelEarly := range []bool{false, true} {
 		t.Run(map[bool]string{false: "complete", true: "cancel"}[cancelEarly], func(t *testing.T) {
 			released := make(chan struct{})

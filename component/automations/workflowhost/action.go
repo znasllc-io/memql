@@ -104,8 +104,10 @@ func (d *actionDispatcher) Invoke(ctx context.Context, name string, args map[str
 }
 
 func (h *host) executeAction(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	if !h.opts.ConcurrentOperations {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

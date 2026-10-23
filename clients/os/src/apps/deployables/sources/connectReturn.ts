@@ -48,7 +48,7 @@ export interface ConnectReturn {
   reason: string;
   /** The Deployables section to open. */
   section: string;
-  appId?: "settings" | "deployables";
+  appId?: "settings" | "deployables" | "pipelines";
   credentialId?: string;
   flowId?: string;
 }
@@ -65,12 +65,12 @@ export interface ConnectReturn {
  * memql#5479), where a cluster owner registers the GitHub App from the
  * pipelines readiness item and expects to come back to.
  */
-const RETURN_SECTIONS: readonly string[] = ["deployables", "sources", "settings", "connections", "pipelines"];
+const RETURN_SECTIONS: readonly string[] = ["deployables", "sources", "settings", "connections", "pipelines", "repositories", "runs"];
 
-export function returnPathFor(section: string, appId: "settings" | "deployables" = "deployables"): string {
+export function returnPathFor(section: string, appId: "settings" | "deployables" | "pipelines" = "deployables"): string {
   const params = new URLSearchParams();
   params.set(CONNECT_SECTION_PARAM, section);
-  if (appId === "settings") params.set("connectApp", appId);
+  if (appId !== "deployables") params.set("connectApp", appId);
   return `/?${params.toString()}`;
 }
 
@@ -88,7 +88,7 @@ export function readConnectReturn(search: string): ConnectReturn | null {
   const section = (params.get(CONNECT_SECTION_PARAM) ?? "").trim();
   return {
     reason: (params.get(CONNECT_RESULT_PARAM) ?? "").trim(),
-    ...(params.get("connectApp") === "settings" ? { appId: "settings" as const } : {}),
+    ...(["settings", "pipelines"].includes(params.get("connectApp") ?? "") ? { appId: params.get("connectApp") as "settings" | "pipelines" } : {}),
     section: RETURN_SECTIONS.includes(section) ? section : DEFAULT_CONNECT_SECTION,
     ...(params.get("githubCredentialId") ? { credentialId: params.get("githubCredentialId")! } : {}),
     ...(params.get("githubFlowId") ? { flowId: params.get("githubFlowId")! } : {}),
@@ -160,11 +160,11 @@ export function clearParkedConnectReturn(): void {
 // Correlation is UI state only. Identity validates the OAuth state, browser
 // session, target GitHub identity and PKCE; this record never grants authority.
 const ATTEMPT_KEY = "memql:github-connect-attempt";
-export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = "", section = "", appId: "settings" | "deployables" = "deployables"): void {
+export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = "", section = "", appId: "settings" | "deployables" | "pipelines" = "deployables"): void {
   try { sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify({ flowId, viewer, credentialId, section, appId })); } catch { /* No auto-selection without a record. */ }
 }
 export function correlateConnectReturn(result: ConnectReturn, viewer: string): ConnectReturn {
-  let attempt: { flowId?: string; viewer?: string; credentialId?: string; section?: string; appId?: "settings" | "deployables" } | null = null;
+  let attempt: { flowId?: string; viewer?: string; credentialId?: string; section?: string; appId?: "settings" | "deployables" | "pipelines" } | null = null;
   try { attempt = JSON.parse(sessionStorage.getItem(ATTEMPT_KEY) ?? "null"); sessionStorage.removeItem(ATTEMPT_KEY); } catch { /* Refuse an unreadable correlation. */ }
   // Even a refused callback that cannot trust its state belongs where this
   // browser started. This restores navigation only, never credential authority.

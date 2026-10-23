@@ -37,22 +37,34 @@ type revisionWriteAdmission struct {
 }
 
 func loadRevisionWorkflow(engineRevision string) (*revisionWorkflow, error) {
-	definition, err := workflowhost.Load(installationRevisionWorkflow)
+	artifacts, err := loadArtifactWorkflow(engineRevision)
 	if err != nil {
 		return nil, err
 	}
-	return newRevisionWorkflow(definition, engineRevision)
+	return loadRevisionWorkflowNamed(engineRevision, installationRevisionWorkflow, artifacts)
+}
+
+func loadRevisionWorkflowNamed(engineRevision, name string, artifacts *artifactWorkflow) (*revisionWorkflow, error) {
+	definition, err := workflowhost.Load(name)
+	if err != nil {
+		return nil, err
+	}
+	return newRevisionWorkflowWithArtifacts(definition, engineRevision, artifacts)
 }
 
 func newRevisionWorkflow(definition *automations.Automation, engineRevision string) (*revisionWorkflow, error) {
-	if definition == nil || !definition.Trusted || !commitDigest.MatchString(engineRevision) {
-		return nil, errors.New("installation execution requires an installed recipe and immutable engine revision")
-	}
-	owned, err := automations.NewLoader(automations.LoaderOptions{}).Snapshot(definition)
+	artifacts, err := loadArtifactWorkflow(engineRevision)
 	if err != nil {
 		return nil, err
 	}
-	artifacts, err := loadArtifactWorkflow(engineRevision)
+	return newRevisionWorkflowWithArtifacts(definition, engineRevision, artifacts)
+}
+
+func newRevisionWorkflowWithArtifacts(definition *automations.Automation, engineRevision string, artifacts *artifactWorkflow) (*revisionWorkflow, error) {
+	if artifacts == nil || definition == nil || !definition.Trusted || !commitDigest.MatchString(engineRevision) {
+		return nil, errors.New("installation execution requires an installed recipe and immutable engine revision")
+	}
+	owned, err := automations.NewLoader(automations.LoaderOptions{}).Snapshot(definition)
 	if err != nil {
 		return nil, err
 	}

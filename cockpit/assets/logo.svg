@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 150" width="600" height="150" role="img" aria-label="memQL Cockpit — terminal-native IDE and ops console">
+  <defs>
+    <style type="text/css"><![CDATA[
+      .word     { font-family: 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 400; font-size: 42px; fill: #555; }
+      .word-bold{ font-family: 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 700; font-size: 56px; fill: #1a1a1a; }
+      .accent   { fill: #1a4f8b; }
+      .tag      { font-family: 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-weight: 500; font-size: 12px; fill: #666; letter-spacing: 2px; }
+      .node     { fill: #1a4f8b; }
+      .edge     { stroke: #1a4f8b; stroke-width: 2; fill: none; stroke-linecap: round; }
+      .pulse    { fill: none; stroke: #1a4f8b; stroke-width: 1.5; opacity: 0.35; }
+      .frame    { fill: none; stroke: #1a4f8b; stroke-width: 1.5; }
+      .prompt   { fill: #1a4f8b; }
+    ]]></style>
+  </defs>
+
+  <!-- Graph + terminal glyph -->
+  <g transform="translate(40,40)">
+    <!-- terminal frame -->
+    <rect class="frame" x="0" y="0" width="100" height="70" rx="4"/>
+    <!-- title bar dots -->
+    <circle class="node" cx="10" cy="10" r="2.5"/>
+    <circle class="node" cx="20" cy="10" r="2.5"/>
+    <circle class="node" cx="30" cy="10" r="2.5"/>
+    <!-- prompt -->
+    <text class="prompt" x="10" y="40" font-family="Menlo, Monaco, monospace" font-size="14" font-weight="700">&gt;_</text>
+    <!-- subtle graph nodes inside terminal -->
+    <circle class="node" cx="55" cy="50" r="3"/>
+    <circle class="node" cx="75" cy="35" r="3"/>
+    <circle class="node" cx="85" cy="55" r="3"/>
+    <line class="edge" x1="55" y1="50" x2="75" y2="35"/>
+    <line class="edge" x1="75" y1="35" x2="85" y2="55"/>
+    <line class="edge" x1="55" y1="50" x2="85" y2="55"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="170" y="78"><tspan class="word">memQL</tspan> <tspan class="word-bold accent">Cockpit</tspan></text>
+  <text x="172" y="106" class="tag">TERMINAL-NATIVE IDE &amp; OPS CONSOLE</text>
+</svg>

@@ -33,6 +33,9 @@ type Options struct {
 	// Operations binds builtin names and fully qualified action capabilities.
 	// No action can escape this allowlist to the ambient engine or local shell.
 	Operations map[string]Operation
+	// ConcurrentOperations is a native-host promise that its operation closures
+	// enforce their own synchronization and effect fencing. DSL cannot set it.
+	ConcurrentOperations bool
 }
 
 var installed = sync.OnceValues(func() (map[string]*automations.Automation, error) {
@@ -85,6 +88,20 @@ func ScopedCapabilities(operations map[string]Operation) []memql.IntegrationCapa
 // before constructing the scope. Completed-effect recovery remains with the
 // operation's existing journal; errors are not implicitly retried here.
 func Run(ctx context.Context, name string, args map[string]any, opts Options) (any, error) {
+	h, err := prepareHost(name, opts)
+	if err != nil {
+		return nil, err
+	}
+	execution, err := h.TriggerAutomationWithArgs(ctx, name, args)
+	if err != nil {
+		// The interpreter stores an error's printable text for its journal.
+		// Native callers also need the original typed refusal for errors.As.
+		return nil, err
+	}
+	return execution.Output, nil
+}
+
+func prepareHost(name string, opts Options) (*host, error) {
 	if opts.Load == nil {
 		opts.Load = Load
 	}
@@ -105,13 +122,7 @@ func Run(ctx context.Context, name string, args map[string]any, opts Options) (a
 	h.registry = steps.NewRegistry()
 	h.registry.Register(automations.StepTypeFunction, h)
 	h.registry.Register(automations.StepTypeAction, h)
-	execution, err := h.TriggerAutomationWithArgs(ctx, name, args)
-	if err != nil {
-		// The interpreter stores an error's printable text for its journal.
-		// Native callers also need the original typed refusal for errors.As.
-		return nil, err
-	}
-	return execution.Output, nil
+	return h, nil
 }
 
 type host struct {
@@ -231,11 +242,15 @@ func (h *host) Execute(ctx context.Context, step *automations.Step, sc *automati
 				value, err = automations.NewLogicRunner(h.opts.AmbientEngine, h.registry, h.opts.Logger).WithoutJournal().RunPreparedLogicBody(ctx, fn.body, args)
 			}
 		} else {
-			h.mu.Lock()
+			if !h.opts.ConcurrentOperations {
+				h.mu.Lock()
+			}
 			if err = ctx.Err(); err == nil {
 				value, err = h.opts.Operations[step.Function.Name](ctx, args)
 			}
-			h.mu.Unlock()
+			if !h.opts.ConcurrentOperations {
+				h.mu.Unlock()
+			}
 		}
 	}
 	r := &automations.StepResult{StepId: step.ID, StartedAt: started, CompletedAt: time.Now(), Status: "success", Result: value}

@@ -69,3 +69,18 @@ builtin installationReobserveConfiguration { }
 /// Atomically promote only complete native preparation evidence.
 @executor("integration.installation.installationPromotePreparation")
 builtin installationPromotePreparation { }
+
+/// Verify the configured authenticated session and migration baseline before installation.
+@executor("integration.installation.installationContinuityBaseline")
+builtin installationContinuityBaseline { }
+
+@executor("integration.release.releaseOverlayRead")
+builtin releaseOverlayRead {}
+@executor("integration.release.releaseOverlayBuild")
+builtin releaseOverlayBuild {}
+@executor("integration.release.releaseOverlayReserve")
+builtin releaseOverlayReserve {}
+@executor("integration.release.releaseOverlayPropose")
+builtin releaseOverlayPropose {}
+@executor("integration.release.releaseOverlayObserve")
+builtin releaseOverlayObserve {}

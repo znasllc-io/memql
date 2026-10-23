@@ -140,22 +140,22 @@ describe("personal GitHub source management", () => {
   const decision = (accountId: string, verb: string, resource: string, effect: "allow" | "deny" = "allow"): OrganizationCapability => ({ accountId, verb, resource, effect });
   it("admits one complete authorized organization despite another organization's deny", () => {
     setEffectiveCapabilities([], [
-      decision("acme", "read", "data"), decision("acme", "read", "app:deployables"), decision("acme", "execute", "app:deployables/sources"),
-      decision("beta", "execute", "app:deployables/sources", "deny"),
+      decision("acme", "read", "data"), decision("acme", "read", "app:pipelines"), decision("acme", "execute", "app:pipelines/repositories"),
+      decision("beta", "execute", "app:pipelines/repositories", "deny"),
     ]);
     expect(canManagePersonalSources()).toBe(true);
   });
   it("does not combine data access in one organization with source permissions in another", () => {
     setEffectiveCapabilities([], [
-      decision("acme", "read", "data"), decision("acme", "read", "app:deployables"),
-      decision("beta", "execute", "app:deployables/sources"),
+      decision("acme", "read", "data"), decision("acme", "read", "app:pipelines"),
+      decision("beta", "execute", "app:pipelines/repositories"),
     ]);
     expect(canManagePersonalSources()).toBe(false);
   });
   it("keeps global grants and requires the app and data doors", () => {
     installSeededAccess("owner");
     expect(canManagePersonalSources()).toBe(true);
-    setEffectiveCapabilities([{ verb: "execute", resource: "app:deployables/sources", effect: "allow", source: "role" }]);
+    setEffectiveCapabilities([{ verb: "execute", resource: "app:pipelines/repositories", effect: "allow", source: "role" }]);
     expect(canManagePersonalSources()).toBe(false);
   });
 });

@@ -82,6 +82,7 @@ func (a *App) wirePipelines() {
 			)
 		}
 	})
+	a.wirePipelineMaintenance(integ)
 }
 
 // The OS asks the BFF for readiness, while only agents register a step

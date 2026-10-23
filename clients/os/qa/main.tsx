@@ -1,3 +1,5 @@
+import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpdates";
+import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
 import { LocalUsersSettingsStore } from "../src/apps/users/settings";
 import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup } from "../test/users/harness";
@@ -97,7 +99,9 @@ import { useAutomationFeeds } from "../src/apps/nexus/useAutomations";
 import {
   constructRow as nexusConstructRow,
   fakeConnection as nexusConnection,
+  approvalRow as nexusApproval,
   goalRow as nexusGoal,
+  stepRow as nexusStep,
   runRow as nexusRun,
   ladderPolicyRow as nexusLadderPolicyRow,
   procedureRow as nexusProcedureRow,
@@ -289,6 +293,11 @@ const PARKED = {
   createdAt: "2026-09-01T13:00:00Z",
 };
 
+const DSL_ONLY_REVIEW = { ...PARKED, report: { ...PARKED.report, dslChanges: true,
+  dslDomains: [{domain:"znasdelivery",files:3,constructs:{automation:12}}],
+  deployables: PARKED.report.deployables.map((app,index)=>({...app,name:index===0?"memql-website":"znas-website"})),
+} };
+
 const LISTS: FakeSeed = {
   sites: LIST_SITES,
   packages: [ACME, WIDGETS, BROCHURE, LEGACY, FRESH] as never,
@@ -420,6 +429,7 @@ function DeployablesWindow({ section, fallback, intent }: { section: string; fal
   return (
     <WindowBody fallback={fallback}>
       <DeployablesApp
+        surface={["sources", "runs", "repositories", "changes", "overview"].includes(section) ? "pipelines" : "deployables"}
         sectionId={section}
         navigate={() => {}}
         askContext={() => {}}
@@ -705,6 +715,32 @@ function FeedbackPreview() {
   </div>;
 }
 
+function readableNexus(state: "running" | "waiting" | "failed" | "long" = "running") {
+  const seed = { goals: [nexusGoal({id:"goal-readable", statement:"Send accurate invoices to every client"})], runs: [nexusRun({id:"run-readable", goalId:"goal-readable", status:"running", finishedAt:"", spent:{tokens:2480, modelCalls:1}})], steps: [
+    nexusStep({id:"s-check",runId:"run-readable",key:"step-1",seq:0, title:"Check the client list", result:{summary:"Found 18 active clients with billing details."}}),
+    nexusStep({id:"s-review",runId:"run-readable",key:"step-2",seq:1, title:"Review this month’s work", kind:"reasoning", dependsOn:["step-1"], result:{summary:"Matched the recorded work to 18 invoices.",reason:"Each invoice uses approved hours and the client’s saved rate."}}),
+    nexusStep({id:"s-write",runId:"run-readable",key:"step-3",seq:2, title:"Prepare the invoices", status:"running", dependsOn:["step-2"], result:{summary:"Preparing invoice files for review."}}),
+    nexusStep({id:"s-send",runId:"run-readable",key:"step-4",seq:3, title:"Request your review", kind:"human", status:"pending", dependsOn:["step-3"]})]};
+  if (state === "failed") {
+    seed.runs[0] = nexusRun({id:"run-readable",goalId:"goal-readable",status:"failed",spent:{},errorMessage:"Invoice files were not saved.",finishedAt:"2026-09-01T10:00:00Z"});
+    seed.steps[2] = nexusStep({id:"s-write",runId:"run-readable",key:"step-3",seq:2,title:"Prepare the invoices",status:"failed",dependsOn:["step-2"],result:{summary:"Invoice files were not saved.",reason:"The output folder refused the write."}});
+  }
+  if (state === "waiting") {
+    seed.runs[0] = nexusRun({id:"run-readable",goalId:"goal-readable",status:"waiting",finishedAt:"",spent:{},waitingOn:{kind:"approval",subject:"approval-readable"}});
+    seed.steps[2] = nexusStep({id:"s-write",runId:"run-readable",key:"step-3",seq:2,title:"Prepare the invoices",status:"done",dependsOn:["step-2"],result:{summary:"Prepared 18 invoices for your review."}});
+    seed.steps[3] = nexusStep({id:"s-send",runId:"run-readable",key:"step-4",seq:3,title:"Request your review",kind:"human",status:"waiting",dependsOn:["step-3"],result:{summary:"Waiting for your review before sending the invoices."}});
+  }
+  if (state === "long") seed.steps = Array.from({length:55},(_,i)=>nexusStep({id:`history-${i}`,runId:"run-readable",key:`step-${i}`,seq:i,title:`Check client ${i+1} billing records`,status:i<54?"done":"running",dependsOn:i?[`step-${i-1}`]:[],result:{summary:i<54?"Billing details checked and saved.":"Checking the latest billing record."}}));
+  return nexusConnection({ ...seed, approvals: state === "waiting" ? [nexusApproval({id:"approval-readable",runId:"run-readable",goalId:"goal-readable",stepKey:"step-4",question:"Send the 18 prepared invoices to your clients?",reason:"Your review is required before the invoices are sent."})] : [] });
+}
+
+function installationPreview(state: "prepared" | "preparing" | "applying" | "complete" | "empty" | "unavailable", repositoryUnavailable = false) {
+  const selected = { candidateId:"sha256:"+"a".repeat(64), catalogDigest:"sha256:"+"b".repeat(64), overlayRevision:"c".repeat(40), label:"MemQL 0.31 · Cockpit 0.17" };
+  const plan = { ...selected, installationId:"qa-installation", preparationId:"qa-preparation",planId:"qa-plan",state,expectedCurrentRevision:"d".repeat(40),canManage: true, artifactExpiresAt:"2026-12-01T12:00:00Z",observation:state === "applying"?{revisionObserved:true,healthy:true,synced:true}:undefined };
+  const query = { executeNamed: async () => { if(state === "unavailable") throw new Error("Delivery configuration has not been supplied by this installation."); return new Result({bundle:{nodes:[{id:"installation",payload:{preparation:state === "preparing"?{...selected,installationId:"qa-installation",preparationId:"qa-preparation",requestId:"original-request",expectedCurrentRevision:"d".repeat(40),state:"preparing",canResume:true}:null,installationId:"qa-installation",currentRevision:"d".repeat(40),choices:state === "empty"?[]:[selected],active:["prepared","applying"].includes(state)?plan:null,latest:state === "complete"?plan:null,proposalBaseRevision:repositoryUnavailable?"":"e".repeat(40),proposalWarning:repositoryUnavailable?"The installation repository connection is unavailable.":undefined,proposals:[]}}]}} as never); }};
+  return () => <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected proposedRelease={state === "empty"?selected:null} /></WindowBody>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -850,6 +886,7 @@ const VIEWS: Record<
   "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
   "analysis-pending": { connect: () => analysisConnection("pending"), framed: true, render: () => <Lists section="deployables" /> },
   "analysis-failed": { connect: () => analysisConnection("failed"), framed: true, render: () => <Lists section="deployables" /> },
+  "package-dsl-only": { seed:{ packages:[{...ACME,declares:DSL_ONLY_REVIEW.report.deployables.map(app=>({name:app.name,kind:app.kind}))}],sites:[],awaitingConfirm:[DSL_ONLY_REVIEW],deployments:{"pkg-acme":[DSL_ONLY_REVIEW]} },framed:true,render:()=> <Lists section="deployables" /> },
   "analysis-review": { connect: () => analysisConnection("review"), framed: true, render: () => <Lists section="deployables" /> },
   "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },
   "source-management": { seed: { ...SOURCE_CHOOSER,
@@ -869,6 +906,22 @@ const VIEWS: Record<
   // Pipelines (epic memql#5479): the Runs tab and a run page in each state.
   "pipeline-channels": { seed: { ...PIPELINES_SEED, pipelineChannels: [{ id: "channel-releases", ownerUserId: "u-me", name: "releases", kind: "email", recipients: ["ops@example.test"], secretRef: "", status: "active" }] }, framed: true, render: () => <DeployablesWindow section="settings" fallback="Deployables" /> },
   "pipeline-channels-empty": { seed: {}, framed: true, render: () => <DeployablesWindow section="settings" fallback="Deployables" /> },
+  "delivery-overview": { seed: PIPELINES_SEED, framed: true, render: () => <DeployablesWindow section="overview" fallback="Pipelines" /> },
+  "delivery-repository": { seed: { ...PIPELINES_SEED, repositoryAuthority: {canWrite:false,canRequest:true,route:"maintainer",repository:"acme/shop"}}, framed: true, render:()=> <DeployablesWindow section="repositories" fallback="Pipelines" intent={{packageId:"pkg-shop"}} /> },
+  "delivery-add-repository": { seed:SOURCE_CHOOSER, framed:true, render:()=> <DeployablesWindow section="repositories" fallback="Pipelines" /> },
+  "installation-prepared": { render:installationPreview("prepared") },
+  "installation-preparing": { render:installationPreview("preparing") },
+  "installation-repository-outage": { render:installationPreview("prepared", true) },
+  "installation-applying": { render:installationPreview("applying") },
+  "installation-complete": { render:installationPreview("complete") },
+  "installation-empty": { render:installationPreview("empty") },
+  "installation-unavailable": { render:installationPreview("unavailable") },
+  "delivery-repositories": { seed: PIPELINES_SEED, framed: true, render: () => <DeployablesWindow section="repositories" fallback="Pipelines" /> },
+  "delivery-changes": { seed: PIPELINES_SEED, framed: true, render: () => <DeployablesWindow section="changes" fallback="Pipelines" /> },
+  "nexus-readable": { connect: () => readableNexus("running"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
+  "nexus-readable-waiting": { connect: () => readableNexus("waiting"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
+  "nexus-readable-failed": { connect: () => readableNexus("failed"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
+  "nexus-readable-long": { connect: () => readableNexus("long"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "pipeline-runs": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-empty": { seed: PIPELINES_NO_RUNS_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-none": { seed: {}, framed: true, render: () => <RunsWindow /> },
@@ -2032,14 +2085,14 @@ clicks.forEach((label, i) => {
       if (target) { const data = new DataTransfer(); data.items.add(new File(["email,name\ndana@example.com,Dana"], "people.csv", { type: "text/csv" })); target.files = data.files; target.dispatchEvent(new Event("change", { bubbles: true })); }
       return;
     }
-    const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
+    const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=button], [role=tab], [role=radio], summary, a")).find(
       (el) => el.checkVisibility() && (
         (el.textContent ?? "").trim() === label ||
         el.getAttribute("aria-label") === label ||
         el.querySelector(".os-choice-card-name")?.textContent?.trim() === label ||
         el.querySelector(".os-row-name")?.textContent?.trim() === label),
     );
-    target?.click();
+    target?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }, 2500 + i * 1200);
 });
 

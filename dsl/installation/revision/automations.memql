@@ -25,3 +25,28 @@ automation installationRevisionWorkflow {
   }
   builtin installationRevisionObserve()
 }
+
+/// Requalify the exact applied revision before recording installation completion.
+/// Every native proof is fresh; a controller success alone never closes the attempt.
+@template
+automation installationCompletionWorkflow {
+  state := builtin installationCompletionRead()
+  if !state.converged { return }
+  builtin installationCompletionConfiguration()
+  builtin installationRevisionResolve()
+  builtin installationRevisionCompatibility()
+  for role in ["rollback", "candidate"] {
+    builtin installationRevisionReopenSource(role: role)
+    builtin installationRevisionRenderSource(role: role)
+  }
+  builtin installationRevisionVerifyResources()
+  automation installationArtifactWorkflow()
+  builtin installationRevisionRecheckResources()
+  builtin installationRevisionVerifyStorage()
+  builtin installationRevisionVerifyProtected()
+  builtin installationCompletionPrepareWorkloads()
+  automation installationWorkloadWorkflow()
+  builtin installationCompletionContinuity()
+  builtin installationCompletionReobserve()
+  builtin installationCompletionRecord()
+}

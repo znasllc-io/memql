@@ -93,12 +93,12 @@ describe("the map draws what the rows say", () => {
     mount(seeded());
     await openGoal();
     expect(screen.getByLabelText("Start, where the goal was set")).toBeTruthy();
-    expect(screen.getByLabelText(/^Automation nightlyReconcile/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Automation Work begins/)).toBeTruthy();
     // The beacon carries the goal's own words and how far the work has got.
     // Two readings of the same fact -- the count under the ring and the map's
     // own accessible name -- which is exactly the "colour is never the only
     // carrier" rule applied to a number.
-    expect(screen.getAllByText("1 of 3").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1 of 3 steps complete").length).toBeGreaterThan(0);
     expect(screen.getByRole("application").getAttribute("aria-label")).toContain(
       "1 of 3 steps done",
     );
@@ -107,9 +107,9 @@ describe("the map draws what the rows say", () => {
   it("gives every step a node that says its state in words", async () => {
     mount(seeded());
     await openGoal();
-    expect(screen.getByLabelText("Step read, done")).toBeTruthy();
-    expect(screen.getByLabelText("Step decide, running")).toBeTruthy();
-    expect(screen.getByLabelText("Step write, pending")).toBeTruthy();
+    expect(screen.getByLabelText("Step Read, done")).toBeTruthy();
+    expect(screen.getByLabelText("Step Decide, running")).toBeTruthy();
+    expect(screen.getByLabelText("Step Write, pending")).toBeTruthy();
   });
 
   it("says the run is working it out rather than drawing a fraction of nothing", async () => {
@@ -133,7 +133,7 @@ describe("the map draws what the rows say", () => {
       }),
     );
     await openGoal();
-    expect(screen.getByLabelText("Waiting on you: sideEffect")).toBeTruthy();
+    expect(screen.getByLabelText("Waiting on you: Review a decision")).toBeTruthy();
   });
 });
 
@@ -141,23 +141,23 @@ describe("one selection, shared by the map and the rail", () => {
   it("opens the rail's step when its node is clicked", async () => {
     mount(seeded());
     await openGoal();
-    fireEvent.click(screen.getByLabelText("Step decide, running"));
+    fireEvent.click(screen.getByLabelText("Step Decide, running"));
     // The rail row for that step is now expanded, which is the shared
     // selection arriving on the other surface.
-    const row = screen.getByRole("button", { name: /^Step 2, decide/ });
+    const row = screen.getByRole("button", { name: /^Decide, / });
     expect(row.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("keeps the selection to ONE step, so opening another closes the first", async () => {
     mount(seeded());
     await openGoal();
-    fireEvent.click(screen.getByLabelText("Step decide, running"));
-    fireEvent.click(screen.getByLabelText("Step write, pending"));
+    fireEvent.click(screen.getByLabelText("Step Decide, running"));
+    fireEvent.click(screen.getByLabelText("Step Write, pending"));
     expect(
-      screen.getByRole("button", { name: /^Step 2, decide/ }).getAttribute("aria-expanded"),
+      screen.getByRole("button", { name: /^Decide, / }).getAttribute("aria-expanded"),
     ).toBe("false");
     expect(
-      screen.getByRole("button", { name: /^Step 3, write/ }).getAttribute("aria-expanded"),
+      screen.getByRole("button", { name: /^Write, / }).getAttribute("aria-expanded"),
     ).toBe("true");
   });
 });
@@ -185,7 +185,7 @@ describe("density: a finished stretch folds and says how much it stands for", ()
     expect(screen.queryByLabelText("Step s0, done")).toBeNull();
 
     fireEvent.click(fold);
-    expect(screen.getByLabelText("Step s0, done")).toBeTruthy();
+    expect(document.querySelectorAll('.os-nexus-node[data-kind="step"]')).toHaveLength(6);
     expect(screen.queryByLabelText("6 finished steps, folded. Open to see them.")).toBeNull();
   });
 });
@@ -253,7 +253,7 @@ describe("rewind", () => {
     );
     await screen.findByRole("group", { name: "What you can do with this" });
     expect(screen.queryByRole("button", { name: /^Rewind/ })).toBeNull();
-    expect(screen.getByText("no run to act on yet")).toBeTruthy();
+    expect(screen.getByText("No attempt is available yet")).toBeTruthy();
   });
 
   it("is offered, and says plainly that it spends nothing", async () => {
@@ -314,7 +314,7 @@ describe("rewind", () => {
       payload: { goalId: "g1", at: "2026-09-01T09:00:11Z" },
     });
     await screen.findByRole("application");
-    const rail = screen.getAllByRole("button", { name: /^Step \d+, / });
+    const rail = screen.getAllByRole("button", { name: /^(Read|Decide|Write), / });
     // Every rail row agrees with the map: nothing is `done` at a moment when
     // the run had not finished a step.
     for (const row of rail) {
@@ -351,7 +351,7 @@ describe("the acts legal from the run's state", () => {
     await openGoal();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).getByText("Answer it")).toBeTruthy();
-    expect(screen.getByText(/parked on you: sends mail outside the cluster/)).toBeTruthy();
+    expect(screen.getByText(/sends mail outside the cluster/)).toBeTruthy();
   });
 
   it("offers no Replay while the run is still going, and says why", async () => {
@@ -359,7 +359,7 @@ describe("the acts legal from the run's state", () => {
     await openGoal();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).queryByText("Replay")).toBeNull();
-    expect(screen.getByText(/replay and branching wait until the run finishes/)).toBeTruthy();
+    expect(screen.getByText(/Follow the actions above to see what happens next/)).toBeTruthy();
   });
 
   it("offers Replay once the run is terminal", async () => {

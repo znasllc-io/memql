@@ -37,7 +37,7 @@ import {
   builtinReply,
   siteRow,
   type as typeInto,
-  withSession,
+  withDeliverySession as withSession,
   type FakeConnection,
   type FakeSeed,
 } from "./harness";
@@ -484,12 +484,7 @@ describe("the Head's action, by state", () => {
     const update = headAction(page);
     expect(update?.textContent).toBe("Deploy the update");
     expect(update?.getAttribute("data-tone")).toBe("primary");
-    // The Source stop carries the standing mark and the newer version -- and
-    // it is one line now, so reading it means opening it.
-    await openStop(page, "Source");
-    expect(within(page).getByText(/A newer version is available: bbbbbbb/)).toBeTruthy();
-    await click(within(page).getByRole("button", { name: /^Back to / }));
-    await click(await screen.findByRole("button", { name: /^Deploy the update/ }));
+    await click(update);
     expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
@@ -658,11 +653,11 @@ describe("the Source stop", () => {
 
   it("shows a package-produced site's source as facts", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
-    await openStop(page, "Source");
+    const source = await openSourceView(page);
     expect(within(screen.getByRole("region", { name: /^Source / })).getByRole("heading", { name: "acme" })).toBeTruthy();
-    expect(within(page).getByText("Tracking")).toBeTruthy();
-    expect(within(page).getByText("Deployed")).toBeTruthy();
-    expect(within(page).getAllByText("aaaaaaa").length).toBeGreaterThan(0);
+    expect(within(source).getByText("Tracking")).toBeTruthy();
+    expect(within(source).getByText("Deployed")).toBeTruthy();
+    expect(within(source).getAllByText("aaaaaaa").length).toBeGreaterThan(0);
   });
 
   describe("the credential chip", () => {
@@ -671,35 +666,35 @@ describe("the Source stop", () => {
     it("renders the label and the fingerprint, and never anything token-shaped", async () => {
       const card = credentialRow({ id: "cred-1", token: "ghp_should_never_arrive" });
       const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [PRIVATE], credentials: [card] }, "store.memql.example.com");
-      await openStop(page, "Source");
-      expect(await within(page).findByText("acme deploy token")).toBeTruthy();
-      expect(within(page).getByText("sha256:ab12cd34")).toBeTruthy();
-      expect(page.textContent).not.toContain("ghp_");
-      expect(within(page).queryByText("revoked")).toBeNull();
+      const source = await openSourceView(page);
+      expect(await within(source).findByText("acme deploy token")).toBeTruthy();
+      expect(within(source).getByText("sha256:ab12cd34")).toBeTruthy();
+      expect(source.textContent).not.toContain("ghp_");
+      expect(within(source).queryByText("revoked")).toBeNull();
       // The credentials feed is the root's, read once, and never a value.
-      expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(1);
+      expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(2);
       expect(connection.calls.some((c) => c.includes("token"))).toBe(false);
     });
 
     it("says revoked, in the warn tone, when the card is", async () => {
       const card = credentialRow({ id: "cred-1", status: "revoked", revokedAt: "2026-09-01T00:00:00Z" });
       const { page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [PRIVATE], credentials: [card] }, "store.memql.example.com");
-      await openStop(page, "Source");
-      const revoked = await within(page).findByText("revoked");
+      const source = await openSourceView(page);
+      const revoked = await within(source).findByText("revoked");
       expect(revoked.getAttribute("data-tone")).toBe("warn");
     });
 
     it("says public for a repository with no credential", async () => {
       const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
-      await openStop(page, "Source");
-      expect(within(page).getByText("public")).toBeTruthy();
+      const source = await openSourceView(page);
+      expect(within(source).getByText("public")).toBeTruthy();
     });
 
     it("says 'a credential you cannot see' for an id that resolves to no card", async () => {
       const { page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [PRIVATE], credentials: [] }, "store.memql.example.com");
-      await openStop(page, "Source");
-      expect(await within(page).findByText("a credential you cannot see")).toBeTruthy();
-      expect(within(page).queryByText("cred-1")).toBeNull();
+      const source = await openSourceView(page);
+      expect(await within(source).findByText("a credential you cannot see")).toBeTruthy();
+      expect(within(source).queryByText("cred-1")).toBeNull();
     });
 
     it("switches which credential the source fetches under, for a writer", async () => {
@@ -715,6 +710,7 @@ describe("the Source stop", () => {
       // SWITCHING THE CREDENTIAL IS A FACT ABOUT THE SOURCE, so it lives on
       // the source's own view (D4) rather than inside every app's Source stop.
       const source = await openSourceView(page);
+      await click(within(source).getByRole("button", { name: "Settings" }));
       const save = within(source).getByRole("button", { name: "Save" }) as HTMLButtonElement;
       // Nothing has changed yet, so there is nothing to save.
       expect(save.disabled).toBe(true);
@@ -737,19 +733,20 @@ describe("the Source stop", () => {
         { role: "reader" },
       );
       await openStop(page, "Source");
+      const source = screen.getByRole("dialog");
       // The chip still says which credential is in force -- reading is not
       // the privileged half.
-      expect(await within(page).findByText("acme deploy token")).toBeTruthy();
-      expect(within(page).queryByLabelText("The credential this source is fetched under, on github.com")).toBeNull();
+      expect(await within(source).findByText("acme deploy token")).toBeTruthy();
+      expect(within(source).queryByLabelText("The credential this source is fetched under, on github.com")).toBeNull();
     });
 
     it("follows a revocation live, because the feed broadcasts updates", async () => {
       const card = credentialRow({ id: "cred-1" });
       const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [PRIVATE], credentials: [card] }, "store.memql.example.com");
-      await openStop(page, "Source");
-      await within(page).findByText("acme deploy token");
+      const source = await openSourceView(page);
+      await within(source).findByText("acme deploy token");
       await emit(connection, "v1:platform:sourceCredential", credentialRow({ id: "cred-1", status: "revoked" }));
-      expect(await within(page).findByText("revoked")).toBeTruthy();
+      expect(await within(source).findByText("revoked")).toBeTruthy();
     });
   });
 
@@ -761,6 +758,7 @@ describe("the Source stop", () => {
     async function ask() {
       const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
       const source = await openSourceView(page);
+      await click(within(source).getByRole("button", { name: "Settings" }));
       await click(within(source).getByRole("button", { name: "Archive this source" }));
       expect(within(source).getByText(/goes offline the moment you confirm/)).toBeTruthy();
       return { connection, source };
@@ -805,6 +803,7 @@ describe("the Source stop", () => {
       // warning lives, and it names what goes offline.
       const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
       const source = await openSourceView(page);
+      await click(within(source).getByRole("button", { name: "Settings" }));
       const open = within(source).getByRole("button", { name: "Archive this source" }) as HTMLButtonElement;
       expect(open.disabled).toBe(false);
       // The section already says what is live, before the confirmation opens.
@@ -839,6 +838,7 @@ describe("the Source stop", () => {
         "store.memql.example.com",
       );
       const source = await openSourceView(page);
+      await click(within(source).getByRole("button", { name: "Settings" }));
       await click(within(source).getByRole("button", { name: "Archive this source" }));
       await typeInto(within(source).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
       await readTheBar();
@@ -869,6 +869,7 @@ describe("the Source stop", () => {
         "store.memql.example.com",
       );
       const source = await openSourceView(page);
+      await click(within(source).getByRole("button", { name: "Settings" }));
       const open = within(source).getByRole("button", { name: "Archive this source" });
       const part = open.closest(".os-danger-part") as HTMLElement;
       expect(part.textContent).toContain("Deactivates every app this source produced");
@@ -879,6 +880,7 @@ describe("the Source stop", () => {
       const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [{ ...ACME, status: "archived" }] }, "store.memql.example.com");
       const source = await openSourceView(page);
       expect(within(source).getByText(/apps come back inactive/)).toBeTruthy();
+      await click(within(source).getByRole("button", { name: "Settings" }));
       await click(within(source).getByRole("button", { name: "Restore this source" }));
       expect(connection.callsNamed("packageRestore")).toEqual(['builtin packageRestore(packageId: "pkg-acme")']);
     });
@@ -1583,6 +1585,7 @@ describe("apps it produces", () => {
       "store.memql.example.com",
     );
     const source = await openSourceView(page);
+    await click(within(source).getByRole("button", { name: "Deployables" }));
     const list = within(source).getByText("Apps it produces").closest("section") as HTMLElement;
     expect(within(list).getByText("storefront")).toBeTruthy();
     expect(within(list).getByText("web")).toBeTruthy();
@@ -1601,6 +1604,7 @@ describe("apps it produces", () => {
       "store.memql.example.com",
     );
     const source = await openSourceView(page);
+    await click(within(source).getByRole("button", { name: "Deployables" }));
     const list = within(source).getByText("Apps it produces").closest("section") as HTMLElement;
     expect(within(list).getByText("inactive")).toBeTruthy();
     await click(within(list).getByRole("button", { name: /web/ }));

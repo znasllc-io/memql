@@ -61,16 +61,17 @@ import type { OsAppSection } from "../../system/registry";
  * rather than a mirror of a gate. It inherits the app's own `app:cluster`.
  */
 export const CLUSTER_SECTIONS: OsAppSection[] = [
-  { id: "readiness", name: "Readiness" },
-  { id: "capacity", name: "Capacity", requires: "app:cluster/capacity" },
-  { id: "releases", name: "Releases", requires: "app:cluster/releases" },
+  { id: "overview", name: "Overview" },
+  { id: "runtime", name: "Runtime" },
+  { id: "origins", name: "Data", requires: "app:cluster/origins" },
   { id: "updates", name: "Updates", requires: "app:cluster/updates" },
-  { id: "modules", name: "Modules", requires: "app:cluster/modules" },
-  { id: "mesh", name: "Mesh" },
-  { id: "origins", name: "Data origins", requires: "app:cluster/origins" },
-  { id: "automations", name: "Automations", requires: "app:cluster/automations" },
-  { id: "agents", name: "Agents" },
-  { id: "audit", name: "Audit trail", requires: "app:cluster/audit" },
+  { id: "readiness", name: "Readiness", parent: "overview" },
+  { id: "capacity", name: "Capacity", parent: "runtime", requires: "app:cluster/capacity" },
+  { id: "modules", name: "Modules", parent: "runtime", requires: "app:cluster/modules" },
+  { id: "mesh", name: "Nodes", parent: "runtime" },
+  { id: "automations", name: "System automations", parent: "runtime", requires: "app:cluster/automations" },
+  { id: "agents", name: "Agents", parent: "runtime" },
+  { id: "audit", name: "Audit trail", parent: "logs", requires: "app:cluster/audit" },
   { id: "logs", name: "Logs", requires: "app:cluster/logs" },
   { id: "settings", name: "Settings" },
 ];
@@ -99,7 +100,7 @@ export const DEFAULT_CLUSTER_SETTINGS: ClusterSettings = {
   // Readiness first, per the manifest. Named here as well because this value
   // is what a corrupt or absent document falls back to, and falling back to
   // "whatever is first in an array" would move with an unrelated edit.
-  defaultSection: "readiness",
+  defaultSection: "overview",
   showInactiveAgents: false,
 };
 

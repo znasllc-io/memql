@@ -261,6 +261,17 @@ export function placementsComplete(
   });
 }
 
+/** Only analyzed, changed DSL is useful work with every website skipped. */
+export function hasInstallableDslChanges(report: AnalysisReport | null): boolean {
+  return report?.ok === true && report.dslChanges === true &&
+    (report.dslDomains ?? []).some(domain => domain.domain.trim() !== "" && domain.files > 0);
+}
+
+export function dslOnlySelectionReady(report: AnalysisReport | null, addresses: Readonly<Record<string, AddressDraft>>): boolean {
+  return hasInstallableDslChanges(report) && (report?.deployables ?? []).every(app =>
+    app.name !== "" && addresses[app.name]?.skip === true);
+}
+
 /** Explicit organization ownership travels with every placement. Skipped apps carry none. */
 export function placementsFrom(
   apps: readonly string[],

@@ -46,6 +46,8 @@ import {
   addressKeyFor,
   appsToPlace,
   duplicateSource,
+  dslOnlySelectionReady,
+  hasInstallableDslChanges,
   movingStopFor,
   pathOf,
   phaseOf,
@@ -436,6 +438,7 @@ export function ComposePage(props: ComposePageProps) {
     return out;
   }, [apps, checks.verdicts]);
 
+  const dslOnly = path === "package" && dslOnlySelectionReady(report, placementAddresses);
   const placementsDone = placementsComplete(apps, addresses, clusterDomain, verdicts);
   // Analyzing is `deploy`; registering a NEW source on the way is `sources`
   // (createPackage), so a flow opened with no source behind it needs both.
@@ -444,7 +447,7 @@ export function ComposePage(props: ComposePageProps) {
     canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone) && (!selectedSource || placementsKnown) && (!selectedSource || selectedSource.declares.length === 0 || selectedSource.declares.some(app => !placed.includes(app.name)));
   const readyToRestoreSource = !fixedSource && !parked && !created.packageId && can.sources && sourceDone && placementsKnown &&
     selectedSource?.sourceRemoved === true && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name));
-  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone && (!selectedSource || placementsKnown);
+  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : (placementsDone || dslOnly) && (!selectedSource || placementsKnown);
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
@@ -603,6 +606,7 @@ export function ComposePage(props: ComposePageProps) {
   }
 
   async function deploy(): Promise<void> {
+    if (!readyToDeploy || busy) return;
     if (path === "handmade") {
       const ok = await publish.publish(created.siteId, draft.artifactId);
       if (ok) setPublishedZip(true);
@@ -833,9 +837,11 @@ export function ComposePage(props: ComposePageProps) {
         // Not reachable yet is not a form: a stop nobody can answer draws its
         // blurb and nothing else.
         if (stage.state === "pending" || stage.state === "ahead") return null;
-        return (
+        return <>
+          {dslOnly ? <Caption>Install the package’s MemQL changes and restart the services that use them. No website will be built or published.</Caption> : null}
           <ComposeWhereItLivesStop
             apps={apps}
+            allowSkip={hasInstallableDslChanges(report)}
             labels={Object.fromEntries((report?.deployables ?? []).map(d => [d.name, d.displayName || d.name]))}
             onExport={report?.manifest ? () => downloadManifest(report.manifest!, addresses, outcomes, clusterDomain) : undefined}
             sourceName={sourceName}
@@ -856,7 +862,7 @@ export function ComposePage(props: ComposePageProps) {
             checks={checks}
             verdicts={verdicts}
           />
-        );
+        </>;
       case "build":
         return <>
           <BuildStop run={run} app={only ?? ""} refusal={run?.error ?? null} />
@@ -891,7 +897,7 @@ export function ComposePage(props: ComposePageProps) {
         : []
       : action === null || action.disabled
         ? []
-        : [{ label: action.label, tone: action.tone, busy, onAct: act }];
+        : [{ label: dslOnly && phase === "awaiting_confirm" ? "Install MemQL changes" : action.label, tone: action.tone, busy, onAct: act }];
 
   const title = composeTitle(parked?.pkg ?? fixedSource, report?.deployables?.find(d => d.name === only)?.displayName || only);
   // AN INACTIVE APP, OR ONE OF AN ARCHIVED SOURCE, IS HELD: whatever the
@@ -902,7 +908,7 @@ export function ComposePage(props: ComposePageProps) {
   // AND THE ENGINE WOULD TAKE THEM LIVE (Connect Shopify, D5): a storefront
   // placed with no store is refused, so Go live is absent until readiness says
   // yes for every site the run placed.
-  const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci") && everyCanGoLive === true;
+  const canGoLive = finished && goLiveIds.length > 0 && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci") && everyCanGoLive === true;
   const journeyActs: Act[] = !held && !finished && (
     ["source", "githubAccount", "githubOrganization", "githubRepository"].includes(journeyStop) ? []
     : journeyStop === "sourceDetail" && readyToRestoreSource ? [{ label: "Restore source", tone: "primary", busy: repositoryRegistration.busy, onAct: () => void restoreSource() }]
@@ -986,9 +992,9 @@ export function ComposePage(props: ComposePageProps) {
     const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
     return [{
       id,
-      name: STEP_NAMES[id],
+      name: id === "whereItLives" && dslOnly ? "Installation" : STEP_NAMES[id],
       state,
-      sentence: STEP_SENTENCES[id],
+      sentence: id === "whereItLives" && dslOnly ? "Review the MemQL changes to install" : STEP_SENTENCES[id],
       answer: stage.reason,
       openable: reachable,
       body: reachable ? (
@@ -1019,12 +1025,12 @@ export function ComposePage(props: ComposePageProps) {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   }));
   const detail = stepNeeds ? undefined : detailNeeds !== null ? detailNeeds.detail : finished
-    ? finishedSentence(path, draft, outcomes, siteHostname, wentLive)
+    ? run?.dslVersion && publishedHosts(outcomes).length === 0 ? "MemQL changes were staged and service restarts were requested. No website was published." : finishedSentence(path, draft, outcomes, siteHostname, wentLive)
     : inactive
       ? siteStateDetail("Inactive", "")
       : archivedSource
         ? "restore the source to deploy its apps again"
-        : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice);
+        : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice, dslOnly);
 
   // Leave changes navigation only. Cancel targets this persisted run, and
   // remains separate from the request that started it and its busy state.
@@ -1236,12 +1242,14 @@ function composePhaseDetail(
   addresses: Readonly<Record<string, AddressDraft>>,
   declared: boolean,
   choice = "-",
+  dslOnly = false,
 ): string {
   // NOTHING IS CHOSEN YET, so the bar's word already says what is needed
   // ("Choose a method") and the three choices are on the page. What is worth
   // saying beside it is the thing somebody about to start wants to know.
   if (phase === "composing" && !declared && choice === "") return "nothing is deployed until you confirm";
   if (phase === "awaiting_confirm") {
+    if (dslOnly) return "MemQL changes only; the services that use them will restart";
     if (apps.length > 1) {
       const going = apps.filter((app) => addresses[app]?.skip !== true).length;
       if (going === 0) return "pick at least one app to deploy";
@@ -1255,6 +1263,7 @@ function composePhaseDetail(
     case "analyzing":
       return "Reading the source and checking its configuration. Review opens when the report is ready; nothing is deployed.";
     case "deploying":
+      if (dslOnly) return "installing MemQL changes and requesting service restarts";
       return "building, then putting the files in place -- nothing goes live until you say";
     case "stopped":
       return "the last attempt did not finish; retrying starts a fresh one";

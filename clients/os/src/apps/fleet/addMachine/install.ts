@@ -118,7 +118,7 @@ export function installCommand(input: InstallCommandInput): string {
     return `curl -fsSL ${source.base}/scripts/install/install-mac.sh | ${localInstallerEnvironment(source)}bash -s -- --token ${input.token} --cluster ${input.clusterUrl || CLUSTER_URL_PLACEHOLDER} --computeruse${inference}${input.workbench ? " --workbench" : ""} --user-local --download-base=${source.base}/releases/download/v${source.version}`;
   }
   const cluster = input.clusterUrl === "" ? CLUSTER_URL_PLACEHOLDER : input.clusterUrl;
-  const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-${input.platform}.sh`;
+  const script = `https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/install-${input.platform}.sh`;
   const computeruse = input.computerUse ? " --computeruse" : "";
   // ORDER IS FIXED and asserted word for word by the tests: --computeruse
   // then --inference. The installers parse both, so the order is cosmetic to
@@ -169,7 +169,7 @@ export function uninstallCommand(
 ): string {
   const cluster = opts.clusterUrl ? opts.clusterUrl : CLUSTER_URL_PLACEHOLDER;
   if (opts.localTest && platform === "mac") return `curl -fsSL ${opts.localTest.base}/scripts/install/uninstall-mac.sh | ${localInstallerEnvironment(opts.localTest)}bash -s -- --user-local --cluster=${cluster}${opts.purge ? " --purge" : ""}`;
-  const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-${platform}.sh`;
+  const script = `https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-${platform}.sh`;
   // ORDER IS FIXED and asserted word for word by the tests, as for the
   // install line: --cluster first, then --purge, then --user-local. Both
   // uninstallers parse the flags in any order; the fixed order is for the

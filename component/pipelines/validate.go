@@ -315,6 +315,11 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 			"Stage %q has two steps named %q; a step name must be unique within its stage.", stage, step.Name)
 	}
 	scope := stage + "/" + step.Name
+	if step.Verification {
+		if refusal := validateVerification(spec, step, scope); refusal != nil {
+			return refusal
+		}
+	}
 
 	if step.RepositoryChange != nil {
 		return validateRepositoryChangeStep(spec, stage, step)
@@ -341,6 +346,14 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 	if step.Only != "" && step.Packages == "" {
 		return Refuse(CodeStepInvalid, scope,
 			"only narrows a step's packages, and this step selects none; add packages: %s or packages: %s.", PackagesAffected, PackagesAll)
+	}
+	if len(step.PackageRoots) > 0 && step.Packages == "" {
+		return Refuse(CodeStepInvalid, scope, "packageRoots narrows selected packages; declare packages first.")
+	}
+	for _, root := range step.PackageRoots {
+		if _, ok := dbGatedTree(root); !ok {
+			return Refuse(CodeStepInvalid, scope, "packageRoots must name repository-relative package directories, without traversal or globs.")
+		}
 	}
 	if step.Packages != "" {
 		if spec.Select == nil {

@@ -31,7 +31,7 @@ function memStore() {
 function mount(connection: FakeConnection, navigate: (id: string, options?: { fromContent?: boolean }) => void = vi.fn()) {
   h.connection = connection;
   return render(
-    withSession(<DeployablesApp sectionId="sources" navigate={navigate} askContext={vi.fn()} store={memStore()} />, { role: "owner", userId: VIEWER }),
+    withSession(<DeployablesApp surface="pipelines" sectionId="sources" navigate={navigate} askContext={vi.fn()} store={memStore()} />, { role: "owner", userId: VIEWER }),
   );
 }
 
@@ -148,14 +148,14 @@ describe("pipeline settings", () => {
   });
 
   it("renders a refusal in the page, with its copy, and leaves the pipeline as it was", async () => {
-    const connection = fakeConnection(seed({ pipelinesDisconnectError: "capability_not_held: the caller does not hold execute on app:deployables/connect" }));
+    const connection = fakeConnection(seed({ pipelinesDisconnectError: "capability_not_held: the caller does not hold execute on app:pipelines/connect" }));
     mount(connection);
     const page = await openSettings();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     expect(await within(page).findByText("This needs a part of Deployables you have not been granted")).toBeTruthy();
-    expect(within(page).getByText("the caller does not hold execute on app:deployables/connect")).toBeTruthy();
+    expect(within(page).getByText("the caller does not hold execute on app:pipelines/connect")).toBeTruthy();
     expect(bar().word).toBe("Checks on");
     expect(bar().acts).toEqual(["Disconnect", "Change", "Run"]);
   });

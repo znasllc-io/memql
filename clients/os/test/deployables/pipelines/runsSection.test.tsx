@@ -27,7 +27,7 @@ function mount(connection: FakeConnection | null, opts: { intent?: { id: string;
   h.connection = connection;
   return render(
     withSession(
-      <DeployablesApp sectionId="runs" navigate={opts.navigate ?? vi.fn()} askContext={vi.fn()} store={memStore()} {...(opts.intent ? { intent: opts.intent, consumeIntent: vi.fn() } : {})} />,
+      <DeployablesApp surface="pipelines" sectionId="runs" navigate={opts.navigate ?? vi.fn()} askContext={vi.fn()} store={memStore()} {...(opts.intent ? { intent: opts.intent, consumeIntent: vi.fn() } : {})} />,
       { role: "owner", userId: VIEWER },
     ),
   );
@@ -123,8 +123,8 @@ describe("the Runs tab", () => {
     const navigate = vi.fn();
     mount(fakeConnection(seed({ pipelineRuns: [] })), { navigate });
     expect(await screen.findByText("No runs yet")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Open Sources" }));
-    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    await click(screen.getByRole("button", { name: "Open Repositories" }));
+    expect(navigate).toHaveBeenCalledWith("repositories", { fromContent: true });
   });
 
   it("opens a run's page with the trail back to Runs", async () => {

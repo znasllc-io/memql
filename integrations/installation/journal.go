@@ -27,6 +27,7 @@ type revisionRecord struct {
 	ObservationVersion int64
 	Observation        *argocd.Facts
 	Rollback           *rollbackRecord
+	Completion         *completionReceipt
 }
 
 // The role is from the current resolved request, not a persisted claim or DSL
@@ -145,12 +146,12 @@ func lockHead(ctx context.Context, tx *sql.Tx, installation string) (string, int
 
 func readRevision(ctx context.Context, tx *sql.Tx, installation, key string) (revisionRecord, error) {
 	r := revisionRecord{ID: key}
-	var plan, observation []byte
+	var plan, observation, completion []byte
 	var requester string
-	var started sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at
+	var started, completed sql.NullTime
+	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at
 FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR UPDATE`, installation, key).
-		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started)
+		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed)
 	if err != nil {
 		return revisionRecord{}, err
 	}
@@ -159,15 +160,15 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 	if err != nil || actual != key || r.Plan.InstallationID != installation || r.Plan.RequestedBy != requester || r.SlotEpoch < 1 {
 		return revisionRecord{}, errors.New("installation revision journal identity is inconsistent")
 	}
-	if r.State != "prepared" && r.State != "applying" && r.State != "cancelled" {
+	if r.State != "prepared" && r.State != "applying" && r.State != "cancelled" && r.State != "complete" {
 		return revisionRecord{}, errors.New("installation revision journal state is invalid")
 	}
-	if (r.State == "applying") != started.Valid || r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) {
+	if (r.State == "applying" || r.State == "complete") != started.Valid || r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) {
 		return revisionRecord{}, errors.New("installation revision effect markers are inconsistent")
 	}
 	if len(observation) != 0 {
 		var facts argocd.Facts
-		if json.Unmarshal(observation, &facts) != nil || r.State != "applying" {
+		if json.Unmarshal(observation, &facts) != nil || (r.State != "applying" && r.State != "complete") {
 			return revisionRecord{}, errors.New("installation observation is invalid")
 		}
 		encoded, _ := json.Marshal(facts)
@@ -177,6 +178,16 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 			return revisionRecord{}, errors.New("installation observation contains noncanonical fields")
 		}
 		r.Observation = &facts
+	}
+	if (r.State == "complete") != completed.Valid || (r.State == "complete") != (len(completion) != 0) {
+		return revisionRecord{}, errors.New("installation completion markers are inconsistent")
+	}
+	if len(completion) != 0 {
+		var proof completionReceipt
+		if json.Unmarshal(completion, &proof) != nil || proof.validate(r.Plan, key) != nil {
+			return revisionRecord{}, errors.New("installation completion receipt is invalid")
+		}
+		r.Completion = &proof
 	}
 	r.Rollback, err = readRollback(ctx, tx, r)
 	return r, err
@@ -209,7 +220,7 @@ func (j *revisionJournal) withRecord(ctx context.Context, installation, key stri
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if r.State != "cancelled" && (active != key || epoch != r.SlotEpoch) {
+	if r.State != "cancelled" && r.State != "complete" && (active != key || epoch != r.SlotEpoch) {
 		return revisionRecord{}, errChanged
 	}
 	if update != nil {

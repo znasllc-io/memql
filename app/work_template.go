@@ -8,6 +8,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -16,6 +17,7 @@ type workTemplate struct {
 	automation *automations.Automation
 	registry   *memql.AuthoredRuntimeRegistry
 	members    map[string]*automations.Automation
+	prepared   *workflowhost.PreparedSnapshot
 }
 
 type workTemplateReader interface {
@@ -41,6 +43,9 @@ func workTemplateRows(ctx context.Context, engine workTemplateReader, name strin
 // A compiled draft is durable but private to its run. An agent reconstructs
 // it from owned rows; no planner registry or scheduler activation is assumed.
 func loadWorkTemplate(ctx context.Context, engine *memql.MemQLEngine, loader *automations.Loader, journal *automations.RunJournal) (*workTemplate, error) {
+	if journal.TriggeredBy == "repository-change" {
+		return loadRepositoryWorkTemplate(ctx, engine, journal)
+	}
 	if journal.TriggeredBy == "approval-discussion" && (journal.AutomationName != memql.ApprovalDiscussionTemplate || journal.TemplateConstructId != "" || journal.Rerun != nil || journal.ForkedFromRunId != "") {
 		return nil, fmt.Errorf("approval discussion cannot execute a changed or replayed plan")
 	}

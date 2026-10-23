@@ -624,9 +624,20 @@ func TestASlowRenderCannotLoseASaveThatLandsMeanwhile(t *testing.T) {
 	}
 	// Nothing is locked while it waits. And it waits longer than the pool lets a
 	// transaction sit idle, so a lock it held would be gone by now.
+	// Another repository/test may legitimately hold a gate in this shared
+	// database. Keep one here so the observation must identify this template,
+	// rather than requiring every unrelated writer to be idle.
+	otherGate, err := memql.AcquireWriteGate(context.Background(), gatePoolFor(t)(), "campaign-template:unrelated-"+source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer otherGate()
 	var advisory int
 	if err := w.db.QueryRowContext(context.Background(),
-		`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = 1296387409 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&advisory); err != nil {
+		`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
+		 AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext(?)::oid
+		 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+		"campaign-template:source:"+account+":"+source).Scan(&advisory); err != nil {
 		t.Fatal(err)
 	}
 	if advisory != 0 {

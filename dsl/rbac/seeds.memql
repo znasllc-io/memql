@@ -342,7 +342,6 @@ seed capability cap-owner-execute-app-cluster-modules { roleSlug: "owner"  verb:
 @description("developer: flip a STOREFRONT pack in the modules section of the cluster app; every other pack stays owner-only (Connect Shopify design, D4).")
 seed capability cap-developer-execute-app-cluster-modules { roleSlug: "developer"  verb: "execute"  resourceType: "app:cluster/modules"  predefined: true }
 @description("owner: review exact release candidates and their durable publication records.")
-seed capability cap-owner-read-app-cluster-releases { roleSlug: "owner" verb: "read" resourceType: "app:cluster/releases" predefined: true }
 seed capability cap-owner-read-app-cluster-capacity { roleSlug: "owner" verb: "read" resourceType: "app:cluster/capacity" predefined: true }
 seed capability cap-owner-execute-app-cluster-capacity { roleSlug: "owner" verb: "execute" resourceType: "app:cluster/capacity" predefined: true }
 seed capability cap-owner-read-app-cluster-updates { roleSlug: "owner" verb: "read" resourceType: "app:cluster/updates" predefined: true }
@@ -418,10 +417,6 @@ seed capability cap-admin-read-app-deployables-logs { roleSlug: "admin"  verb: "
 // sources a person connected. OWNER AND DEVELOPER, the two roles holding the
 // `connect` part below -- the runs it lists are read owner-scoped, so a role
 // that cannot connect a pipeline would only ever open an empty tab.
-@description("owner: open the runs section of the deployables app -- the pipeline runs of the sources you connected (memql#5498).")
-seed capability cap-owner-read-app-deployables-runs { roleSlug: "owner"  verb: "read"  resourceType: "app:deployables/runs"  predefined: true }
-@description("developer: open the runs section of the deployables app -- the pipeline runs of the sources you connected (memql#5498).")
-seed capability cap-developer-read-app-deployables-runs { roleSlug: "developer"  verb: "read"  resourceType: "app:deployables/runs"  predefined: true }
 
 // ---- app:fleet (owners and developers only) ----
 @description("owner: manage Fleet and enroll personal machines.")
@@ -677,10 +672,6 @@ seed capability cap-developer-read-app-setup { roleSlug: "developer"  verb: "rea
 // =============================================================================
 
 // ---- app:deployables/sources -- add or edit a source, its credential, its auto-deploy switch ----
-@description("owner: the sources part of the Deployables app -- add or edit a source, its credential, its auto-deploy switch (memql#5301).")
-seed capability cap-owner-execute-app-deployables-sources { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/sources"  predefined: true }
-@description("developer: the sources part of the Deployables app -- add or edit a source, its credential, its auto-deploy switch (memql#5301).")
-seed capability cap-developer-execute-app-deployables-sources { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/sources"  predefined: true }
 
 // ---- app:deployables/deploy -- analyze, confirm, retry, cancel a run ----
 @description("owner: the deploy part of the Deployables app -- analyze, confirm, retry, cancel a run (memql#5301).")
@@ -758,22 +749,6 @@ seed capability cap-developer-execute-app-deployables-store { roleSlug: "develop
 // where a notify stage delivers, and epic memql#5480 writes them. A person
 // may be trusted with the second without the first, so the seam borrowing
 // `sources` and `deploy` for these (epic memql#5477) ends here.
-@description("owner: the connect part of the Deployables app -- preview, connect, reconnect or disconnect a source's pipeline (memql#5498).")
-seed capability cap-owner-execute-app-deployables-connect { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/connect"  predefined: true }
-@description("developer: the connect part of the Deployables app -- preview, connect, reconnect or disconnect a source's pipeline (memql#5498).")
-seed capability cap-developer-execute-app-deployables-connect { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/connect"  predefined: true }
-@description("owner: the rerun part of the Deployables app -- re-run a pipeline run, whole or only its failed steps (memql#5498).")
-seed capability cap-owner-execute-app-deployables-rerun { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/rerun"  predefined: true }
-@description("developer: the rerun part of the Deployables app -- re-run a pipeline run, whole or only its failed steps (memql#5498).")
-seed capability cap-developer-execute-app-deployables-rerun { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/rerun"  predefined: true }
-@description("owner: the cancel part of the Deployables app -- stop a queued or running pipeline run (memql#5498).")
-seed capability cap-owner-execute-app-deployables-cancel { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/cancel"  predefined: true }
-@description("developer: the cancel part of the Deployables app -- stop a queued or running pipeline run (memql#5498).")
-seed capability cap-developer-execute-app-deployables-cancel { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/cancel"  predefined: true }
-@description("owner: the channels part of the Deployables app -- name where a pipeline's notify stage delivers (memql#5498; its writers arrive with memql#5480).")
-seed capability cap-owner-execute-app-deployables-channels { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/channels"  predefined: true }
-@description("developer: the channels part of the Deployables app -- name where a pipeline's notify stage delivers (memql#5498; its writers arrive with memql#5480).")
-seed capability cap-developer-execute-app-deployables-channels { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/channels"  predefined: true }
 
 
 // ---- app:identity (registry floor: no floor) ----
@@ -800,3 +775,53 @@ seed capability cap-owner-read-app-settings-connections { roleSlug: "owner" verb
 seed capability cap-developer-read-app-settings-connections { roleSlug: "developer" verb: "read" resourceType: "app:settings/connections" predefined: true }
 seed capability cap-owner-execute-app-settings-connections { roleSlug: "owner" verb: "execute" resourceType: "app:settings/connections" predefined: true }
 seed capability cap-developer-execute-app-settings-connections { roleSlug: "developer" verb: "execute" resourceType: "app:settings/connections" predefined: true }
+
+// Pipelines manages delivery; repository authority is independently enforced per effect.
+@description("owner: read the app:pipelines surface; this grants no repository authority.")
+seed capability cap-owner-read-app-pipelines { roleSlug: "owner" verb: "read" resourceType: "app:pipelines" predefined: true }
+@description("developer: read the app:pipelines surface; this grants no repository authority.")
+seed capability cap-developer-read-app-pipelines { roleSlug: "developer" verb: "read" resourceType: "app:pipelines" predefined: true }
+@description("owner: read the app:pipelines/repositories surface; this grants no repository authority.")
+seed capability cap-owner-read-app-pipelines-repositories { roleSlug: "owner" verb: "read" resourceType: "app:pipelines/repositories" predefined: true }
+@description("developer: read the app:pipelines/repositories surface; this grants no repository authority.")
+seed capability cap-developer-read-app-pipelines-repositories { roleSlug: "developer" verb: "read" resourceType: "app:pipelines/repositories" predefined: true }
+@description("owner: read the app:pipelines/changes surface; this grants no repository authority.")
+seed capability cap-owner-read-app-pipelines-changes { roleSlug: "owner" verb: "read" resourceType: "app:pipelines/changes" predefined: true }
+@description("developer: read the app:pipelines/changes surface; this grants no repository authority.")
+seed capability cap-developer-read-app-pipelines-changes { roleSlug: "developer" verb: "read" resourceType: "app:pipelines/changes" predefined: true }
+@description("owner: read the app:pipelines/runs surface; this grants no repository authority.")
+seed capability cap-owner-read-app-pipelines-runs { roleSlug: "owner" verb: "read" resourceType: "app:pipelines/runs" predefined: true }
+@description("developer: read the app:pipelines/runs surface; this grants no repository authority.")
+seed capability cap-developer-read-app-pipelines-runs { roleSlug: "developer" verb: "read" resourceType: "app:pipelines/runs" predefined: true }
+@description("owner: read the app:pipelines/releases surface; this grants no repository authority.")
+seed capability cap-owner-read-app-pipelines-releases { roleSlug: "owner" verb: "read" resourceType: "app:pipelines/releases" predefined: true }
+@description("developer: read the app:pipelines/releases surface; this grants no repository authority.")
+seed capability cap-developer-read-app-pipelines-releases { roleSlug: "developer" verb: "read" resourceType: "app:pipelines/releases" predefined: true }
+@description("owner: read the app:pipelines/logs surface; this grants no repository authority.")
+seed capability cap-owner-read-app-pipelines-logs { roleSlug: "owner" verb: "read" resourceType: "app:pipelines/logs" predefined: true }
+@description("developer: read the app:pipelines/logs surface; this grants no repository authority.")
+seed capability cap-developer-read-app-pipelines-logs { roleSlug: "developer" verb: "read" resourceType: "app:pipelines/logs" predefined: true }
+@description("owner: execute the app:pipelines/repositories surface; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-repositories { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/repositories" predefined: true }
+@description("developer: execute the app:pipelines/repositories surface; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-repositories { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/repositories" predefined: true }
+@description("owner: execute the app:pipelines/connect surface; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-connect { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/connect" predefined: true }
+@description("developer: execute the app:pipelines/connect surface; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-connect { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/connect" predefined: true }
+@description("owner: execute the app:pipelines/rerun surface; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-rerun { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/rerun" predefined: true }
+@description("developer: execute the app:pipelines/rerun surface; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-rerun { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/rerun" predefined: true }
+@description("owner: execute the app:pipelines/cancel surface; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-cancel { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/cancel" predefined: true }
+@description("developer: execute the app:pipelines/cancel surface; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-cancel { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/cancel" predefined: true }
+@description("owner: execute the app:pipelines/channels surface; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-channels { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/channels" predefined: true }
+@description("developer: execute the app:pipelines/channels surface; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-channels { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/channels" predefined: true }
+@description("owner: execute the app:pipelines/requests surface; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-requests { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/requests" predefined: true }
+@description("developer: execute the app:pipelines/requests surface; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-requests { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/requests" predefined: true }

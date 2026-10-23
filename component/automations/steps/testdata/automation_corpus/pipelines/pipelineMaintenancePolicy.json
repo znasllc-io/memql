@@ -1,0 +1,61 @@
+{
+  "automation": "pipelines/automations.memql pipelineMaintenancePolicy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "attempt": 3,
+            "conclusion": "s-conclusion",
+            "event": "s-event",
+            "failureCode": "s-failureCode",
+            "repository": "s-repository",
+            "sha": "s-sha"
+          },
+          "topic": "automation.invocation.pipelineMaintenancePolicy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "action": "none",
+            "reason": "",
+            "template": ""
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "attempt": 3,
+            "conclusion": "s-conclusion",
+            "event": "s-event",
+            "failureCode": "s-failureCode",
+            "repository": "s-repository",
+            "sha": "s-sha"
+          },
+          "topic": "automation.invocation.pipelineMaintenancePolicy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "action": "none",
+            "reason": "",
+            "template": ""
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

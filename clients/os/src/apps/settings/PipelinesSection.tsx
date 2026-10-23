@@ -61,7 +61,7 @@ import { PipelineRunners } from "./PipelineRunners";
 /** Where GitHub sends an owner back to after registering the app from here. */
 export const PIPELINES_RETURN_PATH = returnPathFor("pipelines", "settings");
 
-export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "intent" | "consumeIntent">) {
+export function PipelinesSection({ intent, consumeIntent, heading = true }: Pick<OsAppProps, "intent" | "consumeIntent"> & { heading?: boolean }) {
   const { readiness, access } = useSession();
   const loaded = readiness?.loaded === true;
   const verdict = readiness?.loaded ? readiness.of("pipelines") : null;
@@ -70,9 +70,9 @@ export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "in
   const returned = useConnectReturn(intent, consumeIntent, github.refresh);
   const installations = useLaggingInstallations();
   const fleet = useMachinesAllowingPipelines(access?.userId ?? "");
-  const sources = useAppReach("deployables");
+  const sources = useAppReach("pipelines");
   const openSources =
-    sources.canOpenWindows && sources.sections.includes("sources") ? () => sources.open("sources") : null;
+    sources.canOpenWindows && sources.sections.includes("repositories") ? () => sources.open("repositories") : null;
   // GITHUB ENDS A REGISTER-AND-INSTALL ON A NEUTRAL RETURN (`?github=installed`)
   // that names no section, which would land the owner on Deployables > Sources.
   // Remembering where the trip began brings them back here; the record steers
@@ -95,7 +95,7 @@ export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "in
   return (
     <section className="os-action-pane os-pipelines-setup" aria-label="Pipelines">
       <div className="os-action-body os-app-stack">
-        <Head title="Pipelines" meta={verdict?.optional ? "Optional" : undefined} />
+        {heading ? <Head title="Pipelines" meta={verdict?.optional ? "Optional" : undefined} /> : null}
         <Caption>{MODULE_DESCRIPTIONS.pipelines}</Caption>
         {loaded ? (
           <Rail stops={stops} label="What pipelines need" scale="page" />
@@ -206,7 +206,7 @@ function repositoryStop(step: SubStep, app: SubStep["reading"], openSources: (()
       openSources === null ? undefined : (
         <div className="os-pipelines-stop">
           <button type="button" className="os-link os-pipelines-act" onClick={openSources}>
-            Open Sources
+            Open Repositories
           </button>
         </div>
       ),

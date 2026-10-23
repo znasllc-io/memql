@@ -105,6 +105,19 @@ type memStore struct {
 	work *fakeWork
 }
 
+func (s *memStore) RunsAwaitingMaintenance(_ context.Context) ([]Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []Run{}
+	for _, r := range s.runs {
+		if r.Finished() && r.Conclusion == ConclusionFailure && r.PolicySnapshot != nil && (r.MaintenanceState == "" || r.MaintenanceState == "pending") {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].FinishedAt.Before(out[b].FinishedAt) })
+	return out, nil
+}
+
 type pipelineUpdate struct {
 	Owner, ID string
 	Patch     PipelinePatch
@@ -598,6 +611,9 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 			*dst = *v
 		}
 	}
+	set(&r.MaintenanceState, patch.MaintenanceState)
+	set(&r.MaintenanceGoalID, patch.MaintenanceGoalID)
+	set(&r.MaintenanceMessage, patch.MaintenanceMessage)
 	set(&r.Status, patch.Status)
 	set(&r.Conclusion, patch.Conclusion)
 	set(&r.RefusalCode, patch.RefusalCode)

@@ -25,9 +25,12 @@ const installationPrepareWorkflow = "installationPrepareWorkflow"
 // not proof: every image and resource in that commit must pass native checks.
 type preparationRequest struct {
 	InstallationID, RequestID, CandidateID, CatalogDigest, OverlayRevision string
+	ExpectedCurrentRevision                                                string
 	Prune                                                                  bool
 }
 type preparationHost struct {
+	health                       HealthProbe
+	completion                   *workflowhost.Snapshot
 	api                          argocd.API
 	journal                      *preparationJournal
 	executor                     sourceCaptureExecutor
@@ -43,10 +46,18 @@ type preparationHost struct {
 }
 
 func (h *preparationHost) bindWorkflow(engineRevision string) error {
+	return h.bindWorkflowNames(engineRevision, WorkflowNames{})
+}
+
+func (h *preparationHost) bindWorkflowNames(engineRevision string, names WorkflowNames) error {
+	names = names.defaults()
+	if err := names.validate(); err != nil {
+		return err
+	}
 	if h == nil || !commitDigest.MatchString(engineRevision) {
 		return errors.New("installation preparation requires its installed engine revision")
 	}
-	definition, err := workflowhost.Load(installationPrepareWorkflow)
+	definition, err := workflowhost.Load(names.Preparation)
 	if err != nil {
 		return err
 	}
@@ -57,15 +68,19 @@ func (h *preparationHost) bindWorkflow(engineRevision string) error {
 	if err != nil {
 		return err
 	}
-	h.artifacts, err = loadArtifactWorkflow(engineRevision)
+	h.artifacts, err = loadArtifactWorkflowNamed(engineRevision, names.Artifacts)
 	if err != nil {
 		return err
 	}
-	h.revisions, err = loadRevisionWorkflow(engineRevision)
+	h.revisions, err = loadRevisionWorkflowNamed(engineRevision, names.Revision, h.artifacts)
 	if err != nil {
 		return err
 	}
-	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest, h.revisions.digest})
+	h.completion, err = workflowhost.Capture(names.Completion, completionContract, nil, (&completionScope{revision: &revisionWorkflowScope{}}).operations())
+	if err != nil {
+		return err
+	}
+	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest, h.revisions.digest, h.completion.Version})
 	return nil
 }
 
@@ -87,7 +102,7 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 		return revisionRecord{}, err
 	}
 	if err == nil {
-		if prior.Scope.RequestedBy != actor || prior.Scope.WorkflowDigest != h.digest || prior.Scope.CandidateID != request.CandidateID || prior.Scope.PublicationDigest != request.CatalogDigest || prior.Scope.Intent.Revision != request.OverlayRevision || prior.Scope.Intent.Prune != request.Prune {
+		if prior.Scope.RequestedBy != actor || prior.Scope.WorkflowDigest != h.digest || prior.Scope.CandidateID != request.CandidateID || prior.Scope.PublicationDigest != request.CatalogDigest || prior.Scope.Intent.Revision != request.OverlayRevision || prior.Scope.Intent.Prune != request.Prune || (request.ExpectedCurrentRevision != "" && beforeRevision(prior.Scope.Intent.BeforeSpec) != request.ExpectedCurrentRevision) {
 			return revisionRecord{}, errors.New("installation preparation request was reused with changed inputs or authority")
 		}
 		if prior.State == "promoted" {
@@ -103,8 +118,14 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 	if err != nil {
 		return revisionRecord{}, err
 	}
+	if request.ExpectedCurrentRevision != "" && (!commitDigest.MatchString(request.ExpectedCurrentRevision) || sourceRevision(cfg.render.Source) != request.ExpectedCurrentRevision) {
+		return revisionRecord{}, errors.New("installation current revision changed since selection")
+	}
 	if cfg.configuration.InstallationID != request.InstallationID || (prior.ID != "" && (prior.Scope.ConfigurationDigest != cfg.digest || prior.Scope.ConfigurationInvariantDigest != cfg.invariantDigest)) {
 		return revisionRecord{}, errors.New("installation receiving configuration changed")
+	}
+	if h.rendererAddressOverride != "" {
+		cfg.rendererAddress = h.rendererAddressOverride
 	}
 	s := &preparationWorkflowScope{host: h, request: request, operator: actor, configuration: cfg, record: prior, sources: map[string]verifiedSourceCapture{}, renders: map[string]argocd.RenderedRevision{}}
 	return s.run(ctx)
@@ -136,6 +157,7 @@ func (s *preparationWorkflowScope) run(ctx context.Context) (revisionRecord, err
 }
 
 type preparationWorkflowScope struct {
+	healthBaseline *HealthObservation
 	// Native preparation proofs mutate together. Artifact checks share a read
 	// lock and retain their own bounded concurrency inside the child scope.
 	mu                  sync.RWMutex
@@ -170,6 +192,7 @@ func (s *preparationWorkflowScope) operations() map[string]workflowhost.Operatio
 		"installationVerifyProtected":        s.verifyProtected,
 		"installationReobserveConfiguration": s.reobserve,
 		"installationPromotePreparation":     s.promote,
+		"installationContinuityBaseline":     s.continuityBaseline,
 	}
 	for _, name := range []string{"installationArtifactRequirements", "installationArtifactCheck", "installationArtifactsComplete"} {
 		operations[name] = func(ctx context.Context, args map[string]any) (any, error) {
@@ -427,7 +450,10 @@ func (s *preparationWorkflowScope) promote(ctx context.Context, args map[string]
 	}
 	var before struct{ TargetRevision string }
 	_ = json.Unmarshal(s.renders["rollback"].Spec().Source, &before)
-	plan := preparedPlan{FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
+	if s.configuration.configuration.Health != nil && (s.healthBaseline == nil || s.healthBaseline.validate() != nil) {
+		return nil, errors.New("installation preparation requires a verified session and migration baseline")
+	}
+	plan := preparedPlan{CompletionWorkflow: s.host.completion, HealthBaseline: s.healthBaseline, FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
 	artifact.workflow, artifact.operator = s.host.artifacts.digest, s.operator
 	artifact.digest = artifactHash("workflow-evidence", []string{artifact.digest, artifact.workflow, artifact.operator})
 	evidence := promotionEvidence{configuration: s.configuration, artifacts: artifact, published: s.candidate, candidateSource: s.sources["candidate"], rollbackSource: s.sources["rollback"], candidateRender: s.renders["candidate"], rollbackRender: s.renders["rollback"], resources: s.resources, storage: s.storage, sensitive: s.sensitive}

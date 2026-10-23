@@ -133,7 +133,7 @@ builtin setUserDisplayName {
 /// A call carrying no actor is REFUSED rather than answered, because the state row names the
 /// account the callback may land a grant on and a row naming nobody is a grant nobody owns.
 @sdk
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:pipelines/repositories")
 @executor("integration.identity.githubConnectBegin")
 @args(profile="object")
 @description("Begin session-bound GitHub authorization with PKCE. Returns {authorizeUrl, reason, installUrl}. Omit credentialId to add a GitHub identity; supply an own grant to reconnect only that identity. The callback requires the originating live browser session and returns safe credential and flow correlation identifiers. reason is ok, github_app_not_configured, or connect_state_invalid. Never returns a token.")

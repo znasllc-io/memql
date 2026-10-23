@@ -106,6 +106,7 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
+	Verification     bool              `json:"verification,omitempty"`
 	GitHubReadToken  bool              `json:"githubReadToken,omitempty"`
 	CheckoutHistory  string            `json:"checkoutHistory,omitempty"`
 	RepositoryChange *RepositoryChange `json:"repositoryChange,omitempty"`

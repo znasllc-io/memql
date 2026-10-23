@@ -122,7 +122,7 @@ func (i *Integration) Schedule(ctx context.Context) (PollResult, error) {
 			}
 			if opened.Opened {
 				res.Opened = append(res.Opened, opened.Run)
-			} else {
+			} else if opened.Ignored == "" {
 				res.Existing = append(res.Existing, opened.Run)
 			}
 		}

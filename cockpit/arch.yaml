@@ -1,0 +1,19 @@
+# Architecture-model declaration for the memql-cockpit module.
+# Schema: memql/component/architecture/extract/archyaml.go
+
+service: memql-cockpit
+display_name: "MemQL Cockpit"
+description: |
+  The fleet worker runtime and cluster CLI, installed as the `memql`
+  command on operator machines. Runs headless (shell / fs / http
+  tools) everywhere and computer-use (screenshot / mouse / keyboard /
+  window via RobotGo) on the opt-in CGO build; enrolls machines
+  against a cluster (discovery + OAuth, device-code fallback) and
+  runs as a LaunchAgent / user-systemd service.
+
+depends_on:
+  - memql
+
+entrypoints:
+  - func: "main.main"
+    label: "memql CLI"

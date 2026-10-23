@@ -3,7 +3,6 @@ import { useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
-  Caption,
   Chip,
   Head,
   LiveList,
@@ -167,7 +166,7 @@ export function RunLine({
  * reason: a row should be readable as the thing it opens into.
  */
 export function RunMarks({ runs }: { runs: readonly RunRow[] }) {
-  if (runs.length === 0) return <Caption>no runs yet</Caption>;
+  if (runs.length === 0) return null;
   return (
     <span className="os-nexus-marks" role="list" aria-label="Runs of this goal">
       {runs.map((run) => (

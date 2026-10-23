@@ -167,6 +167,8 @@ func (i *Integration) Trigger(ctx context.Context, inboundRequestID string) (Tri
 			failures = append(failures, fmt.Errorf("pipeline %s: %w", p.ID, oerr))
 		case skip != "":
 			res.Skipped = append(res.Skipped, SkippedPipeline{PipelineID: p.ID, Reason: skip})
+		case opened.Ignored != "":
+			res.Skipped = append(res.Skipped, SkippedPipeline{PipelineID: p.ID, Reason: opened.Ignored})
 		case opened.Opened:
 			res.Opened = append(res.Opened, opened.Run)
 		default:
@@ -250,7 +252,7 @@ func rerunOf(r Run, deliveryID string, failedOnly bool) Opening {
 	scheduleSlot, _ := pipelines.ScheduledSlotFromRunKey(r.RunKey)
 	return Opening{
 		Event: r.Event, Mode: r.Mode, SHA: r.SHA, BaseSHA: r.BaseSHA, Branch: r.HeadBranch,
-		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version,
+		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version, ReleaseTag: r.ReleaseTag,
 		ScheduleSlot: scheduleSlot, Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly, InboundRequestID: r.InboundRequestID,
 	}
 }

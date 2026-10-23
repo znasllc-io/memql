@@ -500,8 +500,7 @@ export function RunPage({
               <>No goal asked for this run -- it is an automation execution.</>
             ) : (
               <>
-                For a goal this window cannot read (
-                <span className="os-mono">{run.goalId}</span>).
+                For a goal this window cannot read.
               </>
             )
           ) : (
@@ -649,8 +648,7 @@ export function RunPage({
           </Caption>
         ) : null}
 
-        <Panel label="What this run is made of">
-          <KindBand breakdown={breakdown} />
+        <section aria-label="Run usage" className="os-app-stack">
           {/* THE SPEND IS THE BAND'S LEGEND LINE, not four stat cards beside
               it: it is the same question the band asks, answered in figures.
               Every value can be ABSENT and renders as an em dash -- epic A1
@@ -670,6 +668,7 @@ export function RunPage({
               <span className="os-nexus-spend-label">started</span>
             </li>
           </ul>
+          <details className="nexus-technical"><summary>Execution details</summary><KindBand breakdown={breakdown} />
           {breakdown.unclassified > 0 ? (
             <Caption>
               {breakdown.unclassified} of these steps{" "}
@@ -677,7 +676,8 @@ export function RunPage({
               whether they called a model, so they are counted separately rather than assumed free.
             </Caption>
           ) : null}
-        </Panel>
+          </details>
+        </section>
 
         {/* THE RUN'S OWN VERDICT, where the summary is -- and the validator's
             beside it, naming the step it checked, because this is where a

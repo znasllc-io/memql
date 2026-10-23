@@ -110,7 +110,8 @@ type WorkStep struct {
 	Key          string
 	// DefinitionFingerprint binds the complete execution definition recorded
 	// before admission. Older receipts without it cannot authorize recovery.
-	DefinitionFingerprint string
+	DefinitionFingerprint   string
+	VerificationFingerprint string
 	// Seq is the step's place in the plan the work run was opened with.
 	Seq          int
 	Status       string
@@ -212,9 +213,16 @@ type Run struct {
 	InboundRequestID string
 	PullRequest      int
 	HeadBranch       string
+	ReleaseTag       string
 	BaseSHA          string
 	Title            string
 	Version          string
+	// PolicySnapshot freezes the installed delivery policy and its complete
+	// reachable source. It grants no repository or execution authority.
+	PolicySnapshot     map[string]any
+	MaintenanceState   string
+	MaintenanceGoalID  string
+	MaintenanceMessage string
 
 	Status         string
 	Conclusion     string
@@ -362,25 +370,28 @@ type PipelinePatch struct {
 // RunPatch is a read-merge write to a run, on PipelinePatch's rule: nil is
 // not written, non-nil is written as given. Notes and Stages are sent whole.
 type RunPatch struct {
-	Status            *string
-	Conclusion        *string
-	RefusalCode       *string
-	RefusalMessage    *string
-	RefusalScope      *string
-	CheckRunID        *int64
-	CheckRunState     *string
-	Notes             *[]Note
-	WorkRunID         *string
-	WorkGoalID        *string
-	DriverNodeID      *string
-	DriverLeaseID     *string
-	DriverHeartbeatAt *time.Time
-	CancelRequested   *bool
-	CancelledBy       *string
-	Stages            *[]StageSummary
-	StartedAt         *time.Time
-	FinishedAt        *time.Time
-	DurationMs        *int64
+	MaintenanceState   *string
+	MaintenanceGoalID  *string
+	MaintenanceMessage *string
+	Status             *string
+	Conclusion         *string
+	RefusalCode        *string
+	RefusalMessage     *string
+	RefusalScope       *string
+	CheckRunID         *int64
+	CheckRunState      *string
+	Notes              *[]Note
+	WorkRunID          *string
+	WorkGoalID         *string
+	DriverNodeID       *string
+	DriverLeaseID      *string
+	DriverHeartbeatAt  *time.Time
+	CancelRequested    *bool
+	CancelledBy        *string
+	Stages             *[]StageSummary
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	DurationMs         *int64
 }
 
 // Channel is one v1:pipelines:channel row as this package reads it: where a

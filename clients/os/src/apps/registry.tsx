@@ -6,6 +6,7 @@ import {
   Files as FilesIcon,
   GraduationCap,
   Layers,
+  GitPullRequest,
   Mail,
   MonitorSmartphone,
   Rocket,
@@ -31,6 +32,7 @@ import { CLUSTER_SECTIONS } from "./cluster/settings";
 import { ConceptsApp } from "./concepts/ConceptsApp";
 import { CONCEPTS_SECTIONS } from "./concepts/settings";
 import { EMAIL_SECTIONS, EMAIL_REQUIRES, EMAIL_WANTS } from "./email/settings";
+import { PipelinesApp, PIPELINES_SECTIONS } from "./pipelines/PipelinesApp";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS, DEPLOYABLES_REQUIRES, DEPLOYABLES_WANTS } from "./deployables/settings";
 import { FilesApp } from "./files/FilesApp";
@@ -112,7 +114,7 @@ const settings: OsAppManifest = {
     // own GitHub App and its installations, which only an owner registers.
     // Beside Integrations because it is the same kind of thing: something
     // this cluster can be connected to, set up once.
-    { id: "pipelines", name: "Pipelines", requires: "app:settings/pipelines" },
+    { id: "pipelines", name: "Pipelines", parent: "integrations", requires: "app:settings/pipelines" },
     // The three that arrived when the portal's admin console was retired
     // (epic memql#4984). Each requirement is the one the ENGINE will
     // actually apply, not a rounder number: the Tokens reads and the revokes
@@ -233,6 +235,22 @@ const deployables: OsAppManifest = {
   settingsSection: "settings",
   logsSection: "logs",
   component: DeployablesApp,
+};
+
+const pipelines: OsAppManifest = {
+  id: "pipelines",
+  name: "Pipelines",
+  icon: GitPullRequest,
+  requires: "app:pipelines",
+  sections: PIPELINES_SECTIONS,
+  records: [
+    { section: "repositories", idField: "packageId", query: "platform.packagesAll", labels: ["name", "repoUrl"] },
+    { section: "runs", idField: "runId", query: "pipelines.pipelineRunsForOwner", labels: ["title", "repository", "headBranch"] },
+  ],
+  searchSection: "repositories",
+  settingsSection: "settings",
+  logsSection: "logs",
+  component: PipelinesApp,
 };
 
 // Fleet, in full (epic #4729). Machines is first and therefore the section a
@@ -748,6 +766,7 @@ export const OS_REGISTRY: OsRegistry = {
     concepts,
     files,
     deployables,
+    pipelines,
     fleet,
     logs,
     materializer,

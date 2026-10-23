@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"os"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/server"
@@ -18,6 +19,14 @@ func (a *App) wireReleaseCandidates(uploader server.FileUploader, bucket string)
 	if !ok {
 		return
 	}
+	if err := provider.ConfigureInstallationHealth(a.installationMigrationHealth); err != nil {
+		a.Logger.Error("installation serving health could not be configured", "error", err)
+	}
+	if packages := a.lookupPackagesIntegration(); packages != nil {
+		if err := provider.ConfigureInstallationOverlay(packages); err != nil {
+			a.Logger.Error("installation overlay proposals could not be configured", "error", err)
+		}
+	}
 	store, ok := a.pipelinesLibraryStoreFor(uploader, bucket).(release.CandidateLibrary)
 	if !ok {
 		a.Logger.Error("release candidates require the native retained-artifact store")
@@ -31,4 +40,16 @@ func (a *App) wireReleaseCandidates(uploader server.FileUploader, bucket string)
 	}}); err != nil {
 		a.Logger.Error("release candidate storage could not be configured", "error", err)
 	}
+	// This native host is opt-in: no receiving configuration means no update surface.
+	if strings.TrimSpace(os.Getenv("MEMQL_INSTALLATION_CONFIG_NAME")) != "" {
+		preparer, err := a.installationPreparer(uploader, bucket)
+		if err != nil {
+			a.Logger.Error("installation selection could not be configured", "error", err)
+			return
+		}
+		if err := provider.ConfigureInstallation(preparer); err != nil {
+			a.Logger.Error("installation selection host could not be bound", "error", err)
+		}
+	}
+
 }

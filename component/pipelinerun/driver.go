@@ -553,6 +553,9 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 	if dr.run.RerunFailedOnly && !dr.carryFromOriginal(ctx) {
 		return nil, false
 	}
+	if !dr.reuseVerification(ctx) {
+		return nil, false
+	}
 
 	work := workjournal.Work{
 		OwnerUserID: dr.run.OwnerUserID,
@@ -705,6 +708,14 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 	for _, t := range dr.tracks {
 		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage, "pipelineKind": string(t.step.Kind)}
 		call["definitionFingerprint"] = t.definition
+		call["displayTitle"] = strings.ReplaceAll(t.step.Stage+" / "+t.step.Name, "-", " ")
+		call["summary"] = string(t.step.Kind)
+		if t.verification != "" {
+			call["verificationFingerprint"] = t.verification
+		}
+		if t.evidenceRunID != "" {
+			call["evidenceRunId"] = t.evidenceRunID
+		}
 		if len(t.step.Packages) > 0 {
 			call["packages"] = slices.Clone(t.step.Packages)
 		}
@@ -916,9 +927,11 @@ type stageTracks struct {
 
 // stepTrack is one compiled step as this drive follows it.
 type stepTrack struct {
-	step       pipelines.Step
-	attempt    int
-	definition string
+	step          pipelines.Step
+	attempt       int
+	definition    string
+	verification  string
+	evidenceRunID string
 	// sent: the rows say running with no receipt -- a previous driver handed
 	// it to the runner, which may still be at it. Re-sent with the same
 	// attempt when the run goes on; when the run ends instead, the runner is
@@ -960,8 +973,9 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 		for _, step := range stage.Steps {
 			t := &stepTrack{
 				step: step, attempt: 1,
-				definition: dr.definitionOf(step),
-				state:      StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
+				definition:   dr.definitionOf(step),
+				verification: dr.verificationOf(step),
+				state:        StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
 			}
 			st.tracks = append(st.tracks, t)
 			dr.tracks = append(dr.tracks, t)
@@ -1101,6 +1115,12 @@ func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) bool
 			dr.journalUnavailable(t.step.Key, err)
 			return false
 		}
+	}
+	if rec.result == nil {
+		rec.result = map[string]any{}
+	}
+	if _, recorded := rec.result["summary"]; !recorded {
+		rec.result["summary"] = strings.ReplaceAll(t.step.Stage+" / "+t.step.Name, "-", " ") + ": " + rec.report
 	}
 	if err := t.handle.Finish(ctx, rec.journal()); err != nil {
 		dr.journalUnavailable(t.step.Key, err)
@@ -1604,6 +1624,9 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	}
 	applyRunPatch(&dr.run, patch)
 	dr.log.Info("pipelines: the run concluded", "conclusion", v.conclusion, "code", v.workCode)
+	if err := dr.i.reconcileMaintenance(ctx, dr.d, dr.runID); err != nil {
+		dr.log.Warn("pipelines: failed-run diagnosis awaits recovery", "error", err)
+	}
 	if v.conclusion == ConclusionSuccess && dr.run.Mode == pipelines.ModeFull && dr.havePipeline {
 		if err := dr.i.mergeTimings(ctx, dr.d, dr.p, dr.runID, dr.observedTimings()); err != nil {
 			dr.log.Warn("pipelines: the run's package timings were not merged into the pipeline's table", "error", err)
@@ -1724,6 +1747,9 @@ func applyRunPatch(r *Run, p RunPatch) {
 			*dst = *v
 		}
 	}
+	set(&r.MaintenanceState, p.MaintenanceState)
+	set(&r.MaintenanceGoalID, p.MaintenanceGoalID)
+	set(&r.MaintenanceMessage, p.MaintenanceMessage)
 	set(&r.Status, p.Status)
 	set(&r.Conclusion, p.Conclusion)
 	set(&r.RefusalCode, p.RefusalCode)

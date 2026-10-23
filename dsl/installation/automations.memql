@@ -28,6 +28,22 @@ automation installationPrepareWorkflow {
   builtin installationRecheckResources()
   builtin installationVerifyStorage()
   builtin installationVerifyProtected()
+  builtin installationContinuityBaseline()
   builtin installationReobserveConfiguration()
   builtin installationPromotePreparation()
+}
+
+/// Prepare immutable signed image pins, save their intent, then open a draft PR.
+@template
+automation installationOverlayProposalWorkflow {
+ builtin releaseOverlayRead()
+ builtin releaseOverlayBuild()
+ builtin releaseOverlayReserve()
+ builtin releaseOverlayPropose()
+}
+
+/// One read of the exact PR; only a verified merge becomes selectable.
+@template
+automation installationOverlayObservationWorkflow {
+ builtin releaseOverlayObserve()
 }

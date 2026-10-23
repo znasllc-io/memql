@@ -111,14 +111,16 @@ func (c *Client) ApplyBranchChange(ctx context.Context, bearer, owner, repo stri
 			}
 		}
 		e, found := entries[file.Path]
+		mode := "100644"
 		if file.BeforeSHA256 == "" {
 			if found {
 				return "", errors.New("new branch replacement path already exists")
 			}
 		} else {
-			if !branchChangeDigest.MatchString(file.BeforeSHA256) || !found || e.Kind != "blob" || e.Mode != "100644" || !branchChangeSHA.MatchString(e.SHA) {
+			if !branchChangeDigest.MatchString(file.BeforeSHA256) || !found || e.Kind != "blob" || (e.Mode != "100644" && e.Mode != "100755") || !branchChangeSHA.MatchString(e.SHA) {
 				return "", errors.New("branch replacement base is not a regular file")
 			}
+			mode = e.Mode
 			var blob struct {
 				Content, Encoding string
 				Size              int64
@@ -135,7 +137,7 @@ func (c *Client) ApplyBranchChange(ctx context.Context, bearer, owner, repo stri
 				return "", errors.New("branch replacement source bytes changed")
 			}
 		}
-		changes = append(changes, map[string]string{"path": file.Path, "mode": "100644", "type": "blob", "content": file.Content})
+		changes = append(changes, map[string]string{"path": file.Path, "mode": mode, "type": "blob", "content": file.Content})
 	}
 	var newTree struct {
 		SHA string `json:"sha"`
@@ -187,6 +189,15 @@ func (c *Client) ApplyBranchChange(ctx context.Context, bearer, owner, repo stri
 	} else if readErr != nil || current != edit.ExpectedHead {
 		return "", errors.New("pull-request branch moved before the repository write")
 	}
+	// The lookup above may overlap a revocation on another replica. Recheck
+	// after reconciliation so its old bearer cannot authorize a new ref write.
+	bearer, err = edit.Authorize(ctx, created.SHA)
+	if err != nil {
+		return "", err
+	}
+	if bearer == "" {
+		return "", errors.New("repository write has no current grant")
+	}
 	var ref any
 	var writeErr error
 	if edit.Create {
@@ -212,6 +223,20 @@ func (c *Client) ApplyBranchChange(ctx context.Context, bearer, owner, repo stri
 // repeated or uncertain POST is reconciled by its unique head/base identity.
 // A deliberately closed proposal stays closed; it is never silently reopened.
 func (c *Client) EnsureChangePullRequest(ctx context.Context, bearer, owner, repo, head, base, title, body string) (string, error) {
+	return c.ensureChangePullRequest(ctx, bearer, owner, repo, head, base, title, body, nil)
+}
+
+// EnsureAuthorizedChangePullRequest refreshes authorization after read-only
+// reconciliation and immediately before creating the draft. A revoked grant
+// cannot use the bearer that was valid before the lookup.
+func (c *Client) EnsureAuthorizedChangePullRequest(ctx context.Context, bearer, owner, repo, head, base, title, body string, authorize func(context.Context) (string, error)) (string, error) {
+	if authorize == nil {
+		return "", errors.New("pull-request creation requires current authorization")
+	}
+	return c.ensureChangePullRequest(ctx, bearer, owner, repo, head, base, title, body, authorize)
+}
+
+func (c *Client) ensureChangePullRequest(ctx context.Context, bearer, owner, repo, head, base, title, body string, authorize func(context.Context) (string, error)) (string, error) {
 	if !branchChangeRef(head) || !branchChangeRef(base) || head == base || len(title) == 0 || len(title) > 200 || strings.ContainsAny(title, "\x00\r\n") || len(body) > 16000 || !utf8.ValidString(body) || strings.ContainsRune(body, 0) {
 		return "", errors.New("pull-request proposal is invalid or unbounded")
 	}
@@ -236,6 +261,16 @@ func (c *Client) EnsureChangePullRequest(ctx context.Context, bearer, owner, rep
 	}
 	if prior, err := lookup(ctx); err != nil || prior != "" {
 		return prior, err
+	}
+	if authorize != nil {
+		fresh, err := authorize(ctx)
+		if err != nil {
+			return "", err
+		}
+		if fresh == "" {
+			return "", errors.New("pull-request authorization returned no credential")
+		}
+		bearer = fresh
 	}
 	var created struct {
 		URL string `json:"html_url"`

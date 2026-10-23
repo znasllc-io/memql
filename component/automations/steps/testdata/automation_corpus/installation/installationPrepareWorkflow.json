@@ -102,6 +102,10 @@
           },
           {
             "kind": "builtin",
+            "name": "installationContinuityBaseline"
+          },
+          {
+            "kind": "builtin",
             "name": "installationReobserveConfiguration"
           },
           {
@@ -213,6 +217,10 @@
           {
             "kind": "builtin",
             "name": "installationVerifyProtected"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationContinuityBaseline"
           },
           {
             "kind": "builtin",

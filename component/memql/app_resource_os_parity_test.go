@@ -145,9 +145,14 @@ func assertKnownResourcesNameEveryApp(t *testing.T, known []string) {
 			t.Errorf("knownResources does not list %s", resource)
 		}
 	}
-	for _, part := range []string{"sources", "deploy", "publish", "retire", "domains", "store", "connect", "rerun", "cancel", "channels"} {
+	for _, part := range []string{"deploy", "publish", "retire", "domains", "store"} {
 		if !vocabularyHas(known, "app:deployables/"+part) {
 			t.Errorf("knownResources does not list app:deployables/%s; the Deployables part is not seeded on any role", part)
+		}
+	}
+	for _, part := range []string{"repositories", "connect", "rerun", "cancel", "channels", "requests"} {
+		if !vocabularyHas(known, "app:pipelines/"+part) {
+			t.Errorf("knownResources does not list app:pipelines/%s", part)
 		}
 	}
 	// And the core vocabulary is still there beside them.
@@ -199,12 +204,12 @@ builtin misspelledPartProbe {
 func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 	want := map[string]string{
 		// sources
-		"createPackage":          "app:deployables/sources",
-		"updatePackageSource":    "app:deployables/sources",
-		"setPackageAutoDeploy":   "app:deployables/sources",
-		"packageSetAutoDeploy":   "app:deployables/sources",
-		"sourceCredentialCreate": "app:deployables/sources",
-		"sourceCredentialRevoke": "app:deployables/sources",
+		"createPackage":          "app:pipelines/repositories",
+		"updatePackageSource":    "app:pipelines/repositories",
+		"setPackageAutoDeploy":   "app:pipelines/repositories",
+		"packageSetAutoDeploy":   "app:pipelines/repositories",
+		"sourceCredentialCreate": "app:pipelines/repositories",
+		"sourceCredentialRevoke": "app:pipelines/repositories",
 		// deploy
 		"packageAnalyze":          "app:deployables/deploy",
 		"packageDeploy":           "app:deployables/deploy",
@@ -227,15 +232,15 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		"customDomainAdd":    "app:deployables/domains",
 		"removeCustomDomain": "app:deployables/domains",
 		// pipelines (task memql#5498): one part per consequence
-		"pipelinesPreview":        "app:deployables/connect",
-		"pipelinesConnect":        "app:deployables/connect",
-		"pipelinesChannelSave":    "app:deployables/channels",
-		"pipelinesChannelArchive": "app:deployables/channels",
-		"pipelinesChannelAllow":   "app:deployables/channels",
-		"pipelinesDisconnect":     "app:deployables/connect",
-		"pipelinesRerun":          "app:deployables/rerun",
-		"pipelinesRunLatest":      "app:deployables/rerun",
-		"pipelinesCancel":         "app:deployables/cancel",
+		"pipelinesPreview":        "app:pipelines/connect",
+		"pipelinesConnect":        "app:pipelines/connect",
+		"pipelinesChannelSave":    "app:pipelines/channels",
+		"pipelinesChannelArchive": "app:pipelines/channels",
+		"pipelinesChannelAllow":   "app:pipelines/channels",
+		"pipelinesDisconnect":     "app:pipelines/connect",
+		"pipelinesRerun":          "app:pipelines/rerun",
+		"pipelinesRunLatest":      "app:pipelines/rerun",
+		"pipelinesCancel":         "app:pipelines/cancel",
 	}
 	// The reads a section opens, declared on the construct that serves it: the
 	// installations read asks GitHub about the cluster's own app, which is the

@@ -63,6 +63,10 @@ func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	require.NoError(t, err)
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
+	body, err = os.ReadFile("../../component/database/memory-nodes/migrations/20261022010000_installation_completion.up.sql")
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, string(body))
+	require.NoError(t, err)
 	return first, second
 }
 

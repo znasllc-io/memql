@@ -43,3 +43,16 @@ func (dr *runDriver) definitionOf(step pipelines.Step) string {
 	}
 	return value
 }
+
+// Verification has a deliberately smaller environment: it cannot read an
+// event, release version, base or run identity. Its proof still binds the
+// complete executable definition, source SHA, selected packages and owner.
+func (dr *runDriver) verificationOf(step pipelines.Step) string {
+	if !step.Verification || step.Kind != pipelines.StepCommand {
+		return ""
+	}
+	copy := *dr
+	copy.run = dr.run
+	copy.run.Event, copy.run.Mode, copy.run.Version, copy.run.InboundRequestID = "", "", "", ""
+	return copy.definitionOf(step)
+}

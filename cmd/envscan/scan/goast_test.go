@@ -1078,3 +1078,27 @@ func lookup() string { return "" }
 		}
 	}
 }
+
+// Importing the host worker into the monorepo must not turn operating-system
+// and third-party runtime settings into engine configuration. Nearby owned or
+// unknown keys remain visible: this is an exact-name boundary, not a prefix.
+func TestCockpitHostReadsKeepExternalSettingsOutOfEngineRegistry(t *testing.T) {
+	externalNames := []string{"DISPLAY", "DOCKER_CONTEXT", "DOCKER_HOST", "OLLAMA_HOST", "OLLAMA_MODELS", "TERMINAL", "WAYLAND_DISPLAY", "XDG_CONFIG_HOME", "XDG_DATA_HOME"}
+	var body strings.Builder
+	body.WriteString("package worker\nimport \"os\"\nfunc read() {\n")
+	for _, key := range append(externalNames, "MEMQL_COCKPIT_CRED_STORE", "OLLAMA_UNREGISTERED_SETTING") {
+		fmt.Fprintf(&body, "_ = os.Getenv(%q)\n", key)
+	}
+	body.WriteString("}\n")
+	root := writeGoFixture(t, map[string]string{"cockpit/internal/worker/host.go": body.String()})
+	out, err := ScanReads(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := keysOf(out)
+	sort.Strings(got)
+	want := []string{"MEMQL_COCKPIT_CRED_STORE", "OLLAMA_UNREGISTERED_SETTING"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("host read classification = %v, want only owned/unknown settings %v", got, want)
+	}
+}

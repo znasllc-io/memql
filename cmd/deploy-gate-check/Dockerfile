@@ -16,6 +16,7 @@ COPY go.mod go.sum ./
 # so their manifests must land in this layer, before `COPY . .`. The `go.*`
 # glob is load-bearing: an L0 module has no go.sum and Docker fails a COPY
 # whose named source does not exist. Add a line per module as each tier lands.
+COPY cockpit/go.* ./cockpit/
 COPY component/actions/go.* ./component/actions/
 COPY component/architecture/go.* ./component/architecture/
 COPY component/auth/go.* ./component/auth/

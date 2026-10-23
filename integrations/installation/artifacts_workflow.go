@@ -23,7 +23,11 @@ type artifactWorkflow struct {
 }
 
 func loadArtifactWorkflow(engineRevision string) (*artifactWorkflow, error) {
-	definition, err := workflowhost.Load(installationArtifactWorkflow)
+	return loadArtifactWorkflowNamed(engineRevision, installationArtifactWorkflow)
+}
+
+func loadArtifactWorkflowNamed(engineRevision, name string) (*artifactWorkflow, error) {
+	definition, err := workflowhost.Load(name)
 	if err != nil {
 		return nil, err
 	}

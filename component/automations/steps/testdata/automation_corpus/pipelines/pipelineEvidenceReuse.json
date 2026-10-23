@@ -1,0 +1,49 @@
+{
+  "automation": "pipelines/automations.memql pipelineEvidenceReuse",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageSeconds": 3,
+            "event": "s-event",
+            "sourceEvent": "s-sourceEvent",
+            "sourceMode": "s-sourceMode"
+          },
+          "topic": "automation.invocation.pipelineEvidenceReuse"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": false,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageSeconds": 3,
+            "event": "s-event",
+            "sourceEvent": "s-sourceEvent",
+            "sourceMode": "s-sourceMode"
+          },
+          "topic": "automation.invocation.pipelineEvidenceReuse"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": false,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

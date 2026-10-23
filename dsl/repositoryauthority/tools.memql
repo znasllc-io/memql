@@ -1,0 +1,31 @@
+/// Read the current repository authority for a caller-visible connected source.
+/// A local installation role or source visibility does not grant upstream writes.
+@handler(type="query", query="builtin repositoryChangeAccess(sourceId: args.sourceId)")
+@requiresAgentRole("assistant", "specialist")
+tool inspectRepositoryAuthority {
+  sourceId string! @description("Connected source id resolved from authorized source records.")
+}
+
+/// Request a bounded repository change. The installed policy resolves its
+/// maintainer; another maintainer must approve before the bound goal executes.
+/// Reuse requestId only for the identical request after an uncertain response.
+@handler(type="query", query="builtin repositoryChangeRequest(sourceId: args.sourceId, requestId: args.requestId, statement: args.statement, operation: args.operation, paths: args.paths, parentRequestId: args.parentRequestId)")
+@requiresAgentRole("assistant", "specialist")
+tool requestRepositoryChange {
+  sourceId string!
+  requestId string! @description("Fresh stable unique id, reused only for identical recovery.")
+  operation enum("propose_change")! @description("Only a scoped branch and pull request proposal is permitted.")
+  statement string! @description("Human-readable requested change and acceptance criteria.")
+  paths array! @description("Explicit relative files or directory prefixes ending in /; no wildcards or traversal.")
+  parentRequestId string @description("Existing parent request for a related upstream dependency; a link, not authority.")
+}
+
+/// Read the durable state and recorded response of a repository change request.
+@handler(type="query", query="builtin repositoryChangeStatus(requestId: args.requestId)")
+@requiresAgentRole("assistant", "specialist")
+tool repositoryChangeRequestStatus { requestId string! }
+
+/// Recover visible repository requests and their goal links after reconnecting.
+@handler(type="query", query="builtin repositoryChangeRequests(sourceId: args.sourceId)")
+@requiresAgentRole("assistant", "specialist")
+tool listRepositoryChangeRequests { sourceId string! }

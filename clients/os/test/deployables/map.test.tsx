@@ -20,7 +20,7 @@ import {
   emit,
   fakeConnection,
   siteRow,
-  withSession,
+  withDeliverySession as withSession,
   type FakeConnection,
   type FakeSeed,
 } from "./harness";
@@ -652,13 +652,12 @@ describe("a source's checks on the map", () => {
     const app = (section: string) =>
       withSession(<DeployablesApp sectionId={section} navigate={navigate} askContext={vi.fn()} store={store} />, { role: "owner", userId: VIEWER });
     h.connection = fakeConnection(checkedSeed());
-    const view = render(app("map"));
+    render(app("map"));
     await click(await screen.findByLabelText(/^Checks for acme\/shop/));
-    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    expect(navigate).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith("deployables", expect.anything());
     expect(document.querySelector(".os-deploy-node[data-selected]")).toBeNull();
     // Where the navigation lands: the source's own page, on the Sources tab.
-    view.rerender(app("sources"));
     expect(await screen.findByRole("region", { name: "Source shop" })).toBeTruthy();
   });
 
@@ -666,7 +665,8 @@ describe("a source's checks on the map", () => {
     const navigate = vi.fn();
     mount(fakeConnection(checkedSeed()), { navigate });
     fireEvent.keyDown(await screen.findByLabelText(/^Checks for acme\/shop/), { key: "Enter" });
-    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    expect(navigate).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith("deployables", expect.anything());
+    expect(await screen.findByRole("region", { name: "Source shop" })).toBeTruthy();
   });
 });

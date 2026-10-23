@@ -99,6 +99,17 @@ var external = map[string]bool{
 	"LANG":                true,
 	"TZ":                  true,
 	"CI":                  true,
+	// Host and third-party runtime settings consumed by Cockpit, not owned or
+	// seeded by the engine. Keep exact names so new MemQL settings still drift.
+	"DISPLAY":         true,
+	"DOCKER_CONTEXT":  true,
+	"DOCKER_HOST":     true,
+	"OLLAMA_HOST":     true,
+	"OLLAMA_MODELS":   true,
+	"TERMINAL":        true,
+	"WAYLAND_DISPLAY": true,
+	"XDG_CONFIG_HOME": true,
+	"XDG_DATA_HOME":   true,
 	// Injected into every pod by the KUBELET, not by any MemQL manifest
 	// (memql#4257). component/deploycontrol's in-cluster substrate reads them
 	// to address the API server, which is what a ServiceAccount-authenticated

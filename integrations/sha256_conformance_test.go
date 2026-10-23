@@ -46,6 +46,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"release/installation_overlay.go":        "BeforeSHA256 is the bounded GitHub branch writer's exact standard SHA-256 checksum of existing file bytes; request IDs and configuration fingerprints use core/id separately",
 		"workbench/export.go":                    "streams the standard SHA-256 file checksum required by verified storage and v1:library:file.sha256; receipt identities use core/id separately",
 		"workbench/export_test.go":               "independently verifies the exported binary bytes against their standard SHA-256 checksum",
 		"workbench/export_db_test.go":            "verifies the Library storage protocol's standard SHA-256 checksum while testing cross-replica export recovery and downloads",

@@ -54,6 +54,7 @@ COPY go.mod go.sum ./
 # an L0 module with no external dependencies has NO go.sum, and Docker fails a
 # COPY whose named source does not exist. Add a line per module as each tier
 # lands (#3242..#3244).
+COPY cockpit/go.* ./cockpit/
 COPY component/actions/go.* ./component/actions/
 COPY component/architecture/go.* ./component/architecture/
 COPY component/auth/go.* ./component/auth/

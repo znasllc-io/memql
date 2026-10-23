@@ -802,6 +802,19 @@ vscode-test-host:
 test: identity-tailwind
 	$(GO) test $(ALL_PKGS)
 
+.PHONY: cockpit cockpit-computeruse cockpit-test
+## Build the machine-side worker and operator command
+cockpit:
+	$(MAKE) -C cockpit cockpit
+
+## Build Cockpit with the native computer-use tools
+cockpit-computeruse:
+	$(MAKE) -C cockpit cockpit-computeruse
+
+## Test the Cockpit module against this exact engine checkout
+cockpit-test:
+	$(GO) test ./cockpit/...
+
 ## Run all tests with verbose output
 test-v: identity-tailwind
 	$(GO) test -v $(ALL_PKGS)

@@ -25,7 +25,7 @@ import {
 } from "../../src/apps/deployables/packages/rows";
 import { railFor } from "../../src/apps/deployables/page/rail";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, fakeConnection, siteRow, withSession, type FakeConnection } from "./harness";
+import { click, fakeConnection, siteRow, withDeliverySession as withSession, type FakeConnection } from "./harness";
 
 // build.test.tsx is the OS half of the Build epic (memql#4900, task
 // memql#4905): what the surface SAYS once builds are real, what it calls, and
@@ -336,6 +336,7 @@ describe("the seams the surface calls", () => {
     const page = await openPackage(connection);
 
     const source = await openSourceView(page);
+    await click(within(source).getByRole("button", { name: "Settings" }));
     await click(within(source).getByRole("radio", { name: /Automatic Check and deploy/ }));
 
     const calls = connection.callsNamed("packageSetAutoDeploy");

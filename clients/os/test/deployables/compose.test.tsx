@@ -1485,3 +1485,51 @@ describe("discarding an unplaced setup", () => {
     expect(connection.callsNamed("packageDeactivateDeployable")[0]).toContain('deployableName: "storefront"');
   });
 });
+
+
+describe("installing package DSL without publishing websites", () => {
+  const websites = ["memql-website", "znas-website"];
+  const report = { ...REPORT_TWO, dslChanges: true,
+    dslDomains: [{ domain: "znasdelivery", files: 3, constructs: { automation: 12 } }],
+    deployables: REPORT_TWO.deployables.map((app, index) => ({ ...app, name: websites[index]!, deployment: { slug: websites[index], domains: [index === 0 ? "memql.io" : "znas.io"] } })),
+  };
+  async function uploadedReport(over: Record<string, unknown> = {}) {
+    const connection = fakeConnection({ artifacts: [ZIP], artifactProbe: { "artifact-zip": zipReply({ isPackage: true }) } });
+    const { region } = await compose(connection);
+    await chooseSource(region, /A zip in Files/);
+    await click(await within(region).findByText("storefront-build.zip"));
+    await fill(NAME_FIELD, "znas");
+    await click(await forward("Analyze"));
+    const packageId = mintedPackageId(connection);
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(packageId, { report: { ...report, ...over } }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+    await openAddresses();
+    for (const website of websites) await click(within(region).getByRole("radiogroup", { name: `Deploy or skip ${website}` }).querySelectorAll("[role=radio]")[1]);
+    return { connection, region, packageId };
+  }
+  it("confirms the analyzed snapshot with both websites explicitly skipped and no production placement", async () => {
+    const { connection, region, packageId } = await uploadedReport();
+    expect(within(region).getByText(/No website will be built or published/)).toBeTruthy();
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
+    await click(await forward("Install MemQL changes"));
+    const confirmed = connection.callsNamed("packageDeploy").at(-1) ?? "";
+    expect(confirmed).toContain('confirm: true');
+    expect(confirmed).toContain('deploymentId: "dep-1"');
+    for (const website of websites) expect(confirmed).toContain(`"${website}": {domains: [], skip: true}`);
+    expect(confirmed).not.toMatch(/hostname|accountId|memql\.io|znas\.io|target: "serving"/);
+    expect(connection.callsNamed("sitePublishFromArtifact")).toHaveLength(0);
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(packageId, { status: "succeeded", report, dslVersion: "packages/znasdelivery/content-hash/", deployables: websites.map(name => ({ name, refusal: { code: "deployable_skipped", message: "Skipped" } })) }), "NODE_UPDATED");
+    await waitFor(() => expect(document.querySelector(".os-actbar")?.textContent).toContain("MemQL changes were staged and service restarts were requested"));
+    expect(forwardAct("Go live")).toBeNull();
+  });
+  it.each([
+    ["no DSL", { dslDomains: [], dslChanges: true }],
+    ["unchanged DSL", { dslChanges: false }],
+    ["unknown DSL change", { dslChanges: undefined }],
+  ])("does not confirm all skipped websites with %s", async (_name, over) => {
+    const { connection } = await uploadedReport(over);
+    expect(forwardAct("Install MemQL changes")).toBeNull();
+    expect(forwardAct("Deploy")).toBeNull();
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
+  });
+});

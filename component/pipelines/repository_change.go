@@ -35,8 +35,9 @@ type RepositoryChangeRule struct {
 }
 
 // RepositoryProposal contains bounded UTF-8 replacements for regular files.
-// No deletion, mode change, executable, symlink or arbitrary Git operation is
-// representable. Base SHA-256 values bind every edit to its source contents;
+// No deletion, mode change, symlink or arbitrary Git operation is representable.
+// Existing executable permissions are preserved; new files are non-executable.
+// Base SHA-256 values bind every edit to its source contents;
 // an empty base digest requires that exact path to be absent at the base.
 type RepositoryProposal struct {
 	Schema int                     `json:"schema"`

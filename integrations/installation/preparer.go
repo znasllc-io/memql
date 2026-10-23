@@ -27,21 +27,24 @@ type PreparationDependencies struct {
 	Tokens                                       pipelinesteps.TokenMinter
 	Catalog                                      CatalogFactory
 	Namespace, ConfigurationName, EngineRevision string
+	Workflows                                    WorkflowNames
+	Health                                       HealthProbe
 }
 
-// Preparer is a native admission host. It registers no integration capabilities
-// and accepts only an already-admitted internal operator context.
+// Preparer is a native admission host. Public selection methods admit an
+// identified operator and preserve that identity into internal scoped effects.
 type Preparer struct{ host *preparationHost }
 
 // PrepareSelection selects a publication and reviewed overlay, not authority,
 // connections, credentials, rendered resources or evidence fingerprints.
 type PrepareSelection struct {
-	InstallationID  string `json:"installationId"`
-	RequestID       string `json:"requestId"`
-	CandidateID     string `json:"candidateId"`
-	CatalogDigest   string `json:"catalogDigest"`
-	OverlayRevision string `json:"overlayRevision"`
-	Prune           bool   `json:"prune"`
+	InstallationID          string `json:"installationId"`
+	RequestID               string `json:"requestId"`
+	CandidateID             string `json:"candidateId"`
+	CatalogDigest           string `json:"catalogDigest"`
+	OverlayRevision         string `json:"overlayRevision"`
+	ExpectedCurrentRevision string `json:"expectedCurrentRevision"`
+	Prune                   bool   `json:"prune"`
 }
 
 // PreparationResult is a summary of the durable journal, never a transferable
@@ -61,8 +64,8 @@ func NewPreparer(deps PreparationDependencies) (*Preparer, error) {
 	if _, err := receiverPath("v1", "configmaps", deps.Namespace, deps.ConfigurationName); err != nil {
 		return nil, err
 	}
-	host := &preparationHost{api: deps.API, journal: &preparationJournal{db: deps.Database}, executor: deps.Executor, files: deps.Files, tokens: deps.Tokens, catalog: deps.Catalog, namespace: deps.Namespace, configurationName: deps.ConfigurationName}
-	if err := host.bindWorkflow(deps.EngineRevision); err != nil {
+	host := &preparationHost{health: deps.Health, api: deps.API, journal: &preparationJournal{db: deps.Database}, executor: deps.Executor, files: deps.Files, tokens: deps.Tokens, catalog: deps.Catalog, namespace: deps.Namespace, configurationName: deps.ConfigurationName}
+	if err := host.bindWorkflowNames(deps.EngineRevision, deps.Workflows); err != nil {
 		return nil, err
 	}
 	return &Preparer{host: host}, nil
@@ -72,7 +75,7 @@ func (p *Preparer) Prepare(ctx context.Context, selection PrepareSelection) (Pre
 	if p == nil || p.host == nil {
 		return PreparationResult{}, errors.New("installation preparation is unavailable")
 	}
-	record, err := p.host.prepare(ctx, preparationRequest{InstallationID: selection.InstallationID, RequestID: selection.RequestID, CandidateID: selection.CandidateID, CatalogDigest: selection.CatalogDigest, OverlayRevision: selection.OverlayRevision, Prune: selection.Prune})
+	record, err := p.host.prepare(ctx, preparationRequest{InstallationID: selection.InstallationID, RequestID: selection.RequestID, CandidateID: selection.CandidateID, CatalogDigest: selection.CatalogDigest, OverlayRevision: selection.OverlayRevision, Prune: selection.Prune, ExpectedCurrentRevision: selection.ExpectedCurrentRevision})
 	if err != nil {
 		return PreparationResult{}, err
 	}

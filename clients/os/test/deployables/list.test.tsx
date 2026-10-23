@@ -372,7 +372,7 @@ describe("the list", () => {
     mount(connection, { section: "sources" });
     const acme = await screen.findByRole("button", { name: /^Open acme,/ });
     expect(screen.getByRole("heading", { name: "Sources" })).toBeTruthy();
-    expect(screen.getByText("Manage sources here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.getByText("Repositories available to this account.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add a deployable" })).toBeNull();
     expect(rowNames()).toEqual(["acme", "widgets-co"]);
     // Where it lives, how much it produced, and the one state word.

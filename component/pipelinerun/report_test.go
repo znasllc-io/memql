@@ -209,7 +209,7 @@ func TestReportRecipeCannotManufactureSuccessWithoutAnUpload(t *testing.T) {
 	h, dh := newReportDriveHarness(t, "complete")
 	a := workflowSource(t, `@template
  automation pipelineSARIFDelivery { return {state: "complete"} }`)
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	run := dh.openRun(t, pushOpening())
 	deliver(t, dh.integ, run)
 	got, _ := dh.store.run(run.ID)

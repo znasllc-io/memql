@@ -263,8 +263,8 @@ describe("Settings > Pipelines", () => {
     expect(within(bar()).getByText("Partly set up")).toBeTruthy();
     expect(within(bar()).getByText("2 of 3 done")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Sources" }));
-    expect(JSON.parse(screen.getByTestId("windows").textContent ?? "[]")).toEqual([["deployables", "sources"]]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Repositories" }));
+    expect(JSON.parse(screen.getByTestId("windows").textContent ?? "[]")).toEqual([["pipelines", "repositories"]]);
   });
 
   it("says not known rather than not done when the cluster has not said which", async () => {
@@ -298,7 +298,7 @@ describe("Settings > Pipelines", () => {
     // The repository cannot be connected before the app exists: dimmed, and
     // with no act that would lead somewhere it fails.
     expect(stopStates()).toEqual(["open", "ahead", "done"]);
-    expect(screen.queryByRole("button", { name: "Open Sources" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Repositories" })).toBeNull();
 
     fireEvent.click(setUp);
     await waitFor(() => expect(wire.fake.callsNamed("githubAppSetupBegin")).toHaveLength(1));

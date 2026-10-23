@@ -190,6 +190,13 @@
       "file": "knowledge/training/model-catalog-v1.txt",
       "sha256": "018d26426a57ae2cda089fea8ed9088d8697f50e513f3e61f971fd47a1bb4770",
       "lesson": true
+    },
+    {
+      "domainId": "software-development",
+      "sourceRef": "training:repository-authority",
+      "file": "knowledge/training/repository-authority-v1.txt",
+      "sha256": "8b197553d8420d6619bc1c8a2175c370196089c2d38cf3b1786cb837d87b0d21",
+      "lesson": true
     }
   ],
   "provenance": [

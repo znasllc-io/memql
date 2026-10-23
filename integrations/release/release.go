@@ -36,6 +36,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/installation"
 )
 
 // resultConcept is the synthetic, never-persisted MemoryNode concept the
@@ -51,13 +52,16 @@ const resultConcept = "integration:release:result"
 
 // Integration is the DSL-facing capability set.
 type Integration struct {
-	logger        *slog.Logger
-	github        *Client
-	registry      *RegistryChecker
-	store         *Store
-	resolver      resolver
-	candidateDeps atomic.Pointer[CandidateDependencies]
-	candidateDB   func() *sql.DB
+	logger              *slog.Logger
+	github              *Client
+	registry            *RegistryChecker
+	store               *Store
+	resolver            resolver
+	candidateDeps       atomic.Pointer[CandidateDependencies]
+	candidateDB         func() *sql.DB
+	installation        atomic.Pointer[installation.Preparer]
+	installationHealth  atomic.Pointer[installationHealthBinding]
+	installationOverlay atomic.Pointer[overlayBinding]
 }
 
 // NewIntegration wires the pieces. Every collaborator is a field rather than a
@@ -83,6 +87,15 @@ func (i *Integration) IntegrationName() string { return "release" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out := append([]memql.IntegrationCapability{
+		{Name: "proposeInstallation", Description: "Propose exact signed image pins in the installation repository for review; never merge or install.", Handler: i.handleInstallationPropose},
+		{Name: "observeInstallationProposal", Description: "Verify the exact proposed pull request and make its merged commit selectable.", Handler: i.handleInstallationProposalObserve},
+		{Name: "installationHealth", Description: "Read authenticated receiving identity and verified migration readiness for a bounded continuity probe.", Handler: i.handleInstallationHealth},
+		{Name: "installationStatus", Description: "Read this installation and its available immutable release selections.", Handler: i.handleInstallationStatus},
+		{Name: "prepareInstallation", Description: "Prepare the explicitly selected candidate and current revision for separate installation approval.", Handler: i.handleInstallationPrepare},
+		{Name: "resumeInstallation", Description: "Resume the original operator’s saved preparation without changing its selection or request identity.", Handler: i.handleInstallationResume},
+		{Name: "cancelInstallation", Description: "Cancel only the original operator’s current prepared plan before any application begins.", Handler: i.handleInstallationCancel},
+		{Name: "applyInstallation", Description: "Apply one exact separately selected native installation plan.", Handler: i.handleInstallationApply},
+		{Name: "observeInstallation", Description: "Observe the exact selected installation intent without applying it.", Handler: i.handleInstallationObserve},
 		{Name: "sealPublishedCandidate", Description: "Seal verified native publication evidence into a portable signed catalog record. Owner only.", Handler: i.handleCatalogSeal},
 		{Name: "getPublishedCandidate", Description: "Read a verified public release projection without private candidate evidence. Developer, admin or owner.", Handler: i.handleCatalogGet},
 		{Name: "listPublishedCandidates", Description: "List verified published releases available for installation. Developer, admin or owner.", Handler: i.handleCatalogList},
@@ -132,6 +145,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateAssemblyScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateDraftScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities((&overlayScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"releaseRetentionArchiveInputs": nil})...)
 	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }

@@ -14,7 +14,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { bare, deployedByLabel, deployerOf, namesFrom } from "../../src/apps/deployables/people";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { click, fakeConnection, siteRow, withDeliverySession as withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // WHO DEPLOYED WHAT (epic memql#5289, task memql#5306; design section 4
 // "Attribution"). The fact is on the rows the list and the page already

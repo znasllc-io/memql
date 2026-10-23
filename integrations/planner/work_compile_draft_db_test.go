@@ -422,6 +422,13 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 			t.Fatalf("missing deterministic receipt or unnecessary model calls: %s / %d", receipt, bridge.calls)
 		}
 	})
+	// A fork belongs to a real open goal. Compilation alone only persists the
+	// draft; the fork guard must still verify its owner's goal on the receiver.
+	if _, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkGoal("+encodeArgs(map[string]any{
+		"goalId": "v1:work:goal:draft-goal", "statement": "Create and save the requested deliverable", "origin": "user",
+	})+")"); err != nil {
+		t.Fatal(err)
+	}
 	for _, sectionable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("sectionable=%t", sectionable), func(t *testing.T) {
 			triage := map[string]any{"complexity": "trivial", "requiresFile": false}

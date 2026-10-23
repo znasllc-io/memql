@@ -209,8 +209,8 @@ normal app destinations without acknowledgment tracking.
 - [Environment variables](docs/public/operate/env-vars.md) · [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md)
 
 **Tooling:** **MemQL Cockpit** -- the fleet worker runtime + cluster CLI,
-installed as the `memql` command on operator machines; its own repo is
-`github.com/znasllc-io/memql-cockpit`. This repo's `bin/memql` is the engine
+installed as the `memql` command on operator machines; its source is in
+`cockpit/`, a separate module in this repository. This repo's `bin/memql` is the engine
 binary, which ships only inside container images; the two never share a PATH,
 so do not "fix" the name collision by renaming either.
 
@@ -833,7 +833,7 @@ the `mcp.<domain>` endpoint.
   subscription tokens, the LOOP caps INCLUDE the call. Billing falls to
   `unknown` when the usage report or the subscription signal is silent.
 
-The cockpit half lives in `memql-cockpit`; this repo fixes the protocol and
+The cockpit half lives in `cockpit/`; this repository fixes the protocol and
 the engine side.
 
 ### Workers (computer_use_headless / computer_use_embodied)

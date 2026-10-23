@@ -2,9 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { FileText } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { useAuthSource } from "../../../auth/context";
 import { useOsIfPresent } from "../../../chrome/state";
-import { AutoRefresh, Caption, ContentSkeleton, Head, Notice, Panel, RecordListSkeleton, Subhead } from "../../../kit";
+import { useAuthSource } from "../../../auth/context";
+import { AutoRefresh, Button, Caption, ContentSkeleton, Head, Notice, Panel, RecordListSkeleton, Subhead, useAppReach } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
@@ -104,6 +104,7 @@ function useMachineNames(): (workerId: string) => string {
 
 function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, onOpenRun }: RunPageProps & { run: RunRow }) {
   const connection = useOsConnection();
+  const nexus = useAppReach("nexus");
   const os = useOsIfPresent();
   const machineName = useMachineNames();
   const { steps, state: stepsState } = useRunSteps(run.workRunId);
@@ -177,7 +178,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
     <div className="os-deploy-pane pipeline-run-page" data-os-page-context={JSON.stringify({ page: "Pipeline run", runId: run.id, source: sourceName, sha: run.sha, attempt: run.attempt })}>
       <AutoRefresh enabled={expiry.needsRefresh} busy={expiry.loading} onRefresh={expiry.refresh} />
       <div className="os-deploy-scroll">
-        <Panel label={`Run ${title}`}>
+        <section className="os-app-stack" aria-label={`Run ${title}`}>
           <Head navigationKey={`run:${run.id}`} title={title} breadcrumbs={breadcrumbs} back={back} />
           <p className="pipeline-run-meta">
             {run.event === "pull_request" && run.pullRequest > 0 ? (
@@ -192,6 +193,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
             {whenWords(run.queuedAt, new Date()) !== "" ? <time dateTime={run.queuedAt}>{whenWords(run.queuedAt, new Date())}</time> : null}
           </p>
 
+          {run.maintenanceState && run.maintenanceState !== "none" ? <Notice tone={run.maintenanceState === "human" ? "warn" : "info"} sentence={run.maintenanceState === "analysis" ? "A follow-up is investigating this failure." : run.maintenanceState === "human" ? "This failure needs a person’s attention." : "A follow-up is being prepared."} detail={run.maintenanceMessage || undefined}>{run.maintenanceGoalId && nexus.sections.includes("goals") ? <Button tone="quiet" onClick={() => nexus.open("goals", { goalId: run.maintenanceGoalId })}>Open follow-up goal</Button> : null}</Notice> : null}
           {run.notes.map((note) => (
             <ProblemNotice key={note.code} problem={{ code: note.code, message: note.message }} tone="warn" />
           ))}
@@ -205,14 +207,14 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
               {run.refusalCode !== "" ? (
                 <ProblemNotice problem={{ code: run.refusalCode, message: run.refusalMessage, scope: run.refusalScope }} tone={toneFor(run.refusalCode)} />
               ) : null}
-              <StopsAcross stops={stops} open={open} onOpen={(id) => setChosen({ at: movement, stop: id })} label="Stages" panelId={panelId} />
+              <div className="pipeline-run-workspace"><StopsAcross stops={stops} open={open} onOpen={(id) => setChosen({ at: movement, stop: id })} label="Stages" panelId={panelId} />
               <section className="pipeline-stage-panel" role="tabpanel" id={panelId} aria-labelledby={openStop ? `${panelId}-tab-${openStop.id}` : undefined}>
                 {openStop === null ? null : openStop.steps.length === 0 ? (
                   stepsState === "seeding" || run.workRunId === "" && !isFinished(run) ? <RecordListSkeleton label="Loading the steps" rows={2} /> : <Caption>{stageSummary(openStop)}</Caption>
                 ) : (
                   <StageSteps stop={openStop} files={files.byFileId} expired={expiry.files} machineName={machineName} onOpenFile={os ? (ref) => os.actions.openApp("files", "browse", { fileId: ref }) : null} />
                 )}
-              </section>
+              </section></div>
             </>
           )}
 
@@ -238,7 +240,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
           {problem !== null ? (
             problem.code !== "" ? <ProblemNotice problem={problem} tone={toneFor(problem.code)} /> : <Notice tone="error" sentence="The cluster refused." detail={problem.message} />
           ) : null}
-        </Panel>
+        </section>
       </div>
       <ActionBar state={confirmCancel ? "Cancel this run?" : bar.state} detail={confirmCancel ? "Steps that are running stop now. Finished steps keep their results." : bar.detail} tone={bar.tone} live acts={acts} />
     </div>

@@ -39,7 +39,7 @@ import { useReading } from "../../../cluster/reading";
 // a red "not ready" -- which would send somebody to fix a cluster whose only
 // problem is that we could not ask.
 
-export function ReadinessSection() {
+export function ReadinessSection({ title = "Readiness" }: { title?: string }) {
   const connection = useOsConnection();
   const session = useSession();
 
@@ -72,7 +72,7 @@ export function ReadinessSection() {
 
   return (
     <div className="os-cluster">
-      <Head title="Readiness">
+      <Head title={title}>
         <AutoRefresh
           busy={inference.state === "reading" || passkeys.state === "reading"}
 

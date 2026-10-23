@@ -1984,7 +1984,7 @@ mutation syncState setSyncPaused {
 /// `accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the
 /// cluster's own account unless a client was picked; absent, the package is untied and its owner's.
 @actor
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:pipelines/repositories")
 mutation package createPackage {
   args {
     sourceConnectionId string
@@ -2013,7 +2013,7 @@ mutation package createPackage {
 
 /// Remove or restore only the configured source entry. Package lifecycle, deployables,
 /// grants and installation bindings are unchanged. The engine restricts this to its owner.
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:pipelines/repositories")
 mutation package setPackageSourceRemoved {
   args {
     packageId string!
@@ -2029,7 +2029,7 @@ mutation package setPackageSourceRemoved {
 /// credentials to fetch under -- switching a source to a fresh credential after revoking the old one
 /// is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628,
 /// so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:pipelines/repositories")
 mutation package updatePackageSource {
   args {
     packageId     string!
@@ -2100,7 +2100,7 @@ mutation package enablePackageDeployables {
 /// owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There
 /// is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's
 /// decision, which is what makes an auto-run's provenance honest.
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:pipelines/repositories")
 mutation package setPackageAutoDeploy {
   args {
     packageId   string!
@@ -3022,7 +3022,7 @@ mutation sourceConnection recordSourceConnection {
 
 /// Local binding removal after the capability has resolved the owner. This
 /// changes no credential, package, deployment or hosted site.
-/// actor.userId scoping alone cannot enforce execute on app:deployables/sources;
+/// actor.userId scoping alone cannot enforce execute on app:pipelines/repositories;
 /// the capability checks that independent management permission before this write.
 @serverOnly
 mutation sourceConnection removeSourceConnection {

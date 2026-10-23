@@ -430,6 +430,9 @@ export function runFingerprint(run: RunRow): string {
 // ---------------------------------------------------------------------------
 
 export interface StepRow {
+  displayTitle?: string;
+  summary?: string;
+  reason?: string;
   id: string;
   runId: string;
   key: string;
@@ -492,6 +495,9 @@ export function stepFromRow(row: Row): StepRow {
   const attempt = Math.max(1, rowNumber(flat, "attempt"));
   const version = figure(flat, "version");
   return {
+    displayTitle: rowString(flat, "displayTitle") || rowString(flat, "title") || rowString(flat, "action") || (typeof call?.displayTitle === "string" ? call.displayTitle : ""),
+    summary: rowString(flat, "summary"),
+    reason: rowString(flat, "reason"),
     id: rowString(flat, "id"),
     runId: rowString(flat, "runId"),
     key: rowString(flat, "key"),

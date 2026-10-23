@@ -19,7 +19,7 @@ import { KeysSection } from "./KeysSection";
 import { LanguageSection } from "./LanguageSection";
 import { VendorsSection } from "./VendorsSection";
 import { LevelsSection } from "./LevelsSection";
-import { PipelinesSection } from "./PipelinesSection";
+import { Button, Head, Caption } from "../../kit";
 import { ProceduresSection } from "./ProceduresSection";
 import { RoutingMovedSection } from "./RoutingLink";
 import { TokensSection } from "./TokensSection";
@@ -75,7 +75,7 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   // It takes the intent because a GitHub App registered from here comes back
   // here, carrying how the trip went.
   if (sectionId === "pipelines")
-    return <PipelinesSection intent={intent} consumeIntent={consumeIntent} />;
+    return <PipelinesMoved />;
   if (sectionId === "providers")
     return <VendorsSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "levels") return <LevelsSection />;
@@ -248,4 +248,9 @@ function AppearanceSection() {
       </fieldset>
     </div>
   );
+}
+
+function PipelinesMoved() {
+  const { actions } = useOs();
+  return <div className="os-app-stack"><Head title="Pipelines" /><Caption>Repository workflows, runs and delivery settings live in Pipelines.</Caption><Button onClick={() => actions.openApp("pipelines", "settings")}>Open Pipelines</Button></div>;
 }

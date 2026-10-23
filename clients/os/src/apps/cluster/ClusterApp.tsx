@@ -3,14 +3,14 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
-import { Details, DetailsSection, Head, Select, SettingRow, Switch } from "../../kit";
+import { Details, DetailsSection, Head, Select, SettingRow, Switch, RecordList, RecordRow, Subhead, useAppReach } from "../../kit";
 import { AgentsSection } from "./agents/AgentsSection";
 import { AuditSection } from "./audit/AuditSection";
 import { MeshSection } from "./mesh/MeshSection";
 import { ModulesSection } from "./modules/ModulesSection";
 import { AutomationsSection } from "./automations/AutomationsSection";
 import { OriginsSection } from "./origins/OriginsSection";
-import { ReleasesSection } from "./releases/ReleasesSection";
+import { holds } from "../../system/roles";
 import { UpdatesSection } from "./updates/UpdatesSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
 import { CapacitySection } from "./capacity/CapacitySection";
@@ -77,6 +77,7 @@ export function ClusterApp({
   // the guard fires on open and never again -- an operator who then clicks
   // Readiness is not dragged back to their default.
   const applied = useRef(false);
+  const pipelines = useAppReach("pipelines");
   useEffect(() => {
     if (intent?.payload.storageWarning !== true) return;
     applied.current = true;
@@ -101,20 +102,22 @@ export function ClusterApp({
     // operator back to their default the moment they navigated away.
   }, []);
 
+  if (sectionId === "overview") return <><ReadinessSection title="Overview" /><div className="os-cluster"><Subhead>Explore</Subhead><RecordList as="ul" label="Cluster details"><RecordRow name="Runtime" secondary="Nodes, capacity and installed capabilities" onOpen={() => navigate("runtime", { fromContent: true })} />{holds("read", "app:cluster/updates") ? <RecordRow name="Updates" secondary="Published versions available to this installation" onOpen={() => navigate("updates", { fromContent: true })} /> : null}</RecordList></div></>;
+  if (sectionId === "runtime") return <div className="os-cluster os-app-stack"><Head title="Runtime" /><RecordList as="ul" label="Runtime components">{CLUSTER_SECTIONS.filter(section => section.parent === "runtime" && (!section.requires || holds("read", section.requires))).map(section => <RecordRow key={section.id} name={section.name} onOpen={() => navigate(section.id, { fromContent: true })} />)}</RecordList></div>;
   if (sectionId === "settings") {
     return <ClusterSettingsSection settings={settings} update={update} />;
   }
   if (sectionId === "logs") {
     return (
-      <AppLogsSection
+      <><div className="os-panel-actions">{holds("read", "app:cluster/audit") ? <button className="os-link" onClick={() => navigate("audit", { fromContent: true })}>Audit trail</button> : null}</div><AppLogsSection
         app="cluster"
         subjectConcepts={CLUSTER_LOG_CONCEPTS}
         intent={intent}
         consumeIntent={consumeIntent}
-      />
+      /></>
     );
   }
-  if (sectionId === "releases") return <ReleasesSection visible={windowVisible} />;
+  if (sectionId === "releases") return <div className="os-cluster"><Head title="Releases" /><RecordList as="ul" label="Release management"><RecordRow name="Open releases in Pipelines" onOpen={() => pipelines.open("releases")} /></RecordList></div>;
   if (sectionId === "capacity") return <CapacitySection visible={windowVisible} />;
   if (sectionId === "updates") return <UpdatesSection visible={windowVisible} />;
   if (sectionId === "modules") return <ModulesSection />;

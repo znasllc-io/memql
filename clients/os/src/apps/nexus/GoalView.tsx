@@ -1,3 +1,5 @@
+import { stepTitle, stepOutcome } from "../../nexus/presentation";
+import { StepSummary } from "./StepSummary";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState } from "react";
 import { GitBranch, History, RotateCcw } from "lucide-react";
@@ -23,7 +25,7 @@ import { NOW, existedAt, goalProgress, scene, stepStatusAt } from "../../nexus/s
 import { formatElapsed, receipt } from "../../nexus/scene/receipt";
 import { BeaconMap } from "./BeaconMap";
 import { KindBand } from "./KindBand";
-import { StepSpineRow } from "./StepSpine";
+import { GoalJourney } from "./GoalJourney";
 import { ComposerHost, type ComposerRequest } from "./ComposerHost";
 import type { CancelGoalState, DeriveRunState } from "./actions";
 import {
@@ -33,6 +35,7 @@ import {
   idTail,
   kindBreakdown,
   runFromRow,
+  runSpend,
   stepFromRow,
   stepsInOrder,
   type GoalRow,
@@ -256,6 +259,8 @@ export function GoalView({
   // carry: its head, and whether a step's child run is an app session.
   const appRuns = useMemo(() => runRows.map(runFromRow), [runRows]);
   const appRun = run === null ? null : (appRuns.find((candidate) => idTail(candidate.id) === idTail(run.id)) ?? null);
+  const tokenUsage = appRun ? runSpend(appRun).find(figure => figure.as === "tokens")?.value ?? null : null;
+  const currentStep = railSteps.find(step => ["waiting", "running", "failed"].includes(step.status)) ?? railSteps.at(-1);
   const composerStep = composer === null ? null : (railSteps.find((step) => step.key === composer.stepKey) ?? null);
   const composerSession =
     composerStep !== null &&
@@ -280,7 +285,7 @@ export function GoalView({
           trail row"). */}
       <Head
         title={goal.statement}
-        meta={<Chip tone={goal.status === "closed" ? "muted" : "accent"}>{goalStatusWord(goal.status)}</Chip>}
+        meta={<Chip tone={goal.status === "closed" ? "muted" : "accent"}>{goal.status === "active" ? "Active goal" : goalStatusWord(goal.status)}</Chip>}
         back={{ label: "Goals", onSelect: onBack }}
       />
 
@@ -292,7 +297,7 @@ export function GoalView({
             value={goal.createdAt === "" ? "" : formatFreshness(goal.createdAt, now)}
             title={goal.createdAt === "" ? undefined : formatMoment(goal.createdAt)}
           />
-          <Fact label="Runs" value={world.runs.length === 0 ? "none yet" : String(world.runs.length)} />
+          <Fact label="Attempts in recent activity" value={world.runs.length === 0 ? "Not loaded" : String(world.runs.length)} />
           {goal.closeReason === "" ? null : <Fact label="Closed because" value={goal.closeReason} />}
         </Facts>
 
@@ -321,66 +326,35 @@ export function GoalView({
         {run === null ? (
           <Caption>
             {world.runs.length === 0
-              ? "No run has been opened for this goal yet."
+              ? "No attempt is available in the loaded activity."
               : "Pick a run to draw."}
           </Caption>
         ) : (
           <>
-            <BeaconMap
-              world={world}
-              state={stepsState}
-              selectedStepKey={selectedStepKey}
-              onSelectStep={setSelectedStepKey}
-              onOpenApproval={onOpenApproval}
-              expandedColumns={expandedColumns}
-              expandedFolds={expandedFolds}
-              onToggleColumn={(depth) => setExpandedColumns((held) => toggled(held, depth))}
-              onToggleFold={(depth) => setExpandedFolds((held) => toggled(held, depth))}
-              at={at}
-            />
+            <section className="nexus-now" aria-label="Current progress"><div><p className="nexus-now-title">{waitingOnYou ? "Waiting for your decision" : currentStep ? stepTitle(currentStep) : runStatusWord(run.status)}</p><Caption>{waitingOnYou ? parked?.question || "Review the request to continue." : currentStep ? stepOutcome(currentStep) : "The next action has not been recorded yet."}</Caption></div><span className="nexus-usage" title={tokenUsage === null ? "Token usage has not been reported" : `${tokenUsage.toLocaleString()} reported tokens`}>{tokenUsage === null ? "Usage not reported" : `${formatTokens(tokenUsage)} tokens reported`}</span></section>
+            <div className="nexus-workspace"><div className="nexus-workspace-spine">
+              <GoalJourney key={run.id} steps={railSteps} selected={selectedStepKey} onSelect={setSelectedStepKey} completed={progress.completed} total={progress.total} stale={stepsState === "degraded" || stepsState === "disconnected"} />
+              {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{progress.compiling ? "The steps appear as the work is planned." : "This run recorded no steps."}</Caption>) : null}
+            </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite"><StepSummary step={openStep} /></aside> : null}</div>
 
             {rewound ? (
               <Scrubber moments={moments} at={at} onScrub={setAt} onLive={() => setAt("")} />
             ) : null}
 
-            {card === null ? null : <ReceiptCard card={card} />}
-
-            <Panel label="What this run is made of">
+            <details className="nexus-technical"><summary>Usage and execution details</summary>
+              {card === null ? null : <ReceiptCard card={card} />}
               <KindBand breakdown={breakdown} />
-            </Panel>
+            </details>
 
-            <section className="os-nexus-timeline" aria-label="What this run did, in order">
-              <ol className="os-nexus-steps">
-                {railSteps.map((step, index) => (
-                  <li key={step.id || step.key} className="os-nexus-step-item">
-                    <StepSpineRow
-                      step={step}
-                      position={index + 1}
-                      last={index === railSteps.length - 1}
-                      open={step.key === selectedStepKey}
-                      onOpen={() =>
-                        setSelectedStepKey(step.key === selectedStepKey ? "" : step.key)
-                      }
-                      // WHAT THE LIVE ROW AND THE HEAD KNOW, without the run
-                      // page's versions read: a retried or re-run step still
-                      // shows it was, as the "attempt N" chip used to say.
-                      versions={{
-                        count: Math.max(step.version, step.attempt, appRun?.head[step.key]?.version ?? 0),
-                        current: appRun?.head[step.key]?.runId === "" ? (appRun.head[step.key]?.version ?? step.version) : step.version,
-                      }}
-                    />
-                  </li>
-                ))}
-              </ol>
-              {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{stepsState === "disconnected"
-                      ? "Not connected to the cluster"
-                      : progress.compiling
-                        ? "It is still working out what to do. The steps appear as it decides them."
-                        : "This run recorded no steps."}</Caption>) : null}
-            </section>
+            <details className="nexus-technical"><summary>Dependencies and execution map</summary><BeaconMap
+              world={world} state={stepsState} selectedStepKey={selectedStepKey} onSelectStep={setSelectedStepKey}
+              onOpenApproval={onOpenApproval} expandedColumns={expandedColumns} expandedFolds={expandedFolds}
+              onToggleColumn={depth => setExpandedColumns(held => toggled(held, depth))}
+              onToggleFold={depth => setExpandedFolds(held => toggled(held, depth))} at={at} />
+            </details>
 
             <button type="button" className="os-nexus-link" onClick={() => onOpenRun(run.id)}>
-              Open this run in full
+              Activity and advanced controls
             </button>
           </>
         )}
@@ -394,21 +368,21 @@ export function GoalView({
         state={run === null ? goalStatusWord(goal.status) : runStatusWord(run.status)}
         detail={
           rewound
-            ? "rewound -- nothing here runs, and nothing is spent"
+            ? "Reviewing saved history; no work is being started"
             : run === null
-              ? "no run to act on yet"
+              ? "No attempt is available yet"
               : waitingOnYou
                 ? // The reason, in the classifier's own words where it gave
                   // one: "waiting" alone does not say whether somebody is
                   // needed or a timer is.
                   parked?.reason !== undefined && parked.reason !== ""
-                    ? `parked on you: ${parked.reason}`
-                    : "parked on you -- it does not move until you answer"
+                    ? parked.reason
+                    : "Waiting for your decision before continuing"
                 : terminal
                   ? openStep === null
-                    ? "select a step to branch from there"
+                    ? "Select an action to review its result"
                     : ""
-                  : "replay and branching wait until the run finishes"
+                  : "Follow the actions above to see what happens next"
         }
         tone={tone}
         acts={acts}
@@ -418,7 +392,7 @@ export function GoalView({
             to type something -- and what it asks for is the statement, because
             that is what they would call it. */}
         {closable ? (
-          <span className="os-nexus-confirm">
+          <details className="os-nexus-confirm"><summary>Close goal</summary>
             <Input
               id="nexus-close-confirm"
               label={`Type the goal's own words to close it: ${goal.statement}`}
@@ -426,7 +400,7 @@ export function GoalView({
               value={confirm}
               onChange={setConfirm}
             />
-          </span>
+          </details>
         ) : null}
         {derive.error === "" ? null : (
           <span className="os-nexus-act-error os-mono" role="alert">

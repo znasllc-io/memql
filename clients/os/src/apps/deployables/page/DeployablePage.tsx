@@ -87,7 +87,7 @@ export interface DeployablePageProps {
   openRevision?: number;
   backLabel?: string;
   /** Opens the source's own view. */
-  onOpenSource: (packageId: string) => void;
+  onOpenSource?: (packageId: string) => void;
   /** True while this deployable's delete is still tearing its domains down. */
   deleting?: boolean;
   /**
@@ -353,7 +353,7 @@ export function DeployablePage({
             zipOpen={zipOpen}
             onZipOpenChange={setZipOpen}
             refusal={refusal}
-            onOpenSource={pkg === null ? undefined : () => onOpenSource(pkg.id)}
+            onOpenSource={pkg === null || !onOpenSource ? undefined : () => onOpenSource(pkg.id)}
           />
         );
       case "whatItIs":
@@ -476,7 +476,7 @@ export function DeployablePage({
             site={site} pkg={pkg} run={run} runs={timelineRows} can={can} accounts={accounts} canDomains={can.domains} canStore={can.store}
             timelineState={deployments?.snapshot.state ?? "disconnected"}
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
-            onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}
+            onInspect={setDetail} onOpenSource={() => pkg && onOpenSource ? onOpenSource(pkg.id) : setDetail("source")}
             lifecycle={lifecycle}
             readiness={previewReadiness}
             deployChoice={offerCandidate ? {

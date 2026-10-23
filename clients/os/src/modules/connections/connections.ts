@@ -38,7 +38,7 @@ const ConnectionsContext = createContext<SourceConnectionsFeed | null>(null);
 /** One retained feed at the app root, shared by Sources, Settings and the wizard. */
 export function SharedSourceConnectionsProvider({ children }: { children: ReactNode }) {
   useSession();
-  return createElement(SourceConnectionsProvider, { enabled: accessAdmits("app:settings/connections") || accessAdmits("app:deployables"), children });
+  return createElement(SourceConnectionsProvider, { enabled: accessAdmits("app:settings/connections") || accessAdmits("app:deployables") || accessAdmits("app:pipelines"), children });
 }
 export function SourceConnectionsProvider({ children, enabled = true }: { children: ReactNode; enabled?: boolean }) {
   const shared = useContext(ConnectionsContext);
