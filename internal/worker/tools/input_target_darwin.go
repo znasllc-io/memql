@@ -209,6 +209,7 @@ func (darwinInputBackend) diagnosticProbes() []InputTargetProbe {
 	started := time.Now()
 	p := C.targetReadDiagnostic(&problem, &pid)
 	probe := InputTargetProbe{Method: "NSWorkspace snapshot plus direct AX application (diagnostic only; snapshot may be cached)", PID: int(pid), ElapsedMilliseconds: time.Since(started).Milliseconds()}
+	probe.MainLoopRunning, probe.MainLoopTurns = DesktopMainLoopProgress()
 	if p == nil {
 		probe.Error = targetReadFailure(problem).Error()
 	} else {

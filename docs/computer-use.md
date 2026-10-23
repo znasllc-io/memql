@@ -267,6 +267,12 @@ direct application AX reads and report elapsed time. That snapshot can be cached
 between main-run-loop turns; it is diagnostic only and never substitutes for
 the guard's focused-application read.
 
+The macOS computer-use `worker run` initializes AppKit on the original process
+thread with activation prohibited, then pumps its main run loop while the worker
+runs on a Go goroutine. It creates no windows and does not activate applications.
+Ordinary CLI commands and scoped-command children do not start this loop. The
+diagnostic reports loop progress; the AX target guard remains authoritative.
+
 macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
 packets also carry the observed window in Quartz's two public mouse-window
 fields. Quartz ignores those fields for scroll packets, which retain PID and

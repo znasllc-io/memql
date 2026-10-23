@@ -90,6 +90,8 @@ type InputTargetProbe struct {
 	WindowID            uint64 `json:"observed_window_id,omitempty"`
 	ElapsedMilliseconds int64  `json:"elapsed_milliseconds"`
 	Error               string `json:"error,omitempty"`
+	MainLoopRunning     bool   `json:"main_loop_running"`
+	MainLoopTurns       uint64 `json:"main_loop_turns"`
 }
 
 // DesktopInputTargetStatus reads from the actual worker process so its TCC
