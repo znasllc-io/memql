@@ -90,10 +90,10 @@ export function OverviewSection({
     feedMetric("Runs in flight", runs, inFlight),
     feedMetric("Approvals waiting", approvals, waiting),
     {
-      label: "Reusable to goal-specific",
+      label: "Reusable automations",
       figure: reuseFigure,
       loading: libraryLoading,
-      format: () => `${tally.reusable} to ${tally.goalSpecific}`,
+      format: () => String(tally.reusable),
       detail: libraryKnown ? reuseDetail(tally) : undefined,
     },
   ];
@@ -114,7 +114,7 @@ export function OverviewSection({
             something out, running, or waiting. <strong>Approvals waiting</strong> are runs stopped on you.
           </p>
           <p>
-            <strong>Reusable to goal-specific</strong> counts your automations, the ones you authored and the ones
+            <strong>Reusable automations</strong> counts saved ways of working that can serve different requests, including ones you authored and ones
             the system learned.{" "}
             {reusableAfter === null
               ? "An automation is reusable once enough different kinds of goal have used it."
@@ -183,6 +183,7 @@ function feedMetric(label: string, snapshot: LiveSnapshot<Row>, value: number): 
 /** The quiet line under the ratio: what the two numbers leave out. */
 function reuseDetail(tally: ReturnType<typeof reuseTally>): string | undefined {
   const parts: string[] = [];
+  if (tally.goalSpecific > 0) parts.push(`${tally.goalSpecific} for one type of request`);
   if (tally.accountSpecific > 0) parts.push(`${tally.accountSpecific} for one account`);
   if (tally.unlabelled > 0) parts.push(`${tally.unlabelled} not yet labelled`);
   return parts.length === 0 ? undefined : parts.join(", ");

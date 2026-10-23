@@ -446,7 +446,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin repositoryChangeStatus(")) return builtinReply("repositoryChangeStatus", seed.changeRequests?.slice(0,1) ?? []);
       if (call.startsWith("builtin repositoryChangeRequest(")) {
         if (seed.repositoryChangeError) throw new Error(seed.repositoryChangeError);
-        const receipt = {id:"request-one", repository:"acme/shop", repositoryId:42, state:seed.repositoryAuthority?.canWrite ? "approved" : "pending", statement:"Improve the requested component", paths:["clients/os/"], goalId:"goal-request", reason:"", expiresAt:"2026-12-01T00:00:00Z"} as Row;
+        const receipt = {id:"request-one", operation: /operation: "([^"]*)"/.exec(call)?.[1] ?? "", repository:"acme/shop", repositoryId:42, state:seed.repositoryAuthority?.canWrite ? "approved" : "pending", statement:"Improve the requested component", paths:["clients/os/"], goalId:"goal-request", reason:"", expiresAt:"2026-12-01T00:00:00Z"} as Row;
         seed.changeRequests=[receipt]; return builtinReply("repositoryChangeRequest", [receipt]);
       }
       if (call.startsWith("builtin pipelinesPreview(")) {

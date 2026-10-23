@@ -82,9 +82,10 @@ import (
 func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 	// Directory -> why that package may stamp internal origin.
 	//
-	// Every entry is a package doing SERVER-INITIATED work: boot, migration,
-	// reconciliation, or a system query on behalf of no caller. None of them
-	// is a request handler.
+	// Entries normally perform SERVER-INITIATED work: boot, migration,
+	// reconciliation, or a system query on behalf of no caller. The explicit
+	// REQUEST-DERIVED exceptions below must have their own tested admission
+	// boundary; they do not authorize general request handlers to stamp origin.
 	//
 	// Of these, all but component/automations apply the stamp INLINE as the
 	// argument to a single Execute, so the marked context dies at that call
@@ -98,8 +99,9 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/auth":              "defines the stamp, and resolves an identity from claims before any actor exists",
 		"component/automations":       "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
 		"component/identity":          "identity store internals, server-initiated; and the audit sink (EngineAuditSink), whose one stamp is on the createAuditEvent it composes, because that cluster-owner-tier create admits only a cluster owner or server code and the sink records every caller's decisions (memql#5624)",
-		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
+		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
 		"component/identity/roletest": "bounded persona provisioning -- REQUEST-DERIVED; the single inline stamp opens user creation only after fresh operator authentication and the owner/developer role boundary, with a server-generated reserved persona ID and unchanged actor. service_db_test.go exercises denied roles, nested tests and revoked credentials; the stamped context never escapes",
+		"integrations/installation":   "native installation-selection host -- REQUEST-DERIVED, restricted to the single selection.go admission stamp below. selection_gate_test.go proves every public entry rejects unidentified/anonymous/synthetic/stand-in/insufficient actors before I/O and preserves the resolved actor, credential scopes, delegation ceilings and cancellation. The unexported context feeds captured workflows with closed native operation maps and no general engine dispatch; artifact/revision/source proofs and exact requester remain mandatory (artifacts_workflow_test.go, preparation_promotion_db_test.go, selection_test.go)",
 		"component/identity/pat":      "personal-access-token store, server-initiated",
 		// The campaigns sending engine and the event-email rule runtime (epic
 		// memql#4819). SERVER-INITIATED, not request-derived: the callers are a
@@ -1042,6 +1044,13 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 
 	if len(seen) == 0 {
 		t.Fatal("no ContextWithInternalOrigin calls found anywhere -- this gate has stopped resolving them and would now pass vacuously")
+	}
+	// This request-derived exception admits one reviewed native host, not every
+	// future caller in the installation package. A second stamp or another file
+	// must undergo a new boundary review even though the package is listed.
+	selectionStamps := seen["integrations/installation"]
+	if len(selectionStamps) != 1 || !strings.HasPrefix(selectionStamps[0], "integrations/installation/selection.go:") {
+		t.Errorf("installation internal admission must remain the single selection.go stamp: %v", selectionStamps)
 	}
 
 	for _, dir := range sortedKeys(seen) {

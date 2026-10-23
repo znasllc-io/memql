@@ -380,6 +380,17 @@ query observation workObservationSummariesForOwnerRun {
   shape workObservationSummary
 }
 
+/// Bounded completed model-usage receipts for one caller-owned run, without model content.
+@actor
+query observation workModelUsageForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+             && row.?data.execution.kind == "model" && row.?data.execution.phase == "completed"
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape workModelUsageSummary
+}
+
 /// Human and validator verdicts only. Other decisions and tool/checkpoint data
 /// are not verdicts and must not travel to the feedback controls.
 @actor

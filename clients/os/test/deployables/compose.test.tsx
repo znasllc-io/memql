@@ -1491,7 +1491,7 @@ describe("installing package DSL without publishing websites", () => {
   const websites = ["memql-website", "znas-website"];
   const report = { ...REPORT_TWO, dslChanges: true,
     dslDomains: [{ domain: "znasdelivery", files: 3, constructs: { automation: 12 } }],
-    deployables: REPORT_TWO.deployables.map((app, index) => ({ ...app, name: websites[index]!, deployment: { slug: websites[index], domains: [index === 0 ? "memql.io" : "znas.io"] } })),
+    deployables: REPORT_TWO.deployables.map((app, index) => ({ ...app, name: websites[index]!, deployment: { slug: websites[index], domains: [index === 0 ? "platform.example" : "company.example"] } })),
   };
   async function uploadedReport(over: Record<string, unknown> = {}) {
     const connection = fakeConnection({ artifacts: [ZIP], artifactProbe: { "artifact-zip": zipReply({ isPackage: true }) } });

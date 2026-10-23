@@ -11,7 +11,7 @@ describe("readable activity", () => {
   });
   it("does not print opaque IDs or turn a completed action into an invented successful outcome", () => {
     expect(stepTitle(step)).toBe("Carry out a task");
-    expect(stepOutcome(step)).toBe("Completed. No written result was recorded.");
+    expect(stepOutcome(step)).toBe("Completed. No written summary is available.");
     expect(stepTitle({ ...step, callName: "readInvoiceTotals" })).toBe("Read invoice totals");
   });
 });

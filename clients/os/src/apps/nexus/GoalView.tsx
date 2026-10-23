@@ -1,3 +1,6 @@
+import { summarizeUsage, usageLabel } from "./modelUsage";
+import { UsageDetails } from "./UsageDetails";
+import type { ModelUsageState } from "./useModelUsage";
 import { stepTitle, stepOutcome } from "../../nexus/presentation";
 import { StepSummary } from "./StepSummary";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
@@ -76,6 +79,7 @@ import { goalStatusWord, originWord, runModeWord, runStatusWord } from "./words"
 // would have people spending money by dragging a slider.
 
 export interface GoalViewProps {
+  usage?: ModelUsageState;
   goal: GoalRow;
   /** The app root's raw feeds. The map narrows them itself; see `world.ts`. */
   goalRow: Row | null;
@@ -98,6 +102,7 @@ export interface GoalViewProps {
 
 export function GoalView({
   goal,
+  usage,
   goalRow,
   runRows,
   approvalRows,
@@ -259,6 +264,7 @@ export function GoalView({
   // carry: its head, and whether a step's child run is an app session.
   const appRuns = useMemo(() => runRows.map(runFromRow), [runRows]);
   const appRun = run === null ? null : (appRuns.find((candidate) => idTail(candidate.id) === idTail(run.id)) ?? null);
+  const usageSummary = usage ? summarizeUsage(usage.calls, usage.complete) : null;
   const tokenUsage = appRun ? runSpend(appRun).find(figure => figure.as === "tokens")?.value ?? null : null;
   const currentStep = railSteps.find(step => ["waiting", "running", "failed"].includes(step.status)) ?? railSteps.at(-1);
   const composerStep = composer === null ? null : (railSteps.find((step) => step.key === composer.stepKey) ?? null);
@@ -331,18 +337,18 @@ export function GoalView({
           </Caption>
         ) : (
           <>
-            <section className="nexus-now" aria-label="Current progress"><div><p className="nexus-now-title">{waitingOnYou ? "Waiting for your decision" : currentStep ? stepTitle(currentStep) : runStatusWord(run.status)}</p><Caption>{waitingOnYou ? parked?.question || "Review the request to continue." : currentStep ? stepOutcome(currentStep) : "The next action has not been recorded yet."}</Caption></div><span className="nexus-usage" title={tokenUsage === null ? "Token usage has not been reported" : `${tokenUsage.toLocaleString()} reported tokens`}>{tokenUsage === null ? "Usage not reported" : `${formatTokens(tokenUsage)} tokens reported`}</span></section>
+            <section className="nexus-now" aria-label="Current progress"><div><p className="nexus-now-title">{waitingOnYou ? "Waiting for your decision" : currentStep ? stepTitle(currentStep) : runStatusWord(run.status)}</p><Caption>{waitingOnYou ? parked?.question || "Review the request to continue." : currentStep ? stepOutcome(currentStep) : "The next action has not been recorded yet."}</Caption></div><span className="nexus-usage" title={usageSummary?.total !== null && usageSummary?.total !== undefined ? `${usageSummary.total.toLocaleString()} tokens${usageSummary.estimated ? " (includes estimates)" : " reported"}` : "Token usage has not been reported"}>{usageSummary && usageSummary.calls > 0 ? usageLabel(usageSummary) : tokenUsage === null ? "Usage not reported" : `${formatTokens(tokenUsage)} tokens reported`}</span></section>
             <div className="nexus-workspace"><div className="nexus-workspace-spine">
               <GoalJourney key={run.id} steps={railSteps} selected={selectedStepKey} onSelect={setSelectedStepKey} completed={progress.completed} total={progress.total} stale={stepsState === "degraded" || stepsState === "disconnected"} />
               {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{progress.compiling ? "The steps appear as the work is planned." : "This run recorded no steps."}</Caption>) : null}
-            </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite"><StepSummary step={openStep} /></aside> : null}</div>
+            </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite"><StepSummary step={openStep} usage={usage ? summarizeUsage(usage.calls.filter(call => call.stepKey === openStep.key), usage.complete) : undefined} /></aside> : null}</div>
 
             {rewound ? (
               <Scrubber moments={moments} at={at} onScrub={setAt} onLive={() => setAt("")} />
             ) : null}
 
             <details className="nexus-technical"><summary>Usage and execution details</summary>
-              {card === null ? null : <ReceiptCard card={card} />}
+              {card === null ? null : <ReceiptCard card={card} usage={usage} />}
               <KindBand breakdown={breakdown} />
             </details>
 
@@ -499,20 +505,21 @@ function Scrubber({
  * stopped. Hiding the cost because the outcome was bad is the version of this
  * that flatters instead of informing.
  */
-function ReceiptCard({ card }: { card: NonNullable<ReturnType<typeof receipt>> }) {
+function ReceiptCard({ card, usage }: { card: NonNullable<ReturnType<typeof receipt>>; usage?: ModelUsageState }) {
   return (
     <Panel label="What it cost">
       <ul className="os-nexus-spend" aria-label="What this run cost">
         <Reading value={card.elapsedMs < 0 ? "--" : formatElapsed(card.elapsedMs)} label="took" />
         <Reading value={String(card.steps)} label={card.steps === 1 ? "step" : "steps"} />
-        <Reading value={String(card.thought)} label="thought" />
-        <Reading value={formatTokens(card.tokens)} label="tokens" />
+        {usage ? null : <Reading value={String(card.thought)} label="steps with model reasoning" />}
+        {usage ? null : <Reading value={card.tokens === null ? "Not reported" : formatTokens(card.tokens)} label="tokens" />}
         <Reading value={formatMoney(card.cost)} label="cost" />
-        <Reading
+        {usage ? null : <Reading
           value={card.modelCalls === null ? "--" : String(card.modelCalls)}
           label="model calls"
-        />
+        />}
       </ul>
+      {usage ? <UsageDetails usage={usage} /> : null}
       {card.failure === "" ? null : (
         <Notice
           tone="error"
@@ -528,11 +535,11 @@ function ReceiptCard({ card }: { card: NonNullable<ReturnType<typeof receipt>> }
       {card.cancelledBy === "" ? null : (
         <Caption>Cancelled by {card.cancelledBy}.</Caption>
       )}
-      {card.subscriptionTokens === null ? (
+      {!usage && card.subscriptionTokens === null ? (
         <Caption>
           This run's engine reported no spend, so these figures are unmeasured rather than zero.
         </Caption>
-      ) : card.subscriptionTokens > 0 ? (
+      ) : card.subscriptionTokens !== null && card.subscriptionTokens > 0 ? (
         <Caption>
           {formatTokens(card.subscriptionTokens)} of those tokens were covered by a subscription and
           did not count against the dollar ceiling.

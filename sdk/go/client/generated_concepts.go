@@ -1142,6 +1142,7 @@ var BoundConcepts = map[string]string{
 	"workModelCallsForOwnerRun":                        "v1:work:modelCall",
 	"workModelCallsForOwnerStep":                       "v1:work:modelCall",
 	"workModelCallsPageForOwnerRun":                    "v1:work:modelCall",
+	"workModelUsageForOwnerRun":                        "v1:work:observation",
 	"workObservationSummariesForOwnerRun":              "v1:work:observation",
 	"workObservationsForOwnerRun":                      "v1:work:observation",
 	"workProgressReceiptsForOwnerRun":                  "v1:work:observation",

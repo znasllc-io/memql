@@ -1,3 +1,4 @@
+import type { ModelUsageState } from "./useModelUsage";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { GitBranch, Pin, Redo2, RotateCcw } from "lucide-react";
@@ -142,6 +143,7 @@ export interface RunPageProps {
   stepsState: string;
   approvals: readonly ApprovalRow[];
   journal: Journal;
+  usage?: ModelUsageState;
   derive: DeriveRunState;
   /** Every run this person owns: a step's child run says whether an app session answered it. */
   runs?: readonly RunRow[];
@@ -165,6 +167,7 @@ export function RunPage({
   stepsState,
   approvals,
   journal,
+  usage,
   derive,
   runs = [],
   backLabel = "Runs",
@@ -773,7 +776,7 @@ export function RunPage({
           ) : null}
         </section>
 
-        <JournalPanel journal={journal} />
+        <JournalPanel journal={journal} usage={usage} />
       </div>
 
       <ActionBar

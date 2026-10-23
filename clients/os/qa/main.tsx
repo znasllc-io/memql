@@ -1,3 +1,6 @@
+import liveQuickReply from "../test/nexus/fixtures/liveQuickReply.json";
+import { flatten as flattenLiveCapture } from "../src/kit/rows";
+import { RepositoryChange } from "../src/apps/pipelines/RepositoryChange";
 import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpdates";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
@@ -741,6 +744,18 @@ function installationPreview(state: "prepared" | "preparing" | "applying" | "com
   return () => <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected proposedRelease={state === "empty"?selected:null} /></WindowBody>;
 }
 
+function repositoryDeliveryView(state: "compose" | "waiting" | "attention" | "queued" | "merged") {
+  const reason = { compose: "", waiting: 'Required check "ci-required" is still running.', attention: "A required GitHub review or CODEOWNER approval is still needed.", queued: "GitHub is verifying this change in the merge queue.", merged: "GitHub merged this reviewed change." }[state];
+  return {
+    seed: {
+      repositoryAuthority: { sourceId: "source-one", repository: "acme/shop", repositoryId: 42, canWrite: false, canRequest: true, route: "maintainer", operations: ["propose_change", "deliver_change"] },
+      changeRequests: state === "compose" ? [] : [{ id: "request-delivery", operation: "deliver_change", state: "approved", statement: "Make saved filters easier to use", repository: "acme/shop", paths: ["clients/os/"], goalId: "goal-delivery", proposal: { state: "proposed", branch: "memql/change-reviewed", commit: "a".repeat(40), pullRequestUrl: "https://github.com/acme/shop/pull/27" }, review: { approved: true, reason: "The changes and regression cases cover the requested scope." }, delivery: { state, reason, headSha: "a".repeat(40), queueEntryId: "queue-delivery" } }],
+    },
+    framed: true,
+    render: () => <WindowBody fallback="Pipelines"><RepositoryChange sourceId="source-one" /></WindowBody>,
+  };
+}
+
 const VIEWS: Record<
   string,
   {
@@ -918,10 +933,16 @@ const VIEWS: Record<
   "installation-unavailable": { render:installationPreview("unavailable") },
   "delivery-repositories": { seed: PIPELINES_SEED, framed: true, render: () => <DeployablesWindow section="repositories" fallback="Pipelines" /> },
   "delivery-changes": { seed: PIPELINES_SEED, framed: true, render: () => <DeployablesWindow section="changes" fallback="Pipelines" /> },
+  "nexus-live-reply": { connect: () => nexusConnection({ goals: [flattenLiveCapture(liveQuickReply.goal)], runs: [flattenLiveCapture(liveQuickReply.run)], steps: liveQuickReply.steps.map(flattenLiveCapture), modelUsage: liveQuickReply.modelUsage, modelCalls: liveQuickReply.modelCalls.map(flattenLiveCapture) }), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"live-capture",payload:{goalId:liveQuickReply.goal.id}}} /> },
   "nexus-readable": { connect: () => readableNexus("running"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-waiting": { connect: () => readableNexus("waiting"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-failed": { connect: () => readableNexus("failed"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-long": { connect: () => readableNexus("long"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
+  "repository-delivery-compose": repositoryDeliveryView("compose"),
+  "repository-delivery-waiting": repositoryDeliveryView("waiting"),
+  "repository-delivery-attention": repositoryDeliveryView("attention"),
+  "repository-delivery-queued": repositoryDeliveryView("queued"),
+  "repository-delivery-merged": repositoryDeliveryView("merged"),
   "pipeline-runs": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-empty": { seed: PIPELINES_NO_RUNS_SEED, framed: true, render: () => <RunsWindow /> },
   "pipeline-runs-none": { seed: {}, framed: true, render: () => <RunsWindow /> },

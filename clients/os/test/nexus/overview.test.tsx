@@ -87,8 +87,8 @@ describe("the Overview's figures", () => {
         learnedProcedures: [constructRow({ id: "p1", name: "procedureA", targetNamespace: "procedure", catalogued: false, reuse: "goalSpecific" })],
       }),
     );
-    await waitFor(() => expect(value("Reusable to goal-specific")).toBe("2 to 2"));
-    expect(within(metric("Reusable to goal-specific")).getByText("1 for one account, 1 not yet labelled")).toBeTruthy();
+    await waitFor(() => expect(value("Reusable automations")).toBe("2"));
+    expect(within(metric("Reusable automations")).getByText("2 for one type of request, 1 for one account, 1 not yet labelled")).toBeTruthy();
     const breakdown = screen.getByRole("region", { name: "Your automations, by reuse" });
     expect(within(breakdown).getByText("Reusable")).toBeTruthy();
     expect(within(breakdown).getByText("Not yet labelled")).toBeTruthy();
@@ -96,8 +96,8 @@ describe("the Overview's figures", () => {
 
   it("keeps the ratio ABSENT until something is labelled -- never 0 to 0", async () => {
     mount(fakeConnection({ constructs: [constructRow({ id: "c1", name: "a" }), constructRow({ id: "c2", name: "b" })] }));
-    await waitFor(() => expect(within(metric("Reusable to goal-specific")).getByText("2 not yet labelled")).toBeTruthy());
-    expect(value("Reusable to goal-specific")).toBe("—");
+    await waitFor(() => expect(within(metric("Reusable automations")).getByText("2 not yet labelled")).toBeTruthy());
+    expect(value("Reusable automations")).toBe("—");
     expect(screen.queryByText(/0 to 0/)).toBeNull();
     // Unlabelled is its own segment, never folded into "for one goal".
     const breakdown = screen.getByRole("region", { name: "Your automations, by reuse" });
@@ -109,9 +109,9 @@ describe("the Overview's figures", () => {
     conn.query.cataloguedConstructsForOwner.mockImplementation(() => new Promise(() => {}) as never);
     mount(conn);
     await waitFor(() => expect(value("Goals open")).toBe("0"));
-    const cell = metric("Reusable to goal-specific");
+    const cell = metric("Reusable automations");
     expect(cell.querySelector('[aria-busy="true"]')).toBeTruthy();
-    expect(value("Reusable to goal-specific")).not.toMatch(/\d/);
+    expect(value("Reusable automations")).not.toMatch(/\d/);
     // Loading is ANNOUNCED, never painted: every such word is screen-reader-only.
     const loading = screen.queryAllByText(/^Loading/);
     expect(loading.length).toBeGreaterThan(0);
@@ -122,7 +122,7 @@ describe("the Overview's figures", () => {
     mount(fakeConnection({ constructs: new Error("permission denied: v1:authoring:construct") }));
     expect(await screen.findByText("Your automations could not be read.")).toBeTruthy();
     expect(screen.getByText("permission denied: v1:authoring:construct")).toBeTruthy();
-    expect(value("Reusable to goal-specific")).toBe("—");
+    expect(value("Reusable automations")).toBe("—");
   });
 
   it("says there is nothing yet when there is nothing at all, and points at Goals", async () => {

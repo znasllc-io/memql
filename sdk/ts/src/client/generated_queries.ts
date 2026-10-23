@@ -13102,6 +13102,28 @@ QueryClient.prototype.workModelCallsPageForOwnerRun = function (this: QueryClien
   return this.executeNamed("workModelCallsPageForOwnerRun", buildWorkModelCallsPageForOwnerRun(args), opts);
 };
 
+/** Bounded completed model-usage receipts for one caller-owned run, without model content. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workModelUsageForOwnerRun"] in generated_concepts.ts).
+export interface WorkModelUsageForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkModelUsageForOwnerRun(args: WorkModelUsageForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workModelUsageForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelUsageForOwnerRun(args: WorkModelUsageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelUsageForOwnerRun = function (this: QueryClient, args: WorkModelUsageForOwnerRunArgs = {} as WorkModelUsageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelUsageForOwnerRun", buildWorkModelUsageForOwnerRun(args), opts);
+};
+
 /** Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.ts).
 export interface WorkObservationSummariesForOwnerRunArgs {

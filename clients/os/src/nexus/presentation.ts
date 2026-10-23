@@ -23,11 +23,33 @@ const actions: Record<string, string> = {
   review: "Review the changes", test: "Check the changes", build: "Build the software",
   deploy: "Deploy the selected release", publish: "Publish the prepared result",
   appSession: "Work on the request", session: "Work on the request",
+  workViewerContext: "Check your profile context", workReviewReply: "Prepare the final answer",
+  workConversationReply: "Write the answer", workQuickReply: "Write the answer",
+  ai: "Work on the request",
 };
+
+function object(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+/** Journal results retain both their recorded value and their node envelope.
+ * Read only these explicit wrappers; arbitrary nested metadata is not an outcome. */
+function resultValues(step: PresentableStep): Record<string, unknown>[] {
+  const result = step.result;
+  if (!result) return [];
+  const value = object(result.value);
+  if (value) return [result, value];
+  const nodes = object(result.result);
+  const payloads = nodes ? Object.values(nodes).map(node => object(object(node)?.payload)).filter((value): value is Record<string, unknown> => value !== null) : [];
+  return [result, ...payloads];
+}
 
 export function stepTitle(step: PresentableStep): string {
   const declared = sentence(step.displayTitle) || recordedText(step.input, ["title", "action", "summary"]);
   if (declared) return declared;
+  const prompt = resultValues(step).map(result => recordedText(result, ["prompt"])).find(Boolean);
+  if (prompt && actions[prompt]) return actions[prompt];
+  if (step.key === "goalInput" && step.stepType === "expression") return "Read the request details";
   const call = (step.callName || step.key).split(/[.:/]/).filter(Boolean).at(-1) ?? "";
   if (actions[call]) return actions[call];
   const words = call.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();
@@ -40,17 +62,22 @@ export function stepTitle(step: PresentableStep): string {
 }
 
 export function stepOutcome(step: PresentableStep): string {
-  const result = sentence(step.summary) || recordedText(step.result, ["summary", "message", "text", "content"]);
+  const result = sentence(step.summary) || resultValues(step).map(value => recordedText(value, ["summary", "reply", "message", "text", "content"])).find(Boolean);
   if (result) return result;
+  if (step.status === "done" && step.key === "goalInput" && step.stepType === "expression" && step.result?.valueRecorded === true) {
+    const input = object(step.result.value);
+    return input && Object.keys(input).length === 0 ? "No additional request details were supplied." : "The supplied request details are available to the next actions.";
+  }
+  if (step.status === "done" && step.callName === "workViewerContext" && resultValues(step).some(value => typeof value.checkedAt === "string" && typeof value.source === "string")) return "Your available profile and account context was checked.";
   if (step.status === "failed") return "This action did not finish successfully. Open it to read the failure details.";
   if (step.status === "waiting") return "Waiting before continuing.";
   if (step.status === "running") return "This action is in progress.";
-  if (step.status === "done") return "Completed. No written result was recorded.";
+  if (step.status === "done") return "Completed. No written summary is available.";
   if (step.status === "skipped") return "This action was skipped.";
   if (step.status === "cancelled") return "This action was stopped.";
   return "This action has not started.";
 }
 
 export function stepReason(step: PresentableStep): string {
-  return sentence(step.reason) || recordedText(step.result, ["reason", "decisionReason"]);
+  return sentence(step.reason) || resultValues(step).map(value => recordedText(value, ["reason", "decisionReason"])).find(Boolean) || "";
 }

@@ -297,6 +297,24 @@ shape observation workObservationSummary {
   content
 }
 
+/// Usage facts only: never prompts, generated text, tool output or saved checkpoints.
+@row
+shape observation workModelUsageSummary {
+  row.createdAt
+  ownerUserId
+  runId
+  stepKey
+  data.execution.call.id
+  data.execution.call.model
+  data.execution.call.inputTokens
+  data.execution.call.outputTokens
+  data.execution.call.tokensEstimated
+  data.execution.call.totalCost
+  data.execution.call.pricingConfigured
+  data.execution.call.billing
+  data.execution.call.cacheKind
+}
+
 /// The epic memql#5414 values, both of them, and when the seed last wrote the row.
 @row
 shape feedbackPolicy feedbackPolicyFull {

@@ -13782,6 +13782,28 @@ func WorkModelCallsPageForOwnerRunBuild(args WorkModelCallsPageForOwnerRunArgs) 
 	return b.String()
 }
 
+// WorkModelUsageForOwnerRun -- Bounded completed model-usage receipts for one caller-owned run, without model content.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workModelUsageForOwnerRun"] in generated_concepts.go).
+type WorkModelUsageForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkModelUsageForOwnerRun calls the engine query workModelUsageForOwnerRun.
+func (qc *QueryClient) WorkModelUsageForOwnerRun(ctx context.Context, args WorkModelUsageForOwnerRunArgs) (*Result, error) {
+	call := WorkModelUsageForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workModelUsageForOwnerRun", call)
+}
+
+func WorkModelUsageForOwnerRunBuild(args WorkModelUsageForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workModelUsageForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkObservationSummariesForOwnerRun -- Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.go).
