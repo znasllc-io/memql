@@ -147,6 +147,9 @@ original sources remain available, and required instructions, current decisions
 and pending operations remain exact. Archival must reduce the active context;
 it does not raise the model window or grant permission.
 There is no extra automatic retry with identical input. The question retains
+the existing execution generation and model override when answered, just as a
+provider-call ceiling pause does. It does not create an ordinary failure rerun.
+The saved question retains
 the exact prepared tool calls and completed receipts; Retry or guidance resumes
 that suspended execution after the capacity problem is addressed. It does not
 restart the stage or discard its working context. Storage and authorization
