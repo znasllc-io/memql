@@ -760,17 +760,18 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded all thirty-one shipped pipeline builtins,
+	// The control: the engine has loaded all thirty-two shipped pipeline builtins,
 	// including legacy log adoption, channel configuration, schedule opt-in,
-	// connect preview and runner status. An empty registry must not pass this audit.
+	// connect preview, runner status and native merge-group review reporting.
+	// An empty registry must not pass this audit.
 	executors := 0
 	for _, fn := range eng.Functions().Snapshot() {
 		if fn != nil && fn.IsBuiltin() && strings.HasPrefix(fn.Executor, "integration.pipelines.") {
 			executors++
 		}
 	}
-	if executors != 31 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 31", executors)
+	if executors != 32 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 32", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

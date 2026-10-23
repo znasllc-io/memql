@@ -21,6 +21,29 @@ type workContextFleet struct {
 	wantDocument                  string
 }
 
+// These routing/loop fixtures reconstruct the run on the execution replica.
+// Supply the serving node's admission seam explicitly, as the real engine does;
+// the real-database work admission tests own durable usage and lease validation.
+type workFleetAdmission struct {
+	owner string
+	calls int
+}
+
+func (g *workFleetAdmission) AdmitProvider(ctx context.Context, run common.RunContext, _ memql.ProviderAdmission) error {
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	access, _ := auth.AccessFromContext(ctx)
+	if access == nil || access.UserId != g.owner || run.OwnerUserId != g.owner || run.RunId != "adopted-run" || run.GoalId != "goal" {
+		return fmt.Errorf("provider admission lost the expected persisted owner or run")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return fmt.Errorf("provider admission lost its cancellation deadline")
+	}
+	g.calls++
+	return nil
+}
+
 func (f *workContextFleet) Catalog(ctx context.Context, owner string) ([]memql.FleetModel, error) {
 	f.visits++
 	ac, _ := auth.AccessFromContext(ctx)
@@ -90,6 +113,8 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: owner})
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
 			defer cancel()
+			admission := &workFleetAdmission{owner: owner}
+			ctx = memql.ContextWithProviderAdmissionForTest(ctx, admission)
 			document := strings.TrimSpace(strings.Repeat("Preserve this original document. ", 3000))
 			fleet := &workContextFleet{owner: owner, wantDocument: document}
 			providers := memql.NewProviderRegistryForTest()
@@ -125,6 +150,9 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			}
 			if engine.compactions != 1 || fleet.visits == 0 || fleet.calls != 1 || fleet.missingContext != 0 || result.FinalText != "Completed answer" {
 				t.Fatalf("actual lane did not use owned fleet: visits=%d calls=%d result=%+v", fleet.visits, fleet.calls, result)
+			}
+			if admission.calls != fleet.calls {
+				t.Fatalf("provider calls did not cross admission: admitted=%d dispatched=%d", admission.calls, fleet.calls)
 			}
 			used := 0
 			_, recovered := r.handOffContext(ctx, fmt.Errorf("context_length_exceeded"), []common.ChatMessage{{Role: "user", Content: document}}, &used, 0, "strict-overflow")

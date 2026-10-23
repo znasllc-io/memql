@@ -785,6 +785,18 @@ func TestPipelineStepRemovesItsWorkspaceWhateverTheOutcome(t *testing.T) {
 // --- the token -----------------------------------------------------------
 
 func TestPipelineStepNeverPutsTheTokenOnDiskOrInArgv(t *testing.T) {
+	// CI can set GIT_CONFIG_* for its own checkout (for example safe.directory).
+	// This fixture measures whether the fetch leaks its configuration into the
+	// step, so remove that ambient configuration and restore it after the test.
+	for _, variable := range os.Environ() {
+		name, _, _ := strings.Cut(variable, "=")
+		if strings.HasPrefix(name, "GIT_CONFIG_") {
+			t.Setenv(name, "")
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatalf("isolate Git configuration variable %s: %v", name, err)
+			}
+		}
+	}
 	allowLocalClones(t)
 	fx := newPipelineFixture(t)
 	realGit, err := exec.LookPath("git")
