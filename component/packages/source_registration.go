@@ -22,8 +22,11 @@ func (i *Integration) handleSourceRegister(ctx context.Context, args map[string]
 	}
 	owner := actorFromContext(ctx).UserId
 	credential, binding, account := strings.TrimSpace(stringArg(args, "credentialId")), strings.TrimSpace(stringArg(args, "sourceConnectionId")), strings.TrimSpace(stringArg(args, "accountId"))
-	if owner == "" || credential == "" || binding == "" || account == "" || d.Store == nil {
+	if owner == "" || credential == "" || binding == "" || d.Store == nil {
 		return nil, sourceConnectionUnavailable()
+	}
+	if account == "" {
+		return nil, refuse("organization_required", "select an active MemQL organization before registering this repository")
 	}
 	repoOwner, repo, err := parseGitHubRepo(stringArg(args, "repoUrl"))
 	if err != nil {
