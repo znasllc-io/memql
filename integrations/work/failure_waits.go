@@ -473,12 +473,21 @@ func (i *Integration) handOffRemedy(ctx context.Context, kind, runId, owner, sin
 			"component", "work.remedy", "run", runId, "kind", kind)
 		return false
 	}
+	// Claim acquisition and goroutine scheduling consume the same bounded
+	// window as the remedy itself. Starting it only inside serveRemedy would
+	// allow a delayed claimant to run after its cross-replica lease expired.
+	expiresAt := i.clock().Add(remedyTimeout)
+	remedyCtx, cancelRemedy := context.WithTimeout(context.Background(), remedyTimeout)
 	if !claimer.ClaimWithTTL(ctx, remedyClaimName, runId+"#"+since, remedyClaimTTL) {
+		cancelRemedy()
 		return false
 	}
 	i.log().Info("work: claimed a classified failure for its remedy",
 		"component", "work.remedy", "run", runId, "kind", kind, "node", selfNodeId())
-	go i.serveRemedy(remedy, kind, runId, owner, since)
+	go func() {
+		defer cancelRemedy()
+		i.serveRemedy(remedyCtx, remedy, kind, runId, owner, since, expiresAt)
+	}()
 	return true
 }
 
@@ -493,9 +502,10 @@ func (i *Integration) handOffRemedy(ctx context.Context, kind, runId, owner, sin
 // charged to its ceilings and routed by its owner's choice, exactly as
 // compile's calls are. So the context carries the run, under the owner's
 // borrowed authority, and its budget scopes.
-func (i *Integration) serveRemedy(remedy Remedy, kind, runId, owner, since string) {
-	ctx, cancel := context.WithTimeout(context.Background(), remedyTimeout)
-	defer cancel()
+func (i *Integration) serveRemedy(ctx context.Context, remedy Remedy, kind, runId, owner, since string, expiresAt time.Time) {
+	if ctx.Err() != nil || !i.clock().Before(expiresAt) {
+		return
+	}
 	ctx, err := i.runOwnerActor(ctx, runId, owner)
 	if err != nil {
 		i.log().Warn("work remedy: could not restore intake authority", "run", runId, "error", err)
@@ -528,7 +538,7 @@ func (i *Integration) serveRemedy(remedy Remedy, kind, runId, owner, since strin
 	}
 	ctx = common.ContextWithRun(ctx, rc)
 	ctx = memql.ContextWithBudgetScope(ctx, memql.BudgetScopeId("run", runId), memql.BudgetScopeId("goal", rc.GoalId))
-	ctx = withProviderPhase(ctx, rc, providerPhase{status: runStatusWaiting, waitKind: kind, since: since, stepKey: stepKey, expiresAt: i.clock().Add(remedyTimeout)})
+	ctx = withProviderPhase(ctx, rc, providerPhase{status: runStatusWaiting, waitKind: kind, since: since, stepKey: stepKey, expiresAt: expiresAt})
 
 	took := false
 	if kind == waitKindReplan {

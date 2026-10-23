@@ -204,7 +204,7 @@ func TestRemedyRefusesInvalidPersistedAuthorityBeforeInference(t *testing.T) {
 		row["executionAuthority"] = grant
 		remedy := &signallingRemedy{}
 		i, eng := plannerReplica(t, remedy, &pkClaims{}, row)
-		i.serveRemedy(remedy, waitKindReplan, remedyRunId, "u-alice", rowString(rowMap(row, "waitingOn"), "since"))
+		i.serveRemedy(context.Background(), remedy, waitKindReplan, remedyRunId, "u-alice", rowString(rowMap(row, "waitingOn"), "since"), i.clock().Add(remedyTimeout))
 		if len(remedy.calls) != 0 || len(mutationsIn(eng)) != 0 {
 			t.Fatal("invalid grant reached the remedy or changed the run")
 		}
