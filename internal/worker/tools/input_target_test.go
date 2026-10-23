@@ -414,6 +414,15 @@ func TestInputCleanupFailureIsNotReportedAsReleased(t *testing.T) {
 		t.Fatal("release retargeted")
 	}
 }
+
+func TestInputWrongKeyOrderRefusesWithUsableContract(t *testing.T) {
+	g, b, ctx := newInputFixture(t)
+	token := inputToken(t, g, ctx)
+	_, f := g.input(ctx, "key_combo", map[string]any{"inputTarget": token, "keys": []any{"cmd", "r"}})
+	if f == nil || len(b.events) != 0 || !strings.Contains(f.GetErrorMessage(), `keys=["r","cmd"]`) {
+		t.Fatalf("missing primary-first remediation: %v", f)
+	}
+}
 func TestUnsupportedBackendAndActionsNeverEmit(t *testing.T) {
 	g, b, ctx := newInputFixture(t)
 	for _, action := range []string{"window_focus", "mouse_down", "mouse_up", "mouse_drag", "key_hold"} {

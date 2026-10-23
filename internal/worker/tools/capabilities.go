@@ -138,6 +138,9 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 			"receipt":               "inputTarget.id, required on one action in the same run, expires after 60 seconds",
 			"coordinates":           "explicit x/y from that exact screenshot for every pointer action",
 			"focusActivation":       false,
+			"key_combo":             "keys is a string array: primary key first, then modifiers; for example [r,cmd] or [enter]",
+			"key_type":              "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",
+			"mouse_click":           "explicit x/y, optional left/right/middle button and cmd/ctrl/alt/shift modifiers; single click only",
 			"interruption":          "latched until operator review and worker restart; no automatic retry or reacquisition",
 			"limitation":            "process-addressed delivery; AX window/field checks are sampled, not atomic; delayed effects may stop input",
 		}

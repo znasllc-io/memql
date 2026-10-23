@@ -255,7 +255,11 @@ until operator review and worker restart. A new screenshot cannot clear the
 interruption. Input is serialized across enrollments in one worker process.
 There is no automatic retry, focus stealing, or global-event fallback.
 
-macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Before each
+macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
+packets also carry the observed window in Quartz's two public mouse-window
+fields. Quartz ignores those fields for scroll packets, which retain PID and
+point addressing with the same sampled-focus checks. Window hints do not
+acknowledge application delivery or atomically bind an AX field. Before each
 press/text event the guard checks the AX window and field; releases check the
 window and always address the original PID. Cleanup releases only an already
 attempted down event to that same PID. After a click, Tab, Escape, Cmd-L or Cmd-F, an observed field change
@@ -272,7 +276,8 @@ observation. Pointer events do not warp the global cursor; applications may
 ignore synthetic hover/scroll delivery. This is not a claim of uninterrupted
 multi-app support or that automation can never compete with a user. Normal
 live interactions still require controlled validation before sustained use.
-Tests use fake event backends and do not establish application delivery.
+Guard tests use fake event backends. Platform packet tests construct and inspect
+Quartz events without posting them; neither establishes application delivery.
 
 Linux and other platforms have no verified target-addressed input backend in
 this version and refuse input. Read-only capabilities remain as documented.

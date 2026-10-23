@@ -80,9 +80,11 @@ static int targetSame(targetFocus *a, targetFocus *b, int field) {
 // addressed to the retained PID. There is deliberately no global-post fallback.
 // Posting has no delivery acknowledgement and cannot atomically bind an event
 // to an AX field: the Go guard samples those identities before every event.
-static int targetPost(pid_t pid, int kind, int key, const UniChar *text, int ntext,
+typedef struct { CGEventRef event; pid_t pid; } targetEvent;
+static void targetEventFree(targetEvent *e) { if (!e) return; if (e->event) CFRelease(e->event); free(e); }
+static targetEvent *targetCreate(pid_t pid, uint32_t wid, int kind, int key, const UniChar *text, int ntext,
                       int down, int button, int x, int y, int dx, int dy, uint64_t flags) {
-    if (pid <= 0) return 0;
+    if (pid <= 0 || wid == 0) return NULL;
     CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStatePrivate);
     if (!source) return 0;
     CGEventRef event = NULL;
@@ -99,10 +101,25 @@ static int targetPost(pid_t pid, int kind, int key, const UniChar *text, int nte
         event = CGEventCreateScrollWheelEvent(source,kCGScrollEventUnitLine,2,dy,dx);
         if (event) CGEventSetLocation(event,CGPointMake(x,y));
     }
-    if (event) { CGEventSetFlags(event,(CGEventFlags)flags); CGEventPostToPid(pid,event); CFRelease(event); }
     CFRelease(source);
-    return event != NULL;
+    if (!event) return NULL;
+    CGEventSetFlags(event,(CGEventFlags)flags);
+    CGEventSetIntegerValueField(event,kCGEventTargetUnixProcessID,pid);
+    if (kind == 2 || kind == 3) {
+        // PID posting bypasses normal global hit-testing. Carry the observed
+        // window on mouse events; Quartz ignores these fields on scroll events.
+        // These are routing hints, not an AX lock or
+        // proof that the application processed the event.
+        CGEventSetIntegerValueField(event,kCGMouseEventWindowUnderMousePointer,wid);
+        CGEventSetIntegerValueField(event,kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent,wid);
+    }
+    targetEvent *out = calloc(1,sizeof(targetEvent));
+    if (!out) { CFRelease(event); return NULL; }
+    out->event=event; out->pid=pid; return out;
 }
+static void targetSend(targetEvent *e) { CGEventPostToPid(e->pid,e->event); }
+static int64_t targetEventField(targetEvent *e, int field) { return CGEventGetIntegerValueField(e->event,(CGEventField)field); }
+
 */
 import "C"
 
@@ -144,6 +161,24 @@ func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
 	if !ok || f.ptr == nil {
 		return fmt.Errorf("invalid target identity")
 	}
+	event, err := newDarwinTargetEvent(f.window(), e)
+	if err != nil {
+		return err
+	}
+	defer event.close()
+	C.targetSend(event.ptr)
+	return nil
+}
+
+// Event construction is separate from posting so platform packet fields can
+// be tested without touching the desktop or needing an active application.
+type darwinTargetEvent struct{ ptr *C.targetEvent }
+
+func (e *darwinTargetEvent) close() { C.targetEventFree(e.ptr); e.ptr = nil }
+func (e *darwinTargetEvent) routing() (pid, window, handlingWindow int64) {
+	return int64(C.targetEventField(e.ptr, C.kCGEventTargetUnixProcessID)), int64(C.targetEventField(e.ptr, C.kCGMouseEventWindowUnderMousePointer)), int64(C.targetEventField(e.ptr, C.kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent))
+}
+func newDarwinTargetEvent(w WindowInfo, e targetInputEvent) (*darwinTargetEvent, error) {
 	kind, key, button := C.int(-1), C.int(0), C.int(0)
 	var chars []uint16
 	switch e.kind {
@@ -153,7 +188,7 @@ func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
 	case "key":
 		code, valid := targetKeyCode(e.key)
 		if !valid {
-			return fmt.Errorf("unsupported key")
+			return nil, fmt.Errorf("unsupported key")
 		}
 		kind, key = 1, C.int(code)
 	case "move":
@@ -169,7 +204,7 @@ func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
 	case "scroll":
 		kind = 4
 	default:
-		return fmt.Errorf("unsupported event")
+		return nil, fmt.Errorf("unsupported event")
 	}
 	flags := C.uint64_t(0)
 	for _, mod := range e.modifiers {
@@ -196,10 +231,11 @@ func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
 	if len(chars) > 0 {
 		ptr = (*C.UniChar)(&chars[0])
 	}
-	if C.targetPost(f.ptr.pid, kind, key, ptr, C.int(len(chars)), down, button, C.int(e.x), C.int(e.y), C.int(e.dx), C.int(e.dy), flags) == 0 {
-		return fmt.Errorf("target event creation failed")
+	event := C.targetCreate(C.pid_t(w.PID), C.uint32_t(w.ID), kind, key, ptr, C.int(len(chars)), down, button, C.int(e.x), C.int(e.y), C.int(e.dx), C.int(e.dy), flags)
+	if event == nil {
+		return nil, fmt.Errorf("target event creation failed")
 	}
-	return nil
+	return &darwinTargetEvent{ptr: event}, nil
 }
 
 func init() { desktopInputGuard.backend = darwinInputBackend{} }

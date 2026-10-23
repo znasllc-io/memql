@@ -331,7 +331,7 @@ func planTargetInput(action string, args map[string]any, mapper CoordinateMapper
 			return nil, failure("bad_request", "key_combo requires keys, primary key first.")
 		}
 		if _, ok := targetKeyCode(keys[0]); !ok {
-			return nil, failure("bad_request", "Unsupported target-addressed key.")
+			return nil, failure("bad_request", "Unsupported primary key. key_combo requires the primary key first, then modifiers: for example keys=[\"r\",\"cmd\"] or keys=[\"enter\"].")
 		}
 		mods, refusal := targetModifiers(keys[1:])
 		if refusal != nil {
