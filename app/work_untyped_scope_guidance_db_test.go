@@ -36,18 +36,33 @@ import (
 type untypedScopeProvider struct {
 	first    bool
 	requests [][]common.ChatMessage
+	reviews  [][]common.ChatMessage
 }
 
 func (*untypedScopeProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text call")
 }
+
+// Keep the installed independent reply review on the resumed replica. Only
+// the provider's bounded verdict is synthetic; the saved evidence stays real.
+func (p *untypedScopeProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if schema.Name != "work_reply_review" || !schema.Strict {
+		return "", fmt.Errorf("unexpected structured call: %s (strict=%v)", schema.Name, schema.Strict)
+	}
+	p.reviews = append(p.reviews, append([]common.ChatMessage(nil), messages...))
+	return `{"missingEvidence":"","reply":"Correction received without executing an operation"}`, nil
+}
+
 func (p *untypedScopeProvider) CallChatWithTools(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	p.requests = append(p.requests, append([]common.ChatMessage(nil), messages...))
 	if p.first {
 		p.first = false
 		return &common.ToolCallingChatResult{ToolCalls: []common.ToolCall{
 			{ID: "completed", Name: "discoverCapabilities", Arguments: `{}`},
-			{ID: "scope-call", Name: "requestComputerUseScope", Arguments: `{"intent":"inspect","requestedScope":"full","summary":"Review the synthetic scope","requireLabels":{"fixture":"true"}}`},
+			{ID: "scope-call", Name: "requestComputerUseScope", Arguments: `{"intent":"inspect","requestedScope":"full","sessionKind":"desktop","summary":"Review the synthetic scope","requireLabels":{"fixture":"true"}}`},
 			{ID: "unstarted", Name: "discoverCapabilities", Arguments: `{}`},
 		}}, nil
 	}
@@ -137,6 +152,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 		require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 		require.NoError(t, rules.Finalize())
 		rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
+		e.SetAIResolver(rtr)
 		replier, err := agent.NewReplier(&untypedScopeAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, effects: effects}, rtr, e.Logger)
 		require.NoError(t, err)
 		turn := &installedBudgetTurn{replierTurnRunner: &replierTurnRunner{replier: replier, engine: e}}
@@ -163,6 +179,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			for n, runner := range runners {
 				runner.first = n == 0
 				runner.requests = nil
+				runner.reviews = nil
 				turns[n].background = background
 			}
 
@@ -244,6 +261,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			approval := query(reader, "workApprovalForOwner", map[string]any{"approvalId": wait.ApprovalID})[0]
 			subject := approval["subject"].(map[string]any)
 			require.NotContains(t, subject, "computerPermission")
+			require.Equal(t, "desktop", subject["sessionKind"], "the feedback question uses an explicit session request, never an omitted operation")
 			require.Contains(t, subject, "nativeScopeCheckpoint")
 			witness := subject["nativeScopeCheckpoint"].(map[string]any)
 			require.Equal(t, "scope-call", witness["toolCallId"])
@@ -262,10 +280,10 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			grant, err := works[1].Find(ctx, permission.Request{OwnerID: owner, AgentID: subject["agentId"].(string), RunID: runID, Tool: "workerHost", Action: "exec", Args: map[string]any{"cmd": "pwd", "cwd": "/fixture"}})
 			require.NoError(t, err)
 			require.Nil(t, grant)
-			legacyRequest := worker.Request{RunId: runID, OwnerUserId: owner, AgentId: subject["agentId"].(string), RequireLabels: worker.LabelsFromArgs(subject["requireLabels"])}
-			legacyScope, err := (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, legacyRequest, time.Now())
+			sessionRequest := worker.Request{RunId: runID, OwnerUserId: owner, AgentId: subject["agentId"].(string), Tool: "workerComputer", Action: "screenshot", RequireLabels: worker.LabelsFromArgs(subject["requireLabels"])}
+			sessionScope, err := (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, sessionRequest, time.Now())
 			require.NoError(t, err)
-			require.Empty(t, legacyScope)
+			require.Empty(t, sessionScope)
 			// Positive reader control with the very same subject and selector:
 			// only its decision differs. Restore the actual answered receipt
 			// immediately; this is synthetic test data, never a public grant.
@@ -277,13 +295,18 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(approvalRaw), &approvedControl))
 			approvedControl["decision"] = "approved"
 			insertWorkRow(t, db, approvalRowID, "v1:work:approval", time.Now().UTC(), approvedControl)
-			controlScope, err := (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, legacyRequest, time.Now())
+			controlScope, err := (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, sessionRequest, time.Now())
 			require.NoError(t, err)
 			require.Equal(t, "full", controlScope)
-			insertWorkRow(t, db, approvalRowID, "v1:work:approval", time.Now().UTC(), savedApproval)
-			legacyScope, err = (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, legacyRequest, time.Now())
+			execRequest := sessionRequest
+			execRequest.Tool, execRequest.Action = "workerHost", "exec"
+			controlScope, err = (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, execRequest, time.Now())
 			require.NoError(t, err)
-			require.Empty(t, legacyScope)
+			require.Empty(t, controlScope, "approving a desktop session must not permit commands")
+			insertWorkRow(t, db, approvalRowID, "v1:work:approval", time.Now().UTC(), savedApproval)
+			sessionScope, err = (&worker.EngineStore{Engine: reader}).WorkComputerScope(ctx, sessionRequest, time.Now())
+			require.NoError(t, err)
+			require.Empty(t, sessionScope)
 
 			prepare := func(j *automations.RunJournal) (*automations.RunJournal, *automations.ResumeOptions) {
 				t.Helper()
@@ -348,6 +371,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 					refused.Close()
 					require.Error(t, err)
 					require.Empty(t, runners[1].requests)
+					require.Empty(t, runners[1].reviews)
 					require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": completedTools, "completed-tool": completedTools}, effects)
 					insertWorkRow(t, db, rowID, concept, time.Now().UTC(), original)
 				})
@@ -359,6 +383,9 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "completed", done.Status)
 			require.Len(t, runners[1].requests, 1)
+			require.Empty(t, runners[0].reviews, "the paused replica cannot review an unfinished reply")
+			require.Len(t, runners[1].reviews, 1)
+			require.Contains(t, fmt.Sprint(runners[1].reviews[0]), "completed result retained", "the resumed reply review must receive the completed tool receipt")
 			require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": completedTools, "completed-tool": completedTools, "child-tail": 1, "later-section": 1}, effects)
 			retained := runners[1].requests[0]
 			require.Contains(t, retained, common.ChatMessage{Role: "tool", ToolCallId: "completed", Name: "discoverCapabilities", Content: "completed result retained"})
