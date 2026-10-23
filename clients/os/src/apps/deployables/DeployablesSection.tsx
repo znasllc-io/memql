@@ -5,7 +5,7 @@ import { AccountChip } from "../accounts/AccountPicker";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { healthExplanation } from "./health";
 import { AddButton } from "../../kit/AddButton";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivePane } from "./paneActivity";
 import { Archive, FileArchive, GitBranch, Globe, ShoppingBag } from "lucide-react";
 import { RecordRow } from "../../kit/RecordRow";
@@ -28,6 +28,8 @@ import {
 } from "../../kit";
 import { formatFreshness } from "../../kit/format";
 import type { LiveView } from "../../live/liveView";
+import { useOsConnection } from "../../live/connection";
+import { useGraphRevision } from "../../live/useGraphRevision";
 import type { ArrivalKind } from "../../live/arrival";
 import { NO_ACCOUNT_LABEL } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, accountNameFrom, type AccountRow } from "../accounts/rows";
@@ -54,7 +56,7 @@ import {
   type DeployableListRow,
   type ListFilter,
 } from "./list";
-import { runIsScopedToApp, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { deploymentFromRow, memqlOnlyStaged, runIsScopedToApp, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
 import { partsForOrganization, type PartsHeld } from "./parts";
 import { availableInAnyOrganization } from "../../system/roles";
@@ -861,8 +863,9 @@ function DeployableLine({
 }) {
   const now = useNow();
   const site = row.site;
+  const completion = usePackageOnlyCompletion(row);
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
-  const state = row.parked ? deploymentStateWord(row.parked.status) : row.disabled ? "Inactive" : site ? siteStateWord(site) : "Not deployed";
+  const state = row.parked ? deploymentStateWord(row.parked.status) : row.disabled ? "Inactive" : site ? siteStateWord(site) : completion === "staged" ? "MemQL changes staged" : completion === "reading" ? "Reading installation status" : completion === "unavailable" ? "Installation status unavailable" : "Not deployed";
   const name = row.name;
   const client = accountNameFrom(accounts, site?.accountId ?? row.pkg?.accountId ?? "");
   // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:
@@ -872,7 +875,7 @@ function DeployableLine({
   return <RecordRow
     icon={site?.kind === "shopify_storefront" ? <ShoppingBag size={18} aria-hidden /> : <Globe size={18} aria-hidden />}
     name={name}
-    secondary={row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
+    secondary={completion === "staged" ? "MemQL package" : row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
     state={state}
     tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"}
     stateTitle={!row.parked && site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
@@ -890,4 +893,38 @@ function DeployableLine({
     {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{row.parked ? "started" : site ? "deployed" : "added"} by {deployedBy}</span> : null}
     {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
   </RecordRow>;
+}
+
+/** Source-only rows have no site state. Read one bounded receipt page only
+ * for packages with a recorded installation, without retaining every source's
+ * timeline. Connection, version and pending-run changes invalidate the answer. */
+function usePackageOnlyCompletion(row: DeployableListRow): "" | "reading" | "staged" | "unavailable" {
+  const connection = useOsConnection();
+  const pkg = row.pkg;
+  const packageId = !row.site && !row.app && !row.parked && pkg?.deployedVersion && pkg.declares.length === 0 ? pkg.id : "";
+  const version = packageId ? pkg?.deployedVersion ?? "" : "";
+  const revision = useGraphRevision([], Boolean(packageId));
+  const key = `${packageId}:${version}:${revision}`;
+  const [receipt, setReceipt] = useState<{ key: string; connection: typeof connection; state: "" | "staged" | "unavailable" } | null>(null);
+  useEffect(() => {
+    if (!packageId || !connection) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setReceipt({ key, connection, state: "unavailable" });
+      controller.abort();
+    }, 15_000);
+    void connection.query.packageDeployments({ packageId }, { signal: controller.signal }).then(result => {
+      if (controller.signal.aborted) return;
+      const staged = result.rows().map(deploymentFromRow).some(run => run.packageId === packageId && run.sourceVersion === version && memqlOnlyStaged(run));
+      // This bounded page may omit an older successful receipt. A recorded
+      // installed version without matching evidence is unknown, not absent.
+      setReceipt({ key, connection, state: staged ? "staged" : "unavailable" });
+    }).catch(() => {
+      if (!controller.signal.aborted) setReceipt({ key, connection, state: "unavailable" });
+    }).finally(() => clearTimeout(timeout));
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [connection, packageId, version, key]);
+  if (!packageId) return "";
+  if (!connection) return "unavailable";
+  return receipt?.key === key && receipt.connection === connection ? receipt.state : "reading";
 }

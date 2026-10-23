@@ -26,6 +26,7 @@ import { useWrite, useNewPackage, useRegisterRepositorySource, usePackageActions
 import { ProblemNotice, ReportView } from "../packages/ReportView";
 import {
   deploymentFromRow,
+  memqlOnlyStaged,
   shortRepo,
   sourceLabel,
   type AnalysisReport,
@@ -328,6 +329,7 @@ export function ComposePage(props: ComposePageProps) {
       : (currentTimeline[0] ?? null)) ??
     (parked?.run.id === pinnedRunId ? parked.run : null);
   const report = run?.report ?? null;
+  const completedMemqlOnly = memqlOnlyStaged(run);
 
   const zip = zipProbe.reply === null ? null : zipVerdict(zipProbe.reply);
   // A SOURCE THAT EXISTS IS THE PACKAGE PATH, whether or not a run has parked
@@ -869,6 +871,7 @@ export function ComposePage(props: ComposePageProps) {
           {run ? <Rail input={{ mode: "deploy", deployment: run }} /> : null}
         </>;
       case "live":
+        if (completedMemqlOnly) return <Caption>This receipt confirms staging. It does not verify that every service has loaded the changes.</Caption>;
         return <>
           {draft.choice === "ci" && created.siteId ? <CiHandoff siteId={created.siteId} name={draft.name} clusterDomain={clusterDomain} /> : null}
           {outcomes.length || created.siteId ? <ComposeWhereItLivesStop apps={apps} sourceName={sourceName} addresses={addresses}
@@ -922,7 +925,7 @@ export function ComposePage(props: ComposePageProps) {
   // THE STEPS, off the pipeline's own reading. Completion, failures and
   // availability come from `railFor`, never from a local step counter; which
   // step is OPEN is the only thing a click changes.
-  const awaitingLive = finished && !wentLive;
+  const awaitingLive = finished && !wentLive && !completedMemqlOnly;
   // WHICH WAY IN, as the rail says it. A flow opened for a source that already
   // exists never asked, so it reads the answer off the source.
   const kind = draft.choice !== "" ? draft.choice : (parked?.pkg ?? source) === undefined ? "" : (parked?.pkg ?? source)!.sourceKind === "artifact" ? "zip" : "repo";
@@ -992,9 +995,9 @@ export function ComposePage(props: ComposePageProps) {
     const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
     return [{
       id,
-      name: id === "whereItLives" && dslOnly ? "Installation" : STEP_NAMES[id],
+      name: id === "live" && completedMemqlOnly ? "Result" : id === "whereItLives" && (dslOnly || completedMemqlOnly) ? "Installation" : STEP_NAMES[id],
       state,
-      sentence: id === "whereItLives" && dslOnly ? "Review the MemQL changes to install" : STEP_SENTENCES[id],
+      sentence: id === "live" && completedMemqlOnly ? "MemQL changes staged" : id === "whereItLives" && (dslOnly || completedMemqlOnly) ? "Review the MemQL changes to install" : STEP_SENTENCES[id],
       answer: stage.reason,
       openable: reachable,
       body: reachable ? (
@@ -1021,11 +1024,11 @@ export function ComposePage(props: ComposePageProps) {
               ? { word: "GitHub account needs attention", detail: "manage the account in Settings or choose another" }
               : { word: "Choose a repository", detail: "then configure its branch, name and owning account" };
   const stepNeeds = !sourceLocked && draft.choice === "repo" ? ({ source: "Choose a method", githubAccount: "Choose a GitHub account", githubOrganization: "Choose an organization or personal account", githubRepository: "Choose a repository", sourceDetail: "Configure the deployable" } as Partial<Record<WizardStep, string>>)[journeyStop] : undefined;
-  const word = stepNeeds ?? (!sourceLocked && (draft.choice !== "repo" || draft.repoUrl !== "") && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
+  const word = completedMemqlOnly && !held ? "MemQL changes staged" : stepNeeds ?? (!sourceLocked && (draft.choice !== "repo" || draft.repoUrl !== "") && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   }));
-  const detail = stepNeeds ? undefined : detailNeeds !== null ? detailNeeds.detail : finished
-    ? run?.dslVersion && publishedHosts(outcomes).length === 0 ? "MemQL changes were staged and service restarts were requested. No website was published." : finishedSentence(path, draft, outcomes, siteHostname, wentLive)
+  const detail = stepNeeds ? undefined : detailNeeds !== null ? detailNeeds.detail : finished && !held
+    ? completedMemqlOnly ? "No website was published." : finishedSentence(path, draft, outcomes, siteHostname, wentLive)
     : inactive
       ? siteStateDetail("Inactive", "")
       : archivedSource

@@ -1493,6 +1493,16 @@ describe("installing package DSL without publishing websites", () => {
     dslDomains: [{ domain: "znasdelivery", files: 3, constructs: { automation: 12 } }],
     deployables: REPORT_TWO.deployables.map((app, index) => ({ ...app, name: websites[index]!, deployment: { slug: websites[index], domains: [index === 0 ? "platform.example" : "company.example"] } })),
   };
+  it("keeps an archived source's current state ahead of its historical staging receipt", async () => {
+    const connection = fakeConnection();
+    h.connection = connection;
+    const pkg = packageFromRow({ ...ACME, status: "archived" } as Row);
+    const run = deploymentFromRow(parkedRun(pkg.id, { status: "succeeded", report: { ...report, deployables: [] }, dslVersion: "packages/delivery/content/" }));
+    render(withSession(<ComposePage clusterDomain="memql.test" can={ALL_PARTS} isClusterOwner viewerUserId="u-me" credentials={[]}
+      source={pkg} parked={{ pkg, run }} siteFeed={{ state: "live", error: "" }} placedSources={[]} onBack={vi.fn()} />, { role: "owner", userId: "u-me" }));
+    await waitFor(() => expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Archived"));
+    expect(document.querySelector(".os-actbar")?.textContent).toContain("restore the source");
+  });
   async function uploadedReport(over: Record<string, unknown> = {}) {
     const connection = fakeConnection({ artifacts: [ZIP], artifactProbe: { "artifact-zip": zipReply({ isPackage: true }) } });
     const { region } = await compose(connection);
@@ -1519,7 +1529,10 @@ describe("installing package DSL without publishing websites", () => {
     expect(confirmed).not.toMatch(/hostname|accountId|memql\.io|znas\.io|target: "serving"/);
     expect(connection.callsNamed("sitePublishFromArtifact")).toHaveLength(0);
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(packageId, { status: "succeeded", report, dslVersion: "packages/znasdelivery/content-hash/", deployables: websites.map(name => ({ name, refusal: { code: "deployable_skipped", message: "Skipped" } })) }), "NODE_UPDATED");
-    await waitFor(() => expect(document.querySelector(".os-actbar")?.textContent).toContain("MemQL changes were staged and service restarts were requested"));
+    await waitFor(() => expect(document.querySelector(".os-actbar")?.textContent).toContain("MemQL changes staged"));
+    expect(document.querySelector(".os-actbar")?.textContent).not.toContain("restarts were requested");
+    expect(within(region).getByRole("button", { name: /Result MemQL changes staged/ })).toBeTruthy();
+    expect(within(region).queryByRole("button", { name: /Live Open to visitors/ })).toBeNull();
     expect(forwardAct("Go live")).toBeNull();
   });
   it.each([
