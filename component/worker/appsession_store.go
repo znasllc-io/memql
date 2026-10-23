@@ -498,7 +498,9 @@ type ArtifactProvenanceStamper interface {
 // fresh across replicas; only the attested writes use internal origin.
 // Non-file artifacts get an index stamp only. Missing/foreign rows or a link
 // to another producing run are reported without replacing their provenance.
-// Writes are independently retryable; a failure is reported to the runner,
+// The backing file is claimed first with row-version fences on both rows, so
+// competing indexes cannot assign one file to different runs. Writes are
+// independently retryable; a failure is reported to the runner,
 // which preserves the completed app work and logs the bookkeeping failure.
 func (s *EngineStore) StampArtifactProvenance(ctx context.Context, ownerUserId string, artifactIds []string, p ArtifactProvenance) error {
 	if s == nil || s.Engine == nil || len(artifactIds) == 0 || p.Empty() {
@@ -520,7 +522,24 @@ func (s *EngineStore) StampArtifactProvenance(ctx context.Context, ownerUserId s
 	return firstErr
 }
 
-func (s *EngineStore) readProvenanceRow(ctx context.Context, owner, queryName, key, id string) (map[string]any, error) {
+type provenanceRow struct {
+	payload     map[string]any
+	concept, id string
+	version     time.Time
+}
+
+func (r *provenanceRow) fence(ctx context.Context) context.Context {
+	return memqlengine.ContextWithRowVersionFence(ctx, r.concept, r.id, r.version)
+}
+
+func (r *provenanceRow) checkRun(runID string) error {
+	if existing, _ := r.payload["producedByRunId"].(string); existing != "" && runID != "" && !SameSubjectId(existing, runID) {
+		return fmt.Errorf("worker.store: artifact already belongs to another producing run")
+	}
+	return nil
+}
+
+func (s *EngineStore) readProvenanceRow(ctx context.Context, owner, concept, queryName, key, id string) (*provenanceRow, error) {
 	query, err := langparser.RenderCall(queryName, map[string]any{key: id})
 	if err != nil {
 		return nil, err
@@ -538,48 +557,65 @@ func (s *EngineStore) readProvenanceRow(ctx context.Context, owner, queryName, k
 		if !SameSubjectId(rowOwner, owner) {
 			return nil, fmt.Errorf("worker.store: provenance row belongs to another owner")
 		}
-		return row, nil
+		if node.GetCreatedAt() == nil || node.GetCreatedAt().AsTime().IsZero() {
+			return nil, fmt.Errorf("worker.store: provenance requires an observed row version")
+		}
+		return &provenanceRow{payload: row, concept: concept, id: id, version: node.GetCreatedAt().AsTime()}, nil
 	}
 	return nil, fmt.Errorf("worker.store: provenance row %s is not readable", id)
 }
 
 func (s *EngineStore) stampProducedArtifact(ctx context.Context, owner, artifactId string, p ArtifactProvenance) error {
-	artifact, err := s.readProvenanceRow(ctx, owner, "libraryArtifactById", "artifactId", artifactId)
+	artifact, err := s.readProvenanceRow(ctx, owner, "v1:library:artifact", "libraryArtifactById", "artifactId", artifactId)
 	if err != nil {
 		return err
 	}
-	rows := []map[string]any{artifact}
-	fileId, _ := artifact["sourceConceptRef"].(string)
-	if artifact["kind"] == "file" {
-		file, err := s.readProvenanceRow(ctx, owner, "libraryFileById", "fileId", fileId)
-		if err != nil {
-			return err
-		}
-		rows = append(rows, file)
+	if err := artifact.checkRun(p.RunId); err != nil {
+		return err
 	}
-	for _, row := range rows {
-		if existing, _ := row["producedByRunId"].(string); existing != "" && p.RunId != "" && existing != p.RunId {
-			return fmt.Errorf("worker.store: artifact already belongs to another producing run")
-		}
-	}
-	args := map[string]any{"artifactId": artifactId, "producedBy": p.AsMap()}
+	args := map[string]any{"producedBy": p.AsMap()}
 	// Omit unknown work identity: a plain conversation must not erase an
 	// existing association or invent a run. The mutation preserves absent args.
 	if p.RunId != "" {
 		args["runId"] = p.RunId
 	}
-	if err := s.executeMutation(appSessionWriteContext(ctx, owner), "stampArtifactProvenance", args); err != nil {
-		return err
+	writeCtx := artifact.fence(appSessionWriteContext(ctx, owner))
+	if artifact.payload["kind"] == "file" {
+		fileId, _ := artifact.payload["sourceConceptRef"].(string)
+		file, err := s.readProvenanceRow(ctx, owner, "v1:library:file", "libraryFileById", "fileId", fileId)
+		if err != nil {
+			return err
+		}
+		if err := file.checkRun(p.RunId); err != nil {
+			return err
+		}
+		args["fileId"] = fileId
+		if p.StepKey != "" {
+			// Library's step filter uses the logical key, not the canonical step ID.
+			args["stepKey"] = memqlengine.BareShortId(p.StepKey)
+		}
+		// Claim the shared backing file BEFORE its index. The engine compares
+		// both witnesses and commits under their sorted PostgreSQL row locks.
+		// A second artifact pointing at this file therefore cannot win another
+		// run after reading the same empty association. The artifact witness also
+		// prevents an intervening owner or sourceConceptRef change from authorizing
+		// a claim against a stale link.
+		if err := s.executeMutation(file.fence(writeCtx), "stampLibraryFileProvenance", args); err != nil {
+			return err
+		}
+		// A crash or cancellation here leaves only the file claimed. The same
+		// run can retry and finish its index; a different run must still refuse.
+		file, err = s.readProvenanceRow(ctx, owner, "v1:library:file", "libraryFileById", "fileId", fileId)
+		if err != nil {
+			return err
+		}
+		if err := file.checkRun(p.RunId); err != nil {
+			return err
+		}
+		writeCtx = file.fence(writeCtx)
+		delete(args, "fileId")
+		delete(args, "stepKey")
 	}
-	if len(rows) == 1 {
-		return nil
-	}
-	delete(args, "artifactId")
-	args["fileId"] = fileId
-	if p.StepKey != "" {
-		// The session stores a canonical step ID; Library's step filter uses
-		// the logical key, matching work observations and delivery receipts.
-		args["stepKey"] = memqlengine.BareShortId(p.StepKey)
-	}
-	return s.executeMutation(appSessionWriteContext(ctx, owner), "stampLibraryFileProvenance", args)
+	args["artifactId"] = artifactId
+	return s.executeMutation(writeCtx, "stampArtifactProvenance", args)
 }
