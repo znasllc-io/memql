@@ -54,6 +54,8 @@ func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: owner})
+	admission := &ownedFleetAdmissionFixture{owner: owner}
+	ctx = memql.ContextWithProviderAdmissionForTest(ctx, admission)
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	fleet := &terminalToolFleet{workContextFleet: workContextFleet{owner: owner}}
@@ -83,6 +85,9 @@ func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 	}
 	if len(saved.savedContinuation) < 2 {
 		t.Fatal("completed file receipt was not checkpointed")
+	}
+	if admission.calls != 2 {
+		t.Fatalf("tool execution and continuation reserved %d provider attempts, want 2", admission.calls)
 	}
 	if executor.calls != 1 || fleet.calls != 2 || len(result.ToolCalls) != 1 || result.FinalText != "Saved the file" || sink.toolResults != 1 {
 		t.Fatalf("terminal file call was lost: executions=%d fleetCalls=%d result=%+v sink=%+v", executor.calls, fleet.calls, result, sink)

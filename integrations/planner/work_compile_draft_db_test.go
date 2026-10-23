@@ -270,8 +270,8 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	}
 	// The node's write-gate pool (memql#6022), as its database opens one: the work
 	// integration takes its decision gates there and refuses a plug-in built without
-	// it. forkRun takes none today; a test that builds the integration hands it the
-	// pool all the same, so the day it does the test fails for its own reason.
+	// it. forkRun holds the goal lifecycle gate while validating the owner and
+	// opening the derived run, so this fixture needs the same pool as a serving node.
 	gates, gerr := database.NewGatePool(dbtest.DSN(), 0)
 	if gerr != nil {
 		t.Fatal(gerr)
@@ -429,8 +429,17 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 				triage = map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "first section", "outputs": []string{"first"}}, {"label": "two", "instruction": "second section", "outputs": []string{"second"}}}}
 			}
 			bridge := &draftDBCompiler{engine: plannerEngine, triage: triage}
-			req := CompileRequest{GoalId: "v1:work:goal:draft-goal", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
+			req := CompileRequest{GoalId: "v1:work:goal:" + id.NewShortId(), RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
 			req.Spine, err = workintegration.CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fork admission validates the owning goal under its lifecycle gate.
+			// Persist that part of the fixture as the owner, as native goal creation
+			// does, so the fork exercises a real owned run rather than an orphan.
+			_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkGoal("+encodeArgs(map[string]any{
+				"goalId": req.GoalId, "statement": req.Statement, "origin": "user", "requestedVia": "nexus", "input": req.Input,
+			})+")")
 			if err != nil {
 				t.Fatal(err)
 			}

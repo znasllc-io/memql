@@ -21,6 +21,20 @@ type workContextFleet struct {
 	wantDocument                  string
 }
 
+type ownedFleetAdmissionFixture struct {
+	owner string
+	calls int
+}
+
+func (g *ownedFleetAdmissionFixture) AdmitProvider(ctx context.Context, run common.RunContext, _ memql.ProviderAdmission) error {
+	actor, _ := auth.AccessFromContext(ctx)
+	if actor == nil || actor.UserId != g.owner || run.OwnerUserId != g.owner || run.RunId != "adopted-run" {
+		return fmt.Errorf("provider admission lost the persisted work owner or run")
+	}
+	g.calls++
+	return nil
+}
+
 func (f *workContextFleet) Catalog(ctx context.Context, owner string) ([]memql.FleetModel, error) {
 	f.visits++
 	ac, _ := auth.AccessFromContext(ctx)
@@ -88,6 +102,8 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: owner})
+			admission := &ownedFleetAdmissionFixture{owner: owner}
+			ctx = memql.ContextWithProviderAdmissionForTest(ctx, admission)
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
 			defer cancel()
 			document := strings.TrimSpace(strings.Repeat("Preserve this original document. ", 3000))
@@ -125,6 +141,9 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			}
 			if engine.compactions != 1 || fleet.visits == 0 || fleet.calls != 1 || fleet.missingContext != 0 || result.FinalText != "Completed answer" {
 				t.Fatalf("actual lane did not use owned fleet: visits=%d calls=%d result=%+v", fleet.visits, fleet.calls, result)
+			}
+			if admission.calls != 1 {
+				t.Fatalf("owned fleet reserved %d provider attempts, want 1", admission.calls)
 			}
 			used := 0
 			_, recovered := r.handOffContext(ctx, fmt.Errorf("context_length_exceeded"), []common.ChatMessage{{Role: "user", Content: document}}, &used, 0, "strict-overflow")
