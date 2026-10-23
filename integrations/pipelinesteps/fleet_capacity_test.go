@@ -6,8 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,6 +120,95 @@ func TestFleetDiskCapacityWaitKeepsActionableReasonWithoutRepeatingIt(t *testing
 	}
 }
 
+func TestFleetLocalBuildFenceWaitsForOperatorReconciliation(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "local-build.json")
+	body := []byte("fixture operator-owned record")
+	if err := os.WriteFile(marker, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reason := "A retained local build needs reconciliation; inspect its record before clearing it."
+	fenced := make(chan struct{}, 8)
+	var executions atomic.Int32
+	d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+		if _, err := os.Lstat(marker); err == nil {
+			select {
+			case fenced <- struct{}{}:
+			default:
+			}
+			return worker.Result{ErrorCode: "pipeline_capacity_fenced", ErrorMessage: reason, RefusedBeforeStart: true}, nil
+		} else if !os.IsNotExist(err) {
+			return worker.Result{}, err
+		}
+		executions.Add(1)
+		if req.Args["timeoutSec"] != 900 {
+			return worker.Result{}, errors.New("waiting spent the command budget")
+		}
+		return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`}, nil
+	}}
+	f, _, _, sink := newTestFleet(t, d)
+	f.capacityRetry = time.Millisecond
+	req := fleetReq()
+	run := fleetRun(req)
+	run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan pl.StepResult, 1)
+	go func() {
+		result, _ := f.RunStep(ctx, req, run)
+		done <- result
+	}()
+	for range 2 {
+		select {
+		case <-fenced:
+		case result := <-done:
+			t.Fatalf("fence did not keep admission waiting: %+v", result)
+		case <-ctx.Done():
+			t.Fatal("fenced admission did not return")
+		}
+	}
+	if executions.Load() != 0 {
+		t.Fatal("command started while the operator-owned marker remained")
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != string(body) {
+		t.Fatalf("waiter changed the operator record: %q %v", got, err)
+	}
+	// Fixture-only external operator action, never an effect of the waiter.
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-done:
+		if result.Status != pl.OutcomeSucceeded || executions.Load() != 1 {
+			t.Fatalf("reconciled admission: %+v executions=%d", result, executions.Load())
+		}
+	case <-ctx.Done():
+		t.Fatal("reconciled admission did not finish")
+	}
+	if got := strings.Count(strings.Join(sink.messages(), "\n"), reason); got != 1 {
+		t.Fatalf("recovery reason reported %d times: %v", got, sink.messages())
+	}
+}
+
+func TestFleetLocalBuildFenceRechecksConsentBeforeAnotherDispatch(t *testing.T) {
+	calls := 0
+	d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+		calls++
+		if calls == 1 {
+			return worker.Result{ErrorCode: "pipeline_capacity_fenced", RefusedBeforeStart: true}, nil
+		}
+		return worker.Result{ErrorCode: "denied_by_policy", ErrorMessage: "repository consent was withdrawn", RefusedBeforeStart: true}, nil
+	}}
+	f, _, _, _ := newTestFleet(t, d)
+	f.capacityRetry = time.Millisecond
+	req := fleetReq()
+	run := fleetRun(req)
+	run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+	result, err := f.RunStep(context.Background(), req, run)
+	if err != nil || result.Status != pl.OutcomeRefused || calls != 2 || result.Failure == nil || !strings.Contains(result.Failure.Message, "consent was withdrawn") {
+		t.Fatalf("withdrawal did not stop fenced admission: %+v %v calls=%d", result, err, calls)
+	}
+}
+
 func TestFleetDiskCapacityWaitBoundsLiveMeasurementsAndRetainsArchive(t *testing.T) {
 	calls := 0
 	d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
@@ -152,6 +244,10 @@ func TestFleetNeverQueuesUncertainOrPolicyRefusals(t *testing.T) {
 	}{
 		{"uncertain busy", "pipeline_capacity_busy", false, false, nil},
 		{"lost busy reply", "pipeline_capacity_busy", true, false, errors.New("transport lost")},
+		{"uncertain fence", "pipeline_capacity_fenced", false, false, nil},
+		{"lost fence reply", "pipeline_capacity_fenced", true, false, errors.New("transport lost")},
+		{"fence engine gate", "pipeline_capacity_fenced", true, true, nil},
+		{"capacity inspection unavailable", "pipeline_capacity_unavailable", true, false, nil},
 		{"policy", "denied_by_policy", true, false, nil},
 		{"engine gate", "pipeline_capacity_busy", true, true, nil},
 		{"disconnected", "worker_disconnected", false, false, nil},
@@ -179,47 +275,49 @@ func TestFleetNeverQueuesUncertainOrPolicyRefusals(t *testing.T) {
 }
 
 func TestFleetCapacityWaitStopsOnCancellationAndRunCeiling(t *testing.T) {
-	for _, mode := range []string{"cancel", "ceiling", "missing-ceiling"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			now := exNow
-			calls := 0
-			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
-				calls++
+	for _, code := range []string{"pipeline_capacity_busy", "pipeline_capacity_fenced"} {
+		for _, mode := range []string{"cancel", "ceiling", "missing-ceiling"} {
+			t.Run(code+"/"+mode, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				now := exNow
+				calls := 0
+				d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+					calls++
+					if mode == "cancel" {
+						cancel()
+					} else if mode == "ceiling" {
+						now = now.Add(time.Hour)
+					}
+					return worker.Result{ErrorCode: code, RefusedBeforeStart: true}, nil
+				}}
+				f, _, _, _ := newTestFleet(t, d)
+				f.now = func() time.Time { return now }
+				f.capacityRetry = time.Millisecond
+				req := fleetReq()
+				run := fleetRun(req)
+				if mode != "missing-ceiling" {
+					run.RunDeadline = exNow.Add(time.Minute).Format(time.RFC3339)
+				}
+				res, _ := f.RunStep(ctx, req, run)
+				if calls != 1 {
+					t.Fatalf("dispatched again after %s: %d", mode, calls)
+				}
 				if mode == "cancel" {
-					cancel()
-				} else if mode == "ceiling" {
-					now = now.Add(time.Hour)
+					if res.Status != pl.OutcomeCancelled {
+						t.Fatalf("cancel: %+v", res)
+					}
+				} else {
+					want := pl.CodeRunCeiling
+					if mode == "missing-ceiling" {
+						want = pl.CodeExecutorError
+					}
+					if res.Failure == nil || res.Failure.Code != want {
+						t.Fatalf("%s: %+v", mode, res)
+					}
 				}
-				return worker.Result{ErrorCode: "pipeline_capacity_busy", RefusedBeforeStart: true}, nil
-			}}
-			f, _, _, _ := newTestFleet(t, d)
-			f.now = func() time.Time { return now }
-			f.capacityRetry = time.Millisecond
-			req := fleetReq()
-			run := fleetRun(req)
-			if mode != "missing-ceiling" {
-				run.RunDeadline = exNow.Add(time.Minute).Format(time.RFC3339)
-			}
-			res, _ := f.RunStep(ctx, req, run)
-			if calls != 1 {
-				t.Fatalf("dispatched again after %s: %d", mode, calls)
-			}
-			if mode == "cancel" {
-				if res.Status != pl.OutcomeCancelled {
-					t.Fatalf("cancel: %+v", res)
-				}
-			} else {
-				want := pl.CodeRunCeiling
-				if mode == "missing-ceiling" {
-					want = pl.CodeExecutorError
-				}
-				if res.Failure == nil || res.Failure.Code != want {
-					t.Fatalf("%s: %+v", mode, res)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 

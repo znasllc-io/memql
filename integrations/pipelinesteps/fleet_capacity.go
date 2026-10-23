@@ -13,10 +13,10 @@ import (
 )
 
 // Capacity is admission, not an execution retry. Only a dispatcher's confirmed
-// busy-before-start result or an eligible worker awaiting connection may wait
-// and re-route. A transport error, policy withdrawal or uncertain execution
-// returns immediately. Each re-route repeats current routing, consent and
-// receiving-replica checks.
+// busy-before-start result, retained local-build fence or eligible worker
+// awaiting connection may wait and re-route. A transport error, policy
+// withdrawal or uncertain execution returns immediately. Each re-route repeats
+// current routing, consent and receiving-replica checks.
 func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRequest, run *StepRun, token string, capture *Capture, chunk func(*nodev1.WorkerForwardStream)) (worker.Result, *pl.StepResult, error) {
 	deadline, deadlineErr := time.Parse(time.RFC3339Nano, run.RunDeadline)
 	ownTimeout := run.TimeoutSeconds
@@ -106,7 +106,7 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 // contract. A lost reply after dispatch must never replay the command.
 func fleetMayWait(result worker.Result) bool {
 	switch result.ErrorCode {
-	case "pipeline_capacity_busy", "worker_disconnected", "worker_unreachable":
+	case "pipeline_capacity_busy", "pipeline_capacity_fenced", "worker_disconnected", "worker_unreachable":
 		return true
 	case "no_worker_available":
 		return result.WaitForConnection

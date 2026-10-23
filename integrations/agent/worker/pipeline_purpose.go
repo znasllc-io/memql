@@ -453,7 +453,7 @@ func pipelineRefusedBeforeStart(purpose string, result Result, dispatchErr error
 		return false
 	}
 	switch result.ErrorCode {
-	case "pipeline_capacity_busy", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "denied_by_policy":
+	case "pipeline_capacity_busy", "pipeline_capacity_fenced", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "denied_by_policy":
 		return true
 	default:
 		return false

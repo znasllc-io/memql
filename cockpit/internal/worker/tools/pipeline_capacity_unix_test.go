@@ -194,7 +194,7 @@ func TestPipelineCapacityRefusesRetainedLocalBuildWithoutChangingItsRecord(t *te
 					reservation.close()
 					t.Fatal("retained local build was admitted")
 				}
-				if !errors.Is(err, errPipelineUnreconciled) || !strings.Contains(err.Error(), "host_build_guard.py --inspect") {
+				if !errors.Is(err, errPipelineLocalBuildFenced) || errors.Is(err, errPipelineUnreconciled) || !strings.Contains(err.Error(), "host_build_guard.py --inspect") {
 					t.Fatalf("missing recovery instruction: %v", err)
 				}
 			}
@@ -219,6 +219,85 @@ func TestPipelineCapacityRefusesRetainedLocalBuildWithoutChangingItsRecord(t *te
 				t.Fatal("local marker became a pipeline attempt")
 			}
 			reservation.close()
+		})
+	}
+}
+
+func TestPipelineLocalBuildFenceStartsNoCommandUntilOperatorReconciles(t *testing.T) {
+	allowLocalClones(t)
+	fx := newPipelineFixture(t)
+	policy, workspace := pipelineTestPolicy(t, "")
+	root, err := pipelineCapacityRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "local-build.json")
+	body := []byte(`{"operation":"fixture local build","pid":99999999}`)
+	if err := os.WriteFile(marker, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := &recordedOutput{}
+	for range 2 {
+		_, failed := runPipelineStepQuietly(t, stepArgs(t, fx, "echo executed", nil), policy, out)
+		if failed.GetErrorCode() != "pipeline_capacity_fenced" || !strings.Contains(failed.GetErrorMessage(), "host_build_guard.py --inspect") {
+			t.Fatalf("lost dedicated fence or recovery instruction: %v", failed)
+		}
+		if out.all() != "" {
+			t.Fatalf("work started while fenced: %q", out.all())
+		}
+		if _, err := os.Stat(workspace); !os.IsNotExist(err) {
+			t.Fatalf("checkout created while fenced: %v", err)
+		}
+		if got, err := os.ReadFile(marker); err != nil || string(got) != string(body) {
+			t.Fatalf("worker changed the local build record: %q %v", got, err)
+		}
+	}
+	// Fixture-only operator reconciliation. Production admission must never
+	// delete the marker or infer from its PID that earlier effects are safe.
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded(t)(runPipelineStepQuietly(t, stepArgs(t, fx, "echo executed", nil), policy, out))
+	if got.ExitCode != 0 || strings.Count(out.all(), "executed") != 1 {
+		t.Fatalf("reconciled execution: %+v %q", got, out.all())
+	}
+	assertNoStepDirs(t, workspace)
+}
+
+func TestPipelineLocalBuildFenceDoesNotReclassifyOtherAdmissionFailures(t *testing.T) {
+	for _, kind := range []string{"unavailable", "workbench", "prior-pipeline"} {
+		t.Run(kind, func(t *testing.T) {
+			policy, workspace := pipelineTestPolicy(t, "")
+			root, _ := pipelineCapacityRoot()
+			want := "pipeline_capacity_unavailable"
+			switch kind {
+			case "unavailable":
+				pipelineCapacityRoot = func() (string, error) { return "", os.ErrPermission }
+			case "workbench":
+				if err := os.WriteFile(filepath.Join(root, "workbench-1.lock"), []byte("unreconciled"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "prior-pipeline":
+				want = "pipeline_recovery_required"
+				reservation, err := acquirePipelineReservation()
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = reservation.begin(pipelineAttemptRecord{Execution: "native", Workspace: t.TempDir()})
+				reservation.close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			fx := pipelineFixture{url: "https://github.com/o/r.git", shas: []string{"", strings.Repeat("a", 40)}}
+			out := &recordedOutput{}
+			_, failed := runPipelineStepQuietly(t, stepArgs(t, fx, "echo executed", nil), policy, out)
+			if failed.GetErrorCode() != want || out.all() != "" {
+				t.Fatalf("unrelated admission became a local-build fence: %v output=%q", failed, out.all())
+			}
+			if _, err := os.Stat(workspace); !os.IsNotExist(err) {
+				t.Fatalf("unrelated admission started checkout: %v", err)
+			}
 		})
 	}
 }

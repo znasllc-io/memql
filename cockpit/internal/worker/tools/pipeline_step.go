@@ -116,6 +116,10 @@ const (
 )
 
 var (
+	// A retained local-build marker is known before this pipeline attempt
+	// starts. Only an operator may reconcile it; the engine may wait meanwhile.
+	errPipelineLocalBuildFenced = errors.New("a retained local build needs reconciliation before this machine can accept another build")
+
 	// pipelineStopGrace is how long a step stopped for its timeout gets between
 	// SIGTERM and SIGKILL. A variable only so a test can shorten it.
 	pipelineStopGrace = 10 * time.Second
@@ -219,6 +223,8 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 		code := "pipeline_capacity_unavailable"
 		if errors.Is(err, errPipelineBusy) {
 			code = "pipeline_capacity_busy"
+		} else if errors.Is(err, errPipelineLocalBuildFenced) {
+			code = "pipeline_capacity_fenced"
 		}
 		return refuse(code, err)
 	}

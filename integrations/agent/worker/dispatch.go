@@ -439,8 +439,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		timeout = workerservice.DispatchTimeoutDefault
 	}
 
-	var busy Result
-	var busyRecord RoutingRecord
+	var capacity Result
+	var capacityRecord RoutingRecord
 	for idx, cand := range plan.Candidates {
 		record.Attempts = idx + 1
 		record.SelectedBy = selectedBy(req, plan, idx)
@@ -451,8 +451,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			// looking for one that can start now. A later machine may reject the
 			// runtime or repository; that does not make the busy one ineligible.
 			// Only a confirmed no-start result is eligible for this fallback.
-			if req.Purpose == PurposePipeline && res.ErrorCode == "pipeline_capacity_busy" && busy.ErrorCode == "" {
-				busy, busyRecord = res, record
+			// Prefer ordinary occupied capacity over an operator-reconciled
+			// fence when both exist: that machine can become available itself.
+			if req.Purpose == PurposePipeline &&
+				((res.ErrorCode == "pipeline_capacity_busy" && capacity.ErrorCode != "pipeline_capacity_busy") ||
+					(res.ErrorCode == "pipeline_capacity_fenced" && capacity.ErrorCode == "")) {
+				capacity, capacityRecord = res, record
 			}
 			// NOTHING RAN on this machine. That is the whole precondition for
 			// trying another one (design D5): a busy machine and a stream that
@@ -474,12 +478,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 				record.ReroutedFrom = "worker:" + cand.RegistrationId
 				continue
 			}
-			if busy.ErrorCode != "" {
-				// Every candidate refused before start. Return the busy machine's
+			if capacity.ErrorCode != "" {
+				// Every candidate refused before start. Return the waiting machine's
 				// identity and routing decision so pipeline admission can wait,
 				// retaining the total number of candidates actually attempted.
-				busyRecord.Attempts = record.Attempts
-				res, record = busy, busyRecord
+				capacityRecord.Attempts = record.Attempts
+				res, record = capacity, capacityRecord
 			}
 			d.recordInvocation(ctx, req, res.WorkerId, startedAt, d.clock(), res, res.classifyOutcome(), record)
 			// This return and the one below carry the MACHINE's words, so they

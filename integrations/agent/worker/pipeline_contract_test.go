@@ -69,7 +69,7 @@ func TestNativePlatformUsesBuildMetadataAndLiveConnection(t *testing.T) {
 }
 
 func TestOnlyConfirmedContractRefusalsAllowAnotherMachine(t *testing.T) {
-	for _, code := range []string{"pipeline_capacity_busy", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "denied_by_policy"} {
+	for _, code := range []string{"pipeline_capacity_busy", "pipeline_capacity_fenced", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "denied_by_policy"} {
 		result := Result{ErrorCode: code}
 		if !pipelineRefusedBeforeStart(PurposePipeline, result, nil) {
 			t.Errorf("confirmed refusal %s lost", code)
@@ -90,7 +90,7 @@ func TestContractPreStartProofSurvivesTheReplicaHop(t *testing.T) {
 		code    string
 		reroute bool
 	}{
-		{"pipeline_capacity_busy", true}, {"pipeline_runtime_unavailable", true},
+		{"pipeline_capacity_busy", true}, {"pipeline_capacity_fenced", true}, {"pipeline_runtime_unavailable", true},
 		{"denied_by_policy", true}, {"timeout", false}, {"pipeline_cleanup_uncertain", false},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
