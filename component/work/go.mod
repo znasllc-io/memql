@@ -12,7 +12,3 @@ module github.com/znasllc-io/memql/component/work
 go 1.26.8
 
 toolchain go1.27.3
-
-require github.com/stretchr/testify v1.12.1
-
-require go.yaml.in/yaml/v3 v3.0.5 // indirect
