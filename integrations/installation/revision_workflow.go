@@ -564,6 +564,9 @@ func (s *revisionWorkflowScope) reobserveConfiguration(ctx context.Context, args
 		return nil, err
 	}
 	s.reobserved = false
+	if s.configuration == nil {
+		return nil, errors.New("installation configuration reobservation requires prior authenticated configuration")
+	}
 	var fresh *receiverSnapshot
 	if r.Plan.FormatVersion == 2 {
 		fresh, err = readSelectedReceiver(ctx, s.host, r)

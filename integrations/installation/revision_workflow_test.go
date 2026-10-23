@@ -219,6 +219,48 @@ func TestRevisionWorkflowRecipeCannotForgeNativeProgressOrOmitStart(t *testing.T
 	}
 }
 
+func TestRevisionWorkflowReobserveRequiresPriorConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name, body, wantError string
+	}{
+		{"first operation", `builtin installationRevisionReobserveConfig()`, "prior authenticated configuration"},
+		{"ignored sequencing refusal", `builtin installationRevisionReobserveConfig() on error continue`, "no native observation"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, peerDB := journalDB(t)
+			definition, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource("@template\nautomation reobserveFirstRevision {\n"+test.body+"\n}", "revision-sequencing-test.memql")
+			require.NoError(t, err)
+			definition.Trusted = true // Installed-source recipe, not caller-provided authority.
+			workflow, err := newRevisionWorkflow(definition, strings.Repeat("d", 40))
+			require.NoError(t, err)
+			preparation := preparationConnection(db)
+			ctx, prepared, plan, evidence := promotionFixture(t, preparation, workflow.digest)
+			record, err := preparation.promote(ctx, plan.InstallationID, prepared.ID, prepared.Scope.WorkflowDigest, prepared.Scope.ConfigurationDigest, plan, evidence)
+			require.NoError(t, err)
+
+			receiver := newReceiverFixture(t)
+			catalog := receiver.factory(t)
+			_, err = readReceiver(ctx, receiver, "memql", "receiver", catalog)
+			require.NoError(t, err, "the receiver is valid; an adapter failure must not hide a sequencing panic")
+			clear(receiver.reads)
+			host := &preparationHost{api: receiver, journal: preparation, files: &captureFilesFixture{}, tokens: preparationTokenFixture{},
+				catalog: catalog, artifacts: workflow.artifacts, revisions: workflow, namespace: "memql", configurationName: "receiver"}
+			journal := &revisionJournal{db: func() *sql.DB { return db }}
+			require.NotPanics(t, func() {
+				_, err = workflow.run(ctx, journal, plan.InstallationID, record.ID, revisionStart, nil, host)
+			})
+			require.ErrorContains(t, err, test.wantError)
+			require.Empty(t, receiver.reads, "a missing prerequisite must refuse before receiver access")
+			peer := &revisionJournal{db: func() *sql.DB { return peerDB }}
+			retained, err := peer.get(ctx, plan.InstallationID, record.ID)
+			require.NoError(t, err)
+			require.Equal(t, record, retained, "the other journal host must see the unchanged prepared intent")
+			require.Equal(t, "prepared", retained.State)
+			require.Zero(t, retained.ObservationVersion)
+		})
+	}
+}
+
 func TestRevisionWriteAdmissionRequalifiesExpiredPromotedArtifacts(t *testing.T) {
 	now := time.Now().UTC()
 	digest := func(label string) string { return artifactHash("revision-admission-test", label) }
