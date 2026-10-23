@@ -19,6 +19,55 @@ type decisionContextReader struct {
 	fail     bool
 }
 
+type instructionContextReader struct {
+	memql.IntegrationEngineAccess
+	*decisionContextReader
+}
+
+func (r *instructionContextReader) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	return r.decisionContextReader.Execute(ctx, query)
+}
+
+func TestWholePromptInstructionIsRetainedBeforeNativeCheckpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		override *common.StepOverride
+		want     string
+	}{
+		{"ordinary", nil, "Compiled section"},
+		{"additive", &common.StepOverride{Prompt: "Add a table"}, "Compiled section"},
+		{"whole", &common.StepOverride{WholePrompt: true, Prompt: "  Current replacement\n"}, "  Current replacement\n"},
+		{"empty-whole", &common.StepOverride{WholePrompt: true, Prompt: " "}, "Compiled section"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{
+				RunId: "run", OwnerUserId: "owner", StepKey: "section", Mode: common.RunModeLive, Override: tc.override,
+			})
+			reader := &instructionContextReader{decisionContextReader: &decisionContextReader{run: map[string]any{}}}
+			runner := &fakeTurnRunner{reply: "saved"}
+			integration := &Integration{engine: reader}
+			integration.SetAgentTurnRunner(runner)
+			_, err := integration.handleRunAgentTurn(ctx, map[string]any{"prompt": "Compiled section"}, 0)
+			require.NoError(t, err)
+			require.Len(t, runner.saw, 1)
+			msg := runner.saw[0]
+			require.Equal(t, tc.want, msg.Hints["work_section_prompt"])
+			var marked []string
+			for _, m := range msg.History {
+				if m.Name == common.WorkInstructionMessageName {
+					marked = append(marked, m.Content)
+				}
+			}
+			require.Equal(t, []string{tc.want}, marked)
+			if tc.name == "additive" {
+				require.Contains(t, msg.History[len(msg.History)-1].Content, "Add a table")
+			} else {
+				require.Len(t, msg.History, 2, "whole replacement must not be duplicated as late additive guidance")
+			}
+		})
+	}
+}
+
 func (r *decisionContextReader) Execute(_ context.Context, q string) (*memql.ExecuteResult, error) {
 	switch {
 	case strings.HasPrefix(q, "query workRunForOwner("):
