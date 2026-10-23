@@ -50,8 +50,10 @@ const (
 	// coding agent is a build directory somebody forgot to exclude.
 	maxPushFileBytes int64 = 64 << 20
 
-	// maxPushFiles bounds how many produced files one session pushes.
+	// maxPushFiles bounds Library output uploads; larger sets are bundled.
 	maxPushFiles = 32
+	// Bound archive metadata independently of the number of Library requests.
+	maxOutputEntries = 4096
 	// Bound aggregate uploads too: 32 individually legal files need not be
 	// two GiB of evidence. Omitted candidates remain in the retention manifest.
 	maxPushTotalBytes int64 = 128 << 20
@@ -410,6 +412,7 @@ type producedFile struct {
 	path string
 	rel  string
 	size int64
+	info os.FileInfo
 }
 
 // collectProduced walks the workspace for files the run created or
@@ -482,7 +485,7 @@ func collectProduced(workspace string, before map[string]fileStamp, writes ...ma
 				rel, info.Size(), maxPushFileBytes))
 			return nil
 		}
-		out = append(out, producedFile{path: path, rel: rel, size: info.Size()})
+		out = append(out, producedFile{path: path, rel: rel, size: info.Size(), info: info})
 		return nil
 	})
 
@@ -492,8 +495,8 @@ func collectProduced(workspace string, before map[string]fileStamp, writes ...ma
 	var selected []producedFile
 	var bytes int64
 	for _, f := range out {
-		if len(selected) >= maxPushFiles {
-			skipped = append(skipped, fmt.Sprintf("%s (over the %d-file cap)", f.rel, maxPushFiles))
+		if len(selected) >= maxOutputEntries {
+			skipped = append(skipped, fmt.Sprintf("%s (over the %d-file cap)", f.rel, maxOutputEntries))
 		} else if f.size > maxPushTotalBytes-bytes {
 			skipped = append(skipped, fmt.Sprintf("%s (%d bytes, over the %d-byte total cap)", f.rel, f.size, maxPushTotalBytes))
 		} else {

@@ -701,13 +701,13 @@ func TestSession_ProducedFilesAndTranscriptArePushed(t *testing.T) {
 			}
 		}
 	}
-	if manifest.Version != 1 || manifest.TranscriptID == "" || len(manifest.Files) != 2 || len(manifest.Failures) != 0 {
+	if manifest.Version != 2 || manifest.TranscriptID == "" || len(manifest.Files) != 2 || len(manifest.Failures) != 0 {
 		t.Fatalf("incomplete durable retention receipt: %+v", manifest)
 	}
 }
 
 func TestSession_OutputOmissionIsDurableAndPreventsCleanup(t *testing.T) {
-	fakeApp(t, "claude", "i=0; while [ $i -lt 35 ]; do echo evidence > proof-$i.txt; i=$((i+1)); done\n"+quietClaude)
+	fakeApp(t, "claude", "echo evidence > proof.txt\ndd if=/dev/zero of=too-large.bin bs=1 count=1 seek=67108864 2>/dev/null\n"+quietClaude)
 	h := newRig(t)
 	end := h.start(t, nil)
 	if !strings.Contains(end.GetError(), "not retained") {
@@ -721,10 +721,10 @@ func TestSession_OutputOmissionIsDurableAndPreventsCleanup(t *testing.T) {
 			}
 		}
 	}
-	if len(manifest.Files) != maxPushFiles || len(manifest.Omitted) != 3 || len(manifest.Failures) == 0 {
+	if len(manifest.Files) != 1 || len(manifest.Omitted) != 1 || len(manifest.Failures) == 0 {
 		t.Fatalf("omission disappeared from durable receipt: %+v", manifest)
 	}
-	if _, err := os.Stat(filepath.Join(h.workspace, "proof-9.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(h.workspace, "too-large.bin")); err != nil {
 		t.Fatalf("unretained evidence removed: %v", err)
 	}
 }

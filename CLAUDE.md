@@ -917,7 +917,8 @@ directory (`.git/config` holds remote URLs and their tokens). A file
 holding any credential the session was given travels as neither data nor
 digest (`contains_credential`), at any size -- it is scanned in the pass
 that hashes it -- and the end-of-session push skips it too
-(`redactor.holdsFile`): the redactor rewrites text on its way out, but it
+(`contentPolicy.readOutput` scans the same bytes it bundles and hashes):
+the redactor rewrites text on its way out, but it
 never sees inside base64 or a file pushed whole, and the bearer cannot be
 revoked. A remembered digest is trusted only while the redactor holds no
 new credential. 256 KiB per file and 1 MiB per action travel inline; up to 64 MiB

@@ -713,8 +713,11 @@ Files the run created or changed in the workspace are pushed to the Library,
 plus the full transcript. Bounded, and the bounds are announced rather than
 applied silently:
 
-- 64 MiB per file, 32 files and 128 MiB total per session. Candidates omitted
-  by these limits are named in the transcript and an `outputs.json` artifact;
+- 64 MiB per source file and per output artifact, 128 MiB total, and at most
+  32 output uploads per session. More than 32 files use bounded ZIP parts
+  (stored without compression); archive overhead counts toward both byte
+  limits. At most 4096 source entries bound the manifest and ZIP metadata.
+  Candidates omitted by limits are named in an `outputs.json` artifact;
 - a repository acquired during the session is an input. Unchanged tracked
   files do not enter the upload budget. Changed files and explicitly recorded
   writes are retained, including recorded writes committed before the session
@@ -731,12 +734,24 @@ applied silently:
   different directories would otherwise arrive indistinguishable.
 
 The output manifest links retained files to their workspace-relative paths,
-sizes and Library artifact IDs, and links the transcript. It records omissions
-and transfer failures. An incomplete export reports an error and preserves the
+sizes, SHA-256 digests and Library artifact IDs, and links the transcript.
+Manifest version 2 adds `archiveEntry` when a file lives inside a ZIP, plus an
+`archives` list with each uploaded ZIP’s ID, byte length and SHA-256. Download
+the artifact, verify its digest, then read the named member and verify that
+member’s length and digest. Small sets still have individual artifacts.
+Each file is checked through one regular-file descriptor inside the workspace;
+its exact retained bytes are scanned for session credentials before bundling
+and hashed in the same read. Missing, changed or unreadable files are explicit
+gaps. Only successfully uploaded members enter `files`; failed parts name all
+their members in `omitted`. The manifest records omissions and transfer failures. An incomplete export reports an error and preserves the
 workspace for recovery; a transcript whose upload failed is also preserved.
 This is separate from the action journal, which retains file revisions as the
 app records them. Clean checkouts and dependency caches remain reusable local
-resources rather than Library copies of a repository.
+resources rather than Library copies of a repository. Existing `.tar` and
+`.zip` outputs remain eligible under the same rules. A later session takes a
+new input snapshot, so unchanged files omitted by an earlier export must be
+explicitly recovered as newly produced evidence; restarting alone does not
+retroactively retain them.
 
 Uploads declare a type from the produced bytes instead of multipart's default
 `application/octet-stream`. Recognized binary signatures retain their type.
