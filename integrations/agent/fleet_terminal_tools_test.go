@@ -56,6 +56,8 @@ func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: owner})
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	admission := &workFleetAdmission{owner: owner}
+	ctx = memql.ContextWithProviderAdmissionForTest(ctx, admission)
 	fleet := &terminalToolFleet{workContextFleet: workContextFleet{owner: owner}}
 	providers := memql.NewProviderRegistryForTest()
 	providers.SetFleetInference(fleet)
@@ -86,5 +88,8 @@ func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 	}
 	if executor.calls != 1 || fleet.calls != 2 || len(result.ToolCalls) != 1 || result.FinalText != "Saved the file" || sink.toolResults != 1 {
 		t.Fatalf("terminal file call was lost: executions=%d fleetCalls=%d result=%+v sink=%+v", executor.calls, fleet.calls, result, sink)
+	}
+	if admission.calls != fleet.calls {
+		t.Fatalf("provider calls did not cross admission: admitted=%d dispatched=%d", admission.calls, fleet.calls)
 	}
 }
