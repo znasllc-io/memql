@@ -83,13 +83,11 @@ beforeEach(() => {
 });
 
 describe("a source with a pipeline that runs", () => {
-  it("reads the Pipeline fact from the newest planned run, beside Tracking", async () => {
+  it("reads the Pipeline fact from the newest planned run", async () => {
     mount(fakeConnection(seed()));
     const page = await openSource();
     // The newest run anywhere planned three stages (the cart run), so three.
     await waitFor(() => expect(fact(page, "Pipeline")).toBe("memql-package.yaml, 3 stages, webhook, cluster"));
-    const terms = [...page.querySelectorAll("dt")].map((dt) => dt.textContent);
-    expect(terms.indexOf("Pipeline")).toBe(terms.indexOf("Tracking") + 1);
   });
 
   it("says Latest upstream's checks passed and it is not yet deployed", async () => {

@@ -11,10 +11,9 @@ import { RemoveSource } from "../sources/RemoveSource";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { useAccountOptions } from "../../accounts/tie";
 import { accountNameFrom } from "../../accounts/rows";
-import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
-import { Caption, Fact, Facts, Head, Panel } from "../../../kit";
+import { Caption, Details, DetailsSection, Fact, Facts, Head, Panel } from "../../../kit";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -232,40 +231,46 @@ export function SourceView({
 
           {repositoryWorkspace ? <LocalTabs label="Repository views" value={section} onChange={setSection} options={[["details", "Details"], ["changes", "Change requests"], ...(checked ? [["checks", "Checks"] as const] : []), ["apps", "Deployables"], ["settings", "Settings"]]} /> : null}
           <div hidden={repositoryWorkspace && section !== "details"}>
-          <Caption>
-            {pkg.sourceKind === "repo" ? provenance.provenance : "Shared ZIP package"}
-          </Caption>
-
           {pkg.sourceRemoved ? <Caption>Removed from the repository catalog. Its deployables and repository history are retained.</Caption> : null}
-          <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
-          {pkg.updateAvailable ? <Caption>A newer version is available: {shortVersion(pkg.latestKnownVersion)}. Open an app to review and deploy it.</Caption> : null}
-          <Facts>
-            <Fact label="MemQL account" value={accountNameFrom(accounts, pkg.accountId)} />
-            {pkg.sourceKind === "repo" ? <Fact label="GitHub account" value={provenance.identity} /> : null}
-            {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} /> : null}
-            {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
-            {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
+          <Details>
+          <DetailsSection title="Source">
+            <Facts>
+              {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} copyValue={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} copyValue={pkg.artifactId} />}
+              {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} copyValue={pkg.repoRef || undefined} /> : null}
+              <Fact label="Added" value={formatMoment(pkg.createdAt)} copyValue={pkg.createdAt} />
+            </Facts>
+          </DetailsSection>
+          <DetailsSection title="Access">
+            <Facts>
+              <Fact label="MemQL account" value={accountNameFrom(accounts, pkg.accountId)} />
+              {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} copyValue={provenance.target} /> : null}
+              {pkg.sourceKind === "repo" ? <Fact label="Connection" value={<CredentialChip pkg={pkg} credentials={credentials} />} /> : null}
+            </Facts>
+          </DetailsSection>
+          <DetailsSection title="Delivery">
+            <Facts>
             {checked ? (
               <Fact
                 label="Pipeline"
                 value={settled ? pipelineFact(pipeline, runs) : pipelinesError !== "" ? "Could not be read" : <InlineSkeleton label="Loading the pipeline" />}
               />
             ) : null}
-            <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
+            <Fact label="Deployed" value={pkg.deployedVersion !== "" ? shortVersion(pkg.deployedVersion) : !appsSettled ? <InlineSkeleton label="Loading deployed apps" /> : apps.length > 0 ? "Version not recorded" : "Not deployed"} copyValue={pkg.deployedVersion || undefined} mono={pkg.deployedVersion !== ""} />
             {/* WHAT THAT COMMIT'S CHECKS SAID, beside it (D14): "checks
                 passed, not yet deployed" is the reading that says a newer
                 version is ready to go. The commit stays in the data voice and
                 the words do not. */}
             <Fact
               label="Latest upstream"
-              value={upstream === "" ? latest : <><span className="os-mono">{latest}</span>, {upstream}</>}
-              mono={upstream === ""}
+              value={upstream === "" ? latest || "Not checked yet" : <><span className="os-mono">{latest}</span>, {upstream}</>}
+              copyValue={pkg.latestKnownVersion || undefined}
+              mono={upstream === "" && latest !== ""}
             />
-            <Fact label="Added" value={formatMoment(pkg.createdAt)} />
-            {deployedBy === "" ? null : <Fact label="Deployed by" value={deployedBy} />}
-          </Facts>
-
-          <AvailableVersion key={pkg.id} pkg={pkg} />
+            {pkg.sourceKind === "repo" ? <Fact label="Update" value={latest === "" ? "Not checked yet" : pkg.updateAvailable ? "Available" : "No newer version detected"} /> : null}
+            {deployedBy === "" || (pkg.deployedVersion === "" && apps.length === 0) ? null : <Fact label="Deployed by" value={deployedBy} />}
+            </Facts>
+          </DetailsSection>
+          </Details>
           </div>
           {repositoryWorkspace && pkg.sourceKind === "repo" ? <div hidden={section !== "changes"}><RepositoryChange key={pkg.id} sourceId={pkg.id} visible={section === "changes"} /></div> : null}
           <div hidden={repositoryWorkspace && section !== "checks"}>
