@@ -103,6 +103,28 @@ generation replacement and checks all three session kinds, ordinary and rerun
 executions, rejection and a forged pending-request hash with real storage on two
 engines. It verifies decision and transcript restoration, not a live screenshot.
 
+## Produced file readability
+
+Apps output transport must declare the file's format without changing its bytes.
+The Cockpit uploader previously used multipart's unconditional binary default,
+so a retained JSON checkpoint had a valid digest but the text reader refused it.
+The repair belongs in the producer: `ResolveLibraryMIME` continues to honor an
+explicit type and `libraryReadFile` retains its owner, revision, MIME, UTF-8 and
+size checks. Cockpit classifies the complete body conservatively before upload:
+binary signatures survive, and text requires full UTF-8 and control-byte checks.
+Only validated JSON with a JSON extension receives `application/json`; Markdown
+and ordinary text remain format hints, never trusted instructions. Existing
+opaque rows are not silently rewritten. A normal authorized upload/version is
+needed to change their type; archive extraction and semantic indexing are not
+added by this repair.
+
+Cockpit's `TestLibraryPushContentTypePreservesBytes` covers both upload entry
+points, exact multipart bytes, identity, binary signatures and misleading text
+extensions/suffixes. `TestDocumentRevisionWorkflow/HistoryAndApproval/UploadedJSONReadAcrossEngines`
+uses the real upload handler and persisted owner-stamped rows, then reads JSON
+on a second engine without an artifact index. The same bytes under binary MIME
+remain refused, and unauthenticated/foreign readers never fetch the blob.
+
 ## Knowledge requirements can change during execution
 
 An initial role or skill binding is not a complete account of a goal's needs.
