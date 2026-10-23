@@ -108,10 +108,9 @@ func shopperExtensionFromFunction(fn *Function) (ShopperExtension, error) {
 
 // registerShopperExtensions is the boot pass.
 //
-// IT CLEARS FIRST. The registry must reflect the tree as it now is: a
-// domain dropped from a bundle, or a pack disabled under it, has to stop
-// extending, and a half-cleared registry after a failed load would be
-// worse than either outcome.
+// It constructs a fresh view, then publishes it atomically. A domain dropped
+// from a bundle, or a pack disabled under it, has to stop extending. Candidate
+// validation runs the same checks without publishing that view.
 //
 // Every refusal is RETURNED rather than logged-and-skipped, so strict boot
 // decides. An extension that silently failed to register is a form that
@@ -119,7 +118,26 @@ func shopperExtensionFromFunction(fn *Function) (ShopperExtension, error) {
 // this whole seam exists to end -- it would look exactly like the silent
 // drop that made the seam necessary.
 func registerShopperExtensions(functions *FunctionRegistry) []error {
-	ResetShopperExtensions()
+	return loadShopperExtensions(functions, true)
+}
+
+func loadShopperExtensions(functions *FunctionRegistry, publish bool) []error {
+	forms := map[string]ShopperForm{}
+	shopperMu.RLock()
+	for key, form := range shopperForms {
+		forms[key] = form
+	}
+	shopperMu.RUnlock()
+	extensions := map[string]ShopperExtension{}
+	var inert []string
+	if publish {
+		defer func() {
+			shopperMu.Lock()
+			defer shopperMu.Unlock()
+			shopperExtensions = extensions
+			shopperExtensionsInert = inert
+		}()
+	}
 	if functions == nil {
 		return nil
 	}
@@ -134,14 +152,13 @@ func registerShopperExtensions(functions *FunctionRegistry) []error {
 	sort.Slice(declared, func(i, j int) bool { return declared[i].Name < declared[j].Name })
 
 	var problems []error
-	var inert []string
 	for _, fn := range declared {
 		ext, err := shopperExtensionFromFunction(fn)
 		if err != nil {
 			problems = append(problems, err)
 			continue
 		}
-		if err := RegisterShopperExtension(ext); err != nil {
+		if err := registerShopperExtensionIn(ext, forms, extensions); err != nil {
 			// AN INERT PACK IS NOT A PROBLEM. A storefront pack ships
 			// disabled, so this is the state a freshly installed cluster is
 			// in, and refusing the load would mean a product that extends a
@@ -154,14 +171,7 @@ func registerShopperExtensions(functions *FunctionRegistry) []error {
 			problems = append(problems, err)
 		}
 	}
-	if len(inert) > 0 {
-		// Reported, never silent: an operator who enabled a pack and still
-		// sees no client fields needs this line to exist.
-		sort.Strings(inert)
-		shopperExtensionsInert = inert
-	} else {
-		shopperExtensionsInert = nil
-	}
+	sort.Strings(inert)
 	return problems
 }
 
@@ -170,7 +180,11 @@ func registerShopperExtensions(functions *FunctionRegistry) []error {
 var shopperExtensionsInert []string
 
 // ShopperExtensionsInert reports extensions waiting on a pack to be enabled.
-func ShopperExtensionsInert() []string { return append([]string(nil), shopperExtensionsInert...) }
+func ShopperExtensionsInert() []string {
+	shopperMu.RLock()
+	defer shopperMu.RUnlock()
+	return append([]string(nil), shopperExtensionsInert...)
+}
 
 func describeFunctionKind(kind string) string {
 	if strings.TrimSpace(kind) == "" {

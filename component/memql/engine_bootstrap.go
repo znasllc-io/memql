@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"sort"
@@ -13,9 +14,16 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/deprecation"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 func (e *MemQLEngine) Init(concepts concept.Registry) error {
+	return e.initFromTree(concepts, memqldsl.Tree(), true)
+}
+
+// initFromTree validates the same boot contracts against one explicit source.
+// publish=false keeps candidate definitions and runtime bindings private.
+func (e *MemQLEngine) initFromTree(concepts concept.Registry, tree fs.FS, publish bool) error {
 	e.setConceptRelationships(nil)
 	e.concepts = nil
 	e.initialized = false
@@ -39,7 +47,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// before any loader runs, so strict boot refuses the tree below and
 	// MEMQL_DSL_ALLOW_SKIPS is the break-glass. The domain still parses, with
 	// the engine's own edition, so one boot reports every problem it has.
-	e.resolveLanguageLines(report)
+	e.resolveLanguageLinesFromTree(tree, report)
 
 	if concepts == nil {
 		return fmt.Errorf("concept registry is required")
@@ -96,7 +104,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// in the new tree (none today) get registered exclusively via
 	// this loader. When the legacy tree is retired (Pass 3), the
 	// loadEmbeddedFunctions call above goes away.
-	if _, _, ulErr := LoadUnifiedFunctions(e.Logger, functionRegistry, e.concepts, report); ulErr != nil {
+	if _, _, ulErr := loadUnifiedFunctionsFromTree(tree, e.Logger, functionRegistry, e.concepts, report); ulErr != nil {
 		e.Logger.Warn("unified function loader returned an error; legacy loader covers the gap",
 			"component", "memql.engine",
 			"error", ulErr)
@@ -115,7 +123,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 
 	// Pass 2 of the DSL restructure: overlay shapes from the new
 	// domain-first tree.
-	if _, ulErr := LoadUnifiedShapes(e.Logger, shapeRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedShapesFromTree(tree, e.Logger, shapeRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified shape loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -160,7 +168,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// Specs / traits use the SpecRegistry; the unified function
 	// loader does NOT handle them. Without this call the registry
 	// stays empty + every executor lookup misses.
-	if _, ulErr := LoadUnifiedSpecs(e.Logger, specRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedSpecsFromTree(tree, e.Logger, specRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified spec loader returned an error",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -196,7 +204,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// Pass 2: overlay builtins from the new tree (struct-form
 	// `builtin NAME { ... }` blocks). Builtins are functions
 	// internally so they merge into the FunctionRegistry.
-	if _, ulErr := LoadUnifiedBuiltins(e.Logger, functionRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedBuiltinsFromTree(tree, e.Logger, functionRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified builtin loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -208,7 +216,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 
 	// Pass 2: overlay tools from the new tree.
-	if _, ulErr := LoadUnifiedTools(e.Logger, toolRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedToolsFromTree(tree, e.Logger, toolRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified tool loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -241,7 +249,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// extension that silently failed to register would be a form quietly
 	// not collecting a client's fields, which is the failure this seam
 	// exists to end.
-	for _, extErr := range registerShopperExtensions(functionRegistry) {
+	for _, extErr := range loadShopperExtensions(functionRegistry, publish) {
 		report.AddSkip(baseloader.Skip{
 			Component: "memql.shopperExtensionRegistration",
 			Keyword:   "mutation",
@@ -257,7 +265,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
-	if inert := ShopperExtensionsInert(); len(inert) > 0 && e.Component != nil && e.Logger != nil {
+	if inert := ShopperExtensionsInert(); publish && len(inert) > 0 && e.Component != nil && e.Logger != nil {
 		e.Logger.Info("shopper form extensions are waiting on a pack to be enabled; "+
 			"a client's own fields will not be collected until it is",
 			"component", "memql.engine", "extensions", inert)
@@ -281,8 +289,8 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// resolves @templateFile references against dsl.Tree() so the
 	// .tmpl sidecars in dsl/<domain>/prompts/ are picked up.
 	// Reuse the same partials the legacy loader built.
-	if partials, pErr := loadPartials(); pErr == nil && partials != nil {
-		if _, ulErr := LoadUnifiedPrompts(e.Logger, promptRegistry, partials, report); ulErr != nil {
+	if partials, pErr := loadPartialsFromTree(tree); pErr == nil && partials != nil {
+		if _, ulErr := loadUnifiedPromptsFromTree(tree, e.Logger, promptRegistry, partials, report); ulErr != nil {
 			e.Logger.Warn("unified prompt loader returned an error; legacy covers gap",
 				"component", "memql.engine", "error", ulErr)
 		}
@@ -305,7 +313,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// engine startup + on v1:identity:user create events to materialize
 	// rows into v1:agents:agent and friends.
 	seedRegistry := NewSeedRegistry()
-	if _, slErr := LoadUnifiedSeeds(e.Logger, seedRegistry, report); slErr != nil {
+	if _, slErr := loadUnifiedSeedsFromTree(tree, e.Logger, seedRegistry, report); slErr != nil {
 		e.Logger.Warn("unified seed loader returned an error",
 			"component", "memql.engine", "error", slErr)
 	}
@@ -325,12 +333,14 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// `go run ./scripts/secrets seed`. OS env stays as a legacy fallback per the
 	// Phase 4b transition. Calling these is idempotent; they overwrite
 	// any prior installation, which is the desired behavior in tests.
-	SetSystemSecretResolver(func(ctx context.Context, name string) (string, error) {
-		return e.ResolveSystemSecret(ctx, name)
-	})
-	SetSystemVariableResolver(func(ctx context.Context, name string) (string, error) {
-		return e.ResolveSystemVariable(ctx, name)
-	})
+	if publish {
+		SetSystemSecretResolver(func(ctx context.Context, name string) (string, error) {
+			return e.ResolveSystemSecret(ctx, name)
+		})
+		SetSystemVariableResolver(func(ctx context.Context, name string) (string, error) {
+			return e.ResolveSystemVariable(ctx, name)
+		})
+	}
 
 	providerRegistry, err := loadAIProviders(e.Logger)
 	if err != nil {
@@ -341,7 +351,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// has one file per vendor with the base + all models in one
 	// place; each `provider NAME { ... }` block becomes a registry
 	// entry.
-	if _, ulErr := LoadUnifiedProviders(e.Logger, providerRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedProvidersFromTree(tree, publish, e.Logger, providerRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified provider loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -349,7 +359,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if err != nil {
 		return err
 	}
-	if _, ulErr := LoadUnifiedPolicies(e.Logger, policyRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedPoliciesFromTree(tree, e.Logger, policyRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified policy loader returned an error; legacy stub covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -374,7 +384,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// nil, and a router walking nil rules resolves every call through no rule
 	// at all -- which is the pre-rules behaviour wearing the new vocabulary.
 	ruleRegistry := NewRuleRegistry()
-	if _, ulErr := LoadUnifiedRules(e.Logger, ruleRegistry, report); ulErr != nil {
+	if _, ulErr := loadUnifiedRulesFromTree(tree, e.Logger, ruleRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified rule loader returned an error",
 			"component", "memql.engine", "error", ulErr)
 	}
@@ -394,7 +404,9 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.policies = policyRegistry
 	policyRegistry.AttachStore(databasePolicyStore{database: e.database})
 	e.rules = ruleRegistry
-	e.aiRuntime = newAIRuntime(e.Logger, promptRegistry, providerRegistry, e.aiCacheConfig)
+	if publish {
+		e.aiRuntime = newAIRuntime(e.Logger, promptRegistry, providerRegistry, e.aiCacheConfig)
+	}
 	if e.aiRuntime != nil {
 		// The prompt path's route to a model (epic memql#5127, design D2). It
 		// is the ENGINE's resolveAI rather than the router directly, so the
@@ -438,7 +450,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// explicit `concept.name` cross-concept reference. A violation is a
 	// hard load-time error with an actionable fix message. No escape
 	// valve -- the project starts fresh under the new rule.
-	if err := ValidateDependencyTree(); err != nil {
+	if err := validateDependencyTree(tree); err != nil {
 		return err
 	}
 
@@ -467,7 +479,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// name a core construct also uses -- which is the state memql#3897 exists
 	// to make possible.
 	if rewrites := resolveConstructReferences(
-		functionRegistry, specRegistry, shapeRegistry, e.prompts, baseloader.ReadAll(e.Logger),
+		functionRegistry, specRegistry, shapeRegistry, e.prompts, baseloader.ReadAllFrom(tree, e.Logger),
 		// Logger is PROMOTED through the embedded *component.Component, so it
 		// has to be guarded on the Component too -- a Component-less engine
 		// panics on the promoted field (#2674).
@@ -485,11 +497,21 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// arg-typing (each capability call's args validated against the declared
 	// capability schema). A reconciliation or strict-typing failure crashes the
 	// cluster at bootstrap, so surface it here as a hard load-time error.
-	if err := actions.DefaultCatalogError(); err != nil {
-		return fmt.Errorf("capability catalog reconciliation failed: %w", err)
-	}
-	if err := actions.DefaultLoadError(); err != nil {
-		return fmt.Errorf("authored action load (strict capability arg-typing) failed: %w", err)
+	if publish {
+		if err := actions.DefaultCatalogError(); err != nil {
+			return fmt.Errorf("capability catalog reconciliation failed: %w", err)
+		}
+		if err := actions.DefaultLoadError(); err != nil {
+			return fmt.Errorf("authored action load (strict capability arg-typing) failed: %w", err)
+		}
+	} else {
+		catalog, err := actions.LoadCatalogFromFS(tree)
+		if err != nil {
+			return fmt.Errorf("capability catalog reconciliation failed: %w", err)
+		}
+		if _, err := actions.NewRegistry().LoadFromFSWithCatalog(tree, catalog); err != nil {
+			return fmt.Errorf("authored action load (strict capability arg-typing) failed: %w", err)
+		}
 	}
 
 	// Load-time per-kind uniqueness gate (epic #2351 / S5, memql#2360),
@@ -505,7 +527,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// makes it a strict-boot signal (below) alongside the skipped
 	// constructs each loader recorded on the report.
 	// One read of the merged tree serves both whole-tree source passes below.
-	rawTree := baseloader.ReadAll(e.Logger)
+	rawTree := baseloader.ReadAllFrom(tree, e.Logger)
 
 	// DSL contract gates (memql#3629). Authorization scoping, retired filter
 	// operators the engine still honours, and the `row.` intrinsic namespace
@@ -540,7 +562,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if e.Component != nil && e.Logger != nil {
 		deprecationLogger = e.Logger
 	}
-	recordDeprecatedUses(report, rawTree, deprecationLogger, deprecation.Current())
+	recordDeprecatedUsesWithMetrics(report, rawTree, deprecationLogger, deprecation.Current(), publish)
 
 	// @requiresRank slug validation (epic memql#4832, D6/O2). A floor
 	// naming a role the ladder does not know ranks 0, and a floor of 0

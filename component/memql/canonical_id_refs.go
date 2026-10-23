@@ -2,6 +2,7 @@ package memql
 
 import (
 	"fmt"
+	"io/fs"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,16 +31,22 @@ var useImportRe = regexp.MustCompile(`(?m)^\s*use\s+([\w.]+)\.\{([^}]*)\}`)
 // embedded tree, so a bundle's own pin is honoured exactly like a core
 // domain's. That matters specifically: the cross-repo ambiguity this rule
 // closes arrives from those mounts.
+// Candidate loaders pass their own tree through the private helper below;
+// they must never bind a replacement against the live domain's old pin.
 // The read itself delegates to namespacePin, the loader's own pin reader, so
 // there is exactly one definition of "what this domain's pin says". Copying
 // its four lines here instead would be two sources of truth for one file, and
 // the copy is the one that drifts.
 func declaredNamespaceForDomain(domain string) string {
+	return declaredNamespaceForDomainFromTree(memqldsl.Tree(), domain)
+}
+
+func declaredNamespaceForDomainFromTree(tree fs.FS, domain string) string {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
 		return ""
 	}
-	if pin := namespacePin(memqldsl.Tree(), domain); pin != "" {
+	if pin := namespacePin(tree, domain); pin != "" {
 		return pin
 	}
 	return domain

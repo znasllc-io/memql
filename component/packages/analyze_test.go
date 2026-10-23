@@ -6,11 +6,9 @@ import (
 	"testing/fstest"
 )
 
-// NOTE ON PARALLELISM: nothing in this file calls t.Parallel(). The DSL gate
-// mounts the candidate's domains on the process tree for the width of one
-// pass; two passes at once would validate each against the other's domains,
-// which is why AnalyzePackageDSL serializes them -- and a parallel test would
-// simply queue behind that lock while looking like it had won something.
+// These fixtures share process-wide pack registrations with other tests, so
+// they do not call t.Parallel. Candidate analysis itself uses a private tree;
+// it neither mounts the candidate globally nor serializes live readers.
 
 func TestValidPackageAnalyzesClean(t *testing.T) {
 	rep, err := Analyze(validPackage(), Options{SourceVersion: "abc123"})

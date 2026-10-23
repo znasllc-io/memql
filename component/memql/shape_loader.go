@@ -21,6 +21,8 @@ type ShapeDefinition struct {
 	Description string         `json:"description"`
 	Template    map[string]any `json:"template"`
 	Origin      string         `json:"-"` // file path for debugging
+	// Captured from the loading tree so candidate bindings never consult live pins.
+	declaredNamespace string
 
 	// KindRow / KindActor declare the shape's source universe.
 	KindRow   bool `json:"kindRow,omitempty"`

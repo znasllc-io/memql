@@ -112,6 +112,10 @@ func (e *MemQLEngine) DeprecatedUses() []DeprecatedUseRecord {
 // path testable a release early: pass one past the window and this records the
 // refusals a cluster cut from it will record.
 func recordDeprecatedUses(report *LoadReport, files []baseloader.RawFile, logger *slog.Logger, release string) {
+	recordDeprecatedUsesWithMetrics(report, files, logger, release, true)
+}
+
+func recordDeprecatedUsesWithMetrics(report *LoadReport, files []baseloader.RawFile, logger *slog.Logger, release string, publish bool) {
 	var records []DeprecatedUseRecord
 	for _, f := range files {
 		for _, u := range languageParser.ScanDeprecatedUses(f.Content) {
@@ -170,8 +174,10 @@ func recordDeprecatedUses(report *LoadReport, files []baseloader.RawFile, logger
 				"component", deprecatedFormsComponent, "rule", form.Rule, "at", at, "detail", form.Warning())
 		}
 	}
-	for rule, tracker := range trackers {
-		metrics.DSLDeprecatedUse(rule, tracker.Counts()[rule])
+	if publish {
+		for rule, tracker := range trackers {
+			metrics.DSLDeprecatedUse(rule, tracker.Counts()[rule])
+		}
 	}
 
 	report.mu.Lock()

@@ -116,8 +116,11 @@ func (r *PromptRegistry) set(prompt *PromptTemplate) {
 // {{define}} blocks. Used by LoadUnifiedPrompts to give every prompt
 // access to {{template "partial_name"}}.
 func loadPartials() (*template.Template, error) {
+	return loadPartialsFromTree(memqldsl.Tree())
+}
+
+func loadPartialsFromTree(tree fs.FS) (*template.Template, error) {
 	base := template.New("__base__").Funcs(template.FuncMap{})
-	tree := memqldsl.Tree()
 	entries, err := fs.ReadDir(tree, "common/_partials")
 	if err != nil {
 		// No partials directory -- partials are optional.

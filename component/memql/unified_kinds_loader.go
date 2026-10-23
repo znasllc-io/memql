@@ -48,6 +48,10 @@ func extractAdapter(content, keyword string) []baseloader.Slice {
 // child; tests in shape_parser_test.go still exercise it pending the
 // final deletion in #306 child D (#310).
 func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedShapesFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedShapesFromTree(tree fs.FS, logger *slog.Logger, registry *ShapeRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("shape registry is nil")
 	}
@@ -56,7 +60,7 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry, report ...*
 		logger,
 		"memql.unifiedShapeLoader",
 		"shape",
-		baseloader.ReadAll(logger),
+		baseloader.ReadAllFrom(tree, logger),
 		extractAdapter,
 		func(origin string, raw []byte) (*ShapeDefinition, error) {
 			decl, err := languageParser.ParseShapeDecl(string(raw))
@@ -68,6 +72,7 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry, report ...*
 				return nil, err
 			}
 			shape.Origin = strings.TrimSuffix(origin, ":"+shape.Name)
+			shape.declaredNamespace = declaredNamespaceForDomainFromTree(tree, NamespaceFromFilePath(shape.Origin))
 			return shape, nil
 		},
 		registry.Upsert,
@@ -104,6 +109,10 @@ func LoadUnifiedShapes(logger *slog.Logger, registry *ShapeRegistry, report ...*
 // only for @extends inheritance) are registered with Available=false
 // on purpose: they're metadata, not callable.
 func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedProvidersFromTree(memqldsl.Tree(), true, logger, registry, report...)
+}
+
+func loadUnifiedProvidersFromTree(tree fs.FS, connect bool, logger *slog.Logger, registry *ProviderRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("provider registry is nil")
 	}
@@ -119,7 +128,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry, repor
 	// `openai` is at line 379 but children like audio15 / chat54
 	// land at lines 27..) because the resolver runs before the base
 	// is in the registry.
-	files := baseloader.ReadAll(logger)
+	files := baseloader.ReadAllFrom(tree, logger)
 	all := make([]parsedProviderConfig, 0, 64)
 	for _, raw := range files {
 		for _, slice := range extractAdapter(raw.Content, "provider") {
@@ -149,7 +158,7 @@ func LoadUnifiedProviders(logger *slog.Logger, registry *ProviderRegistry, repor
 		}
 	}
 
-	total := registerParsedProviders(logger, registry, all)
+	total := registerParsedProvidersWithClients(logger, registry, all, connect)
 	rep.AddRegistered("providers", total)
 	if logger != nil {
 		logger.Info("memql.unifiedProviderLoader: registered",
@@ -187,6 +196,10 @@ type parsedProviderConfig struct {
 // debug line -- which is the whole point: they stay in the tree for a
 // future re-enable without polluting boot logs.
 func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, all []parsedProviderConfig) int {
+	return registerParsedProvidersWithClients(logger, registry, all, true)
+}
+
+func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderRegistry, all []parsedProviderConfig, connect bool) int {
 	// Collect the @disabled @base names up front so pass 2 can
 	// propagate the disable to every child that @extends one. A
 	// disabled base is never registered, so a child extending it
@@ -256,6 +269,12 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 		}
 		entry := &ProviderConfigEntry{Config: *p.cfg}
 		resolveProviderExtends(&entry.Config, registry)
+		// Analysis checks definitions, never resolves live secrets or constructs clients.
+		if !connect {
+			registry.setEntry(entry)
+			total++
+			continue
+		}
 		resolvedAuth, authErr := resolveAuthPlaceholders(entry.Config.Auth)
 		if authErr != nil {
 			entry.err = authErr
@@ -366,6 +385,10 @@ func reportProviderAvailability(logger *slog.Logger, available int, unavailable 
 // code after this child; tests in tool_parser_test.go still
 // exercise it pending the final deletion in #306 child D (#310).
 func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedToolsFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedToolsFromTree(tree fs.FS, logger *slog.Logger, registry *ToolRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("tool registry is nil")
 	}
@@ -374,7 +397,7 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 		logger,
 		"memql.unifiedToolLoader",
 		"tool",
-		baseloader.ReadAll(logger),
+		baseloader.ReadAllFrom(tree, logger),
 		extractAdapter,
 		func(origin string, raw []byte) ([]*Tool, error) {
 			decl, err := languageParser.ParseToolDecl(string(raw))
@@ -443,6 +466,10 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 // builtin_parser_test.go still exercise it pending the final deletion
 // in #306 child D (#310).
 func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedBuiltinsFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedBuiltinsFromTree(tree fs.FS, logger *slog.Logger, registry *FunctionRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("function registry is nil")
 	}
@@ -451,7 +478,7 @@ func LoadUnifiedBuiltins(logger *slog.Logger, registry *FunctionRegistry, report
 		logger,
 		"memql.unifiedBuiltinLoader",
 		"builtin",
-		baseloader.ReadAll(logger),
+		baseloader.ReadAllFrom(tree, logger),
 		extractAdapter,
 		func(origin string, raw []byte) (*Function, error) {
 			decl, err := languageParser.ParseBuiltinDecl(string(raw))
@@ -533,13 +560,16 @@ func validateBuiltinAliases(registry *FunctionRegistry) error {
 // directory path to resolve sidecar templates. Kept inline for that
 // reason.
 func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials *template.Template, report ...*LoadReport) (int, error) {
+	return loadUnifiedPromptsFromTree(memqldsl.Tree(), logger, registry, partials, report...)
+}
+
+func loadUnifiedPromptsFromTree(tree fs.FS, logger *slog.Logger, registry *PromptRegistry, partials *template.Template, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("prompt registry is nil")
 	}
 	rep := firstReport(report)
-	tree := memqldsl.Tree()
 	total := 0
-	for _, raw := range baseloader.ReadAll(logger) {
+	for _, raw := range baseloader.ReadAllFrom(tree, logger) {
 		// The offset-bearing slices, so a refusal can name its line.
 		for _, slice := range constructDeclarationSlices(raw.Content, "prompt") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
@@ -767,13 +797,16 @@ func extractFileTopPreamble(source string) string {
 // passes the body through to the row insert without further sidecar
 // handling.
 func LoadUnifiedSeeds(logger *slog.Logger, registry *SeedRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedSeedsFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedSeedsFromTree(tree fs.FS, logger *slog.Logger, registry *SeedRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("seed registry is nil")
 	}
 	rep := firstReport(report)
-	tree := memqldsl.Tree()
 	total := 0
-	for _, raw := range baseloader.ReadAll(logger) {
+	for _, raw := range baseloader.ReadAllFrom(tree, logger) {
 		// Extract the file-top preamble (every `use ...` clause,
 		// both Form A and Form B) once per file. Each per-seed slice
 		// doesn't include the file-top preamble (the

@@ -93,7 +93,11 @@ func resolveShapeBoundConcept(concepts memoryNodes.Registry, shape *ShapeDefinit
 	// memql#5477's v1:pipelines:channel beside v1:shopify:channel), while the
 	// queries bound to it went on resolving through the pin.
 	resolver := NewConceptResolver(concepts)
-	for _, hint := range ambientHints(domain, declaredNamespaceForOrigin(shape.Origin)) {
+	declaredNamespace := shape.declaredNamespace
+	if declaredNamespace == "" {
+		declaredNamespace = declaredNamespaceForOrigin(shape.Origin)
+	}
+	for _, hint := range ambientHints(domain, declaredNamespace) {
 		id, hintErr := resolver.resolveBareConceptNameWithNamespace(bare, hint)
 		if hintErr != nil {
 			continue

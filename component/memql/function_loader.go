@@ -145,6 +145,10 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 // parse error reports is the file's (memql#5364). line 0 leaves positions
 // relative to content.
 func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry, line, bodyOffset int) (*Function, error) {
+	return tryParseFunctionSliceInNamespace(expectedName, expectedKind, content, origin, registry, line, bodyOffset, declaredNamespaceForOrigin(origin))
+}
+
+func tryParseFunctionSliceInNamespace(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry, line, bodyOffset int, declaredNamespace string) (*Function, error) {
 	// What the author wrote, placed in the file when the slice's line is
 	// known: the positions the lexer reports below come from here.
 	authored := content
@@ -249,7 +253,7 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// the path that derives row ids. The same-domain scope the last segment
 	// describes is a different question, and this is not it.
 	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
-		content, NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
+		content, NamespaceFromFilePath(origin), declaredNamespace); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved
@@ -308,7 +312,7 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 		// same file can only ever emit `v1:agents:*`.
 		if err := resolver.ResolveFileWithSignatureConceptsInDomain(
 			file, version, signatureConcepts,
-			NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin),
+			NamespaceFromFilePath(origin), declaredNamespace,
 		); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
@@ -381,7 +385,7 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 		resolver := NewConceptResolver(registry)
 		if id, err := resolver.ResolveSignatureConceptInNamespace(
 			file.Uses, signatureConcepts[0],
-			NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin),
+			NamespaceFromFilePath(origin), declaredNamespace,
 		); err == nil {
 			boundConcept = id
 		}

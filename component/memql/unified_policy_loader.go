@@ -14,10 +14,12 @@ package memql
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // LoadUnifiedPolicies walks the unified tree, extracts every
@@ -31,12 +33,16 @@ import (
 // policyDeclToPolicyConfig converter. The hand-rolled parser, reached
 // by nothing but its own tests after that, is deleted (memql#5359).
 func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedPoliciesFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedPoliciesFromTree(tree fs.FS, logger *slog.Logger, registry *PolicyRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("policy registry is nil")
 	}
 	rep := firstReport(report)
 	total := 0
-	for _, raw := range baseloader.ReadAll(logger) {
+	for _, raw := range baseloader.ReadAllFrom(tree, logger) {
 		for _, slice := range ExtractKeywordSlices(raw.Content, "policy") {
 			decl, err := languageParser.ParsePolicyDecl(slice.Source)
 			if err != nil {

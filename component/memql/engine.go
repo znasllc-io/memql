@@ -278,9 +278,18 @@ const ComponentName = common.ComponentName("MemQLEngine")
 
 // New constructs a MemQLEngine instance backed by the default implementation.
 func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {
+	return newEngine(db, true, args...)
+}
+
+// Validation engines allocate no serving cache and publish no metrics sources.
+func newEngine(db *bun.DB, serving bool, args ...component.Arg) (*MemQLEngine, error) {
 	cfg := loadEngineConfigFromEnv()
 	aiCacheCfg := loadAICacheConfigFromEnv()
-	cache, err := newResultCache(cfg.CacheSize)
+	cacheSize := cfg.CacheSize
+	if !serving {
+		cacheSize = 0
+	}
+	cache, err := newResultCache(cacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("memory engine cache initialization failed: %w", err)
 	}

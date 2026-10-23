@@ -14,11 +14,13 @@ package memql
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // LoadUnifiedSpecs walks dsl.Tree() and registers every spec + trait
@@ -30,10 +32,14 @@ import (
 // but the skip is surfaced loudly so a malformed spec/trait can't rot
 // silently (memql#2356).
 func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedSpecsFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedSpecsFromTree(tree fs.FS, logger *slog.Logger, registry *SpecRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("spec registry is nil")
 	}
-	files := baseloader.ReadAll(logger)
+	files := baseloader.ReadAllFrom(tree, logger)
 
 	// Each file's `use` imports, by the path the loader stamps into an origin
 	// ("unified:<path>:<name>"). A spec's binding resolves through the

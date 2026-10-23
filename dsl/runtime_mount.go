@@ -78,7 +78,7 @@ func MountRuntimeDomainsFromEnv(logger *slog.Logger) []string {
 			}
 			continue
 		}
-		RegisterTree(domain, os.DirFS(filepath.Join(root, domain)))
+		registerTree(domain, os.DirFS(filepath.Join(root, domain)), true)
 		mounted = append(mounted, domain)
 		if logger != nil {
 			logger.Info("MEMQL_DSL_PATH: mounted runtime product DSL domain",

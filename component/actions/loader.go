@@ -26,6 +26,10 @@ import (
 // (pin-by-default; the verified-upgrade lifecycle lands later). @disabled drops
 // the action's Enabled flag.
 func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string) (*Action, error) {
+	return declToActionWithCatalog(d, origin, capImports, DefaultCatalog(), DefaultCatalogError())
+}
+
+func declToActionWithCatalog(d *ast.ActionDecl, origin string, capImports map[string]string, catalog *CapabilityCatalog, catalogErr error) (*Action, error) {
 	if d == nil {
 		return nil, fmt.Errorf("actions: nil action decl")
 	}
@@ -132,7 +136,7 @@ func DeclToAction(d *ast.ActionDecl, origin string, capImports map[string]string
 	// rejects unknown args, and types must be compatible. A capability the
 	// catalog does not declare (namespace-valid but undeclared) is left to the
 	// existing namespace check; there is no schema to enforce.
-	if err := validateAgainstCatalog(DefaultCatalog(), DefaultCatalogError(), a, d.Name, origin); err != nil {
+	if err := validateAgainstCatalog(catalog, catalogErr, a, d.Name, origin); err != nil {
 		return nil, err
 	}
 	return a, nil
@@ -203,6 +207,10 @@ func parseCapabilityImports(content string) (map[string]string, error) {
 // capabilities.*` imports. A slice that fails to parse/convert is returned as
 // an error (load-time failures should be loud).
 func LoadSource(content, path string) ([]*Action, error) {
+	return loadSourceWithCatalog(content, path, DefaultCatalog(), DefaultCatalogError())
+}
+
+func loadSourceWithCatalog(content, path string, catalog *CapabilityCatalog, catalogErr error) ([]*Action, error) {
 	slices := extractActionSlices(content)
 	if len(slices) == 0 {
 		return nil, nil
@@ -218,7 +226,7 @@ func LoadSource(content, path string) ([]*Action, error) {
 			return nil, fmt.Errorf("%s: action %q: %w", path, sl.name, err)
 		}
 		origin := path + ":" + sl.name
-		a, err := DeclToAction(decl, origin, capImports)
+		a, err := declToActionWithCatalog(decl, origin, capImports, catalog, catalogErr)
 		if err != nil {
 			return nil, err
 		}
@@ -239,6 +247,18 @@ func warnEditionRefused(component, path string, err error) {
 // every (non-underscore) .memql file, and registers the enabled ones.
 // Returns the number registered.
 func (r *Registry) LoadFromFS(tree fs.FS) (int, error) {
+	if err := DefaultCatalogError(); err != nil {
+		return 0, err
+	}
+	return r.LoadFromFSWithCatalog(tree, DefaultCatalog())
+}
+
+// LoadFromFSWithCatalog validates actions against the same isolated candidate
+// capability catalog, without touching either process-wide default registry.
+func (r *Registry) LoadFromFSWithCatalog(tree fs.FS, catalog *CapabilityCatalog) (int, error) {
+	if catalog == nil {
+		return 0, fmt.Errorf("actions: capability catalog is required")
+	}
 	if tree == nil {
 		return 0, nil
 	}
@@ -289,7 +309,7 @@ func (r *Registry) LoadFromFS(tree fs.FS) (int, error) {
 			warnEditionRefused("actions.loader", p, prepErr)
 			continue
 		}
-		acts, lerr := LoadSource(string(raw), p)
+		acts, lerr := loadSourceWithCatalog(string(raw), p, catalog, nil)
 		if lerr != nil {
 			return total, lerr
 		}
