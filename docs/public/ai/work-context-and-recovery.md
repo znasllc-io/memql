@@ -346,6 +346,14 @@ Owned work uses the following layers:
    call ID and tool name remain intact. This requires no summarization call.
    If several medium results collectively overflow the newest exchange, the
    engine also offloads them until the combined context fits.
+   Before an Apps session asks for feedback, a public result larger than
+   64 KiB is referenced from its existing journal receipt instead of copied
+   into the continuation. The original bytes remain unchanged, and the
+   reference includes their hash and exact recall coordinates. Small results
+   and call arguments remain intact. This allows a sequence of screenshots
+   to suspend without exhausting the 4 MiB retained-content limit; individual
+   receipt and scan limits still apply. It does not upload a Library artifact
+   or claim that the images were inspected.
 3. **Checkpoint older complete exchanges.** The DSL checkpoint prompt retains
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
