@@ -612,7 +612,11 @@ handoff. If the original rerun replaced the whole prompt, that old replacement
 is not applied again over completed results, a prepared operation or the latest
 recorded decision. The delegate checks the continuation's owner, run, step and
 override binding before launch. Model and effort choices still apply, and a
-fresh explicit rerun still honors whole-prompt replacement. Retained context
+fresh explicit rerun still honors whole-prompt replacement. That replacement is
+also retained as the active instruction before the first checkpoint and used
+for skill preparation, so a later approval cannot restore the obsolete compiled
+section. Additive instructions and later human corrections retain their existing
+ordering. Retained context
 does not extend permissions or bypass the operation's execution checks.
 
 Useful documents, scripts, patches, screenshots and verification receipts can

@@ -79,6 +79,26 @@ launch, and retains the fresh-rerun control. The existing database continuation
 test covers cross-replica checkpoint/decision validation upstream. These checks
 do not establish model adherence or completion of the downstream task.
 
+Whole-prompt replacement must also reach checkpoint creation upstream. A live
+rerun stored the current replacement correctly and launched its first App with
+it, but the native context builder marked the older compiled section as active.
+Every resumed App then recovered that obsolete instruction. The builder now
+selects the executing step's nonempty whole-prompt override before assigning the
+retention marker and skill-preparation hint. It does not append a duplicate
+replacement after later human answers. Additive overrides keep their existing
+chronological guidance path; an empty replacement retains the compiled section.
+The final delegate still preserves the complete restored handover on native
+resume. No checkpoint is rewritten, permission extended, effect replayed, or
+owner/step/generation/override binding relaxed.
+
+`TestWholePromptInstructionIsRetainedBeforeNativeCheckpoint` exercises the
+installed context-builder entry with ordinary, additive, whole and empty
+replacements. `TestWorkDBWholePromptSurvivesNestedPermissionResumes` reproduces
+the old compiled instruction on the first checkpoint, then covers a fresh rerun
+and two nested permission waits across engines, exact completed effects, later
+human correction, unchanged source checkpoint and one-use permission consumption.
+The model boundary is controlled; these tests do not prove downstream adherence.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an

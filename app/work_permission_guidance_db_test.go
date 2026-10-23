@@ -48,7 +48,7 @@ func (f *permissionGuidanceTurn) RunTurn(ctx context.Context, msg *memqlv1.Agent
 	run, _ := common.RunFromContext(ctx)
 	messages := []common.ChatMessage{{Role: "system", Content: "Current instructions"}}
 	for _, m := range msg.History {
-		messages = append(messages, common.ChatMessage{Role: m.Role, Content: m.Content})
+		messages = append(messages, common.ChatMessage{Role: m.Role, Name: m.Name, Content: m.Content})
 	}
 	if run.Continuation == nil {
 		f.effects["completed-tool"]++
