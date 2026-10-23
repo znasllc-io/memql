@@ -9,6 +9,7 @@ vi.mock("../../../src/live/connection", () => ({
 }));
 
 import { DeployablesApp } from "../../../src/apps/deployables/DeployablesApp";
+import { useOs } from "../../../src/chrome/state";
 import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/settings";
 import { LIBRARY_ARTIFACT_CONCEPT, WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { click, emit, fakeConnection, withSession, type FakeConnection, type FakeSeed } from "../harness";
@@ -22,11 +23,17 @@ function memStore() {
   return new LocalDeployablesSettingsStore({ getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) });
 }
 
+function FileDestinationProbe() {
+  const { state } = useOs();
+  const window = Object.values(state.shell.windows).find(item => item.appId === "files");
+  return <output aria-label="Files destination">{JSON.stringify(window?.intent?.payload ?? null)}</output>;
+}
+
 function mount(connection: FakeConnection, runId = "r-1", role = "owner") {
   h.connection = connection;
   return render(
     withSession(
-      <DeployablesApp surface="pipelines" sectionId="runs" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} intent={{ id: `open-${runId}`, payload: { runId } }} consumeIntent={vi.fn()} />,
+      <><DeployablesApp surface="pipelines" sectionId="runs" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} intent={{ id: `open-${runId}`, payload: { runId } }} consumeIntent={vi.fn()} /><FileDestinationProbe /></>,
       { role, userId: VIEWER },
     ),
   );
@@ -102,6 +109,13 @@ describe("the run page", () => {
     await screen.findByLabelText("The last lines of tests.unit's log");
     expect(screen.getByText("No change under bucket os.")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Artifacts" })).getByText("dist/coverage.html")).toBeTruthy();
+  });
+
+  it("opens the exact indexed log without asking Files to search for its backing file", async () => {
+    mount(fakeConnection(seed()));
+    await screen.findByLabelText("The last lines of tests.unit's log");
+    await click(screen.getByRole("button", { name: "Open the full log" }));
+    expect(JSON.parse(screen.getByLabelText("Files destination").textContent!)).toEqual({ artifactId: "artifact-log" });
   });
 
   it("shows confirmed expiry without changing the failed verdict or offering a dead download", async () => {

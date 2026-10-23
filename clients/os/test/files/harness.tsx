@@ -122,6 +122,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       const refusal = seed.refuse?.[name];
       if (refusal !== undefined) throw new Error(refusal);
 
+      if (name === "libraryArtifactById" || name === "libraryArtifactForFile") {
+        const value = /(?:artifactId|fileId): "([^"]+)"/.exec(call)?.[1];
+        return rowsResult((seed.artifacts ?? []).filter(row => name === "libraryArtifactById"
+          ? row.id === value : row.sourceConceptRef === value));
+      }
       if (call.startsWith("query libraryArtifactsByLens(")) return rowsResult(seed.artifacts ?? []);
       if (call === "query libraryFolders()") return rowsResult(seed.folders ?? []);
       if (call === "query myWorkersWithStatus()") return rowsResult(seed.machines ?? []);
@@ -243,7 +248,7 @@ export async function renderFiles(opts: {
    */
   registry?: OsRegistry;
 } = {}) {
-  const view = render(
+  const frame = (intent: typeof opts.intent) => (
     withSession(
       <OsProvider
         registry={opts.registry ?? OS_REGISTRY}
@@ -257,18 +262,19 @@ export async function renderFiles(opts: {
             navigate={() => {}}
             askContext={opts.askContext ?? (() => {})}
             askAbout={opts.askAbout ?? (() => {})}
-            intent={opts.intent}
+            intent={intent}
             consumeIntent={opts.consumeIntent ?? (() => {})}
             store={memSettingsStore(opts.settings ?? {})}
             uploads={opts.uploads ?? NO_UPLOADS}
           />
         </MachinesProvider>
       </OsProvider>,
-    ),
+    )
   );
+  const view = render(frame(opts.intent));
   // Let the collections run their seeds.
   await act(async () => {});
-  return view;
+  return { ...view, setIntent: (intent: typeof opts.intent) => view.rerender(frame(intent)) };
 }
 
 // ---------------------------------------------------------------------------

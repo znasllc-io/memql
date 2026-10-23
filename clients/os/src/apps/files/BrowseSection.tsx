@@ -112,6 +112,7 @@ export function BrowseSection({
   filter,
   setFilter,
   selectedId,
+  explicitSelection = null,
   onSelect,
   confirmBeforeArchive,
   askAbout,
@@ -145,6 +146,8 @@ export function BrowseSection({
   filter: FilesFilter;
   setFilter: (next: FilesFilter) => void;
   selectedId: string;
+  /** The owner-checked destination can open before the broad index finishes. */
+  explicitSelection?: ArtifactRow | null;
   onSelect: (id: string) => void;
   confirmBeforeArchive: boolean;
   askAbout?: (tag: string) => void;
@@ -513,7 +516,8 @@ export function BrowseSection({
     openInVsCode(config.domain, row.id, () => setVsNoAnswer(true), undefined, editorFilename(row));
   };
 
-  const selected = content.find((r) => r.id === selectedId) ?? null;
+  const selected = content.find((r) => r.id === selectedId)
+    ?? (explicitSelection?.id === selectedId ? explicitSelection : null);
   const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
   const accountOptions = useAccountOptions();

@@ -4,7 +4,7 @@ import { Concepts, newShortId, type Row } from "@znasllc-io/memql-sdk-core/clien
 import { useAuthSource } from "../../auth/context";
 import { EdgeUploadProvider } from "../../items/edgeUpload";
 import type { UploadProvider } from "../../items/upload";
-import { Check, Head, Panel, SetupGroup } from "../../kit";
+import { Button, Check, ContentSkeleton, Head, Notice, Panel, SetupGroup } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
 import { useOs } from "../../chrome/state";
@@ -37,6 +37,7 @@ import {
   type FilesSettingsStore, FILES_REQUIRES, FILES_WANTS } from "./settings";
 import { useLibraryFeeds } from "./useLibrary";
 import { useUploadTasks } from "./useUploadTasks";
+import { useFileDestination } from "./useFileDestination";
 import { useSession } from "../../chrome/access";
 import { readEditorPreference, saveEditorPreference, type EditorPreference } from "../../items/editorPreference";
 
@@ -48,8 +49,9 @@ import { readEditorPreference, saveEditorPreference, type EditorPreference } fro
 // TWO FEEDS, ONE SELECTION, EVERY SURFACE A READING OF THEM
 // ===========================================================================
 // The artifacts and folders collections are retained HERE, at the app root,
-// and every surface -- the rail, the list, the inspector, the archive walk --
-// is a client-side fold over their snapshots. A second subscription over
+// and the browse surfaces fold their snapshots. Explicit file links also
+// have one bounded owner-checked read until this feed has held their row.
+// There is still one subscription per concept. A second subscription over
 // either concept would be one that can disagree (the Deployables rule), and
 // a server-side folder filter could not see pre-field rows at all: a row
 // promoted before folders existed has no `folderId` member, and only a
@@ -167,20 +169,18 @@ export function FilesApp({
     [artifacts.snapshot],
   );
 
-  // A generated output names its backing file, whose artifact may arrive
-  // after the composition becomes ready. Keep that intent until the retained
-  // index feed can resolve it; no extra subscription or per-file read.
   const handledIntent = useRef("");
+  const { destination, clear: clearDestination, retry: retryDestination } = useFileDestination(connection, intent, content);
   // The open intent (epic memql#4842, #4845): "show this place, this folder".
   // Consumed by id, so acting on a stale render can never eat a newer
   // instruction; an unrecognized payload is consumed and ignored rather than
   // left standing to re-fire on every render.
   useEffect(() => {
     if (!intent || intent.id === handledIntent.current) return;
-    const fileId = intent.payload.fileId;
-    if (typeof fileId === "string" && fileId !== "") {
-      const artifact = content.find((row) => row.kind === "file" && row.sourceConceptRef === fileId);
-      if (!artifact) return;
+    if (typeof intent.payload.fileId === "string" && intent.payload.fileId !== "" ||
+        typeof intent.payload.artifactId === "string" && intent.payload.artifactId !== "") {
+      if (destination?.intentId !== intent.id || destination.status !== "ready" || !destination.row) return;
+      const artifact = destination.row;
       const place = artifact.archived ? "bin" : "library";
       setFilter((f) => ({
         ...DEFAULT_FILTER,
@@ -195,6 +195,7 @@ export function FilesApp({
     }
     const place = intent.payload.place;
     const folderId = intent.payload.folderId;
+    clearDestination();
     if (isFilesPlace(place)) {
       setFilter((f) => ({
         ...f,
@@ -209,7 +210,7 @@ export function FilesApp({
     }
     handledIntent.current = intent.id;
     consumeIntent?.(intent.id);
-  }, [intent, consumeIntent, content]);
+  }, [intent, consumeIntent, destination, clearDestination]);
 
   // WHICH OF THE CALLER'S FILES CAME OUT OF THE MATERIALIZER (epic
   // memql#4981, #4983). Folded from the composition feed against the artifact
@@ -342,6 +343,24 @@ export function FilesApp({
       />
     );
   }
+  if (destination && destination.status !== "ready" && destination.intentId === intent?.id) {
+    const back = () => {
+      handledIntent.current = destination.intentId;
+      consumeIntent?.(destination.intentId);
+      clearDestination();
+      setSelectedId("");
+    };
+    return <section className="os-app-section">
+      <Head title="File" back={{ label: "Library", onSelect: back }} />
+      {destination.status === "loading" ? <ContentSkeleton label="Opening the file" /> :
+        <Notice tone={destination.status === "missing" ? "info" : "error"}
+          sentence={destination.status === "missing" ? "This file is unavailable." : "This file could not be opened."}
+          next={destination.status === "missing" ? "It may still be saving, or it may no longer be available to you." : "Try again, or return to the Library."}
+          detail={destination.error || undefined}>
+          <Button onClick={retryDestination}>Try again</Button>
+        </Notice>}
+    </section>;
+  }
   return (
     <BrowseSection
       list={list}
@@ -360,7 +379,8 @@ export function FilesApp({
       filter={filter}
       setFilter={setFilter}
       selectedId={selectedId}
-      onSelect={setSelectedId}
+      explicitSelection={destination && !destination.indexed ? destination.row : null}
+      onSelect={id => { clearDestination(); setSelectedId(id); }}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askAbout={askAbout}
       tasks={tasks}

@@ -212,7 +212,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
                 {openStop === null ? null : openStop.steps.length === 0 ? (
                   stepsState === "seeding" || run.workRunId === "" && !isFinished(run) ? <RecordListSkeleton label="Loading the steps" rows={2} /> : <Caption>{stageSummary(openStop)}</Caption>
                 ) : (
-                  <StageSteps stop={openStop} files={files.byFileId} expired={expiry.files} machineName={machineName} onOpenFile={os ? (ref) => os.actions.openApp("files", "browse", { fileId: ref }) : null} />
+                  <StageSteps stop={openStop} files={files.byFileId} expired={expiry.files} machineName={machineName} onOpenFile={os ? (artifactId) => os.actions.openApp("files", "browse", { artifactId }) : null} />
                 )}
               </section></div>
             </>
@@ -229,7 +229,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
                     name={artifactDisplayName(file?.name || expiry.files.get(id) || "Artifact")}
                     secondary={step.key}
                     state={file ? undefined : expiry.files.has(id) ? "Expired" : files.state === "seeding" || expiry.loading ? "Checking availability" : "Unavailable"}
-                    {...(file && os ? { label: `Open ${artifactDisplayName(file.name)} in Files`, onOpen: () => os.actions.openApp("files", "browse", { fileId: file.sourceRef }) } : {})}
+                    {...(file && os ? { label: `Open ${artifactDisplayName(file.name)} in Files`, onOpen: () => os.actions.openApp("files", "browse", { artifactId: file.artifactId }) } : {})}
                   />
                 ))}
               </RecordList>
@@ -260,7 +260,7 @@ function StageSteps({ stop, files, expired, machineName, onOpenFile }: {
   files: ReadonlyMap<string, RunFileRow>;
   expired: ReadonlyMap<string, string>;
   machineName: (workerId: string) => string;
-  onOpenFile: ((sourceRef: string) => void) | null;
+  onOpenFile: ((artifactId: string) => void) | null;
 }) {
   return (
     <ul className="os-record-list pipeline-steps" data-density="compact" aria-label={`Steps of ${stop.name}`}>
@@ -345,7 +345,7 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
       )}
       {log !== null ? (
         <p className="pipeline-log-acts">
-          {onOpenFile ? <button type="button" className="os-link" onClick={() => onOpenFile(log.sourceRef)}>Open the full log</button> : null}
+          {onOpenFile ? <button type="button" className="os-link" onClick={() => onOpenFile(log.artifactId)}>Open the full log</button> : null}
           <span className="pipeline-log-saved">Saved to your Library</span>
         </p>
       ) : null}
