@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -68,6 +69,17 @@ type inputTargetGuard struct {
 }
 
 var desktopInputGuard = &inputTargetGuard{now: time.Now}
+
+var desktopRuntimeDisabled atomic.Bool
+
+// DisableDesktopRuntime isolates a failed GUI startup from inference and host
+// work. It is one-way for this process; no later call can re-enable input.
+func DisableDesktopRuntime() {
+	desktopRuntimeDisabled.Store(true)
+	desktopInputGuard.mu.Lock()
+	desktopInputGuard.halted = true
+	desktopInputGuard.mu.Unlock()
+}
 
 // InputTargetStatus is an explicit local diagnostic, not an input receipt or
 // permission. It contains no element contents, application titles or tokens.

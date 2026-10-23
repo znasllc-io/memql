@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -50,5 +51,24 @@ func TestDesktopMainLoopProgressAndShutdown(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "desktop main loop progressed and stopped") {
 		t.Fatalf("main-thread loop lifecycle failed: %v\n%s", err, out)
+	}
+}
+
+func TestDesktopStartupFailurePreservesHostWork(t *testing.T) {
+	var events []string
+	runWithDesktopLoop(func() { events = append(events, "host-start") },
+		func(func()) error { return errors.New("no GUI session") },
+		func() { events = append(events, "desktop-disabled") },
+		func(error) { events = append(events, "reported") })
+	if strings.Join(events, ",") != "desktop-disabled,reported,host-start" {
+		t.Fatalf("unsafe fallback order or lost host startup: %v", events)
+	}
+	events = nil
+	runWithDesktopLoop(func() { events = append(events, "host-start") },
+		func(run func()) error { run(); return nil },
+		func() { events = append(events, "desktop-disabled") },
+		func(error) { events = append(events, "reported") })
+	if strings.Join(events, ",") != "host-start" {
+		t.Fatalf("successful startup duplicated/disabled work: %v", events)
 	}
 }

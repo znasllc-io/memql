@@ -86,7 +86,7 @@ type CapabilityDescriptor struct {
 // supportedComputerActions) come from capabilities_headless.go /
 // capabilities_computeruse.go.
 func ComputeCapabilities() CapabilityDescriptor {
-	desc := computeCapabilities(runtime.GOOS, os.Getenv)
+	desc := computeCapabilitiesForRuntime(runtime.GOOS, os.Getenv, !desktopRuntimeDisabled.Load())
 	// Scoped reads refuse symlink components. Advertise the physical home path
 	// used by this worker account, without granting access or listing its files.
 	if home, err := filepath.EvalSymlinks(homeDir()); err == nil && permission.CleanAbsolute(home) {
@@ -99,18 +99,26 @@ func ComputeCapabilities() CapabilityDescriptor {
 // ComputeCapabilities so tests can table-drive the display-server
 // detection without mutating the process environment.
 func computeCapabilities(goos string, getenv func(string) string) CapabilityDescriptor {
+	return computeCapabilitiesForRuntime(goos, getenv, true)
+}
+
+func computeCapabilitiesForRuntime(goos string, getenv func(string) string, desktopReady bool) CapabilityDescriptor {
+	hasDesktop := buildHasComputerUse && desktopReady
 	// Dispatchable actions = the per-build computer-use router table plus the
 	// build-agnostic set (`wait`). Merged + sorted for a stable wire
 	// shape; the slices never overlap (the router table is computeruse-only,
 	// the agnostic set is routed before the router).
 	actions := append(availableComputerActions(supportedComputerActions(), goos), buildAgnosticComputerActions...)
+	if !hasDesktop {
+		actions = append([]string{}, buildAgnosticComputerActions...)
+	}
 	sort.Strings(actions)
 	if actions == nil {
 		// Keep the JSON shape stable: "actions": [] -- never null.
 		actions = []string{}
 	}
 	displayServer := "none"
-	if buildHasComputerUse {
+	if hasDesktop {
 		displayServer = detectDisplayServer(goos, getenv)
 	}
 	// Probe the display count only when a RobotGo-drivable display
@@ -126,7 +134,7 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 		contracts["workerHost.computer_permission"] = 1
 	}
 	var targetPolicy map[string]any
-	if buildHasComputerUse {
+	if hasDesktop {
 		contracts["workerComputer.input_target"] = 1
 		supported := []string{}
 		if goos == "darwin" {
@@ -151,7 +159,7 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 		ActionContracts:      contracts,
 		Platform:             goos,
 		DisplayServer:        displayServer,
-		ComputerUseAvailable: buildHasComputerUse,
+		ComputerUseAvailable: hasDesktop,
 		Actions:              actions,
 		Displays:             displays,
 		SchemaVersion:        capabilitySchemaVersion,

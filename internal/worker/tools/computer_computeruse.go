@@ -57,6 +57,9 @@ var computerActionHandlers = map[string]func(map[string]any) (*memqlv1.Success, 
 // required and probed at startup -- see worker.PermissionStatus
 // and `memql worker setup` for the operator wizard.
 func (d *Dispatcher) dispatchComputer(ctx context.Context, action string, args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
+	if desktopRuntimeDisabled.Load() {
+		return nil, failure("desktop_unavailable", "The desktop runtime did not initialize. Desktop actions are disabled for this worker process; host and inference services remain available.")
+	}
 	if isComputerInputAction(action) || action == "window_focus" {
 		return desktopInputGuard.input(ctx, action, args)
 	}

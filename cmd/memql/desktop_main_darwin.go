@@ -26,8 +26,17 @@ func runWorkerCommand(args []string) {
 			return
 		}
 	}
-	if err := tools.RunDesktopMainLoop(func() { worker.HandleCommand(args) }); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	runWithDesktopLoop(func() { worker.HandleCommand(args) }, tools.RunDesktopMainLoop, tools.DisableDesktopRuntime, func(err error) {
+		fmt.Fprintf(os.Stderr, "Desktop actions disabled: %v. Continuing host and inference services.\n", err)
+	})
+}
+
+// The loop starts the callback only after successful GUI initialization. A
+// failure must not take unrelated fleet services down on a headless Mac.
+func runWithDesktopLoop(run func(), loop func(func()) error, disable func(), report func(error)) {
+	if err := loop(run); err != nil {
+		disable()
+		report(err)
+		run()
 	}
 }

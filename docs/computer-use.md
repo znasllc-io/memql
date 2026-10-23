@@ -272,6 +272,9 @@ thread with activation prohibited, then pumps its main run loop while the worker
 runs on a Go goroutine. It creates no windows and does not activate applications.
 Ordinary CLI commands and scoped-command children do not start this loop. The
 diagnostic reports loop progress; the AX target guard remains authoritative.
+If GUI initialization fails (for example, without a usable GUI session), host
+and inference services still start. Desktop operations are disabled for that
+process and its capabilities advertise only the platform-independent `wait`.
 
 macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
 packets also carry the observed window in Quartz's two public mouse-window
