@@ -30,6 +30,8 @@ func TestStoredImageReplayAcrossEnginesKeepsBytesOutOfJournal(t *testing.T) {
 	first := engineWithFleetDefaultPrompt(t, fleet, "")
 	journal := newCountingJournal()
 	first.SetModelCallJournal(journal)
+	guard := &admittedWorkFixture{}
+	first.SetRunCeilingGuard(guard)
 	run := common.RunContext{RunId: "image-live", GoalId: "goal", StepKey: "portrait", OwnerUserId: "alice", Mode: common.RunModeLive}
 	req := airoute.ResolveRequest{Level: airoute.LevelFast, ExplicitProvider: "fleet:illustrator"}
 	input := FleetImageRequest{Prompt: "An illustrated portrait", Width: 512, Height: 768, Count: 1, Format: "png"}
@@ -50,10 +52,14 @@ func TestStoredImageReplayAcrossEnginesKeepsBytesOutOfJournal(t *testing.T) {
 	}
 	second := engineWithFleetDefaultPrompt(t, fleet, "")
 	second.SetModelCallJournal(journal)
+	second.SetRunCeilingGuard(guard)
 	run.RunId, run.SourceRunId, run.SourceGoalId, run.Mode = "image-replay", "image-live", "goal", common.RunModeReplay
 	replayed, err := second.CallAIImage(common.ContextWithRun(userCtx("alice"), run), req, input, "alice/image-1", sink)
 	if err != nil || replayed.Receipt != live.Receipt || replayed.Served != "journal" || writes != 1 || fleet.calls != 1 {
 		t.Fatalf("replay=%+v err=%v writes=%d calls=%d", replayed, err, writes, fleet.calls)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("live image and replay reserved %d provider attempts, want 1", guard.calls)
 	}
 	raw, _ := json.Marshal(journal.rows)
 	if strings.Contains(string(raw), "private-image-bytes") {
@@ -76,12 +82,17 @@ func TestStoredImageFailureIsNotASuccessReceipt(t *testing.T) {
 	e := engineWithFleetDefaultPrompt(t, fleet, "")
 	journal := newCountingJournal()
 	e.SetModelCallJournal(journal)
+	guard := &admittedWorkFixture{}
+	e.SetRunCeilingGuard(guard)
 	ctx := common.ContextWithRun(userCtx("alice"), common.RunContext{RunId: "failed-image", GoalId: "goal", StepKey: "image", OwnerUserId: "alice", Mode: common.RunModeLive})
 	_, err := e.CallAIImage(ctx, airoute.ResolveRequest{Level: airoute.LevelFast, ExplicitProvider: "fleet:illustrator"}, FleetImageRequest{Prompt: "A portrait", Width: 512, Height: 512, Count: 1}, "alice/image", func(context.Context, FleetImage, airoute.Resolution) (string, error) {
 		return "", errors.New("storage unavailable")
 	})
 	if err == nil || !strings.Contains(err.Error(), "storage unavailable") {
 		t.Fatalf("storage failure hidden: %v", err)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("failed image storage reserved %d provider attempts, want 1", guard.calls)
 	}
 	if rows := journal.rows["failed-image"]; len(rows) != 1 || rows[0].Error == "" {
 		t.Fatalf("failure not recorded: %+v", rows)

@@ -20,6 +20,15 @@ type admissionFixture struct {
 	refusal error
 }
 
+// admittedWorkFixture wires both work guards for engine tests that exercise a
+// real fleet provider with a goal-backed run. Keeping admission observable lets
+// replay tests prove that a journal answer reserves no new inference attempt.
+// Tests of missing wiring still use an unwired engine and must fail closed.
+type admittedWorkFixture struct {
+	fakeGuard
+	admissionFixture
+}
+
 type admissionTransport struct{ calls int }
 
 func (t *admissionTransport) RoundTrip(req *http.Request) (*http.Response, error) {

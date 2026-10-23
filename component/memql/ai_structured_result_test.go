@@ -13,12 +13,17 @@ func TestStructuredFleetCallJournalsLocalUsage(t *testing.T) {
 	e := engineWithFleetDefaultPrompt(t, fleet, "")
 	journal := newCountingJournal()
 	e.SetModelCallJournal(journal)
+	guard := &admittedWorkFixture{}
+	e.SetRunCeilingGuard(guard)
 	ctx := common.ContextWithRun(userCtx("alice"), common.RunContext{
 		RunId: "materialization-run", GoalId: "materialization-goal", StepKey: "compose", OwnerUserId: "alice", Mode: common.RunModeLive,
 	})
 	_, err := e.InvokeAIStructured(ctx, "localConductorTurn", map[string]any{"utterance": "write a document"}, "draft", json.RawMessage(`{"type":"object"}`), true)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("structured call reserved %d provider attempts, want 1", guard.calls)
 	}
 	if len(fleet.lastReq.Messages) < 2 || fleet.lastReq.Messages[len(fleet.lastReq.Messages)-1].Role != "user" {
 		t.Fatalf("structured recovery cannot run on runtimes requiring a user query: %+v", fleet.lastReq.Messages)
@@ -38,6 +43,8 @@ func TestStructuredResultPreservesAttributionOnReplay(t *testing.T) {
 	e := engineWithFleetDefaultPrompt(t, fleet, "")
 	journal := newCountingJournal()
 	e.SetModelCallJournal(journal)
+	guard := &admittedWorkFixture{}
+	e.SetRunCeilingGuard(guard)
 	run := common.RunContext{RunId: "original", GoalId: "goal", StepKey: "compose", OwnerUserId: "alice", Mode: common.RunModeLive}
 	req := airoute.ResolveRequest{Level: airoute.LevelStrong, ExplicitProvider: "fleet:llama3.1:8b"}
 	messages := []common.ChatMessage{{Role: "user", Content: "Write the document"}}
@@ -59,6 +66,9 @@ func TestStructuredResultPreservesAttributionOnReplay(t *testing.T) {
 	}
 	if replayed.Text != live.Text || replayed.Served != "journal" || replayed.Resolution.Model != live.Resolution.Model || replayed.Usage != live.Usage {
 		t.Fatalf("replayed content or provenance changed: live=%+v replay=%+v", live, replayed)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("live structured call and replay reserved %d provider attempts, want 1", guard.calls)
 	}
 	if len(journal.rows["replay"]) != 1 || journal.rows["replay"][0].Served != "journal" {
 		t.Fatal("replay did not receive its own journal entry")

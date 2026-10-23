@@ -106,6 +106,8 @@ func TestAnAIExpressionCarriesItsLevelToTheFleet(t *testing.T) {
 	e := &MemQLEngine{providers: providers, prompts: prompts, modelSeam: &modelSeam{}}
 	e.aiRuntime = newTestAIRuntime(prompts, providers, aiCacheConfig{})
 	e.aiRuntime.seam = e.modelSeam
+	guard := &admittedWorkFixture{}
+	e.SetRunCeilingGuard(guard)
 
 	if _, err := e.InvokeAI(userCtx("alice"), "triage", map[string]any{"goal": "hi"}); err != nil {
 		t.Fatal(err)
@@ -125,6 +127,9 @@ func TestAnAIExpressionCarriesItsLevelToTheFleet(t *testing.T) {
 	}
 	if fleet.lastReq.Level != "strong" {
 		t.Fatalf("a step re-run at strong reached the machine with level %q", fleet.lastReq.Level)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("owned step re-run reserved %d provider attempts, want 1", guard.calls)
 	}
 }
 

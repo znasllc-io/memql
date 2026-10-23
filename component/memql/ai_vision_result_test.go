@@ -13,6 +13,8 @@ func TestVisionReferenceReplayUsesImageBytes(t *testing.T) {
 	e := engineWithFleetDefaultPrompt(t, fleet, "")
 	journal := newCountingJournal()
 	e.SetModelCallJournal(journal)
+	guard := &admittedWorkFixture{}
+	e.SetRunCeilingGuard(guard)
 	run := common.RunContext{RunId: "reference-run", GoalId: "goal", StepKey: "compose", OwnerUserId: "alice", Mode: common.RunModeLive}
 	req := airoute.ResolveRequest{Level: airoute.LevelStrong, ExplicitProvider: "fleet:visual:8b"}
 	images := []common.VisionContent{{MimeType: "image/png", Data: []byte("image-one")}}
@@ -28,6 +30,9 @@ func TestVisionReferenceReplayUsesImageBytes(t *testing.T) {
 	replay, err := e.CallAIVision(common.ContextWithRun(userCtx("alice"), run), req, "Describe the reference", images)
 	if err != nil || replay.Text != live.Text || replay.Served != "journal" {
 		t.Fatalf("vision replay=%+v, %v", replay, err)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("live vision call and replay reserved %d provider attempts, want 1", guard.calls)
 	}
 	images[0].Data = []byte("image-two")
 	if _, err := e.CallAIVision(common.ContextWithRun(userCtx("alice"), run), req, "Describe the reference", images); err == nil {
