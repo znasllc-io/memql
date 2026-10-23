@@ -228,6 +228,9 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 			return refuse("pipeline_recovery_required", err)
 		}
 	}
+	if err := checkPipelineDisk(settings.WorkspaceRoot, settings.MinFreeDiskMiB); err != nil {
+		return refuse("pipeline_capacity_busy", err)
+	}
 	if err := checkPipelineRuntime(stepCtx, &req); err != nil {
 		return refuse("pipeline_runtime_unavailable", err)
 	}
@@ -264,6 +267,12 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 		containerMemoryMiB: settings.ContainerMemoryMiB}
 	if fail := run.fetch(stepCtx); fail != nil {
 		return nil, fail
+	}
+	// Checkout may consume the remaining headroom. Refusal is still safe to
+	// reroute: the pipeline command has never started, and the deferred cleanup
+	// must confirm removal before returning a retryable capacity response.
+	if err := checkPipelineDisk(dir, settings.MinFreeDiskMiB); err != nil {
+		return refuse("pipeline_capacity_busy", err)
 	}
 	exitCode, fail := run.command(stepCtx)
 	if fail != nil {

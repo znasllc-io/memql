@@ -4,6 +4,7 @@ package pipelinesteps
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -26,6 +27,8 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 	}
 	maxDelay := 6 * delay
 	queued := false
+	lastReason := ""
+	capacityNotices := 0
 	for {
 		if ctx.Err() != nil {
 			res := stoppedResult(ctx)
@@ -63,6 +66,19 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 		if !queued {
 			capture.Note("memql: waiting for the owner's shared build capacity; no command has started")
 			queued = true
+		}
+		// Preserve the machine's actionable capacity explanation (for example
+		// insufficient disk) without repeating it on every polling attempt.
+		// Available bytes may change every poll: cap live notices, retaining
+		// further changes in the bounded archive rather than flooding the store.
+		if reason := cutBytes(strings.TrimSpace(result.ErrorMessage), 2048); reason != "" && reason != lastReason {
+			if capacityNotices < 4 {
+				capture.Notice("memql: " + reason)
+				capacityNotices++
+			} else {
+				capture.Note("memql: " + reason)
+			}
+			lastReason = reason
 		}
 		wait := delay
 		if remaining := deadline.Sub(f.now()); remaining < wait {

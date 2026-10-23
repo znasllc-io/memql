@@ -85,6 +85,9 @@ func TestPipelinesPolicyDefaults(t *testing.T) {
 	if pp.ContainerMemoryMiB != 2048 || (*Policy)(nil).Pipelines().ContainerMemoryMiB != 2048 {
 		t.Fatal("the default command memory cap changed")
 	}
+	if pp.MinFreeDiskMiB != 20480 || (*Policy)(nil).Pipelines().MinFreeDiskMiB != 20480 {
+		t.Fatal("the default workspace disk headroom changed")
+	}
 	if want := filepath.Join(home, ".memql", "pipelines"); pp.WorkspaceRoot != want {
 		t.Errorf("with no workspace root anywhere, steps run under %q, want %q", pp.WorkspaceRoot, want)
 	}
@@ -115,7 +118,7 @@ func TestPipelinesPolicyReplacesOnReloadSoTheConsentCanBeWithdrawn(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	write("pipelines:\n  allow: true\n  repos: [o/r]\n  container_memory_mib: 4096\n")
+	write("pipelines:\n  allow: true\n  repos: [o/r]\n  container_memory_mib: 4096\n  min_free_disk_mib: 30720\n")
 	p, err := LoadPolicy(path)
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +155,20 @@ func TestPipelinesPolicyReplacesOnReloadSoTheConsentCanBeWithdrawn(t *testing.T)
 	}
 	if p.Pipelines().ContainerMemoryMiB != 2048 || previous.ContainerMemoryMiB != 4096 {
 		t.Fatal("reload must restore the default for new steps without changing a running step's snapshot")
+	}
+	if p.Pipelines().MinFreeDiskMiB != 20480 || previous.MinFreeDiskMiB != 30720 {
+		t.Fatal("disk headroom reload did not preserve the running snapshot and restore the omitted default")
+	}
+}
+
+func TestPipelinesDiskPolicyCannotDisableAdmission(t *testing.T) {
+	if got := policyWith(t, "pipelines:\n  allow: true\n  min_free_disk_mib: 0\n").Pipelines().MinFreeDiskMiB; got != DefaultPipelineMinFreeDiskMiB {
+		t.Fatalf("zero disabled disk admission: %d", got)
+	}
+	for _, minimum := range []int{-1, 1, 1023, 1048577} {
+		if err := (PipelinesPolicy{Allow: true, MinFreeDiskMiB: minimum}).Check("o/r"); err == nil || !strings.Contains(err.Error(), "min_free_disk_mib") {
+			t.Errorf("invalid disk threshold %d admitted: %v", minimum, err)
+		}
 	}
 }
 

@@ -277,6 +277,8 @@ type BackupPolicy struct {
 // max_timeout_sec caps the timeout a step asks for (default 3600).
 // container_memory_mib sizes the command container only (default 2048).
 // Services keep their separate 2 GiB caps. The request cannot override this.
+// min_free_disk_mib is the available workspace filesystem headroom required
+// before checkout and command admission (default 20480). It is not a quota.
 //
 // The whole block REPLACES on reload, unlike the allow lists above: it is a
 // consent, and one a SIGHUP could not take back would be a grant the file no
@@ -287,6 +289,7 @@ type PipelinesPolicy struct {
 	WorkspaceRoot      string   `yaml:"workspace_root"`
 	MaxTimeoutSec      int      `yaml:"max_timeout_sec"`
 	ContainerMemoryMiB int      `yaml:"container_memory_mib"`
+	MinFreeDiskMiB     int      `yaml:"min_free_disk_mib"`
 }
 
 // DefaultPipelineMaxTimeoutSec is the longest a pipeline step may run when
@@ -294,6 +297,8 @@ type PipelinesPolicy struct {
 const DefaultPipelineMaxTimeoutSec = 3600
 
 const DefaultPipelineContainerMemoryMiB = 2048
+
+const DefaultPipelineMinFreeDiskMiB = 20480
 
 // Check decides whether this machine runs a pipeline step of repository. The
 // refusal is a sentence naming the setting that changes it: it reaches the
@@ -304,6 +309,9 @@ func (pp PipelinesPolicy) Check(repository string) error {
 	}
 	if pp.ContainerMemoryMiB != 0 && (pp.ContainerMemoryMiB < 256 || pp.ContainerMemoryMiB > 32768) {
 		return errors.New("pipelines.container_memory_mib must be between 256 and 32768 MiB, or omitted for the 2048 MiB default")
+	}
+	if pp.MinFreeDiskMiB != 0 && (pp.MinFreeDiskMiB < 1024 || pp.MinFreeDiskMiB > 1048576) {
+		return errors.New("pipelines.min_free_disk_mib must be between 1024 and 1048576 MiB, or omitted for the 20480 MiB default")
 	}
 	if len(pp.Repos) == 0 {
 		return nil
@@ -539,6 +547,7 @@ func (p *Policy) Pipelines() PipelinesPolicy {
 			WorkspaceRoot:      pipelinesWorkspaceRoot("", ""),
 			MaxTimeoutSec:      DefaultPipelineMaxTimeoutSec,
 			ContainerMemoryMiB: DefaultPipelineContainerMemoryMiB,
+			MinFreeDiskMiB:     DefaultPipelineMinFreeDiskMiB,
 		}
 	}
 	p.mu.RLock()
@@ -553,6 +562,9 @@ func (p *Policy) Pipelines() PipelinesPolicy {
 	}
 	if out.ContainerMemoryMiB == 0 {
 		out.ContainerMemoryMiB = DefaultPipelineContainerMemoryMiB
+	}
+	if out.MinFreeDiskMiB == 0 {
+		out.MinFreeDiskMiB = DefaultPipelineMinFreeDiskMiB
 	}
 	return out
 }
