@@ -364,9 +364,17 @@ query observation workObservationsForOwnerRun {
 query modelCall workModelCallsPageForOwnerRun {
   args { runId string! }
   filter row => row.runId == args.runId && row.ownerUserId == actor.userId
-  sort "row.createdAt", "desc"
+  sort "row.createdAt", "asc"
   paginate 50
   shape workModelCallSummary
+}
+
+/// Reconcile a late completion against its exact durable receipt.
+@actor
+query modelCall workModelCallReceiptForOwnerRun {
+ args { runId string! receiptId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.id == canonicalId(args.receiptId, modelCall)
+ shape workModelCallSummary
 }
 
 /// Activity summaries, without potentially megabyte-sized checkpoint/tool data.
@@ -731,6 +739,25 @@ query observation workProgressReceiptsForOwnerRun {
  args { runId string! }
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && ((row.kind == "tool_result" && row.?data.isError == false) || (row.kind == "note" && row.?data.capabilityEvidence == true))
  sort "row.createdAt", "desc"
+ paginate 100
+ shape workObservationFull
+}
+
+/// The cumulative native provider ledger survives process and replica changes.
+@actor
+query observation workProviderAdmissionForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.providerAdmission != nil
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}
+
+/// Bounded candidate lookup against durable consumed-evidence identities.
+@actor
+query observation workProgressCreditsForOwnerRun {
+ args { runId string! receiptIds []string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.id in args.receiptIds
  paginate 100
  shape workObservationFull
 }

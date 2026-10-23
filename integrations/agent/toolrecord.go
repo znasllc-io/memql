@@ -89,6 +89,9 @@ type ToolInvocation struct {
 	// recorded: a tool result can be arbitrarily large and can carry anything
 	// the tool read, and the transcript only needs the call.
 	Error string
+	// NativeResultEvidence is derived from an actual bounded source read by
+	// the recorder, never from a model-supplied argument or prose assertion.
+	NativeResultEvidence string
 }
 
 // toolExecutor is the dispatch this wraps -- the engine's own
@@ -181,6 +184,13 @@ func (r *toolRecorder) ExecuteToolByName(ctx context.Context, toolName string, a
 	}
 	if execErr != nil {
 		inv.Error = execErr.Error()
+	} else if resolver, ok := r.exec.(interface {
+		ToolCallee(string) (string, string, bool)
+	}); ok {
+		kind, _, known := resolver.ToolCallee(toolName)
+		if known && kind == "query" {
+			inv.NativeResultEvidence = sourceReadEvidence(out)
+		}
 	}
 	if err := rec.RecordToolInvocation(ctx, inv); err != nil && r.logger != nil {
 		// Logged and swallowed, like taskstamp -- for the same reason, which

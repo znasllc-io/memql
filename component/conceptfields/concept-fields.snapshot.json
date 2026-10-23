@@ -8617,6 +8617,7 @@
       "concept": "v1:work:goal",
       "file": "work/concepts.memql",
       "fields": [
+        "acceptance",
         "accountIds",
         "ceilings",
         "closeReason",
@@ -8759,6 +8760,7 @@
         "outcome",
         "ownerUserId",
         "parentRunId",
+        "providerAccountingVersion",
         "replayPolicy",
         "rerun",
         "routing",

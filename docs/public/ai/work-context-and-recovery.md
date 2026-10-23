@@ -634,9 +634,11 @@ must make progress through checkpointed steps and waits; it does not require
 one unbounded model call or an open client connection.
 
 A goal has no fixed lifetime or automatic-extension count. Time and model-call
-estimates are renewable work windows. Successful, previously uncredited tool
-receipts can renew a window; heartbeats, elapsed time, repeated reads and model
-claims cannot. The existing loop detector also pauses repeated stalled work.
+estimates are renewable work windows. Substantive, previously uncredited source
+facts and native capability contracts can renew a window; heartbeats, elapsed
+time, repeated reads, generic command output and model claims cannot. Consumed
+evidence stays in the owned journal after leaving the bounded active index.
+The existing loop detector also pauses repeated stalled work.
 When progress cannot justify renewal, MemQL preserves the work and asks for
 direction. A fresh human answer renews a window on the same goal, preserving
 usage and completed effects. Waiting for the person does not spend active time.

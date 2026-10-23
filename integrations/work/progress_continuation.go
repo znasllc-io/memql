@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,6 +72,11 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 		return false, err
 	}
 	defer release()
+	return i.continueWorkProgressLocked(ctx, rc, spent, estimatedTokens)
+}
+
+// Caller holds the workload write gate (possibly with the provider gate).
+func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.RunContext, spent workstate.Spent, estimatedTokens int) (bool, error) {
 	run, err := i.store().runForOwner(ctx, rc.RunId)
 	if err != nil {
 		return false, err
@@ -110,12 +116,11 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 	if err != nil || next == 0 {
 		return false, err
 	}
-	seen := rowStringSlice(state, "receipts")
+	var candidates []string
 	rows, err := i.store().query(ctx, "query "+call("workProgressReceiptsForOwnerRun", map[string]any{"runId": rc.RunId}))
 	if err != nil {
 		return false, err
 	}
-	fresh := false
 	for _, row := range rows {
 		if memql.BareShortId(rowString(row, "ownerUserId")) != memql.BareShortId(rc.OwnerUserId) || memql.BareShortId(rowString(row, "runId")) != memql.BareShortId(rc.RunId) {
 			return false, fmt.Errorf("work progress receipt attribution changed")
@@ -127,13 +132,16 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 			}
 		}
 		for _, key := range progressReceiptKeys(row) {
-			if !slices.Contains(seen, key) {
-				fresh = true
-				seen = append(seen, key)
+			if !slices.Contains(candidates, key) {
+				candidates = append(candidates, key)
 			}
 		}
 	}
-	if !fresh || len(seen) > 300 {
+	seen, next, err := i.claimProgressCredits(ctx, rc, state, candidates, next)
+	if err != nil {
+		return false, err
+	}
+	if len(seen) == 0 {
 		return false, nil
 	}
 	if classification == nil {
@@ -142,7 +150,12 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 	if state == nil {
 		state = map[string]any{}
 	}
+	if rowInt(state, "policyVersion") < 2 {
+		state["legacyReceipts"] = rowStringSlice(state, "receipts")
+	}
+	state["policyVersion"] = 2
 	state["extensions"], state["receipts"], state["continuedAt"] = next, seen, rfc(i.clock())
+	state["receiptAfter"] = rfc(i.clock())
 	state["reason"] = "Completed new work; renewed the execution window."
 	classification["progressContinuation"] = state
 	if err := i.store().updateRun(ctx, rc.RunId, map[string]any{"classification": classification, "versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock()))}); err != nil {
@@ -151,22 +164,48 @@ func (i *Integration) ContinueWorkProgress(ctx context.Context, rc common.RunCon
 	return true, nil
 }
 
-func progressReceiptKey(row map[string]any) string {
+func progressResultEvidenceKeys(row map[string]any) []string {
 	data := rowMap(row, "data")
 	if rowString(row, "kind") != "tool_result" || data["isError"] != false || data["argsTruncated"] == true {
-		return ""
+		return nil
 	}
 	name := rowString(data, "tool")
 	short := name[strings.LastIndex(name, ".")+1:]
 	switch short {
 	case "", "discoverCapabilities", "workCapabilities", "recallWorkHistory", "requestUserFeedback", "respondToUser":
-		return ""
+		return nil
 	}
 	var args any
 	if json.Unmarshal([]byte(rowString(data, "args")), &args) != nil {
-		return ""
+		return nil
 	}
-	return workstate.ArtifactHash(map[string]any{"tool": name, "args": args})
+	evidence := rowString(data, "nativeResultEvidence")
+	var digests []string
+	if raw, err := hex.DecodeString(evidence); err == nil && len(raw) == 32 {
+		digests = []string{evidence}
+	} else if json.Unmarshal([]byte(evidence), &digests) != nil {
+		return nil
+	}
+	if len(digests) == 0 || len(digests) > 100 {
+		return nil
+	}
+	var keys []string
+	for _, digest := range digests {
+		raw, err := hex.DecodeString(digest)
+		if err != nil || len(raw) != 32 {
+			return nil
+		}
+		keys = append(keys, "source-content-v1:"+digest)
+	}
+	return keys
+}
+
+func progressReceiptKey(row map[string]any) string {
+	keys := progressResultEvidenceKeys(row)
+	if len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
 }
 
 // A real feedback answer may request one further work window. It does not

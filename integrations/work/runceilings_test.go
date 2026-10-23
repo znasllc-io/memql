@@ -74,6 +74,7 @@ func answerRows(eng *recordingEngine, ceilings map[string]any, calls ...map[stri
 	eng.reply("workGoalForOwner", goal)
 	for n, row := range calls {
 		row["id"] = "receipt-" + itoa(n)
+		row["createdAt"] = rfc(testNow)
 		row["ownerUserId"] = ceilingOwner
 		row["runId"] = ceilingRunId
 	}

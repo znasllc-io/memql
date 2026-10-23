@@ -3,6 +3,8 @@ package work
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,7 +13,58 @@ import (
 )
 
 func usageRow(id, served string, tokens int) map[string]any {
-	return map[string]any{"id": id, "ownerUserId": ceilingOwner, "runId": ceilingRunId, "served": served, "inputTokens": tokens}
+	return map[string]any{"id": id, "createdAt": rfc(testNow), "ownerUserId": ceilingOwner, "runId": ceilingRunId, "served": served, "inputTokens": tokens}
+}
+
+type longUsagePageEngine struct {
+	Engine
+	count int
+}
+
+func (e longUsagePageEngine) Execute(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	if !strings.Contains(q, "workModelCallsPageForOwnerRun") {
+		return e.Engine.Execute(ctx, q)
+	}
+	start := 0
+	if cursor := memqlengine.CursorFromContext(ctx); cursor != "" {
+		var err error
+		start, err = strconv.Atoi(cursor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	end := min(start+50, e.count)
+	var rows []any
+	for n := start; n < end; n++ {
+		rows = append(rows, usageRow(fmt.Sprintf("receipt-%08d", n), "local", 1))
+	}
+	result := memqlengine.NewResultWithOutput(rows)
+	if end < e.count {
+		result.SetCursor(strconv.Itoa(end))
+		result.SetHasMore(true)
+	}
+	return result, nil
+}
+
+func TestRunUsageLifetimeHistoryDoesNotFillThePendingReceiptIndex(t *testing.T) {
+	c, eng := newTestCeilings(t)
+	answerRows(eng, nil)
+	c.store.engine = longUsagePageEngine{Engine: eng, count: 5000}
+	rc := aGoalBackedRun()
+	// Explicitly exercise accounting without claiming that 5,000 calls fit the
+	// current work window. That policy check remains independently enforced.
+	b := c.budgetFor(rc)
+	for n := 0; n < 2; n++ {
+		if err := c.refreshReceipts(context.Background(), rc, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b.spent.ModelCalls != 5000 || b.spent.TokensLocal != 5000 {
+		t.Fatalf("incomplete cumulative usage: %+v", b.spent)
+	}
+	if len(b.receipts) != 0 || len(b.pending) != 0 {
+		t.Fatal("durable history filled the active pending index")
+	}
 }
 
 func TestRunUsageUnionKeepsLocalOnlyChargesAndNeverRefundsObservedReceipts(t *testing.T) {
@@ -36,6 +89,7 @@ func TestRunUsageUnionKeepsLocalOnlyChargesAndNeverRefundsObservedReceipts(t *te
 	}
 	// A later successful retry of the same receipt cannot charge twice.
 	eng.reply("workModelCallsPageForOwnerRun", usageRow("peer", "subscription", 200), usageRow("local", "local", 100))
+	eng.reply("workModelCallReceiptForOwnerRun", usageRow("local", "local", 100))
 	if b := c.Admit(ctx, rc, 0); b != nil {
 		t.Fatal(b)
 	}
@@ -45,8 +99,8 @@ func TestRunUsageUnionKeepsLocalOnlyChargesAndNeverRefundsObservedReceipts(t *te
 	}
 	// Even a genuinely removed receipt is not a budget refund.
 	eng.reply("workModelCallsPageForOwnerRun")
-	if b := c.Admit(ctx, rc, 0); b != nil {
-		t.Fatal(b)
+	if b := c.Admit(ctx, rc, 0); b == nil || b.Ceiling != work.CeilingUnevaluated {
+		t.Fatalf("a regressed durable journal must require accounting recovery: %+v", b)
 	}
 	if c.Spent(ctx, rc) != got {
 		t.Fatalf("missing receipt refunded usage: %+v", c.Spent(ctx, rc))

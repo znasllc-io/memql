@@ -11,11 +11,11 @@ import (
 
 // Prefetched capability contracts are completed reads even without a model's
 // tool round trip. Credit facts, not search terms, timestamps, shortlist order,
-// or busy/idle polling. The durable per-run watermark and continuation cap still
-// apply, so rediscovering the same facts cannot buy another work window.
+// or busy/idle polling. Durable consumed-evidence identities still apply, so
+// rediscovering the same facts cannot buy another work window.
 func progressReceiptKeys(row map[string]any) []string {
-	if key := progressReceiptKey(row); key != "" {
-		return []string{key}
+	if keys := progressResultEvidenceKeys(row); len(keys) > 0 {
+		return keys
 	}
 	data := rowMap(row, "data")
 	if rowString(row, "kind") != "note" || data["capabilityEvidence"] != true || rowString(data, "messagesEncoding") != "json-base64-v1" {
@@ -55,14 +55,7 @@ func progressReceiptKeys(row map[string]any) []string {
 		}
 		keys = append(keys, workstate.ArtifactHash(map[string]any{"capabilityContract": contract.Name, "kind": contract.Kind, "app": contract.App}))
 	}
-	if facts.Fleet.Status == "observed" {
-		for modality, counts := range facts.Fleet.Modalities {
-			if modality == "" || counts.Advertised == nil || *counts.Advertised < 0 {
-				return nil
-			}
-			keys = append(keys, workstate.ArtifactHash(map[string]any{"fleetModality": modality, "advertised": *counts.Advertised}))
-		}
-	}
+	// Changing machine counts are availability polling, not completed work.
 	sort.Strings(keys)
 	return keys
 }

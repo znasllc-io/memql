@@ -699,6 +699,9 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 // behaviour. allowInline (MCP Tier-3 #1535) relaxes the inline-shape
 // pre-rejection; default false everywhere else.
 func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (out *ExecuteResult, err error) {
+	// Remote and authored owned tools reconstruct authority on the serving
+	// node. Its provider guard is local; callbacks never travel through RPC.
+	ctx = e.modelSeam.withProviderAdmission(ctx)
 	startTime := time.Now()
 	if err := auth.ValidateRoleTestContext(ctx); err != nil {
 		return nil, err

@@ -485,18 +485,41 @@ cancellation. It does not prove semantic retrieval or indexing is available.
 ## Progress windows and result acceptance
 
 Time and model-call estimates bound a work window, not a goal's lifetime.
-`integrations/work/progress_continuation.go` renews only after successful new
-receipts or a verified human answer, under the shared run decision lock. The
+`integrations/work/progress_continuation.go` renews only after substantive new
+source facts, native capability contracts or a verified human answer, under
+the shared run decision lock. The
 old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
-Counters never reset on renewal. A human-directed restart opens a new evidence
-epoch and clears only its bounded duplicate cache; receipts older than the epoch
-cannot fund another window. Original evidence remains in the journal. This
-keeps a memory bound from becoming a lifetime limit while preventing an old
-answer or receipt from buying another window on a second replica. The signal is
-completed activity, not certification that the user's objective is achieved.
+Counters never reset on renewal. A human-directed restart and each automatic
+renewal open a new evidence epoch; receipts older than that epoch cannot fund
+another window. Consumed facts have immutable, deterministic owned receipts;
+only the latest 100 keys stay in the active index. The target window survives
+a partial write, so a second replica can finish the update without reusing or
+losing the credit. The textual source signal deliberately excludes opaque exec
+output, polling and work notes; it does not certify task relevance or correctness.
+Other effects need their own verified native evidence or scoped owner feedback.
+
+The provider boundary reserves actual attempts, including owned embeddings and
+HTTP retries, under the same workload gate plus its admission gate. Its immutable
+cumulative head is timestamp-fenced across peer clock skew. This replaces the
+compiled 600-call lifetime backstop for governed work; an explicitly configured
+call cap remains hard. Missing wiring, malformed accounting, foreign ownership,
+closed goals and declared spending ceilings refuse admission. Old runs retain
+their logical baseline and mark historical transport attempts unknown; they
+cannot certify explicit hard caps or goal monetary limits without recovery.
+Logical-answer reconciliation pages fresh receipts and removes confirmed entries
+from its bounded pending index, rather than retaining every historical ID.
+
+Regression coverage includes
+[`TestProgressDBWorkflowAcrossReplicas`](../../../integrations/work/progress_continuation_db_test.go)
+(400 facts, replay after eviction, partial-write recovery),
+[`TestProviderAdmissionsReserveAcrossReplicasAndKeepHardLimits`](../../../integrations/work/provider_admission_db_test.go)
+(concurrent admissions, skew, monetary limits and legacy uncertainty), and
+the [logical accounting tests](../../../integrations/work/runceilings_union_test.go)
+(5,000 receipts and refusal of regressed reads). Provider estimates are not billing
+reconciliation; no test invents unavailable historical transport usage.
 
 Execution writers no longer close goals on success, failure or cancellation.
 `workAcceptGoalResults` accepts an exact finished run revision only from its

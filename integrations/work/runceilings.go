@@ -12,15 +12,17 @@ package work
 // executor; maxEvents is still warned as unenforced, never silently certified.
 //
 // A missing goal, unreadable usage or identity overflow fails closed rather than
-// inventing budget. Local unjournaled charges remain counted on this replica;
-// no distributed in-flight reservation is claimed. The receipt set is bounded
-// separately from goal lifetime, and an exhausted set needs accounting recovery,
+// inventing budget. Local unjournaled answers remain counted on this replica;
+// actual provider attempts have their separate durable reservation ledger.
+// The active pending index is bounded separately from goal lifetime, and an
+// exhausted set needs accounting recovery,
 // not a claim that the owner's objective was accepted or completed.
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,8 +37,8 @@ import (
 // read rather than an allowance.
 const maxTrackedRuns = 2048
 
-// Bound identity retention even when a goal has no model-call ceiling. Do not
-// evict individual receipt IDs: that would silently double-count on reread.
+// Bound unjournaled local charges, not a run's lifetime. Confirmed receipts
+// leave this active index only after a complete durable accounting read.
 const maxTrackedRunReceipts = 4096
 
 // RunCeilings implements memqlengine.RunCeilingGuard over v1:work:goal's
@@ -58,6 +60,9 @@ type runBudget struct {
 	// seeded is false until the rows have been read once.
 	seeded          bool
 	receipts        map[string]struct{}
+	pending         map[string]work.CallSpend
+	durable         work.Spent
+	unrecorded      work.Spent
 	receiptOverflow bool
 	// ceilings are the goal's, with the two this seam cannot evaluate
 	// cleared. unbounded is true when nothing is left to check.
@@ -170,18 +175,29 @@ func (c *RunCeilings) Charge(ctx context.Context, rc common.RunContext, spend me
 	b := c.budgetFor(rc)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	call := work.CallSpend{Served: spend.Served, InputTokens: spend.InputTokens, OutputTokens: spend.OutputTokens, Cost: spend.Cost}
+	charge := work.CallSpend{Served: spend.Served, InputTokens: spend.InputTokens, OutputTokens: spend.OutputTokens, Cost: spend.Cost}
 	if receiptID := memqlengine.BareShortId(strings.TrimSpace(spend.ReceiptID)); receiptID != "" {
-		if err := b.addReceipt(receiptID, call); err != nil {
+		if _, pending := b.receipts[receiptID]; !pending {
+			rows, err := c.store.query(ownerActor(memqlengine.ContextWithFreshRead(ctx), rc.OwnerUserId), "query "+call("workModelCallReceiptForOwnerRun", map[string]any{"runId": rc.RunId, "receiptId": receiptID}))
+			if err == nil && len(rows) > 0 {
+				// A late completion retry may name a receipt already included in
+				// the durable total. Reconcile instead of charging it twice.
+				if err := c.refreshReceipts(ctx, rc, b); err == nil {
+					return
+				}
+			}
+		}
+		if err := b.addReceipt(receiptID, charge); err != nil {
 			// An already-admitted answer must still count even after the bound was
 			// reached. No further calls can be admitted with uncertain identity.
 			b.receiptOverflow = true
-			b.spent = work.AddCall(b.spent, call)
+			b.spent = work.AddCall(b.spent, charge)
 		}
 		return
 	}
 	// Cache hits have no durable row and therefore cannot overlap a fresh read.
-	b.spent = work.AddCall(b.spent, call)
+	b.spent = work.AddCall(b.spent, charge)
+	b.unrecorded = work.AddCall(b.unrecorded, charge)
 }
 
 // Spent reports the run's spend so far, for a refusal to carry onto the row.
@@ -263,7 +279,11 @@ func (b *runBudget) addReceipt(receiptID string, call work.CallSpend) error {
 	if b.receipts == nil {
 		b.receipts = map[string]struct{}{}
 	}
+	if b.pending == nil {
+		b.pending = map[string]work.CallSpend{}
+	}
 	b.receipts[receiptID] = struct{}{}
+	b.pending[receiptID] = call
 	b.spent = work.AddCall(b.spent, call)
 	return nil
 }
@@ -273,29 +293,99 @@ func (b *runBudget) addReceipt(receiptID string, call work.CallSpend) error {
 // but cannot authorize a call; a retry deduplicates the same IDs.
 func (c *RunCeilings) refreshReceipts(ctx context.Context, rc common.RunContext, b *runBudget) error {
 	if b.receiptOverflow {
-		return fmt.Errorf("model usage receipt tracking is exhausted")
+		return fmt.Errorf("unjournaled model usage exceeded the recoverable pending index")
 	}
+	// This is a bounded-time accounting read, not a lifetime receipt cap.
+	// Stable (createdAt, ID) ordering proves uniqueness with one watermark across pages;
+	// only not-yet-journaled local charges require an active duplicate index.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	query := "query " + call("workModelCallsPageForOwnerRun", map[string]any{"runId": rc.RunId})
-	err := memqlengine.WalkQueryPages(ownerActor(ctx, rc.OwnerUserId), c.store.engine.Execute, query, maxTrackedRunReceipts+1, func(result *memqlengine.ExecuteResult) error {
-		for _, row := range memqlRows(result) {
-			receiptID := memqlengine.BareShortId(rowString(row, "id"))
-			if receiptID == "" {
-				return fmt.Errorf("model usage receipt has no identity")
+	var total work.Spent
+	pending := make(map[string]work.CallSpend, len(b.pending))
+	for id, spend := range b.pending {
+		pending[id] = spend
+	}
+	lastID, cursor := "", ""
+	var lastAt time.Time
+	emptyPages := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		result, err := c.store.engine.Execute(memqlengine.ContextWithCursor(ownerActor(memqlengine.ContextWithFreshRead(ctx), rc.OwnerUserId), cursor), query)
+		if err != nil {
+			return err
+		}
+		if result == nil {
+			return fmt.Errorf("model usage returned no page")
+		}
+		rows := memqlRows(result)
+		// Node-set materialization need not preserve the query's page order.
+		// Restore it inside the page before checking the cross-page watermark.
+		sort.Slice(rows, func(a, b int) bool {
+			at, _ := rowTime(rows[a], "createdAt")
+			bt, _ := rowTime(rows[b], "createdAt")
+			if !at.Equal(bt) {
+				return at.Before(bt)
 			}
+			return rowString(rows[a], "id") < rowString(rows[b], "id")
+		})
+		if len(rows) == 0 {
+			emptyPages++
+		} else {
+			emptyPages = 0
+		}
+		if emptyPages > 32 {
+			return fmt.Errorf("model usage pagination made no progress")
+		}
+		for _, row := range rows {
+			receiptID := memqlengine.BareShortId(rowString(row, "id"))
+			at, validTime := rowTime(row, "createdAt")
+			if !validTime || receiptID == "" || (!lastAt.IsZero() && (at.Before(lastAt) || (at.Equal(lastAt) && receiptID <= lastID))) {
+				return fmt.Errorf("model usage identities did not advance in stable order (%q after %q)", receiptID, lastID)
+			}
+			lastID = receiptID
+			lastAt = at
 			if memqlengine.BareShortId(rowString(row, "ownerUserId")) != memqlengine.BareShortId(strings.TrimSpace(rc.OwnerUserId)) || memqlengine.BareShortId(rowString(row, "runId")) != memqlengine.BareShortId(rc.RunId) {
 				return fmt.Errorf("model usage receipt attribution does not match this run")
 			}
-			if err := b.addReceipt(receiptID, work.CallSpend{Served: rowString(row, "served"), InputTokens: rowInt(row, "inputTokens"), OutputTokens: rowInt(row, "outputTokens"), Cost: rowFloat(row, "cost")}); err != nil {
-				return err
+			total = work.AddCall(total, work.CallSpend{Served: rowString(row, "served"), InputTokens: rowInt(row, "inputTokens"), OutputTokens: rowInt(row, "outputTokens"), Cost: rowFloat(row, "cost")})
+			delete(pending, receiptID)
+		}
+		next := ""
+		if meta := result.GetMeta(); meta != nil {
+			next = meta.Cursor
+			if meta.HasMore && next == "" {
+				return fmt.Errorf("model usage has more rows without a cursor")
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return err
+		if next == "" {
+			break
+		}
+		if next == cursor {
+			return fmt.Errorf("model usage cursor did not advance")
+		}
+		cursor = next
 	}
-	if len(b.receipts) >= maxTrackedRunReceipts {
-		return fmt.Errorf("model usage receipt tracking reached its %d-receipt safety bound", maxTrackedRunReceipts)
+	if total.ModelCalls < b.durable.ModelCalls || total.Tokens < b.durable.Tokens || total.TokensLocal < b.durable.TokensLocal || total.TokensSubscription < b.durable.TokensSubscription || total.Cost < b.durable.Cost {
+		return fmt.Errorf("durable model usage regressed; accounting recovery is required before another call")
+	}
+	b.durable = total
+	b.pending = pending
+	b.receipts = map[string]struct{}{}
+	b.spent = total
+	for id, spend := range pending {
+		b.receipts[id] = struct{}{}
+		b.spent = work.AddCall(b.spent, spend)
+	}
+	b.spent.ModelCalls += b.unrecorded.ModelCalls
+	b.spent.Tokens += b.unrecorded.Tokens
+	b.spent.TokensLocal += b.unrecorded.TokensLocal
+	b.spent.TokensSubscription += b.unrecorded.TokensSubscription
+	b.spent.Cost += b.unrecorded.Cost
+	if len(b.pending) >= maxTrackedRunReceipts {
+		return fmt.Errorf("unjournaled model usage reached the bounded pending index; durable receipts must be recovered")
 	}
 	return nil
 }
@@ -316,6 +406,9 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 		return work.Ceilings{}, fmt.Errorf("goal %s is not readable as %s", rc.GoalId, owner)
 	}
 	ceilings, err := ceilingsOf(goal)
+	if rowString(goal, "status") == "closed" {
+		return work.Ceilings{}, fmt.Errorf("the work goal is closed")
+	}
 	if err != nil {
 		return work.Ceilings{}, fmt.Errorf("goal %s ceilings: %w", rc.GoalId, err)
 	}

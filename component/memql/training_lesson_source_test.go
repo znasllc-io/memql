@@ -51,11 +51,23 @@ func TestManualLessonSourceReadsSavedGuidanceAcrossReplicas(t *testing.T) {
 }
 
 func TestTrainingEvidenceRequiresNativeRecorder(t *testing.T) {
-	for _, data := range []map[string]any{{"trainingSelection": map[string]any{}}, {"execution": map[string]any{"call": map[string]any{"phase": "completed"}}}} {
+	for _, data := range []map[string]any{{"trainingSelection": map[string]any{}}, {"execution": map[string]any{"call": map[string]any{"phase": "completed"}}}, {"nativeResultEvidence": "fabricated"}, {"capabilityEvidence": true}} {
 		row := map[string]any{"data": data}
 		require.Error(t, guardTrainingEvidence(context.Background(), nil, row))
 		require.Error(t, guardTrainingEvidence(auth.ContextWithInternalOrigin(context.Background()), nil, row))
 		require.Error(t, guardTrainingEvidence(context.Background(), row, map[string]any{"deleted": true}))
 		require.NoError(t, guardTrainingEvidence(ContextWithTrainingEvidenceWrite(context.Background()), row, row))
+	}
+}
+
+func TestProviderAndProgressReceiptsRequireImmutableNativeWrites(t *testing.T) {
+	for _, key := range []string{"providerAdmission", "progressCredit"} {
+		row := map[string]any{"data": map[string]any{key: map[string]any{}}}
+		require.Error(t, guardTrainingEvidence(context.Background(), nil, row))
+		require.Error(t, guardTrainingEvidence(auth.ContextWithInternalOrigin(context.Background()), nil, row))
+		ctx := ContextWithTrainingEvidenceWrite(context.Background())
+		require.NoError(t, guardTrainingEvidence(ctx, nil, row))
+		require.ErrorContains(t, guardTrainingEvidence(ctx, row, row), "immutable")
+		require.ErrorContains(t, guardTrainingEvidence(ctx, row, map[string]any{"deleted": true}), "immutable")
 	}
 }
