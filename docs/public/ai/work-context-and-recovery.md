@@ -653,6 +653,20 @@ usage and completed effects. Waiting for the person does not spend active time.
 Spending limits, operation timeouts and access approvals remain separate controls.
 See [LLM cost control](llm-cost-control.md) for the evidence and recovery bounds.
 
+Preparing a plan, repairing a failed step and checking a finished answer can each
+require inference outside ordinary execution. Those calls belong to the specific
+native operation that admitted them. Before reserving another provider attempt,
+MemQL rechecks the owner, goal, cancellation state and current compiler, waiting
+step or answer version. A paused or finished run alone does not authorize a
+call, and an old operation cannot continue after the run changes phase.
+
+Repair and answer-check deadlines start before the operation claims its work.
+Waiting to acquire that claim or preparing its prompt consumes the same window;
+it cannot extend the window. Calls retain cancellation and cumulative usage
+across these phases. Database regressions exercise these boundaries across
+separate engines; provider availability and a deployed installation still need
+end-to-end verification with a fresh inference request.
+
 A run finishing is not acceptance of the goal's results. The goal stays open
 until its owner explicitly accepts the reviewed result or chooses to close it.
 The acceptance operation records the exact run revision, person, time and

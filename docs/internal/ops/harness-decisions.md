@@ -532,6 +532,53 @@ admission may hold that mutex while waiting to renew, so the reverse order would
 deadlock. `TestProviderAdmissionDoesNotInvertConcurrentProgressLocks` forces that
 overlap with a peer completion and verifies both admissions finish.
 
+Provider admission also distinguishes execution from native work phases. A
+`running`-only test incorrectly refused the compiler's first classification call:
+the receiving planner had correctly claimed a run whose status was still
+`compiling`. Widening that test to all waiting or finished runs would allow stale
+contexts to infer after work stopped. The native entry paths instead attach a
+private, call-local phase stamp after their existing admission gates:
+
+| Phase | Fresh evidence checked under the workload gate | Stop condition |
+| --- | --- | --- |
+| Compilation | The claimed planner's recorded node and heartbeat still match the compiling run. | Cancellation, a changed owner/goal or compiler, or any status transition. |
+| Replan or repair | The waiting run still names the exact remedy kind, step and `since` value claimed by the receiving planner. | A later wait, human approval wait, cancellation, status change or expired operation window. |
+| Answer validation | The designated answer-check path has selected an exact succeeded run revision and completed step version; its configured cross-replica claim still bounds the call. | A changed run or step version, cancellation, or the original check deadline. |
+
+Ordinary waiting and terminal contexts remain refused. Even if a stamped run
+returns to `running`, its old compiler or remedy context cannot borrow execution
+authority. The answer-check path preserves its existing behavior when no claimer
+is configured; that does not let a caller manufacture the private phase stamp.
+Owner authentication, goal ownership, current cancellation and cumulative
+provider reservations remain mandatory for every phase.
+
+The remedy's ten-minute context and phase expiry start **before** its
+fifteen-minute claim is acquired. The answer check's fifteen-minute context and
+expiry start before its claim and prompt preparation. Claim latency, scheduling
+delay and rendering consume these original windows; they cannot create another
+window or leave inference running after its deadline. These per-operation limits
+do not close the goal or reset usage. Compilation has a different durable
+ownership contract: its recorded heartbeat prevents a later claimant from
+restarting the same compile after a lease expires.
+
+The stamps are native context values, not DSL arguments or serialized grants.
+The provider boundary checks them before Fleet transport. A receiving planner
+builds its own stamp from its newly admitted operation, without relying on
+intake-node memory. A restart must return through the existing claim and recovery
+path; retained accounting receipts survive independently of the temporary stamp.
+
+The required-database tests in
+[`provider_phase_db_test.go`](../../../integrations/work/provider_phase_db_test.go)
+cover `TestProviderAdmissionCompileCrossesReplicaBeforeExecution` (including the
+original refusal), `TestProviderAdmissionRemedyIsBoundToClaimedWaitAcrossReplicas`,
+`TestProviderAdmissionAnswerCheckBindsSucceededVersionAcrossReplicas`,
+`TestProviderAdmissionRemedyClaimDelayConsumesOriginalWindow`, and
+`TestProviderAdmissionAnswerCheckCannotExtendClaimDuringPromptPreparation`.
+They verify admission, stale-context refusal and durable accounting through
+separate engines. They use a provider-boundary probe, so they do not establish
+live Fleet availability or successful installed-cluster rollout; those still
+require a fresh end-to-end inference on the deployed revision.
+
 Admission and progress-credit receipts also bypass optional observation indexing.
 Their labels contain no reusable finding, and embedding one while its accounting
 locks are held would recursively request provider admission and deadlock. This
