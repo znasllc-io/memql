@@ -70,6 +70,10 @@ func (c *RunCeilings) AdmitProvider(ctx context.Context, rc common.RunContext, p
 	coverage := "legacy-attempts-unknown"
 	if rowInt(run, "providerAccountingVersion") == 1 {
 		coverage = "complete-from-run-creation"
+		// Every provider attempt on this contract reserves first. An absent
+		// ledger means zero attempts, even if cache or journal answers have
+		// already consumed part of the independent logical work window.
+		base = 0
 	}
 	if len(rows) > 1 {
 		return unknown(fmt.Errorf("ambiguous provider ledger head"))
@@ -103,14 +107,15 @@ func (c *RunCeilings) AdmitProvider(ctx context.Context, rc common.RunContext, p
 	if base < 0 || admitted < 0 || base >= math.MaxInt-admitted-1 || tokens < 0 || policy.EstimatedTokens < 0 || tokens > math.MaxInt-policy.EstimatedTokens || math.IsNaN(cost) || math.IsInf(cost, 0) || cost < 0 || policy.EstimatedCost < 0 || math.IsNaN(policy.EstimatedCost) || math.IsInf(policy.EstimatedCost, 0) {
 		return unknown(fmt.Errorf("invalid cumulative provider usage"))
 	}
-	spent.ModelCalls = max(spent.ModelCalls, base+admitted)
+	providerCalls := base + admitted
+	spent.ModelCalls = max(spent.ModelCalls, providerCalls)
 	spent.Tokens = max(spent.Tokens, tokens)
 	spent.Cost = max(spent.Cost, cost)
 	if coverage == "legacy-attempts-unknown" && (policy.HardCallLimit > 0 || (policy.HardCostExplicit && policy.HardCostLimit > 0)) {
 		return unknown(fmt.Errorf("historical provider attempts are unknown; the explicit operator call limit requires accounting recovery"))
 	}
-	if policy.HardCallLimit > 0 && spent.ModelCalls >= policy.HardCallLimit {
-		return fail(memql.RunCeilingBreach{Ceiling: "providerCalls", Limit: fmt.Sprint(policy.HardCallLimit), Actual: fmt.Sprint(spent.ModelCalls), Reason: "explicit operator provider-call limit reached"}, spent)
+	if policy.HardCallLimit > 0 && providerCalls >= policy.HardCallLimit {
+		return fail(memql.RunCeilingBreach{Ceiling: "providerCalls", Limit: fmt.Sprint(policy.HardCallLimit), Actual: fmt.Sprint(providerCalls), Reason: "explicit operator provider-call limit reached"}, spent)
 	}
 	if policy.HardCostLimit > 0 && cost+policy.EstimatedCost > policy.HardCostLimit {
 		return fail(memql.RunCeilingBreach{Ceiling: "cost", Limit: fmt.Sprint(policy.HardCostLimit), Actual: fmt.Sprint(cost), Reason: "provider cost limit would be exceeded"}, spent)
