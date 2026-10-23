@@ -330,7 +330,7 @@ pipeline:
             set -eu
             . ./cockpit/scripts/ci/native-env.sh
             export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
-            test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
+            native_go_platform darwin arm64
             bash scripts/identity/build-css.sh
             go test -race -tags computeruse -count=1 -timeout=600s $MEMQL_PACKAGES
     - name: delivery-artifacts
@@ -1050,7 +1050,7 @@ pipeline:
           . ./cockpit/scripts/ci/native-env.sh
           bash scripts/identity/build-css.sh
           cd cockpit
-          test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
+          native_go_platform darwin arm64
           env -u GOFLAGS make cockpit-computeruse-host
           ./scripts/macos/package-menubar.sh --arch=arm64
           python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-arm64.tar.gz
@@ -1082,7 +1082,7 @@ pipeline:
           . ./cockpit/scripts/ci/native-env.sh
           bash scripts/identity/build-css.sh
           cd cockpit
-          test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
+          native_go_platform darwin arm64
           pkgutil --pkg-info com.apple.pkg.RosettaUpdateAuto >/dev/null
           env -u GOFLAGS make cockpit-computeruse-darwin-amd64
           ./bin/memql-computeruse-darwin-amd64 --version

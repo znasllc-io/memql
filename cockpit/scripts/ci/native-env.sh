@@ -14,3 +14,10 @@ export GOPATH="$PWD/.memql-native/go"
 export GOCACHE="$PWD/.memql-native/go-build"
 export PATH="$GOPATH/bin:$PATH"
 mkdir -p "$GOPATH" "$GOCACHE"
+
+# Source this file at the checkout root; release commands may then enter
+# cockpit/. Only toolchain preparation is retried, never the subsequent tests.
+_memql_native_ci_dir="$PWD/cockpit/scripts/ci"
+native_go_platform() {
+    python3 "$_memql_native_ci_dir/native_go_platform.py" --os="$1" --arch="$2"
+}
