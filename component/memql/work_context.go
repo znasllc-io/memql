@@ -94,6 +94,11 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 			out[i].Content = workContextArchivedResult(out, i, fingerprint)
 		}
 	}
+	var err error
+	out, err = e.archiveOversizedWorkCalls(ctx, out, tools, target, sourceLimit)
+	if err != nil {
+		return nil, err
+	}
 	// Bounded semantic checkpoints follow complete exchanges, not arbitrary
 	// message counts. Older checkpoints may be consolidated with fresh evidence;
 	// their exact sources and prior references remain in the journal.
@@ -217,7 +222,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 // human requests, incomplete calls and the fresh tail. This is exact offloading,
 // not a claim that an excerpt preserves all the meaning of the original.
 func (e *MemQLEngine) archiveWorkContextExchanges(ctx context.Context, out []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
-	const sourceLimit = 4 * 1024 * 1024
+	const sourceLimit = workContextArchiveBytes
 	unproductive := make(map[string]bool)
 	// Eight storage attempts bound work even with many separated authority
 	// messages. The larger byte limit is for exact storage, never model input.
@@ -362,8 +367,12 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source, t
 // relevance context without treating a tool result or earlier memory as a new
 // request. Preserve both ends of long requests (templates often append intent).
 func workContextTask(messages []common.ChatMessage) string {
-	first, latest := "", ""
+	first, latest, instruction := "", "", ""
 	for _, message := range messages {
+		if common.IsWorkInstruction(message) {
+			instruction = message.Content
+			continue
+		}
 		if message.Role != "user" || isWorkMemory(message) || message.Content == "" {
 			continue
 		}
@@ -380,6 +389,12 @@ func workContextTask(messages []common.ChatMessage) string {
 		head := limit / 4
 		tail := limit - head - len(gap)
 		return strings.ToValidUTF8(value[:head], "") + gap + strings.ToValidUTF8(value[len(value)-tail:], "")
+	}
+	if instruction != "" {
+		// Relevance includes the active section, not just the broader goal and
+		// latest approval. The full instruction stays pinned outside this bounded
+		// summary input; this relevance excerpt also keys cached summaries.
+		return "Current execution instruction:\n" + excerpt(instruction, 2000) + "\nOriginal request:\n" + excerpt(first, 900) + "\nLatest request:\n" + excerpt(latest, 900)
 	}
 	if first == latest {
 		return excerpt(first, 4000)

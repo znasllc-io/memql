@@ -336,7 +336,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// An ordinary question pauses the current execution. Its answer must keep
 	// that lineage: the saved tool checkpoint is bound to it, including inside
 	// an explicit rerun. Answering it is not a failure retry.
-	if retry == nil && !(kind == "feedback" && work.IsReasoningCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission)) {
+	// A native session-scope approval has that same boundary. Creating another
+	// rerun here invalidates its saved request ID before the executor can resume.
+	// Legacy requests without a native witness retain their existing retry path;
+	// the executor still proves every witness before any model or effect runs.
+	nativeScopeCheckpoint := memql.WorkScopeCheckpoint(kind, rowMap(approval, "subject"), storedHash)
+	if retry == nil && !(kind == "feedback" && work.IsReasoningCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission && !nativeScopeCheckpoint)) {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))

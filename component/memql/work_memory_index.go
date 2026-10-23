@@ -209,39 +209,61 @@ func (e *MemQLEngine) workRecallMemoryBuiltin(ctx context.Context, args map[stri
 		return nil, fmt.Errorf("provide a short memory question")
 	}
 	ctx = ContextWithFreshRead(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Semantic retrieval can wait for a local model's capacity. Give the whole
+	// optional search/backfill phase one budget, preserving at least half of a
+	// shorter caller deadline for source validation and authorized exact reads.
+	// The fallback uses the original context, never a detached one.
+	semanticBudget := 10 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline) / 2; remaining < semanticBudget {
+			semanticBudget = remaining
+		}
+	}
+	semanticCtx, cancelSemantic := context.WithTimeout(ctx, semanticBudget)
+	defer cancelSemantic()
 	searchIndex := func() ([]map[string]any, error) {
-		return e.memoryCall(ctx, "builtin", "common.similarTo", map[string]any{"text": search, "concept": conversationEvidenceConcept, "domains": []string{conversationMemoryDomain(subject.UserId)}, "limit": 6})
+		return e.memoryCall(semanticCtx, "builtin", "common.similarTo", map[string]any{"text": search, "concept": conversationEvidenceConcept, "domains": []string{conversationMemoryDomain(subject.UserId)}, "limit": 6})
 	}
 	candidates, searchErr := searchIndex()
 	// Repair missing historical coverage lazily. The regular source-update
 	// automation does this off the reply path; old installations have no index.
 	indexNote := ""
-	if len(candidates) == 0 {
-		rows, err := e.memoryCall(ctx, "query", "os.askMemoryConversations", nil)
+	// A failed provider is not missing coverage: retrying it through indexing
+	// would spend the time reserved for the fallback without improving recall.
+	if len(candidates) == 0 && searchErr == nil {
+		rows, err := e.memoryCall(semanticCtx, "query", "os.askMemoryConversations", nil)
 		if err != nil {
-			return nil, err
+			searchErr = err
 		}
-		backfillCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		budget := 8
 		for _, row := range rows {
 			if budget == 0 {
 				indexNote = "Historical indexing is incomplete; exact conversation search remains available."
 				break
 			}
-			count, remains, err := e.indexConversationEvidence(backfillCtx, row, budget)
+			count, remains, err := e.indexConversationEvidence(semanticCtx, row, budget)
 			budget -= count
 			if err != nil {
-				indexNote = "Semantic indexing is unavailable; exact conversation search remains available."
+				searchErr = err
 				break
 			}
 			if remains {
 				indexNote = "Historical indexing is incomplete; exact conversation search remains available."
 			}
 		}
-		cancel()
-		if budget < 8 {
+		if budget < 8 && searchErr == nil {
 			candidates, searchErr = searchIndex()
 		}
+	}
+	cancelSemantic()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if searchErr != nil {
+		indexNote = "Semantic retrieval or indexing is unavailable; exact conversation search remains available."
 	}
 	matches := []map[string]any{}
 	sources := map[string]map[string]any{}

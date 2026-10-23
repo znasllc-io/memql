@@ -456,6 +456,9 @@ type ArtifactProvenance struct {
 	Model     string
 	Effort    string
 	SessionId string
+	// Run and step come from the native invocation, never the app's report.
+	RunId   string
+	StepKey string
 }
 
 // AsMap renders the stamp for the mutation. Every key is written, empty ones
@@ -485,39 +488,98 @@ func (p ArtifactProvenance) Empty() bool {
 // not stamp. EngineStore serves all three.
 type ArtifactProvenanceStamper interface {
 	// StampArtifactProvenance writes the stamp onto each artifact id, and onto
-	// the backing Library file row when one resolves by the same id.
+	// the backing Library file row resolved through sourceConceptRef.
 	StampArtifactProvenance(ctx context.Context, ownerUserId string, artifactIds []string, p ArtifactProvenance) error
 }
 
-// StampArtifactProvenance implements ArtifactProvenanceStamper.
-//
-// It writes the INDEX row and the backing FILE row, and it writes them
-// independently: the Files list reads the index and the analysis and sync
-// passes read the file, so one stamped and the other not would make "which of
-// these did an app produce" answerable in one place and not the other -- which
-// is worse than neither, because the reader cannot tell which answer they got.
-//
-// A file id that does not resolve is NOT an error. The cockpit pushes
-// artifacts, and an artifact id is not always a file id; the write is attempted
-// and its refusal is a debug fact rather than a failure of the run.
+// StampArtifactProvenance binds returned evidence to its native work and app.
+// The index and file have different ids: follow the owner's sourceConceptRef,
+// never guess a file id from the artifact id. Reads remain owner-scoped and
+// fresh across replicas; only the attested writes use internal origin.
+// Non-file artifacts get an index stamp only. Missing/foreign rows or a link
+// to another producing run are reported without replacing their provenance.
+// Writes are independently retryable; a failure is reported to the runner,
+// which preserves the completed app work and logs the bookkeeping failure.
 func (s *EngineStore) StampArtifactProvenance(ctx context.Context, ownerUserId string, artifactIds []string, p ArtifactProvenance) error {
 	if s == nil || s.Engine == nil || len(artifactIds) == 0 || p.Empty() {
 		return nil
 	}
-	ctx = appSessionWriteContext(ctx, ownerUserId)
-	stamp := p.AsMap()
+	if strings.TrimSpace(ownerUserId) == "" {
+		return fmt.Errorf("worker.store: artifact provenance requires an owner")
+	}
 	var firstErr error
 	for _, artifactId := range artifactIds {
 		artifactId = strings.TrimSpace(artifactId)
 		if artifactId == "" {
 			continue
 		}
-		if err := s.executeMutation(ctx, "stampArtifactProvenance", map[string]any{
-			"artifactId": artifactId,
-			"producedBy": stamp,
-		}); err != nil && firstErr == nil {
+		if err := s.stampProducedArtifact(ctx, ownerUserId, artifactId, p); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+func (s *EngineStore) readProvenanceRow(ctx context.Context, owner, queryName, key, id string) (map[string]any, error) {
+	query, err := langparser.RenderCall(queryName, map[string]any{key: id})
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := s.executeAndExtract(memqlengine.ContextWithFreshRead(appSessionReadContext(ctx, owner)), "query "+query)
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		if node == nil || node.Payload == nil {
+			continue
+		}
+		row := node.Payload.AsMap()
+		rowOwner, _ := row["ownerUserId"].(string)
+		if !SameSubjectId(rowOwner, owner) {
+			return nil, fmt.Errorf("worker.store: provenance row belongs to another owner")
+		}
+		return row, nil
+	}
+	return nil, fmt.Errorf("worker.store: provenance row %s is not readable", id)
+}
+
+func (s *EngineStore) stampProducedArtifact(ctx context.Context, owner, artifactId string, p ArtifactProvenance) error {
+	artifact, err := s.readProvenanceRow(ctx, owner, "libraryArtifactById", "artifactId", artifactId)
+	if err != nil {
+		return err
+	}
+	rows := []map[string]any{artifact}
+	fileId, _ := artifact["sourceConceptRef"].(string)
+	if artifact["kind"] == "file" {
+		file, err := s.readProvenanceRow(ctx, owner, "libraryFileById", "fileId", fileId)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, file)
+	}
+	for _, row := range rows {
+		if existing, _ := row["producedByRunId"].(string); existing != "" && p.RunId != "" && existing != p.RunId {
+			return fmt.Errorf("worker.store: artifact already belongs to another producing run")
+		}
+	}
+	args := map[string]any{"artifactId": artifactId, "producedBy": p.AsMap()}
+	// Omit unknown work identity: a plain conversation must not erase an
+	// existing association or invent a run. The mutation preserves absent args.
+	if p.RunId != "" {
+		args["runId"] = p.RunId
+	}
+	if err := s.executeMutation(appSessionWriteContext(ctx, owner), "stampArtifactProvenance", args); err != nil {
+		return err
+	}
+	if len(rows) == 1 {
+		return nil
+	}
+	delete(args, "artifactId")
+	args["fileId"] = fileId
+	if p.StepKey != "" {
+		// The session stores a canonical step ID; Library's step filter uses
+		// the logical key, matching work observations and delivery receipts.
+		args["stepKey"] = memqlengine.BareShortId(p.StepKey)
+	}
+	return s.executeMutation(appSessionWriteContext(ctx, owner), "stampLibraryFileProvenance", args)
 }

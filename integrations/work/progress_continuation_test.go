@@ -23,7 +23,7 @@ func progressFixture(t *testing.T) (*Integration, *recordingEngine, map[string]a
 	return i, e, run, aGoalBackedRun()
 }
 func progressReceipt(value string) map[string]any {
-	return map[string]any{"runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "tool_result", "content": "verified result", "data": map[string]any{"tool": "readSource", "args": `{"id":"` + value + `"}`, "isError": false}}
+	return map[string]any{"createdAt": rfc(testNow.Add(time.Second)), "runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "tool_result", "content": "verified result", "data": map[string]any{"tool": "readSource", "args": `{"id":"` + value + `"}`, "nativeResultEvidence": workstate.ArtifactHash(map[string]any{"content": value}), "isError": false}}
 }
 func TestProgressContinuationsRequireNewWorkBeyondLifetimeCaps(t *testing.T) {
 	i, e, run, rc := progressFixture(t)
@@ -108,6 +108,8 @@ func TestProgressReceiptRejectsFailuresDiscoveryAndEquivalentRepeats(t *testing.
 	v := progressReceipt("one")
 	rowMap(v, "data")["args"] = "broken JSON"
 	require.Empty(t, progressReceiptKey(v))
+	delete(rowMap(v, "data"), "args")
+	require.NotEmpty(t, progressReceiptKey(v), "a successful source query can take no arguments")
 }
 func TestProgressLimitsIntersectAndDoNotOverflow(t *testing.T) {
 	_, overflow := progressCeilings(map[string]any{}, map[string]any{"classification": map[string]any{"progressContinuation": map[string]any{"extensions": math.MaxInt}}}, workstate.Ceilings{})

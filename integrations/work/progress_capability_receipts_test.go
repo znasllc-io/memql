@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	workstate "github.com/znasllc-io/memql/component/work"
@@ -20,7 +21,7 @@ func capabilityProgressReceipt(t *testing.T, search, content string) map[string]
 		{Role: "tool", Name: "workCapabilities", ToolCallId: "discovery", Content: content},
 	})
 	require.NoError(t, err)
-	return map[string]any{"runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "note", "data": map[string]any{
+	return map[string]any{"createdAt": rfc(testNow.Add(time.Second)), "runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "note", "data": map[string]any{
 		"capabilityEvidence": true, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(messages),
 	}}
 }

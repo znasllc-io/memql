@@ -364,9 +364,17 @@ query observation workObservationsForOwnerRun {
 query modelCall workModelCallsPageForOwnerRun {
   args { runId string! }
   filter row => row.runId == args.runId && row.ownerUserId == actor.userId
-  sort "row.createdAt", "desc"
+  sort "row.createdAt", "asc"
   paginate 50
   shape workModelCallSummary
+}
+
+/// Reconcile a late completion against its exact durable receipt.
+@actor
+query modelCall workModelCallReceiptForOwnerRun {
+ args { runId string! receiptId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.id == canonicalId(args.receiptId, modelCall)
+ shape workModelCallSummary
 }
 
 /// Activity summaries, without potentially megabyte-sized checkpoint/tool data.
@@ -484,6 +492,17 @@ query approval workQuestionsForOwnerRun {
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.kind == "feedback"
  sort "row.createdAt", "desc"
  paginate 50
+ shape workApprovalFull
+}
+
+/// Human corrections remain instructions after later permission decisions.
+/// One extra row makes the bounded reader refuse overflow, not lose history.
+@actor
+query approval workApprovalGuidanceForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.decidedBy == actor.userId && row.decision == "answered" && row.?answer.feedback != nil
+ sort "decidedAt", "asc"
+ paginate 17
  shape workApprovalFull
 }
 
@@ -714,12 +733,42 @@ query observation workToolSourcesForOwnerRun {
  shape workObservationFull
 }
 
-/// Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work.
+/// Search original tool fields across execution receipts and compaction archives.
+/// The engine projects public source fields; these raw rows are not model context.
+@actor
+query observation workHistorySearchSourcesForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && (row.?data.sourceMessages != nil || row.?data.delegatedEvidence == true || row.?data.continuation == true || row.?data.capabilityEvidence == true)
+ sort "row.createdAt", "desc"
+ paginate 4
+ shape workObservationFull
+}
+
+/// Completed native/delegated source reads and capability contracts; checkpoints and model prose cannot buy more work.
 @actor
 query observation workProgressReceiptsForOwnerRun {
  args { runId string! }
- filter row => row.runId == args.runId && row.ownerUserId == actor.userId && ((row.kind == "tool_result" && row.?data.isError == false) || (row.kind == "note" && row.?data.capabilityEvidence == true))
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && ((row.kind == "tool_result" && row.?data.isError == false) || (row.kind == "note" && (row.?data.capabilityEvidence == true || (row.?data.delegatedEvidence == true && row.?data.nativeResultEvidence != nil))))
  sort "row.createdAt", "desc"
+ paginate 100
+ shape workObservationFull
+}
+
+/// The cumulative native provider ledger survives process and replica changes.
+@actor
+query observation workProviderAdmissionForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.providerAdmission != nil
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}
+
+/// Bounded candidate lookup against durable consumed-evidence identities.
+@actor
+query observation workProgressCreditsForOwnerRun {
+ args { runId string! receiptIds []string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.id in args.receiptIds
  paginate 100
  shape workObservationFull
 }

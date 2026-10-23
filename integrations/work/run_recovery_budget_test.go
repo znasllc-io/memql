@@ -17,7 +17,7 @@ func TestModelCallBudgetRefreshesApprovedTotalsWithoutRefundingUsage(t *testing.
 	ctx, rc := context.Background(), aGoalBackedRun()
 	limit, used, err := c.ModelCallBudget(ctx, rc)
 	require.NoError(t, err)
-	require.Equal(t, 96, limit, "proactive recovery observes the hard limit; admission owns the soft estimate")
+	require.Equal(t, 12, limit, "recovery observes the same current workload window as admission")
 	require.Zero(t, used)
 	c.Charge(ctx, rc, memqlengine.ModelSpend{ReceiptID: "local", Served: "local", InputTokens: 20})
 	c.Charge(ctx, rc, memqlengine.ModelSpend{Served: "cache"})
@@ -27,7 +27,7 @@ func TestModelCallBudgetRefreshesApprovedTotalsWithoutRefundingUsage(t *testing.
 		for n := 0; n < 2; n++ {
 			limit, used, err = c.ModelCallBudget(ctx, rc)
 			require.NoError(t, err)
-			require.Equal(t, 96, limit, "a raise is visible before this replica reaches its old hard cap")
+			require.Equal(t, total, limit, "a recorded allowance change is visible to recovery on a warm replica")
 			require.Equal(t, 3, used, "keep peer, unjournaled local, and cache charges exactly once")
 		}
 	}
@@ -63,4 +63,32 @@ func TestModelCallBudgetNeverTreatsUnreadableUsageAsUnlimited(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, limit)
 	require.Zero(t, used)
+}
+
+func TestModelCallBudgetObservesRenewedWindowWithoutChangingUsage(t *testing.T) {
+	c, eng := newTestCeilings(t)
+	answerRows(eng, map[string]any{"maxModelCalls": 96})
+	run := map[string]any{"id": ceilingRunId, "ownerUserId": ceilingOwner, "goalId": ceilingGoalId, "classification": map[string]any{"workload": "project"}}
+	eng.reply("workRunForOwner", run)
+	ctx, rc := context.Background(), aGoalBackedRun()
+	limit, _, err := c.ModelCallBudget(ctx, rc)
+	require.NoError(t, err)
+	require.Equal(t, 96, limit)
+	for n := 0; n < 122; n++ {
+		c.Charge(ctx, rc, memqlengine.ModelSpend{Served: "cache"})
+	}
+	// Completed evidence has already renewed this museum-cataloguing run on
+	// another replica. Recovery must observe the same window as admission,
+	// rather than permanently suppressing summaries at the original 96.
+	for _, extensions := range []int{4, 5} {
+		run["classification"] = map[string]any{"workload": "project", "progressContinuation": map[string]any{"extensions": extensions}}
+		eng.reply("workRunForOwner", run)
+		limit, used, err := c.ModelCallBudget(ctx, rc)
+		require.NoError(t, err)
+		require.Equal(t, 96*(extensions+1), limit)
+		require.Equal(t, 122, used, "observing a renewal does not refund cumulative usage")
+	}
+	for _, call := range eng.calls {
+		require.NotContains(t, call.Query, "mutation ", "recovery observation cannot renew a window itself")
+	}
 }

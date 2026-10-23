@@ -32,9 +32,10 @@ package agent
 // THE CAP IS THE ANTI-RUNAWAY DISCIPLINE APPLIED TO THE RECOVERY ITSELF. A
 // compression loop with no bound is a runaway of the kind this tree spends
 // several guards on already; and once compressing stops freeing anything, the
-// honest move is to stop and let the failure through, where the symptom
-// table's human.contextExhausted rule turns it into a question for a person
-// instead of a retry nobody benefits from.
+// honest move is to suspend owned work with its exact exchange. The caller's
+// native model-recovery path saves a checkpoint and asks for a person rather
+// than passing through generic failed-step Retry, which restarts the stage.
+// Outside owned work the human.contextExhausted classifier remains the fallback.
 
 import (
 	"context"
@@ -84,9 +85,8 @@ const (
 // still allowed to recover from and compressing freed something -- the caller
 // retries the SAME iteration with the smaller history. It answers ok=false for
 // everything else, including an overflow past the cap or one that freed
-// nothing, and the caller then handles err exactly as it did before: the
-// overflow goes through, and the work spine's human.contextExhausted rule
-// turns it into a question rather than a retry.
+// nothing. The caller then suspends owned work through recoverModelCall;
+// ordinary non-work requests keep their existing failure classification.
 //
 // used is a pointer because the cap is per TURN, not per iteration: a turn
 // that compresses at every iteration is not recovering, it is looping.

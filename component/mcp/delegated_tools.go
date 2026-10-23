@@ -289,7 +289,7 @@ func callDelegatedTool(ctx context.Context, eng Engine, sessionID, name string, 
 		encoded, _ := json.Marshal(result)
 		raw = string(encoded)
 	} else {
-		result = toolResultFromJSON(raw)
+		result, raw = presentExecutedToolResult(name, args, raw)
 	}
 	if recorder, ok := eng.(interface {
 		RecordDelegatedToolSource(context.Context, string, map[string]any, string) error

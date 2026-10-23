@@ -264,6 +264,7 @@ func (s *modelSeam) serve(
 	}
 	defer cancelDeadline()
 	ctx = bounded
+	ctx = s.withProviderAdmission(ctx)
 
 	// THE RUN'S CEILINGS, BEFORE ANYTHING IS SPENT (memql#5580). The check
 	// sits above the journal lookup as well as above the provider call, so a

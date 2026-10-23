@@ -196,16 +196,11 @@ const (
 	// Fallback output-token estimate when a request omits max_tokens.
 	defaultEstOutputTokens = 4096
 
-	// Per-scope budget defaults (memql#1144). Unlike the process-scope caps
-	// (which default to 0/unlimited because a since-boot latch has no safe
-	// universal value for a long-lived node), the per-scope latch is ON by
-	// default: a scope is ONE conversation/space or plan-lineage, a
-	// well-defined unit of work, so a runaway WITHIN a scope is unambiguous
-	// and latching it kills just that loop without touching other
-	// conversations or needing a restart. The caps sit well ABOVE the
-	// per-turn iteration cap (120) so a single legitimately-deep turn never
-	// trips them; a loop that spans turns/plan-cycles does. Conservative +
-	// env-tunable; raise per deployment.
+	// Ungoverned calls retain the conservative per-scope lifetime backstop.
+	// Owned work with a native durable provider-admission guard uses renewable
+	// work windows instead of this default call cap. An explicitly configured
+	// value (including 600) remains a hard limit. Neither mode resets usage or
+	// bypasses the independent cost, process, rate or fingerprint guards.
 	defaultScopeMaxCalls   = 600
 	defaultScopeMaxCostUSD = 20.0
 	// Scopes idle longer than this are pruned so the map can't grow
@@ -284,11 +279,13 @@ type llmGuard struct {
 	// space or plan-lineage) read off the request context. scopeEnabled gates
 	// it; a cap of 0 means unlimited for that dimension. scopes holds the
 	// live per-scope tallies; idle ones are pruned past scopeIdleTTL.
-	scopeEnabled    bool
-	scopeMaxCalls   int
-	scopeMaxCostUSD float64
-	scopeIdleTTL    time.Duration
-	scopes          map[string]*scopeBudget
+	scopeEnabled       bool
+	scopeMaxCalls      int
+	scopeCallsExplicit bool
+	scopeCostExplicit  bool
+	scopeMaxCostUSD    float64
+	scopeIdleTTL       time.Duration
+	scopes             map[string]*scopeBudget
 
 	// now is injectable for tests; defaults to time.Now.
 	now func() time.Time
@@ -298,11 +295,12 @@ type llmGuard struct {
 
 // scopeBudget is one scope's cumulative tally + latch state (memql#1144).
 type scopeBudget struct {
-	calls    int64
-	costUSD  float64
-	latched  bool
-	reason   string
-	lastSeen time.Time
+	calls     int64
+	costUSD   float64
+	latched   bool
+	callLatch bool
+	reason    string
+	lastSeen  time.Time
 }
 
 // loggerOrDefault guards against a nil logger in tests that build the
@@ -350,11 +348,13 @@ func newLLMGuardFromEnv() *llmGuard {
 		// Per-scope latch (memql#1144) -- ON by default with conservative caps
 		// (see the const comments). The scope is a conversation/space or
 		// plan-lineage stamped on the request context.
-		scopeEnabled:    envBoolDefault("MEMQL_LLM_SCOPE_GUARD_ENABLED", true),
-		scopeMaxCalls:   envIntDefault("MEMQL_LLM_SCOPE_MAX_CALLS", defaultScopeMaxCalls),
-		scopeMaxCostUSD: envFloatDefault("MEMQL_LLM_SCOPE_MAX_COST_USD", defaultScopeMaxCostUSD),
-		scopeIdleTTL:    time.Duration(envIntDefault("MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS", scopeIdleTTLSeconds)) * time.Second,
-		scopes:          map[string]*scopeBudget{},
+		scopeEnabled:       envBoolDefault("MEMQL_LLM_SCOPE_GUARD_ENABLED", true),
+		scopeMaxCalls:      envIntDefault("MEMQL_LLM_SCOPE_MAX_CALLS", defaultScopeMaxCalls),
+		scopeCallsExplicit: strings.TrimSpace(os.Getenv("MEMQL_LLM_SCOPE_MAX_CALLS")) != "",
+		scopeCostExplicit:  strings.TrimSpace(os.Getenv("MEMQL_LLM_SCOPE_MAX_COST_USD")) != "",
+		scopeMaxCostUSD:    envFloatDefault("MEMQL_LLM_SCOPE_MAX_COST_USD", defaultScopeMaxCostUSD),
+		scopeIdleTTL:       time.Duration(envIntDefault("MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS", scopeIdleTTLSeconds)) * time.Second,
+		scopes:             map[string]*scopeBudget{},
 
 		hits:    map[string][]time.Time{},
 		tripped: map[string]time.Time{},
@@ -554,6 +554,10 @@ func (g *llmGuard) recordAndMaybeLatch(scopeIds []string, body []byte) (reason s
 // So a fleet call arrives here with cost 0 and still increments every call
 // tally, process-wide and per-scope.
 func (g *llmGuard) recordAndMaybeLatchCost(scopeIds []string, cost float64) (reason string, blocked bool) {
+	return g.recordGovernedCost(scopeIds, cost, false)
+}
+
+func (g *llmGuard) recordGovernedCost(scopeIds []string, cost float64, governed bool) (reason string, blocked bool) {
 	if g == nil || (!g.killSwitchEnabled && !g.scopeEnabled) {
 		return "", false
 	}
@@ -590,10 +594,11 @@ func (g *llmGuard) recordAndMaybeLatchCost(scopeIds []string, cost float64) (rea
 				sb = &scopeBudget{lastSeen: now}
 				g.scopes[sid] = sb
 			}
-			if sb.latched {
+			if sb.latched && !(governed && !g.scopeCallsExplicit && sb.callLatch) {
 				return sb.reason, true
 			}
-			if g.scopeMaxCalls > 0 && sb.calls >= int64(g.scopeMaxCalls) {
+			if (!governed || g.scopeCallsExplicit) && g.scopeMaxCalls > 0 && sb.calls >= int64(g.scopeMaxCalls) {
+				sb.callLatch = true
 				return g.tripScopeLocked(sid, sb, fmt.Sprintf(
 					"per-scope LLM call ceiling reached for scope %q: %d cumulative calls (MEMQL_LLM_SCOPE_MAX_CALLS=%d)",
 					sid, sb.calls, g.scopeMaxCalls)), true
@@ -674,10 +679,10 @@ func (g *llmGuard) costCeilingReached(ctx context.Context) (string, bool) {
 			if sb == nil {
 				continue
 			}
-			if sb.latched {
+			if sb.latched && !(governedProviderWork(ctx) && !g.scopeCallsExplicit && sb.callLatch) {
 				return sb.reason, true
 			}
-			if g.scopeMaxCalls > 0 && sb.calls >= int64(g.scopeMaxCalls) {
+			if (!governedProviderWork(ctx) || g.scopeCallsExplicit) && g.scopeMaxCalls > 0 && sb.calls >= int64(g.scopeMaxCalls) {
 				return fmt.Sprintf(
 					"per-scope LLM call ceiling reached for scope %q: %d cumulative calls (MEMQL_LLM_SCOPE_MAX_CALLS=%d)",
 					sid, sb.calls, g.scopeMaxCalls), true
@@ -848,7 +853,7 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return observeFederationExchange(base, req)
 	}
 	g := t.guard
-	if g == nil || (!g.enabled && !g.rateEnabled && !g.killSwitchEnabled && !g.scopeEnabled) {
+	if g == nil {
 		return base.RoundTrip(req)
 	}
 
@@ -873,7 +878,7 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 
 	fp, guarded := fingerprintRequest(req.Method, req.URL.Path, bodyBytes)
-	if guarded {
+	if guarded || (hasProviderWork(req.Context()) && req.Method == http.MethodPost && isAuxiliaryInferencePath(req.URL.Path)) {
 		// 0. KILL-SWITCH first (memql#1145). If the cumulative breaker has
 		// already latched, hard-stop immediately with a terminal 402 -- no
 		// fingerprinting, no rate accounting, no vendor request. This is the
@@ -883,8 +888,10 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		}
 		// 1. Per-fingerprint loop breaker (catches byte-identical loops
 		// cheaply). admit() self-gates on g.enabled.
-		if open, repeats := g.admit(fp); open {
-			return loopBreakerResponse(req, repeats), nil
+		if guarded {
+			if open, repeats := g.admit(fp); open {
+				return loopBreakerResponse(req, repeats), nil
+			}
 		}
 		// 2. The per-lane, content-independent rate ceiling -- the backstop
 		// that catches loops varying their request body. The lane is read
@@ -903,11 +910,34 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// breaker latches and THIS call is hard-stopped too, keeping the
 		// number of vendor calls <= the cap for every scope it belongs to.
 		scopes := budgetScopesFromContext(req.Context())
-		if reason, blocked := g.recordAndMaybeLatch(scopes, bodyBytes); blocked {
+		cost := estimateRequestCostUSD(bodyBytes, g.costInPerMillion, g.costOutPerMillion)
+		tokens := (len(bodyBytes)+3)/4 + parseMaxOutputTokens(bodyBytes)
+		if strings.HasSuffix(strings.ToLower(req.URL.Path), "/embeddings") {
+			// Embeddings bill input; a vector is not generated output tokens.
+			tokens = (len(bodyBytes) + 3) / 4
+			cost = float64(tokens) / 1_000_000 * g.costInPerMillion
+		}
+		governed, err := g.admitWorkProvider(req.Context(), cost, tokens)
+		if err != nil {
+			return nil, err
+		}
+		if reason, blocked := g.recordGovernedCost(scopes, cost, governed); blocked {
 			return killSwitchResponse(req, reason), nil
 		}
 	}
 	return base.RoundTrip(req)
+}
+
+// Auxiliary inference legitimately repeats inputs, so it shares admission and
+// rate accounting without adopting the chat fingerprint loop detector.
+func isAuxiliaryInferencePath(path string) bool {
+	p := strings.ToLower(path)
+	for _, suffix := range []string{"/embeddings", "/audio/speech", "/audio/transcriptions", "/audio/translations", "/images/generations", "/images/edits"} {
+		if strings.HasSuffix(p, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // loopBreakerResponse builds a synthetic HTTP 429 the vendor SDKs parse

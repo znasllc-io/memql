@@ -28,11 +28,11 @@ type trainingVector struct {
 }
 
 func (p *trainingVector) Embed(ctx context.Context, text string) ([]float32, error) {
+	p.calls++
 	if p.block {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	p.calls++
 	v := make([]float32, 1024)
 	v[0] = 1
 	if strings.HasPrefix(text, "unrelated") {
@@ -87,6 +87,20 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	f.query(f.engine, person, "mutation", "createWorkGoal", map[string]any{"goalId": goalID, "statement": "Verify a change with evidence", "origin": "user"})
 	f.query(f.engine, person, "mutation", "createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "status": "running", "mode": "live", "automationName": "fixture", "templateFingerprint": "fixture", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 	ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: f.owner, StepKey: "section", Mode: common.RunModeLive})
+	f.query(f.engine, person, "mutation", "createWorkStep", map[string]any{"stepId": runID + "-section", "runId": runID, "key": "section", "seq": 1, "stepType": "function", "status": "running", "attempt": 1, "version": 1})
+	// Exercise the model-callable gateway under an ordinary caller origin,
+	// not the native prompt reader's internal origin. Its returned envelope
+	// must preserve real passages AND explain an empty selection.
+	consultCtx := common.ContextWithRun(revisionActor(f.owner, auth.RoleOwner), common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: f.owner, StepKey: "section", Mode: common.RunModeLive})
+	consult := func() map[string]any {
+		rows, err := f.second.handleConsultWorkTraining(consultCtx, map[string]any{"text": "Verify a change"}, 0)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		var value map[string]any
+		require.NoError(t, json.Unmarshal(rows[0].Payload, &value))
+		require.NotEmpty(t, value["receiptId"])
+		return value
+	}
 	search := func(lib *Integration) []map[string]any {
 		rows, err := lib.handleOwnedTrainingLessons(ctx, map[string]any{"text": "Verify a change", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1200}, 0)
 		require.NoError(t, err)
@@ -100,6 +114,10 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	}
 	require.Empty(t, search(f.second))
 	require.Zero(t, provider.calls, "first-use empty corpus does not call an embedder")
+	empty := consult()
+	require.Equal(t, "empty-eligible-corpus", empty["status"])
+	require.Empty(t, empty["passages"])
+	require.Zero(t, provider.calls)
 	teach := func(actor context.Context, suffix, text string) (fileID, chunkID, artifactID string) {
 		fileID = f.owner + suffix
 		f.query(f.engine, actor, "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": suffix + ".txt", "mimeType": "text/plain", "size": len(text), "blobUrl": "fixture://owned-source", "source": "uploaded", "format": "text"})
@@ -125,6 +143,31 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	require.Equal(t, memql.BareShortId(chunk), got[0]["chunkId"])
 	require.Equal(t, memql.BareShortId(artifact), got[0]["artifactId"])
 	require.Contains(t, got[0]["text"], "required checks")
+	consulted := consult()
+	require.Equal(t, "ranked", consulted["status"])
+	require.Len(t, consulted["passages"], 1)
+	require.Contains(t, fmt.Sprint(consulted["passages"]), "required checks")
+	// Traverse the registered work builtin and Library gateway together. A
+	// handler-only fixture would miss a DSL/engine envelope that silently lost
+	// passages between the two integrations (including delegated Apps calls).
+	gateway := f.query(f.other, consultCtx, "builtin", "libraryConsultWorkTraining", map[string]any{"text": "Verify a change"})
+	require.Len(t, gateway, 1)
+	require.NotEmpty(t, gateway[0]["receiptId"], fmt.Sprint(gateway))
+	combined := f.query(f.other, consultCtx, "builtin", "workConsultKnowledge", map[string]any{"need": "Verify a change", "context": "The current result needs an independent check."})
+	require.Len(t, combined, 1)
+	require.Equal(t, "not-assessed", combined[0]["readiness"])
+	require.Contains(t, fmt.Sprint(combined[0]["training"]), "required checks")
+	require.NotEmpty(t, combined[0]["skillReceiptId"])
+	journal := f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
+	require.Contains(t, fmt.Sprint(journal), "knowledgeConsultation")
+	for _, refused := range []common.RunContext{
+		{RunId: runID, GoalId: goalID, OwnerUserId: f.owner, StepKey: "section", Mode: common.RunModeReplay},
+		{RunId: runID, GoalId: goalID, OwnerUserId: f.owner + "other", StepKey: "section", Mode: common.RunModeLive},
+		{RunId: runID, GoalId: goalID, OwnerUserId: f.owner, StepKey: "missing", Mode: common.RunModeLive},
+	} {
+		_, err := f.second.handleConsultWorkTraining(common.ContextWithRun(revisionActor(f.owner, auth.RoleOwner), refused), map[string]any{"text": "Verify a change"}, 0)
+		require.Error(t, err)
+	}
 	receiptID := stringField(got[0], "selectionReceiptId")
 	require.NotEmpty(t, receiptID)
 	receipts := f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
@@ -142,13 +185,41 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	// A cold/busy optional inference door must not prevent the first work
 	// action. The omission is durable and cannot claim any lesson was read.
 	provider.block = true
-	omitted, lookupErr := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "A new uncached slow query", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1200}, 0)
+	retryArgs := map[string]any{"text": "Compare the museum's two acquisition records", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1200, "retryUnavailableAfterSeconds": 300}
+	var timeoutReceipt trainingSelectionReceipt
+	omitted, lookupErr := f.second.readOwnedTrainingLessons(ctx, retryArgs, func(_ string, r trainingSelectionReceipt) { timeoutReceipt = r })
 	provider.block = false
 	require.NoError(t, lookupErr)
 	require.Empty(t, omitted)
 	require.NoError(t, ctx.Err())
 	timeoutReceipts := f.query(f.engine, memql.ContextWithFreshRead(person), "query", "workObservationsForOwnerRun", map[string]any{"runId": runID})
 	require.Contains(t, fmt.Sprint(timeoutReceipts), "embedding-timeout")
+	beforeRetry := provider.calls
+	var reused trainingSelectionReceipt
+	omitted, lookupErr = f.first.readOwnedTrainingLessons(ctx, retryArgs, func(_ string, r trainingSelectionReceipt) { reused = r })
+	require.NoError(t, lookupErr)
+	require.Empty(t, omitted)
+	require.Equal(t, beforeRetry, provider.calls, "another replica reuses availability evidence without another inference")
+	require.Equal(t, "embedding-backoff", reused.Status)
+	require.Equal(t, timeoutReceipt.RetryAt, reused.RetryAt, "reading backoff cannot extend its deadline")
+	require.NotEmpty(t, reused.ReusedReceiptID)
+	rc, _ := common.RunFromContext(ctx)
+	_, receiptRef, lookupErr := f.second.recentTrainingTimeout(ctx, rc, reused.AvailabilityKey, time.Now().Add(301*time.Second))
+	require.NoError(t, lookupErr)
+	require.Empty(t, receiptRef, "expired unavailability must permit a new attempt")
+	// Fresh review/source heads invalidate the availability key, even for the
+	// same query. The ordinary embedding cache and passage revalidation remain.
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": chunk, "status": "validated"})
+	var recovered trainingSelectionReceipt
+	omitted, lookupErr = f.first.readOwnedTrainingLessons(ctx, retryArgs, func(_ string, r trainingSelectionReceipt) { recovered = r })
+	require.NoError(t, lookupErr)
+	require.NotEmpty(t, omitted)
+	require.Equal(t, beforeRetry+1, provider.calls)
+	require.Equal(t, "ranked", recovered.Status)
+	require.NotEqual(t, reused.AvailabilityKey, recovered.AvailabilityKey)
+	_, lookupErr = f.second.handleOwnedTrainingLessons(ctx, retryArgs, 0)
+	require.NoError(t, lookupErr)
+	require.Equal(t, beforeRetry+1, provider.calls, "successful vectors still reuse the existing durable embedding cache")
 	// A reviewed passage too large for its allocation is withheld whole and the
 	// bounded decision records the reason, without treating it as delivered.
 	tiny, err := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "Verify a change", "limit": 1, "minimumSimilarity": 0.6, "maxTokens": 1}, 0)

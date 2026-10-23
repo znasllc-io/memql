@@ -450,6 +450,11 @@ builtin libraryRevisionPreparedImages {
 @executor("integration.library.workTrainingContext")
 builtin libraryWorkTrainingContext {}
 
+/// Narrow live-work gateway to reviewed Training retrieval, with explicit
+/// availability and a persisted selection receipt. Does not index or publish.
+@executor("integration.library.consultWorkTraining")
+builtin libraryConsultWorkTraining { text string! }
+
 /// Bounded, fresh reviewed passages proved against the current task owner's taught Library sources.
 @executor("integration.library.ownedTrainingLessons")
 builtin libraryOwnedTrainingLessons {
@@ -457,6 +462,8 @@ builtin libraryOwnedTrainingLessons {
  limit int!
  minimumSimilarity number!
  maxTokens int!
+ retryUnavailableAfterSeconds int
+ includeAvailability bool
 }
 
 /// One manual, version-guarded lesson event. Never invoked by automatic mining.

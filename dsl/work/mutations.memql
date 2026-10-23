@@ -79,6 +79,7 @@ mutation run createWorkRun {
       ownerUserId: actor.userId
       mode: args.mode ?? "live"
       callerSuppliedPayload: args.callerSuppliedPayload ?? false
+      providerAccountingVersion: 1
       replayPolicy: args.replayPolicy ?? "strict"
       cancelRequested: false
     }
@@ -334,6 +335,9 @@ mutation goal createWorkGoal {
 /// with acceptance. Runs may finish, fail or wait while the goal remains open.
 /// Only the interactive accept/cancel handlers close a goal. The server-only
 /// mutation preserves the owner-checked acceptance receipt and optional feedback.
+/// Scoping to actor.userId alone cannot attest human acceptance: a delegated
+/// agent also acts as that owner and must not certify its own results. The
+/// interactive handler validates the decision and reviewed version first.
 @serverOnly
 mutation goal updateWorkGoal {
   args {
@@ -398,6 +402,7 @@ mutation modelCall createWorkModelCall {
 mutation observation createWorkObservation {
   args {
     observationId  string!
+    versionTime    datetime
     runId          string!
     stepKey        string
     kind           string!
@@ -408,6 +413,7 @@ mutation observation createWorkObservation {
     accept { runId, stepKey, kind, content, data }
     stamp {
       id: args.observationId
+      createdAt: args.versionTime ?? now
       ownerUserId: actor.userId
     }
   }

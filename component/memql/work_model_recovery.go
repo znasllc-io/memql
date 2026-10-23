@@ -14,7 +14,8 @@ import (
 )
 
 // RecoverWorkModelCall is native-only: the tool loop calls it after a failed
-// provider response, before dispatching any proposed tool. It cannot make an
+// provider response or a capacity refusal during proactive compaction, before
+// dispatching any proposed tool. It cannot make an
 // uncertain tool effect retryable. The installed recipe chooses retry or ask.
 func (e *MemQLEngine) RecoverWorkModelCall(ctx context.Context, failure string, attempt, maxRetries int, messages []common.ChatMessage) (retry bool, err error) {
 	defer func() {
@@ -25,9 +26,10 @@ func (e *MemQLEngine) RecoverWorkModelCall(ctx context.Context, failure string, 
 	}()
 	run, ok := common.RunFromContext(ctx)
 	ac, _ := auth.AccessFromContext(ctx)
+	capacity := work.IsContextCapacityFailure(failure)
 	if !ok || ac == nil || run.GoalId == "" || run.OwnerUserId == "" || run.StepKey == "" ||
 		BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) || run.Mode == common.RunModeReplay ||
-		!work.IsModelCallCeiling(failure) || len(messages) == 0 || attempt < 0 || maxRetries < 0 || maxRetries > 3 {
+		(!work.IsModelCallCeiling(failure) && !capacity) || len(messages) == 0 || attempt < 0 || maxRetries < 0 || maxRetries > 3 || (capacity && maxRetries != 0) {
 		return false, fmt.Errorf("model recovery requires the unchanged owned execution and a provider failure")
 	}
 	if err := ctx.Err(); err != nil {
@@ -55,7 +57,13 @@ func (e *MemQLEngine) RecoverWorkModelCall(ctx context.Context, failure string, 
 	if len(goals) != 1 || stringField(goals[0], "status") == "closed" {
 		return false, fmt.Errorf("model recovery goal is no longer active")
 	}
-	value, err := e.runScopedWorkflow(ctx, "workModelCallRecovery", map[string]any{"retriesSpent": attempt, "maxRetries": maxRetries}, nil)
+	failureKind := "model_call_ceiling"
+	if capacity {
+		// Compaction has already exhausted its bounded recovery. Identical
+		// context is never automatically resent, even under a custom recipe.
+		failureKind = "context_capacity"
+	}
+	value, err := e.runScopedWorkflow(ctx, "workModelCallRecovery", map[string]any{"retriesSpent": attempt, "maxRetries": maxRetries, "failureKind": failureKind}, nil)
 	if err != nil {
 		return false, err
 	}

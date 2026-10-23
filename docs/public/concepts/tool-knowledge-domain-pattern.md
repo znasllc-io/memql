@@ -272,6 +272,16 @@ unavailable embedder is reported as deferred indexing. Ownerless scheduled work
 does not manufacture a user or a forwarding assertion to reach private fleet
 models; those bindings await an authorized owned turn.
 
+Optional Training similarity lookups record `embedding-timeout` when their own
+short deadline expires. The Training recipe may reuse that availability receipt
+for five minutes, recording `embedding-backoff` and the original retry time.
+This is unavailable context, not evidence that no lessons match. Repeated reads
+do not extend the delay. Each lookup rechecks the owned run, current source heads,
+review/publication state and embedding binding; a changed query, source or binding
+permits a fresh attempt. Successful vectors continue to use the existing shared
+embedding cache, while selected passages always undergo current authorization
+and source validation. Oversized source inventories disable availability reuse.
+
 Before an owned turn retrieves manuals and optional lessons, its Training recipe
 rechecks the current run and goal and indexes at most eight missing release
 vectors in one two-minute pass. Only exact, validated, non-superseded manifest
