@@ -255,6 +255,14 @@ until operator review and worker restart. A new screenshot cannot clear the
 interruption. Input is serialized across enrollments in one worker process.
 There is no automatic retry, focus stealing, or global-event fallback.
 
+An operator can inspect the running worker's exact-target acquisition with
+`memql worker control --action=input-target-status`. This explicit local control
+action uses the worker's own macOS permission identity and reports the failing
+AX stage/error or observed PID/window. It does not read element contents, mint
+a receipt, reset the interruption latch, activate a window, or send input.
+Ordinary `--action=status` does not acquire an AX target. Diagnostic success
+does not establish event delivery or authorize resuming an interrupted run.
+
 macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
 packets also carry the observed window in Quartz's two public mouse-window
 fields. Quartz ignores those fields for scroll packets, which retain PID and

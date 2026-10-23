@@ -89,6 +89,38 @@ func inputToken(t *testing.T, g *inputTargetGuard, ctx context.Context) string {
 	}
 	return p.InputTarget.ID
 }
+
+func TestInputTargetDiagnosticPreservesGuardAndNeverPosts(t *testing.T) {
+	g, b, ctx := newInputFixture(t)
+	inputToken(t, g, ctx)
+	frame, anchor := g.frame, g.anchor
+	for _, halted := range []bool{false, true} {
+		g.halted = halted
+		for _, unavailable := range []bool{false, true} {
+			b.err = nil
+			if unavailable {
+				b.err = errors.New("focused UI element: AX error -25212")
+			}
+			status := g.targetStatus()
+			if status.Available == unavailable || status.Halted != halted || !status.Bound {
+				t.Fatalf("incorrect diagnostic: %+v", status)
+			}
+			if unavailable && status.Error != b.err.Error() {
+				t.Fatalf("lost diagnostic: %+v", status)
+			}
+			if !unavailable && (status.WindowID != 42 || status.PID != 100) {
+				t.Fatalf("incorrect observed target: %+v", status)
+			}
+			if g.frame != frame || g.anchor != anchor || g.frame.used || g.halted != halted || len(b.events) != 0 {
+				t.Fatal("diagnostic changed input state or posted an event")
+			}
+		}
+	}
+	g.backend = nil
+	if status := g.targetStatus(); status.Available || status.Error == "" {
+		t.Fatalf("missing backend must be explicit: %+v", status)
+	}
+}
 func TestInputReceiptOwnershipExpiryAndConsumption(t *testing.T) {
 	for _, mode := range []string{"wrong-token", "other-run", "other-home", "expired", "cancelled", "replayed", "bad-args"} {
 		t.Run(mode, func(t *testing.T) {

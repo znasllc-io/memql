@@ -69,6 +69,40 @@ type inputTargetGuard struct {
 
 var desktopInputGuard = &inputTargetGuard{now: time.Now}
 
+// InputTargetStatus is an explicit local diagnostic, not an input receipt or
+// permission. It contains no element contents, application titles or tokens.
+type InputTargetStatus struct {
+	Available bool   `json:"available"`
+	Bound     bool   `json:"bound"`
+	Halted    bool   `json:"halted"`
+	WindowID  uint64 `json:"observed_window_id,omitempty"`
+	PID       int    `json:"observed_pid,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// DesktopInputTargetStatus reads from the actual worker process so its TCC
+// identity is used. It never activates an app, posts input or changes the guard.
+func DesktopInputTargetStatus() InputTargetStatus { return desktopInputGuard.targetStatus() }
+
+func (g *inputTargetGuard) targetStatus() InputTargetStatus {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	status := InputTargetStatus{Bound: g.anchor != nil, Halted: g.halted}
+	if g.backend == nil {
+		status.Error = "No target-addressed input backend is available."
+		return status
+	}
+	focus, err := g.backend.focus()
+	if err != nil {
+		status.Error = err.Error()
+		return status
+	}
+	defer focus.close()
+	w := focus.window()
+	status.Available, status.WindowID, status.PID = true, w.ID, w.PID
+	return status
+}
+
 func (g *inputTargetGuard) clearFrame() {
 	if g.frame != nil {
 		g.frame.focus.close()

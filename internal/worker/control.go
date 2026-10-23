@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql-cockpit/internal/config"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
 	"gopkg.in/yaml.v3"
 )
 
@@ -255,10 +256,11 @@ type controlRequest struct {
 	Setup *SetupControl `json:"setup,omitempty"`
 }
 type controlResponse struct {
-	OK     bool            `json:"ok"`
-	Error  string          `json:"error,omitempty"`
-	Status *LocalStatus    `json:"status,omitempty"`
-	Logs   []LocalLogEntry `json:"logs,omitempty"`
+	OK          bool                     `json:"ok"`
+	Error       string                   `json:"error,omitempty"`
+	Status      *LocalStatus             `json:"status,omitempty"`
+	Logs        []LocalLogEntry          `json:"logs,omitempty"`
+	InputTarget *tools.InputTargetStatus `json:"input_target,omitempty"`
 }
 
 func ownedByCurrentUser(info os.FileInfo) bool {
@@ -345,6 +347,9 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 	case "status":
 		status := fleet.LocalStatus()
 		response.Status = &status
+	case "input-target-status":
+		status := tools.DesktopInputTargetStatus()
+		response.InputTarget = &status
 	case "home":
 		if request.Enabled == nil || request.Home == "" {
 			response.OK = false
@@ -409,7 +414,7 @@ func callControl(path string, request controlRequest) (controlResponse, error) {
 
 func handleControl(args []string) {
 	fs := flag.NewFlagSet("worker control", flag.ContinueOnError)
-	action := fs.String("action", "status", "status, logs, home, setup (the installer's progress), or request-permission (explicit local macOS prompt)")
+	action := fs.String("action", "status", "status, input-target-status (explicit read-only focus diagnostic), logs, home, setup (the installer's progress), or request-permission (explicit local macOS prompt)")
 	permission := fs.String("permission", "", "accessibility or screen_recording, for request-permission")
 	pid := fs.Int("pid", 0, "expected worker process ID, required for request-permission")
 	home := fs.String("home", "", "configured server ID")
