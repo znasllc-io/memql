@@ -1284,7 +1284,10 @@ func firstToken(cmd string) string {
 		return ""
 	}
 	for i, r := range cmd {
-		if r == ' ' || r == '\t' {
+		// A newline ends a shell command just as a blank ends its name.
+		// Classify only; never normalize the exact bytes the owner reviewed
+		// (including newlines inside quoted strings) before execution.
+		if r == ' ' || r == '\t' || r == '\n' {
 			return cmd[:i]
 		}
 	}

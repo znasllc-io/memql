@@ -764,6 +764,13 @@ fresh replica's saved-file reader and verifies that binary and owner gates hold.
 
 ## When it does not work
 
+An approved `workerHost.exec` script may start with a no-argument command
+followed by a newline. The local shell-policy name classifier recognizes that
+newline without joining the next line to the command name. It does not rewrite
+the reviewed script: quoted multiline text, the exact-command receipt, local
+consent, working-directory checks, resource limits, and allow/deny lists retain
+their existing behavior. A scoped approval does not override the local policy.
+
 | What you see | What it means |
 |---|---|
 | `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false; the badge says which |
