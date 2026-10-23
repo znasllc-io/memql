@@ -138,6 +138,7 @@ func TestWorkDBRequiredKnowledgeReachesPromptOnAnotherReplica(t *testing.T) {
 		require.Greater(t, payload["_similarity"].(float64), 0.79)
 	}
 	turn := func(lane, step string) *agent.TurnResult {
+		write("createWorkStep", map[string]any{"stepId": key + step, "runId": runID, "key": step, "seq": 0, "stepType": "automation", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 		ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: step, Mode: common.RunModeLive})
 		result, err := replier.Handle(ctx, &memqlv1.AgentGenerateTurnMsg{RequestId: key + step, AgentId: "synthetic", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "synthetic", Role: "assistant"}, Hints: map[string]string{agent.ExecutionLaneHintKey: lane}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Read the current manual"}}}, knowledgeTurnSink{})
 		require.NoError(t, err)

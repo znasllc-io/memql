@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 func workerResultText(t *testing.T, concept string, payload any, graph bool) string {
@@ -19,6 +20,37 @@ func workerResultText(t *testing.T, concept string, payload any, graph bool) str
 	raw, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	return string(raw)
+}
+
+func TestWorkerToolExecutionFailureKeepsOnlyTheDeclaredReceiptInBand(t *testing.T) {
+	payload := json.RawMessage(`{"ok":false,"errorCode":"exec_timeout","errorMessage":"The command outcome is uncertain","output":{"count":9007199254740993,"stdout":"partial output"}}`)
+	nodes := []memorynodes.MemoryNode{{ID: "worker-call:1", Concept: "integration:worker:result", Payload: payload}}
+	err := WorkerToolExecutionFailure("workerHost", "exec", nodes)
+	require.Error(t, err, "a failed builtin must still fail an automation")
+	require.Contains(t, err.Error(), "exec_timeout")
+	wrapped := fmt.Errorf("function: %w", err)
+	tool := &Tool{Name: "workerHost", Handler: &ToolHandler{Type: "function", FunctionName: "agentworkerDispatchHost"}}
+	result := workerToolFailureResult(tool, wrapped)
+	require.NotNil(t, result)
+	require.True(t, result.IsError)
+	require.Len(t, result.Content, 1)
+	require.Contains(t, result.Content[0].Text, `"count":9007199254740993`)
+	require.Contains(t, result.Content[0].Text, "partial output")
+	require.False(t, ClassifyToolError(wrapped).Retryable)
+	payload[0] = '!' // The recorded answer owns its bytes.
+	require.Contains(t, workerToolFailureResult(tool, err).Content[0].Text, `"ok":false`)
+	require.Nil(t, workerToolFailureResult(tool, fmt.Errorf("transport unavailable")))
+	require.Nil(t, workerToolFailureResult(tool, ClassifyToolError(wrapped)), "an arbitrary structured error is not a worker receipt")
+	other := &Tool{Name: "workerComputer", Handler: &ToolHandler{Type: "function", FunctionName: "agentworkerDispatchComputer"}}
+	require.Nil(t, workerToolFailureResult(other, err), "a receipt cannot cross tool identities")
+	tool.Handler.FunctionName = "unrelatedFunction"
+	require.Nil(t, workerToolFailureResult(tool, err))
+	tool.Handler.FunctionName = "agentworkerDispatchHost"
+	for _, bad := range [][]memorynodes.MemoryNode{nil, nodes, {{Concept: "user:note", Payload: json.RawMessage(`{"ok":false}`)}}, {{Concept: "integration:worker:result", Payload: json.RawMessage(`{"ok":true}`)}}} {
+		invalid := WorkerToolExecutionFailure("workerHost", "exec", bad)
+		require.Nil(t, workerToolFailureResult(tool, invalid))
+		require.False(t, ClassifyToolError(invalid).Retryable, "missing evidence cannot license another dispatch")
+	}
 }
 
 func TestWorkerToolResultUsesOnlyDeclaredContract(t *testing.T) {
