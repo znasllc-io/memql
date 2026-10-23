@@ -443,6 +443,34 @@ evidence. A screenshot of an old running build cannot close that evidence gap.
 
 ## Context pressure and optional work
 
+### An answer received before the App stops
+
+An approved invocation can take longer to unwind than the two-second dispatch
+readiness wait. The decision event then leaves its answer claim unspent. The
+local Ask trial exposed a missing wakeup: the App stopped seven seconds after
+the answer, but the cron leader was an identity node with no dispatcher, so its
+sweep abandoned the approved run instead of resuming it. The previous regression
+explicitly invoked an agent's recovery entry and did not cover that topology.
+
+After the executor saves its suspended receipt, `workRunDispatcher.report`
+freshly checks the same answer, owner-readable run, execution generation,
+cancellation and absence of running steps, then re-offers the ordinary run
+event. The existing same-answer claim and execution fences remain authoritative;
+there is no new permission, generation, replay rule, lease or polling interval.
+An unanswered wait remains parked, a later answer follows its usual event, and
+a stale settlement cannot adopt a newer rerun. The stopped invocation's cancelled
+context is detached only for this bounded metadata read, retaining its actor;
+dispatch independently restores persisted owner authority again.
+
+`TestWorkDBHumanSettlementWakesWithoutExecutingSweepLeader` reproduces abandonment
+with two peer engines, an early real permission decision, a delayed nested
+receipt and an actual non-executing sweep integration. It checks same-answer
+dispatch without a manual agent sweep, stale-answer/generation refusal and
+duplicate event/settlement suppression. Existing recovery tests retain coverage
+for claimant death, lease takeover, cancellation and uncertain effects. This
+repair does not rewrite the trial's already-abandoned execution or make its
+manual recovery an uninterrupted run.
+
 Prerequisite recovery preserves prepared work. The shared execution prompt
 distinguishes an operation that could not start from a produced result that
 failed validation. It asks for the specific missing setup information, input
