@@ -468,6 +468,19 @@ unnecessary inference before this ordering change and verifies zero summary
 calls plus exact cross-replica readback afterward. Ordinary small receipts,
 instructions and the fresh tail remain verbatim in that regression.
 
+Capacity pauses and provider-call ceilings share the native checkpoint decision
+path. The pause writer emitted `context_capacity`, but its classifier recognized
+only `model_call_ceiling`; Retry consequently created an ordinary rerun with a
+new generation and empty override, and exact checkpoint validation refused it.
+The classifier now recognizes both exact failure kinds. Owner/receipt checks,
+override equality and execution lineage remain enforced; capacity decisions do
+not renew progress limits or grant operation permission. The required-database
+`TestContextCapacityDecisionPreservesCheckpointGenerationAcrossReplicas` follows
+the actual pause writer through Retry and guidance on another engine, retaining
+the Astra/xhigh override, generation, spent budget and exact completed exchange.
+This prevents new invalid reruns; it does not rewrite a previously failed run's
+history or prove that its downstream work has resumed.
+
 Memory-only history can remain over budget after the last fresh exchange has
 been summarized. Semantic selection deliberately refuses to re-summarize those
 derived claims, but sharing that restriction with exact archival stranded an

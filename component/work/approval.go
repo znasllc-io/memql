@@ -330,8 +330,11 @@ func short(h string) string {
 	return h
 }
 
-// IsModelCallCheckpoint identifies native pre-tool provider suspensions. The
-// checkpoint itself is validated again by the execution replica before use.
+// IsModelCallCheckpoint identifies native pre-tool provider suspensions. Both
+// emitted failure kinds must retain the saved generation and override: treating
+// capacity as an ordinary failure retry replaces that lineage before validation.
+// The checkpoint itself is validated again by the execution replica before use;
+// classification grants neither permission nor a larger progress/model budget.
 func IsModelCallCheckpoint(subject map[string]any) bool {
-	return subject["providerFailure"] == "model_call_ceiling"
+	return subject["providerFailure"] == "model_call_ceiling" || subject["providerFailure"] == "context_capacity"
 }
