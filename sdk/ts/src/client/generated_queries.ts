@@ -6528,7 +6528,7 @@ QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, a
   return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
 };
 
-/** Read connected repositories and application sources visible to this caller. */
+/** Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {
 }
@@ -6954,7 +6954,7 @@ QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: 
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
 };
 
-/** Read repository pipelines connected by the caller, most recently connected first. */
+/** Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
 export interface PipelinesForOwnerArgs {
 }
@@ -11830,7 +11830,7 @@ QueryClient.prototype.sourceConnectionById = function (this: QueryClient, args: 
   return this.executeNamed("sourceConnectionById", buildSourceConnectionById(args), opts);
 };
 
-/** List the caller's active saved source connections to GitHub repositories. Discover source connection and installation ids before resolving a repository; these personal bindings remain independent of MemQL organization accounts. */
+/** Read the caller's active saved source connections for discovering accessible repositories, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for their repository listing contract. */
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.ts).
 export interface SourceConnectionsMineArgs {
 }
@@ -13058,6 +13058,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workGoalsForResponsibility = function (this: QueryClient, args: WorkGoalsForResponsibilityArgs = {} as WorkGoalsForResponsibilityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workGoalsForResponsibility", buildWorkGoalsForResponsibility(args), opts);
+};
+
+/** Search original tool fields across execution receipts and compaction archives. The engine projects public source fields; these raw rows are not model context. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workHistorySearchSourcesForOwnerRun"] in generated_concepts.ts).
+export interface WorkHistorySearchSourcesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkHistorySearchSourcesForOwnerRun(args: WorkHistorySearchSourcesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workHistorySearchSourcesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workHistorySearchSourcesForOwnerRun(args: WorkHistorySearchSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workHistorySearchSourcesForOwnerRun = function (this: QueryClient, args: WorkHistorySearchSourcesForOwnerRunArgs = {} as WorkHistorySearchSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workHistorySearchSourcesForOwnerRun", buildWorkHistorySearchSourcesForOwnerRun(args), opts);
 };
 
 /** Reconcile a late completion against its exact durable receipt. */

@@ -6591,7 +6591,7 @@ func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
 	return "query packageDeploymentsPending()"
 }
 
-// PackagesAll -- Read connected repositories and application sources visible to this caller.
+// PackagesAll -- Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).
 type PackagesAllArgs struct {
@@ -6992,7 +6992,7 @@ func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	return b.String()
 }
 
-// PipelinesForOwner -- Read repository pipelines connected by the caller, most recently connected first.
+// PipelinesForOwner -- Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable.
 //
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.go).
 type PipelinesForOwnerArgs struct {
@@ -12493,7 +12493,7 @@ func SourceConnectionByIdBuild(args SourceConnectionByIdArgs) string {
 	return b.String()
 }
 
-// SourceConnectionsMine -- List the caller's active saved source connections to GitHub repositories. Discover source connection and installation ids before resolving a repository; these personal bindings remain independent of MemQL organization accounts.
+// SourceConnectionsMine -- Read the caller's active saved source connections for discovering accessible repositories, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for their repository listing contract.
 //
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.go).
 type SourceConnectionsMineArgs struct {
@@ -13739,6 +13739,28 @@ func WorkGoalsForResponsibilityBuild(args WorkGoalsForResponsibilityArgs) string
 	b.WriteString("query workGoalsForResponsibility(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(quoteMemQL(args.ResponsibilityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkHistorySearchSourcesForOwnerRun -- Search original tool fields across execution receipts and compaction archives. The engine projects public source fields; these raw rows are not model context.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workHistorySearchSourcesForOwnerRun"] in generated_concepts.go).
+type WorkHistorySearchSourcesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkHistorySearchSourcesForOwnerRun calls the engine query workHistorySearchSourcesForOwnerRun.
+func (qc *QueryClient) WorkHistorySearchSourcesForOwnerRun(ctx context.Context, args WorkHistorySearchSourcesForOwnerRunArgs) (*Result, error) {
+	call := WorkHistorySearchSourcesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workHistorySearchSourcesForOwnerRun", call)
+}
+
+func WorkHistorySearchSourcesForOwnerRunBuild(args WorkHistorySearchSourcesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workHistorySearchSourcesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
 }

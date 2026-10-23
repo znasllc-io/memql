@@ -28,7 +28,7 @@ func TestEnginePortableLanesKeepRequiredCommands(t *testing.T) {
 	if value, found := engineStepExports(conformance.Run, "MEMQL_DIFFERENTIAL_REQUIRED"); !found || value != "1" {
 		t.Error("conformance can report a language differential as a passing warning")
 	}
-	for _, name := range []string{"mcp-conformance", "proving"} {
+	for _, name := range []string{"mcp-conformance", "proving", "test-agent"} {
 		step, ok := engineDeclaredStep(spec, name)
 		if !ok || !slices.Contains(step.Services, "postgres") {
 			t.Fatalf("%s lacks its database", name)
@@ -91,7 +91,6 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 	// scripts/citags additionally walks every tagged test file and checks that
 	// these commands cover its real package and build constraint.
 	for tag, packages := range map[string]string{
-		"agent":     "./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/",
 		"bff":       "./app/ ./component/server/ ./component/node/",
 		"edge":      "./app/ ./component/server/ ./component/node/",
 		"identity":  "./app/ ./component/node/",
@@ -101,6 +100,10 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 	} {
 		assertCommand("test-"+tag, "go test -tags "+tag+" -timeout=300s "+packages)
 	}
+	// Required database cases give app its own suite budget; the other agent
+	// packages retain their existing alarm. Neither command may use cached results.
+	assertCommand("test-agent", "go test -tags agent -count=1 -timeout=900s -v ./app/")
+	assertCommand("test-agent", "go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/")
 	for _, tag := range []string{"clustere2e", "clustere2e,agent"} {
 		assertCommand("build-clustere2e", "go vet -tags "+tag+" ./test/clustere2e/")
 		assertCommand("build-clustere2e", "go test -tags "+tag+" -c -o /dev/null ./test/clustere2e/")

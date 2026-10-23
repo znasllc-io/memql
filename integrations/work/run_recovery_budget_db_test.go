@@ -8,7 +8,7 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testing.T, a, b actsDB) {
+func testModelCallBudgetDBSeesPeerWindowsAndReceipts(t *testing.T, a, b actsDB) {
 	ctx := actorCtx(a.owner)
 	runID := a.openRun(t, nil)
 	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "lookup"}})
@@ -20,7 +20,7 @@ func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testi
 	for _, g := range []*RunCeilings{ga, gb} {
 		limit, used, err := g.ModelCallBudget(ctx, rc)
 		require.NoError(t, err)
-		require.Equal(t, 96, limit)
+		require.Equal(t, 12, limit)
 		require.Zero(t, used)
 	}
 	// A warm ordinary query on A must not hide B's later approved total or
@@ -39,7 +39,7 @@ func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testi
 		for _, g := range []*RunCeilings{ga, gb, NewRunCeilings(b.eng, testLogger())} {
 			limit, used, err := g.ModelCallBudget(ctx, rc)
 			require.NoError(t, err)
-			require.Equal(t, 96, limit)
+			require.Equal(t, total, limit)
 			if g == ga {
 				require.Equal(t, 3, used, "local-only charges survive a fresh read")
 			} else {
@@ -58,4 +58,22 @@ func testModelCallBudgetDBSeesPeerRaisesAndReceiptsBeforeHardExhaustion(t *testi
 	after, err := a.i.store().runForOwner(memqlengine.ContextWithFreshRead(ctx), runID)
 	require.NoError(t, err)
 	require.Equal(t, run, after, "observing a budget cannot reset or rewrite the run")
+
+	// A peer's evidence-backed renewal changes the cumulative observation,
+	// while all historical usage and the read-only contract remain intact.
+	b.write(t, "updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "project", "progressContinuation": map[string]any{"extensions": 4}}})
+	renewed := b.runRow(t, runID)
+	for _, guard := range []*RunCeilings{ga, gb, NewRunCeilings(b.eng, testLogger())} {
+		limit, used, err := guard.ModelCallBudget(ctx, rc)
+		require.NoError(t, err)
+		require.Equal(t, 480, limit, "do not report the exhausted original 96 after renewal")
+		if guard == ga {
+			require.Equal(t, 3, used)
+		} else {
+			require.Equal(t, 2, used)
+		}
+	}
+	after, err = a.i.store().runForOwner(memqlengine.ContextWithFreshRead(ctx), runID)
+	require.NoError(t, err)
+	require.Equal(t, renewed, after, "observing a peer's renewal cannot grant another one")
 }
