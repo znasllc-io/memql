@@ -47,6 +47,20 @@ work, chronology, ownership and overflow. The regression uses document editing;
 no repository, language or feature-specific branch is involved. These checks
 establish delivery, not model adherence or a completed user task.
 
+The live Apps check exposed a second ordering seam: the newer correction was
+present, but compaction had archived an older additive step override, and the
+Apps delegate appended that override at the very end again. The guidance reader
+now includes the exact current override instructions and dislike guidance at
+the rerun's recorded `requestedAt`, before any later human corrections. Their
+exact rendering prevents the delegate's missing-instruction fallback from
+re-appending them. The two bounded override messages belong only to the current
+step/context and do not alter model, effort, input or permission bindings. A
+missing decision time refuses instead of inventing chronology. Explicit whole
+session prompt replacement remains its separate existing contract; this repair
+does not claim to redesign that path. The database regression
+`TestStepOverrideKeepsItsPlaceBeforeLaterHumanCorrection` checks both older and
+newer human corrections around the override and the flattened Apps prompt.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an

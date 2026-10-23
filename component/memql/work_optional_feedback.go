@@ -92,6 +92,27 @@ func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, err
 		return nil, err
 	}
 	out = append(out, corrections...)
+	// The rerun's owner instructions are older than corrections made during
+	// that attempt. Compaction can have archived their original message; the
+	// Apps seam would then append them again AFTER newer guidance. Keep their
+	// exact rendering in this bounded chronological batch so that seam finds
+	// them already present and cannot accidentally renew their priority.
+	// WholePrompt is a separate explicit replacement contract, not an additive
+	// instruction; its existing session semantics are unchanged here.
+	if rc.Override != nil && !rc.Override.WholePrompt {
+		extra := StepOverrideMessages(ctx)
+		if len(extra) > 0 {
+			at, valid := askTimestamp(rerun["requestedAt"])
+			if !valid {
+				return nil, fmt.Errorf("step override guidance timestamp is unavailable")
+			}
+			for n, message := range extra {
+				guidanceID := fmt.Sprintf("step-override-%s-%d", workContextHash("guidance", []byte(rc.RerunRequestId+"\x00"+rc.StepKey)), n)
+				out = append(out, WorkGuidance{ID: guidanceID, Prompt: message.Content})
+				dates[guidanceID] = at
+			}
+		}
+	}
 	// Sources are queried independently. Restore human chronology before
 	// presentation so an older approval correction cannot override later Ask
 	// guidance merely because its journal reader ran last.

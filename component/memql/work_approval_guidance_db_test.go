@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,4 +78,32 @@ func TestApprovalGuidanceBoundsAndOwnership(t *testing.T) {
 	recordApprovalGuidance(write, actor.UserId, run, "Beyond the explicit context bound.")
 	_, err = b.ReadWorkGuidance(guidanceRunContext(ctx, run))
 	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+}
+
+func TestStepOverrideKeepsItsPlaceBeforeLaterHumanCorrection(t *testing.T) {
+	_, b, ctx, _, run, write := guidanceFixture(t)
+	actor, _ := auth.AccessFromContext(ctx)
+	before := recordApprovalGuidance(write, actor.UserId, run, "Prepare the revised document.")
+	at := time.Now().UTC()
+	ov := &common.StepOverride{Prompt: "Publish the revised document.", GuidanceReason: "The draft was unfinished.", RequestedBy: actor.UserId}
+	write("updateWorkRun", map[string]any{"runId": run, "rerun": map[string]any{"requestId": "attempt", "requestedAt": at.Format(time.RFC3339Nano)}})
+	after := recordApprovalGuidance(write, actor.UserId, run, "Set the revision aside and restore the original. Do not publish.")
+	runtime := common.ContextWithRun(ctx, common.RunContext{RunId: run, GoalId: "fixture-goal", OwnerUserId: actor.UserId, StepKey: "section", RerunRequestId: "attempt", Override: ov})
+	read, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Len(t, read, 4)
+	require.Equal(t, "approval-guidance-"+before, read[0].ID)
+	require.Equal(t, StepOverrideInstructions(ov), read[1].Prompt)
+	require.Equal(t, StepOverrideGuidance(ov), read[2].Prompt)
+	require.Equal(t, "approval-guidance-"+after, read[3].ID)
+	// The Apps adapter must find the exact override already in its supplied
+	// context; otherwise it appends old instructions after the latest correction.
+	messages := []common.ChatMessage{}
+	for _, item := range read {
+		messages = append(messages, common.ChatMessage{Role: "user", Content: item.Prompt})
+	}
+	prompt := flattenForSession(messages)
+	require.Contains(t, prompt, StepOverrideInstructions(ov))
+	require.Contains(t, prompt, StepOverrideGuidance(ov))
+	require.Greater(t, strings.LastIndex(prompt, "Do not publish."), strings.LastIndex(prompt, StepOverrideInstructions(ov)))
 }

@@ -496,7 +496,8 @@ func recoveryRecordedAnswer(stamp string, extra map[string]any) common.ChatMessa
 }
 
 // One read can hand a turn sixteen routed messages, sixteen late optional
-// answers and sixteen approval corrections, each on its own bound. Recovery keeps every id a
+// answers and sixteen approval corrections, each on its own bound, plus the
+// current step's two override messages. Recovery keeps every id a
 // whole read can hold in its checkpoint, which reads back on any replica; only
 // more than one whole read is refused.
 func TestWorkProgressRecoveryHoldsAWholeGuidanceRead(t *testing.T) {
@@ -526,6 +527,12 @@ func TestWorkProgressRecoveryHoldsAWholeGuidanceRead(t *testing.T) {
 	state, _, err = recoveryState(messages)
 	require.NoError(t, err)
 	require.Len(t, state.GuidanceIDs, 48)
+	seen["step-override-instructions"], seen["step-override-guidance"] = true, true
+	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
+	require.NoError(t, err)
+	state, _, err = recoveryState(messages)
+	require.NoError(t, err)
+	require.Len(t, state.GuidanceIDs, memql.MaxWorkGuidanceReceipts)
 	seen["one-more"] = true
 	_, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
 	require.ErrorContains(t, err, "recovery guidance exceeds its bounded context")

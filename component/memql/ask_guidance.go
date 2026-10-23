@@ -19,9 +19,10 @@ const maxWorkGuidanceMessages = 16
 const maxWorkGuidanceRunes = 16000
 
 // MaxWorkGuidanceReceipts is the most messages one ReadWorkGuidance returns,
-// its routed guidance, late optional answers and approval corrections: what an agent
-// may acknowledge at once, and the guidance ids it keeps while recovering.
-const MaxWorkGuidanceReceipts = 3 * maxWorkGuidanceMessages
+// its routed guidance, late optional answers, approval corrections and at most
+// two current step-override messages: what an agent may acknowledge at once,
+// and the guidance ids it keeps while recovering.
+const MaxWorkGuidanceReceipts = 3*maxWorkGuidanceMessages + 2
 
 type WorkGuidance struct {
 	ID     string
