@@ -27,58 +27,59 @@ function setup() {
  return { ask, cancel, onClose, callbacks:()=>callbacks };
 }
 function draft(value:string) { fireEvent.change(screen.getByRole("textbox",{name:"Ask"}),{target:{value}}); }
-it("separates all header actions and toggles the entire body without a second back button",()=>{
- setup(); draft("unsent message");
- const activity=screen.getByRole("button",{name:"Activity"});
- expect(activity.parentElement).not.toBe(screen.getByRole("button",{name:"New conversation"}).parentElement);
- expect(activity.parentElement).not.toBe(screen.getByRole("button",{name:"Close Ask"}).parentElement);
- expect(activity.parentElement).toBe(screen.getByRole("button", { name: "Conversations" }).parentElement);
- activity.focus(); fireEvent.click(activity);
- expect(screen.getByRole("region",{name:"Conversation activity"})).toBeTruthy();
- expect(screen.queryByRole("log",{name:"Conversation"})).toBeNull();
- expect(screen.queryByRole("textbox",{name:"Ask"})).toBeNull();
- const conversation = screen.getByRole("button", { name: "Conversation" });
- expect(conversation).toBe(activity);
- expect(document.activeElement).toBe(conversation);
- expect(screen.queryByRole("button", { name: /back|close activity/i })).toBeNull();
+function openActivity(text = "Jose") {
+ const message = screen.getByText(text).closest<HTMLElement>(".os-ask-message")!;
+ fireEvent.click(within(message).getByRole("button", { name: "Message actions" }));
+ fireEvent.click(screen.getByRole("menuitem", { name: "View activity" }));
+}
+it("opens activity from its message and preserves the draft when returning", () => {
+ const w = setup(); draft("Jose"); fireEvent.click(screen.getByRole("button", { name: "Send" }));
+ act(() => { w.callbacks().delta("Reply"); w.callbacks().done(); });
+ draft("unsent message");
  expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
- fireEvent.click(conversation);
- expect(screen.getByRole("button", { name: "Activity" })).toBe(activity);
- expect((screen.getByRole("textbox",{name:"Ask"}) as HTMLTextAreaElement).value).toBe("unsent message");
- expect(document.activeElement).toBe(activity);
+ openActivity();
+ expect(screen.getByRole("region", { name: "Message activity" })).toBeTruthy();
+ expect(screen.queryByRole("log", { name: "Conversation" })).toBeNull();
+ expect(screen.queryByRole("textbox", { name: "Ask" })).toBeNull();
+ fireEvent.click(screen.getByRole("button", { name: "Back to conversation" }));
+ expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement).value).toBe("unsent message");
+ expect(document.activeElement).toBe(within(screen.getByText("Jose").closest<HTMLElement>(".os-ask-message")!).getByRole("button", { name: "Message actions" }));
 });
 it("keeps streaming while activity is open, shows terminal evidence, and returns to the same answer",()=>{
  const w=setup();draft("Jose");fireEvent.click(screen.getByRole("button",{name:"Send"}));
  const event={id:"run",kind:"run" as const,phase:"running" as const,at:new Date().toISOString()};
  act(()=>w.callbacks().activity?.(event));
- fireEvent.click(screen.getByRole("button",{name:"Activity"}));
+ openActivity();
  expect(screen.getByText("Working")).toBeTruthy();
  act(()=>{ w.callbacks().delta("Nice to meet you, Jose."); w.callbacks().activity?.({...event,phase:"completed"});w.callbacks().done(); });
  expect(screen.queryByText("Working")).toBeNull();
  expect(screen.getByText("Completed")).toBeTruthy();
- fireEvent.click(screen.getByRole("button",{name:"Conversation"}));
+ fireEvent.click(screen.getByRole("button",{name:"Back to conversation"}));
  expect(screen.getByText("Nice to meet you, Jose.")).toBeTruthy();
  expect(w.cancel).not.toHaveBeenCalled();
  expect(w.ask).toHaveBeenCalledOnce();
 });
-it("Escape returns from Activity without closing Ask, including when focus is in the header",()=>{
- const w=setup(); const activity=screen.getByRole("button",{name:"Activity"});
- fireEvent.click(activity); fireEvent.keyDown(screen.getByRole("region",{name:"Conversation activity"}),{key:"Escape"});
- expect(screen.queryByRole("region",{name:"Conversation activity"})).toBeNull();
- fireEvent.click(activity); activity.focus(); fireEvent.keyDown(activity,{key:"Escape"});
- expect(screen.queryByRole("region",{name:"Conversation activity"})).toBeNull();
+it("Escape returns from message activity without closing Ask, including from the header", () => {
+ const w = setup(); draft("Jose"); fireEvent.click(screen.getByRole("button", { name: "Send" }));
+ openActivity();
+ fireEvent.keyDown(screen.getByRole("region", { name: "Message activity" }), { key: "Escape" });
+ expect(screen.queryByRole("region", { name: "Message activity" })).toBeNull();
+ openActivity();
+ const headerButton = screen.getByRole("button", { name: "Conversations" }); headerButton.focus();
+ fireEvent.keyDown(headerButton, { key: "Escape" });
+ expect(screen.queryByRole("region", { name: "Message activity" })).toBeNull();
  expect(w.onClose).not.toHaveBeenCalled();
 });
 it("shows failed run details without an indefinite Working state",()=>{
  const w=setup();draft("Jose");fireEvent.click(screen.getByRole("button",{name:"Send"}));
  act(()=>{w.callbacks().activity?.({id:"run",kind:"run",phase:"failed",at:new Date().toISOString(),error:"Intent classification timed out"});w.callbacks().error("Intent classification timed out");});
- fireEvent.click(screen.getByRole("button",{name:"Activity"}));
- const region=screen.getByRole("region",{name:"Conversation activity"});
+ openActivity();
+ const region=screen.getByRole("region",{name:"Message activity"});
  expect(within(region).getByText("Failed")).toBeTruthy();
  expect(within(region).getByText("Intent classification timed out")).toBeTruthy();
  expect(within(region).queryByText("Working")).toBeNull();
  fireEvent.click(screen.getByRole("button",{name:"New conversation"}));
- expect(screen.queryByRole("region",{name:"Conversation activity"})).toBeNull();
+ expect(screen.queryByRole("region",{name:"Message activity"})).toBeNull();
  expect(document.activeElement).toBe(screen.getByRole("textbox",{name:"Ask"}));
 });
 
