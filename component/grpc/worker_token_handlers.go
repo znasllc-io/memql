@@ -9,6 +9,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/workertoken"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 // handleCreateWorkerToken mints a fresh worker token. The plain
@@ -112,8 +113,8 @@ func (s *streamSession) handleCreateWorkerToken(envelope *memqlv1.MemqlClientMes
 	return send(&memqlv1.CreateWorkerTokenResult{
 		Success:     true,
 		PlainToken:  plain,
-		IdentityId:  workertoken.CanonicalId(identityId),
-		OwnerUserId: ownerUserId,
+		IdentityId:  memqlengine.BareShortId(identityId),
+		OwnerUserId: memqlengine.BareShortId(ownerUserId),
 	})
 }
 
