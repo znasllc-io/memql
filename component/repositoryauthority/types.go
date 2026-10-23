@@ -40,22 +40,23 @@ type Transfer struct {
 	ParentRequestID string   `json:"parentRequestId,omitempty"`
 }
 type Receipt struct {
-	Statement       string           `json:"statement"`
-	Operation       string           `json:"operation"`
-	Paths           []string         `json:"paths"`
-	ID              string           `json:"id"`
-	Repository      string           `json:"repository"`
-	RepositoryID    int64            `json:"repositoryId"`
-	State           string           `json:"state"`
-	Reason          string           `json:"reason,omitempty"`
-	GoalID          string           `json:"goalId,omitempty"`
-	RunID           string           `json:"runId,omitempty"`
-	ApprovalID      string           `json:"approvalId,omitempty"`
-	ExpiresAt       string           `json:"expiresAt"`
-	ParentRequestID string           `json:"parentRequestId,omitempty"`
-	Delivery        *DeliveryReceipt `json:"delivery,omitempty"`
-	Review          *ReviewReceipt   `json:"review,omitempty"`
-	Proposal        *ProposalReceipt `json:"proposal,omitempty"`
+	Statement       string               `json:"statement"`
+	Operation       string               `json:"operation"`
+	Paths           []string             `json:"paths"`
+	ID              string               `json:"id"`
+	Repository      string               `json:"repository"`
+	RepositoryID    int64                `json:"repositoryId"`
+	State           string               `json:"state"`
+	Reason          string               `json:"reason,omitempty"`
+	GoalID          string               `json:"goalId,omitempty"`
+	RunID           string               `json:"runId,omitempty"`
+	ApprovalID      string               `json:"approvalId,omitempty"`
+	ExpiresAt       string               `json:"expiresAt"`
+	ParentRequestID string               `json:"parentRequestId,omitempty"`
+	Delivery        *DeliveryReceipt     `json:"delivery,omitempty"`
+	ReviewReport    *ReviewReportReceipt `json:"reviewReport,omitempty"`
+	Review          *ReviewReceipt       `json:"review,omitempty"`
+	Proposal        *ProposalReceipt     `json:"proposal,omitempty"`
 }
 type Access struct {
 	SourceID     string   `json:"sourceId"`
@@ -114,9 +115,11 @@ type Deps struct {
 	Review        func(context.Context, Authorization, map[string]any, ReviewInput) (ReviewResult, error)
 	// DeliveryContext restores current maintainer authority after verifying the
 	// original goal remains open and its live-mode run is running or succeeded.
-	DeliveryContext func(context.Context, string, string, string) (context.Context, error)
-	Queue           func(context.Context, Authorization, DeliveryIntent) (DeliveryReceipt, error)
-	Now             func() time.Time
+	DeliveryContext  func(context.Context, string, string, string) (context.Context, error)
+	ReportReview     func(context.Context, Authorization, ReviewReportIntent) (ReviewReportReceipt, error)
+	ReportMergeGroup func(context.Context, MergeGroupReviewIntent, func(context.Context) error) (MergeGroupReviewReceipt, error)
+	Queue            func(context.Context, Authorization, DeliveryIntent) (DeliveryReceipt, error)
+	Now              func() time.Time
 }
 
 type Replacement struct {
@@ -162,7 +165,23 @@ type ReviewReceipt struct {
 	Approved     bool   `json:"approved"`
 	Reason       string `json:"reason"`
 }
+type ReviewReportIntent struct {
+	ProposalHash, ReviewDigest, ExternalID string
+	Proposal                               ProposalReceipt
+	BaseBranch                             string
+}
+type ReviewReportReceipt struct {
+	State        string `json:"state"`
+	CheckName    string `json:"checkName"`
+	CheckRunID   int64  `json:"checkRunId"`
+	AppID        int64  `json:"appId"`
+	HeadSHA      string `json:"headSha"`
+	ProposalHash string `json:"proposalHash"`
+	ReviewDigest string `json:"reviewDigest"`
+	ExternalID   string `json:"externalId"`
+}
 type DeliveryIntent struct {
+	ReviewReport ReviewReportReceipt
 	// ObserveOnly forbids ready/enqueue writes after provider-confirmed admission.
 	ObserveOnly  bool
 	ProposalHash string

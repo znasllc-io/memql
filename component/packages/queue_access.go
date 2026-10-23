@@ -5,6 +5,26 @@ import (
 	"strings"
 )
 
+// RepositoryReviewCheckToken borrows only check-reporting authority, after
+// freshly verifying that the source owner may write this exact repository.
+// The returned App ID belongs to the same configuration that minted the token.
+// The caller must independently enforce the native accepted-review receipt.
+func (i *Integration) RepositoryReviewCheckToken(ctx context.Context, credentialID, ownerUserID, owner, repo string) (string, int64, error) {
+	d, err := i.resolve()
+	if err != nil {
+		return "", 0, err
+	}
+	authority, err := d.repositoryAccess(ctx, credentialID, ownerUserID, owner, repo)
+	if err != nil {
+		return "", 0, err
+	}
+	if !authority.CanWrite {
+		return "", 0, refuse("repository_write_not_authorized", "this GitHub identity cannot authorize review reporting for the repository")
+	}
+	token, _, appID, err := d.GitHubApp.ScopedInstallationTokenWithApp(ctx, authority.InstallationID, []string{strings.TrimSpace(repo)}, map[string]string{"checks": "write", "metadata": "read"})
+	return token, appID, err
+}
+
 // RepositoryQueueObservationToken borrows only repository observation scopes.
 // It cannot ready or enqueue a pull request, even when the App has write scopes.
 func (i *Integration) RepositoryQueueObservationToken(ctx context.Context, credentialID, ownerUserID, owner, repo string) (string, int64, error) {

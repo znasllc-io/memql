@@ -19,6 +19,7 @@ type deliveryFixture struct {
 	sourceHead                 string
 	approved                   bool
 	reviews, proposals, queues int
+	reports                    int
 	queueModes                 []bool
 	lifecycleError             error
 	runFinished                bool
@@ -39,6 +40,8 @@ func newDeliveryFixture(t *testing.T, reviewed bool, recipeOverride ...string) *
 				return `@template
 automation deliveryRecipe {
  args {requestId string!}
+ report := builtin repositoryChangeReportReview(requestId: args.requestId)
+ if report.state != "complete" { return report }
  result := builtin repositoryChangeQueue(requestId: args.requestId)
  return result
 }`, nil
@@ -71,6 +74,13 @@ automation deliveryRecipe {
 			}
 			f.proposals++
 			return ProposalReceipt{State: "complete", Branch: "change/" + a.EffectID, Commit: strings.Repeat("c", 40), PullRequestURL: "https://github.com/core/engine/pull/42"}, nil
+		}
+		d.ReportReview = func(ctx context.Context, a Authorization, in ReviewReportIntent) (ReviewReportReceipt, error) {
+			if _, err := f.i.AuthorizeReviewReport(ctx, a.RequestID); err != nil {
+				return ReviewReportReceipt{}, err
+			}
+			f.reports++
+			return acceptedReport(in), nil
 		}
 		d.Queue = func(ctx context.Context, a Authorization, in DeliveryIntent) (DeliveryReceipt, error) {
 			if _, err := f.i.AuthorizeDelivery(ctx, a.RequestID); err != nil {
@@ -132,6 +142,13 @@ func (f *deliveryFixture) publish(t *testing.T) {
 	if _, err := f.i.Propose(f.ctx, f.proposal); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.i.ReportReview(f.ctx, f.receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func acceptedReport(in ReviewReportIntent) ReviewReportReceipt {
+	return ReviewReportReceipt{State: "complete", CheckName: ReviewCheckName, HeadSHA: in.Proposal.Commit, ProposalHash: in.ProposalHash, ReviewDigest: in.ReviewDigest, ExternalID: in.ExternalID, CheckRunID: 42, AppID: 17}
 }
 
 func TestDeliveryRequiresExplicitScopeAndExactIndependentReview(t *testing.T) {
@@ -431,7 +448,46 @@ automation deliveryRecipe {
 		t.Fatalf("recipe multiplied provider calls: n=%d err=%v calls=%d", n, err, f.queues)
 	}
 	r, err := f.i.Status(actor(f.maintainer), f.receipt.ID)
-	if err != nil || r.Delivery == nil || r.Delivery.State != "attention" || !strings.Contains(r.Delivery.Reason, "one observation per lease") {
+	if err != nil || r.Delivery == nil || r.Delivery.State != "attention" || !strings.Contains(r.Delivery.Reason, "one queue effect per lease") {
 		t.Fatalf("bounded refusal not readable: %+v %v", r, err)
+	}
+}
+
+func TestDeliveryRecoveryReportsSameReviewAfterProviderOutageBeforeQueue(t *testing.T) {
+	f := newDeliveryFixture(t, true)
+	if _, err := f.i.Review(f.ctx, f.proposal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.i.Propose(f.ctx, f.proposal); err != nil {
+		t.Fatal(err)
+	}
+	report := f.i.deps().ReportReview
+	unavailable := true
+	f.i.Configure(func(d *Deps) {
+		d.ReportReview = func(ctx context.Context, a Authorization, in ReviewReportIntent) (ReviewReportReceipt, error) {
+			if unavailable {
+				return ReviewReportReceipt{}, errors.New("provider unavailable")
+			}
+			return report(ctx, a, in)
+		}
+	})
+	waiting, err := f.i.ReportReview(f.ctx, f.receipt.ID)
+	if err != nil || waiting.State != "waiting" || f.queues != 0 {
+		t.Fatalf("outage did not remain waiting: %+v %v", waiting, err)
+	}
+	f.runFinished = true
+	if _, err := f.i.ReportReview(f.ctx, f.receipt.ID); err == nil {
+		t.Fatal("finished run retained ambient report authority")
+	}
+	unavailable = false
+	f.queueAnswer = DeliveryReceipt{State: "queued", HeadSHA: strings.Repeat("c", 40), QueueEntryID: "queue-42"}
+	other := New(f.i.deps())
+	count, err := other.RecoverDeliveries(auth.ContextWithInternalOrigin(context.Background()))
+	if err != nil || count != 1 || f.reports != 1 || f.queues != 1 || f.proposals != 1 || f.reviews != 1 {
+		t.Fatalf("recovery lost exact report/proposal: count%d report%d queue%d proposed%d reviewed%d err%v", count, f.reports, f.queues, f.proposals, f.reviews, err)
+	}
+	status, err := other.Status(actor(f.requester), f.receipt.ID)
+	if err != nil || status.ReviewReport == nil || status.ReviewReport.State != "complete" || status.ReviewReport.ExternalID != waiting.ExternalID || status.Delivery == nil || status.Delivery.State != "queued" {
+		t.Fatalf("recovered receipt %+v %v", status, err)
 	}
 }

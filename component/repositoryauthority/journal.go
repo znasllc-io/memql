@@ -11,6 +11,7 @@ import (
 )
 
 type record struct {
+	MergeGroupReports           map[string]mergeGroupReviewRecord
 	ID                          string
 	Fingerprint                 string
 	Request                     Request
@@ -31,6 +32,8 @@ type record struct {
 	ReviewInput                 *ReviewInput
 	ReviewHash                  string
 	ReviewReceipt               *ReviewReceipt
+	ReviewReportIntent          *ReviewReportIntent
+	ReviewReportReceipt         *ReviewReportReceipt
 	DeliveryState               string
 	DeliveryAdmitted            bool
 	DeliveryReceipt             *DeliveryReceipt
@@ -46,7 +49,7 @@ func digest(v any) string {
 	return hex.EncodeToString(h[:])
 }
 func (r record) receipt(actor string) Receipt {
-	out := Receipt{Proposal: r.ProposalReceipt, Operation: r.Request.Operation, Review: r.ReviewReceipt, Delivery: r.DeliveryReceipt, ID: r.ID, Repository: r.Source.Repository, RepositoryID: r.RepositoryID, Statement: r.Request.Statement, Paths: r.Request.Paths, State: r.State, Reason: r.Reason, GoalID: r.GoalID, RunID: r.RunID, ApprovalID: r.ApprovalID, ExpiresAt: r.ExpiresAt.UTC().Format(time.RFC3339Nano), ParentRequestID: r.Request.ParentRequestID}
+	out := Receipt{ReviewReport: r.ReviewReportReceipt, Proposal: r.ProposalReceipt, Operation: r.Request.Operation, Review: r.ReviewReceipt, Delivery: r.DeliveryReceipt, ID: r.ID, Repository: r.Source.Repository, RepositoryID: r.RepositoryID, Statement: r.Request.Statement, Paths: r.Request.Paths, State: r.State, Reason: r.Reason, GoalID: r.GoalID, RunID: r.RunID, ApprovalID: r.ApprovalID, ExpiresAt: r.ExpiresAt.UTC().Format(time.RFC3339Nano), ParentRequestID: r.Request.ParentRequestID}
 	// Nexus IDs belong to this installation and this owner. A request status
 	// is shareable with its requester; the maintainer's private journal is not.
 	if r.Route.Remote != "" || !same(actor, r.Maintainer.OwnerUserID) {

@@ -71,8 +71,8 @@ func (c *Client) appJWT(cfg Config, now time.Time) (string, error) {
 func base64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // privateKey decodes and parses the app's key ONCE PER APP: the result is kept
-// until adopt sees a different configuration, which is the only thing that can
-// make it wrong.
+// with the fingerprint of the key it parsed. A concurrent config refresh must
+// not change the key used by an operation that already captured its config.
 //
 // Every error here names the SHAPE of the failure and never the material: a
 // base64 error carries a byte offset, pem.Decode carries nothing at all, and
@@ -84,12 +84,14 @@ func base64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b)
 // out the first and every conversion tool in the world produces the second;
 // refusing one would be refusing a key that is correct.
 func (c *Client) privateKey(cfg Config) (*rsa.PrivateKey, error) {
+	fingerprint := sha256.Sum256([]byte(cfg.PrivateKeyB64))
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.keyParsed {
+	if c.keyParsed && c.keyFrom == fingerprint {
 		return c.key, c.keyErr
 	}
 	c.key, c.keyErr = parsePrivateKey(cfg.PrivateKeyB64)
+	c.keyFrom = fingerprint
 	c.keyParsed = true
 	return c.key, c.keyErr
 }

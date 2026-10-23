@@ -135,6 +135,29 @@ func (c *Client) InstallationToken(ctx context.Context, installationId int64) (s
 // would be exactly the token this exists to keep off a Job.
 func (c *Client) ScopedInstallationToken(ctx context.Context, installationID int64, repositories []string, permissions map[string]string) (token string, expiresAt time.Time, err error) {
 	cfg := c.config()
+	return c.scopedInstallationToken(ctx, cfg, installationID, repositories, permissions)
+}
+
+// ScopedInstallationTokenWithApp also identifies the App that signed the mint.
+// Reading configuration again after the network call could misattribute a
+// token when an administrator replaces the App while that call is in flight.
+func (c *Client) ScopedInstallationTokenWithApp(ctx context.Context, installationID int64, repositories []string, permissions map[string]string) (string, time.Time, int64, error) {
+	cfg := c.config()
+	if !cfg.Configured() {
+		return "", time.Time{}, 0, ErrNotConfigured
+	}
+	appID, err := strconv.ParseInt(strings.TrimSpace(cfg.AppId), 10, 64)
+	if err != nil || appID <= 0 {
+		return "", time.Time{}, 0, errors.New("review reporting requires a positive numeric GitHub App ID")
+	}
+	token, expiresAt, err := c.scopedInstallationToken(ctx, cfg, installationID, repositories, permissions)
+	if err != nil {
+		return "", time.Time{}, 0, err
+	}
+	return token, expiresAt, appID, nil
+}
+
+func (c *Client) scopedInstallationToken(ctx context.Context, cfg Config, installationID int64, repositories []string, permissions map[string]string) (token string, expiresAt time.Time, err error) {
 	if !cfg.Configured() {
 		return "", time.Time{}, ErrNotConfigured
 	}

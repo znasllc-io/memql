@@ -65,6 +65,11 @@ signed release candidate. Installation qualification additionally requires an
 immutable candidate and rollback publication, verified artifacts and trust,
 an immutable reviewed overlay and the actual receiving controller.
 
+Run [artifact qualification](delivery-artifact-qualification.md) for the
+real PostgreSQL, Library, Azurite and OCI registry handoffs. That affected
+CI lane refuses skipped provider cases and records its fixture cleanup;
+it does not replace the selected installation/controller rehearsal below.
+
 To install the reviewed instance DSL locally, upload its source ZIP through
 Files, then choose **Deployables → Add a deployable → A zip in Files**. Analyze
 the archive, explicitly skip both website entries on the address step, and
@@ -104,6 +109,23 @@ the GitHub App identity/logo, required check context, queue triggers and review
 policy together before cutover. Existing rulesets remain authoritative until
 an explicit reviewed policy change is applied; independent AI review does not
 silently satisfy a separate GitHub code-owner requirement.
+
+The replacement review requirement must bind **MemQL / review** to the
+approved GitHub App ID, alongside the existing required test context.
+Changing only the code-owner setting would leave direct queue admission
+without independent review enforcement. The reserved review context cannot
+be used as a pipeline name, including an already stored pipeline.
+
+Qualify that context on both the exact PR head and GitHub's synthetic
+merge-group head before changing repository policy. The group report must
+prove every included PR's immutable head against its persisted native
+accepted review; a matching green title alone is insufficient. Exercise a
+two-change group, a changed head, removed membership, a missing native
+receipt and a lost provider response. The initial group-proof path requires
+the queue's **MERGE** method; squash/rebase cannot be treated as equivalent
+parent evidence. Keep existing enforcement until these checks pass with the
+actual installed App. Preserve required tests, queue ordering and bypass
+restrictions when reviewing the policy diff.
 
 Register the app with the permissions in [GitHub setup](../../public/operate/github-connect.md),
 including the explicit GitHub consent for existing installations. Verify the

@@ -320,6 +320,7 @@ func (i *Integration) observe(ctx context.Context, r record) (record, error) {
 		state, reason = remote.State, remote.Reason
 		r.DeliveryReceipt = remote.Delivery
 		r.ReviewReceipt = remote.Review
+		r.ReviewReportReceipt = remote.ReviewReport
 		r.ProposalReceipt = remote.Proposal
 	} else if !r.Immediate && r.ApprovalID != "" {
 		if d.Decision == nil {
@@ -345,7 +346,7 @@ func (i *Integration) refresh(ctx context.Context, r record) (record, error) {
 	if err != nil {
 		return r, err
 	}
-	if observed.State == r.State && observed.Reason == r.Reason && digest(observed.DeliveryReceipt) == digest(r.DeliveryReceipt) && digest(observed.ReviewReceipt) == digest(r.ReviewReceipt) && digest(observed.ProposalReceipt) == digest(r.ProposalReceipt) {
+	if observed.State == r.State && observed.Reason == r.Reason && digest(observed.DeliveryReceipt) == digest(r.DeliveryReceipt) && digest(observed.ReviewReceipt) == digest(r.ReviewReceipt) && digest(observed.ProposalReceipt) == digest(r.ProposalReceipt) && digest(observed.ReviewReportReceipt) == digest(r.ReviewReportReceipt) {
 		return r, nil
 	}
 	return i.update(ctx, r.ID, func(current *record) error {
@@ -354,6 +355,7 @@ func (i *Integration) refresh(ctx context.Context, r record) (record, error) {
 			if current.Route.Remote != "" {
 				current.DeliveryReceipt = observed.DeliveryReceipt
 				current.ReviewReceipt = observed.ReviewReceipt
+				current.ReviewReportReceipt = observed.ReviewReportReceipt
 				current.ProposalReceipt = observed.ProposalReceipt
 			}
 		}

@@ -89,10 +89,10 @@ func (i *Integration) Review(ctx context.Context, p Proposal) (ReviewReceipt, er
 type deliveryRecoveryKey struct{}
 type deliveryRecovery struct{ id, lease string }
 
-// AuthorizeDelivery is read-only so adapters can recheck inside the journal's
-// effect lock. A recovery fence is private to the leased, queue-only workflow;
+// AuthorizeReviewReport is read-only so adapters can recheck inside the journal's
+// effect lock. A recovery fence is private to the leased reporting and queue workflow;
 // it cannot authorize proposal writes or another request.
-func (i *Integration) AuthorizeDelivery(ctx context.Context, id string) (Authorization, error) {
+func (i *Integration) AuthorizeReviewReport(ctx context.Context, id string) (Authorization, error) {
 	actor, err := person(ctx, "", "")
 	if err != nil {
 		return Authorization{}, err
@@ -101,7 +101,7 @@ func (i *Integration) AuthorizeDelivery(ctx context.Context, id string) (Authori
 	if err != nil {
 		return Authorization{}, err
 	}
-	if r.Request.Operation != OperationDeliver || r.Proposal == nil || r.ProposalReceipt == nil || r.ReviewReceipt == nil || !r.ReviewReceipt.Approved || r.ReviewReceipt.ProposalHash != r.ProposalHash || r.ReviewHash != r.ProposalHash || digest(*r.Proposal) != r.ProposalHash || r.ProposalReceipt.State != "complete" || !commit.MatchString(r.ProposalReceipt.Commit) {
+	if r.Request.Operation != OperationDeliver || r.Proposal == nil || r.ProposalReceipt == nil || r.ReviewReceipt == nil || r.ReviewInput == nil || len(r.Route.ReviewPrompt) == 0 || digest(r.ReviewInput.Proposal) != r.ProposalHash || !r.ReviewReceipt.Approved || r.ReviewReceipt.ProposalHash != r.ProposalHash || r.ReviewHash != r.ProposalHash || digest(*r.Proposal) != r.ProposalHash || r.ProposalReceipt.State != "complete" || !commit.MatchString(r.ProposalReceipt.Commit) {
 		return Authorization{}, errors.New("queue admission requires delivered scope, exact proposal and independent review")
 	}
 	var grant Authorization
@@ -131,6 +131,25 @@ func (i *Integration) AuthorizeDelivery(ctx context.Context, id string) (Authori
 		return Authorization{}, err
 	}
 	grant.EffectID, grant.EffectCreatedAt = r.ProposalHash, r.ProposalCreatedAt
+	return grant, nil
+}
+
+// AuthorizeDelivery adds the durable provider review receipt to the independent
+// review and current maintainer gates. A green check supplied by a caller cannot
+// substitute for this journal evidence.
+func (i *Integration) AuthorizeDelivery(ctx context.Context, id string) (Authorization, error) {
+	grant, err := i.AuthorizeReviewReport(ctx, id)
+	if err != nil {
+		return Authorization{}, err
+	}
+	r, err := i.get(ctx, id, grant.Source.OwnerUserID)
+	if err != nil {
+		return Authorization{}, err
+	}
+	intent := reviewReportIntent(r)
+	if r.ReviewReportIntent == nil || digest(*r.ReviewReportIntent) != digest(intent) || !matchingReviewReport(intent, r.ReviewReportReceipt) {
+		return Authorization{}, errors.New("queue admission requires the exact app-owned independent review check receipt")
+	}
 	return grant, nil
 }
 
@@ -167,7 +186,7 @@ func (i *Integration) Queue(ctx context.Context, id string) (DeliveryReceipt, er
 		}
 		observeOnly := r.DeliveryAdmitted || r.DeliveryState == "queued"
 		r.DeliveryAdmitted = observeOnly
-		observed, e := d.Queue(ctx, grant, DeliveryIntent{ObserveOnly: observeOnly, ProposalHash: r.ProposalHash, Proposal: *r.ProposalReceipt, BaseBranch: r.Proposal.BaseBranch})
+		observed, e := d.Queue(ctx, grant, DeliveryIntent{ReviewReport: *r.ReviewReportReceipt, ObserveOnly: observeOnly, ProposalHash: r.ProposalHash, Proposal: *r.ProposalReceipt, BaseBranch: r.Proposal.BaseBranch})
 		if e != nil {
 			// Store a recoverable identity even when the provider response was lost.
 			receipt = DeliveryReceipt{State: "waiting", Reason: "Repository service could not confirm queue admission; the same pull request will be checked again.", HeadSHA: r.ProposalReceipt.Commit}
@@ -203,7 +222,7 @@ func (i *Integration) Queue(ctx context.Context, id string) (DeliveryReceipt, er
 	return receipt, err
 }
 
-// RecoverDeliveries executes only captured queue workflows for previously armed
+// RecoverDeliveries executes only captured report/queue workflows for previously armed
 // requests. The scheduler supplies no target, owner, credential or approval.
 func (i *Integration) RecoverDeliveries(ctx context.Context) (int, error) {
 	if !auth.OriginFromContext(ctx).IsInternal() {
@@ -227,25 +246,39 @@ func (i *Integration) RecoverDeliveries(ctx context.Context) (int, error) {
 		ownerCtx, e := d.DeliveryContext(batchCtx, r.Maintainer.OwnerUserID, r.GoalID, r.RunID)
 		if e == nil {
 			ownerCtx = context.WithValue(ownerCtx, deliveryRecoveryKey{}, deliveryRecovery{id: r.ID, lease: r.DeliveryLease})
-			if _, e = i.AuthorizeDelivery(ownerCtx, r.ID); e == nil {
+			if _, e = i.AuthorizeReviewReport(ownerCtx, r.ID); e == nil {
 				var snapshot *workflowhost.Snapshot
 				snapshot, e = workflowhost.SnapshotFromMap(r.Route.DeliveryRecipe)
 				if e == nil {
-					called := false
-					_, e = workflowhost.RunSnapshot(ownerCtx, snapshot, deliveryContract, map[string]any{"requestId": r.ID}, workflowhost.Options{Operations: map[string]workflowhost.Operation{"repositoryChangeQueue": func(c context.Context, a map[string]any) (any, error) {
-						if called {
-							return nil, errors.New("delivery recipe exceeded one observation per lease")
+					called := map[string]bool{}
+					operation := func(name string, run func(context.Context, string) (any, error)) workflowhost.Operation {
+						return func(c context.Context, a map[string]any) (any, error) {
+							if called[name] {
+								return nil, errors.New("delivery recipe exceeded one " + name + " effect per lease")
+							}
+							called[name] = true
+							if str(a["requestId"]) != r.ID {
+								return nil, errors.New("delivery recipe selected another request")
+							}
+							return run(c, r.ID)
 						}
-						called = true
-						if str(a["requestId"]) != r.ID {
-							return nil, errors.New("delivery recipe selected another request")
-						}
-						receipt, err := i.Queue(c, r.ID)
-						if err != nil {
-							return nil, err
-						}
-						return decoded[map[string]any](receipt)
-					}}})
+					}
+					_, e = workflowhost.RunSnapshot(ownerCtx, snapshot, deliveryContract, map[string]any{"requestId": r.ID}, workflowhost.Options{Operations: map[string]workflowhost.Operation{
+						"repositoryChangeReportReview": operation("report", func(c context.Context, id string) (any, error) {
+							v, e := i.ReportReview(c, id)
+							if e != nil {
+								return nil, e
+							}
+							return decoded[map[string]any](v)
+						}),
+						"repositoryChangeQueue": operation("queue", func(c context.Context, id string) (any, error) {
+							v, e := i.Queue(c, id)
+							if e != nil {
+								return nil, e
+							}
+							return decoded[map[string]any](v)
+						}),
+					}})
 				}
 			}
 		}

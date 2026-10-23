@@ -80,6 +80,12 @@ builtin repositoryChangeContext { requestId string! }
 @args(profile="object")
 builtin repositoryChangeReview { requestId string! proposal object! }
 
+/// Report the accepted durable independent review on the exact published commit.
+/// Native authorization supplies all check fields and verifies app-owned readback.
+@executor("integration.repositoryauthority.reportReview")
+@args(profile="object")
+builtin repositoryChangeReportReview { requestId string! }
+
 /// Observe required checks/reviews, mark the exact reviewed PR ready, and request
 /// merge-queue admission. This never bypasses repository policy or deploys a release.
 @executor("integration.repositoryauthority.queue")

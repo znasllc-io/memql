@@ -354,8 +354,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, "cockpit", "vulnerabilities", "secrets-current", manifestStageTests, "installer-smoke"}
-	pullRequestStages := []string{manifestStageChecks, "cockpit", "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "installer-smoke", "dependency-proposal", "dependency-proposal-write"}
+	fullStages := []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", "secrets-current", manifestStageTests, "installer-smoke"}
+	pullRequestStages := []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "installer-smoke", "dependency-proposal", "dependency-proposal-write"}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
 		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
@@ -378,7 +378,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "cockpit", "vulnerabilities", manifestStageTests, "inventory", "cockpit-release", "release-files", "build-tools", "images"},
+		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", manifestStageTests, "inventory", "cockpit-release", "release-files", "build-tools", "images"},
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// A scheduled scan selects only its explicit opt-in stages; default
 		// stages such as checks and history scans are intentionally absent.
@@ -475,6 +475,10 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				}
 				if engineCockpitHost(step.Stage, step.Name) {
 					checkCockpitHost(t, step)
+					continue
+				}
+				if engineDeliveryHost(step.Stage, step.Name) {
+					checkDeliveryHost(t, step)
 					continue
 				}
 				if engineInstallerHost(step.Stage, step.Name) {
@@ -813,6 +817,9 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 			}
 			if engineCockpitHost(stage.Name, step.Name) {
 				continue // exact host contract is exercised in every compiled opening
+			}
+			if engineDeliveryHost(stage.Name, step.Name) {
+				continue // disposable providers need the consented Docker host
 			}
 			if engineInstallerHost(stage.Name, step.Name) {
 				continue // exact fixture contracts are compiled above and in scripts/ci

@@ -941,3 +941,27 @@ func TestAStaticClientNeverAsksASource(t *testing.T) {
 		t.Fatal("a configured static client minted no assertion")
 	}
 }
+
+func TestCapturedAppConfigurationKeepsItsOwnKeyAfterAnotherOperationAdopts(t *testing.T) {
+	first, second := testConfig(t), otherConfig(t)
+	c := New(first)
+	c.adopt(second)
+	if _, err := c.appJWT(second, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// Interleaving: operation A captured first, B adopted and cached second,
+	// then A resumes signing its already captured configuration.
+	assertion, err := c.appJWT(first, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(assertion, ".")
+	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if err := rsa.VerifyPKCS1v15(&appKey(t).PublicKey, crypto.SHA256, sum[:], sig); err != nil {
+		t.Fatal("captured App configuration was signed with another App's key")
+	}
+}

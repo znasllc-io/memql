@@ -275,3 +275,9 @@ builtin pipelinesChannelAllow {
   name       string! @description("The caller's channel name.")
   allowed    bool!   @description("True allows notification stages to use this channel; false revokes that permission.")
 }
+
+/// Publish independent review evidence for this exact native merge group.
+/// Available only inside an operator-bound claimed pipeline workflow; accepts
+/// no caller-selected repository, members, verdict, or check identity.
+@executor("integration.pipelines.reportMergeGroupReview")
+builtin pipelineReportMergeGroupReview { }

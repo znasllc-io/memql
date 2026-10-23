@@ -52,6 +52,18 @@ func (a *App) wireRepositoryAuthority() {
 		d.CaptureReview = func(_ context.Context, name string) (map[string]any, error) { return a.engine.CapturePrompt(name) }
 		d.Review = a.reviewRepositoryChange
 		d.DeliveryContext = a.repositoryAuthorityDeliveryContext
+		d.ReportMergeGroup = func(ctx context.Context, intent repositoryauthority.MergeGroupReviewIntent, authorize func(context.Context) error) (repositoryauthority.MergeGroupReviewReceipt, error) {
+			if pkgs == nil {
+				return repositoryauthority.MergeGroupReviewReceipt{}, errors.New("repository connection is unavailable")
+			}
+			return reportRepositoryMergeGroup(ctx, pkgs, intent, authorize)
+		}
+		d.ReportReview = func(ctx context.Context, grant repositoryauthority.Authorization, intent repositoryauthority.ReviewReportIntent) (repositoryauthority.ReviewReportReceipt, error) {
+			if pkgs == nil {
+				return repositoryauthority.ReviewReportReceipt{}, errors.New("repository connection is unavailable")
+			}
+			return reportRepositoryReview(ctx, pkgs, provider, grant, intent)
+		}
 		d.Queue = func(ctx context.Context, grant repositoryauthority.Authorization, intent repositoryauthority.DeliveryIntent) (repositoryauthority.DeliveryReceipt, error) {
 			if pkgs == nil {
 				return repositoryauthority.DeliveryReceipt{}, errors.New("repository connection is unavailable")

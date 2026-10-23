@@ -64,7 +64,7 @@ pipeline:
   select:
     go: import-graph
     # Native test setup has no Go imports, so its changes need full coverage.
-    full: [cockpit/Makefile, "cockpit/scripts/**"]
+    full: [cockpit/Makefile, "cockpit/scripts/**", "scripts/ci/delivery-artifacts.sh", "scripts/ci/delivery_artifacts*", "scripts/lib/capability.sh", "scripts/identity/build-css.sh"]
     # The trees whose packages need a database, as
     # scripts/ci/db-gated-packages.sh --trees prints them: that script is the
     # canonical list, and the test holds this copy to it. db-tests takes these
@@ -332,6 +332,26 @@ pipeline:
             test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
             bash scripts/identity/build-css.sh
             go test -race -tags computeruse -count=1 -timeout=600s $MEMQL_PACKAGES
+    - name: delivery-artifacts
+      steps:
+        - name: provider-qualification
+          packages: affected
+          packageRoots: [app, integrations/release, integrations/ociregistry, integrations/azureblob, integrations/pipelinesteps, integrations/installation, component/pipelinerun, component/pipelines, component/workjournal, component/database, component/memql]
+          placement: fleet
+          execution: native
+          caches: []
+          platform: linux/amd64
+          needs: { docker: true }
+          timeout: 35m
+          artifacts: [.memql-artifact-evidence]
+          run: |
+            set -eu
+            bash scripts/ci/delivery-artifacts.sh \
+              --database-image=ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631 \
+              --blob-image=mcr.microsoft.com/azure-storage/azurite@sha256:647c63a91102a9d8e8000aab803436e1fc85fbb285e7ce830a82ee5d6661cf37 \
+              --registry-image=docker.io/library/registry@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e \
+              --artifact-image=docker.io/library/python@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a \
+              --output=.memql-artifact-evidence
     - name: vulnerabilities
       on: [pull_request, merge_group, push, release, schedule, manual]
       runAfterFailure: true

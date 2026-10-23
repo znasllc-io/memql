@@ -91,7 +91,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 			switch step.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
 			case automations.StepTypeFunction:
-				if step.Function == nil || (step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
+				if step.Function == nil || (step.Function.Name != "pipelineReportMergeGroupReview" && step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
 					return fmt.Errorf("pipeline workflow step %q calls a function outside its run-scoped contract", step.ID)
 				}
 			case automations.StepTypeAction:
@@ -403,6 +403,8 @@ func workflowCapability(name string) func(context.Context, map[string]any, int) 
 		var value any
 		var err error
 		switch name {
+		case "reportMergeGroupReview":
+			value, err = h.reportMergeGroupReview(ctx, args)
 		case "workflowFacts":
 			value = h.facts()
 		case "skipStep":
@@ -464,6 +466,8 @@ func (h *pipelineWorkflowHost) Execute(ctx context.Context, step *automations.St
 	var value any
 	if err == nil {
 		switch step.Function.Name {
+		case "pipelineReportMergeGroupReview":
+			value, err = h.reportMergeGroupReview(ctx, args)
 		case "pipelineWorkflowFacts":
 			value = h.facts()
 		case "pipelineSkipStep":
@@ -488,7 +492,7 @@ func (h *pipelineWorkflowHost) facts() map[string]any {
 			states = append(states, map[string]any{"key": t.step.Key, "stage": stage.name, "stageIndex": index, "status": string(s.Status), "kind": string(t.step.Kind), "runAfterFailure": t.step.RunAfterFailure})
 		}
 	}
-	return map[string]any{"stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled() || h.dr.cleanupFailed.Load(), "steps": states}
+	return map[string]any{"event": string(h.dr.run.Event), "stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled() || h.dr.cleanupFailed.Load(), "steps": states}
 }
 
 func (h *pipelineWorkflowHost) skip(ctx context.Context, args map[string]any) (any, error) {
@@ -566,6 +570,7 @@ func (dr *runDriver) execute(ctx context.Context) error {
 	var err error
 	if dr.workflow.snapshot != nil {
 		ops := map[string]workflowhost.Operation{
+			"pipelineReportMergeGroupReview": h.reportMergeGroupReview,
 			"pipelineWorkflowFacts": func(_ context.Context, args map[string]any) (any, error) {
 				if len(args) != 0 {
 					return nil, fmt.Errorf("workflow facts accepts no arguments")

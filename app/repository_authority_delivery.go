@@ -68,6 +68,18 @@ func queueRepositoryChange(ctx context.Context, access repositoryQueueAccess, au
 	if info.ID != grant.RepositoryID || !strings.EqualFold(info.FullName, grant.Source.Repository) || info.DefaultBranch != intent.BaseBranch {
 		return out, errors.New("repository delivery identity changed")
 	}
+	verifyReport := func(c context.Context) error {
+		r := intent.ReviewReport
+		if r.State != "complete" || r.ProposalHash != intent.ProposalHash || r.HeadSHA != intent.Proposal.Commit || r.CheckName != repositoryauthority.ReviewCheckName || r.ReviewDigest == "" {
+			return errors.New("queue admission has no exact native review check receipt")
+		}
+		return gh.VerifyReviewCheck(c, observation, parts[0], parts[1], r.CheckRunID, r.HeadSHA, r.CheckName, r.ExternalID, r.AppID)
+	}
+	if !intent.ObserveOnly {
+		if err := verifyReport(ctx); err != nil {
+			return out, err
+		}
+	}
 	refresh := func(c context.Context) (string, error) {
 		if err := check(c); err != nil {
 			return "", err
@@ -86,6 +98,12 @@ func queueRepositoryChange(ctx context.Context, access repositoryQueueAccess, au
 		}
 		token, _, err := access.RepositoryQueueUserToken(c, grant.Source.CredentialID, grant.Source.OwnerUserID, parts[0], parts[1])
 		if err != nil {
+			return "", err
+		}
+		if err := check(c); err != nil {
+			return "", err
+		}
+		if err := verifyReport(c); err != nil {
 			return "", err
 		}
 		if err := check(c); err != nil {
@@ -138,8 +156,8 @@ func repositoryIndependentReviewContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-// The native queue recovery lease grants only observation/admission of the
-// original reviewed PR. It cannot reactivate proposal effects after success.
+// The native delivery recovery lease grants only review reporting and
+// observation/admission of the original reviewed PR. It cannot reactivate proposal effects after success.
 func (a *App) repositoryAuthorityDeliveryContext(ctx context.Context, owner, goalID, runID string) (context.Context, error) {
 	if owner == "" || goalID == "" || runID == "" {
 		return nil, errors.New("repository delivery identity is missing")

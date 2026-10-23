@@ -46,6 +46,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			v, e := i.Review(ctx, p)
 			return result(v, e)
 		}},
+		{Name: "reportReview", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			v, e := i.ReportReview(ctx, str(a["requestId"]))
+			return result(v, e)
+		}},
 		{Name: "queue", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			v, e := i.Queue(ctx, str(a["requestId"]))
 			return result(v, e)

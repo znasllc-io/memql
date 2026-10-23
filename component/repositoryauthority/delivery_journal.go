@@ -21,7 +21,7 @@ func (i *Integration) claimDeliveries(ctx context.Context, limit int) ([]record,
 	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `SELECT body FROM repository_change_requests
- WHERE body->>'DeliveryState' IN ('pending','waiting','attention','queued')
+ WHERE body->>'DeliveryState' IN ('reporting','pending','waiting','attention','queued')
  AND COALESCE((body->>'DeliveryLeaseUntil')::timestamptz,'-infinity') <= $1
  AND (body->>'ExpiresAt')::timestamptz > $1
  ORDER BY updated_at,id LIMIT $2 FOR UPDATE SKIP LOCKED`, i.now(), limit)

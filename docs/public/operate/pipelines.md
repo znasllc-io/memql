@@ -71,8 +71,18 @@ The native proposal boundary accepts one immutable set of file replacements
 against an exact base commit. A `propose_change` request authorizes a draft pull
 request only. `deliver_change` additionally authorizes independent review and
 merge-queue admission; it is available only when the installed authority route
-declares both a review prompt and a queue-only delivery recipe. An existing
+declares both a review prompt and a bounded review-report and queue delivery recipe. An existing
 draft request cannot be upgraded by retrying it with a different operation.
+
+The `repositoryChangeReportReview` operation accepts only the native request ID.
+It publishes the reserved app-owned `MemQL / review` check for the exact proposed
+commit after the accepted independent review, then verifies GitHub's readback.
+Its durable receipt binds the source, repository identity, proposal and captured
+review. Queue admission requires that receipt and rechecks the exact provider
+check; a matching title or success supplied by a caller grants nothing. Pipeline
+names cannot claim this reserved review context. Required tests remain separate.
+An unavailable provider leaves the same report waiting; the installed recovery
+recipe explicitly resumes reporting before queueing, without drafting again.
 
 The change recipe, independent review prompt with its partials, and delivery
 recipe are captured before approval. Changing their content or routing

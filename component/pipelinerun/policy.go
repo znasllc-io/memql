@@ -42,7 +42,7 @@ var optionalPolicyRoles = map[string]string{
 func pipelinePolicyOperations() map[string]workflowhost.Operation {
 	out := map[string]workflowhost.Operation{}
 	for _, name := range []string{
-		"pipelineWorkflowFacts", "pipelineSkipStep", "pipelineReportPublish", "pipelineReportObserve",
+		"pipelineReportMergeGroupReview", "pipelineWorkflowFacts", "pipelineSkipStep", "pipelineReportPublish", "pipelineReportObserve",
 		"pipelineRetentionSweepPage", "integration.pipelines.executeStep", "integration.pipelines.reportProgress",
 	} {
 		out[name] = func(context.Context, map[string]any) (any, error) {

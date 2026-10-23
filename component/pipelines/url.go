@@ -18,3 +18,13 @@ func RunPageURL(osOrigin, runID string) string {
 func CheckRunName(pipelineName string) string {
 	return "MemQL / " + pipelineName
 }
+
+// IndependentReviewCheckName is reserved for native, exact-proposal review
+// evidence. Ordinary package pipelines must never publish this context.
+const IndependentReviewCheckName = "MemQL / review"
+
+// ReservedPipelineCheckName rejects case and surrounding-space variations as
+// well, so a stored pipeline cannot impersonate independent review evidence.
+func ReservedPipelineCheckName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(CheckRunName(strings.TrimSpace(name))), IndependentReviewCheckName)
+}

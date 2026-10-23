@@ -15,6 +15,7 @@
 /.memql-editor/
 /.memql-site-browsers/
 /.memql-release/
+/.memql-artifact-evidence/
 *.out
 coverage.*
 *.coverprofile

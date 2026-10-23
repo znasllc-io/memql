@@ -43,6 +43,10 @@ import (
 // Deps are the integration's ports. New takes them, and Configure sets the
 // ones only app/ can build after every plug-in has materialized.
 type Deps struct {
+	// ReportMergeGroupReview is available only to a captured, claimed pipeline
+	// workflow. The callback must recheck the supplied lease fence at effects.
+	ReportMergeGroupReview func(context.Context, Pipeline, Run, func(context.Context) error) (map[string]any, error)
+
 	// ArtifactRetention supplies the same durable artifact journal and provider
 	// fences used by producers and publication consumers on every replica.
 	ArtifactRetention *ArtifactRetentionDependencies

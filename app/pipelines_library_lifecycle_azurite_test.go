@@ -11,6 +11,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
@@ -62,21 +63,27 @@ func TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients(t *testing.T)
 	}
 	t.Run("producer-stopped-before-provider-request", func(t *testing.T) {
 		blocked := pipelineBlockedScopeUpload{AzureBlobUploader: u1, entered: make(chan struct{}), proceed: make(chan struct{})}
-		writer, _, _ := pipelineStreamDBStore(t, blocked)
+		writer, engine, db := pipelineStreamDBStore(t, blocked)
 		cleaner, _, _ := pipelineStreamDBStore(t, u2)
 		writer.bucket, cleaner.bucket = container, container
 		file := pipelineStreamFile(id.NewShortId(), "late source archive")
+		preparePipelineAzuriteAccounting(t, engine, db, u1, file.OwnerUserID)
 		owner, scope := pipelineLifecycleScope(file)
 		uploaded := make(chan error, 1)
 		go func() { _, err := writer.StoreRunFileStream(ctx, file); uploaded <- err }()
 		defer func() {
 			close(blocked.proceed)
-			if err := <-uploaded; !errors.Is(err, azureblob.ErrBlobRetired) {
+			if err := <-uploaded; !errors.Is(err, azureblob.ErrBlobRetired) && !errors.Is(err, storagequota.ErrRetired) {
 				t.Errorf("pre-fence provider request recreated retired bytes: %v", err)
 			}
 		}()
 		select {
 		case <-blocked.entered:
+		case err := <-uploaded:
+			// Do not wait for the parent deadline when admission correctly
+			// refuses before the injected provider boundary is reached.
+			uploaded <- err
+			t.Fatal("upload never reached the intended provider boundary", err)
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
@@ -90,13 +97,14 @@ func TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients(t *testing.T)
 		if receipt, err := cleaner.RetireRunFile(owner, scope, ids[0]); err != nil || receipt.TombstoneETag == "" {
 			t.Fatal("provider absence was not permanently fenced", receipt, err)
 		}
-		// The deferred resumed request reaches the real provider after the
-		// leased tombstone, despite having reserved before the admissions fence.
+		// The deferred request resumes after the real leased tombstone. The
+		// durable capacity fence or the provider must refuse its earlier intent.
 	})
-	one, _, db := pipelineStreamDBStore(t, pipelineLostRetirementReply{u1})
+	one, engine, db := pipelineStreamDBStore(t, pipelineLostRetirementReply{u1})
 	two, _, _ := pipelineStreamDBStore(t, u2)
 	one.bucket, two.bucket = container, container
 	f := pipelineStreamFile(id.NewShortId(), "data")
+	preparePipelineAzuriteAccounting(t, engine, db, u1, f.OwnerUserID)
 	stored, err := one.StoreRunFileStream(ctx, f)
 	if err != nil {
 		t.Fatal(err)

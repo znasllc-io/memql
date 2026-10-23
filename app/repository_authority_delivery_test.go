@@ -35,6 +35,7 @@ func newDeliveryProtocol(t *testing.T) *deliveryProtocol {
 	p := &deliveryProtocol{t: t, repositoryID: 42, base: "main"}
 	p.grant = repositoryauthority.Authorization{EffectID: strings.Repeat("f", 64), RequestID: "request", RepositoryID: 42, Source: repositoryauthority.Source{ID: "source", OwnerUserID: "owner", CredentialID: "credential", Repository: "acme/repo"}}
 	p.intent = repositoryauthority.DeliveryIntent{ProposalHash: p.grant.EffectID, BaseBranch: "main", Proposal: repositoryauthority.ProposalReceipt{State: "proposed", Branch: "memql/change-" + p.grant.EffectID, Commit: strings.Repeat("a", 40), PullRequestURL: "https://github.com/acme/repo/pull/9"}}
+	p.intent.ReviewReport = repositoryauthority.ReviewReportReceipt{State: "complete", CheckName: repositoryauthority.ReviewCheckName, CheckRunID: 71, AppID: 42, HeadSHA: p.intent.Proposal.Commit, ProposalHash: p.intent.ProposalHash, ReviewDigest: strings.Repeat("b", 64), ExternalID: "memql-review:" + strings.Repeat("c", 64)}
 	repository := map[string]any{"id": "R_42", "nameWithOwner": "acme/repo"}
 	p.pr = map[string]any{"id": "PR_9", "number": 9, "state": "OPEN", "headRefOid": p.intent.Proposal.Commit, "baseRefName": "main", "isDraft": true, "merged": false, "mergeCommit": nil, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "reviewDecision": "APPROVED", "isInMergeQueue": false, "isMergeQueueEnabled": true, "repository": repository, "headRepository": repository, "baseRepository": repository, "baseRef": map[string]any{"name": "main", "branchProtectionRule": nil}, "mergeQueueEntry": nil}
 	p.client = githubapp.New(githubapp.Config{}, githubapp.WithHTTPClient(&http.Client{Transport: p}))
@@ -81,6 +82,9 @@ func (p *deliveryProtocol) RoundTrip(r *http.Request) (*http.Response, error) {
 			p.beforeRepository(p.repositoryReads)
 		}
 		out = map[string]any{"id": p.repositoryID, "full_name": "acme/repo", "default_branch": p.base}
+	case "/repos/acme/repo/check-runs/71":
+		r := p.intent.ReviewReport
+		out = map[string]any{"id": r.CheckRunID, "name": r.CheckName, "head_sha": r.HeadSHA, "external_id": r.ExternalID, "app": map[string]any{"id": r.AppID}, "status": "completed", "conclusion": "success"}
 	case "/graphql":
 		require.Equal(p.t, http.MethodPost, r.Method)
 		var body struct {
@@ -137,7 +141,7 @@ func TestRepositoryDeliveryUsesFreshUserAuthorityOnlyForOrdinaryQueueEffects(t *
 	require.Equal(t, []string{"ready", "enqueue"}, p.mutations)
 	require.Equal(t, 1, p.observers)
 	require.Equal(t, 4, p.writers)
-	require.Equal(t, 13, p.authorizations, "initial scope plus three checks around every user-credential refresh")
+	require.Equal(t, 17, p.authorizations, "initial scope plus checks around every credential and report refresh")
 }
 func TestRepositoryDeliveryRejectsReplacedRepositoryBeforeEffects(t *testing.T) {
 	for _, replaceAt := range []int{1, 2, 3} {
@@ -225,4 +229,21 @@ func TestRepositoryDeliveryObservationCannotReenqueueOrRequestUserCredentials(t 
 	require.Empty(t, p.mutations)
 	require.Equal(t, 2, p.snapshots)
 	require.Equal(t, 2, p.repositoryReads)
+}
+
+func TestRepositoryDeliveryRequiresNativeReviewReportBeforeQueueWrites(t *testing.T) {
+	for _, alter := range []func(*repositoryauthority.ReviewReportReceipt){
+		func(r *repositoryauthority.ReviewReportReceipt) { r.State = "waiting" },
+		func(r *repositoryauthority.ReviewReportReceipt) { r.HeadSHA = strings.Repeat("b", 40) },
+		func(r *repositoryauthority.ReviewReportReceipt) { r.ProposalHash = "other" },
+		func(r *repositoryauthority.ReviewReportReceipt) { r.CheckRunID = 0 },
+		func(r *repositoryauthority.ReviewReportReceipt) { r.AppID = 0 },
+	} {
+		p := newDeliveryProtocol(t)
+		alter(&p.intent.ReviewReport)
+		_, err := p.run()
+		require.Error(t, err)
+		require.Empty(t, p.mutations)
+		require.Zero(t, p.writers)
+	}
 }

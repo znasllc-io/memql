@@ -21,7 +21,7 @@ const deliveryContract = "repository.delivery-recipe.v1"
 
 // RecipeOperationNames is shared by native preflight and Work dispatch.
 func RecipeOperationNames() []string {
-	return []string{"repositoryChangeContext", "ai", "repositoryChangePropose", "repositoryChangeReview", "repositoryChangeQueue"}
+	return []string{"repositoryChangeContext", "ai", "repositoryChangePropose", "repositoryChangeReview", "repositoryChangeReportReview", "repositoryChangeQueue"}
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`)
@@ -131,9 +131,9 @@ func (i *Integration) resolveRoute(ctx context.Context, s Source, canWrite bool)
 			if marshalErr != nil || len(r.ReviewPrompt) == 0 || len(promptJSON) > 512<<10 {
 				return r, errors.New("repository review prompt must be a bounded captured closure")
 			}
-			delivery, e := workflowhost.Capture(r.DeliveryTemplate, deliveryContract, d.WorkflowSource, map[string]workflowhost.Operation{"repositoryChangeQueue": refuse})
+			delivery, e := workflowhost.Capture(r.DeliveryTemplate, deliveryContract, d.WorkflowSource, map[string]workflowhost.Operation{"repositoryChangeReportReview": refuse, "repositoryChangeQueue": refuse})
 			if e != nil {
-				return r, fmt.Errorf("delivery recipe exceeds queue-only authority: %w", e)
+				return r, fmt.Errorf("delivery recipe exceeds review-report and queue authority: %w", e)
 			}
 			r.DeliveryRecipe = delivery.Map()
 		}

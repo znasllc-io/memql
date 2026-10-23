@@ -71,10 +71,11 @@ func TestPipelineStreamAzuriteDBRecoveryAcrossClients(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _, db := pipelineStreamDBStore(t, pipelineLostBlobReply{u1})
+	first, engine, db := pipelineStreamDBStore(t, pipelineLostBlobReply{u1})
 	second, _, _ := pipelineStreamDBStore(t, u2)
 	first.bucket, second.bucket = container, container
 	f := pipelineStreamFile(id.NewShortId(), "")
+	preparePipelineAzuriteAccounting(t, engine, db, u1, f.OwnerUserID)
 	const size = int64(128 << 20)
 	hash := sha256.New()
 	if _, err := io.Copy(hash, io.LimitReader(pipelineZeroReader{}, size)); err != nil {
@@ -113,6 +114,7 @@ func TestPipelineStreamAzuriteDBRecoveryAcrossClients(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT state FROM pipeline_artifact_uploads WHERE intent_id=$1", got.Receipt.IntentID).Scan(&state); err != nil || state != "ready" {
 		t.Fatalf("final receipt: %s %v", state, err)
 	}
+	assertPipelineAzuriteCharge(t, u2, f.OwnerUserID, size)
 	trusted := auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, f.OwnerUserID))
 	scope := pipelinesteps.RunFileReceiptScope{OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Attempt: f.Attempt}
 	opened, body, err := second.OpenRunFileReceipt(trusted, scope, got.Receipt.IntentID)
