@@ -475,13 +475,23 @@ calculation does not grant permission or execute the approved operation.
    memory incomplete. It never truncates a claim or source URL to make it
    fit. Exact source messages are saved before the bounded memory replaces
    them, so verbosity alone does not stop the goal or spend another model call.
-4. **Retrieve only what is needed.** `recallWorkHistory` searches a bounded
-   page of archive records. An exact checkpoint and message index retrieve
+4. **Retrieve only what is needed.** By default, `recallWorkHistory` searches
+   original tool results and call arguments across current-run execution
+   receipts and compaction archives. It excludes earlier recall requests and
+   their nested answers, assistant prose, approval requests, and generated call
+   IDs from matching. An argument-only hit returns the completed result with
+   `matchedField: "arguments"`; its directory identifies the corresponding call.
+   Search directories omit excluded calls without renumbering source indexes.
+   An exact checkpoint and message index retrieve
    character pages of the original serialized message, including tool-call
    arguments. `nextOffset` continues that message; `cursor` continues a
    search. An empty page with `hasMore` does not mean the evidence is absent.
-   When searching earlier tool receipts in the same owned conversation, one
-   call scans at most eight four-receipt pages before returning its cursor.
+   Current-run search and searches of earlier tool receipts in the same owned
+   conversation scan at most eight four-receipt pages per call before returning
+   a cursor. Keep `sourceRunId` when returned with a receipt reference; context
+   archive references retain their existing checkpoint route without it.
+   `checkpoint: "conversation"` selects original input conversation messages.
+   Explicit checkpoint reads preserve their original contents and offsets.
    Search stops at a page with matches; directory browsing skips receipts
    without original sources. Derived retrieval responses stay in the journal
    but are excluded from the original-source projection, including when a

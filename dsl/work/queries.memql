@@ -733,6 +733,17 @@ query observation workToolSourcesForOwnerRun {
  shape workObservationFull
 }
 
+/// Search original tool fields across execution receipts and compaction archives.
+/// The engine projects public source fields; these raw rows are not model context.
+@actor
+query observation workHistorySearchSourcesForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && (row.?data.sourceMessages != nil || row.?data.delegatedEvidence == true || row.?data.continuation == true || row.?data.capabilityEvidence == true)
+ sort "row.createdAt", "desc"
+ paginate 4
+ shape workObservationFull
+}
+
 /// Completed native/delegated source reads and capability contracts; checkpoints and model prose cannot buy more work.
 @actor
 query observation workProgressReceiptsForOwnerRun {

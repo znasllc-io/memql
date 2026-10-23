@@ -244,6 +244,26 @@ changed required checkpoints. Previously accumulated copies can still require
 compaction, and end-to-end latency depends on the selected model and remaining
 work; the regression is not a timing guarantee.
 
+Default history discovery searches original tool fields across owned execution
+receipts and compaction archives. Searching serialized consolidated context had
+ranked newer recall requests, nested recalled answers, and generated call-ID
+substrings ahead of the underlying evidence. The source search skips those
+derived matches and reads at most eight pages of four records before yielding a
+cursor. It does not silently fall back to recursive context search. Original
+tool results saved only by compaction remain searchable, while explicit
+checkpoint/conversation selectors retain exact bytes, indexes and offsets.
+Argument-only matches select their completed tool result and identify the match
+field; they never return raw assistant prose alongside the call. The bounded
+directory filters excluded call arguments while preserving index slots.
+Owner and earlier-conversation-run checks remain authoritative across replicas.
+`TestWorkHistoryDefaultSearchSkipsRecallEchoesAndOpaqueIDsAcrossReplicas`
+reproduces forty newer echoes and ID-only false positives ahead of an original
+receipt, checks source hashes and archive-only recovery, and denies a foreign
+owner. `TestWorkHistoryOriginalSearchPreservesOffsetsAndExcludesPrivateArchiveFields`
+checks Unicode/JSON offsets, argument-only results and filtered directories.
+These retrieval tests establish source selection and preservation, not improved
+model completion time or successful downstream execution.
+
 The active compiled instruction has a native retention marker separate from
 the first and latest human messages. Approvals and guidance can arrive after
 that instruction; they must not make its stage boundary eligible for summary

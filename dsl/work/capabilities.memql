@@ -81,9 +81,9 @@ tool navigateOS {
  record string @description("Existing record name or id when requested.")
 }
 
-/// Search original conversation messages and checkpoint sources in this work
-/// run. Results retain their source index; a checkpoint never erases evidence.
-@description("Search original conversation messages and checkpoint sources in this work run by a word, name or identifier.")
+/// Search original tool evidence in this work run; exact checkpoint and
+/// conversation reads preserve their original source indexes and bytes.
+@description("Search original tool arguments and results in this work run by a word, name or identifier. Read conversation messages with checkpoint conversation.")
 @executor("recallWorkHistory")
 @args(profile="object")
 builtin workRecallHistory {
@@ -101,8 +101,8 @@ builtin workRecallHistory {
 @requiresAgentRole("assistant", "specialist")
 tool recallWorkHistory {
  sourceRunId string @description("Read exact public tool receipts from this run or an earlier run in the same saved conversation. Use sourceHistory run IDs from source context when its preview omits original files. Omit search and checkpoint to browse a bounded receipt directory; cursor continues older receipts. System prompts and private reasoning are never returned.")
- search string @description("A name, word, identifier or phrase from earlier conversation or tool output. Combine with checkpoint and messageIndex to jump to that phrase inside one archived message; omit offset for the initial match. Omit search to read from offset zero.")
- checkpoint string @description("Exact archived reference returned by a checkpoint or previous search; with messageIndex selects one original message.")
+ search string @description("A name, word, identifier or phrase from original tool output or call arguments. Default search covers current-run execution receipts and compaction archives, excluding recall echoes, assistant prose and generated call IDs. Argument-only hits return their completed result with matchedField arguments. Combine with checkpoint and messageIndex to search one exact message; omit offset for the initial match. Omit search to read from offset zero.")
+ checkpoint string @description("Exact archived reference returned by a checkpoint or previous search; with messageIndex selects one original message. Preserve sourceRunId only when the result supplies it. Use conversation to read original input conversation messages.")
  messageIndex int @description("Zero-based source message index, default 0, for an exact checkpoint read. Inspect sources[].messages to select the original tool result; message zero may be a derived summary. nextMessageIndex continues the source directory.")
  offset int @description("Unicode character offset in the serialized source message, default 0 for exact reads. Use nextOffset to continue.")
  maxChars int @description("Characters per excerpt, default 1600, maximum 4000. Entire response excerpts share an 8000-character budget.")
