@@ -378,10 +378,12 @@ cluster node, including the SHA-256, size and executable mode of `memql` and
 detect damaged unpacked files after a full disk.
 
 After a healthy rollout, cache maintenance retains at least the two newest
-owned builds per node type on each node. Use `--image-cache-keep=3` to retain
-more. It preserves tagged, digested, pinned and referenced images, and ignores
-images without this build path's ownership labels. It never removes data
-volumes. `--no-wait` skips readiness verification and this maintenance. A failed
+owned builds per node type in host Docker and on each cluster node. Use
+`--image-cache-keep=3` to retain more. It preserves tagged, digested, pinned and
+referenced images, including stopped containers and cluster images whose host
+tag has moved to a newer build. It ignores images without this build path's
+ownership labels. Host removal names each reviewed image explicitly and never
+prunes parent images, build caches or data volumes. `--no-wait` skips readiness verification and this maintenance. A failed
 maintenance operation reports the completed rollout and any confirmed removals,
 but the overall update fails and keeps its recovery record.
 

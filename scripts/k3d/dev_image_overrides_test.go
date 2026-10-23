@@ -770,11 +770,14 @@ case "$1" in
       if [ "$1" = --iidfile ]; then printf '%s\n' "$id" > "$2"; break; fi
       shift
     done ;;
-  image) printf '%s\n' "$id" ;;
+  image)
+    case "$*" in *'image ls --all --quiet --no-trunc'*) exit 0 ;; esac
+    printf '%s\n' "$id" ;;
   create) printf '%064d\n' 1 ;;
   cp) cp "$FAKE_FILES/${2##*/}" "$3" ;;
   rm) exit 0 ;;
   ps)
+    case "$*" in *'ps --all --quiet --no-trunc'*) exit 0 ;; esac
     case "$*" in *'.Names}} {{.State}}'*) printf 'k3d-memql-server-0 running server\n' ;; *) printf 'k3d-memql-server-0 server running\n' ;; esac ;;
   exec)
     if [ "$3" = sh ]; then export FAKE_NODE="$2"; shift 2; exec "$@"; fi

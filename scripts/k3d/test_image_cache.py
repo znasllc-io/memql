@@ -1,7 +1,9 @@
 import copy
 import importlib.util
 import pathlib
+import subprocess
 import unittest
+from unittest import mock
 
 spec = importlib.util.spec_from_file_location("image_cache", pathlib.Path(__file__).with_name("image_cache.py"))
 cache = importlib.util.module_from_spec(spec)
@@ -165,6 +167,74 @@ class ImageCacheTest(unittest.TestCase):
             "containers": [{"image": "current"}], "initContainers": [{"image": "initializer"}],
             "ephemeralContainers": [{"image": "debugger"}]}}}}]}
         self.assertEqual(cache.requested_images(tree), {"current", "initializer", "debugger"})
+
+    def test_host_images_keep_cluster_references_after_host_tag_moves(self):
+        runtime = Runtime([image(n) for n in range(1, 7)])
+        runtime.node_names = [cache.HOST_STORE]
+        cluster = Runtime([image(n) for n in range(1, 7)])
+        cluster.used = [{"imageRef": identity(1)}]
+        cluster.wanted = {identity(2)}
+        cluster.images[identity(3)]["status"]["repoTags"] = ["memql-bff:recovery"]
+        # Exercise the real cross-store protection, not a canned protected set.
+        adapter = cache.Runtime("fixture")
+        adapter.cluster_nodes = cluster.nodes
+        adapter.inventory, adapter.containers, adapter.desired = cluster.inventory, cluster.containers, cluster.desired
+        runtime.external_protected = adapter.external_protected
+        cache.clean(runtime, [cache.HOST_STORE], "fixture", 2, True)
+        self.assertEqual(runtime.removed, [identity(4)])
+
+    def test_host_reference_is_refreshed_after_plan(self):
+        runtime = Runtime([image(n) for n in range(1, 4)])
+        runtime.node_names = [cache.HOST_STORE]
+        runtime.external_protected = lambda node: {identity(1)} if runtime.inventory_calls > 1 else set()
+        result = cache.clean(runtime, [cache.HOST_STORE], "fixture", 2, True)
+        self.assertEqual(runtime.removed, [])
+        self.assertEqual(len(result["retained"]), 1)
+
+    def test_all_store_plans_must_succeed_before_any_removal(self):
+        runtime = Runtime([image(n) for n in range(1, 4)])
+        real_inventory = runtime.inventory
+        def inventory(node):
+            if node == cache.HOST_STORE:
+                raise OSError("host Docker unavailable")
+            return real_inventory(node)
+        runtime.inventory = inventory
+        with self.assertRaises(OSError):
+            cache.clean(runtime, ["k3d-fixture-server-0", cache.HOST_STORE], "fixture", 2, True)
+        self.assertEqual(runtime.removed, [])
+
+    def test_docker_adapter_lists_all_containers_and_deletes_only_exact_id(self):
+        container_id = "f" * 64
+        docker_image = {"Id": identity(1), "Created": "2026-01-01T00:00:00Z",
+                        "RepoTags": ["memql-bff:local"], "RepoDigests": [],
+                        "Config": {"Labels": {cache.CLUSTER_LABEL: "fixture", cache.TYPE_LABEL: "bff"}}}
+        runtime = cache.Runtime("fixture")
+        responses = [subprocess.CompletedProcess([], 0, identity(1) + "\n"),
+                     subprocess.CompletedProcess([], 0, container_id + "\n"),
+                     subprocess.CompletedProcess([], 0, "")]
+        with mock.patch.object(cache.subprocess, "run", side_effect=responses) as run, \
+             mock.patch.object(cache, "read_json", side_effect=[[docker_image], [{"Id": container_id, "Image": identity(1)}]]) as read:
+            self.assertEqual(runtime.inventory(cache.HOST_STORE)[0]["repoTags"], ["memql-bff:local"])
+            self.assertEqual(runtime.containers(cache.HOST_STORE), [{"imageRef": identity(1)}])
+            runtime.remove(cache.HOST_STORE, identity(2))
+        self.assertEqual(run.call_args_list[0].args[0], ["docker", "image", "ls", "--all", "--quiet", "--no-trunc"])
+        self.assertEqual(run.call_args_list[1].args[0], ["docker", "ps", "--all", "--quiet", "--no-trunc"])
+        self.assertEqual(run.call_args_list[2].args[0], ["docker", "image", "rm", "--no-prune", identity(2)])
+        self.assertEqual(read.call_args_list[1].args[0], ["docker", "container", "inspect", container_id])
+        self.assertEqual(cache.owned_image(runtime.docker_detail(docker_image), "fixture")["id"], identity(1))
+
+    def test_docker_inspection_cannot_silently_drop_an_inventory_item(self):
+        with mock.patch.object(cache.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, identity(1) + "\n")), \
+             mock.patch.object(cache, "read_json", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "inventory changed"):
+                cache.Runtime.docker_objects("image")
+
+    def test_unowned_docker_index_without_creation_metadata_is_retained(self):
+        index = {"Id": identity(1), "RepoTags": [], "RepoDigests": []}
+        self.assertIsNone(cache.owned_image(cache.Runtime.docker_detail(index), "fixture"))
+        index["Config"] = {"Labels": {cache.CLUSTER_LABEL: "fixture", cache.TYPE_LABEL: "bff"}}
+        with self.assertRaisesRegex(ValueError, "creation time"):
+            cache.owned_image(cache.Runtime.docker_detail(index), "fixture")
 
 
 if __name__ == "__main__":

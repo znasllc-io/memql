@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Retire only explicitly owned local build images beyond a caller's retention.
 
-Never prune Docker, volumes or unlabelled images. The caller holds the shared
-host build lock for the entire operation. Every removal is by immutable CRI ID
-after a fresh reference/ownership check; inventory failures stop the operation.
+Never prune caches, volumes or unlabelled images. The caller holds the shared
+host build lock for the entire operation. Every removal is by immutable image
+ID after a fresh reference/ownership check; inventory failures stop the operation.
+Both host Docker and each cluster node retain their own newest build pairs.
 """
 
 import argparse
@@ -17,6 +18,7 @@ import sys
 
 CLUSTER_LABEL = "io.memql.local-build.cluster"
 TYPE_LABEL = "io.memql.local-build.node-type"
+HOST_STORE = "host-docker"
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
 CREATED = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})\Z")
@@ -109,6 +111,9 @@ class Runtime:
         self.cluster = cluster
 
     def nodes(self):
+        return sorted(self.cluster_nodes() + [HOST_STORE])
+
+    def cluster_nodes(self):
         output = subprocess.run(["docker", "ps", "--all", "--filter", "label=k3d.cluster=" + self.cluster,
             "--format", '{{.Names}} {{.State}} {{.Label "k3d.role"}}'],
             check=True, capture_output=True, text=True, timeout=30).stdout
@@ -125,9 +130,13 @@ class Runtime:
         return sorted(nodes)
 
     def inventory(self, node):
+        if node == HOST_STORE:
+            return [self.docker_detail(item)["status"] for item in self.docker_objects("image")]
         return read_json(["docker", "exec", node, "crictl", "images", "-o", "json"])["images"]
 
     def containers(self, node):
+        if node == HOST_STORE:
+            return [{"imageRef": item["Image"]} for item in self.docker_objects("container")]
         return read_json(["docker", "exec", node, "crictl", "ps", "-a", "-o", "json"])["containers"]
 
     def desired(self):
@@ -135,16 +144,69 @@ class Runtime:
             "pods,deployments,replicasets,statefulsets,daemonsets,jobs,cronjobs", "-A", "-o", "json"]))
 
     def inspect(self, node, image_id):
+        if node == HOST_STORE:
+            values = read_json(["docker", "image", "inspect", image_id])
+            if len(values) != 1:
+                raise ValueError("Docker did not return exactly one image")
+            return self.docker_detail(values[0])
         return read_json(["docker", "exec", node, "crictl", "inspecti", "-o", "json", image_id])
 
     def remove(self, node, image_id):
+        if node == HOST_STORE:
+            # Never force or recursively remove untagged parents. The daemon
+            # itself also refuses an image used by an existing container.
+            subprocess.run(["docker", "image", "rm", "--no-prune", image_id], check=True,
+                           timeout=30, stdout=subprocess.DEVNULL)
+            return
         subprocess.run(["docker", "exec", node, "crictl", "rmi", image_id], check=True,
                        timeout=30, stdout=subprocess.DEVNULL)
+
+
+    @staticmethod
+    def docker_detail(item):
+        return {"status": {"id": item["Id"], "repoTags": item.get("RepoTags") or [],
+                           "repoDigests": item.get("RepoDigests") or [], "pinned": False},
+                # Some OCI index records carry no creation/config metadata.
+                # Unowned records are retained without parsing a timestamp;
+                # an owned record missing that evidence still fails closed.
+                "info": {"imageSpec": {"created": item.get("Created") or "", "config": item.get("Config") or {}}}}
+
+    @staticmethod
+    def docker_objects(kind):
+        command = (["docker", "image", "ls"] if kind == "image" else ["docker", "ps"])
+        command += ["--all", "--quiet", "--no-trunc"]
+        output = subprocess.run(command, check=True, capture_output=True, text=True, timeout=30).stdout
+        identities = sorted(set(output.splitlines()))
+        expected = IMAGE_ID if kind == "image" else re.compile(r"[0-9a-f]{64}\Z")
+        if any(not expected.fullmatch(identity) for identity in identities):
+            raise ValueError("Docker inventory returned an invalid identity")
+        objects = []
+        for offset in range(0, len(identities), 32):
+            batch = identities[offset:offset + 32]
+            values = read_json(["docker", kind, "inspect", *batch])
+            if not isinstance(values, list) or sorted(item["Id"] for item in values) != batch:
+                raise ValueError("Docker inventory changed during inspection")
+            objects.extend(values)
+        return objects
+
+    def external_protected(self, node):
+        if node != HOST_STORE:
+            return set()
+        # A running/desired k3d image can have lost its host tag after a newer
+        # local build. Preserve its immutable config ID in the host store too.
+        protected = set()
+        desired = self.desired()
+        for cluster_node in self.cluster_nodes():
+            protected.update(protected_images(self.inventory(cluster_node),
+                                               self.containers(cluster_node), desired))
+        return protected
 
 
 def snapshot(runtime, node, cluster, keep, metadata):
     images = runtime.inventory(node)
     protected = protected_images(images, runtime.containers(node), runtime.desired())
+    if hasattr(runtime, "external_protected"):
+        protected.update(runtime.external_protected(node))
     owned = []
     for image in images:
         key = (node, image["id"])
