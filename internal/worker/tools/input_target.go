@@ -72,12 +72,24 @@ var desktopInputGuard = &inputTargetGuard{now: time.Now}
 // InputTargetStatus is an explicit local diagnostic, not an input receipt or
 // permission. It contains no element contents, application titles or tokens.
 type InputTargetStatus struct {
-	Available bool   `json:"available"`
-	Bound     bool   `json:"bound"`
-	Halted    bool   `json:"halted"`
-	WindowID  uint64 `json:"observed_window_id,omitempty"`
-	PID       int    `json:"observed_pid,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Available               bool               `json:"available"`
+	Bound                   bool               `json:"bound"`
+	Halted                  bool               `json:"halted"`
+	WindowID                uint64             `json:"observed_window_id,omitempty"`
+	PID                     int                `json:"observed_pid,omitempty"`
+	Error                   string             `json:"error,omitempty"`
+	AcquisitionMilliseconds int64              `json:"acquisition_milliseconds"`
+	DiagnosticProbes        []InputTargetProbe `json:"diagnostic_probes,omitempty"`
+}
+
+// InputTargetProbe is observation only; no diagnostic path grants input.
+type InputTargetProbe struct {
+	Method              string `json:"method"`
+	Available           bool   `json:"available"`
+	PID                 int    `json:"observed_pid,omitempty"`
+	WindowID            uint64 `json:"observed_window_id,omitempty"`
+	ElapsedMilliseconds int64  `json:"elapsed_milliseconds"`
+	Error               string `json:"error,omitempty"`
 }
 
 // DesktopInputTargetStatus reads from the actual worker process so its TCC
@@ -92,7 +104,12 @@ func (g *inputTargetGuard) targetStatus() InputTargetStatus {
 		status.Error = "No target-addressed input backend is available."
 		return status
 	}
+	started := time.Now()
 	focus, err := g.backend.focus()
+	status.AcquisitionMilliseconds = time.Since(started).Milliseconds()
+	if diagnostic, ok := g.backend.(interface{ diagnosticProbes() []InputTargetProbe }); ok {
+		status.DiagnosticProbes = diagnostic.diagnosticProbes()
+	}
 	if err != nil {
 		status.Error = err.Error()
 		return status

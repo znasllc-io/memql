@@ -262,6 +262,10 @@ AX stage/error or observed PID/window. It does not read element contents, mint
 a receipt, reset the interruption latch, activate a window, or send input.
 Ordinary `--action=status` does not acquire an AX target. Diagnostic success
 does not establish event delivery or authorize resuming an interrupted run.
+macOS diagnostics also compare a public NSWorkspace application snapshot with
+direct application AX reads and report elapsed time. That snapshot can be cached
+between main-run-loop turns; it is diagnostic only and never substitutes for
+the guard's focused-application read.
 
 macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
 packets also carry the observed window in Quartz's two public mouse-window

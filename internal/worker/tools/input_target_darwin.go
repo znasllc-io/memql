@@ -3,10 +3,12 @@
 package tools
 
 /*
-#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation
+#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation -framework AppKit
 #include <ApplicationServices/ApplicationServices.h>
 #include <stdlib.h>
 #include <math.h>
+
+extern pid_t targetKeyboardPID(void);
 
 typedef struct {
     AXUIElementRef app, window, element;
@@ -35,15 +37,21 @@ static int targetAttribute(AXUIElementRef obj, CFStringRef name, CFTypeID type, 
 // Match its geometry to exactly one on-screen CG window in the same process;
 // ambiguity refuses input. No private AX window-number API or title heuristics.
 typedef struct { int stage; AXError code; int matches; } targetReadError;
-static targetFocus *targetRead(targetReadError *problem) {
+static targetFocus *targetReadFromPID(targetReadError *problem, pid_t directPID) {
     problem->stage=1; problem->code=kAXErrorSuccess; problem->matches=0;
     targetFocus *f = calloc(1, sizeof(targetFocus));
     if (!f) return NULL;
-    AXUIElementRef sys = AXUIElementCreateSystemWide();
-    if (!sys) { targetFree(f); return NULL; }
     problem->stage=2;
-    int ok = targetAttribute(sys, kAXFocusedApplicationAttribute, AXUIElementGetTypeID(), (CFTypeRef *)&f->app, &problem->code);
-    CFRelease(sys);
+    int ok=0;
+    if (directPID > 0) {
+        f->app=AXUIElementCreateApplication(directPID);
+        ok=f->app!=NULL;
+    } else {
+        AXUIElementRef sys=AXUIElementCreateSystemWide();
+        if (!sys) { problem->stage=1; targetFree(f); return NULL; }
+        ok=targetAttribute(sys,kAXFocusedApplicationAttribute,AXUIElementGetTypeID(),(CFTypeRef *)&f->app,&problem->code);
+        CFRelease(sys);
+    }
     if (!ok) { targetFree(f); return NULL; }
     problem->stage=3;
     problem->code=AXUIElementGetPid(f->app,&f->pid);
@@ -82,6 +90,23 @@ static targetFocus *targetRead(targetReadError *problem) {
     problem->stage=10; problem->matches=matches;
     if (matches != 1 || !f->wid) { targetFree(f); return NULL; }
     problem->stage=0;
+    return f;
+}
+
+static targetFocus *targetRead(targetReadError *problem) { return targetReadFromPID(problem,0); }
+
+// This alternate read is diagnostic only. It never creates an input receipt.
+// NSWorkspace defines frontmostApplication as the receiver of key events.
+// Compare that PID after the exact AX window/element/CG-geometry read. AppKit
+// can cache application properties between main-run-loop turns, so this is
+// explicitly not proof of fresh focus and cannot authorize input.
+static targetFocus *targetReadDiagnostic(targetReadError *problem, pid_t *pid) {
+    *pid=targetKeyboardPID();
+    if (*pid<=0) { problem->stage=11; problem->code=kAXErrorNoValue; problem->matches=0; return NULL; }
+    targetFocus *f=targetReadFromPID(problem,*pid);
+    if (f && targetKeyboardPID()!=*pid) {
+        targetFree(f); problem->stage=12; problem->code=kAXErrorCannotComplete; return NULL;
+    }
     return f;
 }
 
@@ -139,6 +164,7 @@ import "C"
 
 import (
 	"fmt"
+	"time"
 	"unicode/utf16"
 )
 
@@ -167,10 +193,29 @@ func (darwinInputBackend) focus() (inputFocus, error) {
 	var problem C.targetReadError
 	p := C.targetRead(&problem)
 	if p == nil {
-		stages := map[int]string{1: "system AX allocation", 2: "focused application", 3: "focused application PID", 4: "focused window", 5: "focused UI element", 6: "window position", 7: "window size", 8: "window geometry", 9: "on-screen CG window list", 10: "unique AX-to-CG window match"}
-		return nil, fmt.Errorf("Cannot establish exact target at %s (AX error %d, matching windows %d); input refused. Do not retry input or activate a different app.", stages[int(problem.stage)], int(problem.code), int(problem.matches))
+		return nil, targetReadFailure(problem)
 	}
 	return &darwinInputFocus{ptr: p}, nil
+}
+
+func targetReadFailure(problem C.targetReadError) error {
+	stages := map[int]string{1: "system AX allocation", 2: "focused application", 3: "focused application PID", 4: "focused window", 5: "focused UI element", 6: "window position", 7: "window size", 8: "window geometry", 9: "on-screen CG window list", 10: "unique AX-to-CG window match", 11: "NSWorkspace keyboard recipient", 12: "NSWorkspace keyboard recipient changed"}
+	return fmt.Errorf("Cannot establish exact target at %s (AX error %d, matching windows %d); input refused. Do not retry input or activate a different app.", stages[int(problem.stage)], int(problem.code), int(problem.matches))
+}
+
+func (darwinInputBackend) diagnosticProbes() []InputTargetProbe {
+	var problem C.targetReadError
+	var pid C.pid_t
+	started := time.Now()
+	p := C.targetReadDiagnostic(&problem, &pid)
+	probe := InputTargetProbe{Method: "NSWorkspace snapshot plus direct AX application (diagnostic only; snapshot may be cached)", PID: int(pid), ElapsedMilliseconds: time.Since(started).Milliseconds()}
+	if p == nil {
+		probe.Error = targetReadFailure(problem).Error()
+	} else {
+		probe.Available, probe.WindowID = true, uint64(p.wid)
+		C.targetFree(p)
+	}
+	return []InputTargetProbe{probe}
 }
 func (darwinInputBackend) emit(target inputFocus, e targetInputEvent) error {
 	f, ok := target.(*darwinInputFocus)

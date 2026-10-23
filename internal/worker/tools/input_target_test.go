@@ -121,6 +121,26 @@ func TestInputTargetDiagnosticPreservesGuardAndNeverPosts(t *testing.T) {
 		t.Fatalf("missing backend must be explicit: %+v", status)
 	}
 }
+
+type fakeDiagnosticInputBackend struct{ *fakeInputBackend }
+
+func (*fakeDiagnosticInputBackend) diagnosticProbes() []InputTargetProbe {
+	return []InputTargetProbe{{Method: "alternate observation", Available: true, PID: 100, WindowID: 42}}
+}
+
+func TestInputTargetAlternateDiagnosticCannotEnableInput(t *testing.T) {
+	g, b, ctx := newInputFixture(t)
+	b.err = errors.New("primary focus unavailable")
+	g.backend = &fakeDiagnosticInputBackend{b}
+	status := g.targetStatus()
+	if status.Available || status.Error != b.err.Error() || len(status.DiagnosticProbes) != 1 || !status.DiagnosticProbes[0].Available {
+		t.Fatalf("alternate observation changed primary status: %+v", status)
+	}
+	_, fail := g.screenshot(ctx, map[string]any{"windowId": 42}, fakeInputCapture)
+	if fail == nil || fail.ErrorCode != "input_focus_unavailable" || g.frame != nil || g.anchor != nil || len(b.events) != 0 {
+		t.Fatal("alternate diagnostic enabled receipt/input")
+	}
+}
 func TestInputReceiptOwnershipExpiryAndConsumption(t *testing.T) {
 	for _, mode := range []string{"wrong-token", "other-run", "other-home", "expired", "cancelled", "replayed", "bad-args"} {
 		t.Run(mode, func(t *testing.T) {
