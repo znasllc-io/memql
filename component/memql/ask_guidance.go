@@ -12,16 +12,16 @@ import (
 
 // Guidance is a durable human message, not a new goal, permission or rerun.
 // Bound each source instead of silently truncating it: a run's routed
-// guidance, and apart from it the run's late optional answers, each hold at
+// guidance, late optional answers and approval corrections each hold at
 // most maxWorkGuidanceMessages messages and maxWorkGuidanceRunes runes, so
 // neither can make the other's read fail.
 const maxWorkGuidanceMessages = 16
 const maxWorkGuidanceRunes = 16000
 
 // MaxWorkGuidanceReceipts is the most messages one ReadWorkGuidance returns,
-// its routed guidance and its late optional answers together: what an agent
+// its routed guidance, late optional answers and approval corrections: what an agent
 // may acknowledge at once, and the guidance ids it keeps while recovering.
-const MaxWorkGuidanceReceipts = 2 * maxWorkGuidanceMessages
+const MaxWorkGuidanceReceipts = 3 * maxWorkGuidanceMessages
 
 type WorkGuidance struct {
 	ID     string
@@ -90,7 +90,7 @@ func (e *MemQLEngine) workGuidanceScope(ctx context.Context) (map[string]any, st
 // or later child loop, a retry, a repair, a re-plan or a re-run must recover the
 // human's direction. The loop deduplicates within its own context; receipt
 // state is never a delivery cursor.
-func (e *MemQLEngine) readAskWorkGuidance(ctx context.Context) ([]WorkGuidance, map[string]any, error) {
+func (e *MemQLEngine) readAskWorkGuidance(ctx context.Context, dates map[string]time.Time) ([]WorkGuidance, map[string]any, error) {
 	run, conversation, err := e.workGuidanceScope(ctx)
 	if err != nil || conversation == "" {
 		return nil, run, err
@@ -115,6 +115,7 @@ func (e *MemQLEngine) readAskWorkGuidance(ctx context.Context) ([]WorkGuidance, 
 			return nil, run, fmt.Errorf("saved guidance exceeds its bounded context")
 		}
 		out = append(out, WorkGuidance{ID: transcript.Turns[n].ID, Prompt: target.Text})
+		dates[transcript.Turns[n].ID] = transcript.Turns[n].StartedAt
 	}
 	return out, run, nil
 }

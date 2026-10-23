@@ -21,6 +21,14 @@ saved context and new human answer. Completed tool results stay in order and
 the original checkpoint remains unchanged. Retaining the instructions does not
 grant new access or prove that the model followed them.
 
+A correction sent instead of granting an approval remains guidance for the
+unfinished work after another approval, retry or worker restart. The executing
+worker recovers that correction from the owner's decision journal and orders it
+with other human guidance by time. Permission receipts do not replace earlier
+instructions, and restoring instructions does not grant access or repeat a
+completed operation. The active guidance sources have explicit context bounds;
+overflow is reported rather than silently losing a correction.
+
 ## From changed inputs to a verified result
 
 Changing source or a document's inputs does not by itself update the result a

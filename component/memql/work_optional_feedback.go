@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 	"unicode/utf8"
 
@@ -17,7 +18,8 @@ import (
 // Late optional answers have a bound of their own beside the routed guidance's
 // (maxWorkGuidanceMessages), so neither can make the other's read fail.
 func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, error) {
-	out, root, err := e.readAskWorkGuidance(ctx)
+	dates := map[string]time.Time{}
+	out, root, err := e.readAskWorkGuidance(ctx, dates)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +82,19 @@ func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, err
 			if answers > maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
 				return nil, fmt.Errorf("saved guidance exceeds its bounded context")
 			}
-			out = append(out, WorkGuidance{ID: "optional-answer-" + BareShortId(stringArg(row, "id")), Prompt: prompt})
+			guidanceID := "optional-answer-" + BareShortId(stringArg(row, "id"))
+			out = append(out, WorkGuidance{ID: guidanceID, Prompt: prompt})
+			dates[guidanceID], _ = askTimestamp(row["decidedAt"])
 		}
 	}
+	corrections, err := e.readApprovalWorkGuidance(ctx, targets, dates)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, corrections...)
+	// Sources are queried independently. Restore human chronology before
+	// presentation so an older approval correction cannot override later Ask
+	// guidance merely because its journal reader ran last.
+	sort.SliceStable(out, func(i, j int) bool { return dates[out[i].ID].Before(dates[out[j].ID]) })
 	return out, nil
 }

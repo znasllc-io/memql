@@ -19,6 +19,34 @@ paths and one task's acceptance criteria must not become routing rules.
 
 ## Delegation and return
 
+Human corrections sent through **Discuss in Ask → Send guidance** are durable
+instructions for unfinished work. Previously they survived only in the immediate
+decision checkpoint. A later permission receipt could make the older correction
+archivable, and a fresh Apps worker could resume the superseded task. The native
+guidance reader now retrieves answered corrections from the owner's approval
+journal, including the current run and its root, on every normal guidance read.
+An acknowledgment is not a delivery cursor: a later worker reads them again and
+deduplicates in its own active context. Retry and replan generation changes do
+not invalidate human direction about the remaining goal.
+
+`workApprovalGuidanceForOwnerRun` selects only the owner's answered feedback,
+with the same owner as decision maker. The reader validates the typed guidance
+contract, decision time and run binding; approved commands and rejected requests
+are not instructions. These corrections have their own 16-message/16,000-rune
+context bound. The query reads an extra row so overflow refuses explicitly
+instead of silently dropping legitimate history. This is a context bound, not
+a goal lifetime limit. Routed messages, late optional answers and corrections
+are presented in human timestamp order so source-query order cannot reverse a
+later change of direction. Restoring feedback neither grants permission nor
+replays an operation. Existing ownership, cancellation and execution checks
+still gate the read and every effect.
+
+`work_approval_guidance_db_test.go` reproduces the missing correction using real
+storage and verifies later approvals, retries, another replica, delegated child
+work, chronology, ownership and overflow. The regression uses document editing;
+no repository, language or feature-specific branch is involved. These checks
+establish delivery, not model adherence or a completed user task.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an

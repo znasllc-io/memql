@@ -495,8 +495,8 @@ func recoveryRecordedAnswer(stamp string, extra map[string]any) common.ChatMessa
 	return common.ChatMessage{Role: "user", Content: "[Recorded answer for this run]\n" + string(raw)}
 }
 
-// One read of work guidance can hand a turn sixteen routed messages and, on a
-// bound of their own, sixteen late optional answers. Recovery keeps every id a
+// One read can hand a turn sixteen routed messages, sixteen late optional
+// answers and sixteen approval corrections, each on its own bound. Recovery keeps every id a
 // whole read can hold in its checkpoint, which reads back on any replica; only
 // more than one whole read is refused.
 func TestWorkProgressRecoveryHoldsAWholeGuidanceRead(t *testing.T) {
@@ -518,6 +518,14 @@ func TestWorkProgressRecoveryHoldsAWholeGuidanceRead(t *testing.T) {
 	state, _, err = recoveryState(messages)
 	require.NoError(t, err)
 	require.Len(t, state.GuidanceIDs, 32)
+	for n := range 16 {
+		seen[fmt.Sprintf("approval-guidance-%d", n)] = true
+	}
+	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
+	require.NoError(t, err, "approval corrections keep their own bounded allocation")
+	state, _, err = recoveryState(messages)
+	require.NoError(t, err)
+	require.Len(t, state.GuidanceIDs, 48)
 	seen["one-more"] = true
 	_, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
 	require.ErrorContains(t, err, "recovery guidance exceeds its bounded context")
