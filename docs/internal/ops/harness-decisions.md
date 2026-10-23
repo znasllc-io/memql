@@ -467,6 +467,21 @@ from spending an entire turn before execution. Coverage includes
 `TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas`, including omission
 readback on another engine. The Training interface is unchanged.
 
+Conversation recall reserves time for its exact-source fallback. Semantic
+search and lazy historical backfill share at most ten seconds, or half the
+caller's remaining deadline when shorter. An initial provider failure skips
+backfill rather than retrying the same unavailable embedding path. This bounds
+optional work without changing the embedding worker's memory guards.
+
+After that phase, source validation and exact phrase search use the original
+authorized context. Caller cancellation still fails the request; it is never
+detached. The response explicitly reports semantic unavailability, and an empty
+exact phrase result does not imply that no memory exists. It may require another
+phrase or page. `TestRecallMemoryKeepsExactFallbackAfterEmbeddingTimeout` blocks
+the semantic provider until its deadline and verifies that another engine still
+reads the owner's original conversation from the database, then checks caller
+cancellation. It does not prove semantic retrieval or indexing is available.
+
 ## Progress windows and result acceptance
 
 Time and model-call estimates bound a work window, not a goal's lifetime.

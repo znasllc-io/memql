@@ -21,6 +21,53 @@ func (m memoryIndexTestIntegration) Capabilities() []IntegrationCapability {
 	return []IntegrationCapability{{Name: "store", Handler: m.handler}}
 }
 
+func TestRecallMemoryKeepsExactFallbackAfterEmbeddingTimeout(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	actor := askTestActor()
+	conversation := askTestConversation(t, a, actor)
+	phrase := uniqueSuffix("fallback-evidence")
+	turn := AskTurn{ID: "source", Prompt: "Remember " + phrase, Answer: "Understood.", State: "done", StartedAt: time.Now().UTC()}
+	require.NoError(t, a.askSave(actor, conversation, "Source", askTranscript{Turns: []AskTurn{turn}}))
+	var searches atomic.Int32
+	b.builtinExecutorHandlers["integration.similarity.similarTo"] = func(c context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+		searches.Add(1)
+		<-c.Done() // A provider waiting on capacity must not consume the fallback's deadline.
+		return nil, c.Err()
+	}
+	ctx, cancel := context.WithTimeout(actor, 3*time.Second)
+	defer cancel()
+	nodes, err := b.workRecallMemoryBuiltin(ctx, map[string]any{"search": phrase}, 0)
+	require.NoError(t, err)
+	require.NoError(t, ctx.Err(), "the authorized original-source read keeps the caller's remaining budget")
+	require.Equal(t, int32(1), searches.Load(), "an unavailable provider is not retried through lazy backfill")
+	require.Len(t, nodes, 1)
+	var result struct {
+		SearchMode    string `json:"searchMode"`
+		ExactFallback struct {
+			Matches []struct {
+				ConversationID string `json:"conversationId"`
+				Role           string `json:"role"`
+				Text           string `json:"text"`
+			} `json:"matches"`
+		} `json:"exactFallback"`
+	}
+	require.NoError(t, json.Unmarshal(nodes[0].Payload, &result))
+	require.Equal(t, "semantic unavailable", result.SearchMode)
+	require.Len(t, result.ExactFallback.Matches, 1)
+	require.Equal(t, BareShortId(conversation), result.ExactFallback.Matches[0].ConversationID)
+	require.Equal(t, "user", result.ExactFallback.Matches[0].Role)
+	require.Equal(t, turn.Prompt, result.ExactFallback.Matches[0].Text)
+
+	// Reserving time is not detaching from cancellation or inventing an answer.
+	cancel()
+	_, err = b.workRecallMemoryBuiltin(ctx, map[string]any{"search": phrase}, 0)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestConversationSemanticEvidenceAcrossReplicasAndSourceChanges(t *testing.T) {
 	a, _, _ := readMergeTestEngine(t)
 	b, _, _ := readMergeTestEngine(t)
