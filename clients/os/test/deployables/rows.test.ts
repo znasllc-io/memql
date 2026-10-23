@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BAKED_PLATFORM_REF,
   SITE_STATUSES,
+  builtInSiteName,
   bundleForm,
   bundleFormLabel,
   domainOf,
@@ -122,6 +123,8 @@ describe("the bundle reference's three usage forms", () => {
 
   it("does not mistake a path that merely starts like the platform site's", () => {
     expect(bundleForm("file:///app/osier")).toBe("other");
+    expect(bundleForm("file:///app/vscode-site-backup")).toBe("other");
+    expect(builtInSiteName("file:///app/vscode-site-backup")).toBe("");
   });
 
   // THE DRIFT THIS FILE EXISTS TO CATCH (epic memql#4984). The match is
@@ -140,11 +143,14 @@ describe("the bundle reference's three usage forms", () => {
   it("classifies the reference the platform-site seed actually writes", () => {
     expect(bundleForm("file:///app/os")).toBe("baked-platform");
     expect(BAKED_PLATFORM_REF).toBe("file:///app/os");
+    expect(bundleForm("file:///app/vscode-site")).toBe("baked-platform");
+    expect(builtInSiteName("file:///app/os")).toBe("MemQL OS");
+    expect(builtInSiteName("file:///app/vscode-site")).toBe("VS Code");
   });
 
   it("labels each form for a reader", () => {
     expect(bundleFormLabel(bundleForm(PLATFORM_SITE["bundleRef"] as string))).toBe(
-      "baked platform site",
+      "Built-in site",
     );
     expect(bundleFormLabel(bundleForm(DOCS["bundleRef"] as string))).toBe("baked site");
     expect(bundleFormLabel(bundleForm(SHOP["bundleRef"] as string))).toBe("uploaded bundle");

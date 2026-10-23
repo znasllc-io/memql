@@ -114,6 +114,23 @@ describe("what the map draws", () => {
     expect(bundle).toBeTruthy();
   });
 
+  it.each([
+    ["MemQL OS", "file:///app/os", "os"],
+    ["VS Code", "file:///app/vscode-site", "vscode"],
+  ])("names the built-in %s site without exposing its path and preserves keyboard navigation", async (name, reference, host) => {
+    const navigate = vi.fn();
+    mount(fakeConnection({ sites: [siteRow({
+      id: `site-${host}`, hostname: `${host}.memql.example.com`,
+      bundleRef: reference, systemOwned: true,
+    })] }), { navigate });
+    const bundle = await screen.findByRole("button", { name: `Bundle Built-in site: ${name}` });
+    expect(bundle.querySelector(".os-deploy-node-sub")?.textContent).toBe(name);
+    expect(bundle.querySelector("title")?.textContent).toBe(name);
+    expect(canvas().textContent).not.toContain("file://");
+    fireEvent.keyDown(bundle, { key: "Enter" });
+    expect(navigate).toHaveBeenCalledWith("deployables", { fromContent: true });
+  });
+
   it("draws nothing and says so when there is nothing to draw", async () => {
     const connection = fakeConnection({ sites: [] });
     mount(connection);

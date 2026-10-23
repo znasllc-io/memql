@@ -314,15 +314,10 @@ export function siteFingerprint(site: SiteRow): string {
  * deploy and a rollback WORK -- so the form is the useful reading and the URI
  * is the detail underneath it.
  *
- *   `file:///app/os`            the platform's own site -- MemQL OS -- baked
- *                               into the image: deploy and rollback are an
- *                               image roll. (It was `file:///app/portal`
- *                               until epic memql#4984 retired the portal. The
- *                               match is EXACT, so the old constant stopped
- *                               matching the seeded row the moment the seed
- *                               changed, and the platform's own site rendered
- *                               as "unrecognised reference" -- correct code
- *                               against a value that had moved.)
+ *   `file:///app/os` and
+ *   `file:///app/vscode-site`   the built-in platform sites: MemQL OS and the
+ *                               VS Code extension page. Both ship in the image
+ *                               and change with an installation update.
  *   `file:///app/sites/<name>`  a site baked into the edge image at build
  *                               time: same image roll.
  *   `blob://sites/<id>/<v>/`    an uploaded bundle in object storage: deploy
@@ -337,10 +332,22 @@ export type BundleForm = "none" | "baked-platform" | "baked-site" | "uploaded" |
 
 export const BAKED_PLATFORM_REF = "file:///app/os";
 
+/** Exact built-in references from the platform seeds, never a file-path prefix. */
+export function builtInSiteName(bundleRef: string): string {
+  switch (bundleRef.trim()) {
+    case BAKED_PLATFORM_REF:
+      return "MemQL OS";
+    case "file:///app/vscode-site":
+      return "VS Code";
+    default:
+      return "";
+  }
+}
+
 export function bundleForm(bundleRef: string): BundleForm {
   const ref = bundleRef.trim();
   if (ref === "") return "none";
-  if (ref === BAKED_PLATFORM_REF) return "baked-platform";
+  if (builtInSiteName(ref)) return "baked-platform";
   if (ref.startsWith("file:///app/sites/")) return "baked-site";
   if (ref.startsWith("blob://sites/")) return "uploaded";
   return "other";
@@ -351,7 +358,7 @@ export function bundleFormLabel(form: BundleForm): string {
     case "none":
       return "no bundle";
     case "baked-platform":
-      return "baked platform site";
+      return "Built-in site";
     case "baked-site":
       return "baked site";
     case "uploaded":
@@ -367,7 +374,7 @@ export function bundleFormNote(form: BundleForm): string {
     case "none":
       return "This deployable names no bundle, so there is nothing to serve.";
     case "baked-platform":
-      return "The platform's own console, baked into the edge image. Deploy and rollback are an image roll, not a row write.";
+      return "Included with MemQL. This site changes when the installation is updated or restored to a previous release.";
     case "baked-site":
       return "Baked into the edge image at build time. Deploy and rollback are an image roll, not a row write.";
     case "uploaded":
