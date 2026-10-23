@@ -17,6 +17,7 @@ type WorkflowNames struct {
 	Revision    string `json:"revision"`
 	Artifacts   string `json:"artifacts"`
 	Completion  string `json:"completion"`
+	Rollback    string `json:"rollback"`
 }
 
 func (n WorkflowNames) defaults() WorkflowNames {
@@ -32,11 +33,14 @@ func (n WorkflowNames) defaults() WorkflowNames {
 	if n.Completion == "" {
 		n.Completion = "installationCompletionWorkflow"
 	}
+	if n.Rollback == "" {
+		n.Rollback = "installationRollbackWorkflow"
+	}
 	return n
 }
 func (n WorkflowNames) validate() error {
 	valid := regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,127}$`)
-	for _, v := range []string{n.Preparation, n.Revision, n.Artifacts, n.Completion} {
+	for _, v := range []string{n.Preparation, n.Revision, n.Artifacts, n.Completion, n.Rollback} {
 		if !valid.MatchString(v) {
 			return errors.New("installation workflow name is invalid")
 		}
@@ -63,25 +67,38 @@ func beforeRevision(spec json.RawMessage) string {
 }
 
 // SelectionResult is public review data; it cannot authorize an effect.
+type SelectionApplication struct {
+	Key             string         `json:"key"`
+	Name            string         `json:"name"`
+	Namespace       string         `json:"namespace"`
+	CurrentRevision string         `json:"currentRevision,omitempty"`
+	Started         bool           `json:"started"`
+	Observation     map[string]any `json:"observation,omitempty"`
+}
+
 type SelectionResult struct {
-	InstallationID          string         `json:"installationId"`
-	PreparationID           string         `json:"preparationId"`
-	PlanID                  string         `json:"planId"`
-	State                   string         `json:"state"`
-	CandidateID             string         `json:"candidateId"`
-	CatalogDigest           string         `json:"catalogDigest"`
-	OverlayRevision         string         `json:"overlayRevision"`
-	ExpectedCurrentRevision string         `json:"expectedCurrentRevision"`
-	ArtifactExpiresAt       string         `json:"artifactExpiresAt"`
-	Observation             map[string]any `json:"observation,omitempty"`
-	CanManage               bool           `json:"canManage"`
+	Direction               string                 `json:"direction,omitempty"`
+	Applications            []SelectionApplication `json:"applications,omitempty"`
+	InstallationID          string                 `json:"installationId"`
+	PreparationID           string                 `json:"preparationId"`
+	PlanID                  string                 `json:"planId"`
+	State                   string                 `json:"state"`
+	CandidateID             string                 `json:"candidateId"`
+	CatalogDigest           string                 `json:"catalogDigest"`
+	OverlayRevision         string                 `json:"overlayRevision"`
+	ExpectedCurrentRevision string                 `json:"expectedCurrentRevision"`
+	ArtifactExpiresAt       string                 `json:"artifactExpiresAt"`
+	Observation             map[string]any         `json:"observation,omitempty"`
+	CanManage               bool                   `json:"canManage"`
+	CanRollback             bool                   `json:"canRollback"`
 }
 type SelectionStatus struct {
-	InstallationID  string                `json:"installationId"`
-	CurrentRevision string                `json:"currentRevision"`
-	Active          *SelectionResult      `json:"active,omitempty"`
-	Latest          *SelectionResult      `json:"latest,omitempty"`
-	Preparation     *SelectionPreparation `json:"preparation,omitempty"`
+	Applications    []SelectionApplication `json:"applications,omitempty"`
+	InstallationID  string                 `json:"installationId"`
+	CurrentRevision string                 `json:"currentRevision"`
+	Active          *SelectionResult       `json:"active,omitempty"`
+	Latest          *SelectionResult       `json:"latest,omitempty"`
+	Preparation     *SelectionPreparation  `json:"preparation,omitempty"`
 }
 
 // SelectionPreparation exposes the durable identity of unfinished work, never
@@ -101,6 +118,7 @@ func selectionResult(ctx context.Context, r revisionRecord) SelectionResult {
 	out := selectedResult(r)
 	actor, err := installationActor(ctx)
 	out.CanManage = err == nil && actor == r.Plan.RequestedBy
+	out.CanRollback = out.CanManage && r.RollbackEligible
 	return out
 }
 
@@ -142,7 +160,29 @@ func selectedResult(r revisionRecord) SelectionResult {
 		out.PreparationID = b.ID
 		out.ArtifactExpiresAt = b.ArtifactExpiresAt
 	}
-	if f := r.Observation; f != nil {
+	if r.State == "reverting" {
+		out.State = "applying"
+	}
+	if r.Rollback != nil || r.State == "reverting" {
+		out.Direction = "rollback"
+	}
+	for _, app := range r.Plan.Applications {
+		member := r.Applications[app.Key]
+		if r.Rollback != nil {
+			member = r.Rollback.Applications[app.Key]
+		}
+		item := SelectionApplication{Key: app.Key, Namespace: app.Intent.Target.Namespace, Name: app.Intent.Target.Name, Started: member.Started}
+		if member.Facts != nil {
+			f := member.Facts
+			item.Observation = map[string]any{"intentObserved": f.IntentObserved, "operationPending": f.OperationPending, "operationPhase": f.OperationPhase, "operationSucceeded": f.OperationSucceeded, "revisionObserved": f.RevisionObserved, "healthy": f.Healthy, "synced": f.Synced}
+		}
+		out.Applications = append(out.Applications, item)
+	}
+	facts := r.Observation
+	if r.Rollback != nil {
+		facts = r.Rollback.Observation
+	}
+	if f := facts; f != nil {
 		out.Observation = map[string]any{"intentObserved": f.IntentObserved, "operationPending": f.OperationPending, "operationPhase": f.OperationPhase, "operationSucceeded": f.OperationSucceeded, "revisionObserved": f.RevisionObserved, "healthy": f.Healthy, "synced": f.Synced}
 	}
 	return out
@@ -234,18 +274,36 @@ func (p *Preparer) SelectionStatus(ctx context.Context) (SelectionStatus, error)
 		return SelectionStatus{}, err
 	}
 	var cfg receiverConfiguration
-	if receiverJSON([]byte(resourceText(resourceMap(cm, "data"), "installation.json")), &cfg) != nil || cfg.FormatVersion != 1 || !identifier.MatchString(cfg.InstallationID) {
+	if receiverJSON([]byte(resourceText(resourceMap(cm, "data"), "installation.json")), &cfg) != nil || (cfg.FormatVersion != 1 && cfg.FormatVersion != 2) || !identifier.MatchString(cfg.InstallationID) {
 		return SelectionStatus{}, errors.New("installation receiving configuration is invalid")
 	}
-	app, err := reads.object(ctx, "argoproj.io/v1alpha1", "Application", "applications", cfg.Application.Namespace, cfg.Application.Name)
+	apps, err := cfg.applicationNames()
 	if err != nil {
 		return SelectionStatus{}, err
 	}
-	current := resourceText(resourceMap(resourceMap(app, "spec"), "source"), "targetRevision")
-	if !commitDigest.MatchString(current) {
-		return SelectionStatus{}, errors.New("installation requires an immutable current revision")
+	out := SelectionStatus{InstallationID: cfg.InstallationID}
+	common := ""
+	for index, application := range apps {
+		app, err := reads.object(ctx, "argoproj.io/v1alpha1", "Application", "applications", application.Namespace, application.Name)
+		if err != nil {
+			return out, err
+		}
+		current := resourceText(resourceMap(resourceMap(app, "spec"), "source"), "targetRevision")
+		if !commitDigest.MatchString(current) {
+			return out, errors.New("installation requires immutable current application revisions")
+		}
+		if index == 0 {
+			common = current
+		} else if current != common {
+			common = ""
+		}
+		out.Applications = append(out.Applications, SelectionApplication{Key: application.Key, Namespace: application.Namespace, Name: application.Name, CurrentRevision: current})
 	}
-	out := SelectionStatus{InstallationID: cfg.InstallationID, CurrentRevision: current}
+	out.CurrentRevision = common
+	if _, err := reads.finish(ctx); err != nil {
+		return out, err
+	}
+
 	var key, preparation sql.NullString
 	err = db.QueryRowContext(ctx, `SELECT active_plan_id,active_preparation_id FROM installation_revision_heads WHERE installation_id=$1`, out.InstallationID).Scan(&key, &preparation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -278,7 +336,7 @@ func (p *Preparer) SelectionStatus(ctx context.Context) (SelectionStatus, error)
 		out.Active = &v
 	}
 	var latest string
-	err = db.QueryRowContext(ctx, `SELECT plan_id FROM installation_revision_attempts WHERE installation_id=$1 AND state='complete' ORDER BY completed_at DESC,plan_id LIMIT 1`, out.InstallationID).Scan(&latest)
+	err = db.QueryRowContext(ctx, `SELECT plan_id FROM installation_revision_attempts WHERE installation_id=$1 AND state IN ('complete','rolled_back') ORDER BY COALESCE(rollback_completed_at,completed_at) DESC,plan_id LIMIT 1`, out.InstallationID).Scan(&latest)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}

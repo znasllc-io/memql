@@ -67,6 +67,10 @@ func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	require.NoError(t, err)
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
+	body, err = os.ReadFile("../../component/database/memory-nodes/migrations/20261024010000_installation_groups.up.sql")
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, string(body))
+	require.NoError(t, err)
 	return first, second
 }
 
@@ -178,24 +182,15 @@ func TestJournalConcurrentReplicasReserveAndStartOneImmutableIntent(t *testing.T
 func TestJournalExpiredArtifactReceiptNeedsFreshCallLocalRequalification(t *testing.T) {
 	db, _ := journalDB(t)
 	journal := &revisionJournal{db: func() *sql.DB { return db }}
-	plan := testPlan()
-	internal := func(label string) string { return artifactHash("expired-requalification-test", label) }
-	plan.Preparation = &preparationBinding{
-		ID: internal("preparation"), ConfigurationDigest: internal("configuration"), ConfigurationInvariantDigest: internal("invariant"),
-		CandidateSourceDigest: internal("candidate-source"), RollbackSourceDigest: internal("rollback-source"),
-		CandidateReceiptDigest: internal("candidate-receipt"), RollbackReceiptDigest: internal("rollback-receipt"),
-		StorageDigest: internal("storage"), SensitiveDigest: internal("sensitive"), ArtifactDigest: internal("artifact"), ArtifactWorkflowDigest: internal("artifact-workflow"),
-		ArtifactExpiresAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano), RollbackPublicationDigest: "sha256:" + strings.Repeat("f", 64),
-	}
-	body, key, err := plan.canonical()
+	preparation := preparationConnection(db)
+	ctx, prepared, plan, evidence := promotionFixture(t, preparation)
+	// Let a genuinely admitted receipt expire, retaining its real preparation,
+	// Application claim and immutable promoted-plan identity throughout.
+	evidence.artifacts.expires = time.Now().Add(time.Second)
+	promoted, err := preparation.promote(ctx, plan.InstallationID, prepared.ID, prepared.Scope.WorkflowDigest, prepared.Scope.ConfigurationDigest, plan, evidence)
 	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO installation_revision_heads(installation_id) VALUES($1)`, plan.InstallationID)
-	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO installation_revision_attempts(plan_id,installation_id,requested_by,slot_epoch,plan,state) VALUES($1,$2,$3,1,$4::jsonb,'prepared')`, key, plan.InstallationID, plan.RequestedBy, string(body))
-	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE installation_revision_heads SET active_plan_id=$2,slot_epoch=1 WHERE installation_id=$1`, plan.InstallationID, key)
-	require.NoError(t, err)
-	ctx := operator(auth.RoleDeveloper, plan.RequestedBy)
+	plan, key := promoted.Plan, promoted.ID
+	<-time.After(time.Until(evidence.artifacts.expires) + 10*time.Millisecond)
 	_, err = journal.begin(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest)
 	require.ErrorContains(t, err, "expired before start")
 	_, err = journal.beginAdmitted(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest, revisionWriteAdmission{planID: key, workflow: plan.ExecutionWorkflowDigest, freshUntil: time.Now().Add(-time.Second)})
@@ -388,6 +383,10 @@ func TestInstallationPlanRequiresImmutableRollbackAndExactEvidenceBindings(t *te
 
 func TestInstallationJournalMigrationCanRollBackOnlyWhileEmpty(t *testing.T) {
 	db, _ := journalDB(t)
+	groupsDown, err := os.ReadFile("../../component/database/memory-nodes/migrations/20261024010000_installation_groups.down.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(groupsDown))
+	require.NoError(t, err)
 	rollbackDown, err := os.ReadFile(rollbackMigrationPath + ".down.sql")
 	require.NoError(t, err)
 	_, err = db.Exec(string(rollbackDown))

@@ -15,7 +15,7 @@ var kustomizationNames = []string{"kustomization.yaml", "kustomization.yml", "Ku
 
 // Every admitted field either has no external file reads or is handled below.
 // New Kustomize features fail closed until their complete input codec is added.
-var closedKustomizationFields = strings.Fields(`apiVersion kind metadata namePrefix nameSuffix namespace commonLabels labels commonAnnotations resources bases components patches patchesStrategicMerge patchesJson6902 images replicas configMapGenerator secretGenerator generatorOptions configurations transformers vars buildMetadata sortOptions`)
+var closedKustomizationFields = strings.Fields(`apiVersion kind metadata namePrefix nameSuffix namespace commonLabels labels commonAnnotations resources bases components patches patchesStrategicMerge patchesJson6902 images replicas configMapGenerator secretGenerator generatorOptions configurations transformers vars buildMetadata sortOptions replacements openapi`)
 
 func (v *sourceVerifier) kustomization(dir string, component bool) error {
 	if v.visiting[dir] {
@@ -73,6 +73,20 @@ func (v *sourceVerifier) kustomization(dir string, component bool) error {
 			return err
 		}
 		for _, ref := range refs {
+			if strings.HasPrefix(ref, "https://") && v.fragment != nil {
+				dependency, err := parseSourceDependency(ref, key == "components", v.fragment.AllowedDependencies)
+				if err != nil {
+					return err
+				}
+				if v.fragment.Dependency {
+					return errors.New("nested remote Kustomize dependencies are not qualified")
+				}
+				if len(v.edges) >= MaxSourceDependencies {
+					return errors.New("Kustomize source exceeds its remote dependency bound")
+				}
+				v.edges = append(v.edges, SourceEdge{FromPath: setting, Field: key, Reference: ref, Target: dependency})
+				continue
+			}
 			p, err := sourcePath(dir, ref)
 			if err != nil {
 				return err
@@ -156,6 +170,18 @@ func (v *sourceVerifier) kustomization(dir string, component bool) error {
 			}
 		}
 	}
+	if err := v.replacements(dir, fields["replacements"]); err != nil {
+		return err
+	}
+	if fields["openapi"] != nil {
+		f, err := sourceFields(fields["openapi"], "path")
+		if err != nil {
+			return err
+		}
+		if _, err := v.relativeFile(dir, sourceString(f["path"])); err != nil {
+			return err
+		}
+	}
 	transformers, err := sourceStrings(fields["transformers"])
 	if err != nil {
 		return err
@@ -169,14 +195,8 @@ func (v *sourceVerifier) kustomization(dir string, component bool) error {
 		if err != nil {
 			return err
 		}
-		// This installed topology uses only the built-in namespace transformer.
-		// Other plugin kinds need their own input/side-effect qualification.
-		f, err := sourceFields(doc, "apiVersion", "kind", "metadata", "fieldSpecs", "unsetOnly", "setRoleBindingSubjects", "namespace")
-		if err != nil {
+		if err := v.transformer(dir, doc); err != nil {
 			return err
-		}
-		if sourceString(f["apiVersion"]) != "builtin" || sourceString(f["kind"]) != "NamespaceTransformer" {
-			return errors.New("Kustomize transformer is not a qualified built-in namespace transformer")
 		}
 	}
 	v.visited[visitKey] = true

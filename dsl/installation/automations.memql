@@ -17,11 +17,20 @@ automation installationPrepareWorkflow {
   builtin installationResolvePublications()
   builtin installationCheckCompatibility()
   builtin installationReservePreparation()
-  for role in ["rollback", "candidate"] {
-    builtin installationCaptureSource(role: role)
-    builtin installationVerifySource(role: role)
-    builtin installationAcknowledgeSource(role: role)
-    builtin installationRenderSource(role: role)
+  applications := builtin installationApplications()
+  for app in applications {
+    for role in ["rollback", "candidate"] {
+      builtin installationCaptureSource(application: app.key, role: role)
+      dependencies := builtin installationSourceRequirements(application: app.key, role: role)
+      for dependency in dependencies {
+        builtin installationCaptureDependency(application: app.key, role: role, key: dependency.key)
+        builtin installationVerifyDependency(application: app.key, role: role, key: dependency.key)
+        builtin installationAcknowledgeDependency(application: app.key, role: role, key: dependency.key)
+      }
+      builtin installationVerifySourceGraph(application: app.key, role: role)
+      builtin installationAcknowledgeSource(application: app.key, role: role)
+      builtin installationRenderSource(application: app.key, role: role)
+    }
   }
   builtin installationVerifyResources()
   automation installationArtifactWorkflow()

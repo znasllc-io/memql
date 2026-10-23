@@ -20,6 +20,7 @@ var (
 type revisionJournal struct{ db func() *sql.DB }
 
 type revisionRecord struct {
+	Applications       map[string]applicationObservation
 	ID                 string
 	Plan               preparedPlan
 	State              string
@@ -28,6 +29,8 @@ type revisionRecord struct {
 	Observation        *argocd.Facts
 	Rollback           *rollbackRecord
 	Completion         *completionReceipt
+	RollbackCompletion *completionReceipt
+	RollbackEligible   bool
 }
 
 // The role is from the current resolved request, not a persisted claim or DSL
@@ -68,7 +71,7 @@ func (j *revisionJournal) reserve(ctx context.Context, plan preparedPlan) (revis
 	if actor != plan.RequestedBy {
 		return revisionRecord{}, errors.New("installation plan belongs to another requester")
 	}
-	if plan.Preparation != nil {
+	if plan.Preparation != nil || plan.FormatVersion == 2 {
 		return revisionRecord{}, errors.New("prepared source evidence requires atomic preparation promotion")
 	}
 	body, key, err := plan.canonical()
@@ -146,12 +149,12 @@ func lockHead(ctx context.Context, tx *sql.Tx, installation string) (string, int
 
 func readRevision(ctx context.Context, tx *sql.Tx, installation, key string) (revisionRecord, error) {
 	r := revisionRecord{ID: key}
-	var plan, observation, completion []byte
+	var plan, observation, completion, rollbackCompletion, members []byte
 	var requester string
-	var started, completed sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at
+	var started, completed, rollbackCompleted sql.NullTime
+	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at,application_observations,rollback_completion_receipt,rollback_completed_at
 FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR UPDATE`, installation, key).
-		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed)
+		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed, &members, &rollbackCompletion, &rollbackCompleted)
 	if err != nil {
 		return revisionRecord{}, err
 	}
@@ -160,15 +163,15 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 	if err != nil || actual != key || r.Plan.InstallationID != installation || r.Plan.RequestedBy != requester || r.SlotEpoch < 1 {
 		return revisionRecord{}, errors.New("installation revision journal identity is inconsistent")
 	}
-	if r.State != "prepared" && r.State != "applying" && r.State != "cancelled" && r.State != "complete" {
+	if r.State != "prepared" && r.State != "applying" && r.State != "reverting" && r.State != "cancelled" && r.State != "complete" && r.State != "rolled_back" {
 		return revisionRecord{}, errors.New("installation revision journal state is invalid")
 	}
-	if (r.State == "applying" || r.State == "complete") != started.Valid || r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) {
+	if (r.State == "applying" || r.State == "reverting" || r.State == "complete" || r.State == "rolled_back") != started.Valid || r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) {
 		return revisionRecord{}, errors.New("installation revision effect markers are inconsistent")
 	}
 	if len(observation) != 0 {
 		var facts argocd.Facts
-		if json.Unmarshal(observation, &facts) != nil || (r.State != "applying" && r.State != "complete") {
+		if json.Unmarshal(observation, &facts) != nil || (r.State != "applying" && r.State != "reverting" && r.State != "complete" && r.State != "rolled_back") {
 			return revisionRecord{}, errors.New("installation observation is invalid")
 		}
 		encoded, _ := json.Marshal(facts)
@@ -179,17 +182,37 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 		}
 		r.Observation = &facts
 	}
-	if (r.State == "complete") != completed.Valid || (r.State == "complete") != (len(completion) != 0) {
+	if completed.Valid != (len(completion) != 0) || ((r.State == "complete" || r.State == "reverting") && !completed.Valid) || ((r.State == "prepared" || r.State == "applying" || r.State == "cancelled") && completed.Valid) {
 		return revisionRecord{}, errors.New("installation completion markers are inconsistent")
 	}
 	if len(completion) != 0 {
 		var proof completionReceipt
-		if json.Unmarshal(completion, &proof) != nil || proof.validate(r.Plan, key) != nil {
+		if receiverJSON(completion, &proof) != nil || proof.validate(r.Plan, key) != nil || proof.Direction != "" {
 			return revisionRecord{}, errors.New("installation completion receipt is invalid")
 		}
 		r.Completion = &proof
 	}
+	if (r.State == "rolled_back") != rollbackCompleted.Valid || (r.State == "rolled_back") != (len(rollbackCompletion) != 0) {
+		return revisionRecord{}, errors.New("installation rollback completion markers are inconsistent")
+	}
+	if len(rollbackCompletion) != 0 {
+		var proof completionReceipt
+		if receiverJSON(rollbackCompletion, &proof) != nil || proof.validate(r.Plan, key) != nil || proof.Direction != "rollback" {
+			return revisionRecord{}, errors.New("installation rollback completion receipt is invalid")
+		}
+		r.RollbackCompletion = &proof
+	}
+	r.Applications, err = decodeApplicationObservations(members, r.Plan)
+	if err != nil {
+		return revisionRecord{}, err
+	}
+	if r.Plan.FormatVersion == 2 && r.State == "prepared" && len(r.Applications) != 0 {
+		return revisionRecord{}, errors.New("unstarted group has application effects")
+	}
 	r.Rollback, err = readRollback(ctx, tx, r)
+	if err == nil && r.State == "rolled_back" && r.Rollback == nil {
+		return revisionRecord{}, errors.New("rolled-back installation has no durable reversal")
+	}
 	return r, err
 }
 
@@ -220,8 +243,13 @@ func (j *revisionJournal) withRecord(ctx context.Context, installation, key stri
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if r.State != "cancelled" && r.State != "complete" && (active != key || epoch != r.SlotEpoch) {
+	if r.State != "cancelled" && r.State != "complete" && r.State != "rolled_back" && (active != key || epoch != r.SlotEpoch) {
 		return revisionRecord{}, errChanged
+	}
+	if r.State == "prepared" || r.State == "applying" || r.State == "reverting" {
+		if err := requireApplicationClaims(ctx, tx, r.Plan); err != nil {
+			return revisionRecord{}, err
+		}
 	}
 	if update != nil {
 		if err := update(tx, &r, actor); err != nil {
@@ -231,6 +259,10 @@ func (j *revisionJournal) withRecord(ctx context.Context, installation, key stri
 		if err != nil {
 			return revisionRecord{}, err
 		}
+	}
+	r.RollbackEligible, err = rollbackEligibility(ctx, tx, r, actor)
+	if err != nil {
+		return revisionRecord{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return revisionRecord{}, err
@@ -305,6 +337,9 @@ func (j *revisionJournal) cancel(ctx context.Context, installation, key string) 
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE installation_revision_heads SET active_plan_id=NULL WHERE installation_id=$1 AND active_plan_id=$2 AND slot_epoch=$3`, installation, key, r.SlotEpoch)
+		if err == nil && r.Plan.Preparation != nil {
+			err = releaseApplicationClaims(ctx, tx, installation, r.Plan.Preparation.ID)
+		}
 		return err
 	})
 }

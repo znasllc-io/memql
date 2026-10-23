@@ -14,6 +14,7 @@ import (
 )
 
 const installationRevisionWorkflow = "installationRevisionWorkflow"
+const revisionContract = "installation.revision.v1"
 
 type revisionMode uint8
 
@@ -24,6 +25,7 @@ const (
 
 type revisionWorkflow struct {
 	definition *automations.Automation
+	snapshot   *workflowhost.Snapshot
 	artifacts  *artifactWorkflow
 	digest     string
 }
@@ -94,6 +96,11 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 	if r.Plan.Preparation == nil || (r.State != "prepared" && r.State != "applying") {
 		return revisionRecord{}, errors.New("installation execution requires an admitted active preparation")
 	}
+	if r.Plan.RevisionWorkflow != nil {
+		// The selected source closure survives the engine it installs. Restoring
+		// it grants no authority: every operation still checks this current actor.
+		w = &revisionWorkflow{snapshot: r.Plan.RevisionWorkflow, digest: r.Plan.ExecutionWorkflowDigest, artifacts: &artifactWorkflow{digest: r.Plan.Preparation.ArtifactWorkflowDigest}}
+	}
 	if mode == revisionStart && (r.Plan.RequestedBy != actor || r.Plan.ExecutionWorkflowDigest != w.digest) {
 		return revisionRecord{}, errors.New("installation execution authority or installed recipe changed")
 	}
@@ -103,7 +110,7 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 		}
 		return revisionRecord{}, errors.New("installation observation requires its native receiving API")
 	}
-	if mode == revisionStart && (host.journal == nil || host.files == nil || host.tokens == nil || host.catalog == nil || host.artifacts == nil || host.revisions == nil || host.revisions.digest != w.digest || host.artifacts.digest != w.artifacts.digest) {
+	if mode == revisionStart && (host.journal == nil || host.files == nil || host.tokens == nil || host.catalog == nil || host.artifacts == nil || host.revisions == nil) {
 		return revisionRecord{}, errors.New("installation revision write requires its complete native preparation host")
 	}
 	client, err := argocd.New(host.api)
@@ -111,21 +118,25 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 		return revisionRecord{}, err
 	}
 	s := &revisionWorkflowScope{workflow: w, host: host, journal: journal, client: client, installation: installation, key: key, operator: actor, mode: mode, configuration: configuration, renders: map[string]argocd.RenderedRevision{}, sources: map[string]verifiedSourceCapture{}}
-	_, err = workflowhost.Run(ctx, w.definition.Name, nil, workflowhost.Options{Operations: s.operations(),
-		Load: func(name string) (*automations.Automation, error) {
-			switch name {
-			case w.definition.Name:
-				return w.definition, nil
-			case w.artifacts.definition.Name:
-				return w.artifacts.definition, nil
-			default:
-				return nil, errors.New("installation execution cannot load an unbound child")
-			}
-		},
-		LoadLogic: func(string) (*memql.Function, error) {
-			return nil, errors.New("installation execution cannot load unbound logic")
-		},
-	})
+	if w.snapshot != nil {
+		_, err = workflowhost.RunSnapshot(ctx, w.snapshot, revisionContract, nil, workflowhost.Options{Operations: s.operations()})
+	} else {
+		_, err = workflowhost.Run(ctx, w.definition.Name, nil, workflowhost.Options{Operations: s.operations(),
+			Load: func(name string) (*automations.Automation, error) {
+				switch name {
+				case w.definition.Name:
+					return w.definition, nil
+				case w.artifacts.definition.Name:
+					return w.artifacts.definition, nil
+				default:
+					return nil, errors.New("installation execution cannot load an unbound child")
+				}
+			},
+			LoadLogic: func(string) (*memql.Function, error) {
+				return nil, errors.New("installation execution cannot load unbound logic")
+			},
+		})
+	}
 	if err != nil {
 		return revisionRecord{}, err
 	}
@@ -142,6 +153,9 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 // native callbacks. The DSL controls their order; no callback accepts evidence
 // from its caller.
 type revisionWorkflowScope struct {
+	memberNeeds       map[string]bool
+	memberObserved    map[string]bool
+	rollbackExecution bool
 	workflow          *revisionWorkflow
 	host              *preparationHost
 	journal           *revisionJournal
@@ -169,6 +183,7 @@ type revisionWorkflowScope struct {
 
 func (s *revisionWorkflowScope) operations() map[string]workflowhost.Operation {
 	ops := map[string]workflowhost.Operation{
+		"installationApplications":             s.applications,
 		"installationRevisionRead":             s.read,
 		"installationRevisionConfiguration":    s.readConfiguration,
 		"installationRevisionResolve":          s.resolve,
@@ -220,7 +235,7 @@ func (s *revisionWorkflowScope) writable(ctx context.Context) (revisionRecord, e
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if s.mode != revisionStart || r.Rollback != nil || r.Plan.Preparation == nil || r.Plan.RequestedBy != s.operator || r.Plan.ExecutionWorkflowDigest != s.workflow.digest {
+	if s.mode != revisionStart || (r.Rollback != nil && !s.rollbackExecution) || r.Plan.Preparation == nil || r.Plan.RequestedBy != s.operator || r.Plan.ExecutionWorkflowDigest != s.workflow.digest {
 		return revisionRecord{}, errors.New("installation observation does not grant revision write authority")
 	}
 	return r, nil
@@ -233,6 +248,14 @@ func (s *revisionWorkflowScope) read(ctx context.Context, args map[string]any) (
 	r, err := s.journal.get(ctx, s.installation, s.key)
 	if err != nil {
 		return nil, err
+	}
+	if r.Plan.FormatVersion == 2 {
+		if s.mode == revisionStart {
+			if _, err := s.writable(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return s.readGroup(ctx, r)
 	}
 	mayApply, needsWrite := false, false
 	if s.mode == revisionStart {
@@ -263,7 +286,12 @@ func (s *revisionWorkflowScope) readConfiguration(ctx context.Context, args map[
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := readReceiver(ctx, s.host.api, s.host.namespace, s.host.configurationName, s.host.catalog)
+	var cfg *receiverSnapshot
+	if r.Plan.FormatVersion == 2 {
+		cfg, err = readSelectedReceiver(ctx, s.host, r)
+	} else {
+		cfg, err = readReceiver(ctx, s.host.api, s.host.namespace, s.host.configurationName, s.host.catalog)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -271,12 +299,12 @@ func (s *revisionWorkflowScope) readConfiguration(ctx context.Context, args map[
 		cfg.rendererAddress = s.host.rendererAddressOverride
 	}
 	binding := r.Plan.Preparation
-	if binding == nil || cfg.configuration.InstallationID != r.Plan.InstallationID || cfg.digest != binding.ConfigurationDigest || cfg.invariantDigest != binding.ConfigurationInvariantDigest ||
+	if binding == nil || cfg.configuration.InstallationID != r.Plan.InstallationID || !configurationMatchesPlan(cfg, r.Plan) ||
 		binding.ArtifactWorkflowDigest != s.workflow.artifacts.digest || !freshConfigurationObservation(cfg.observed, time.Now()) {
 		return nil, errors.New("installation revision requires its exact fresh authenticated receiver configuration")
 	}
 	intent, err := argocd.PlanRevision(cfg.application, r.Plan.Intent.RequestID, r.Plan.Intent.Revision, r.Plan.Intent.Prune)
-	if err != nil || !sameIntent(intent, r.Plan.Intent) {
+	if r.Plan.FormatVersion != 2 && (err != nil || !sameIntent(intent, r.Plan.Intent)) {
 		return nil, errors.New("installation revision intent differs from the current authenticated Application baseline")
 	}
 	s.configuration = cfg
@@ -336,7 +364,7 @@ func (s *revisionWorkflowScope) compatibility(_ context.Context, args map[string
 }
 
 func (s *revisionWorkflowScope) reopen(ctx context.Context, args map[string]any) (any, error) {
-	role, err := preparationRole(args)
+	role, sourceRole, member, err := s.sourceKey(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -361,8 +389,14 @@ func (s *revisionWorkflowScope) reopen(ctx context.Context, args map[string]any)
 	}
 	entry, exists := s.preparation.Captures[role]
 	wantSource, wantReceipt := binding.CandidateSourceDigest, binding.CandidateReceiptDigest
-	if role == "rollback" {
+	if sourceRole == "rollback" {
 		wantSource, wantReceipt = binding.RollbackSourceDigest, binding.RollbackReceiptDigest
+	}
+	if r.Plan.FormatVersion == 2 {
+		wantSource, wantReceipt = member.CandidateSourceDigest, member.CandidateReceiptDigest
+		if sourceRole == "rollback" {
+			wantSource, wantReceipt = member.RollbackSourceDigest, member.RollbackReceiptDigest
+		}
 	}
 	if !exists || !entry.Acknowledged || entry.Receipt == nil || entry.SourceDigest != wantSource || entry.ReceiptDigest != wantReceipt {
 		return nil, errors.New("installation retained source differs from its promoted digest and receipt")
@@ -376,7 +410,7 @@ func (s *revisionWorkflowScope) reopen(ctx context.Context, args map[string]any)
 }
 
 func (s *revisionWorkflowScope) render(ctx context.Context, args map[string]any) (any, error) {
-	role, err := preparationRole(args)
+	role, sourceRole, member, err := s.sourceKey(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -408,8 +442,14 @@ func (s *revisionWorkflowScope) render(ctx context.Context, args map[string]any)
 		return nil, err
 	}
 	want := r.Plan.RollbackRenderDigest
-	if role == "candidate" {
+	if sourceRole == "candidate" {
 		want = r.Plan.RenderDigest
+	}
+	if r.Plan.FormatVersion == 2 {
+		want = member.RollbackRenderDigest
+		if sourceRole == "candidate" {
+			want = member.RenderDigest
+		}
 	}
 	if render.Digest() == "" || render.Digest() != want {
 		return nil, errors.New("installation renderer output differs from the promoted immutable render")
@@ -426,17 +466,17 @@ func (s *revisionWorkflowScope) verifyResources(ctx context.Context, args map[st
 	if err != nil {
 		return nil, err
 	}
-	if s.configuration == nil || s.renders["rollback"].Digest() == "" || s.renders["candidate"].Digest() == "" || s.candidate.Digest() == "" || s.rollback.Digest() == "" {
+	if s.configuration == nil || s.inventory("rollback").Digest() == "" || s.inventory("candidate").Digest() == "" || s.candidate.Digest() == "" || s.rollback.Digest() == "" {
 		return nil, errors.New("installation resource verification requires both fresh signed renders")
 	}
-	resources, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.renders["rollback"], s.renders["candidate"], s.configuration.configuration.Platform, s.configuration.bindings)
+	resources, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.inventory("rollback"), s.inventory("candidate"), s.configuration.configuration.Platform, s.configuration.bindings)
 	if err != nil {
 		return nil, err
 	}
 	if resources.digest != r.Plan.ResourceDiffDigest || resources.publication != r.Plan.PublicationDigest || resources.before != r.Plan.RollbackRenderDigest || resources.after != r.Plan.RenderDigest {
 		return nil, errors.New("installation resource diff differs from the promoted plan")
 	}
-	admission, err := newArtifactAdmission(ctx, s.host.api, artifactAdmissionConfig{ConfigurationDigest: s.configuration.digest, Platform: s.configuration.configuration.Platform, Bindings: s.configuration.bindings, Dependencies: s.configuration.dependencies, Registries: s.configuration.registries}, s.rollback, s.candidate, s.renders["rollback"], s.renders["candidate"])
+	admission, err := newArtifactAdmission(ctx, s.host.api, artifactAdmissionConfig{ConfigurationDigest: s.configuration.digest, Platform: s.configuration.configuration.Platform, Bindings: s.configuration.bindings, Dependencies: s.configuration.dependencies, Registries: s.configuration.registries}, s.rollback, s.candidate, s.inventory("rollback"), s.inventory("candidate"))
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +499,7 @@ func (s *revisionWorkflowScope) recheckResources(ctx context.Context, args map[s
 	if s.configuration == nil || s.candidate.Digest() == "" || s.resources.digest == "" {
 		return nil, errors.New("installation resource recheck requires the exact signed plan")
 	}
-	current, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.renders["rollback"], s.renders["candidate"], s.configuration.configuration.Platform, s.configuration.bindings)
+	current, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.inventory("rollback"), s.inventory("candidate"), s.configuration.configuration.Platform, s.configuration.bindings)
 	if err != nil || current.digest != r.Plan.ResourceDiffDigest || current.digest != s.resources.digest || current.publication != s.resources.publication || current.before != s.resources.before || current.after != s.resources.after {
 		return nil, errors.New("installation resources changed during immutable artifact verification")
 	}
@@ -482,7 +522,7 @@ func (s *revisionWorkflowScope) verifyStorage(ctx context.Context, args map[stri
 	if err != nil {
 		return nil, err
 	}
-	evidence, err := verifyStoragePreservation(ctx, s.host.api, s.renders["rollback"], s.renders["candidate"])
+	evidence, err := verifyStoragePreservation(ctx, s.host.api, s.inventory("rollback"), s.inventory("candidate"))
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +544,7 @@ func (s *revisionWorkflowScope) verifyProtected(ctx context.Context, args map[st
 	if s.configuration == nil {
 		return nil, errors.New("installation protected resources require authenticated configuration")
 	}
-	evidence, err := verifySensitivePreservation(ctx, s.host.api, s.renders["rollback"], s.renders["candidate"], s.configuration.protected)
+	evidence, err := verifySensitivePreservation(ctx, s.host.api, s.inventory("rollback"), s.inventory("candidate"), s.configuration.protected)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +564,12 @@ func (s *revisionWorkflowScope) reobserveConfiguration(ctx context.Context, args
 		return nil, err
 	}
 	s.reobserved = false
-	fresh, err := readReceiver(ctx, s.host.api, s.host.namespace, s.host.configurationName, s.host.catalog)
+	var fresh *receiverSnapshot
+	if r.Plan.FormatVersion == 2 {
+		fresh, err = readSelectedReceiver(ctx, s.host, r)
+	} else {
+		fresh, err = readReceiver(ctx, s.host.api, s.host.namespace, s.host.configurationName, s.host.catalog)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +580,7 @@ func (s *revisionWorkflowScope) reobserveConfiguration(ctx context.Context, args
 		return nil, errors.New("installation configuration changed during revision admission")
 	}
 	intent, err := argocd.PlanRevision(fresh.application, r.Plan.Intent.RequestID, r.Plan.Intent.Revision, r.Plan.Intent.Prune)
-	if err != nil || !sameIntent(intent, r.Plan.Intent) {
+	if r.Plan.FormatVersion != 2 && (err != nil || !sameIntent(intent, r.Plan.Intent)) {
 		return nil, errors.New("installation Application changed during revision admission")
 	}
 	s.configuration = fresh
@@ -554,12 +599,12 @@ func freshArtifactObservation(observed, expires, now time.Time) bool {
 
 func (s *revisionWorkflowScope) freshWriteEvidence(r revisionRecord) (revisionWriteAdmission, error) {
 	binding := r.Plan.Preparation
-	if binding == nil || s.configuration == nil || !s.preflightComplete || !s.reobserved || s.configuration.digest != binding.ConfigurationDigest ||
+	if binding == nil || s.configuration == nil || !s.preflightComplete || !s.reobserved || (!s.rollbackExecution && !configurationMatchesPlan(s.configuration, r.Plan)) ||
 		s.configuration.invariantDigest != binding.ConfigurationInvariantDigest || binding.ArtifactWorkflowDigest != s.workflow.artifacts.digest || !freshConfigurationObservation(s.configuration.observed, time.Now()) {
 		return revisionWriteAdmission{}, errors.New("installation write requires freshly authenticated receiving configuration and completed admission")
 	}
 	if s.artifacts == nil || s.artifacts.workflow != s.workflow.artifacts.digest || s.artifacts.operator != s.operator ||
-		s.artifacts.configuration != binding.ConfigurationDigest || s.artifacts.candidate != r.Plan.PublicationDigest || s.artifacts.rollback != binding.RollbackPublicationDigest ||
+		s.artifacts.configuration != s.configuration.digest || s.artifacts.candidate != r.Plan.PublicationDigest || s.artifacts.rollback != binding.RollbackPublicationDigest ||
 		s.artifacts.resources != r.Plan.ResourceDiffDigest || s.artifacts.before != r.Plan.RollbackRenderDigest || s.artifacts.after != r.Plan.RenderDigest || !freshArtifactObservation(s.artifacts.observed, s.artifacts.expires, time.Now()) {
 		return revisionWriteAdmission{}, errors.New("installation write requires complete fresh immutable artifact evidence")
 	}
@@ -605,7 +650,11 @@ func (s *revisionWorkflowScope) begin(ctx context.Context, args map[string]any) 
 }
 
 func (s *revisionWorkflowScope) apply(ctx context.Context, args map[string]any) (any, error) {
-	if err := noRevisionArguments(args); err != nil {
+	return s.journal.withEffectLock(ctx, s.key, func(ctx context.Context) (any, error) { return s.applyLocked(ctx, args) })
+}
+func (s *revisionWorkflowScope) applyLocked(ctx context.Context, args map[string]any) (any, error) {
+	application, err := applicationArgument(args)
+	if err != nil {
 		return nil, err
 	}
 	r, err := s.writable(ctx)
@@ -614,6 +663,12 @@ func (s *revisionWorkflowScope) apply(ctx context.Context, args map[string]any) 
 	}
 	if r.State != "applying" {
 		return nil, errors.New("installation effect must be durably started before an Argo write")
+	}
+	if r.Plan.FormatVersion == 2 {
+		return s.applyGroup(ctx, r, application)
+	}
+	if application != "" {
+		return nil, errors.New("application is outside this plan")
 	}
 	if !s.needsWrite {
 		return nil, nil
@@ -644,7 +699,8 @@ func (s *revisionWorkflowScope) apply(ctx context.Context, args map[string]any) 
 }
 
 func (s *revisionWorkflowScope) observe(ctx context.Context, args map[string]any) (any, error) {
-	if err := noRevisionArguments(args); err != nil {
+	application, err := applicationArgument(args)
+	if err != nil {
 		return nil, err
 	}
 	r, err := s.journal.get(ctx, s.installation, s.key)
@@ -653,6 +709,12 @@ func (s *revisionWorkflowScope) observe(ctx context.Context, args map[string]any
 	}
 	if r.State != "applying" {
 		return nil, errors.New("installation observation requires a started intent")
+	}
+	if r.Plan.FormatVersion == 2 {
+		return s.observeGroup(ctx, r, application)
+	}
+	if application != "" {
+		return nil, errors.New("application is outside this plan")
 	}
 	facts, err := s.client.Observe(ctx, r.Plan.Intent)
 	if err != nil {

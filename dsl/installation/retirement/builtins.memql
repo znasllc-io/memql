@@ -27,3 +27,7 @@ builtin installationRetirementObserve { }
 /// Release only a fully retired preparation's own installation slot.
 @executor("integration.installation.installationRetirementComplete")
 builtin installationRetirementComplete { }
+
+/// List every root and admitted dependency retained by this preparation.
+@executor("integration.installation.installationRetirementRequirements")
+builtin installationRetirementRequirements { }

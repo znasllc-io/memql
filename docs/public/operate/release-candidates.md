@@ -468,12 +468,13 @@ and 256 KiB total. Unknown or duplicate JSON fields refuse. An unset variable or
 an explicit empty `sources` array configures no publishers. Other read failures remain
 errors rather than appearing as an empty list.
 
-In **Cluster → Updates**, an identified developer, admin or owner can choose a
+In **Cluster → Updates → Published releases**, an identified developer, admin or owner can choose a
 configured publisher, browse published releases, and inspect an exact release.
 **Check again** requests a fresh read. Opening or reconnecting a visible page
 also refreshes it; the screen does not continuously poll remote publishers.
 Failures and disconnections keep the last displayed record without calling it
-freshly verified. This screen has no install or publication effect.
+freshly verified. Discovery has no installation or publication effect; installation
+selection lives in the separate **This installation** tab.
 
 The same reads are available as DSL builtins and generated Go/TypeScript SDK
 methods:
@@ -506,3 +507,47 @@ release is compatible with the receiving cluster. DSL policy owns update
 selection, cadence, retries and the installation workflow; native preparation
 owns fresh artifact and cluster evidence, effect fencing and rollback authority.
 This boundary also applies when an automation calls the discovery builtins.
+
+
+## Restore a selected installation
+
+In **Cluster → Updates → This installation**, **Restore previous release**
+selects the exact release recorded before the update. The original operator
+must confirm this action separately. It is available for a started update, or
+the latest completed update while no later preparation or plan has advanced
+this installation. Another operator cannot take over the selection by holding
+an installation role.
+
+Restoration runs the plan's retained rollback recipe with fresh native checks.
+It refuses pending or foreign controller operations, changed migrations,
+unverifiable original access, conflicting application ownership, and missing
+artifact or preservation evidence. It never downgrades the database. The
+original forward completion receipt remains in history.
+
+**Resume restoration** continues an interrupted recorded reversal. **Check
+progress** observes it and verifies completion; it cannot apply missing steps.
+A lost reply does not trigger another write automatically. Read the saved plan
+before explicitly continuing. An installation with several applications shows
+their individual progress and reports differing revisions without inventing a
+shared installed version. Controller synchronization alone is not completion.
+
+The screen says **The previous release is restored and verified** only after a
+native `rolled_back` receipt and matching current revision. That receipt checks
+the previous workloads and images, unchanged migrations, original access,
+storage and protected resources. Other release choices become selectable again
+after the active operation finishes.
+
+The same operation is available through the existing MemQL stream and generated
+Go/TypeScript SDKs:
+
+| Builtin | Effect |
+|---|---|
+| `releaseInstallationStatus()` | Read current member revisions, saved preparation or plan, and current `canRollback` eligibility |
+| `releaseRollbackInstallation(installationId, planId)` | Explicitly start or resume restoration of that exact plan's previous release |
+| `releaseObserveInstallation(installationId, planId)` | Observe the saved direction and record completion only after native verification |
+
+`canRollback` means the original operator may request fresh verification. It
+is not a promise that restoration is safe, and cannot authorize an effect.
+An in-progress restoration is reported as `state: "applying"` with
+`direction: "rollback"`; completion is `state: "rolled_back"`. Callers must
+not interpret the original candidate's identity as the restored release.

@@ -95,6 +95,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "resumeInstallation", Description: "Resume the original operator’s saved preparation without changing its selection or request identity.", Handler: i.handleInstallationResume},
 		{Name: "cancelInstallation", Description: "Cancel only the original operator’s current prepared plan before any application begins.", Handler: i.handleInstallationCancel},
 		{Name: "applyInstallation", Description: "Apply one exact separately selected native installation plan.", Handler: i.handleInstallationApply},
+		{Name: "rollbackInstallation", Description: "Restore the original operator’s exact previous installation through its retained rollback recipe and fresh safety checks.", Handler: i.handleInstallationRollback},
 		{Name: "observeInstallation", Description: "Observe the exact selected installation intent without applying it.", Handler: i.handleInstallationObserve},
 		{Name: "sealPublishedCandidate", Description: "Seal verified native publication evidence into a portable signed catalog record. Owner only.", Handler: i.handleCatalogSeal},
 		{Name: "getPublishedCandidate", Description: "Read a verified public release projection without private candidate evidence. Developer, admin or owner.", Handler: i.handleCatalogGet},

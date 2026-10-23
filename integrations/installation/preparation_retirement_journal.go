@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/argocd"
 )
 
 type preparationRetirement struct {
@@ -30,7 +31,7 @@ type preparationArtifactRetirement struct {
 
 func decodePreparationRetirement(body []byte, state string) (*preparationRetirement, error) {
 	var value *preparationRetirement
-	if len(body) > 64<<10 {
+	if len(body) > 8<<20 {
 		return nil, errors.New("preparation retirement exceeds its bound")
 	}
 	d := json.NewDecoder(bytes.NewReader(body))
@@ -50,12 +51,11 @@ func decodePreparationRetirement(body []byte, state string) (*preparationRetirem
 		}
 		return nil, nil
 	}
-	if (state != "retiring" && state != "cancelled") || !internalDigest.MatchString(value.WorkflowDigest) || len(value.Captures) != 2 {
+	if (state != "retiring" && state != "cancelled") || !internalDigest.MatchString(value.WorkflowDigest) || len(value.Captures) < 2 || len(value.Captures) > 16*(1+argocd.MaxSourceDependencies) {
 		return nil, errors.New("preparation retirement identity is inconsistent")
 	}
-	for _, role := range []string{"candidate", "rollback"} {
-		c, exists := value.Captures[role]
-		if !exists || len(c.Page) > 128 || (c.Cursor != "" && !pl.ValidArtifactIntentIDs([]string{c.Cursor})) ||
+	for key, c := range value.Captures {
+		if !captureStepKey.MatchString(key) || len(c.Page) > 128 || (c.Cursor != "" && !pl.ValidArtifactIntentIDs([]string{c.Cursor})) ||
 			(c.Fenced && !value.ProducerStopped) || (c.PinsReleased && !c.Fenced) ||
 			((c.Cursor != "" || len(c.Page) > 0 || c.Complete) && !c.PinsReleased) || (c.Complete && len(c.Page) > 0) {
 			return nil, errors.New("preparation retirement progress is inconsistent")
@@ -95,7 +95,11 @@ func (j *preparationJournal) beginRetirement(ctx context.Context, installation, 
 		return r, nil
 	}
 	return j.withRecord(ctx, installation, key, workflow, func(r *preparationRecord) error {
-		r.Retirement = &preparationRetirement{WorkflowDigest: cleanupWorkflow, Captures: map[string]preparationCaptureRetirement{"candidate": {}, "rollback": {}}}
+		captures := map[string]preparationCaptureRetirement{}
+		for key := range r.Captures {
+			captures[key] = preparationCaptureRetirement{}
+		}
+		r.Retirement = &preparationRetirement{WorkflowDigest: cleanupWorkflow, Captures: captures}
 		r.State = "retiring"
 		return nil
 	})

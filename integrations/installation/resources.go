@@ -39,6 +39,7 @@ type imageSlot struct {
 type imageBinding struct {
 	Slot                imageSlot
 	Component, Artifact string
+	Application         string `json:"application,omitempty"`
 }
 
 type resourceChange struct {
@@ -98,15 +99,15 @@ var kubernetesSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
 // candidate or rollback render. A complete diff is retained even for resources
 // with no container images; checking only Deployments would omit destructive
 // changes to storage, identity, routing or RBAC.
-func verifyImagesAndDiff(ctx context.Context, api argocd.API, published pipelines.VerifiedPublishedRelease, before, after argocd.RenderedRevision, platform string, bindings []imageBinding) (resourceEvidence, error) {
-	if api == nil || before.Digest() == "" || after.Digest() == "" || len(bindings) == 0 || len(bindings) > 512 || (platform != "linux/arm64" && platform != "linux/amd64") {
+func verifyImagesAndDiff(ctx context.Context, api argocd.API, published pipelines.VerifiedPublishedRelease, before, after argocd.RenderInventory, platform string, bindings []imageBinding) (resourceEvidence, error) {
+	if api == nil || !validRenderInventory(before) || !validRenderInventory(after) || len(bindings) == 0 || len(bindings) > 512 || (platform != "linux/arm64" && platform != "linux/amd64") {
 		return resourceEvidence{}, errors.New("resource verification requires native renders, image bindings, platform and cluster discovery")
 	}
 	release, err := published.Release()
 	if err != nil {
 		return resourceEvidence{}, err
 	}
-	if err := sameRenderScope(before.Spec(), after.Spec()); err != nil {
+	if err := sameRenderInventoryScope(before, after); err != nil {
 		return resourceEvidence{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -123,6 +124,12 @@ func verifyImagesAndDiff(ctx context.Context, api argocd.API, published pipeline
 	}
 	next, err := resourceInventory(ctx, api, after, schemas)
 	if err != nil {
+		return resourceEvidence{}, err
+	}
+	if err := verifyPreservedControllers(old, next); err != nil {
+		return resourceEvidence{}, err
+	}
+	if err := verifyBindingApplications(ctx, api, after, schemas, bindings); err != nil {
 		return resourceEvidence{}, err
 	}
 	oldImages, err := inventoryImages(old)
@@ -185,6 +192,22 @@ func verifyImagesAndDiff(ctx context.Context, api argocd.API, published pipeline
 	return resourceEvidence{digest: "memql-id:" + string(id.NewUntracked().FromString("installation-resource-evidence-v1:"+string(body))), publication: published.Digest(), before: before.Digest(), after: after.Digest(), changes: changes, observed: observed}, nil
 }
 
+func sameRenderInventoryScope(before, after argocd.RenderInventory) error {
+	if !validRenderInventory(before) || !validRenderInventory(after) {
+		return errors.New("complete native render inventories are required")
+	}
+	a, b := before.RenderScopes(), after.RenderScopes()
+	if len(a) == 0 || len(a) != len(b) {
+		return errors.New("render application membership changed")
+	}
+	for i := range a {
+		if err := sameRenderScope(a[i], b[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func sameRenderScope(before, after argocd.RenderSpec) error {
 	var a, b map[string]any
 	if json.Unmarshal(before.Source, &a) != nil || json.Unmarshal(after.Source, &b) != nil || a["targetRevision"] == b["targetRevision"] {
@@ -202,7 +225,10 @@ func sameRenderScope(before, after argocd.RenderSpec) error {
 	return nil
 }
 
-func resourceInventory(ctx context.Context, api argocd.API, rendered argocd.RenderedRevision, schemas map[string]map[string]resourceType) (map[resourceIdentity]resourceObject, error) {
+func resourceInventory(ctx context.Context, api argocd.API, rendered argocd.RenderInventory, schemas map[string]map[string]resourceType) (map[resourceIdentity]resourceObject, error) {
+	if api == nil || !validRenderInventory(rendered) || schemas == nil {
+		return nil, errors.New("resource inventory requires a native render and cluster discovery")
+	}
 	objects := map[resourceIdentity]resourceObject{}
 	for _, body := range rendered.Resources() {
 		value, err := resourceJSON(body)
@@ -236,7 +262,7 @@ func resourceInventory(ctx context.Context, api argocd.API, rendered argocd.Rend
 		}
 		if typ.namespaced {
 			if key.Namespace == "" {
-				key.Namespace = rendered.Spec().Namespace
+				key.Namespace = rendered.Namespace()
 			}
 			if !kubernetesSegment.MatchString(key.Namespace) || len(key.Namespace) > 63 {
 				return nil, errors.New("rendered namespace is invalid")
@@ -359,7 +385,7 @@ func inventoryImages(inventory map[resourceIdentity]resourceObject) (map[imageSl
 			out[imageSlot{key, "imageName", ""}] = image
 			continue
 		default:
-			if !knownNonWorkload(object.version+"/"+key.Kind) || containsImageField(spec) {
+			if (!knownNonWorkload(object.version+"/"+key.Kind) && !preservedController(object.version+"/"+key.Kind)) || containsImageField(spec) {
 				return nil, errors.New("resource kind or image fields need a qualified installation codec")
 			}
 			continue

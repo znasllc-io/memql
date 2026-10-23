@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { InstallationUpdates, readInstallationStatus } from "../../src/apps/cluster/updates/InstallationUpdates";
+import { readTheBar, useFakeDate } from "../readTheBar";
 import { readInstallationProposal } from "../../src/apps/cluster/updates/InstallationProposals";
 
 const candidate = { candidateId: "sha256:release", catalogDigest: "sha256:catalog", overlayRevision: "a".repeat(40), label: "MemQL 1.2" };
@@ -22,6 +23,7 @@ function fixture(over: { unavailable?: boolean; uncertain?: boolean } = {}) {
 }
 
 describe("installation release selection", () => {
+  useFakeDate();
   it("keeps preparation and apply separate and carries only trusted selection facts", async () => {
     const query = fixture(); render(<InstallationUpdates query={query} connected />);
     fireEvent.click(await screen.findByRole("button", { name: /MemQL 1.2/ }));
@@ -192,4 +194,116 @@ describe("installation release selection", () => {
     expect(executeNamed.mock.calls.some(c => c[0] === "releaseProposeInstallation" || c[0] === "releaseObserveInstallationProposal")).toBe(false);
   });
 
+});
+
+
+describe("selected installation restoration", () => {
+  useFakeDate();
+  const members = [
+    { key: "engine", name: "Engine", namespace: "argocd", currentRevision: "a".repeat(40), started: true, observation: { operationPending: false, revisionObserved: true, synced: true, healthy: true } },
+    { key: "product", name: "Workspace", namespace: "argocd", currentRevision: "b".repeat(40), started: true, observation: { operationPending: true, revisionObserved: false, synced: false, healthy: false } },
+  ];
+  function restoreFixture(state = "applying", lostReply = false) {
+    let active: Record<string, unknown> | null = state === "complete" ? null : { ...plan, state, canRollback: true, applications: members };
+    let latest: Record<string, unknown> | null = state === "complete" ? { ...plan, state, canRollback: true } : null;
+    let currentRevision = state === "complete" ? candidate.overlayRevision : "";
+    const executeNamed = vi.fn(async (name: string) => {
+      if (name === "releaseInstallationStatus") return answer({ installationId: plan.installationId, currentRevision, applications: members, choices: [candidate], active, latest });
+      if (name === "releaseRollbackInstallation") {
+        active = { ...plan, state: "applying", direction: "rollback", canRollback: true, applications: members };
+        if (lostReply) { lostReply = false; throw new Error("Connection interrupted after restoration was recorded."); }
+        return answer(active);
+      }
+      if (name === "releaseObserveInstallation") {
+        latest = { ...active, state: "rolled_back", canRollback: false };
+        active = null; currentRevision = plan.expectedCurrentRevision;
+        return answer(latest);
+      }
+      throw new Error("Unexpected installation effect");
+    });
+    return { executeNamed };
+  }
+  async function confirmRestore(query: ReturnType<typeof restoreFixture>) {
+    fireEvent.click(await screen.findByRole("button", { name: "Restore previous release" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep current release" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore previous release" }));
+    expect(query.executeNamed.mock.calls.some(c => c[0] === "releaseRollbackInstallation")).toBe(false);
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Restore previous release" }));
+  }
+
+  it.each(["applying", "complete"])("requires deliberate confirmation for %s and completes only from the native restoration receipt", async state => {
+    const query = restoreFixture(state);
+    render(<InstallationUpdates query={query} connected />);
+    await confirmRestore(query);
+    await screen.findByText(/previous release is being restored/);
+    expect(screen.queryByText("The previous release is restored and verified.")).toBeNull();
+    expect(screen.queryByText("The selected release is installed and verified.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply selected release" })).toBeNull();
+    const sent = (query.executeNamed.mock.calls as unknown as string[][]).find(c => c[0] === "releaseRollbackInstallation")?.[1];
+    expect(sent).toBe('builtin releaseRollbackInstallation(installationId: "installation-one", planId: "plan-one")');
+    expect(screen.getByText("Restoring configuration")).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Check progress" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Check progress" }));
+    await screen.findByText("The previous release is restored and verified.");
+    expect(screen.queryByRole("button", { name: "Resume restoration" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restore previous release" })).toBeNull();
+    expect(query.executeNamed.mock.calls.filter(c => c[0] === "releaseRollbackInstallation")).toHaveLength(1);
+    expect(query.executeNamed.mock.calls.some(c => ["releaseApplyInstallation", "releasePrepareInstallation"].includes(c[0]))).toBe(false);
+  });
+
+  it("reads interrupted restoration after remount and resumes only on an explicit action", async () => {
+    const query = restoreFixture("applying", true);
+    const initial = render(<InstallationUpdates query={query} connected />);
+    await confirmRestore(query);
+    await screen.findByText("The operation could not be confirmed.");
+    expect(query.executeNamed.mock.calls.filter(c => c[0] === "releaseRollbackInstallation")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Resume restoration" })).toBeNull();
+    initial.unmount();
+    render(<InstallationUpdates query={query} connected />);
+    const resume = await screen.findByRole("button", { name: "Resume restoration" });
+    expect(query.executeNamed.mock.calls.filter(c => c[0] === "releaseRollbackInstallation")).toHaveLength(1);
+    fireEvent.click(resume);
+    await waitFor(() => expect(query.executeNamed.mock.calls.filter(c => c[0] === "releaseRollbackInstallation")).toHaveLength(2));
+    const writes = (query.executeNamed.mock.calls as unknown as string[][]).filter(c => c[0] === "releaseRollbackInstallation");
+    expect(writes[1]?.[1]).toBe(writes[0]?.[1]);
+  });
+
+  it.each([
+    { canManage: false, canRollback: true },
+    { canManage: true, canRollback: false },
+    { canManage: true },
+  ])("requires server rollback eligibility and the original operator: %j", async eligibility => {
+    const executeNamed = vi.fn(async () => answer({ installationId: plan.installationId, currentRevision: candidate.overlayRevision, choices: [candidate], latest: { ...plan, state: "complete", ...eligibility } }));
+    render(<InstallationUpdates query={{ executeNamed }} connected />);
+    await screen.findByText("The selected release is installed and verified.");
+    expect(screen.queryByRole("button", { name: "Restore previous release" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume restoration" })).toBeNull();
+  });
+
+  it("does not reuse confirmation when a fresh read withdraws eligibility", async () => {
+    let allowed = true;
+    const executeNamed = vi.fn(async (name: string) => {
+      if (name !== "releaseInstallationStatus") throw new Error("No effect expected");
+      return answer({ installationId: plan.installationId, currentRevision: candidate.overlayRevision, choices: [], active: { ...plan, state: "applying", canRollback: allowed } });
+    });
+    render(<InstallationUpdates query={{ executeNamed }} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restore previous release" }));
+    await screen.findByText("Restore the previous release?");
+    allowed = false;
+    fireEvent.click(screen.getByRole("button", { name: "Read saved plan" }));
+    await waitFor(() => expect(screen.queryByText("Restore the previous release?")).toBeNull());
+    expect(executeNamed.mock.calls.every(c => c[0] === "releaseInstallationStatus")).toBe(true);
+  });
+
+  it("keeps mixed application revisions readable and never prepares against an invented common revision", async () => {
+    const executeNamed = vi.fn(async () => answer({ installationId: plan.installationId, currentRevision: "", applications: members, choices: [candidate] }));
+    render(<InstallationUpdates query={{ executeNamed }} connected />);
+    await screen.findByText("The applications are at different revisions.");
+    expect(screen.queryByText("Installation updates are unavailable.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /MemQL 1.2/ }));
+    expect(screen.queryByRole("button", { name: "Prepare installation plan" })).toBeNull();
+    expect(executeNamed).toHaveBeenCalledTimes(1);
+    expect(() => readInstallationStatus(answer({ installationId: plan.installationId, currentRevision: "", choices: [] }))).toThrow(/incomplete/);
+  });
 });

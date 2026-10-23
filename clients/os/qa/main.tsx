@@ -737,11 +737,39 @@ function readableNexus(state: "running" | "waiting" | "failed" | "long" = "runni
   return nexusConnection({ ...seed, approvals: state === "waiting" ? [nexusApproval({id:"approval-readable",runId:"run-readable",goalId:"goal-readable",stepKey:"step-4",question:"Send the 18 prepared invoices to your clients?",reason:"Your review is required before the invoices are sent."})] : [] });
 }
 
-function installationPreview(state: "prepared" | "preparing" | "applying" | "complete" | "empty" | "unavailable", repositoryUnavailable = false) {
-  const selected = { candidateId:"sha256:"+"a".repeat(64), catalogDigest:"sha256:"+"b".repeat(64), overlayRevision:"c".repeat(40), label:"MemQL 0.31 · Cockpit 0.17" };
-  const plan = { ...selected, installationId:"qa-installation", preparationId:"qa-preparation",planId:"qa-plan",state,expectedCurrentRevision:"d".repeat(40),canManage: true, artifactExpiresAt:"2026-12-01T12:00:00Z",observation:state === "applying"?{revisionObserved:true,healthy:true,synced:true}:undefined };
-  const query = { executeNamed: async () => { if(state === "unavailable") throw new Error("Delivery configuration has not been supplied by this installation."); return new Result({bundle:{nodes:[{id:"installation",payload:{preparation:state === "preparing"?{...selected,installationId:"qa-installation",preparationId:"qa-preparation",requestId:"original-request",expectedCurrentRevision:"d".repeat(40),state:"preparing",canResume:true}:null,installationId:"qa-installation",currentRevision:"d".repeat(40),choices:state === "empty"?[]:[selected],active:["prepared","applying"].includes(state)?plan:null,latest:state === "complete"?plan:null,proposalBaseRevision:repositoryUnavailable?"":"e".repeat(40),proposalWarning:repositoryUnavailable?"The installation repository connection is unavailable.":undefined,proposals:[]}}]}} as never); }};
-  return () => <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected proposedRelease={state === "empty"?selected:null} /></WindowBody>;
+function installationPreview(initial: "prepared" | "preparing" | "applying" | "complete" | "restoring" | "rolled_back" | "empty" | "unavailable", repositoryUnavailable = false) {
+  function InstallationPreview() {
+    const query = useMemo(() => {
+      let state = initial;
+      const selected = { candidateId:"sha256:"+"a".repeat(64), catalogDigest:"sha256:"+"b".repeat(64), overlayRevision:"c".repeat(40), label:"MemQL 0.31 · Cockpit 0.17" };
+      function plan() {
+        return { ...selected, installationId:"qa-installation", preparationId:"qa-preparation",planId:"qa-plan", state:state === "restoring" ? "applying" : state, direction: ["restoring", "rolled_back"].includes(state) ? "rollback" : "", expectedCurrentRevision:"d".repeat(40),canManage:true,canRollback:["applying","complete","restoring"].includes(state),artifactExpiresAt:"2026-12-01T12:00:00Z",
+          applications: [
+            {key:"engine",name:"Engine",namespace:"argocd",started:true,observation:{revisionObserved:true,healthy:true,synced:true,operationPending:false}},
+            {key:"product",name:"Client workspace",namespace:"argocd",started:true,observation:{revisionObserved:false,healthy:false,synced:false,operationPending:true}},
+          ],
+          observation:state === "applying"?{revisionObserved:true,healthy:true,synced:true}:undefined };
+      }
+      const answer = (payload: object) => new Result({bundle:{nodes:[{id:"installation",payload}]}} as never);
+      return { executeNamed: async (name: string) => {
+        if(state === "unavailable") throw new Error("Delivery configuration has not been supplied by this installation.");
+        if(name === "releaseRollbackInstallation") { state="restoring"; return answer(plan()); }
+        if(name === "releaseObserveInstallation") { if(state === "restoring") state="rolled_back"; return answer(plan()); }
+        if(name === "releaseApplyInstallation") { state="applying"; return answer(plan()); }
+        if(name === "releaseResumeInstallation") { state="prepared"; return answer(plan()); }
+        if(name === "releaseCancelInstallation") { state="empty"; return answer({...plan(),state:"cancelled"}); }
+        if(name !== "releaseInstallationStatus") throw new Error("This fixture does not publish changes.");
+        const mixed = ["applying", "restoring"].includes(state);
+        return answer({preparation:state === "preparing"?{...selected,installationId:"qa-installation",preparationId:"qa-preparation",requestId:"original-request",expectedCurrentRevision:"d".repeat(40),state:"preparing",canResume:true}:null,installationId:"qa-installation",currentRevision:mixed?"":state === "complete"?selected.overlayRevision:"d".repeat(40),applications:mixed?[
+          {key:"engine",name:"Engine",namespace:"argocd",currentRevision:"c".repeat(40)},
+          {key:"product",name:"Client workspace",namespace:"argocd",currentRevision:"d".repeat(40)},
+        ]:[],choices:state === "empty"?[]:[selected],active:["prepared","applying","restoring"].includes(state)?plan():null,latest:["complete","rolled_back"].includes(state)?plan():null,proposalBaseRevision:repositoryUnavailable?"":"e".repeat(40),proposalWarning:repositoryUnavailable?"The installation repository connection is unavailable.":undefined,proposals:[]});
+      }};
+    }, []);
+    const selected = {candidateId:"sha256:"+"a".repeat(64),catalogDigest:"sha256:"+"b".repeat(64),label:"MemQL 0.31 · Cockpit 0.17"};
+    return <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected proposedRelease={initial === "empty"?selected:null} /></WindowBody>;
+  }
+  return () => <InstallationPreview />;
 }
 
 function repositoryDeliveryView(state: "compose" | "waiting" | "attention" | "queued" | "merged") {
@@ -929,6 +957,8 @@ const VIEWS: Record<
   "installation-repository-outage": { render:installationPreview("prepared", true) },
   "installation-applying": { render:installationPreview("applying") },
   "installation-complete": { render:installationPreview("complete") },
+  "installation-restoring": { render:installationPreview("restoring") },
+  "installation-restored": { render:installationPreview("rolled_back") },
   "installation-empty": { render:installationPreview("empty") },
   "installation-unavailable": { render:installationPreview("unavailable") },
   "delivery-repositories": { seed: PIPELINES_SEED, framed: true, render: () => <DeployablesWindow section="repositories" fallback="Pipelines" /> },

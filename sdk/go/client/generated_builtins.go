@@ -6513,6 +6513,32 @@ func ReleaseRetireCandidateBuild(args ReleaseRetireCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseRollbackInstallation -- Restore the exact previous release through the selected plan's retained recipe. Only its original operator may request it; fresh native checks may refuse it.
+type ReleaseRollbackInstallationArgs struct {
+	InstallationId string
+	PlanId         string
+}
+
+// ReleaseRollbackInstallation calls the engine builtin releaseRollbackInstallation.
+func (qc *QueryClient) ReleaseRollbackInstallation(ctx context.Context, args ReleaseRollbackInstallationArgs) (*Result, error) {
+	call := ReleaseRollbackInstallationBuild(args)
+	return qc.executeNamed(ctx, "releaseRollbackInstallation", call)
+}
+
+func ReleaseRollbackInstallationBuild(args ReleaseRollbackInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseRollbackInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseSealPublishedCandidate -- Seal complete native publication evidence as an immutable signed catalog record.
 type ReleaseSealPublishedCandidateArgs struct {
 	CandidateId string

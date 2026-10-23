@@ -3,6 +3,7 @@ package installation
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -103,7 +104,7 @@ type retirementWorkflowScope struct {
 
 func retirementRole(args map[string]any) (string, error) {
 	role, ok := args["role"].(string)
-	if !ok || len(args) != 1 || (role != "candidate" && role != "rollback") {
+	if !ok || len(args) != 1 || !captureStepKey.MatchString(role) {
 		return "", errors.New("cleanup requires one scoped source role")
 	}
 	return role, nil
@@ -136,11 +137,12 @@ func (s *retirementWorkflowScope) operations() map[string]workflowhost.Operation
 		"installationRetirementStop": noArgs(func(ctx context.Context) (preparationRecord, error) {
 			return s.journal.stopRetiringProducer(ctx, s.installation, s.key, s.workflow, s.cleanup, s.executor)
 		}),
-		"installationRetirementFence":    roleEffect(s.journal.fenceRetiringCapture),
-		"installationRetirementRelease":  roleEffect(s.journal.releaseRetiringCapturePins),
-		"installationRetirementPage":     s.page,
-		"installationRetirementArtifact": s.artifact,
-		"installationRetirementObserve":  s.observe,
+		"installationRetirementRequirements": s.requirements,
+		"installationRetirementFence":        roleEffect(s.journal.fenceRetiringCapture),
+		"installationRetirementRelease":      roleEffect(s.journal.releaseRetiringCapturePins),
+		"installationRetirementPage":         s.page,
+		"installationRetirementArtifact":     s.artifact,
+		"installationRetirementObserve":      s.observe,
 		"installationRetirementComplete": noArgs(func(ctx context.Context) (preparationRecord, error) {
 			r, err := s.journal.finishRetirement(ctx, s.installation, s.key, s.workflow, s.cleanup)
 			if err == nil {
@@ -204,4 +206,24 @@ func (s *retirementWorkflowScope) observe(ctx context.Context, args map[string]a
 	}
 	s.observed.Store(true)
 	return map[string]any{"ready": ready}, nil
+}
+
+func (s *retirementWorkflowScope) requirements(ctx context.Context, args map[string]any) (any, error) {
+	if len(args) != 0 {
+		return nil, errors.New("source retirement requirements accept no supplied evidence")
+	}
+	record, err := s.journal.retirementRecord(ctx, s.installation, s.key, s.workflow, s.cleanup)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(record.Captures))
+	for key := range record.Captures {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]any, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, map[string]any{"key": key})
+	}
+	return out, nil
 }

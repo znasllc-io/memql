@@ -5015,6 +5015,29 @@ QueryClient.prototype.releaseRetireCandidate = function (this: QueryClient, args
   return this.executeNamed("releaseRetireCandidate", buildReleaseRetireCandidate(args), opts);
 };
 
+/** Restore the exact previous release through the selected plan's retained recipe. Only its original operator may request it; fresh native checks may refuse it. */
+export interface ReleaseRollbackInstallationArgs {
+  installationId: string;
+  planId: string;
+}
+
+export function buildReleaseRollbackInstallation(args: ReleaseRollbackInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "builtin releaseRollbackInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseRollbackInstallation(args: ReleaseRollbackInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseRollbackInstallation = function (this: QueryClient, args: ReleaseRollbackInstallationArgs = {} as ReleaseRollbackInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseRollbackInstallation", buildReleaseRollbackInstallation(args), opts);
+};
+
 /** Seal complete native publication evidence as an immutable signed catalog record. */
 export interface ReleaseSealPublishedCandidateArgs {
   candidateId: string;

@@ -4,12 +4,16 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha1" // Git object protocol fixture, not a new signature.
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"path"
+	"sort"
 	"strings"
 	"testing"
 
@@ -51,6 +55,8 @@ func TestInstallationOverlayPinsOnlySignedDeclaredImageSlots(t *testing.T) {
 	delete(before, "images")
 	delete(after, "images")
 	require.Equal(t, before, after)
+	_, err = pinInstallationImages([]byte(strings.Replace(overlayBefore, "newTag: previous", "newTag: 16", 1)), binding, overlayPublication(t))
+	require.NoError(t, err, "a literal numeric Kustomize tag remains replaceable")
 	for _, tc := range []struct {
 		name, input string
 		binding     []overlayImage
@@ -78,14 +84,25 @@ type overlayHub struct {
 	proposed, merged, revoked, revokeOnLookup                     bool
 	refs, prs, writes                                             int
 	message                                                       string
+	beforeFiles, afterFiles, mergeOverrides                       map[string]string
 }
 
+func (h *overlayHub) files() map[string]string {
+	if h.beforeFiles != nil {
+		return h.beforeFiles
+	}
+	return map[string]string{"deploy/kustomization.yaml": h.before}
+}
+func overlayBlobID(content string) string {
+	sum := sha1.Sum([]byte(fmt.Sprintf("blob %d\x00%s", len(content), content)))
+	return fmt.Sprintf("%x", sum[:])
+}
 func (h *overlayHub) RoundTrip(r *http.Request) (*http.Response, error) {
 	h.t.Helper()
 	code := 200
 	var value any
 	endpoint := strings.TrimPrefix(r.URL.Path, "/repos/acme/install")
-	baseTree, newTree, commit, blob := strings.Repeat("c", 40), strings.Repeat("d", 40), strings.Repeat("e", 40), strings.Repeat("f", 40)
+	baseTree, newTree, commit := strings.Repeat("c", 40), strings.Repeat("d", 40), strings.Repeat("e", 40)
 	if r.Header.Get("Authorization") == "" {
 		h.t.Fatal("missing app token")
 	}
@@ -99,26 +116,62 @@ func (h *overlayHub) RoundTrip(r *http.Request) (*http.Response, error) {
 		} else {
 			value = map[string]any{"commit": map[string]any{"sha": h.branch}}
 		}
-	case endpoint == "/contents/deploy/kustomization.yaml":
-		content := h.before
+	case strings.HasPrefix(endpoint, "/contents/"):
+		file := strings.TrimPrefix(endpoint, "/contents/")
+		content, exists := h.files()[file]
 		if r.URL.Query().Get("ref") == strings.Repeat("9", 40) {
-			content = h.after
+			content, exists = h.afterFiles[file]
+			if altered, ok := h.mergeOverrides[file]; ok {
+				content = altered
+			}
 			if h.mergeContent != "" {
 				content = h.mergeContent
 			}
 		}
-		value = map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(content))}
+		if !exists {
+			code = 404
+			value = map[string]any{}
+		} else {
+			value = map[string]any{"type": "file", "content": base64.StdEncoding.EncodeToString([]byte(content)), "encoding": "base64"}
+		}
+
 	case endpoint == "/git/commits/"+h.base:
 		value = map[string]any{"tree": map[string]any{"sha": baseTree}}
 	case endpoint == "/git/trees/"+baseTree:
-		value = map[string]any{"tree": []any{map[string]string{"path": "deploy", "mode": "040000", "type": "tree", "sha": baseTree}, map[string]string{"path": "deploy/kustomization.yaml", "mode": "100644", "type": "blob", "sha": blob}}}
-	case endpoint == "/git/blobs/"+blob:
-		value = map[string]any{"encoding": "base64", "size": len(h.before), "content": base64.StdEncoding.EncodeToString([]byte(h.before))}
+		entries := []map[string]string{}
+		dirs := map[string]bool{}
+		for file, content := range h.files() {
+			for dir := path.Dir(file); dir != "."; dir = path.Dir(dir) {
+				if !dirs[dir] {
+					entries = append(entries, map[string]string{"path": dir, "mode": "040000", "type": "tree", "sha": strings.Repeat("1", 40)})
+					dirs[dir] = true
+				}
+			}
+			entries = append(entries, map[string]string{"path": file, "mode": "100644", "type": "blob", "sha": overlayBlobID(content)})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i]["path"] < entries[j]["path"] })
+		value = map[string]any{"truncated": false, "tree": entries}
+	case strings.HasPrefix(endpoint, "/git/blobs/"):
+		for _, content := range h.files() {
+			if strings.TrimPrefix(endpoint, "/git/blobs/") == overlayBlobID(content) {
+				value = map[string]any{"content": base64.StdEncoding.EncodeToString([]byte(content)), "size": len(content), "encoding": "base64"}
+			}
+		}
+		require.NotNil(h.t, value)
+
 	case endpoint == "/git/trees" && r.Method == "POST":
-		var body struct{ Tree []struct{ Content string } }
+		var body struct {
+			Tree []struct{ Path, Content string }
+		}
 		require.NoError(h.t, json.NewDecoder(r.Body).Decode(&body))
-		require.Len(h.t, body.Tree, 1)
-		h.after = body.Tree[0].Content
+		require.Len(h.t, body.Tree, len(h.files()))
+		h.afterFiles = map[string]string{}
+		for _, file := range body.Tree {
+			_, ok := h.files()[file.Path]
+			require.True(h.t, ok)
+			h.afterFiles[file.Path] = file.Content
+		}
+		h.after = h.afterFiles["deploy/kustomization.yaml"]
 		value = map[string]string{"sha": newTree}
 	case endpoint == "/git/commits" && r.Method == "POST":
 		var body struct{ Message string }

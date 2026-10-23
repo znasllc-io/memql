@@ -1,0 +1,27 @@
+// Private native source graph ports. Arguments select already bound captures;
+// repositories, commits, credentials and proof bytes are never caller inputs.
+
+/// Discover only dependencies named by this application's verified root.
+@executor("integration.installation.installationSourceRequirements")
+@args(profile="object")
+builtin installationSourceRequirements { application string role string! }
+
+/// Acquire or recover one exact dependency of the selected root.
+@executor("integration.installation.installationCaptureDependency")
+@args(profile="object")
+builtin installationCaptureDependency { application string role string! key string! }
+
+/// Reopen the private dependency archive and verify its committed inputs.
+@executor("integration.installation.installationVerifyDependency")
+@args(profile="object")
+builtin installationVerifyDependency { application string role string! key string! }
+
+/// Acknowledge the exact dependency Job after durable fragment verification.
+@executor("integration.installation.installationAcknowledgeDependency")
+@args(profile="object")
+builtin installationAcknowledgeDependency { application string role string! key string! }
+
+/// Reopen every source fragment and bind the complete immutable graph.
+@executor("integration.installation.installationVerifySourceGraph")
+@args(profile="object")
+builtin installationVerifySourceGraph { application string role string! }

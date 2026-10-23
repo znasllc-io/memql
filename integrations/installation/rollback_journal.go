@@ -14,20 +14,34 @@ import (
 // rollbackPlan is the durable result of native rollback admission, never a
 // request or a proof supplied by DSL. These digests name fresh verifier results;
 // the scoped host must obtain those actual results before reserving this plan.
+type rollbackApplication struct {
+	BaselineFence bool          `json:"baselineFence,omitempty"`
+	Key           string        `json:"key"`
+	Intent        argocd.Intent `json:"intent"`
+}
+type rollbackApplicationState struct {
+	BaselineFence bool
+	Intent        argocd.Intent
+	Started       bool
+}
 type rollbackPlan struct {
-	ParentID            string        `json:"parentId"`
-	RequestedBy         string        `json:"requestedBy"`
-	WorkflowDigest      string        `json:"workflowDigest"`
-	ConfigurationDigest string        `json:"configurationDigest"`
-	ArtifactDigest      string        `json:"artifactDigest"`
-	StorageDigest       string        `json:"storageDigest"`
-	SensitiveDigest     string        `json:"sensitiveDigest"`
-	ObservedAt          string        `json:"observedAt"`
-	ArtifactExpiresAt   string        `json:"artifactExpiresAt"`
-	Intent              argocd.Intent `json:"intent"`
+	BaselineFence       bool                  `json:"baselineFence,omitempty"`
+	FormatVersion       int                   `json:"formatVersion,omitempty"`
+	Applications        []rollbackApplication `json:"applications,omitempty"`
+	ParentID            string                `json:"parentId"`
+	RequestedBy         string                `json:"requestedBy"`
+	WorkflowDigest      string                `json:"workflowDigest"`
+	ConfigurationDigest string                `json:"configurationDigest"`
+	ArtifactDigest      string                `json:"artifactDigest"`
+	StorageDigest       string                `json:"storageDigest"`
+	SensitiveDigest     string                `json:"sensitiveDigest"`
+	ObservedAt          string                `json:"observedAt"`
+	ArtifactExpiresAt   string                `json:"artifactExpiresAt"`
+	Intent              argocd.Intent         `json:"intent"`
 }
 
 type rollbackRecord struct {
+	Applications       map[string]applicationObservation
 	ID                 string
 	Plan               rollbackPlan
 	Started            bool
@@ -49,8 +63,49 @@ func (p rollbackPlan) canonical(parent revisionRecord) ([]byte, string, error) {
 	if err != nil || expiryErr != nil || observed.IsZero() || !expires.After(observed) {
 		return nil, "", errors.New("rollback evidence has invalid observation times")
 	}
-	if err := argocd.ValidateRollback(parent.Plan.Intent, p.Intent); err != nil {
-		return nil, "", err
+	if parent.Plan.FormatVersion == 2 {
+		if p.FormatVersion != 2 || p.BaselineFence {
+			return nil, "", errors.New("group rollback requires exact group membership")
+		}
+		expected := []preparedApplication{}
+		for _, app := range parent.Plan.Applications {
+			if parent.Applications[app.Key].Started {
+				expected = append(expected, app)
+			}
+		}
+		if len(expected) != len(p.Applications) {
+			return nil, "", errors.New("group rollback omits a started application")
+		}
+		for i, app := range p.Applications {
+			if app.Key != expected[i].Key {
+				return nil, "", errors.New("rollback application set changed")
+			}
+			if app.BaselineFence {
+				if err := argocd.ValidateUnappliedRollback(expected[i].Intent, app.Intent); err != nil {
+					return nil, "", err
+				}
+			} else if err := argocd.ValidateRollback(expected[i].Intent, app.Intent); err != nil {
+				return nil, "", err
+			}
+		}
+		if len(p.Applications) > 0 {
+			if !sameJSON(p.Intent, p.Applications[0].Intent) {
+				return nil, "", errors.New("rollback root differs from complete group")
+			}
+		} else if !sameJSON(p.Intent, argocd.Intent{}) {
+			return nil, "", errors.New("empty reversal cannot have an intent")
+		}
+	} else {
+		if p.FormatVersion != 0 || len(p.Applications) != 0 {
+			return nil, "", errors.New("legacy reversal cannot contain a group")
+		}
+		if p.BaselineFence {
+			if err := argocd.ValidateUnappliedRollback(parent.Plan.Intent, p.Intent); err != nil {
+				return nil, "", err
+			}
+		} else if err := argocd.ValidateRollback(parent.Plan.Intent, p.Intent); err != nil {
+			return nil, "", err
+		}
 	}
 	body, err := json.Marshal(p)
 	if err != nil || len(body) > maxPlanBytes {
@@ -77,17 +132,17 @@ func (p rollbackPlan) fresh() error {
 // Historical observations are data, never authority to release that head.
 func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*rollbackRecord, error) {
 	var r rollbackRecord
-	var body, observation []byte
+	var body, observation, members []byte
 	var started sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT rollback_id,plan,started_at,observation_version,observation FROM installation_revision_rollbacks WHERE parent_plan_id=$1 FOR UPDATE`, parent.ID).
-		Scan(&r.ID, &body, &started, &r.ObservationVersion, &observation)
+	err := tx.QueryRowContext(ctx, `SELECT rollback_id,plan,started_at,observation_version,observation,application_observations FROM installation_revision_rollbacks WHERE parent_plan_id=$1 FOR UPDATE`, parent.ID).
+		Scan(&r.ID, &body, &started, &r.ObservationVersion, &observation, &members)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if parent.State != "applying" || len(body) > maxPlanBytes || json.Unmarshal(body, &r.Plan) != nil {
+	if (!parent.rollbackActive() && parent.State != "rolled_back") || len(body) > maxPlanBytes || json.Unmarshal(body, &r.Plan) != nil {
 		return nil, errors.New("installation rollback journal is inconsistent")
 	}
 	expected, key, err := r.Plan.canonical(parent)
@@ -112,6 +167,10 @@ func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*roll
 		}
 		r.Observation = &facts
 	}
+	r.Applications, err = decodeRollbackObservations(members, r.Plan, parent.Plan)
+	if err != nil {
+		return nil, err
+	}
 	return &r, nil
 }
 
@@ -120,7 +179,7 @@ func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*roll
 // not-yet-started rollback fences the forward workflow permanently.
 func (j *revisionJournal) reserveRollback(ctx context.Context, installation, key string, plan rollbackPlan) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, parent *revisionRecord, actor string) error {
-		if parent.State != "applying" || actor != parent.Plan.RequestedBy {
+		if !parent.rollbackActive() || actor != parent.Plan.RequestedBy {
 			return errors.New("rollback requires the active installation's requester")
 		}
 		body, rollbackID, err := plan.canonical(*parent)
@@ -144,7 +203,7 @@ func (j *revisionJournal) reserveRollback(ctx context.Context, installation, key
 func (j *revisionJournal) beginRollback(ctx context.Context, installation, key, workflow string) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, parent *revisionRecord, actor string) error {
 		r := parent.Rollback
-		if parent.State != "applying" || r == nil || actor != r.Plan.RequestedBy || workflow != r.Plan.WorkflowDigest {
+		if !parent.rollbackActive() || r == nil || actor != r.Plan.RequestedBy || workflow != r.Plan.WorkflowDigest {
 			return errors.New("rollback authority or installed recipe changed")
 		}
 		if r.Started {
@@ -163,7 +222,7 @@ func (j *revisionJournal) beginRollback(ctx context.Context, installation, key, 
 func (j *revisionJournal) observeRollback(ctx context.Context, installation, key string, version int64, facts argocd.Facts) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, parent *revisionRecord, _ string) error {
 		r := parent.Rollback
-		if parent.State != "applying" || r == nil || !r.Started || r.ObservationVersion != version {
+		if !parent.rollbackActive() || r == nil || !r.Started || r.ObservationVersion != version {
 			return errChanged
 		}
 		body, err := json.Marshal(facts)

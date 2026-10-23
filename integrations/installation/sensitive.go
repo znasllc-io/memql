@@ -36,12 +36,12 @@ func (e sensitiveEvidence) String() string {
 
 func (e sensitiveEvidence) GoString() string { return e.String() }
 
-func verifySensitivePreservation(ctx context.Context, api argocd.API, before, after argocd.RenderedRevision, required []resourceIdentity) (sensitiveEvidence, error) {
+func verifySensitivePreservation(ctx context.Context, api argocd.API, before, after argocd.RenderInventory, required []resourceIdentity) (sensitiveEvidence, error) {
 	observed := time.Now().UTC()
-	if api == nil || before.Digest() == "" || after.Digest() == "" || len(required) == 0 || len(required) > 128 {
+	if api == nil || !validRenderInventory(before) || !validRenderInventory(after) || len(required) == 0 || len(required) > 128 {
 		return sensitiveEvidence{}, errors.New("protected resource verification requires native renders, configured resources and cluster reads")
 	}
-	if err := sameRenderScope(before.Spec(), after.Spec()); err != nil {
+	if err := sameRenderInventoryScope(before, after); err != nil {
 		return sensitiveEvidence{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)

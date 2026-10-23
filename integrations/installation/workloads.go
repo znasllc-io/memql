@@ -47,9 +47,9 @@ func (workloadEvidence) GoString() string    { return "<installation workload ev
 
 // require binds the opaque result at its point of use. The completion host
 // must still require the owned Argo intent and its other independent proofs.
-func (e workloadEvidence) require(rendered argocd.RenderedRevision, artifacts artifactEvidence, workflow, operator string) error {
+func (e workloadEvidence) require(rendered argocd.RenderInventory, artifacts artifactEvidence, workflow, operator string) error {
 	now := time.Now().UTC()
-	if !internalDigest.MatchString(e.digest) || !internalDigest.MatchString(e.scope) ||
+	if !validRenderInventory(rendered) || !internalDigest.MatchString(e.digest) || !internalDigest.MatchString(e.scope) ||
 		!internalDigest.MatchString(workflow) || !identifier.MatchString(operator) ||
 		e.render != rendered.Digest() || e.artifacts != artifacts.digest ||
 		e.configuration != artifacts.configuration || e.platform != artifacts.platform ||
@@ -60,9 +60,9 @@ func (e workloadEvidence) require(rendered argocd.RenderedRevision, artifacts ar
 	return nil
 }
 
-func newWorkloadAdmission(ctx context.Context, api argocd.API, rendered argocd.RenderedRevision, artifacts artifactEvidence) (*workloadAdmission, error) {
+func newWorkloadAdmission(ctx context.Context, api argocd.API, rendered argocd.RenderInventory, artifacts artifactEvidence) (*workloadAdmission, error) {
 	now := time.Now().UTC()
-	if api == nil || rendered.Digest() == "" ||
+	if api == nil || !validRenderInventory(rendered) ||
 		(rendered.Digest() != artifacts.before && rendered.Digest() != artifacts.after) ||
 		!internalDigest.MatchString(artifacts.digest) || !internalDigest.MatchString(artifacts.configuration) ||
 		!internalDigest.MatchString(artifacts.workflow) || !identifier.MatchString(artifacts.operator) ||

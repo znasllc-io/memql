@@ -34,7 +34,7 @@ func (j *preparationJournal) stopRetiringProducer(ctx context.Context, installat
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err = executor.Cancel(ctx, r.Scope.Captures["candidate"].RunID); err != nil {
+	if err = executor.Cancel(ctx, preparationSourceRun(r.Scope.InstallationID, r.Scope.RequestID, r.Scope.RequestedBy)); err != nil {
 		return preparationRecord{}, errors.New("source producer cleanup remains unconfirmed")
 	}
 	return j.withRetirement(ctx, installation, key, workflow, cleanupWorkflow, func(r *preparationRecord) error {
@@ -48,6 +48,10 @@ func (j *preparationJournal) fenceRetiringCapture(ctx context.Context, installat
 	if err != nil {
 		return preparationRecord{}, err
 	}
+	spec, err := preparationCaptureSpec(r, role)
+	if err != nil {
+		return preparationRecord{}, err
+	}
 	c, found := r.Retirement.Captures[role]
 	if !found || !r.Retirement.ProducerStopped || files == nil {
 		return preparationRecord{}, errors.New("artifact fence requires a stopped scoped producer")
@@ -57,7 +61,7 @@ func (j *preparationJournal) fenceRetiringCapture(ctx context.Context, installat
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err = files.FenceRunFileScope(ctx, retirementArtifactScope(r.Scope.Captures[role])); err != nil {
+	if err = files.FenceRunFileScope(ctx, retirementArtifactScope(spec)); err != nil {
 		return preparationRecord{}, errors.New("artifact producer fence remains unconfirmed")
 	}
 	return j.withRetirement(ctx, installation, key, workflow, cleanupWorkflow, func(r *preparationRecord) error {
@@ -73,6 +77,10 @@ func (j *preparationJournal) releaseRetiringCapturePins(ctx context.Context, ins
 	if err != nil {
 		return preparationRecord{}, err
 	}
+	spec, err := preparationCaptureSpec(r, role)
+	if err != nil {
+		return preparationRecord{}, err
+	}
 	c, found := r.Retirement.Captures[role]
 	if !found || !c.Fenced || files == nil {
 		return preparationRecord{}, errors.New("source reference release requires its producer fence")
@@ -85,7 +93,7 @@ func (j *preparationJournal) releaseRetiringCapturePins(ctx context.Context, ins
 	// consumer could have been admitted. A present receipt closes that exact
 	// consumer permanently, including any verifier still in flight.
 	if receipt := r.Captures[role].Receipt; receipt != nil {
-		capture, err := newSourceCapture(r.Scope.Captures[role])
+		capture, err := newSourceCapture(spec)
 		if err != nil {
 			return preparationRecord{}, err
 		}
@@ -112,6 +120,10 @@ func (j *preparationJournal) nextRetiringArtifacts(ctx context.Context, installa
 	if err != nil {
 		return preparationRecord{}, err
 	}
+	spec, err := preparationCaptureSpec(r, role)
+	if err != nil {
+		return preparationRecord{}, err
+	}
 	previous, found := r.Retirement.Captures[role]
 	if !found || !previous.PinsReleased || files == nil {
 		return preparationRecord{}, errors.New("artifact inventory requires a released scoped consumer")
@@ -130,7 +142,7 @@ func (j *preparationJournal) nextRetiringArtifacts(ctx context.Context, installa
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	ids, err := files.ReadFencedRunFileIntents(ctx, retirementArtifactScope(r.Scope.Captures[role]), cursor)
+	ids, err := files.ReadFencedRunFileIntents(ctx, retirementArtifactScope(spec), cursor)
 	if err != nil {
 		return preparationRecord{}, errors.New("artifact inventory remains unconfirmed")
 	}
@@ -162,6 +174,10 @@ func (j *preparationJournal) retireCaptureArtifact(ctx context.Context, installa
 	if err != nil {
 		return preparationRecord{}, err
 	}
+	spec, err := preparationCaptureSpec(r, role)
+	if err != nil {
+		return preparationRecord{}, err
+	}
 	c, found := r.Retirement.Captures[role]
 	if !found || !c.PinsReleased || files == nil {
 		return preparationRecord{}, errors.New("artifact retirement requires its scoped consumer release")
@@ -180,7 +196,7 @@ func (j *preparationJournal) retireCaptureArtifact(ctx context.Context, installa
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	receipt, err := files.RetireRunFile(ctx, retirementArtifactScope(r.Scope.Captures[role]), intentID)
+	receipt, err := files.RetireRunFile(ctx, retirementArtifactScope(spec), intentID)
 	if err != nil {
 		return preparationRecord{}, errors.New("artifact provider retirement remains unconfirmed")
 	}

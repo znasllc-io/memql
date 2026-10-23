@@ -1,9 +1,7 @@
 package release
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -11,7 +9,7 @@ import (
 )
 
 func overlayMap(n *yaml.Node) (map[string]*yaml.Node, error) {
-	if n.Kind != yaml.MappingNode {
+	if n.Kind != yaml.MappingNode || len(n.Content)%2 != 0 {
 		return nil, errors.New("installation overlay requires YAML mappings")
 	}
 	out := map[string]*yaml.Node{}
@@ -27,6 +25,9 @@ func overlayMap(n *yaml.Node) (map[string]*yaml.Node, error) {
 func overlayNodes(n *yaml.Node) error {
 	if n.Kind == yaml.AliasNode || n.Anchor != "" {
 		return errors.New("installation overlay aliases and anchors are unsupported")
+	}
+	if n.Tag != "" && !strings.HasPrefix(n.Tag, "!!") {
+		return errors.New("installation overlay custom YAML tags are unsupported")
 	}
 	if n.Kind == yaml.MappingNode {
 		if _, err := overlayMap(n); err != nil {
@@ -62,23 +63,12 @@ func removeOverlayScalar(n *yaml.Node, key string) {
 // published artifact, and the later installation independently verifies the
 // entire rendered diff and actual bytes, including unchanged infrastructure.
 func pinInstallationImages(before []byte, bindings []overlayImage, verified pipelines.VerifiedPublishedRelease) ([]byte, error) {
-	if len(before) == 0 || len(before) > 1<<20 {
-		return nil, errors.New("installation overlay file is empty or too large")
-	}
-	var doc yaml.Node
-	decoder := yaml.NewDecoder(bytes.NewReader(before))
-	if decoder.Decode(&doc) != nil || decoder.Decode(new(yaml.Node)) != io.EOF || len(doc.Content) != 1 {
-		return nil, errors.New("installation overlay requires one valid YAML document")
-	}
-	if err := overlayNodes(&doc); err != nil {
-		return nil, err
-	}
-	root, err := overlayMap(doc.Content[0])
+	document, root, err := readOverlayKustomization(before)
 	if err != nil {
 		return nil, err
 	}
-	if root["kind"] == nil || root["kind"].Value != "Kustomization" || root["images"] == nil || root["images"].Kind != yaml.SequenceNode {
-		return nil, errors.New("installation overlay requires an explicit Kustomization image list")
+	if root["images"] == nil || root["images"].Kind != yaml.SequenceNode {
+		return nil, errors.New("installation overlay must be a Kustomization with explicit image slots")
 	}
 	release, err := verified.Release()
 	if err != nil {
@@ -117,7 +107,7 @@ func pinInstallationImages(before []byte, bindings []overlayImage, verified pipe
 			return nil, err
 		}
 		name := fields["name"]
-		if name == nil || name.Kind != yaml.ScalarNode || seen[name.Value] {
+		if name == nil || name.Kind != yaml.ScalarNode || name.Tag != "!!str" || name.Value == "" || seen[name.Value] {
 			return nil, errors.New("installation image slot is missing or duplicated")
 		}
 		seen[name.Value] = true
@@ -129,6 +119,12 @@ func pinInstallationImages(before []byte, bindings []overlayImage, verified pipe
 			if field != "name" && field != "newName" && field != "newTag" && field != "digest" {
 				return nil, errors.New("installation image slot has unsupported fields")
 			}
+			// Kustomize accepts an unquoted numeric tag (for example 16). It
+			// is removed, never interpreted as code or carried into the output.
+			literalTag := field == "newTag" && fields[field].Tag == "!!int"
+			if fields[field].Kind != yaml.ScalarNode || (fields[field].Tag != "!!str" && !literalTag) {
+				return nil, errors.New("installation image slot values must be literal strings")
+			}
 		}
 		setOverlayScalar(item, "newName", replacement.repository)
 		setOverlayScalar(item, "digest", replacement.digest)
@@ -139,17 +135,5 @@ func pinInstallationImages(before []byte, bindings []overlayImage, verified pipe
 			return nil, errors.New("installation overlay is missing a configured image slot")
 		}
 	}
-	var out bytes.Buffer
-	encoder := yaml.NewEncoder(&out)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(&doc); err != nil {
-		return nil, err
-	}
-	if err := encoder.Close(); err != nil {
-		return nil, err
-	}
-	if out.Len() > 1<<20 {
-		return nil, errors.New("installation overlay exceeds its file bound")
-	}
-	return out.Bytes(), nil
+	return writeOverlayKustomization(document)
 }

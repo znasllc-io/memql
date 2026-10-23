@@ -101,7 +101,7 @@ func (i *Integration) handleInstallationStatus(ctx context.Context, _ map[string
 // discovery. A missing grant, broken proposal policy or slow provider cannot
 // turn a saved preparation or plan into an unavailable installation.
 func (i *Integration) installationStatusView(ctx context.Context, status installation.SelectionStatus) map[string]any {
-	out := map[string]any{"installationId": status.InstallationID, "currentRevision": status.CurrentRevision, "choices": []installationChoice{}, "active": status.Active, "latest": status.Latest, "preparation": status.Preparation}
+	out := map[string]any{"installationId": status.InstallationID, "currentRevision": status.CurrentRevision, "applications": status.Applications, "choices": []installationChoice{}, "active": status.Active, "latest": status.Latest, "preparation": status.Preparation}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	_, cfg, err := i.selectedInstallation(ctx)
@@ -182,6 +182,18 @@ func (i *Integration) handleInstallationObserve(ctx context.Context, args map[st
 		return nil, err
 	}
 	result, err := p.ObserveSelected(ctx, asString(args["installationId"]), asString(args["planId"]))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode("installation", result.PlanID, result)
+}
+
+func (i *Integration) handleInstallationRollback(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	p, err := i.receivingSelection(ctx, asString(args["installationId"]))
+	if err != nil {
+		return nil, err
+	}
+	result, err := p.RollbackSelected(ctx, asString(args["installationId"]), asString(args["planId"]))
 	if err != nil {
 		return nil, err
 	}

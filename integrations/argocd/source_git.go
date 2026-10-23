@@ -39,10 +39,13 @@ type SourceFile struct {
 	Mode          string `json:"mode"`
 	Blob          string `json:"blob"`
 	ContentDigest string `json:"contentDigest"`
+	Repository    string `json:"repository,omitempty"`
+	Revision      string `json:"revision,omitempty"`
 }
 
-// ClosedSource proves the supported Kustomize file closure against one exact
-// Git commit. It does not authenticate the publisher, renderer or installation
+// ClosedSource proves the supported Kustomize file closure against exact Git
+// commits, including every admitted repository edge when composed. It does
+// not authenticate the publisher, renderer or installation
 // configuration, nor approve the resource diff. Those remain separate gates.
 // No file contents, commit message or credentials escape in its projection.
 type ClosedSource struct {
@@ -77,6 +80,8 @@ type sourceVerifier struct {
 	settings   int
 	attributes map[string]bool
 	verified   func(string, string, []byte) error
+	fragment   *SourceFragmentSpec
+	edges      []SourceEdge
 }
 
 // VerifySourceClosure follows file reads, not workflow policy. It verifies the
@@ -88,65 +93,81 @@ func VerifySourceClosure(ctx context.Context, objects GitObjects, spec RenderSpe
 }
 
 func verifySourceClosure(ctx context.Context, objects GitObjects, spec RenderSpec, verified func(string, string, []byte) error) (ClosedSource, error) {
+	inputs, err := verifySourceInputs(ctx, objects, spec, verified, nil)
+	if err != nil {
+		return ClosedSource{}, err
+	}
+	body, err := json.Marshal(struct {
+		Spec  json.RawMessage `json:"spec"`
+		Files []SourceFile    `json:"files"`
+	}{inputs.spec, inputs.files})
+	if err != nil {
+		return ClosedSource{}, errors.New("Git source evidence could not be encoded")
+	}
+	digest := "memql-id:" + string(id.NewUntracked().FromString("memql-argocd-closed-source-v1\n"+string(body)))
+	return ClosedSource{spec: inputs.spec, files: inputs.files, digest: digest}, nil
+}
+
+type sourceInputs struct {
+	spec                     []byte
+	files                    []SourceFile
+	edges                    []SourceEdge
+	bytes, objects, settings int
+}
+
+func verifySourceInputs(ctx context.Context, objects GitObjects, spec RenderSpec, verified func(string, string, []byte) error, fragment *SourceFragmentSpec) (sourceInputs, error) {
 	if objects == nil {
-		return ClosedSource{}, errors.New("Git source objects are unavailable")
+		return sourceInputs{}, errors.New("Git source objects are unavailable")
 	}
 	request, specBody, err := renderRequest(spec, RepositoryCredentials{})
 	if err != nil {
-		return ClosedSource{}, err
+		return sourceInputs{}, err
 	}
 	if _, err := sourcePath(".", request.ApplicationSource.Path); err != nil {
-		return ClosedSource{}, err
+		return sourceInputs{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	v := &sourceVerifier{ctx: ctx, objects: objects, bodies: map[string][]byte{}, trees: map[string]map[string]gitEntry{}, files: map[string]SourceFile{}, visiting: map[string]bool{}, visited: map[string]bool{}, attributes: map[string]bool{}, verified: verified}
+	v := &sourceVerifier{ctx: ctx, objects: objects, bodies: map[string][]byte{}, trees: map[string]map[string]gitEntry{}, files: map[string]SourceFile{}, visiting: map[string]bool{}, visited: map[string]bool{}, attributes: map[string]bool{}, verified: verified, fragment: fragment}
 	commit, err := v.read("commit", request.Revision)
 	if err != nil {
-		return ClosedSource{}, err
+		return sourceInputs{}, err
 	}
 	line, _, ok := bytes.Cut(commit, []byte{'\n'})
 	if !ok || len(line) != 45 || !bytes.HasPrefix(line, []byte("tree ")) || !commitSHA.Match(line[5:]) {
-		return ClosedSource{}, errors.New("Git commit does not name one canonical tree")
+		return sourceInputs{}, errors.New("Git commit does not name one canonical tree")
 	}
 	v.root = string(line[5:])
 	if _, found, err := v.lookup(".gitmodules"); err != nil {
-		return ClosedSource{}, err
+		return sourceInputs{}, err
 	} else if found {
-		return ClosedSource{}, errors.New("Git submodule configuration is not a closed installation source")
+		return sourceInputs{}, errors.New("Git submodule configuration is not a closed installation source")
 	}
 	// Argo merges these files before selecting a renderer. Until that separate
 	// source-override codec is qualified, refuse rather than overlooking it.
 	for _, name := range []string{".argocd-source.yaml", ".argocd-source-" + request.AppName + ".yaml"} {
 		p, err := sourcePath(request.ApplicationSource.Path, name)
 		if err != nil {
-			return ClosedSource{}, err
+			return sourceInputs{}, err
 		}
 		_, found, err := v.lookup(p)
 		if err != nil {
-			return ClosedSource{}, err
+			return sourceInputs{}, err
 		}
 		if found {
-			return ClosedSource{}, errors.New("ArgoCD source parameter files must be moved into the reviewed overlay")
+			return sourceInputs{}, errors.New("ArgoCD source parameter files must be moved into the reviewed overlay")
 		}
 	}
-	if err := v.kustomization(request.ApplicationSource.Path, false); err != nil {
-		return ClosedSource{}, err
+	component := fragment != nil && fragment.Component
+	if err := v.kustomization(request.ApplicationSource.Path, component); err != nil {
+		return sourceInputs{}, err
 	}
 	files := make([]SourceFile, 0, len(v.files))
 	for _, file := range v.files {
 		files = append(files, file)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	body, err := json.Marshal(struct {
-		Spec  json.RawMessage `json:"spec"`
-		Files []SourceFile    `json:"files"`
-	}{specBody, files})
-	if err != nil {
-		return ClosedSource{}, errors.New("Git source evidence could not be encoded")
-	}
-	digest := "memql-id:" + string(id.NewUntracked().FromString("memql-argocd-closed-source-v1\n"+string(body)))
-	return ClosedSource{spec: specBody, files: files, digest: digest}, nil
+	return sourceInputs{spec: specBody, files: files, edges: v.edges, bytes: v.bytes, objects: len(v.bodies), settings: v.settings}, nil
 }
 
 func (v *sourceVerifier) read(kind, oid string) ([]byte, error) {

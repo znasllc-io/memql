@@ -120,6 +120,9 @@ func (p *protectedOwners) observe(ctx context.Context, child resourceIdentity, m
 // known Secret/Namespace defaults, undeclared live controller defaults refuse
 // until a qualified codec describes them; silently ignoring them is unsafe.
 func protectedOwnerMatchesLive(desired, live map[string]any) bool {
+	if resourceText(desired, "apiVersion") != resourceText(live, "apiVersion") || resourceText(desired, "kind") != resourceText(live, "kind") {
+		return false
+	}
 	if resourceText(desired, "kind") == "Secret" {
 		a, ea := secretValue(desired)
 		b, eb := secretValue(live)
@@ -127,21 +130,9 @@ func protectedOwnerMatchesLive(desired, live map[string]any) bool {
 			return false
 		}
 	} else {
-		material := func(value map[string]any) map[string]any {
-			out := map[string]any{}
-			for field, content := range value {
-				if field != "apiVersion" && field != "kind" && field != "metadata" && field != "status" {
-					out[field] = content
-				}
-			}
-			if resourceText(value, "kind") == "Namespace" {
-				if spec := resourceMap(value, "spec"); len(spec) == 0 {
-					out["spec"] = map[string]any{"finalizers": []any{"kubernetes"}}
-				}
-			}
-			return out
-		}
-		if !sameJSON(material(desired), material(live)) {
+		a, ea := protectedOwnerMaterial(desired)
+		b, eb := protectedOwnerMaterial(live)
+		if ea != nil || eb != nil || !sameJSON(a, b) {
 			return false
 		}
 	}

@@ -31,6 +31,7 @@ type preparationRequest struct {
 type preparationHost struct {
 	health                       HealthProbe
 	completion                   *workflowhost.Snapshot
+	rollback                     *workflowhost.Snapshot
 	api                          argocd.API
 	journal                      *preparationJournal
 	executor                     sourceCaptureExecutor
@@ -76,11 +77,19 @@ func (h *preparationHost) bindWorkflowNames(engineRevision string, names Workflo
 	if err != nil {
 		return err
 	}
+	h.revisions.snapshot, err = workflowhost.Capture(names.Revision, revisionContract, nil, (&revisionWorkflowScope{}).operations())
+	if err != nil {
+		return err
+	}
+	h.rollback, err = workflowhost.Capture(names.Rollback, rollbackContract, nil, (&rollbackWorkflowScope{revision: &revisionWorkflowScope{}}).operations())
+	if err != nil {
+		return err
+	}
 	h.completion, err = workflowhost.Capture(names.Completion, completionContract, nil, (&completionScope{revision: &revisionWorkflowScope{}}).operations())
 	if err != nil {
 		return err
 	}
-	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest, h.revisions.digest, h.completion.Version})
+	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest, h.revisions.digest, h.completion.Version, h.revisions.snapshot.Version, h.rollback.Version})
 	return nil
 }
 
@@ -179,10 +188,16 @@ type preparationWorkflowScope struct {
 
 func (s *preparationWorkflowScope) operations() map[string]workflowhost.Operation {
 	operations := map[string]workflowhost.Operation{
+		"installationApplications":           s.applications,
 		"installationResolvePublications":    s.resolve,
 		"installationCheckCompatibility":     s.compatibility,
 		"installationReservePreparation":     s.reserve,
 		"installationCaptureSource":          s.capture,
+		"installationSourceRequirements":     s.sourceRequirementsOperation,
+		"installationCaptureDependency":      s.captureDependency,
+		"installationVerifyDependency":       s.verifyDependency,
+		"installationAcknowledgeDependency":  s.acknowledgeDependency,
+		"installationVerifySourceGraph":      s.verifyGraph,
 		"installationVerifySource":           s.verify,
 		"installationAcknowledgeSource":      s.acknowledge,
 		"installationRenderSource":           s.render,
@@ -269,35 +284,51 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	cfg := s.configuration.configuration
 	started := time.Now().UTC().Format(time.RFC3339Nano)
 	if s.record.ID != "" {
-		started = s.record.Scope.Captures["candidate"].RunStartedAt
+		for _, capture := range s.record.Scope.Captures {
+			started = capture.RunStartedAt
+			break
+		}
 	}
-	intent, err := argocd.PlanRevision(s.configuration.application, s.request.RequestID, s.request.OverlayRevision, s.request.Prune)
-	if err != nil {
-		return nil, err
-	}
-	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
+	scope := preparationScope{FormatVersion: cfg.FormatVersion, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Captures: map[string]sourceCaptureSpec{}}
 	run := preparationSourceRun(cfg.InstallationID, s.request.RequestID, s.operator)
-	for _, role := range []string{"candidate", "rollback"} {
-		render := s.configuration.render
-		var source map[string]any
-		if json.Unmarshal(render.Source, &source) != nil {
-			return nil, errors.New("installation source is malformed")
+	for n, app := range s.configuration.applicationMembers() {
+		intent, err := argocd.PlanRevision(app.application, s.request.RequestID, s.request.OverlayRevision, s.request.Prune)
+		if err != nil {
+			return nil, err
 		}
-		if role == "candidate" {
-			source["targetRevision"] = s.request.OverlayRevision
+		if n == 0 {
+			scope.Intent = intent
 		}
-		render.Source, _ = json.Marshal(source)
-		repository := resourceText(source, "repoURL")
-		parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(repository, "https://github.com/"), ".git"), "/")
-		if len(parts) != 2 {
-			return nil, errors.New("installation capture requires a canonical GitHub repository")
+		if cfg.FormatVersion == 2 {
+			scope.Applications = append(scope.Applications, preparationApplication{app.key, intent})
 		}
-		spec := sourceCaptureSpec{OwnerUserID: s.operator, RunID: run, WorkRunID: run, StepKey: "source-" + role, Attempt: 1, RunStartedAt: started, Repository: pipelines.Repository{Owner: parts[0], Name: parts[1], CloneURL: repository}, CloneInstallationID: cfg.Collector.CloneInstallationID, CollectorImage: cfg.Collector.Image, Platform: cfg.Platform, Render: render}
-		if cfg.Collector.PullCredential != nil {
-			spec.ImagePullSecret = "INSTALLATION_PULL_CREDENTIAL"
+		for _, role := range []string{"candidate", "rollback"} {
+			render := app.render
+			var source map[string]any
+			if json.Unmarshal(render.Source, &source) != nil {
+				return nil, errors.New("installation source is malformed")
+			}
+			if role == "candidate" {
+				source["targetRevision"] = s.request.OverlayRevision
+			}
+			render.Source, _ = json.Marshal(source)
+			repository := resourceText(source, "repoURL")
+			parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(repository, "https://github.com/"), ".git"), "/")
+			if len(parts) != 2 {
+				return nil, errors.New("installation capture requires a canonical GitHub repository")
+			}
+			key := applicationCaptureKey(app.key, role)
+			spec := sourceCaptureSpec{OwnerUserID: s.operator, RunID: run, WorkRunID: run, StepKey: "source-" + key, Attempt: 1, RunStartedAt: started, Repository: pipelines.Repository{Owner: parts[0], Name: parts[1], CloneURL: repository}, CloneInstallationID: cfg.Collector.CloneInstallationID, CollectorImage: cfg.Collector.Image, Platform: cfg.Platform, Render: render}
+			if len(cfg.SourceRepositories) != 0 {
+				spec.Fragment = &argocd.SourceFragmentSpec{Render: render, AllowedDependencies: cfg.SourceRepositories}
+			}
+			if cfg.Collector.PullCredential != nil {
+				spec.ImagePullSecret = "INSTALLATION_PULL_CREDENTIAL"
+			}
+			scope.Captures[key] = spec
 		}
-		scope.Captures[role] = spec
 	}
+
 	record, err := s.host.journal.reserve(ctx, scope)
 	if err == nil {
 		s.record = record
@@ -305,7 +336,7 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	return nil, err
 }
 func (s *preparationWorkflowScope) capture(ctx context.Context, args map[string]any) (any, error) {
-	role, err := preparationRole(args)
+	role, err := s.record.Scope.sourceKey(args)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +347,7 @@ func (s *preparationWorkflowScope) capture(ctx context.Context, args map[string]
 	return nil, err
 }
 func (s *preparationWorkflowScope) verify(ctx context.Context, args map[string]any) (any, error) {
-	role, err := preparationRole(args)
+	role, err := s.record.Scope.sourceKey(args)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +360,7 @@ func (s *preparationWorkflowScope) verify(ctx context.Context, args map[string]a
 	return nil, nil
 }
 func (s *preparationWorkflowScope) acknowledge(ctx context.Context, args map[string]any) (any, error) {
-	role, err := preparationRole(args)
+	role, err := s.record.Scope.sourceKey(args)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +371,7 @@ func (s *preparationWorkflowScope) acknowledge(ctx context.Context, args map[str
 	return nil, err
 }
 func (s *preparationWorkflowScope) render(ctx context.Context, args map[string]any) (any, error) {
-	role, err := preparationRole(args)
+	role, err := s.record.Scope.sourceKey(args)
 	if err != nil {
 		return nil, err
 	}
@@ -374,11 +405,11 @@ func (s *preparationWorkflowScope) verifyResources(ctx context.Context, args map
 	}
 	s.resources, s.artifacts = resourceEvidence{}, nil
 	cfg := s.configuration
-	evidence, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.renders["rollback"], s.renders["candidate"], cfg.configuration.Platform, cfg.bindings)
+	evidence, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.inventory("rollback"), s.inventory("candidate"), cfg.configuration.Platform, cfg.bindings)
 	if err != nil {
 		return nil, err
 	}
-	scope, err := newArtifactAdmission(ctx, s.host.api, artifactAdmissionConfig{ConfigurationDigest: cfg.digest, Platform: cfg.configuration.Platform, Bindings: cfg.bindings, Dependencies: cfg.dependencies, Registries: cfg.registries}, s.rollback, s.candidate, s.renders["rollback"], s.renders["candidate"])
+	scope, err := newArtifactAdmission(ctx, s.host.api, artifactAdmissionConfig{ConfigurationDigest: cfg.digest, Platform: cfg.configuration.Platform, Bindings: cfg.bindings, Dependencies: cfg.dependencies, Registries: cfg.registries}, s.rollback, s.candidate, s.inventory("rollback"), s.inventory("candidate"))
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +425,7 @@ func (s *preparationWorkflowScope) recheckResources(ctx context.Context, args ma
 		return nil, errors.New("installation resource recheck requires completed fresh artifact reads")
 	}
 	cfg := s.configuration
-	current, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.renders["rollback"], s.renders["candidate"], cfg.configuration.Platform, cfg.bindings)
+	current, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.inventory("rollback"), s.inventory("candidate"), cfg.configuration.Platform, cfg.bindings)
 	if err != nil || current.digest != s.resources.digest || current.publication != s.resources.publication || current.before != s.resources.before || current.after != s.resources.after {
 		return nil, errors.New("installation resources changed during immutable artifact verification")
 	}
@@ -406,7 +437,7 @@ func (s *preparationWorkflowScope) verifyStorage(ctx context.Context, args map[s
 		return nil, err
 	}
 	var err error
-	s.storage, err = verifyStoragePreservation(ctx, s.host.api, s.renders["rollback"], s.renders["candidate"])
+	s.storage, err = verifyStoragePreservation(ctx, s.host.api, s.inventory("rollback"), s.inventory("candidate"))
 	return nil, err
 }
 func (s *preparationWorkflowScope) verifyProtected(ctx context.Context, args map[string]any) (any, error) {
@@ -414,7 +445,7 @@ func (s *preparationWorkflowScope) verifyProtected(ctx context.Context, args map
 		return nil, err
 	}
 	var err error
-	s.sensitive, err = verifySensitivePreservation(ctx, s.host.api, s.renders["rollback"], s.renders["candidate"], s.configuration.protected)
+	s.sensitive, err = verifySensitivePreservation(ctx, s.host.api, s.inventory("rollback"), s.inventory("candidate"), s.configuration.protected)
 	return nil, err
 }
 func (s *preparationWorkflowScope) reobserve(ctx context.Context, args map[string]any) (any, error) {
@@ -441,7 +472,7 @@ func (s *preparationWorkflowScope) promote(ctx context.Context, args map[string]
 		return nil, errors.New("installation promotion requires fresh configuration and complete artifact evidence")
 	}
 	artifact := *s.artifacts.result
-	if artifact.configuration != s.configuration.digest || artifact.candidate != s.candidate.Digest() || artifact.rollback != s.rollback.Digest() || artifact.resources != s.resources.digest || artifact.before != s.renders["rollback"].Digest() || artifact.after != s.renders["candidate"].Digest() {
+	if artifact.configuration != s.configuration.digest || artifact.candidate != s.candidate.Digest() || artifact.rollback != s.rollback.Digest() || artifact.resources != s.resources.digest || artifact.before != s.inventory("rollback").Digest() || artifact.after != s.inventory("candidate").Digest() {
 		return nil, errors.New("installation artifact evidence belongs to another preparation")
 	}
 	release, err := s.candidate.Release()
@@ -449,18 +480,54 @@ func (s *preparationWorkflowScope) promote(ctx context.Context, args map[string]
 		return nil, err
 	}
 	var before struct{ TargetRevision string }
-	_ = json.Unmarshal(s.renders["rollback"].Spec().Source, &before)
+	before.TargetRevision = beforeRevision(s.record.Scope.Intent.BeforeSpec)
 	if s.configuration.configuration.Health != nil && (s.healthBaseline == nil || s.healthBaseline.validate() != nil) {
 		return nil, errors.New("installation preparation requires a verified session and migration baseline")
 	}
-	plan := preparedPlan{CompletionWorkflow: s.host.completion, HealthBaseline: s.healthBaseline, FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
+	plan := preparedPlan{CompletionWorkflow: s.host.completion, HealthBaseline: s.healthBaseline, FormatVersion: s.record.Scope.FormatVersion, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.inventory("candidate").Digest(), RollbackRenderDigest: s.inventory("rollback").Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
 	artifact.workflow, artifact.operator = s.host.artifacts.digest, s.operator
 	artifact.digest = artifactHash("workflow-evidence", []string{artifact.digest, artifact.workflow, artifact.operator})
-	evidence := promotionEvidence{configuration: s.configuration, artifacts: artifact, published: s.candidate, candidateSource: s.sources["candidate"], rollbackSource: s.sources["rollback"], candidateRender: s.renders["candidate"], rollbackRender: s.renders["rollback"], resources: s.resources, storage: s.storage, sensitive: s.sensitive}
+	plan.RollbackWorkflow = s.host.rollback
+	plan.RevisionWorkflow = s.host.revisions.snapshot
+	if plan.FormatVersion == 2 {
+		for _, member := range s.record.Scope.Applications {
+			a, b := applicationCaptureKey(member.Key, "candidate"), applicationCaptureKey(member.Key, "rollback")
+			plan.Applications = append(plan.Applications, preparedApplication{Key: member.Key, Intent: member.Intent, CandidateCapture: a, RollbackCapture: b, RenderDigest: s.renders[a].Digest(), RollbackRenderDigest: s.renders[b].Digest(), CandidateSourceDigest: s.sources[a].source.Digest(), RollbackSourceDigest: s.sources[b].source.Digest(), CandidateReceiptDigest: s.record.Captures[a].ReceiptDigest, RollbackReceiptDigest: s.record.Captures[b].ReceiptDigest})
+		}
+	}
+	evidence := promotionEvidence{sources: s.sources, renders: s.renders, configuration: s.configuration, artifacts: artifact, published: s.candidate, candidateSource: s.sources["candidate"], rollbackSource: s.sources["rollback"], candidateRender: s.inventory("candidate"), rollbackRender: s.inventory("rollback"), resources: s.resources, storage: s.storage, sensitive: s.sensitive}
 	result, err := s.host.journal.promote(ctx, s.request.InstallationID, s.record.ID, s.host.digest, s.configuration.digest, plan, evidence)
 	if err != nil {
 		return nil, err
 	}
 	s.result = &result
 	return nil, nil
+}
+
+func (s *preparationWorkflowScope) applications(_ context.Context, args map[string]any) (any, error) {
+	if err := noPreparationArguments(args); err != nil {
+		return nil, err
+	}
+	var out []map[string]any
+	for _, app := range s.configuration.applicationMembers() {
+		out = append(out, map[string]any{"key": app.key})
+	}
+	return out, nil
+}
+func renderInventory(scope preparationScope, renders map[string]argocd.RenderedRevision, role string) argocd.RenderInventory {
+	if scope.FormatVersion != 2 {
+		return renders[role]
+	}
+	var members []argocd.RenderedRevision
+	for _, app := range scope.Applications {
+		members = append(members, renders[applicationCaptureKey(app.Key, role)])
+	}
+	result, err := argocd.CombineRenderedRevisions(members)
+	if err != nil {
+		return argocd.RenderedRevision{}
+	}
+	return result
+}
+func (s *preparationWorkflowScope) inventory(role string) argocd.RenderInventory {
+	return renderInventory(s.record.Scope, s.renders, role)
 }

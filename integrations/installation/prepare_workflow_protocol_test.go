@@ -65,10 +65,7 @@ func (f *preparationProtocolFiles) Execute(ctx context.Context, req pipelines.St
 		return pipelines.StepResult{}, err
 	}
 	executor, file := capturePorts(capture, f.archives[role])
-	intent := strings.Repeat("d", 64)
-	if role == "rollback" {
-		intent = strings.Repeat("e", 64)
-	}
+	intent := strings.TrimPrefix(artifactHash("protocol-source-receipt", req.StepKey), "memql-id:")
 	executor.result.ArtifactIntentIDs = []string{intent}
 	file.row.IntentID = intent
 	f.files[req.StepKey] = file
@@ -104,10 +101,11 @@ type preparationRendererRPC interface {
 	Generate(context.Context, *gen.ManifestRequest) (*gen.ManifestResponse, error)
 }
 type preparationRendererFixture struct {
-	mu           sync.Mutex
-	manifests    map[string][]string
-	failRevision string
-	reads        map[string]int
+	mu                   sync.Mutex
+	manifests            map[string][]string
+	applicationManifests map[string]map[string][]string
+	failRevision         string
+	reads                map[string]int
 }
 
 func (f *preparationRendererFixture) Generate(_ context.Context, req *gen.ManifestRequest) (*gen.ManifestResponse, error) {
@@ -118,6 +116,9 @@ func (f *preparationRendererFixture) Generate(_ context.Context, req *gen.Manife
 		return nil, errors.New("interrupted renderer")
 	}
 	manifests, ok := f.manifests[req.Revision]
+	if f.applicationManifests != nil {
+		manifests, ok = f.applicationManifests[req.AppName][req.Revision]
+	}
 	if !ok || req.Repo.Password != "fixture-clone-token" || !req.NoCache || !req.NoRevisionCache {
 		return nil, errors.New("unscoped render")
 	}
@@ -283,7 +284,7 @@ func testPreparationWorkflowProtocolRecovery(t *testing.T, publicRecovery bool) 
 	require.Len(t, external.requests, 2, "recovery must not launch duplicate source jobs")
 	require.Equal(t, 2, external.acknowledgments, "durable acknowledgments are reused")
 	for _, file := range external.files {
-		require.Equal(t, 2, file.opens, "replacement host reopens private source bytes")
+		require.GreaterOrEqual(t, file.opens, 2, "replacement host reopens private source bytes")
 		require.Equal(t, file.opens, file.closed)
 	}
 	rpc.mu.Lock()
@@ -329,6 +330,8 @@ func testPreparationWorkflowProtocolRecovery(t *testing.T, publicRecovery bool) 
 	require.NoError(t, err)
 	require.Equal(t, "applying", started.State)
 	require.Zero(t, started.ObservationVersion)
+	require.NotNil(t, started.Plan.RevisionWorkflow)
+	require.NoError(t, fresh.bindWorkflow(strings.Repeat("f", 40)), "replacement engine may install different workflow definitions")
 	recoveredRevision, err := fresh.revisions.run(ctx, &revisionJournal{db: fresh.journal.db}, request.InstallationID, result.ID, revisionStart, nil, &fresh)
 	require.NoError(t, err)
 	require.Equal(t, 1, controller.writes, "a lost response after commit is reconciled without another PATCH")

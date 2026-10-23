@@ -35,13 +35,15 @@ type sourceCaptureSpec struct {
 	CollectorImage, Platform               string
 	ImagePullSecret                        string
 	Render                                 argocd.RenderSpec
+	Fragment                               *argocd.SourceFragmentSpec `json:"fragment,omitempty"`
 }
 
 type sourceCapture struct {
-	request pl.StepRequest
-	render  argocd.RenderSpec
-	digest  string
-	path    string
+	request  pl.StepRequest
+	render   argocd.RenderSpec
+	fragment *argocd.SourceFragmentSpec
+	digest   string
+	path     string
 }
 
 // sourceCaptureReceipt is observation data, not permission. The preparation
@@ -55,12 +57,30 @@ type sourceCaptureReceipt struct {
 // The result owns its proof and receipt; neither serialized scope digests nor
 // the collector's stdout can manufacture a ClosedSource.
 type verifiedSourceCapture struct {
-	source  argocd.ClosedSource
-	receipt pipelinesteps.StoredFileReceipt
-	scope   string
+	source   argocd.ClosedSource
+	fragment argocd.SourceFragment
+	receipt  pipelinesteps.StoredFileReceipt
+	scope    string
 }
 
-func (v verifiedSourceCapture) String() string   { return v.source.String() }
+func (v verifiedSourceCapture) String() string {
+	if v.fragment.Digest() != "" {
+		return v.fragment.String()
+	}
+	return v.source.String()
+}
+func (v verifiedSourceCapture) digest() string {
+	if v.fragment.Digest() != "" {
+		return v.fragment.Digest()
+	}
+	return v.source.Digest()
+}
+func (v verifiedSourceCapture) renderSpec() argocd.RenderSpec {
+	if v.fragment.Digest() != "" {
+		return v.fragment.Spec().Render
+	}
+	return v.source.Spec()
+}
 func (v verifiedSourceCapture) GoString() string { return v.String() }
 
 type sourceCaptureExecutor interface {
@@ -100,12 +120,34 @@ func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 		return empty, errors.New("source capture image credential name is reserved")
 	}
 	body, err := json.Marshal(spec.Render)
+	var fragment *argocd.SourceFragmentSpec
+	fragmentFlag := ""
+	if spec.Fragment != nil {
+		encoded, encodeErr := json.Marshal(spec.Fragment)
+		if encodeErr != nil {
+			return empty, errors.New("source fragment specification could not be encoded")
+		}
+		owned, decodeErr := argocd.DecodeSourceFragmentSpec(encoded)
+		if decodeErr != nil || !sameJSON(owned.Render, spec.Render) {
+			return empty, errors.New("source fragment differs from the native render specification")
+		}
+		if owned.Dependency && spec.CloneInstallationID != 0 {
+			return empty, errors.New("remote source acquisition supports public repositories only")
+		}
+		fragment = &owned
+		body, err = json.Marshal(owned)
+		fragmentFlag = " --fragment"
+	}
 	// The fixed command carries only encoded, credential-free render config.
 	// Bound it below the container's single environment-variable size limit.
 	if err != nil || len(body) > 32<<10 {
 		return empty, errors.New("source capture render specification exceeds its transport bound")
 	}
-	render, err := argocd.DecodeRenderSpec(body)
+	renderBody, err := json.Marshal(spec.Render)
+	if err != nil {
+		return empty, err
+	}
+	render, err := argocd.DecodeRenderSpec(renderBody)
 	if err != nil {
 		return empty, err
 	}
@@ -130,7 +172,7 @@ func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 	artifact := directoryToken + "/source.tar"
 	// mkdir refuses a preexisting repository path, including a symlink. No
 	// repository script executes; only the image's absolute collector runs.
-	command := "main() {\nset -eu\numask 077\nmkdir '" + directoryToken + "'\nprintf '%s' '" + base64.StdEncoding.EncodeToString(body) + "' | base64 -d > '" + directoryToken + "/render.json'\n/app/installation-source --repository=/workspace --spec='" + directoryToken + "/render.json' --output='" + artifact + "'\n}\nmain"
+	command := "main() {\nset -eu\numask 077\nmkdir '" + directoryToken + "'\nprintf '%s' '" + base64.StdEncoding.EncodeToString(body) + "' | base64 -d > '" + directoryToken + "/render.json'\n/app/installation-source --repository=/workspace --spec='" + directoryToken + "/render.json' --output='" + artifact + "'" + fragmentFlag + "\n}\nmain"
 	request := pl.StepRequest{
 		RunID: spec.RunID, WorkRunID: spec.WorkRunID, StepKey: spec.StepKey, Attempt: spec.Attempt,
 		RunAttempt: 1, RunStartedAt: spec.RunStartedAt, OwnerUserID: spec.OwnerUserID,
@@ -154,7 +196,7 @@ func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 	directory := ".memql-source-" + key
 	request.Step.Run = strings.ReplaceAll(command, directoryToken, directory)
 	request.Step.Artifacts = []string{directory + "/source.tar"}
-	return sourceCapture{digest: "memql-id:" + key, render: render, path: request.Step.Artifacts[0], request: request}, nil
+	return sourceCapture{digest: "memql-id:" + key, render: render, fragment: fragment, path: request.Step.Artifacts[0], request: request}, nil
 }
 
 func (c sourceCapture) stepRequest() pl.StepRequest {
@@ -258,6 +300,13 @@ func (c sourceCapture) verify(ctx context.Context, files sourceCaptureFiles, rec
 	}
 	if err := ctx.Err(); err != nil {
 		return verifiedSourceCapture{}, err
+	}
+	if c.fragment != nil {
+		fragment, err := argocd.VerifySourceFragmentArchive(ctx, data, *c.fragment)
+		if err != nil {
+			return verifiedSourceCapture{}, fmt.Errorf("source fragment verification refused: %w", err)
+		}
+		return verifiedSourceCapture{fragment: fragment, receipt: stored, scope: c.digest}, nil
 	}
 	closed, err := argocd.VerifySourceArchive(ctx, data, c.render)
 	if err != nil {

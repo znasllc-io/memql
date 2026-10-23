@@ -66,7 +66,7 @@ func (f *revisionControllerFixture) Do(ctx context.Context, method, path, _ stri
 		return nil, errors.New("unexpected controller operation")
 	}
 	var state string
-	if err := f.db.QueryRowContext(ctx, "SELECT state FROM installation_revision_attempts WHERE plan_id=$1", f.key).Scan(&state); err != nil || state != "applying" {
+	if err := f.db.QueryRowContext(ctx, "SELECT state FROM installation_revision_attempts WHERE plan_id=$1", f.key).Scan(&state); err != nil || (state != "applying" && state != "reverting") {
 		return nil, errors.New("controller write preceded durable start")
 	}
 	var patch []struct {

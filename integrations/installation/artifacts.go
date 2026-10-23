@@ -75,10 +75,10 @@ func (artifactObservation) GoString() string { return "<installation artifact ob
 func (artifactEvidence) String() string      { return "<installation artifact evidence>" }
 func (artifactEvidence) GoString() string    { return "<installation artifact evidence>" }
 
-func newArtifactAdmission(ctx context.Context, api argocd.API, config artifactAdmissionConfig, rollback, candidate pipelines.VerifiedPublishedRelease, before, after argocd.RenderedRevision) (*artifactAdmission, error) {
+func newArtifactAdmission(ctx context.Context, api argocd.API, config artifactAdmissionConfig, rollback, candidate pipelines.VerifiedPublishedRelease, before, after argocd.RenderInventory) (*artifactAdmission, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if !internalDigest.MatchString(config.ConfigurationDigest) || len(config.Registries) == 0 || len(config.Registries) > 512 {
+	if !validRenderInventory(before) || !validRenderInventory(after) || !internalDigest.MatchString(config.ConfigurationDigest) || len(config.Registries) == 0 || len(config.Registries) > 512 {
 		return nil, errors.New("artifact admission requires a bounded native configuration")
 	}
 	if err := pipelines.CheckPublishedReleaseOverlap(rollback, candidate, config.Dependencies); err != nil {
@@ -106,7 +106,7 @@ func newArtifactAdmission(ctx context.Context, api argocd.API, config artifactAd
 	uses := []artifactUse{}
 	images := map[string]bool{}
 	schemas := map[string]map[string]resourceType{}
-	for i, render := range []argocd.RenderedRevision{before, after} {
+	for i, render := range []argocd.RenderInventory{before, after} {
 		inventory, err := resourceInventory(ctx, api, render, schemas)
 		if err != nil {
 			return nil, err

@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/znasllc-io/memql/component/memql"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 type savedOverlay struct {
@@ -34,7 +35,7 @@ func (s *overlayScope) load(ctx context.Context, key string) (savedOverlay, erro
 	if err != nil {
 		return r, err
 	}
-	if decodeCandidateObject(body, &r.Record) != nil || r.Record.ID != key || r.Record.Owner != s.owner || r.Record.Snapshot == nil || r.Record.Snapshot.Contract != overlayContract || r.Record.Snapshot.CheckArgs(nil) != nil || r.Record.CreatedAt.IsZero() || r.Record.ID != overlayHash([]string{r.Record.Owner, r.Record.Request.InstallationID, r.Record.Request.RequestID}) {
+	if decodeCandidateObject(body, &r.Record) != nil || r.Record.ID != key || r.Record.Owner != s.owner || r.Record.Snapshot == nil || r.Record.Snapshot.Contract != overlayContract || r.Record.Snapshot.CheckArgs(nil) != nil || r.Record.CreatedAt.IsZero() || validateOverlayRecordFiles(r.Record) != nil || r.Record.ID != overlayHash([]string{r.Record.Owner, r.Record.Request.InstallationID, r.Record.Request.RequestID}) {
 		return r, errors.New("stored installation overlay intent is invalid")
 	}
 	r.BranchCommit, r.PullRequestURL, r.MergedCommit = branch.String, url.String, merged.String
@@ -53,15 +54,23 @@ func (s *overlayScope) reserve(ctx context.Context, args map[string]any) (any, e
 	if err := s.gate(ctx, args); err != nil {
 		return nil, err
 	}
-	if s.replacement == nil || s.source == nil || s.snapshot == nil {
+	if len(s.replacements) == 0 || s.source == nil || s.snapshot == nil {
 		return nil, errors.New("installation overlay reserve requires verified exact bytes")
 	}
-	r := overlayRecord{ID: s.id, Owner: s.owner, Request: s.request, Configuration: s.configuration, CreatedAt: time.Now().UTC().Truncate(time.Second), Snapshot: s.snapshot, Replacement: *s.replacement}
+	r := overlayRecord{ID: s.id, Owner: s.owner, Request: s.request, Configuration: s.configuration, CreatedAt: time.Now().UTC().Truncate(time.Second), Snapshot: s.snapshot}
+	if s.configuration.FormatVersion == 1 {
+		r.Replacement = s.replacements[0]
+	} else {
+		r.Replacements = s.replacements
+	}
+	if err := validateOverlayRecordFiles(r); err != nil {
+		return nil, err
+	}
 	if s.record != nil {
 		r.CreatedAt = s.record.CreatedAt
 	}
 	body, err := json.Marshal(r)
-	if err != nil || len(body) > 4<<20 {
+	if err != nil || len(body) > 1<<20 {
 		return nil, errors.New("installation overlay journal exceeds its size bound")
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO release_installation_proposals(proposal_id,owner_user_id,installation_id,record) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT (proposal_id) DO NOTHING`, s.id, s.owner, s.request.InstallationID, string(body))

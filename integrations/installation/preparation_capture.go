@@ -18,8 +18,8 @@ func (j *preparationJournal) captureRecord(ctx context.Context, installation, ke
 	if err != nil || actor != r.Scope.RequestedBy || workflow != r.Scope.WorkflowDigest || r.State != "preparing" {
 		return preparationRecord{}, sourceCapture{}, errors.New("preparation effect authority or workflow changed")
 	}
-	spec, found := r.Scope.Captures[role]
-	if !found {
+	spec, specErr := preparationCaptureSpec(r, role)
+	if specErr != nil {
 		return preparationRecord{}, sourceCapture{}, errors.New("source role is outside this preparation")
 	}
 	capture, err := newSourceCapture(spec)
@@ -65,18 +65,34 @@ func (j *preparationJournal) recordVerified(ctx context.Context, installation, k
 		if !found || !entry.Started || entry.Receipt == nil {
 			return errors.New("source verification requires its durable capture receipt")
 		}
-		capture, err := newSourceCapture(r.Scope.Captures[role])
+		spec, err := preparationCaptureSpec(*r, role)
 		if err != nil {
 			return err
 		}
-		if proof.scope != capture.digest || proof.receipt.IntentID != entry.Receipt.IntentID || !internalDigest.MatchString(proof.source.Digest()) || !sameJSON(proof.source.Spec(), capture.render) {
+		capture, err := newSourceCapture(spec)
+		if err != nil {
+			return err
+		}
+		if proof.scope != capture.digest || proof.receipt.IntentID != entry.Receipt.IntentID || !internalDigest.MatchString(proof.digest()) || !sameJSON(proof.renderSpec(), capture.render) {
 			return errors.New("verified source belongs to another preparation capture")
 		}
 		digest := preparationReceiptDigest(proof.receipt)
-		if entry.SourceDigest != "" && (entry.SourceDigest != proof.source.Digest() || entry.ReceiptDigest != digest) {
+		existing := entry.SourceDigest
+		if capture.fragment != nil {
+			existing = entry.FragmentDigest
+		}
+		if (capture.fragment == nil) != (proof.fragment.Digest() == "") {
+			return errors.New("source proof kind differs from its capture")
+		}
+		if existing != "" && (existing != proof.digest() || entry.ReceiptDigest != digest) {
 			return errors.New("recorded private source evidence changed")
 		}
-		entry.SourceDigest, entry.ReceiptDigest = proof.source.Digest(), digest
+		if capture.fragment != nil {
+			entry.FragmentDigest = proof.digest()
+		} else {
+			entry.SourceDigest = proof.digest()
+		}
+		entry.ReceiptDigest = digest
 		r.Captures[role] = entry
 		return nil
 	})
@@ -112,7 +128,7 @@ func (j *preparationJournal) acknowledgeCapture(ctx context.Context, installatio
 		return preparationRecord{}, err
 	}
 	entry := r.Captures[role]
-	if entry.Receipt == nil || entry.SourceDigest == "" {
+	if entry.Receipt == nil || (entry.Parent == "" && entry.SourceDigest == "") || (entry.Parent != "" && entry.FragmentDigest == "") {
 		return preparationRecord{}, errors.New("source acknowledgement requires durable verified evidence")
 	}
 	if entry.Acknowledged {
@@ -125,7 +141,7 @@ func (j *preparationJournal) acknowledgeCapture(ctx context.Context, installatio
 	}
 	return j.withRecord(ctx, installation, key, workflow, func(current *preparationRecord) error {
 		stored := current.Captures[role]
-		if stored.Receipt == nil || *stored.Receipt != *entry.Receipt || stored.SourceDigest != entry.SourceDigest || stored.ReceiptDigest != entry.ReceiptDigest {
+		if stored.Receipt == nil || *stored.Receipt != *entry.Receipt || stored.SourceDigest != entry.SourceDigest || stored.FragmentDigest != entry.FragmentDigest || stored.ReceiptDigest != entry.ReceiptDigest {
 			return errChanged
 		}
 		stored.Acknowledged = true

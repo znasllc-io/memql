@@ -3,6 +3,7 @@ package installation
 import (
 	"context"
 	"errors"
+	"github.com/znasllc-io/memql/integrations/argocd"
 	"time"
 )
 
@@ -19,7 +20,7 @@ func (j *preparationJournal) reopenPromotedCapture(ctx context.Context, installa
 		return verifiedSourceCapture{}, err
 	}
 	entry := record.Captures[role]
-	proof, err := capture.verify(ctx, files, *entry.Receipt)
+	proof, err := reopenSourceGraph(ctx, record, role, files)
 	if err != nil {
 		return verifiedSourceCapture{}, err
 	}
@@ -46,7 +47,7 @@ func (j *preparationJournal) promotedCapture(ctx context.Context, installation, 
 	if err != nil {
 		return preparationRecord{}, sourceCapture{}, err
 	}
-	if !identifier.MatchString(installation) || !internalDigest.MatchString(preparation) || !internalDigest.MatchString(plan) || (role != "candidate" && role != "rollback") {
+	if !identifier.MatchString(installation) || !internalDigest.MatchString(preparation) || !internalDigest.MatchString(plan) || !captureStepKey.MatchString(role) {
 		return preparationRecord{}, sourceCapture{}, errors.New("promoted source requires exact native installation identities and role")
 	}
 	db, err := j.database()
@@ -76,11 +77,12 @@ func (j *preparationJournal) promotedCapture(ctx context.Context, installation, 
 	if err != nil {
 		return preparationRecord{}, sourceCapture{}, err
 	}
-	if parent.ID != active || parent.SlotEpoch != epoch || (parent.State != "prepared" && parent.State != "applying") {
+	if parent.ID != active || parent.SlotEpoch != epoch || (parent.State != "prepared" && parent.State != "applying" && parent.State != "reverting") {
 		return preparationRecord{}, sourceCapture{}, errChanged
 	}
+	_, root := r.Scope.Captures[role]
 	entry, found := r.Captures[role]
-	if !found || !entry.Acknowledged || entry.Receipt == nil || !internalDigest.MatchString(entry.SourceDigest) || !internalDigest.MatchString(entry.ReceiptDigest) {
+	if !root || !found || !entry.Acknowledged || entry.Receipt == nil || !internalDigest.MatchString(entry.SourceDigest) || !internalDigest.MatchString(entry.ReceiptDigest) {
 		return preparationRecord{}, sourceCapture{}, errors.New("promoted source has no exact retained receipt")
 	}
 	capture, err := newSourceCapture(r.Scope.Captures[role])
@@ -91,4 +93,68 @@ func (j *preparationJournal) promotedCapture(ctx context.Context, installation, 
 		return preparationRecord{}, sourceCapture{}, err
 	}
 	return r, capture, nil
+}
+
+// This read-only path is deliberately independent of the preparation writer.
+// It can recover a graph after promotion on a replica with no local fragments.
+func reopenSourceGraph(ctx context.Context, r preparationRecord, root string, files sourceCaptureFiles) (verifiedSourceCapture, error) {
+	spec, err := preparationCaptureSpec(r, root)
+	if err != nil {
+		return verifiedSourceCapture{}, err
+	}
+	capture, err := newSourceCapture(spec)
+	if err != nil {
+		return verifiedSourceCapture{}, err
+	}
+	entry := r.Captures[root]
+	if entry.Receipt == nil {
+		return verifiedSourceCapture{}, errors.New("retained graph has no root receipt")
+	}
+	proof, err := capture.verify(ctx, files, *entry.Receipt)
+	if err != nil {
+		return verifiedSourceCapture{}, err
+	}
+	if proof.fragment.Digest() == "" {
+		return proof, nil
+	}
+	if proof.fragment.Digest() != entry.FragmentDigest || preparationReceiptDigest(proof.receipt) != entry.ReceiptDigest {
+		return verifiedSourceCapture{}, errors.New("retained root fragment changed")
+	}
+	dependencies := []argocd.SourceFragment{}
+	expected := map[string]bool{}
+	for _, dependency := range proof.fragment.Dependencies() {
+		key := dependencyCaptureKey(root, dependency)
+		expected[key] = true
+		retained, found := r.Captures[key]
+		if !found || retained.Parent != root || retained.Receipt == nil || !retained.Acknowledged {
+			return verifiedSourceCapture{}, errors.New("retained graph has an unfinished dependency")
+		}
+		spec, err := preparationCaptureSpec(r, key)
+		if err != nil {
+			return verifiedSourceCapture{}, err
+		}
+		capture, err := newSourceCapture(spec)
+		if err != nil {
+			return verifiedSourceCapture{}, err
+		}
+		fragment, err := capture.verify(ctx, files, *retained.Receipt)
+		if err != nil {
+			return verifiedSourceCapture{}, err
+		}
+		if fragment.fragment.Digest() == "" || fragment.fragment.Digest() != retained.FragmentDigest || preparationReceiptDigest(fragment.receipt) != retained.ReceiptDigest {
+			return verifiedSourceCapture{}, errors.New("retained dependency fragment changed")
+		}
+		dependencies = append(dependencies, fragment.fragment)
+	}
+	for key, entry := range r.Captures {
+		if entry.Parent == root && !expected[key] {
+			return verifiedSourceCapture{}, errors.New("retained graph has an extra dependency")
+		}
+	}
+	closed, err := argocd.AssembleSourceClosure(ctx, proof.fragment, dependencies)
+	if err != nil {
+		return verifiedSourceCapture{}, err
+	}
+	proof.source, proof.fragment = closed, argocd.SourceFragment{}
+	return proof, nil
 }

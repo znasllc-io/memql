@@ -35,10 +35,12 @@ func main() {
 
 func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var repository, specFile, output string
+	var fragment bool
 	flags := flag.NewFlagSet("installation-source", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(&repository, "repository", "", "path to the Job's pinned Git checkout")
 	flags.StringVar(&specFile, "spec", "", "native render specification JSON file")
+	flags.BoolVar(&fragment, "fragment", false, "capture a partial source graph fragment instead of a complete single-repository closure")
 	flags.StringVar(&output, "output", "", "private source archive file; parent directory must exist")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "Capture verified installation source objects from a pinned checkout.\nUsage: installation-source --repository=PATH --spec=PATH --output=PATH")
@@ -53,9 +55,20 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return emitResult(stdout, 2, false, captureResult{}, "render specification could not be read within its bound")
 	}
-	spec, err := argocd.DecodeRenderSpec(specBody)
-	if err != nil {
-		return emitResult(stdout, 2, false, captureResult{}, "render specification is invalid")
+	var spec argocd.RenderSpec
+	var fragmentSpec *argocd.SourceFragmentSpec
+	if fragment {
+		decoded, decodeErr := argocd.DecodeSourceFragmentSpec(specBody)
+		if decodeErr != nil {
+			return emitResult(stdout, 2, false, captureResult{}, "source fragment specification is invalid")
+		}
+		fragmentSpec = &decoded
+		spec = decoded.Render
+	} else {
+		spec, err = argocd.DecodeRenderSpec(specBody)
+		if err != nil {
+			return emitResult(stdout, 2, false, captureResult{}, "render specification is invalid")
+		}
 	}
 	repository, err = filepath.Abs(repository)
 	if err != nil {
@@ -65,7 +78,7 @@ func execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return emitResult(stdout, 4, false, captureResult{}, "Git is required in the collector image")
 	}
-	result, changed, err := capture(ctx, checkoutObjects{repository: repository, git: git}, spec, output)
+	result, changed, err := captureWithFragment(ctx, checkoutObjects{repository: repository, git: git}, spec, fragmentSpec, output)
 	if err != nil {
 		return emitResult(stdout, 5, changed, result, err.Error())
 	}
@@ -116,7 +129,10 @@ func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 	return body, nil
 }
 
-func capture(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderSpec, output string) (result captureResult, changed bool, err error) {
+func capture(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderSpec, output string) (captureResult, bool, error) {
+	return captureWithFragment(ctx, objects, spec, nil, output)
+}
+func captureWithFragment(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderSpec, fragment *argocd.SourceFragmentSpec, output string) (result captureResult, changed bool, err error) {
 	full, err := filepath.Abs(output)
 	if err != nil {
 		return captureResult{}, false, errors.New("source archive output path is invalid")
@@ -131,7 +147,7 @@ func capture(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderS
 		if !info.Mode().IsRegular() {
 			return captureResult{}, false, errors.New("existing source archive is not a regular file")
 		}
-		result, err := verifyExisting(ctx, root, name, spec)
+		result, err := verifyExistingFragment(ctx, root, name, spec, fragment)
 		return result, false, err
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return captureResult{}, false, errors.New("source archive output could not be checked")
@@ -147,7 +163,12 @@ func capture(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderS
 		}
 	}()
 	defer file.Close()
-	closed, err := argocd.CaptureSourceArchive(ctx, objects, spec, file)
+	var closed sourceProof
+	if fragment != nil {
+		closed, err = argocd.CaptureSourceFragmentArchive(ctx, objects, *fragment, file)
+	} else {
+		closed, err = argocd.CaptureSourceArchive(ctx, objects, spec, file)
+	}
 	if err != nil {
 		return captureResult{}, false, err
 	}
@@ -162,7 +183,7 @@ func capture(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderS
 	// refuses to replace an existing path, even if another collector wins.
 	if err := root.Link(temporary, name); err != nil {
 		if errors.Is(err, os.ErrExist) {
-			result, err := verifyExisting(ctx, root, name, spec)
+			result, err := verifyExistingFragment(ctx, root, name, spec, fragment)
 			return result, false, err
 		}
 		return captureResult{}, false, errors.New("source archive could not be installed without replacing a file")
@@ -170,7 +191,15 @@ func capture(ctx context.Context, objects argocd.GitObjects, spec argocd.RenderS
 	return captureResult{closed.Digest(), len(closed.Files()), info.Size()}, true, nil
 }
 
+type sourceProof interface {
+	Digest() string
+	Files() []argocd.SourceFile
+}
+
 func verifyExisting(ctx context.Context, root *os.Root, name string, spec argocd.RenderSpec) (captureResult, error) {
+	return verifyExistingFragment(ctx, root, name, spec, nil)
+}
+func verifyExistingFragment(ctx context.Context, root *os.Root, name string, spec argocd.RenderSpec, fragment *argocd.SourceFragmentSpec) (captureResult, error) {
 	info, err := root.Lstat(name)
 	if err != nil || !info.Mode().IsRegular() {
 		return captureResult{}, errors.New("existing source archive is not a regular file")
@@ -184,7 +213,12 @@ func verifyExisting(ctx context.Context, root *os.Root, name string, spec argocd
 	if err != nil {
 		return captureResult{}, errors.New("existing source archive exceeds its bound")
 	}
-	closed, err := argocd.VerifySourceArchive(ctx, body, spec)
+	var closed sourceProof
+	if fragment != nil {
+		closed, err = argocd.VerifySourceFragmentArchive(ctx, body, *fragment)
+	} else {
+		closed, err = argocd.VerifySourceArchive(ctx, body, spec)
+	}
 	if err != nil {
 		return captureResult{}, errors.New("existing output does not verify against the requested source; choose a different output path")
 	}

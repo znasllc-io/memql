@@ -475,3 +475,9 @@ builtin releaseResumeInstallation { installationId string! preparationId string!
 @sdk
 @executor("integration.release.cancelInstallation")
 builtin releaseCancelInstallation { installationId string! planId string! }
+
+/// Restore the exact previous release through the selected plan's retained recipe.
+/// Only its original operator may request it; fresh native checks may refuse it.
+@sdk
+@executor("integration.release.rollbackInstallation")
+builtin releaseRollbackInstallation { installationId string! planId string! }

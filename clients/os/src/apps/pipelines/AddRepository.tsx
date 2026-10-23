@@ -41,20 +41,20 @@ export function AddRepository({ back, onAdded, onSettings }: { back: () => void;
   const stages = ["access", "repository", "ownership", "review"];
   const index = stages.indexOf(step);
   const steps: Stop[] = [
-    { id: "access", name: "GitHub account", state: connection ? "done" : "open", answer: connection?.accountLogin,
+    { id: "access", name: "GitHub account", sentence: "Choose the account with access", state: connection ? "done" : "open", answer: connection?.accountLogin,
       body: <><RecordList as="ul" label="GitHub connections">{connections.rows.map(row => <RecordRow key={row.id} name={row.accountLogin} secondary={row.accountType} onOpen={() => { setConnectionId(row.id); setRepository(null); setStep("repository"); }} />)}</RecordList>
         {connections.error ? <Notice tone="warn" sentence="GitHub access could not be refreshed." detail={connections.error} /> : null}
         {!connections.rows.length ? <Caption>{connections.state === "seeding" ? "Reading GitHub connections…" : "Connect a GitHub account to choose a repository."}</Caption> : null}
         <Button tone="quiet" onClick={onSettings}>Manage GitHub connections</Button></> },
-    { id: "repository", name: "Repository", state: repository ? "done" : connection ? "open" : "ahead", answer: repository?.fullName,
+    { id: "repository", name: "Repository", sentence: "Choose the source to track", state: repository ? "done" : connection ? "open" : "ahead", answer: repository?.fullName,
       body: connection ? <RepositoryPicker page={repositories.page} readAt={repositories.readAt} busy={repositories.busy} refusal={repositories.refusal}
         chosen={repository?.fullName} onChoose={row => { setRepository(row); setStep("ownership"); }}
         onLookAgain={() => void read(connection.credentialId, 1, connection.id)} onReadMore={() => void read(connection.credentialId, repositories.page.nextPage, connection.id)} /> : undefined },
-    { id: "ownership", name: "MemQL organization", state: account !== null && accountReady ? "done" : repository ? "open" : "ahead", answer: selectedAccount ? accountName(selectedAccount) : undefined,
+    { id: "ownership", name: "MemQL organization", sentence: "Choose who manages this source", state: account !== null && accountReady ? "done" : repository ? "open" : "ahead", answer: selectedAccount ? accountName(selectedAccount) : undefined,
       body: <><RecordList as="ul" label="Repository organization">{activeAccounts.map(row => <RecordRow key={row.id} name={accountName(row)} secondary={row.id === accountId ? "Selected" : undefined} onOpen={() => { if (accounts.state === "live" && !accounts.error) { setAccount(row.id); setStep("review"); } }} />)}</RecordList>
         {account !== null && accounts.state === "live" && !organizationChosen(accounts.accounts, accountId) ? <Notice tone="warn" sentence="The selected organization is unavailable." detail="Choose an active organization before adding this repository." /> : null}
         {accounts.error ? <Notice tone="warn" sentence="Organizations could not be refreshed." detail={accounts.error} /> : accounts.state !== "live" ? <Caption>Waiting for organizations to be available.</Caption> : !activeAccounts.length ? <Caption>No active organization is available. Set up an organization in Accounts or ask an owner for access.</Caption> : account === null && accountReady ? <Caption>Selected by default. Review this organization before continuing.</Caption> : <Caption>Choose the MemQL organization that will own this repository source.</Caption>}</> },
-    { id: "review", name: "Review", state: account !== null && repository ? "open" : "ahead", body: <><Facts><Fact label="Repository" value={repository?.fullName} /><Fact label="Branch" value={repository?.defaultBranch} /><Fact label="Access through" value={connection?.accountLogin} /><Fact label="MemQL organization" value={selectedAccount ? accountName(selectedAccount) : "Unavailable"} /></Facts>
+    { id: "review", name: "Review", sentence: "Check the source before adding it", state: account !== null && repository ? "open" : "ahead", body: <><Facts><Fact label="Repository" value={repository?.fullName} /><Fact label="Branch" value={repository?.defaultBranch} /><Fact label="Access through" value={connection?.accountLogin} /><Fact label="MemQL organization" value={selectedAccount ? accountName(selectedAccount) : "Unavailable"} /></Facts>
         {!accountReady ? <Notice tone="warn" sentence="The selected organization is unavailable." detail="Return to the MemQL organization step and choose an active organization before adding this repository." /> : null}
         <Caption>Register this source. Its workflow is connected separately; adding it starts no deployment.</Caption></> },
   ];

@@ -464,7 +464,10 @@ Repository detail fixtures use `delivery-repository`, with
 `click=Change requests|Request changes` for the bounded request form and
 `click=Checks` for run summaries. `delivery-add-repository&click=Add repository`
 opens the real left-step wizard. Installation states are `installation-prepared`,
-`installation-applying`, `installation-complete`, `installation-empty` and
-`installation-unavailable`. The applying fixture has a healthy, synchronized
+`installation-applying`, `installation-complete`, `installation-restoring`,
+`installation-restored`, `installation-empty` and `installation-unavailable`.
+The complete fixture can explicitly select restoration, and the restoring fixture
+finishes only after Check progress returns its fixture receipt. Both use the
+real selection screen; they never contact a cluster or GitHub. The applying fixture has a healthy, synchronized
 controller but deliberately remains applying: only the completed backend
 receipt can say that installation was verified.
