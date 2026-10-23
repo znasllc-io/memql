@@ -16,6 +16,7 @@ type fakeActivationBackend struct {
 	activity, observedActivity int
 	calls, closed              int
 	err                        error
+	waitBeforeActivation       time.Duration
 }
 type fakeActivation struct {
 	backend            *fakeActivationBackend
@@ -36,6 +37,13 @@ func (a *fakeActivation) activate(ctx context.Context) (inputFocus, error) {
 	}
 	if a.identity != b.identity || a.activity != b.activity {
 		return nil, errors.New("identity or activity changed")
+	}
+	if b.waitBeforeActivation > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(b.waitBeforeActivation):
+		}
 	}
 	b.calls++
 	if b.err != nil {
@@ -168,5 +176,14 @@ func TestWindowSelectionConcurrentReceiptHasOneActivation(t *testing.T) {
 	<-done
 	if b.calls != 1 || len(b.events) != 0 {
 		t.Fatalf("activation calls=%d", b.calls)
+	}
+}
+
+func TestWindowSelectionExpiringWhileQueuedCannotActivate(t *testing.T) {
+	g, b, ctx, args := activationFixture(t)
+	g.selection.expires = time.Now().Add(10 * time.Millisecond)
+	b.waitBeforeActivation = 60 * time.Millisecond
+	if _, fail := g.input(ctx, "window_focus", args); fail == nil || b.calls != 0 || !g.halted {
+		t.Fatalf("expired while waiting but activated: fail=%v calls=%d halted=%t", fail, b.calls, g.halted)
 	}
 }

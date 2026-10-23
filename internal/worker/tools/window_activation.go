@@ -124,7 +124,11 @@ func (g *inputTargetGuard) selectWindow(ctx context.Context, args map[string]any
 	if err := ctx.Err(); err != nil {
 		return nil, failure("cancelled", err.Error())
 	}
-	focused, err := s.target.activate(ctx)
+	// A valid receipt can expire while waiting for the main thread or an AX
+	// response. Carry its remaining lifetime into every activation stage.
+	activationCtx, cancel := context.WithDeadline(ctx, s.expires)
+	defer cancel()
+	focused, err := s.target.activate(activationCtx)
 	if err != nil || focused == nil {
 		if focused != nil {
 			focused.close()
@@ -136,7 +140,7 @@ func (g *inputTargetGuard) selectWindow(ctx context.Context, args map[string]any
 		}
 		return nil, failure("input_interrupted", message+" "+g.interrupted().GetErrorMessage())
 	}
-	if ctx.Err() != nil || !sameWindowRecord(s.window, focused.window()) {
+	if activationCtx.Err() != nil || !g.now().Before(s.expires) || !sameWindowRecord(s.window, focused.window()) {
 		focused.close()
 		g.halted = true
 		return nil, g.interrupted()
