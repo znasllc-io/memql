@@ -568,7 +568,9 @@ Optional knowledge search and observation indexing each have a five-second
 child deadline, honoring earlier cancellation or deadlines from the caller.
 An unavailable embedding model must not hold a durable receipt indefinitely.
 Administrative receipt labels are not indexed; meaningful checkpoint summaries
-can be indexed. Failed indexing can reduce semantic discoverability until
+can be indexed. Provider-admission and work-window credit receipts remain exact
+journal records without requesting another embedding from inside accounting.
+Failed indexing can reduce semantic discoverability until
 backfill, while exact journal reads remain available. Required instruction
 reads and source verification retain their own failure behavior.
 

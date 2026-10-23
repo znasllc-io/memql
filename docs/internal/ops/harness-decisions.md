@@ -517,6 +517,16 @@ admission may hold that mutex while waiting to renew, so the reverse order would
 deadlock. `TestProviderAdmissionDoesNotInvertConcurrentProgressLocks` forces that
 overlap with a peer completion and verifies both admissions finish.
 
+Admission and progress-credit receipts also bypass optional observation indexing.
+Their labels contain no reusable finding, and embedding one while its accounting
+locks are held would recursively request provider admission and deadlock. This
+does not bypass an embedding's permission or spending checks: no embedding is
+requested. Exact owned receipts remain durable and queryable.
+[`TestAccountingReceiptsPersistWithoutRecursiveEmbedding`](../../../integrations/work/accounting_embedding_db_test.go)
+exercises both writes through a real engine with indexing registered;
+`TestWorkObservationIndexesMeaningInsteadOfArchiveLabels` retains meaningful
+checkpoint indexing while excluding both administrative receipt kinds.
+
 Regression coverage includes
 [`TestProgressDBWorkflowAcrossReplicas`](../../../integrations/work/progress_continuation_db_test.go)
 (400 facts, replay after eviction, partial-write recovery),

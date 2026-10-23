@@ -2274,6 +2274,13 @@ func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, paylo
 	}
 	content, _ := p["content"].(string)
 	if data, ok := p["data"].(map[string]any); ok {
+		// Accounting writes hold the admission/renewal locks. Embedding their
+		// labels would request another provider admission while those same locks
+		// are held, recursively blocking the durable write's return. These rows
+		// retain exact journal identity and no reusable semantic finding.
+		if data["providerAdmission"] != nil || data["progressCredit"] != nil {
+			return
+		}
 		// These administrative labels say nothing about the retained evidence.
 		// Their exact receipts remain available by run/source reference; indexing
 		// "Saved execution progress" or an opaque archive hash adds no recall value.
