@@ -33,6 +33,20 @@ reproduces the refusal and verifies exact resumption without a model call,
 while a deliberately smaller hard target still refuses. No command is run,
 replayed or authorized by this calculation.
 
+The newest recorded human decision stays exact independently of the first and
+last human messages. Goal guidance can be reattached after a fresh approval;
+using message position alone archived the decision while leaving the prepared
+command in context. A new Apps session then searched nested history or repeated
+inspection instead of continuing. Selection, tail-fit checks and the proactive
+budget now count the same current receipt. Earlier decisions remain archivable;
+tool-output quotations cannot replace a human receipt. This retention grants no
+permission, proves no execution and changes no ownership, revocation, use-count
+or spending checks. A strict provider limit still refuses when these exact
+inputs cannot fit. `work_context_decision_test.go` reproduces the selection bug
+and tests exact retention on two database-backed engines, with no effect replay
+or summarizer call. This preserves the decision in context; it does not guarantee
+that a model chooses the next action or that a UI result is correct.
+
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
 | Select a model and execution route | Use the current policy and requested reasoning level. An Apps route does not grant tools, host access or ownership. Missing app-session wiring is a platform fault, not permission to open another machine. | [App session provider](../../../component/memql/app_session_provider.go) |

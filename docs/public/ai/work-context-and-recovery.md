@@ -362,6 +362,11 @@ calculation does not grant permission or execute the approved operation.
    instruction, the original request, the newest human correction, and incomplete tool exchanges are
    not summarized. A complete assistant tool call and all of its results form
    one unit. A preference for recent messages cannot split that unit.
+   The newest recorded approval or feedback also remains exact when existing
+   goal guidance appears after it. Older decision receipts can be archived.
+   The proactive budget includes this current receipt; actual model capacity
+   remains a hard limit. Keeping an answer in context neither grants access nor
+   proves an operation ran: execution still checks its current permission record.
 2. **Archive bulky results.** When the context is over budget, completed large
    tool results are stored in the owner-scoped journal before replacement
    with a short, explicitly incomplete preview and an exact reference. The

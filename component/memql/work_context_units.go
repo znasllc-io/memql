@@ -62,6 +62,21 @@ func workContextHumanBounds(messages []common.ChatMessage) (first, last int) {
 	return first, last
 }
 
+// The current recorded decision may precede reattached goal guidance. Position
+// alone would then archive the approval/feedback while retaining its prepared
+// call, forcing a fresh Apps session to recover the answer from quoted history.
+// Keep only the newest receipt independently of first/last human text; older
+// decisions remain archivable. This is context retention, never permission:
+// execution still validates the owned, unrevoked, unconsumed approval record.
+func workContextCurrentDecision(messages []common.ChatMessage) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && strings.HasPrefix(messages[i].Content, "[Recorded answer for this ") {
+			return i
+		}
+	}
+	return -1
+}
+
 // WorkContextTarget is a proactive history-compaction preference, not a model
 // window. A document and its tool contracts can exceed that preference before
 // any history exists. A prepared current call is likewise indivisible, even
@@ -74,6 +89,7 @@ func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinit
 		return preferred
 	}
 	first, last := workContextHumanBounds(messages)
+	decision := workContextCurrentDecision(messages)
 	freshStart, _ := workContextLatestToolExchange(messages)
 	requiredCall := make(map[int]bool)
 	for _, unit := range workContextUnits(messages) {
@@ -96,7 +112,7 @@ func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinit
 	}
 	pinned := make([]common.ChatMessage, 0, 4)
 	for i, m := range messages {
-		if i == first || i == last || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m) || requiredCall[i] {
+		if i == first || i == last || i == decision || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m) || requiredCall[i] {
 			pinned = append(pinned, m)
 		}
 	}
@@ -129,13 +145,14 @@ func workContextLatestToolExchange(messages []common.ChatMessage) (start, end in
 // tool contracts; a tail that cannot fit still needs immediate archival.
 func workContextCanRetainTail(messages []common.ChatMessage, tools []common.ToolDefinition, target int) bool {
 	first, last := workContextHumanBounds(messages)
+	decision := workContextCurrentDecision(messages)
 	freshStart, freshEnd := workContextLatestToolExchange(messages)
 	var retained []common.ChatMessage
 	for _, unit := range workContextUnits(messages) {
 		pinned := !unit.complete || unit.end == len(messages) || (unit.start == freshStart && unit.end == freshEnd)
 		for i := unit.start; i < unit.end; i++ {
 			m := messages[i]
-			pinned = pinned || i == first || i == last || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m)
+			pinned = pinned || i == first || i == last || i == decision || m.Role == "system" || m.Role == "developer" || common.IsWorkInstruction(m)
 		}
 		if pinned {
 			retained = append(retained, messages[unit.start:unit.end]...)
@@ -149,13 +166,14 @@ func workContextCanRetainTail(messages []common.ChatMessage, tools []common.Tool
 // may sit in the middle after an approval; its stage boundary is still current.
 func workContextArchiveEligibility(messages []common.ChatMessage) func(workContextUnit) bool {
 	firstUser, lastUser := workContextHumanBounds(messages)
+	decision := workContextCurrentDecision(messages)
 	freshStart, freshEnd := workContextLatestToolExchange(messages)
 	return func(u workContextUnit) bool {
 		if !u.complete || u.end == len(messages) || (u.start == freshStart && u.end == freshEnd) {
 			return false
 		}
 		for i := u.start; i < u.end; i++ {
-			if i == firstUser || i == lastUser || messages[i].Role == "system" || messages[i].Role == "developer" || common.IsWorkInstruction(messages[i]) {
+			if i == firstUser || i == lastUser || i == decision || messages[i].Role == "system" || messages[i].Role == "developer" || common.IsWorkInstruction(messages[i]) {
 				return false
 			}
 		}
