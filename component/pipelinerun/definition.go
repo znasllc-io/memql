@@ -13,6 +13,12 @@ import (
 // and resolved secret values never enter the call metadata. Selection decisions
 // are restored from the original rows before comparing this definition.
 func (dr *runDriver) definitionOf(step pipelines.Step) string {
+	return dr.definitionForRun(step, dr.run)
+}
+
+// Only immutable run inputs may be normalized. The live driver owns atomic
+// journal state and locks and must never be copied to compute a fingerprint.
+func (dr *runDriver) definitionForRun(step pipelines.Step, run Run) string {
 	revision := buildinfo.Commit()
 	if dr.d.EngineRevision != nil {
 		revision = dr.d.EngineRevision()
@@ -34,8 +40,8 @@ func (dr *runDriver) definitionOf(step pipelines.Step) string {
 			"workflow":   dr.workflowIdentity(),
 			"repository": dr.p.Repository, "pipelineId": bareID(dr.p.ID),
 			"ownerUserId": dr.p.OwnerUserID, "compute": dr.p.Compute,
-			"sha": dr.run.SHA, "version": dr.run.Version, "inboundRequestId": dr.run.InboundRequestID,
-			"mode": dr.run.Mode, "event": dr.run.Event, "domain": domain,
+			"sha": run.SHA, "version": run.Version, "inboundRequestId": run.InboundRequestID,
+			"mode": run.Mode, "event": run.Event, "domain": domain,
 		},
 	}})
 	if err != nil {
@@ -51,8 +57,7 @@ func (dr *runDriver) verificationOf(step pipelines.Step) string {
 	if !step.Verification || step.Kind != pipelines.StepCommand {
 		return ""
 	}
-	copy := *dr
-	copy.run = dr.run
-	copy.run.Event, copy.run.Mode, copy.run.Version, copy.run.InboundRequestID = "", "", "", ""
-	return copy.definitionOf(step)
+	run := dr.run
+	run.Event, run.Mode, run.Version, run.InboundRequestID = "", "", "", ""
+	return dr.definitionForRun(step, run)
 }

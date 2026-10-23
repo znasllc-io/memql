@@ -2,6 +2,8 @@ package pipelinerun
 
 import (
 	"context"
+	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -9,7 +11,69 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/component/workjournal"
 )
+
+func TestVerificationFingerprintPreservesTheLiveDriver(t *testing.T) {
+	dr := &runDriver{
+		d:        Deps{EngineRevision: func() string { return "engine-revision" }, Domain: func() string { return "example.test" }},
+		p:        Pipeline{ID: "pipeline", OwnerUserID: "owner", Repository: "example/project"},
+		run:      Run{SHA: shaA, Event: pipelines.EventMergeGroup, Mode: pipelines.ModeFull, Version: "1.2.3", InboundRequestID: "inbound"},
+		workflow: &workflowProgram{fingerprint: "captured-workflow"},
+	}
+	step := pipelines.Step{Key: "tests.unit", Kind: pipelines.StepCommand, Run: "go test ./unit", Packages: []string{"example/unit"}, Verification: true}
+	original := dr.run
+	full := dr.definitionOf(step)
+	verification := dr.verificationOf(step)
+	if verification == "" || verification == full {
+		t.Fatal("verification must normalize the run-only facts while retaining an execution definition")
+	}
+	want := &runDriver{d: dr.d, p: dr.p, run: Run{SHA: shaA}, workflow: dr.workflow}
+	if verification != want.definitionOf(step) {
+		t.Fatal("verification changed more than the event, mode, version and inbound request")
+	}
+	want.run.SHA = shaB
+	if verification == want.verificationOf(step) {
+		t.Fatal("verification lost the exact source revision")
+	}
+	// The journal handle can be published by another goroutine. Under -race,
+	// this exercises the old whole-driver copy against atomic stores, rather
+	// than merely asserting the spelling of the implementation.
+	first, latest := &workjournal.Run{}, &workjournal.Run{}
+	dr.workRun.Store(first)
+	dr.journalFailed.Store(true)
+	dr.cleanupFailed.Store(true)
+	ready, stop, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		close(ready)
+		for {
+			select {
+			case <-stop:
+				dr.workRun.Store(latest)
+				return
+			default:
+				dr.workRun.Store(first)
+				dr.workRun.Store(latest)
+				runtime.Gosched()
+			}
+		}
+	}()
+	<-ready
+	stable := true
+	for range 256 {
+		stable = stable && dr.verificationOf(step) == verification
+	}
+	close(stop)
+	<-done
+	if !stable || !reflect.DeepEqual(dr.run, original) || dr.work() != latest || !dr.journalFailed.Load() || !dr.cleanupFailed.Load() {
+		t.Fatal("fingerprinting changed the live run, journal ownership or failure state")
+	}
+	step.Verification = false
+	if dr.verificationOf(step) != "" {
+		t.Fatal("ordinary work must not acquire reusable verification evidence")
+	}
+}
 
 func TestRecoveryRequiresTheSameExecutionDefinition(t *testing.T) {
 	for _, change := range []string{"command", "image", "memory reservation", "CPU reservation", "checkout history", "registry credential", "failure policy", "engine", "domain", "unknown engine", "dirty engine"} {
