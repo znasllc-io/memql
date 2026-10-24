@@ -258,6 +258,21 @@ query run workRunsForGoal {
   shape   workRunFull
 }
 
+/// Existence check for a conflicting goal result: newest or still unfinished, even when
+/// an older active run lies beyond a page of terminal history. No execution payloads.
+@actor
+query run workContinuationConflictsForOwnerGoal {
+  args {
+    goalId string!
+    runVersion datetime!
+  }
+  filter row => row.goalId == args.goalId && row.ownerUserId == actor.userId &&
+    (row.createdAt > args.runVersion || row.status == nil || (row.status != "succeeded" &&
+      row.status != "failed" && row.status != "cancelled" && row.status != "abandoned"))
+  paginate 1
+  shape workContinuationConflict
+}
+
 /// The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read
 /// (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds
 /// them: pushed down on the signature rather than paging the owner's whole run history and folding
@@ -794,5 +809,25 @@ query observation workProgressCreditsForOwnerRun {
  args { runId string! receiptIds []string! }
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.id in args.receiptIds
  paginate 100
+ shape workObservationFull
+}
+
+/// One stable owner-feedback receipt, including a not-yet-committed intent.
+@actor
+query observation workResultFeedbackForOwnerRequest {
+ args { runId string! observationId string! }
+ filter row => row.runId == args.runId && row.id == args.observationId && row.ownerUserId == actor.userId && row.?data.resultFeedback.schemaVersion == 1
+ paginate 1
+ shape workObservationFull
+}
+
+/// All accepted result feedback. The consumer follows every page and restores
+/// requestedAt order; a later continuation never erases an older direction.
+@actor
+query observation workResultFeedbackForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.resultFeedback.schemaVersion == 1 && row.?data.resultFeedback.accepted == true
+ sort "row.createdAt", "asc"
+ paginate 17
  shape workObservationFull
 }

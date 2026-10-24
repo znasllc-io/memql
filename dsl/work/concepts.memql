@@ -77,6 +77,7 @@ concept run {
   status                 enum("compiling", "running", "waiting", "succeeded", "failed", "cancelled", "abandoned")!  @description("Where the run is.")
   waitingOn              object  @description("{kind, subject, since} while status is waiting. kind is approval|feedback|timer|external|subrun, or one of the three the failure path writes -- retry|replan|repair (epic memql#5127) -- each of which the sweep serves on the node that can. A retry and a replan also carry reason and ruleId, which is the classifier verdict a person reads without opening an approval.")
   continuation           object  @description("Owner-scoped agent exchanges captured before a human question; preserves completed effects across replicas.")
+  feedbackContinuation   object  @description("Latest owner feedback continuation receipt: requestId, exact prior runVersion, feedback, requestedBy and requestedAt. A retry cannot dispatch it twice or reopen accepted work.")
   humanResumeId          string  @description("Answered approval identifying the current continuation; gives each human answer one cross-replica dispatch claim.")
   humanWaitMs            int  @description("Accumulated time parked on answered approvals; excluded from active work deadlines, never from model or retry budgets.")
   spent                  object  @description("{tokens, tokensSubscription, tokensLocal, cost, modelCalls, retries, events, wallClockMs} so far.")

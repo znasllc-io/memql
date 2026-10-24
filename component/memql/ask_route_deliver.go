@@ -54,6 +54,10 @@ var nonPersonWaits = map[string]bool{"retry": true, "replan": true, "repair": tr
 // goal's request is what the turn that opened it asked of it: for a split
 // message, the part intake received.
 func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscript) ([]askRouteGoal, error) {
+	return e.askGoals(ctx, transcript, false)
+}
+
+func (e *MemQLEngine) askGoals(ctx context.Context, transcript askTranscript, includeFinished bool) ([]askRouteGoal, error) {
 	ctx = ContextWithFreshRead(ctx)
 	turns := transcript.Turns
 	// The turn that opened each run is the earliest that names it.
@@ -77,10 +81,23 @@ func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscri
 		if err != nil {
 			return nil, err
 		}
-		if len(rows) != 1 || !activeWorkRun(rows[0]) {
+		if len(rows) != 1 {
 			continue
 		}
 		run, opened := rows[0], turns[opening[key]]
+		continuation := ""
+		if !activeWorkRun(run) {
+			if !includeFinished {
+				continue
+			}
+			continuation, err = e.askContinuationVersion(ctx, run)
+			if err != nil {
+				return nil, err
+			}
+			if continuation == "" {
+				continue
+			}
+		}
 		request := askTurnRequest(opened)
 		title := runTitle(run)
 		if strings.TrimSpace(title) == "" {
@@ -90,15 +107,16 @@ func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscri
 			title = request
 		}
 		goals = append(goals, askRouteGoal{
-			Handle:   "g" + strconv.Itoa(len(goals)+1),
-			TurnID:   opened.ID,
-			GoalID:   BareShortId(stringArg(run, "goalId")),
-			RunID:    key,
-			Title:    askRouteClip(title, askRouteTitleRunes),
-			Request:  askRouteClip(request, askRouteSideRunes),
-			Run:      run,
-			Approval: e.pendingRunApproval(ctx, run),
-			Updates:  activeGoalUpdates(turns, key),
+			ContinueVersion: continuation,
+			Handle:          "g" + strconv.Itoa(len(goals)+1),
+			TurnID:          opened.ID,
+			GoalID:          BareShortId(stringArg(run, "goalId")),
+			RunID:           key,
+			Title:           askRouteClip(title, askRouteTitleRunes),
+			Request:         askRouteClip(request, askRouteSideRunes),
+			Run:             run,
+			Approval:        e.pendingRunApproval(ctx, run),
+			Updates:         activeGoalUpdates(turns, key),
 		})
 	}
 	return goals, nil

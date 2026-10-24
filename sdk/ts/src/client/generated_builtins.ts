@@ -1215,6 +1215,33 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
   return this.executeNamed("composeRunRecipe", buildComposeRunRecipe(args), opts);
 };
 
+/** Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation. */
+export interface ContinueRunArgs {
+  runId: string;
+  runVersion: string;
+  requestId: string;
+  feedback: string;
+}
+
+export function buildContinueRun(args: ContinueRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("runVersion: " + renderMemQLValue(args.runVersion));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("feedback: " + renderMemQLValue(args.feedback));
+  return "builtin continueRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    continueRun(args: ContinueRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.continueRun = function (this: QueryClient, args: ContinueRunArgs = {} as ContinueRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("continueRun", buildContinueRun(args), opts);
+};
+
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
   /** Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice. */

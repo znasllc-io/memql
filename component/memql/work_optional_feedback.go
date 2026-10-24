@@ -83,6 +83,10 @@ func (e *MemQLEngine) readWorkGuidance(ctx context.Context, includeWholePrompt b
 			dates[guidanceID], _ = askTimestamp(row["decidedAt"])
 		}
 	}
+	out, err = e.readResultWorkGuidance(ctx, targets, out, dates)
+	if err != nil {
+		return nil, err
+	}
 	corrections, err := e.readApprovalWorkGuidance(ctx, targets, dates)
 	if err != nil {
 		return nil, err

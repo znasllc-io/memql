@@ -910,6 +910,14 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 			}
 		}
 	}
+	// A finished plan can still leave the owner's goal unmet. Its completed
+	// receipts remain fixed; this synthetic planning target is not a failed
+	// step receipt and never authorizes replay of the completed suffix.
+	feedback := rowMap(run, "feedbackContinuation")
+	if guidedTarget && rowString(feedback, "requestId") != "" &&
+		rowString(rowMap(run, "waitingOn"), "feedbackRequestId") == rowString(feedback, "requestId") {
+		out.FailedStep = map[string]any{"key": stepKey, "errorMessage": reason, "symptom": work.SymptomPlan, "finishedResultFeedback": true}
+	}
 	return out, nil
 }
 

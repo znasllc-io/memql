@@ -54,6 +54,7 @@ shape run workRunFull {
   status
   waitingOn
   continuation
+  feedbackContinuation
   humanResumeId
   humanWaitMs
   spent
@@ -347,4 +348,14 @@ shape approval workDocumentApprovalReceipt {
 @row
 shape goal workRevisionAmendment {
  input.requestId
+}
+
+/// Minimal existence witness for the continuation lifecycle gate.
+@row
+shape run workContinuationConflict {
+  row.id
+  row.createdAt
+  ownerUserId
+  goalId
+  status
 }

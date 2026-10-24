@@ -13515,6 +13515,34 @@ func WorkContextSourcesForOwnerRunBuild(args WorkContextSourcesForOwnerRunArgs) 
 	return b.String()
 }
 
+// WorkContinuationConflictsForOwnerGoal -- Existence check for a conflicting goal result: newest or still unfinished, even when an older active run lies beyond a page of terminal history. No execution payloads.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workContinuationConflictsForOwnerGoal"] in generated_concepts.go).
+type WorkContinuationConflictsForOwnerGoalArgs struct {
+	GoalId     string
+	RunVersion string
+}
+
+// WorkContinuationConflictsForOwnerGoal calls the engine query workContinuationConflictsForOwnerGoal.
+func (qc *QueryClient) WorkContinuationConflictsForOwnerGoal(ctx context.Context, args WorkContinuationConflictsForOwnerGoalArgs) (*Result, error) {
+	call := WorkContinuationConflictsForOwnerGoalBuild(args)
+	return qc.executeNamed(ctx, "workContinuationConflictsForOwnerGoal", call)
+}
+
+func WorkContinuationConflictsForOwnerGoalBuild(args WorkContinuationConflictsForOwnerGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("query workContinuationConflictsForOwnerGoal(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	if b.Len() > 44 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runVersion: ")
+	b.WriteString(quoteMemQL(args.RunVersion))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkContinuationForOwnerRun -- Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.go).
@@ -14007,6 +14035,45 @@ func (qc *QueryClient) WorkReplyReviewForOwnerStep(ctx context.Context, args Wor
 func WorkReplyReviewForOwnerStepBuild(args WorkReplyReviewForOwnerStepArgs) string {
 	_ = args
 	return "query workReplyReviewForOwnerStep()"
+}
+
+// WorkResultFeedbackForOwnerRequest -- One stable owner-feedback receipt, including a not-yet-committed intent.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workResultFeedbackForOwnerRequest"] in generated_concepts.go).
+type WorkResultFeedbackForOwnerRequestArgs struct {
+}
+
+// WorkResultFeedbackForOwnerRequest calls the engine query workResultFeedbackForOwnerRequest.
+func (qc *QueryClient) WorkResultFeedbackForOwnerRequest(ctx context.Context, args WorkResultFeedbackForOwnerRequestArgs) (*Result, error) {
+	call := WorkResultFeedbackForOwnerRequestBuild(args)
+	return qc.executeNamed(ctx, "workResultFeedbackForOwnerRequest", call)
+}
+
+func WorkResultFeedbackForOwnerRequestBuild(args WorkResultFeedbackForOwnerRequestArgs) string {
+	_ = args
+	return "query workResultFeedbackForOwnerRequest()"
+}
+
+// WorkResultFeedbackForOwnerRun -- All accepted result feedback. The consumer follows every page and restores requestedAt order; a later continuation never erases an older direction.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workResultFeedbackForOwnerRun"] in generated_concepts.go).
+type WorkResultFeedbackForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkResultFeedbackForOwnerRun calls the engine query workResultFeedbackForOwnerRun.
+func (qc *QueryClient) WorkResultFeedbackForOwnerRun(ctx context.Context, args WorkResultFeedbackForOwnerRunArgs) (*Result, error) {
+	call := WorkResultFeedbackForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workResultFeedbackForOwnerRun", call)
+}
+
+func WorkResultFeedbackForOwnerRunBuild(args WorkResultFeedbackForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workResultFeedbackForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkRunForOwner -- One of the caller's runs by id.

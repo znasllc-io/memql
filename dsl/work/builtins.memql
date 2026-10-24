@@ -144,6 +144,19 @@ builtin replayRun {
   policy  string   @description("strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it.")
 }
 
+/// Continue the owner's open, unaccepted goal using feedback on its exact finished result.
+/// Preserves the run, completed work, usage and permissions. Native planning chooses the remaining
+/// work; no technical step selection is required. A closed/accepted, cancelled or changed result
+/// refuses. Repeating the same request id and payload records no second continuation.
+@sdk
+@executor("integration.work.continueRun")
+builtin continueRun {
+  runId string!
+  runVersion string!
+  requestId string!
+  feedback string!
+}
+
 // ---- intervention: versions, the head and branches (epic memql#5414, #5415) ----
 //
 // Every one of these is caller-scoped in its handler: the caller must OWN the
