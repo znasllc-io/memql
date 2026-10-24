@@ -1,5 +1,7 @@
 package memql
 
+import "context"
+
 // Cross-package test construction for the provider and policy registries.
 //
 // WHY NOT A _test.go FILE. The seam these serve spans packages:
@@ -17,6 +19,13 @@ package memql
 // NewProviderRegistryForTest returns an empty provider registry.
 func NewProviderRegistryForTest() *ProviderRegistry {
 	return newProviderRegistry()
+}
+
+// ContextWithProviderAdmissionForTest wires an explicit fixture guard through
+// the same private context slot used by the serving engine. Cross-package
+// provider tests still pass through admission; this does not disable a gate.
+func ContextWithProviderAdmissionForTest(ctx context.Context, guard ProviderAdmissionGuard) context.Context {
+	return context.WithValue(ctx, workProviderGuardKey{}, guard)
 }
 
 // RegisterForTest inserts an AVAILABLE provider entry under a name.

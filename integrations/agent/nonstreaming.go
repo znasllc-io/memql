@@ -754,6 +754,13 @@ BackgroundLoop:
 		}
 		citations = terminalEnvelope.Citations
 	}
+	// Match the streaming lane's final source barrier, including direct App
+	// completion without an intervening locally executed tool batch.
+	if !paused && finalText != "" {
+		if err := r.saveWorkProgress(ctx, messages); err != nil {
+			return nil, err
+		}
+	}
 
 	r.logger.Info("agent background: complete",
 		"textChunks", textChunks,

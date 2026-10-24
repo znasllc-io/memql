@@ -18,7 +18,17 @@ import (
 type workContextFleet struct {
 	owner                         string
 	visits, calls, missingContext int
+	admissions                    int
 	wantDocument                  string
+}
+
+func (f *workContextFleet) AdmitProvider(ctx context.Context, run common.RunContext, _ memql.ProviderAdmission) error {
+	actor, _ := auth.AccessFromContext(ctx)
+	if actor == nil || actor.UserId != f.owner || run.OwnerUserId != f.owner || run.RunId != "adopted-run" {
+		return fmt.Errorf("provider admission lost work owner or run")
+	}
+	f.admissions++
+	return nil
 }
 
 func (f *workContextFleet) Catalog(ctx context.Context, owner string) ([]memql.FleetModel, error) {
@@ -39,6 +49,9 @@ func (*workContextFleet) ModelPreference(context.Context, string) ([]string, err
 
 func (f *workContextFleet) Call(ctx context.Context, req memql.FleetCallRequest) (memql.FleetCallResult, error) {
 	f.calls++
+	if f.admissions != f.calls {
+		return memql.FleetCallResult{}, fmt.Errorf("fleet dispatch did not reserve its provider attempt")
+	}
 	ac, _ := auth.AccessFromContext(ctx)
 	run, _ := common.RunFromContext(ctx)
 	if req.ActingUserId != f.owner || ac == nil || ac.UserId != f.owner || run.RunId != "adopted-run" {
@@ -92,6 +105,7 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			defer cancel()
 			document := strings.TrimSpace(strings.Repeat("Preserve this original document. ", 3000))
 			fleet := &workContextFleet{owner: owner, wantDocument: document}
+			ctx = memql.ContextWithProviderAdmissionForTest(ctx, fleet)
 			providers := memql.NewProviderRegistryForTest()
 			providers.SetFleetInference(fleet)
 			rules := memql.NewRuleRegistry()

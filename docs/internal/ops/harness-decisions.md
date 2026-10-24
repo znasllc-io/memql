@@ -30,6 +30,19 @@ continuation must still pass its exact native checkpoint proof. Review calls
 retain normal provider admission and spending gates; this record grants no tool
 permission, model calls, completion claim or owner acceptance.
 
+Both execution lanes save their exact final message sequence before handing a
+successful result to review. This barrier also covers direct App completion
+without a locally executed tool batch; an earlier progress marker alone is not
+the completed source. The App-door test exercises both lanes and compares the
+pending review's source with that durable final checkpoint, including exactly
+one completed assistant response. Cross-package Fleet fixtures explicitly wire
+their admission guard and verify reservation before dispatch; no production
+budget gate is disabled to exercise the final checkpoint.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` covers the real adapter and
+durable store in both lanes: an ordinary App greeting includes its final
+response once, then a peer delivers that retained result without another App
+session. A missing or failed final checkpoint prevents the review transition.
+
 An unchanged retry reviews the retained result without production. Changed
 guidance or appended operational receipts require fresh production from the
 latest compatible source, retaining completed exchanges. The latest progress

@@ -18,6 +18,9 @@ type terminalToolFleet struct{ workContextFleet }
 
 func (f *terminalToolFleet) Call(_ context.Context, req memql.FleetCallRequest) (memql.FleetCallResult, error) {
 	f.calls++
+	if f.admissions != f.calls {
+		return memql.FleetCallResult{}, fmt.Errorf("fleet dispatch did not reserve its provider attempt")
+	}
 	if f.calls == 1 {
 		return memql.FleetCallResult{ToolCalls: []common.ToolCall{{ID: "save", Name: "composeFile", Arguments: `{"name":"Heroes","format":"markdown","statement":"Rank ten heroes"}`}}}, nil
 	}
@@ -57,6 +60,7 @@ func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	fleet := &terminalToolFleet{workContextFleet: workContextFleet{owner: owner}}
+	ctx = memql.ContextWithProviderAdmissionForTest(ctx, fleet)
 	providers := memql.NewProviderRegistryForTest()
 	providers.SetFleetInference(fleet)
 	rules := memql.NewRuleRegistry()
