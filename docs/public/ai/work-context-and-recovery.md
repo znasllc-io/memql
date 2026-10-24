@@ -636,6 +636,15 @@ section. Additive instructions and later human corrections retain their existing
 ordering. Retained context
 does not extend permissions or bypass the operation's execution checks.
 
+If a completed turn's final review is interrupted, its proposed reply and source
+checkpoint are saved separately. Retrying review can reuse that completed turn
+without starting its operations again. New instructions still apply, and newer
+progress is preserved. If saved sources cannot be reconciled, continuation stops
+instead of guessing which operations to repeat. Review and delivery still require
+the current owned execution, normal model admission and spending gates. A crash
+around final delivery can repeat the reviewed answer; it does not imply a new
+operation permission or owner acceptance.
+
 The final reply reviewer also reads current owner instructions, including the
 step's replacement and later corrections in their recorded order. It keeps the
 original goal as historical context instead of restoring superseded directions.

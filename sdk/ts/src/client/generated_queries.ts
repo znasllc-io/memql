@@ -13318,6 +13318,26 @@ QueryClient.prototype.workQuestionsForOwnerRun = function (this: QueryClient, ar
   return this.executeNamed("workQuestionsForOwnerRun", buildWorkQuestionsForOwnerRun(args), opts);
 };
 
+/** The latest private reply-review checkpoint of this owner's step. A completed operational result survives a failed helper without rerunning its effects. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workReplyReviewForOwnerStep"] in generated_concepts.ts).
+export interface WorkReplyReviewForOwnerStepArgs {
+}
+
+export function buildWorkReplyReviewForOwnerStep(args: WorkReplyReviewForOwnerStepArgs): string {
+  void args;
+  return "query workReplyReviewForOwnerStep()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workReplyReviewForOwnerStep(args?: WorkReplyReviewForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workReplyReviewForOwnerStep = function (this: QueryClient, args: WorkReplyReviewForOwnerStepArgs = {} as WorkReplyReviewForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workReplyReviewForOwnerStep", buildWorkReplyReviewForOwnerStep(args), opts);
+};
+
 /** One of the caller's runs by id. */
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunForOwner"] in generated_concepts.ts).
 export interface WorkRunForOwnerArgs {

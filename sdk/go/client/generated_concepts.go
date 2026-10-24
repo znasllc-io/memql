@@ -1152,6 +1152,7 @@ var BoundConcepts = map[string]string{
 	"workProgressReceiptsForOwnerRun":                  "v1:work:observation",
 	"workProviderAdmissionForOwnerRun":                 "v1:work:observation",
 	"workQuestionsForOwnerRun":                         "v1:work:approval",
+	"workReplyReviewForOwnerStep":                      "v1:work:observation",
 	"workRunForOwner":                                  "v1:work:run",
 	"workRunSummariesForOwner":                         "v1:work:run",
 	"workRunSummaryForOwner":                           "v1:work:run",

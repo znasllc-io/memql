@@ -19,6 +19,46 @@ paths and one task's acceptance criteria must not become routing rules.
 
 ## Delegation and return
 
+A completed operational turn now saves a private reply-review stage before its
+separate evidence-review call. A transient review failure previously restarted
+the entire operational turn on another replier. The checkpoint binds the full
+result, terminal envelope and exact source messages to owner, run, goal, step,
+rerun request, override and plan; a separate fingerprint covers current goal
+input and chronological owner guidance. The adapter reads fresh ownership,
+execution, cancellation and goal state before review and delivery. An answered
+continuation must still pass its exact native checkpoint proof. Review calls
+retain normal provider admission and spending gates; this record grants no tool
+permission, model calls, completion claim or owner acceptance.
+
+An unchanged retry reviews the retained result without production. Changed
+guidance or appended operational receipts require fresh production from the
+latest compatible source, retaining completed exchanges. The latest progress
+checkpoint is never overwritten by an older draft: recovery counters, evidence
+and guidance watermarks remain intact. Review helper capacity recovery carries
+the current operational source in native context: its durable suspension names
+that source, not the helper's compacted prompt. Later owner guidance therefore
+resumes the operational checkpoint through the ordinary exact-proof path. If a
+legacy or otherwise incompatible checkpoint has replaced that source sequence,
+review-only retry remains possible, but fresh production is
+refused until the sources can be reconciled; there is no silent fresh-turn
+fallback. Evidence continuation remains bounded by the durable repair count.
+Each pending/retired transition receives a separate observation ID so repeated
+retirements cannot resurrect an intervening draft.
+
+The pending stage is retained after delivery until the workflow settles the
+step. A crash before that journal commit can cause another review and delivery,
+but not another production turn. This is not exactly-once user delivery or a
+general exactly-once tool guarantee. A failed initial checkpoint write stops
+before review/delivery; it cannot manufacture a saved result. Pre-upgrade work
+without this stage still follows ordinary source-checkpoint recovery. Malformed
+storage, cancelled/closed work and changed execution refuse before reuse.
+`TestReplyReviewRestartDoesNotRepeatCompletedProduction` reproduces the old
+duplicate-production failure; restart/progress tests cover newer receipts,
+guidance, missing proof and storage failure. `work_reply_checkpoint_db_test.go`
+checks fresh-replica ownership, generation and repeated retirement ordering.
+The integration test for helper recovery exercises real capacity suspension,
+fresh-replica guidance and exact continuation proof without replacing source.
+
 Human corrections sent through **Discuss in Ask → Send guidance** are durable
 instructions for unfinished work. Previously they survived only in the immediate
 decision checkpoint. A later permission receipt could make the older correction

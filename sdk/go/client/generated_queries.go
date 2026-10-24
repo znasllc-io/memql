@@ -13992,6 +13992,23 @@ func WorkQuestionsForOwnerRunBuild(args WorkQuestionsForOwnerRunArgs) string {
 	return b.String()
 }
 
+// WorkReplyReviewForOwnerStep -- The latest private reply-review checkpoint of this owner's step. A completed operational result survives a failed helper without rerunning its effects.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workReplyReviewForOwnerStep"] in generated_concepts.go).
+type WorkReplyReviewForOwnerStepArgs struct {
+}
+
+// WorkReplyReviewForOwnerStep calls the engine query workReplyReviewForOwnerStep.
+func (qc *QueryClient) WorkReplyReviewForOwnerStep(ctx context.Context, args WorkReplyReviewForOwnerStepArgs) (*Result, error) {
+	call := WorkReplyReviewForOwnerStepBuild(args)
+	return qc.executeNamed(ctx, "workReplyReviewForOwnerStep", call)
+}
+
+func WorkReplyReviewForOwnerStepBuild(args WorkReplyReviewForOwnerStepArgs) string {
+	_ = args
+	return "query workReplyReviewForOwnerStep()"
+}
+
 // WorkRunForOwner -- One of the caller's runs by id.
 //
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunForOwner"] in generated_concepts.go).

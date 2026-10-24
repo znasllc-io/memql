@@ -7,6 +7,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -124,5 +125,7 @@ type WorkRuntime interface {
 	SaveWorkContinuation(context.Context, []common.ChatMessage) error
 	DelegatedWorkHumanWait(context.Context, string) error
 	RestoreWorkContinuation(context.Context, []common.ChatMessage) ([]common.ChatMessage, error)
+	ReadWorkReplyReview(context.Context) (memql.WorkReplyReviewCheckpoint, error)
+	SaveWorkReplyReview(context.Context, memql.WorkReplyReviewBinding, json.RawMessage) error
 	CompactWorkContext(context.Context, []common.ChatMessage, []common.ToolDefinition, int) ([]common.ChatMessage, error)
 }
