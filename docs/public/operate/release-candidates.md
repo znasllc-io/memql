@@ -151,7 +151,7 @@ inconsistent references refuse before preparation.
 
 ## Assemble and review
 
-In MemQL OS, open **Cluster → Releases** and select **Prepare release**. Choose
+In MemQL OS, open **Pipelines → Releases** and select **Prepare release**. Choose
 a configured plan, then one successful full-mode run for each declared input.
 The picker walks older pages when needed and shows only runs from the declared
 repository. Multiple inputs for one component must use distinct work runs at
