@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
@@ -29,6 +30,7 @@ import (
 type replyAppCheckpointFixture struct {
 	calls, formats int
 	invalid        bool
+	unfinished     bool
 	engine         *memql.MemQLEngine
 }
 
@@ -40,6 +42,9 @@ func (*replyAppCheckpointFixture) AppOrder(context.Context, string) ([]string, e
 }
 func (f *replyAppCheckpointFixture) Call(_ context.Context, req memql.AppCallRequest) (memql.AppCallResult, error) {
 	if req.Schema != nil && req.Schema.Name == "work_reply_review" && len(req.Images) == 0 && len(req.Inputs) == 0 {
+		if f.unfinished {
+			return memql.AppCallResult{Content: `{"reply":"The retained result needs review","missingEvidence":"","completion":{"kind":"operation","disposition":"unfinished","gap":"The saved receipt is not enough","sourceRefs":[]}}`}, nil
+		}
 		return memql.AppCallResult{Content: `{"reply":"Hello from the saved App","missingEvidence":"","completion":{"kind":"information","disposition":"satisfied","gap":"","sourceRefs":[]}}`}, nil
 	}
 	if f.invalid && req.Schema != nil && req.Schema.Name == "work_outcome_format" && len(req.Images) == 0 && len(req.Inputs) == 0 {
@@ -50,6 +55,13 @@ func (f *replyAppCheckpointFixture) Call(_ context.Context, req memql.AppCallReq
 		return memql.AppCallResult{Content: `{"status":"complete","response":"Hello from the saved App","question":null}`}, nil
 	}
 	return memql.AppCallResult{}, fmt.Errorf("greeting must use the session door")
+}
+
+type savedReportingErrorRegistry struct{ err error }
+
+func (s savedReportingErrorRegistry) Execute(_ context.Context, step *automations.Step, _ *automations.StepContext) (*automations.StepResult, error) {
+	now := time.Now()
+	return &automations.StepResult{StepId: step.ID, Status: "failed", Error: s.err.Error(), StartedAt: now, CompletedAt: now}, s.err
 }
 func (f *replyAppCheckpointFixture) RunStep(ctx context.Context, h memql.AppSessionHandover) (memql.AppSessionOutcome, error) {
 	f.calls++
@@ -87,6 +99,10 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 	require.NoError(t, err)
 	defer gates.Close()
 	fixture := &replyAppCheckpointFixture{engine: writer}
+	auto, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(`@template
+@journalRequired
+automation replyAppCheckpointFixture { reason := builtin checkSavedReport() }`, "reporting-stop.memql")
+	require.NoError(t, err)
 	var repliers []*agent.Replier
 	for _, e := range []*memql.MemQLEngine{writer, reader} {
 		e.SetScopedWorkflowRunner(func(ctx context.Context, name string, args map[string]any, ops map[string]memql.WorkflowOperation) (any, error) {
@@ -117,9 +133,10 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 		repliers = append(repliers, replier)
 	}
 	for _, background := range []bool{false, true} {
-		for _, invalid := range []bool{false, true} {
-			t.Run(fmt.Sprintf("background=%v/invalid=%v", background, invalid), func(t *testing.T) {
-				fixture.invalid = invalid
+		for _, scenario := range []struct{ invalid, unfinished bool }{{}, {invalid: true}, {invalid: true, unfinished: true}} {
+			invalid := scenario.invalid
+			t.Run(fmt.Sprintf("background=%v/invalid=%v/unfinished=%v", background, invalid, scenario.unfinished), func(t *testing.T) {
+				fixture.invalid, fixture.unfinished = invalid, scenario.unfinished
 				key := id.NewShortId()
 				owner, goalID, runID := key+"owner", key+"goal", key+"run"
 				person := auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
@@ -127,8 +144,8 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 					templateMutation(t, writer, auth.ContextWithInternalOrigin(person), name, args)
 				}
 				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Say hello", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 10, "wallClockMs": 600000}})
-				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "fixture", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
-				write("createWorkStep", map[string]any{"stepId": key + "reason", "runId": runID, "key": "reason", "seq": 0, "stepType": "builtin", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": auto.Name, "templateFingerprint": auto.DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				write("createWorkStep", map[string]any{"stepId": runID + "-reason", "runId": runID, "key": "reason", "seq": 0, "stepType": "builtin", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 				ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: "reason", Mode: common.RunModeLive, Override: &common.StepOverride{Model: "app:codex:gpt-6-astra", Effort: "xhigh"}})
 				msg := &memqlv1.AgentGenerateTurnMsg{RequestId: key, AgentId: "fixture", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "fixture", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "hello"}}}
 				if background {
@@ -136,10 +153,17 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 				}
 				before := fixture.calls
 				formatsBefore := fixture.formats
+				var reportingError error
 				for _, replier := range repliers {
 					result, err := replier.Handle(ctx, msg, knowledgeTurnSink{})
-					require.NoError(t, err)
-					require.Equal(t, "Hello from the saved App", result.FinalText)
+					if scenario.unfinished {
+						require.ErrorContains(t, err, "work_outcome_format_unverified")
+						require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+						reportingError = err
+					} else {
+						require.NoError(t, err)
+						require.Equal(t, "Hello from the saved App", result.FinalText)
+					}
 				}
 				require.Equal(t, before+1, fixture.calls, "peer delivery must reuse completed production")
 				if invalid {
@@ -173,6 +197,27 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 					}
 				}
 				require.Equal(t, 1, completed, "durable source must include the completed response once")
+				if reportingError != nil {
+					// Carry the actual Replier error through the outer executor and
+					// required database journal. A semantic stop must not leave the
+					// last step running or masquerade as missing durable storage.
+					journal, err := automations.LoadRunJournal(memql.ContextWithFreshRead(person), reader, runID)
+					require.NoError(t, err)
+					executor := automations.NewExecutor(automations.ExecutorOptions{Engine: reader, StepRegistry: savedReportingErrorRegistry{reportingError}})
+					t.Cleanup(executor.Close)
+					// The registry can only return the already-captured error; this
+					// fixture explicitly permits retrying that synthetic function.
+					_, err = executor.ResumeFrom(person, journal, auto, &automations.ResumeOptions{AllowSideEffects: true})
+					require.ErrorContains(t, err, "work_outcome_format_unverified")
+					require.NotErrorIs(t, err, automations.ErrJournalRequired)
+					journal, err = automations.LoadRunJournal(memql.ContextWithFreshRead(person), reader, runID)
+					require.NoError(t, err)
+					require.Equal(t, "waiting", journal.Status, "the installed failure path must create an explicit review wait")
+					require.Equal(t, "approval", journal.WaitingOn["kind"])
+					require.NotEmpty(t, journal.WaitingOn["subject"])
+					require.Equal(t, "failed", journal.StepStates["reason"].Status)
+					require.False(t, journal.HasRunningStep)
+				}
 			})
 		}
 	}

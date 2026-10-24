@@ -52,7 +52,7 @@ func (r *Replier) repairOutcomeDraft(ctx context.Context, store workReplyReviewS
 		return nil
 	}
 	if f.Attempts != 0 {
-		return fmt.Errorf("%w: work_outcome_format_exhausted; saved result retained, production cannot be replayed", memql.ErrWorkCheckpointRequired)
+		return fmt.Errorf("work_outcome_format_exhausted; saved result retained, production cannot be replayed")
 	}
 	runtime, ok := r.engine.(outcomeRecoveryRuntime)
 	if !ok {
@@ -87,11 +87,11 @@ func (r *Replier) repairOutcomeDraft(ctx context.Context, store workReplyReviewS
 	}
 	raw, err := runtime.FormatWorkOutcome(ctx, f.Input, json.RawMessage(outcomeFormatSchema))
 	if err != nil {
-		return fmt.Errorf("%w: outcome format recovery: %w", memql.ErrWorkCheckpointRequired, err)
+		return fmt.Errorf("outcome format recovery: %w", err)
 	}
 	calls, err := normalizeWorkOutcome([]common.ToolCall{{ID: "recovered-app-response", Name: RespondToUserToolName, Arguments: raw}}, "")
 	if err != nil || len(calls) != 1 {
-		return fmt.Errorf("%w: invalid format-only outcome: %v", memql.ErrWorkCheckpointRequired, err)
+		return fmt.Errorf("invalid format-only outcome: %v", err)
 	}
 	current, err := store.ReadWorkReplyReview(ctx)
 	if err != nil || current.Binding != binding {
