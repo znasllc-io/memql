@@ -206,8 +206,10 @@ would go through; that waits for the prepare pull request.
 `VERSION` equals the tag of the commit a cut tags, and `main` refuses direct
 pushes, so the value arrives the way every other change does:
 
-1. Open a pull request whose one change sets `VERSION` to the version you are
-   about to cut -- `0.24.0`, bare, no leading `v`. A minor release also records
+1. Set `VERSION` to the version you are about to cut -- `0.24.0`, bare, no
+   leading `v` -- in a pull request. This can be a separate preparation pull
+   request or part of the final implementation pull request, before its final
+   review and required checks. A minor release also records
    in `releasedForms` (`deprecation_window_version_test.go`) every deprecated
    form whose warning it is the first to carry; that test says so when it
    applies.
