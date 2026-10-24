@@ -62,7 +62,7 @@ type replyReviewModel struct {
 	run      common.RunContext
 }
 
-func TestReplyReviewUsesCurrentOwnerDirectionAcrossReplicas(t *testing.T) {
+func TestReplyReviewUsesCurrentOwnerDirectionAfterRetryAcrossReplicas(t *testing.T) {
 	for _, whole := range []bool{false, true} {
 		t.Run(fmt.Sprint("whole-", whole), func(t *testing.T) {
 			a, b, ctx, _, runID, write := guidanceFixture(t)
@@ -74,7 +74,10 @@ func TestReplyReviewUsesCurrentOwnerDirectionAcrossReplicas(t *testing.T) {
 			write("updateWorkRun", map[string]any{"runId": runID, "rerun": map[string]any{"requestId": "review-attempt", "requestedAt": at.Format(time.RFC3339Nano)}})
 			recordApprovalGuidance(write, actor.UserId, runID, "Use the corrected document title for publication.")
 			recordApprovalGuidance(write, "another-person", runID, "FOREIGN_DIRECTION_MUST_NOT_APPEAR")
-			runtime := common.ContextWithRun(ctx, common.RunContext{RunId: runID, GoalId: "fixture-goal", OwnerUserId: actor.UserId, StepKey: "section", RerunRequestId: "review-attempt", Override: ov})
+			// Recovery keeps the old instruction's date. Giving it the new
+			// request's date would elevate it above the later correction.
+			write("updateWorkRun", map[string]any{"runId": runID, "rerun": map[string]any{"requestId": "retry-review-attempt", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano), "overrideRequestedAt": at.Format(time.RFC3339Nano)}})
+			runtime := common.ContextWithRun(ctx, common.RunContext{RunId: runID, GoalId: "fixture-goal", OwnerUserId: actor.UserId, StepKey: "section", RerunRequestId: "retry-review-attempt", Override: ov})
 			require.NoError(t, a.RecordDelegatedToolSource(WithActingAgentId(runtime, "editor"), "readDocument", map[string]any{}, `{"verified":true}`))
 			model := &replyReviewModel{}
 			b.SetAIResolver(testAIResolver{fn: func(_ context.Context, req airoute.ResolveRequest) (ResolvedProvider, error) {

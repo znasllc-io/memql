@@ -746,6 +746,21 @@ unbounded in-memory tracking or as owner acceptance.
 
 ## Recovery boundaries and remaining limits
 
+Failure Retry creates a new execution request but preserves the failed step's
+latest admitted version override. Creating that request with an empty override
+restored the compiled section prompt and default routing after an owner had
+replaced them. The recovery path now copies the same step's instructions,
+inputs, whole-prompt flag and model/effort; it does not borrow a neighboring
+step's override, revive an older cleared override or restore a workspace
+snapshot. `overrideRequestedAt` retains instruction chronology separately from
+the new request's timestamp, so later owner corrections still take precedence.
+Missing, malformed or future instruction times refuse recovery rather than
+falling back to a bare run or assigning the retry's fresh timestamp.
+The two-engine installed-builder regression covers failure decision through
+resumed native input; unit tests cover empty, stale and different-step settings.
+This does not make a new failure rerun an unchanged-checkpoint continuation or
+grant permission to replay an operation.
+
 Ordinary Ask follow-up routing considers preparing, running and waiting goals.
 An abandoned goal is outside that active set, so ordinary intake can create new
 work. Use the original request's explicit recovery/guidance controls when

@@ -108,7 +108,11 @@ func (e *MemQLEngine) readWorkGuidance(ctx context.Context, includeWholePrompt b
 	if rc.Override != nil && (!rc.Override.WholePrompt || includeWholePrompt) {
 		extra := StepOverrideMessages(ctx)
 		if len(extra) > 0 {
-			at, valid := askTimestamp(rerun["requestedAt"])
+			instructionAt := rerun["requestedAt"]
+			if inherited, exists := rerun["overrideRequestedAt"]; exists {
+				instructionAt = inherited
+			}
+			at, valid := askTimestamp(instructionAt)
 			if !valid {
 				return nil, fmt.Errorf("step override guidance timestamp is unavailable")
 			}
