@@ -1046,8 +1046,7 @@ uses a controlled clock beyond two hours, and
 tombstones and distinguishes the replacement container. These tests do not
 establish a two-hour live production run or restore ephemeral files.
 
-
-### Feedback after a finished, unaccepted result
+## Feedback after a finished, unaccepted result
 
 Ask routes a correction or request to continue to the latest finished result of
 an open goal as well as to active work. `activeWorkRun` retains its original
@@ -1106,8 +1105,7 @@ commit recovery, monotonic receipt phases, two API continuations and old-request
 retry. `TestAskResultFeedbackKeepsCursorAcrossSealTranscriptAndLaterAPIRequests`
 checks stable delivery across late transcript arrival and more than one query page.
 The Ask continuation tests also cover chronological guidance, transport retry,
-missing-transcript recovery,
-refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
+missing-transcript recovery, refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
 runs the real plan validator and proves the new resume point follows completed
 work. These are fixtures with the real database/plan validator; live rollout and
 completion-disposition verification are reported separately.
