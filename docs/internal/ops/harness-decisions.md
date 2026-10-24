@@ -99,6 +99,29 @@ and two nested permission waits across engines, exact completed effects, later
 human correction, unchanged source checkpoint and one-use permission consumption.
 The model boundary is controlled; these tests do not prove downstream adherence.
 
+Native approval resumes must not reinsert already archived question bodies.
+The history builder previously loaded every answered feedback question, then the
+checkpoint restorer deduplicated only exact messages still in active context.
+Once a question had been compacted, the next approval made its original body
+look new again. A live checkpoint grew by roughly 28 KB without any new tool
+results. A validated continuation now projects only its current wait's recorded
+answer from that query; its required checkpoint supplies the earlier history.
+Fresh executions still load all answered questions. Late optional answers,
+routed corrections and approval guidance keep their independent owner-scoped,
+chronologically ordered reads at model/tool boundaries. Missing or changed
+checkpoints still refuse; no immutable source or completed effect is rewritten.
+
+`TestNativeContinuationDoesNotReinjectArchivedAnswers` reproduces reinsertion
+and checks both permission and feedback waits plus fresh-execution controls.
+The `archived-history` database case in
+`TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica` runs the
+installed context builder against stored historical answers and a compacted
+checkpoint on another engine; it retains the memory, active instruction, exact
+completed tools and current permission receipt without expanding those answers.
+Existing late-answer and additive-correction ordering tests cover the separate
+guidance paths. These checks prove context selection, not model adherence or a
+measured latency improvement.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an
