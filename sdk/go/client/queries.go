@@ -60,9 +60,18 @@ func (qc *QueryClient) executeRaw(ctx context.Context, query string) (any, error
 		if err != nil {
 			return nil, fmt.Errorf("marshal result: %w", err)
 		}
-		var parsed any
+		var parsed map[string]any
 		if err := json.Unmarshal(jsonBytes, &parsed); err != nil {
 			return nil, fmt.Errorf("parse result JSON: %w", err)
+		}
+		// Protojson omits empty repeated fields. A verified Result with no
+		// nodes or data would otherwise look like a flat row ({} or only
+		// metadata) to Rows(). Preserve its zero-row meaning here, where the
+		// protobuf envelope is known; data:[{}] and ordinary flat rows remain
+		// real rows, and metadata stays available through Raw().
+		wire := result.GetResult()
+		if len(wire.GetData()) == 0 && len(wire.GetBundle().GetNodes()) == 0 {
+			parsed["data"] = []any{}
 		}
 		return parsed, nil
 	}
