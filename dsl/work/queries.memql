@@ -363,6 +363,19 @@ query modelCall workModelCallsForOwnerStep {
   shape workModelCallSummary
 }
 
+/// Reconcile one consumed formatting attempt, never authorize another inference.
+/// Two rows expose ambiguity instead of silently selecting a later answer.
+@actor
+query modelCall workOutcomeFormatReceiptsForOwnerStep {
+ args { runId string! stepKey string! attemptedAt datetime! }
+ filter row => row.runId == args.runId && row.stepKey == args.stepKey &&
+   row.ownerUserId == actor.userId && row.promptRef == "workOutcomeFormat" &&
+   row.createdAt >= args.attemptedAt
+ sort "row.createdAt", "asc"
+ paginate 2
+ shape workModelCallFull
+}
+
 /// Every observation of one of the caller's runs. On-demand, like the model calls.
 @actor
 @unbounded("every observation of ONE run -- bounded by the run")

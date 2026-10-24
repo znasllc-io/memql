@@ -451,6 +451,9 @@ func (a *CognitionEngineAdapter) WorkDelegatedOutcomeSource(ctx context.Context,
 func (a *CognitionEngineAdapter) FormatWorkOutcome(ctx context.Context, input memql.WorkDelegatedOutcome, schema json.RawMessage) (string, error) {
 	return a.Engine.FormatWorkOutcome(ctx, input, schema)
 }
+func (a *CognitionEngineAdapter) ReadCompletedWorkOutcomeFormat(ctx context.Context, input memql.WorkDelegatedOutcome) (string, error) {
+	return a.Engine.ReadCompletedWorkOutcomeFormat(ctx, input)
+}
 
 // InvokeAIStructured keeps model routing and strict output validation at the engine seam.
 func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {

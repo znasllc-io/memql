@@ -13234,6 +13234,26 @@ QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient,
   return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
 };
 
+/** Reconcile one consumed formatting attempt, never authorize another inference. Two rows expose ambiguity instead of silently selecting a later answer. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workOutcomeFormatReceiptsForOwnerStep"] in generated_concepts.ts).
+export interface WorkOutcomeFormatReceiptsForOwnerStepArgs {
+}
+
+export function buildWorkOutcomeFormatReceiptsForOwnerStep(args: WorkOutcomeFormatReceiptsForOwnerStepArgs): string {
+  void args;
+  return "query workOutcomeFormatReceiptsForOwnerStep()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workOutcomeFormatReceiptsForOwnerStep(args?: WorkOutcomeFormatReceiptsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workOutcomeFormatReceiptsForOwnerStep = function (this: QueryClient, args: WorkOutcomeFormatReceiptsForOwnerStepArgs = {} as WorkOutcomeFormatReceiptsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workOutcomeFormatReceiptsForOwnerStep", buildWorkOutcomeFormatReceiptsForOwnerStep(args), opts);
+};
+
 /** Bounded candidate lookup against durable consumed-evidence identities. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressCreditsForOwnerRun"] in generated_concepts.ts).
 export interface WorkProgressCreditsForOwnerRunArgs {

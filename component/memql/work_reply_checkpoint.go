@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -21,9 +22,10 @@ type WorkReplyReviewBinding struct {
 }
 
 type WorkReplyReviewCheckpoint struct {
-	Binding WorkReplyReviewBinding
-	Saved   WorkReplyReviewBinding
-	Pending json.RawMessage
+	Binding    WorkReplyReviewBinding
+	Saved      WorkReplyReviewBinding
+	Pending    json.RawMessage
+	RecordedAt time.Time
 }
 
 type replyReviewSourceKey struct{}
@@ -122,13 +124,14 @@ func (e *MemQLEngine) ReadWorkReplyReview(ctx context.Context) (WorkReplyReviewC
 	}
 	if saved.Binding.Generation == binding.Generation && saved.Pending {
 		state.Saved, state.Pending = saved.Binding, value
+		state.RecordedAt, _ = askTimestamp(rows[0]["createdAt"])
 	}
 	return state, nil
 }
 
 // SaveWorkReplyReview is a write barrier before the review call. Guidance may
 // change while production runs: retain its original binding and let the reader
-// require fresh production with the completed receipts preserved. A generation
+// re-evaluate it against fresh direction with completed receipts preserved. A generation
 // change or cancellation refuses the write. Nil value retires a pending draft.
 func (e *MemQLEngine) SaveWorkReplyReview(ctx context.Context, binding WorkReplyReviewBinding, value json.RawMessage) error {
 	current, err := e.workReplyReviewBinding(ctx)

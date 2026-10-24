@@ -17,13 +17,33 @@ import (
 
 type formatRecoveryEngine struct {
 	replyReviewEngine
-	formats    int
-	answer     string
-	formatErr  error
-	sourceErr  error
-	unfinished bool
-	legacy     *memql.WorkDelegatedOutcome
-	input      memql.WorkDelegatedOutcome
+	formats         int
+	answer          string
+	formatErr       error
+	sourceErr       error
+	unfinished      bool
+	legacy          *memql.WorkDelegatedOutcome
+	input           memql.WorkDelegatedOutcome
+	completedFormat string
+	receiptReads    int
+	onFormat        func()
+}
+
+func (e *formatRecoveryEngine) SaveWorkReplyReview(ctx context.Context, binding memql.WorkReplyReviewBinding, value json.RawMessage) error {
+	current := e.replyCheckpoint.Binding
+	err := e.replyReviewEngine.SaveWorkReplyReview(ctx, binding, value)
+	if current.Generation != "" && err == nil {
+		e.replyCheckpoint.Binding = current
+	}
+	return err
+}
+
+func (e *formatRecoveryEngine) ReadCompletedWorkOutcomeFormat(context.Context, memql.WorkDelegatedOutcome) (string, error) {
+	e.receiptReads++
+	if e.completedFormat == "" {
+		return "", errors.New("completed format receipt missing or ambiguous")
+	}
+	return e.completedFormat, nil
 }
 
 func (e *formatRecoveryEngine) Execute(ctx context.Context, query string) (any, error) {
@@ -47,7 +67,57 @@ func (e *formatRecoveryEngine) FormatWorkOutcome(_ context.Context, in memql.Wor
 	if json.Unmarshal(e.replyCheckpoint.Pending, &pending) != nil || pending.OutcomeFormat == nil || pending.OutcomeFormat.Attempts != 1 || !json.Valid(schema) {
 		return "", errors.New("format call preceded its durable attempt")
 	}
+	if e.onFormat != nil {
+		e.onFormat()
+	}
 	return e.answer, e.formatErr
+}
+
+func TestFormatRecoveryGuidanceRaceRetainsConversionWithoutReplay(t *testing.T) {
+	e, ctx, messages := formatFixture(t)
+	productions := 0
+	produce := func(context.Context, *replyReviewSink) (*TurnResult, error) {
+		productions++
+		return nil, &delegatedOutcomeError{input: memql.WorkDelegatedOutcome{SessionID: "session", Draft: "saved", Messages: messages, AgentID: "assistant", AgentRole: "assistant"}, cause: errors.New("missing marker")}
+	}
+	e.onFormat = func() { e.replyCheckpoint.Binding.Guidance = "new-guidance" }
+	sink := &captureSink{}
+	_, err := newTestReplier(e).runReviewedWork(ctx, sink, produce)
+	require.ErrorContains(t, err, "outcome recovery execution or guidance changed")
+	require.Empty(t, sink.texts)
+	var pending pendingWorkReply
+	require.NoError(t, json.Unmarshal(e.replyCheckpoint.Pending, &pending))
+	require.Equal(t, e.answer, pending.OutcomeFormat.Formatted)
+	require.Equal(t, 1, pending.OutcomeFormat.Attempts)
+	require.False(t, pending.OutcomeFormat.Done)
+	result, err := newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.FinalText)
+	require.Equal(t, 1, productions)
+	require.Equal(t, 1, e.formats)
+	require.Equal(t, 1, e.calls)
+	require.Zero(t, e.receiptReads)
+}
+
+func TestFormatRecoveryConsumedAttemptReadsCompletedReceiptWithoutNewInference(t *testing.T) {
+	e, ctx, messages := formatFixture(t)
+	productions := 0
+	produce := func(context.Context, *replyReviewSink) (*TurnResult, error) {
+		productions++
+		return nil, &delegatedOutcomeError{input: memql.WorkDelegatedOutcome{SessionID: "session", Draft: "saved", Messages: messages, AgentID: "assistant", AgentRole: "assistant"}, cause: errors.New("missing marker")}
+	}
+	e.formatErr = errors.New("response handoff interrupted after native journal completion")
+	_, err := newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
+	require.Error(t, err)
+	e.completedFormat = e.answer
+	e.replyCheckpoint.Binding.Guidance = "new-guidance"
+	result, err := newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.FinalText)
+	require.Equal(t, 1, productions)
+	require.Equal(t, 1, e.formats)
+	require.Equal(t, 1, e.receiptReads)
+	require.Equal(t, 1, e.calls)
 }
 
 func formatFixture(t *testing.T) (*formatRecoveryEngine, context.Context, []common.ChatMessage) {
