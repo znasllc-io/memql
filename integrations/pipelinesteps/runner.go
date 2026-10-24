@@ -449,6 +449,7 @@ type step struct {
 	creationSent       string
 	creationAttempts   int
 	creationUnknown    bool
+	creationCause      string // bounded diagnostic only; never an authority to retry
 	creationDispatched bool
 	quotaNoted         bool
 	// claimSent is the claim this Run last sent: the Job carrying exactly it
@@ -530,7 +531,7 @@ func (s *step) execute() pl.StepResult {
 				return s.vanished(nil)
 			case !found:
 				if s.creationUnknown {
-					return s.failed(pl.CodeExecutionUncertain, "The API did not confirm Job creation and no Job can be found. No replacement was sent; reconcile the attempt before authorizing new work.")
+					return s.failed(pl.CodeExecutionUncertain, "The API did not confirm Job creation and no Job can be found. "+s.creationCause+". No replacement was sent; reconcile the attempt before authorizing new work.")
 				}
 				if s.run.RecoverOnly {
 					meta, err := s.creationMetadata()
@@ -809,6 +810,8 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 			// successful create. Read the Job, but never turn its absence
 			// into permission to repeat a potentially completed command.
 			s.creationUnknown = true
+			s.creationCause = ambiguousCreationCause(err)
+			s.log.Warn("pipelines: Job creation response is uncertain", "cause", s.creationCause)
 			return pl.StepResult{}, Job{}, false
 		default:
 			// The Job will not come, so the token must not outlive it.

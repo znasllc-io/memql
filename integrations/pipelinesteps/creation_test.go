@@ -2,10 +2,16 @@ package pipelinesteps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -94,16 +100,60 @@ func TestCreationClaimRejectsStaleSecretRevisionAndReplacement(t *testing.T) {
 }
 
 func TestAmbiguousCreateResponseIsNotPermissionToPostAgain(t *testing.T) {
-	h := newRunnerHarness(t)
-	h.c.with(func(c *rtCluster) { c.createJobAnswers = []kubeAnswer{rtUnavailable} })
-	res := h.run(t, rtRun())
-	wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutionUncertain)
-	if n := len(h.c.requestsFor(http.MethodPost, kubeJobs)); n != 1 {
-		t.Fatalf("ambiguous POST repeated %d times", n)
+	for _, tc := range []struct {
+		name   string
+		answer kubeAnswer
+		cause  string
+	}{
+		{"unavailable", kubeStatus(503, "ServiceUnavailable", "private-response-body"), "Kubernetes API POST returned HTTP 503 (Service Unavailable)"},
+		{"timeout", kubeStatus(408, "Timeout", "private-response-body"), "Kubernetes API POST returned HTTP 408 (Request Timeout)"},
+		{"invalid response", kubeAnswer{code: 201, body: "private-response-body"}, "Kubernetes API returned invalid Job JSON"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			logs := h.logs()
+			h.c.with(func(c *rtCluster) { c.createJobAnswers = []kubeAnswer{tc.answer} })
+			res := h.run(t, rtRun())
+			wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutionUncertain)
+			if !strings.Contains(res.Failure.Message, tc.cause) || !strings.Contains(res.Failure.Message, "No replacement was sent") {
+				t.Fatalf("uncertain result lost its cause or recovery boundary: %+v", res.Failure)
+			}
+			if strings.Contains(res.Failure.Message, "private-response-body") || strings.Contains(fmt.Sprint(logs), "private-response-body") ||
+				logs.count("pipelines: Job creation response is uncertain") != 1 {
+				t.Fatal("creation diagnostics exposed the response or lost the bounded log")
+			}
+			if n := len(h.c.requestsFor(http.MethodPost, kubeJobs)); n != 1 {
+				t.Fatalf("ambiguous POST repeated %d times", n)
+			}
+			secret := h.c.secretNow(t, testSecretName)
+			if !strings.HasPrefix(secret.Metadata.Annotations[annotCreation], "creating ") {
+				t.Fatal("ambiguous creation lost its durable guard")
+			}
+		})
 	}
-	secret := h.c.secretNow(t, testSecretName)
-	if !strings.HasPrefix(secret.Metadata.Annotations[annotCreation], "creating ") {
-		t.Fatal("ambiguous creation lost its durable guard")
+}
+
+func TestAmbiguousCreationCauseDoesNotExposeErrorDetails(t *testing.T) {
+	const private = "private-diagnostic-value"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"status", &deploycontrol.StatusError{Method: "POST", Path: private, Code: 500, Status: private, Body: private}, "Kubernetes API POST returned HTTP 500 (Internal Server Error)"},
+		{"conflict read", &deploycontrol.StatusError{Method: "GET", Path: private, Code: 404, Body: private}, "Kubernetes API GET returned HTTP 404 (Not Found)"},
+		{"timeout", &url.Error{Op: "Post", URL: "https://" + private, Err: context.DeadlineExceeded}, "Kubernetes API request timed out"},
+		{"truncated", fmt.Errorf("%s: %w", private, io.ErrUnexpectedEOF), "Kubernetes API connection ended before a complete response"},
+		{"reset", fmt.Errorf("%s: %w", private, syscall.ECONNRESET), "Kubernetes API connection reset"},
+		{"network", &net.OpError{Op: private, Net: private, Err: errors.New(private)}, "Kubernetes API network request failed"},
+		{"invalid field", &json.UnmarshalTypeError{Value: private, Struct: private, Field: private}, "Kubernetes API returned invalid Job JSON"},
+		{"unknown", errors.New(private), "Kubernetes API transport or response failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ambiguousCreationCause(tc.err); got != tc.want || strings.Contains(got, private) {
+				t.Fatalf("unsafe or incorrect cause: %q", got)
+			}
+		})
 	}
 }
 

@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
@@ -152,4 +155,37 @@ func (k *Kube) SetCreationState(ctx context.Context, meta ObjectMeta, state stri
 	}
 	_, err = k.api.Do(ctx, http.MethodPatch, k.corePath("secrets", meta.Name), contentMergePatch, patch)
 	return err
+}
+
+// ambiguousCreationCause keeps a bounded diagnostic without exposing request
+// paths, URLs, headers, response bodies or arbitrary error text. It never decides
+// whether a POST can be repeated; the existing creation claim remains unchanged.
+func ambiguousCreationCause(err error) string {
+	var status *deploycontrol.StatusError
+	if errors.As(err, &status) {
+		method := "request"
+		if status.Method == http.MethodPost || status.Method == http.MethodGet {
+			method = status.Method
+		}
+		return fmt.Sprintf("Kubernetes API %s returned HTTP %d (%s)", method, status.Code, http.StatusText(status.Code))
+	}
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout() {
+		return "Kubernetes API request timed out"
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "Kubernetes API connection ended before a complete response"
+	}
+	if errors.Is(err, syscall.ECONNRESET) {
+		return "Kubernetes API connection reset"
+	}
+	var syntax *json.SyntaxError
+	var field *json.UnmarshalTypeError
+	if errors.As(err, &syntax) || errors.As(err, &field) {
+		return "Kubernetes API returned invalid Job JSON"
+	}
+	if network != nil {
+		return "Kubernetes API network request failed"
+	}
+	return "Kubernetes API transport or response failed"
 }
