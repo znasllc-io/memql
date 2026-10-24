@@ -4,12 +4,47 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
+
+func TestInferenceClaimUnifiesCanonicalAndBareRunIDs(t *testing.T) {
+	bare, lease := runClaimKey(DispatchRequest{RunId: "r", Recovery: true, InferenceWait: "wait"})
+	canonical, otherLease := runClaimKey(DispatchRequest{RunId: "v1:work:run:r", Recovery: true, InferenceWait: "wait"})
+	if bare != "v1:work:run:r#inference:wait" || bare != canonical || lease != runClaimTTL || lease != otherLease {
+		t.Fatalf("availability claims differ: %q/%v and %q/%v", bare, lease, canonical, otherLease)
+	}
+}
 
 func inferenceWaitRow(at time.Time) map[string]any {
 	run := retryWaitRow(at)
 	run["waitingOn"] = map[string]any{"kind": "approval", "approvalKind": "inferenceUnavailable", "subject": "approval-1", "since": rfc(at.Add(-5 * time.Minute)), "resumeAt": rfc(at)}
 	return run
+}
+
+func TestInferenceStartupRestoresOnlyAutomaticOwnedWaitTimers(t *testing.T) {
+	run := inferenceWaitRow(testNow.Add(-time.Minute))
+	i, _, d, timers := retryAgent(t, &pkClaims{}, run)
+	human := inferenceWaitRow(testNow.Add(-time.Minute))
+	rowMap(human, "waitingOn")["approvalKind"] = "sideEffect"
+	cancelled := inferenceWaitRow(testNow.Add(-time.Minute))
+	cancelled["cancelRequested"] = true
+	i.rowsInFlight = (&stubRowSource{rows: []map[string]any{run, human, cancelled}}).read
+	if _, err := i.RestoreInferenceWaits(actorCtx("ordinary-user")); err == nil {
+		t.Fatal("startup cross-owner scan accepted ordinary caller")
+	}
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	count, err := i.RestoreInferenceWaits(ctx)
+	if err != nil || count != 1 {
+		t.Fatalf("restored %d: %v", count, err)
+	}
+	i.RestoreInferenceWaits(ctx)
+	if delays := timers.fire(); len(delays) != 1 {
+		t.Fatalf("duplicate startup armed %v", delays)
+	}
+	if got := d.settled(t, 1); len(got) != 1 {
+		t.Fatalf("dispatches %v", got)
+	}
 }
 
 func TestInferenceWaitEventArmsOnceAndRechecksDueTime(t *testing.T) {

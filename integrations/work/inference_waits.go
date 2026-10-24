@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -35,7 +36,9 @@ func (i *Integration) armInferenceWait(runID, owner string, waiting map[string]a
 	if identity == "" {
 		return
 	}
-	key := "inference:" + runID + "#" + identity
+	// Events and the durable projection may spell the same ID differently.
+	// Both hints must arm the same timer and contend on the same durable claim.
+	key := "inference:" + bareRunId(runID) + "#" + identity
 	if _, loaded := i.armedRetries.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
@@ -94,4 +97,42 @@ func (i *Integration) serveInferenceRecovery(ctx context.Context, run map[string
 	}
 	at, _ := parseTime(rowString(waiting, "resumeAt"))
 	return i.nudgeWait(ctx, run, runID, owner, at, time.Minute)
+}
+
+// RestoreInferenceWaits reconstructs this agent's lost timers after startup.
+// Event subscriptions start at the current stream watermark; an already parked
+// wait emits no event when an agent returns. During rolling upgrades the cron
+// leader may also run an older sweep, so startup must not depend on its nudge.
+// This bounded maintenance read spans owners, but each timer restores exactly
+// its run owner's authority and rechecks the fresh row before claiming work.
+// It neither writes a heartbeat nor admits an effect on the maintenance actor.
+func (i *Integration) RestoreInferenceWaits(ctx context.Context) (int, error) {
+	if err := requireClusterOwner(ctx); err != nil {
+		return 0, err
+	}
+	if i.dispatcherRef() == nil || i.runClaimerRef() == nil {
+		return 0, nil
+	}
+	if i.rowsInFlight == nil {
+		return 0, fmt.Errorf("work: inference recovery has no in-flight run source")
+	}
+	rows, err := i.rowsInFlight(ctx)
+	if err != nil {
+		return 0, err
+	}
+	considered := 0
+	for _, row := range rows {
+		if err := ctx.Err(); err != nil {
+			return considered, err
+		}
+		if rowString(row, "status") != runStatusWaiting || argBool(row, "cancelRequested") || IsDriverOwnedRun(rowString(row, "triggeredBy")) {
+			continue
+		}
+		if rowString(row, "id") == "" || inferenceWaitIdentity(rowMap(row, "waitingOn")) == "" {
+			continue
+		}
+		i.armInferenceWait(rowString(row, "id"), rowString(row, "ownerUserId"), rowMap(row, "waitingOn"))
+		considered++
+	}
+	return considered, nil
 }
