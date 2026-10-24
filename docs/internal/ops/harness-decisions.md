@@ -1005,8 +1005,7 @@ commit recovery, monotonic receipt phases, two API continuations and old-request
 retry. `TestAskResultFeedbackKeepsCursorAcrossSealTranscriptAndLaterAPIRequests`
 checks stable delivery across late transcript arrival and more than one query page.
 The Ask continuation tests also cover chronological guidance, transport retry,
-missing-transcript recovery,
-refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
+missing-transcript recovery, refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
 runs the real plan validator and proves the new resume point follows completed
 work. These are fixtures with the real database/plan validator; live rollout and
 completion-disposition verification are reported separately.
