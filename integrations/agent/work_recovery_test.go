@@ -495,47 +495,39 @@ func recoveryRecordedAnswer(stamp string, extra map[string]any) common.ChatMessa
 	return common.ChatMessage{Role: "user", Content: "[Recorded answer for this run]\n" + string(raw)}
 }
 
-// One read can hand a turn sixteen routed messages, sixteen late optional
-// answers and sixteen approval corrections, each on its own bound, plus the
-// current step's two override messages. Recovery keeps every id a
-// whole read can hold in its checkpoint, which reads back on any replica; only
-// more than one whole read is refused.
-func TestWorkProgressRecoveryHoldsAWholeGuidanceRead(t *testing.T) {
+// Recovery stores a constant-size prefix identity across arbitrarily many
+// pages. Regrouping the same sources on another replica is not new progress.
+func TestWorkProgressRecoveryHoldsGuidanceCursorBeyondFormerLifetimeLimit(t *testing.T) {
 	r, _, _, ctx, turn := recoveryHarness(t)
-	seen := map[string]bool{"optional-answer-late": true}
-	for n := range 16 {
-		seen[fmt.Sprintf("routed-%d", n)] = true
+	rows := make([]memql.WorkGuidance, 200)
+	for n := range rows {
+		rows[n] = memql.WorkGuidance{ID: fmt.Sprintf("guidance-%03d", n), Prompt: "Preserve the verified record."}
 	}
-	messages, err := r.recoverWorkProgress(ctx, recoveryMessages(t, workRecoveryState{Version: 1}), turn, &captureSink{}, &workGuidanceCursor{seen: seen})
-	require.NoError(t, err, "routed guidance at its cap and a late answer")
+	page := memql.WorkGuidanceCursor{}
+	for {
+		p := memql.WorkGuidancePageAfter(rows, page)
+		page = p.Next
+		if !p.More {
+			break
+		}
+	}
+	cursor := &workGuidanceCursor{paged: true, complete: true, page: page, fresh: true}
+	messages, err := r.recoverWorkProgress(ctx, recoveryMessages(t, workRecoveryState{Version: 1}), turn, &captureSink{}, cursor)
+	require.NoError(t, err)
 	state, _, err := recoveryState(messages)
 	require.NoError(t, err)
-	require.Len(t, state.GuidanceIDs, 17)
-	for n := range 15 {
-		seen[fmt.Sprintf("optional-answer-%d", n)] = true
-	}
-	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
-	require.NoError(t, err, "a whole read")
-	state, _, err = recoveryState(messages)
+	require.Empty(t, state.GuidanceIDs)
+	require.Equal(t, 200, state.GuidanceCursor.Count)
+	raw, err := json.Marshal(state)
 	require.NoError(t, err)
-	require.Len(t, state.GuidanceIDs, 32)
-	for n := range 16 {
-		seen[fmt.Sprintf("approval-guidance-%d", n)] = true
-	}
-	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
-	require.NoError(t, err, "approval corrections keep their own bounded allocation")
-	state, _, err = recoveryState(messages)
-	require.NoError(t, err)
-	require.Len(t, state.GuidanceIDs, 48)
-	seen["step-override-instructions"], seen["step-override-guidance"] = true, true
-	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
+	require.Less(t, len(raw), 1000)
+	state.ReviewActive, state.DiscoveryRounds = true, 3
+	messages, err = r.recoverWorkProgress(ctx, recoveryMessages(t, state), turn, &captureSink{}, &workGuidanceCursor{paged: true, complete: true, page: page})
 	require.NoError(t, err)
 	state, _, err = recoveryState(messages)
 	require.NoError(t, err)
-	require.Len(t, state.GuidanceIDs, memql.MaxWorkGuidanceReceipts)
-	seen["one-more"] = true
-	_, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, &workGuidanceCursor{seen: seen})
-	require.ErrorContains(t, err, "recovery guidance exceeds its bounded context")
+	require.True(t, state.ReviewActive)
+	require.Equal(t, 3, state.DiscoveryRounds)
 }
 
 func TestWorkProgressRecoveryOldAnswersAndActiveGuidanceDoNotRearm(t *testing.T) {
@@ -552,7 +544,8 @@ func TestWorkProgressRecoveryOldAnswersAndActiveGuidanceDoNotRearm(t *testing.T)
 		common.ChatMessage{Role: "user", Content: `{"type":"validation","message":"Choose another operation"}`},
 		recoveryRecordedAnswer("2026-10-14T12:00:03Z", map[string]any{"kind": "budget", "decision": "approved", "answer": map[string]any{"newLimit": 24}}),
 	)
-	cursor := &workGuidanceCursor{seen: map[string]bool{"guidance-b": true, "guidance-a": true}}
+	rows := []memql.WorkGuidance{{ID: "guidance-a", Prompt: "Keep the record."}, {ID: "guidance-b", Prompt: "Use its receipt."}}
+	cursor := &workGuidanceCursor{paged: true, complete: true, page: memql.WorkGuidancePageAfter(rows, memql.WorkGuidanceCursor{}).Next}
 	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, cursor)
 	require.NoError(t, err)
 	state, _, err = recoveryState(messages)
@@ -575,15 +568,17 @@ func TestWorkProgressRecoveryOldAnswersAndActiveGuidanceDoNotRearm(t *testing.T)
 	messages = recoveryMessages(t, state)
 	r, e, x, ctx, turn = recoveryHarness(t)
 	e.used = 5
-	cursor.seen["guidance-c"] = true
+	rows = append(rows, memql.WorkGuidance{ID: "guidance-c", Prompt: "Finish the response."})
+	cursor.page = memql.WorkGuidancePageAfter(rows, memql.WorkGuidanceCursor{}).Next
 	messages, err = r.recoverWorkProgress(ctx, messages, turn, &captureSink{}, cursor)
 	require.NoError(t, err)
 	state, _, err = recoveryState(messages)
 	require.NoError(t, err)
 	require.False(t, state.ReviewActive)
-	require.Contains(t, state.GuidanceIDs, "guidance-c")
+	require.Empty(t, state.GuidanceIDs)
+	require.Equal(t, 3, state.GuidanceCursor.Count)
 	state.ReviewActive, state.DiscoveryRounds = true, 3
-	messages, err = r.recoverWorkProgress(ctx, recoveryMessages(t, state), turn, &captureSink{}, &workGuidanceCursor{seen: map[string]bool{"guidance-c": true, "guidance-a": true}})
+	messages, err = r.recoverWorkProgress(ctx, recoveryMessages(t, state), turn, &captureSink{}, &workGuidanceCursor{paged: true, complete: true, page: cursor.page})
 	require.NoError(t, err)
 	state, _, err = recoveryState(messages)
 	require.NoError(t, err)

@@ -34,11 +34,13 @@ const permissionCorrection = "Correct the command and request its exact approval
 // Only inference is replaced: the installed runAgentTurn, nested execution,
 // checkpoint, typed question, public decision, grant reader and peer resume run.
 type permissionGuidanceTurn struct {
-	engine   *memql.MemQLEngine
-	work     *work.Integration
-	effects  map[string]int
-	requests [][]common.ChatMessage
-	paused   func(string)
+	engine       *memql.MemQLEngine
+	work         *work.Integration
+	effects      map[string]int
+	requests     [][]common.ChatMessage
+	paused       func(string)
+	readGuidance bool
+	guidanceRead []memql.WorkGuidance
 }
 
 func (*permissionGuidanceTurn) ResolveOwnerAgent(context.Context, string) (string, error) {
@@ -58,6 +60,23 @@ func (f *permissionGuidanceTurn) RunTurn(ctx context.Context, msg *memqlv1.Agent
 		messages, err = f.engine.RestoreWorkContinuation(ctx, messages)
 		if err != nil {
 			return "", err
+		}
+		if f.readGuidance {
+			cursor := memql.WorkGuidanceCursor{}
+			for {
+				page, err := f.engine.ReadWorkGuidancePage(ctx, cursor)
+				if err != nil {
+					return "", err
+				}
+				f.guidanceRead = append(f.guidanceRead, page.Messages...)
+				if len(page.Messages) > 0 {
+					messages = append(messages, common.ChatMessage{Role: "user", Content: memql.WorkGuidanceText(page.Messages)})
+				}
+				cursor = page.Next
+				if !page.More {
+					break
+				}
+			}
 		}
 	}
 	f.requests = append(f.requests, messages)
@@ -111,7 +130,7 @@ func (f *permissionGuidanceTurn) RunTurn(ctx context.Context, msg *memqlv1.Agent
 }
 
 func TestWorkDBTypedPermissionGuidanceKeepsExactNestedProgress(t *testing.T) {
-	for _, mode := range []string{"ordinary", "early-answer", "refusals", "fresh-rerun"} {
+	for _, mode := range []string{"ordinary", "early-answer", "refusals", "fresh-rerun", "paged-guidance"} {
 		t.Run(mode, func(t *testing.T) {
 			writer, db := workTemplateDBEngineAndDB(t)
 			reader := workTemplateDBEngine(t)
@@ -137,7 +156,7 @@ func TestWorkDBTypedPermissionGuidanceKeepsExactNestedProgress(t *testing.T) {
 				}
 				require.NotNil(t, wi)
 				require.NoError(t, e.RegisterIntegration(wi))
-				runner := &permissionGuidanceTurn{engine: e, work: wi, effects: effects}
+				runner := &permissionGuidanceTurn{engine: e, work: wi, effects: effects, readGuidance: mode == "paged-guidance"}
 				runners = append(runners, runner)
 				ai := agents.New(e.Agents(), e)
 				ai.SetAgentTurnRunner(runner)
@@ -252,6 +271,13 @@ func TestWorkDBTypedPermissionGuidanceKeepsExactNestedProgress(t *testing.T) {
 				return
 			}
 			if mode != "early-answer" {
+				if mode == "paged-guidance" {
+					for n := range 40 {
+						correction := id.NewShortId()
+						write("createWorkApproval", map[string]any{"approvalId": correction, "runId": runID, "stepKey": "earlier", "kind": "scopeElevation", "subject": map[string]any{}, "artifactHash": "fixture", "question": "Synthetic earlier operation?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+						write("decideWorkApproval", map[string]any{"approvalId": correction, "decision": "answered", "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"feedback": fmt.Sprintf("Correction %d. %s", n, strings.Repeat("Keep completed receipts. ", 25))}})
+					}
+				}
 				decide(first.ApprovalID, "answered", map[string]any{"feedback": permissionCorrection})
 			}
 			journal = load()
@@ -345,6 +371,11 @@ func TestWorkDBTypedPermissionGuidanceKeepsExactNestedProgress(t *testing.T) {
 			require.ErrorAs(t, err, &corrected)
 			require.NotEqual(t, first.ApprovalID, corrected.ApprovalID, "a corrected command needs a new exact receipt")
 			require.Len(t, runners[1].requests, 1)
+			if mode == "paged-guidance" {
+				require.Len(t, runners[1].guidanceRead, 41)
+				require.Contains(t, runners[1].guidanceRead[40].Prompt, permissionCorrection)
+				require.Contains(t, fmt.Sprint(runners[1].requests[0]), "effect already performed")
+			}
 			require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 1, "completed-tool": 1}, effects)
 			old := query(reader, "workApprovalForOwner", map[string]any{"approvalId": first.ApprovalID})[0]
 			require.Equal(t, "answered", old["decision"])

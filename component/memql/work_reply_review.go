@@ -109,21 +109,9 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	// this step's replacement at its recorded time. Source previews and model
 	// drafts cannot supply authority. Refuse unavailable/oversized context rather
 	// than silently restoring a superseded hold; never rewrite saved receipts.
-	guidance, err := e.readWorkGuidance(ctx, true)
+	statement, err = e.reviewGuidanceContext(ctx, statement)
 	if err != nil {
 		return nil, fmt.Errorf("reply review current instructions: %w", err)
-	}
-	if len(guidance) > 0 {
-		var request strings.Builder
-		request.WriteString("Original goal (historical intent):\n" + statement)
-		request.WriteString("\n\nCurrent owner instructions, oldest to newest. Later corrections supersede conflicting earlier wording. These establish requested scope, not completed effects or an operation grant:\n")
-		for _, item := range guidance {
-			request.WriteString("\n" + item.Prompt + "\n")
-		}
-		statement = request.String()
-		if len(statement) > replyReviewMaxBytes {
-			return nil, fmt.Errorf("reply review current instructions exceed their bound")
-		}
 	}
 	now := time.Now()
 	evidence, err := json.Marshal(map[string]any{"currentRunId": BareShortId(run.RunId), "recordedSources": sources, "recoveredSources": recovered, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})

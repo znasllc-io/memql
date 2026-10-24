@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"time"
-	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/work"
@@ -15,8 +14,7 @@ import (
 
 // Late information is read at the same model/tool boundaries as human guidance.
 // Its receipt remains in the shared journal; no timer or mailbox lives on a pod.
-// Late optional answers have a bound of their own beside the routed guidance's
-// (maxWorkGuidanceMessages), so neither can make the other's read fail.
+// Delivery pages share a chronological cursor across all instruction sources.
 func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, error) {
 	return e.readWorkGuidance(ctx, false)
 }
@@ -63,11 +61,8 @@ func (e *MemQLEngine) readWorkGuidance(ctx context.Context, includeWholePrompt b
 	if root != nil && BareShortId(stringArg(root, "id")) != BareShortId(rc.RunId) {
 		targets = append(targets, root)
 	}
-	// readAskWorkGuidance bounded the routed guidance in out; the late answers
-	// are counted apart from it.
-	answers, runes := 0, 0
 	for _, target := range targets {
-		rows, err := e.workRows(ctx, "workQuestionsForOwnerRun", stringArg(target, "id"))
+		rows, err := e.workGuidanceRows(ctx, "workQuestionsForOwnerRun", stringArg(target, "id"))
 		if err != nil {
 			return nil, err
 		}
@@ -83,11 +78,6 @@ func (e *MemQLEngine) readWorkGuidance(ctx context.Context, includeWholePrompt b
 				return nil, err
 			}
 			prompt := "Late answer to an optional question for this execution. Use it for unfinished work; preserve completed results. It grants no additional permission.\n" + string(raw)
-			answers++
-			runes += utf8.RuneCountInString(prompt)
-			if answers > maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
-				return nil, fmt.Errorf("saved guidance exceeds its bounded context")
-			}
 			guidanceID := "optional-answer-" + BareShortId(stringArg(row, "id"))
 			out = append(out, WorkGuidance{ID: guidanceID, Prompt: prompt})
 			dates[guidanceID], _ = askTimestamp(row["decidedAt"])
@@ -126,6 +116,11 @@ func (e *MemQLEngine) readWorkGuidance(ctx context.Context, includeWholePrompt b
 	// Sources are queried independently. Restore human chronology before
 	// presentation so an older approval correction cannot override later Ask
 	// guidance merely because its journal reader ran last.
-	sort.SliceStable(out, func(i, j int) bool { return dates[out[i].ID].Before(dates[out[j].ID]) })
+	sort.SliceStable(out, func(i, j int) bool {
+		if dates[out[i].ID].Equal(dates[out[j].ID]) {
+			return out[i].ID < out[j].ID
+		}
+		return dates[out[i].ID].Before(dates[out[j].ID])
+	})
 	return out, nil
 }

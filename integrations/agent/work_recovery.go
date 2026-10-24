@@ -26,19 +26,20 @@ type workRecoveryEngine interface {
 // system prompt which is refreshed at resume. Its position is the evidence
 // watermark: only completed batches AFTER it have not yet been observed.
 type workRecoveryState struct {
-	EvidenceRepairs    int              `json:"evidenceRepairs,omitempty"`
-	EvidenceGap        string           `json:"evidenceGap,omitempty"`
-	Version            int              `json:"version"`
-	ReadEvidence       workReadEvidence `json:"readEvidence,omitempty"`
-	DiscoveryRounds    int              `json:"discoveryRounds"`
-	RepeatedRounds     int              `json:"repeatedRounds"`
-	RecentEvidence     []string         `json:"recentEvidence,omitempty"`
-	ReviewActive       bool             `json:"reviewActive"`
-	StalledAfterReview int              `json:"stalledAfterReview"`
-	ReviewedLimit      int              `json:"reviewedLimit"`
-	AnsweredAt         time.Time        `json:"answeredAt,omitempty"`
-	GuidanceIDs        []string         `json:"guidanceIds,omitempty"`
-	Instruction        string           `json:"instruction,omitempty"`
+	EvidenceRepairs    int                      `json:"evidenceRepairs,omitempty"`
+	EvidenceGap        string                   `json:"evidenceGap,omitempty"`
+	Version            int                      `json:"version"`
+	ReadEvidence       workReadEvidence         `json:"readEvidence,omitempty"`
+	DiscoveryRounds    int                      `json:"discoveryRounds"`
+	RepeatedRounds     int                      `json:"repeatedRounds"`
+	RecentEvidence     []string                 `json:"recentEvidence,omitempty"`
+	ReviewActive       bool                     `json:"reviewActive"`
+	StalledAfterReview int                      `json:"stalledAfterReview"`
+	ReviewedLimit      int                      `json:"reviewedLimit"`
+	AnsweredAt         time.Time                `json:"answeredAt,omitempty"`
+	GuidanceIDs        []string                 `json:"guidanceIds,omitempty"`
+	GuidanceCursor     memql.WorkGuidanceCursor `json:"guidanceCursor,omitempty"`
+	Instruction        string                   `json:"instruction,omitempty"`
 }
 
 func recoveryDigest(value any) string {
@@ -85,7 +86,7 @@ func recoveryState(messages []common.ChatMessage) (workRecoveryState, int, error
 		if marker >= 0 || len(message.Content) > 8192 {
 			return s, -1, fmt.Errorf("invalid recovery checkpoint")
 		}
-		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || s.EvidenceRepairs < 0 || s.EvidenceRepairs > 1 || len(s.EvidenceGap) > 1200 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > memql.MaxWorkGuidanceReceipts || len(s.ReadEvidence.Recent) > 8 {
+		if err := json.Unmarshal([]byte(message.Content), &s); err != nil || s.Version != 1 || s.EvidenceRepairs < 0 || s.EvidenceRepairs > 1 || len(s.EvidenceGap) > 1200 || len(s.RecentEvidence) > 8 || len(s.GuidanceIDs) > memql.MaxWorkGuidanceReceipts || len(s.ReadEvidence.Recent) > 8 || s.GuidanceCursor.Count < 0 || (s.GuidanceCursor.Count == 0 && s.GuidanceCursor.Hash != "") || (s.GuidanceCursor.Count > 0 && len(s.GuidanceCursor.Hash) != 64) {
 			return s, -1, fmt.Errorf("unreadable recovery checkpoint")
 		}
 		marker = i
@@ -212,21 +213,11 @@ func (r *Replier) recoverWorkProgress(ctx context.Context, messages []common.Cha
 		return nil, err
 	}
 	state.observe(messages[marker+1:])
-	// Active guidance has a bounded lifetime set of server IDs: at most what one
-	// read of work guidance returns. Unlike its rendered text, regrouping old
-	// messages on another replica is not new input.
-	if guidance != nil {
-		for id := range guidance.seen {
-			if !slices.Contains(state.GuidanceIDs, id) {
-				state.GuidanceIDs = append(state.GuidanceIDs, id)
-				state.rearm()
-			}
-		}
-		if len(state.GuidanceIDs) > memql.MaxWorkGuidanceReceipts {
-			return nil, fmt.Errorf("recovery guidance exceeds its bounded context")
-		}
-		slices.Sort(state.GuidanceIDs)
-	}
+	// A validated prefix survives regrouping, compaction and another replica.
+	// Only a changed source prefix rearms recovery. Old ID-array checkpoints are
+	// consumed once for migration; production never appends lifetime ID arrays.
+	applyGuidanceCursor(&state, guidance)
+
 	limit, used, err := engine.WorkModelCallBudget(ctx)
 	if err != nil {
 		failure, readStopped = r.workRecoveryReadFailure(ctx, fmt.Errorf("reading recovery budget: %w", err), messages)

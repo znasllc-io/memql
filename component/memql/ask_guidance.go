@@ -4,24 +4,19 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/common"
 )
 
 // Guidance is a durable human message, not a new goal, permission or rerun.
-// Bound each source instead of silently truncating it: a run's routed
-// guidance, late optional answers and approval corrections each hold at
-// most maxWorkGuidanceMessages messages and maxWorkGuidanceRunes runes, so
-// neither can make the other's read fail.
+// Bound delivery pages, not a goal's lifetime journal. The agent drains pages
+// through ordinary context checkpointing before another operational model call.
 const maxWorkGuidanceMessages = 16
 const maxWorkGuidanceRunes = 16000
 
-// MaxWorkGuidanceReceipts is the most messages one ReadWorkGuidance returns,
-// its routed guidance, late optional answers, approval corrections and at most
-// two current step-override messages: what an agent may acknowledge at once,
-// and the guidance ids it keeps while recovering.
+// MaxWorkGuidanceReceipts bounds one acknowledgment write. It is not a limit
+// on durable guidance or the constant-size recovery cursor.
 const MaxWorkGuidanceReceipts = 3*maxWorkGuidanceMessages + 2
 
 type WorkGuidance struct {
@@ -105,15 +100,10 @@ func (e *MemQLEngine) readAskWorkGuidance(ctx context.Context, dates map[string]
 		return nil, run, err
 	}
 	var out []WorkGuidance
-	runes := 0
 	for n := range transcript.Turns {
 		target := workGuidanceTarget(&transcript.Turns[n], run)
 		if target == nil {
 			continue
-		}
-		runes += utf8.RuneCountInString(target.Text)
-		if len(out) >= maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
-			return nil, run, fmt.Errorf("saved guidance exceeds its bounded context")
 		}
 		out = append(out, WorkGuidance{ID: transcript.Turns[n].ID, Prompt: target.Text})
 		dates[transcript.Turns[n].ID] = transcript.Turns[n].StartedAt
