@@ -26,7 +26,25 @@ func staleProgressStopFixture(t *testing.T) (*Integration, *recordingEngine, map
 }
 
 func TestStaleProgressStopRechecksExistingWindowWithoutRenewal(t *testing.T) {
-	i, eng, approval, _, _ := staleProgressStopFixture(t)
+	testProgressStopRechecksExistingWindowWithoutRenewal(t, workstate.CeilingModelCalls, false)
+}
+
+func TestUnevaluatedStopRechecksExistingWindowWithoutRenewal(t *testing.T) {
+	testProgressStopRechecksExistingWindowWithoutRenewal(t, workstate.CeilingUnevaluated, false)
+}
+
+func TestUnevaluatedStopRechecksInitialWindowWithoutRenewal(t *testing.T) {
+	testProgressStopRechecksExistingWindowWithoutRenewal(t, workstate.CeilingUnevaluated, true)
+}
+
+func testProgressStopRechecksExistingWindowWithoutRenewal(t *testing.T, ceiling string, initial bool) {
+	i, eng, approval, run, _ := staleProgressStopFixture(t)
+	rowMap(approval, "subject")["ceiling"] = ceiling
+	approval["artifactHash"] = artifactHashOf(rowMap(approval, "subject"))
+	if initial {
+		delete(run, "classification")
+		run["spent"] = map[string]any{"modelCalls": 1, "tokens": 20, "wallClockMs": 1000}
+	}
 	ctx := callerContext(actOwner)
 	require.True(t, i.ApprovalGuidanceAvailable(ctx, approval))
 	nodes, err := i.handleDecideApproval(ctx, map[string]any{"approvalId": approval["id"], "decision": "answered", "answer": map[string]any{"feedback": "Continue the unfinished publication."}}, 0)
@@ -45,9 +63,18 @@ func TestStaleProgressStopRechecksExistingWindowWithoutRenewal(t *testing.T) {
 }
 
 func TestStaleProgressStopRecheckRefusesWithoutCurrentAllowance(t *testing.T) {
+	testProgressStopRecheckRefusesWithoutCurrentAllowance(t, workstate.CeilingModelCalls)
+}
+
+func TestUnevaluatedStopRecheckRefusesWithoutCurrentAllowance(t *testing.T) {
+	testProgressStopRecheckRefusesWithoutCurrentAllowance(t, workstate.CeilingUnevaluated)
+}
+
+func testProgressStopRecheckRefusesWithoutCurrentAllowance(t *testing.T, ceiling string) {
 	for _, scenario := range []string{"tokens", "cost", "call window", "time window", "closed goal", "missing goal", "missing spend", "malformed spend", "missing cost", "null calls", "null tokens", "null time", "null cost", "infinite cost", "negative calls", "missing window", "missing intent", "unknown resume", "not progress", "wrong ceiling", "review", "cancelled", "moved", "foreign owner"} {
 		t.Run(scenario, func(t *testing.T) {
 			i, eng, approval, run, goal := staleProgressStopFixture(t)
+			rowMap(approval, "subject")["ceiling"] = ceiling
 			switch scenario {
 			case "tokens":
 				rowMap(goal, "ceilings")["tokenBudget"] = 100

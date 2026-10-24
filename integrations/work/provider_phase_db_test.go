@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -9,8 +10,10 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/agent"
 )
 
 type providerCompileResult struct {
@@ -52,6 +55,7 @@ func TestProviderAdmissionCompileCrossesReplicaBeforeExecution(t *testing.T) {
 	require.NoError(t, err)
 	reply := decodeReply(t, nodes)
 	runID := reply["runId"].(string)
+	seedProviderPhaseProgress(t, a, runID)
 	b.i.HandleRunEvent(runEvent(runID, runStatusCompiling, "work.compile", a.owner))
 	var got providerCompileResult
 	select {
@@ -61,6 +65,7 @@ func TestProviderAdmissionCompileCrossesReplicaBeforeExecution(t *testing.T) {
 	}
 	require.NoError(t, got.err, "a claimed compiler must be able to make its first inference")
 	require.Equal(t, runStatusCompiling, rowString(a.runRow(t, runID), "status"))
+	require.Equal(t, 1, rowInt(rowMap(rowMap(a.runRow(t, runID), "classification"), "progressContinuation"), "extensions"), "a native compiler may consume fresh completed progress")
 	rows := a.query(t, a.owner, "query "+call("workProviderAdmissionForOwnerRun", map[string]any{"runId": runID}))
 	require.Len(t, rows, 1)
 	require.Equal(t, 1, rowInt(rowMap(rowMap(rows[0], "data"), "providerAdmission"), "admittedCalls"))
@@ -125,7 +130,15 @@ func TestProviderAdmissionRemedyIsBoundToClaimedWaitAcrossReplicas(t *testing.T)
 			}
 			require.NoError(t, got.err)
 			require.Error(t, probe.guard.AdmitProvider(actorCtx(a.owner), got.run, memql.ProviderAdmission{}), "a waiting owner context alone is not a remedy claim")
+			seedProviderPhaseProgress(t, a, runID)
+			continued, err := b.i.ContinueWorkProgress(actorCtx(a.owner), got.run, workstate.Spent{ModelCalls: 12}, 0)
+			require.NoError(t, err)
+			require.False(t, continued, "an unclaimed wait cannot consume progress evidence")
 			require.NoError(t, probe.guard.AdmitProvider(got.ctx, got.run, memql.ProviderAdmission{HardCallLimit: 2}))
+			require.Equal(t, 1, rowInt(rowMap(rowMap(a.runRow(t, runID), "classification"), "progressContinuation"), "extensions"))
+			continued, err = b.i.ContinueWorkProgress(got.ctx, got.run, workstate.Spent{ModelCalls: 24}, 0)
+			require.NoError(t, err)
+			require.False(t, continued, "a claimed phase cannot reuse consumed progress evidence")
 			require.Error(t, probe.guard.AdmitProvider(got.ctx, got.run, memql.ProviderAdmission{HardCallLimit: 2}), "phase admission must retain the durable cumulative cap")
 			wait["since"] = rfc(time.Now().Add(time.Minute))
 			a.write(t, "updateWorkRun", map[string]any{"runId": runID, "waitingOn": wait})
@@ -137,6 +150,17 @@ func TestProviderAdmissionRemedyIsBoundToClaimedWaitAcrossReplicas(t *testing.T)
 			require.Equal(t, 2, rowInt(rowMap(rowMap(rows[0], "data"), "providerAdmission"), "admittedCalls"))
 		})
 	}
+}
+
+func seedProviderPhaseProgress(t *testing.T, a actsDB, runID string) {
+	t.Helper()
+	goalID := rowString(a.runRow(t, runID), "goalId")
+	a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 12}})
+	journal := NewModelJournal(a.eng)
+	for n := 0; n < 12; n++ {
+		require.NoError(t, journal.Record(actorCtx(a.owner), a.owner, memql.JournaledCall{ReceiptID: fmt.Sprintf("%s-phase-%d", memql.BareShortId(runID), n), RunId: runID, StepKey: "draft", RequestHash: fmt.Sprint(n), Served: "local"}))
+	}
+	require.NoError(t, a.i.RecordToolInvocation(actorCtx(a.owner), agent.ToolInvocation{RunId: runID, OwnerUserId: a.owner, ToolName: "readSource", NativeResultEvidence: workstate.ArtifactHash(map[string]any{"content": "new source facts for this phase"})}))
 }
 
 type providerDelayedClaimer struct {

@@ -694,6 +694,30 @@ and `TestProgressStopRecheckDBAcrossReplicas` cover this boundary, including a
 lost release, a newly tightened monetary cap, idempotent recovery and a provider
 hard cap that still refuses after recovery.
 
+An `unevaluated` admission stop is a failed check, not measured exhaustion.
+The same discussion gate may reconsider that saved replan inside its current
+initial or renewed allowance, with complete recorded usage and current owner,
+goal, wait and artifact checks. It never recognizes recovery by matching prose,
+rewrites the old question, grants a phase claim, renews a window or clears
+usage. New questions describe verification failure accurately and remain closed
+until that gate succeeds. The retried native phase must still pass fresh logical
+and provider admission; unavailable accounting or an explicit cap still refuses.
+`TestUnevaluatedStopRecheckDBAcrossReplicas` covers a saved answer, failed release,
+tightened monetary limit, peer recovery and unchanged cumulative accounting.
+
+Provider admission recognizes compiler ownership, a claimed remedy's exact wait,
+or an answer validator's exact completed version through private native context.
+Ordinary waiting/compiling contexts cannot mint that evidence. Remedy and answer
+check deadlines start before claim/preparation, so delays cannot extend their
+claim window. Compiler ownership is rechecked against its persisted node and
+heartbeat. Stale phases do not turn into execution authority when status changes.
+Only current execution, compilation and remedy phases can renew progress from
+fresh completed evidence; terminal answer validation cannot renew. The native
+cross-replica tests in `provider_phase_db_test.go` exercise admission, claim
+expiry, changed waits/owners/nodes, cancellation, progress-credit consumption
+and unchanged provider caps. Runtime role versions must include these gates;
+changing a saved run's status to bypass them is not a recovery procedure.
+
 Recovery observes that same current cumulative window. `ModelCallBudget`
 previously reloaded the original goal estimate after calculating the renewed
 allowance, so a run beyond its first window appeared permanently exhausted to

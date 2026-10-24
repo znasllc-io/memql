@@ -8,8 +8,8 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 )
 
-// A replica with the retired lifetime policy can save a hard call/time stop
-// against a window another replica already renewed. The historical question
+// A replica can save a stale hard call/time stop or fail to evaluate admission.
+// Neither proves the current window is exhausted. The historical question
 // remains immutable. A person's guidance may reconsider it only when the fresh
 // owned run's EXISTING window covers its saved spend; this neither renews the
 // window nor admits inference. The ordinary native admission path reconciles
@@ -20,14 +20,18 @@ func (i *Integration) progressStopWithinCurrentWindow(ctx context.Context, appro
 	if rowString(approval, "kind") != workstate.ApprovalKindFeedback || !workstate.IsProgressFeedback(subject) ||
 		subject["continuationAllowed"] != false || rowString(subject, "reviewType") != "" ||
 		rowString(subject, "resumeKind") != waitKindReplan || rowString(subject, "resumeReason") == "" ||
-		(ceiling != workstate.CeilingModelCalls && ceiling != workstate.CeilingWallClock) ||
+		(ceiling != workstate.CeilingModelCalls && ceiling != workstate.CeilingWallClock && ceiling != workstate.CeilingUnevaluated) ||
 		workstate.ArtifactHash(subject) != rowString(approval, "artifactHash") {
 		return false
 	}
 	state := rowMap(rowMap(run, "classification"), "progressContinuation")
-	if rowInt(state, "policyVersion") < 2 || rowInt(state, "extensions") < 1 {
+	if ceiling != workstate.CeilingUnevaluated && (rowInt(state, "policyVersion") < 2 || rowInt(state, "extensions") < 1) {
 		return false // Never infer an existing renewal from an unversioned estimate.
 	}
+	// An unevaluated stop may occur in the initial window too. Reconsidering
+	// it only restarts the native admission checks: missing ownership, phase
+	// authority or provider accounting still refuses before dispatch. Never
+	// infer recovery from the human-readable reason or add a progress window.
 	goal, err := i.store().goalForOwner(memql.ContextWithFreshRead(ctx), rowString(run, "goalId"))
 	if err != nil || goal == nil || rowString(goal, "status") == "closed" {
 		return false

@@ -80,7 +80,11 @@ func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.
 	if err != nil {
 		return false, err
 	}
-	if run == nil || run["cancelRequested"] == true || rowString(run, "status") != runStatusRunning || memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
+	// Compilation and remedies have the same progress contract as execution,
+	// but only their still-current native claim may renew. A matching status
+	// alone is not authority, and terminal answer checks cannot extend work.
+	status := rowString(run, "status")
+	if (status != runStatusRunning && status != runStatusCompiling && status != runStatusWaiting) || i.admitProviderPhase(ctx, rc, run) != nil {
 		return false, nil
 	}
 	goal, err := i.store().goalForOwner(ctx, rc.GoalId)
