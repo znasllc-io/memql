@@ -23,7 +23,7 @@ func TestWriteMCPConfig_ClaudeCodeShapeAndMode(t *testing.T) {
 	}
 	defer m.Remove()
 
-	path := filepath.Join(ws, ".mcp.json")
+	path := m.configPath
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -67,7 +67,7 @@ func TestWriteMCPConfig_CodexIsWorkspaceScoped(t *testing.T) {
 	}
 	defer m.Remove()
 
-	home := filepath.Join(ws, codexHomeRel)
+	home := filepath.Dir(m.configPath)
 	if _, err := os.Stat(filepath.Join(home, "config.toml")); err != nil {
 		t.Fatalf("codex config.toml: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRenew_RewritesInPlace(t *testing.T) {
 	if err := m.Renew(next); err != nil {
 		t.Fatalf("Renew: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(ws, ".mcp.json"))
+	data, err := os.ReadFile(m.configPath)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRenew_RewritesInPlace(t *testing.T) {
 	if strings.Contains(string(data), testBearer) {
 		t.Error("the superseded bearer survived the rewrite")
 	}
-	info, _ := os.Stat(filepath.Join(ws, ".mcp.json"))
+	info, _ := os.Stat(m.configPath)
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("mode after renewal = %o, want 600", perm)
 	}
@@ -189,10 +189,11 @@ func TestSweep_CleansUpAfterAKilledCockpit(t *testing.T) {
 
 	// A session that was live when the process died: the config is
 	// written and Remove is never called, exactly as a SIGKILL leaves it.
-	if _, err := writeMCPConfig(apps.IDClaudeCode, ws, "https://mcp.example.com/mcp", testBearer, "killed-1", state); err != nil {
+	m, err := writeMCPConfig(apps.IDClaudeCode, ws, "https://mcp.example.com/mcp", testBearer, "killed-1", state)
+	if err != nil {
 		t.Fatalf("writeMCPConfig: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(ws, ".mcp.json")); err != nil {
+	if _, err := os.Stat(m.configPath); err != nil {
 		t.Fatalf("precondition: the config should exist: %v", err)
 	}
 
@@ -203,7 +204,7 @@ func TestSweep_CleansUpAfterAKilledCockpit(t *testing.T) {
 	if found := grepTree(t, ws, testBearer); len(found) > 0 {
 		t.Errorf("a killed session left the bearer behind in: %v", found)
 	}
-	if _, err := os.Stat(filepath.Join(ws, ".mcp.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(m.configPath); !os.IsNotExist(err) {
 		t.Errorf(".mcp.json survived the sweep (%v)", err)
 	}
 	// The ledger entry goes with it, so the next boot has nothing to do.
@@ -212,10 +213,8 @@ func TestSweep_CleansUpAfterAKilledCockpit(t *testing.T) {
 	}
 }
 
-// TestSweep_RestoresAPreexistingConfig: if the crash happened while the
-// session's config was in place over the user's own, the sweep puts
-// theirs back.
-func TestSweep_RestoresAPreexistingConfig(t *testing.T) {
+// New sessions leave the project configuration intact even after a crash.
+func TestSweep_PreservesAPreexistingConfig(t *testing.T) {
 	ws := t.TempDir()
 	state := t.TempDir()
 	const mine = `{"mcpServers":{"my-own-server":{}}}`
@@ -237,11 +236,11 @@ func TestSweep_RestoresAPreexistingConfig(t *testing.T) {
 	}
 }
 
-// TestRemove_RestoresAPreexistingConfig is the same guarantee on the
+// TestRemove_PreservesAPreexistingConfig is the same guarantee on the
 // clean path. An `open` or `attach` session can point at a real project,
 // and destroying a config the user wrote is a worse outcome than
 // anything this feature is worth.
-func TestRemove_RestoresAPreexistingConfig(t *testing.T) {
+func TestRemove_PreservesAPreexistingConfig(t *testing.T) {
 	ws := t.TempDir()
 	const mine = `{"mcpServers":{"my-own-server":{}}}`
 	if err := os.WriteFile(filepath.Join(ws, ".mcp.json"), []byte(mine), 0o600); err != nil {
@@ -251,8 +250,8 @@ func TestRemove_RestoresAPreexistingConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeMCPConfig: %v", err)
 	}
-	// While the session runs, ours is the one in place.
-	live, _ := os.ReadFile(filepath.Join(ws, ".mcp.json"))
+	// The private configuration is used while the project config stays intact.
+	live, _ := os.ReadFile(m.configPath)
 	if !strings.Contains(string(live), mcpServerName) {
 		t.Fatalf("the session config is not in place: %s", live)
 	}
@@ -264,6 +263,29 @@ func TestRemove_RestoresAPreexistingConfig(t *testing.T) {
 	}
 	if string(got) != mine {
 		t.Errorf("restored config = %s, want %s", got, mine)
+	}
+}
+
+// Existing crash ledgers may still name the old shared project config. The
+// upgrade must remove that bearer and restore the saved project file.
+func TestSweep_RestoresLegacyProjectConfig(t *testing.T) {
+	ws, state := t.TempDir(), t.TempDir()
+	path := filepath.Join(ws, ".mcp.json")
+	for name, body := range map[string]string{path: testBearer, path + backupSuffix: "original project config"} {
+		if err := os.WriteFile(name, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy := &mcpConfig{sessionID: "legacy", configPath: path, ledger: filepath.Join(state, ledgerDirName, "legacy.json")}
+	if err := legacy.writeLedger(); err != nil {
+		t.Fatal(err)
+	}
+	if removed := Sweep(state); removed != 1 {
+		t.Fatalf("swept %d files", removed)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil || string(body) != "original project config" {
+		t.Fatal("legacy project config not restored", err)
 	}
 }
 
@@ -434,7 +456,7 @@ func TestWriteMCPConfig_CodexFileCarriesTheAuthorizationHeader(t *testing.T) {
 	}
 	defer m.Remove()
 
-	path := filepath.Join(ws, codexHomeRel, "config.toml")
+	path := m.configPath
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -468,7 +490,7 @@ func TestRenew_CodexRewritesTheHeaderInPlace(t *testing.T) {
 	if err := m.Renew(next); err != nil {
 		t.Fatalf("Renew: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(ws, codexHomeRel, "config.toml"))
+	data, err := os.ReadFile(m.configPath)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}

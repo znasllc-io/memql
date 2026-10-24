@@ -214,15 +214,24 @@ status in the error; `pending` (still connecting) does not.
 
 | Path | What it is | Lifetime |
 |---|---|---|
-| `<workspace>/.mcp.json` | Claude Code's project-scoped MCP config, `0600`, carrying the per-run bearer | deleted at session end |
-| `<workspace>/.memql-session/codex/config.toml` | Codex's MCP config in a per-session `CODEX_HOME` | deleted at session end |
-| `<workspace>/.memql-session/transcript.log` | the full transcript | pushed to the Library, then deleted |
-| `<workspace>/.memql-session/open-launcher.sh` | the `open` kind's terminal launcher | deleted at session end |
+| `<workspace>/.memql-session/mcp-<unique>.json` | Claude Code's explicit MCP config, `0600`, carrying this session's bearer | deleted at session end |
+| `<workspace>/.memql-session/codex-<unique>/config.toml` | Codex's MCP config in a conversation-scoped `CODEX_HOME` | credential deleted at session end; provider state retained for attach |
+| `<workspace>/.memql-session/codex-refs/<ref-hash>` | workspace-local provider ref to home index, with no credentials or history | retained with the workspace |
+| `<workspace>/.memql-session/transcript-<unique>.log` | this session's full transcript | pushed to the Library, then deleted; retained on failed push |
+| `<workspace>/.memql-session/open-<unique>/` | this `open` session's launcher and exit receipt | deleted at session end |
 | `<state_dir>/appsessions/<id>.json` | the write ledger — **paths only, never the bearer** | deleted at session end |
 
-A pre-existing `.mcp.json` in the workspace is moved aside and **restored** at
-the end, so an `open` or `attach` session pointed at a real project does not
-destroy a config somebody wrote.
+Overlapping sessions never share transcript or credential paths. Claude receives
+its exact private config through `--mcp-config`, including interactive sessions;
+the project's `.mcp.json` stays untouched. Startup still restores backups named
+by an older worker's crash ledger.
+
+Codex attach reuses the original conversation's provider state in this workspace,
+with a fresh credential. An OS lock refuses a second active writer to that home
+before it can replace the credential; a crash releases the lock. Older refs use
+the former `.memql-session/codex` home in the same workspace. Attach never searches
+another workspace or the user's personal conversation history. Provider state
+and the reference index remain excluded from output retention.
 
 ### The deletion is the security control
 

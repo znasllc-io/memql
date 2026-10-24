@@ -244,6 +244,14 @@ Four rules here are load-bearing, and each is the kind that fails silently:
    enough: every write is recorded in a ledger under the state dir, and
    `appsession.Sweep` clears what a SIGKILL left behind at the next start.
 
+**A RUN WORKSPACE IS SHARED; SESSION SCAFFOLDING IS NOT.** Transcripts, Claude
+configs, and interactive launcher/exit paths have exclusive names inside
+`.memql-session/`. New Codex conversations get private homes. A workspace-local
+ref index lets attach reuse provider state after credential cleanup, guarded by
+an OS lock so a second attach cannot replace an active bearer. Legacy refs use
+only the old home in that workspace. Keep provider state separate from credential
+lifetime; randomizing every attach home silently loses the conversation.
+
 **AN EMPTY `AppSessionStart.workspace` IS THE MACHINE'S CHOICE**, never a
 refusal: the engine cannot know a path here. `appsession/workspace.go` makes
 `<fs.workspace_root or the platform data dir>/<home>/<run_id or session_id>`,

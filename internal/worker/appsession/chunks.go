@@ -33,11 +33,16 @@ const chunkRetryDelay = 200 * time.Millisecond
 // somebody's laptop. It lives inside the session scaffolding, so it is
 // excluded from the produced-file sweep and removed with the session.
 func (s *session) openTranscript(workspace string) error {
-	path := filepath.Join(workspace, transcriptRel)
-	if err := os.MkdirAll(filepath.Dir(path), configDirMode); err != nil {
+	dir := filepath.Join(workspace, sessionScaffoldDir)
+	if err := os.MkdirAll(dir, configDirMode); err != nil {
 		return fmt.Errorf("app session: transcript: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	// Sessions of one run share their working files, but may overlap during
+	// recovery or helper inference. A fixed name truncates another transcript
+	// and lets its cleanup unlink this session's still-open file. Allocate an
+	// exclusive private file; its actual path stays bound to this handle until
+	// successful retention. A failed push keeps these exact bytes for recovery.
+	f, err := os.CreateTemp(dir, "transcript-*.log")
 	if err != nil {
 		return fmt.Errorf("app session: transcript: %w", err)
 	}

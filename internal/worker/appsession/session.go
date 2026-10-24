@@ -97,10 +97,6 @@ const (
 	ActionMessage = "message"
 )
 
-// transcriptRel is where the full transcript accumulates during a run,
-// inside the session scaffolding so it is removed with it.
-const transcriptRel = ".memql-session/transcript.log"
-
 // maxQueuedFollowUps bounds the follow-ups waiting for a turn to end.
 //
 // The queue is fed by the network and drained by an app that takes
@@ -539,8 +535,12 @@ func (s *session) execute(ctx context.Context) (int, error) {
 	}
 	// The MCP configuration first: an app that starts without it reaches
 	// nothing over MCP and reports that as "MemQL's tools are broken".
+	resumeRef := ""
+	if s.start.GetKind() == KindAttach {
+		resumeRef = s.start.GetAppSessionRef()
+	}
 	mcp, err := writeMCPConfig(spec.ID, workspace, s.start.GetMcpEndpoint(),
-		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{Tools: tools, DenyPaths: s.denyPaths(), InferenceOnly: s.start.GetInferenceOnly()})
+		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{ResumeRef: resumeRef, Tools: tools, DenyPaths: s.denyPaths(), InferenceOnly: s.start.GetInferenceOnly()})
 	if err != nil {
 		return -1, err
 	}
@@ -908,6 +908,9 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 	for {
 		res, err := h.Turn(ctx, prompt, sink)
 		s.recordTurn(res)
+		if refErr := s.mcp.rememberProviderRef(res.AppSessionRef); refErr != nil {
+			return res.ExitCode, errors.Join(err, refErr)
+		}
 		// The app's REAL status, unnormalised. A harness whose process
 		// is still alive reports 0 for a protocol-level failure, and
 		// that is not a lie the engine acts on: it files a session with
@@ -1070,11 +1073,23 @@ func (s *session) pump(c *child, onStdout, onStderr func(string, []byte) error) 
 
 // runOpen hands the app to the human -- the open kind.
 func (s *session) runOpen(ctx context.Context, spec apps.Spec, workspace string) (int, error) {
+	root := filepath.Join(workspace, sessionScaffoldDir)
+	if err := os.MkdirAll(root, configDirMode); err != nil {
+		return -1, err
+	}
+	// Open sessions also overlap in a run workspace. Own their launcher and
+	// exit receipt together; cleanup must never consume another window's result.
+	dir, err := os.MkdirTemp(root, "open-")
+	if err != nil {
+		return -1, err
+	}
+	defer os.RemoveAll(dir)
+	exitFile := filepath.Join(dir, "exit")
 	openCommand := s.manager.opts.OpenCommand
 	if openCommand == nil {
 		openCommand = platformOpenCommand
 	}
-	c, note, err := launchOpen(ctx, spec, workspace, s.start.GetPrompt(), s.mcpEnv(), openCommand)
+	c, note, err := launchOpen(ctx, spec, workspace, s.start.GetPrompt(), s.mcpEnv(), s.mcpConfigPath(), exitFile, openCommand)
 	if err != nil {
 		// Immediately, with a reason, and with no fallback to headless:
 		// the user asked to drive it themselves.
@@ -1087,7 +1102,7 @@ func (s *session) runOpen(ctx context.Context, spec apps.Spec, workspace string)
 	_ = s.emitChunk(StreamStderr, []byte(note+"\n"))
 
 	readersDone := s.pump(c, s.emitChunk, s.emitChunk)
-	code := waitForOpen(ctx, c, filepath.Join(workspace, openSessionExitFile), readersDone)
+	code := waitForOpen(ctx, c, exitFile, readersDone)
 	// Usage on this path is normally unknown, and that is correct: a
 	// human-driven session does not report tokens back to the cockpit.
 	// The engine records it as billing "unknown" rather than as free.
