@@ -431,6 +431,10 @@ func (a *CognitionEngineAdapter) DelegatedWorkHumanWait(ctx context.Context, ses
 func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	return a.Engine.RestoreWorkContinuation(ctx, messages)
 }
+func (a *CognitionEngineAdapter) ReadWorkReplanSources(ctx context.Context) (string, error) {
+	return a.Engine.ReadWorkReplanSources(ctx)
+}
+
 func (a *CognitionEngineAdapter) ReadWorkReplyReview(ctx context.Context) (memql.WorkReplyReviewCheckpoint, error) {
 	return a.Engine.ReadWorkReplyReview(ctx)
 }

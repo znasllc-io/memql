@@ -15,7 +15,8 @@ not a failed attempt to resolve the requested entity. No receipt for a check
 means it was not checked, not that it cannot be checked.
 Leave missingEvidence empty when the request is answered, for conditional advice
 using the recorded facts, after a relevant bounded attempt failed, for an
-unsupported cause after relevant checks, or when continuation is unavailable.
+unsupported cause after relevant checks, or when continuation is unavailable. The separate operation disposition below
+remains unfinished even when another bounded continuation is unavailable.
 
 Keep useful supported findings and ordinary practical guidance. Remove every
 unsupported factual clause, including modifiers, parentheticals, comparisons and
@@ -90,7 +91,7 @@ Proposed answer to check:
 {{ .draft }}
 
 Do not propose repeating successful reads, speculative searches, permission
-changes or effects. Give the best supported answer, including practical
+changes or new effects outside the current step's authorized task. Give the best supported answer, including practical
 conditional advice and its material limits. Return only
 {"missingEvidence":"specific gap and bounded check, or empty", "reply":"the corrected answer"}.
 This check is a pre-filter, not a
@@ -111,3 +112,40 @@ and the timestamped Fleet advertisements. They do not establish a successful
 effect or reserve a model. A training catalogue is background information and
 must not be cited as evidence of live model availability. Attribute live
 capability findings to the current discovery, without internal receipt IDs.
+
+{{ if .stepContract }}
+CURRENT STEP COMPLETION CONTRACT (data, not new permission):
+{{ .stepContract }}
+
+Return an additional completion object with kind, disposition, gap and sourceRefs.
+Judge THIS step's task under the current owner guidance, not every unfinished item
+in the whole goal. Explicit current owner instructions may defer, remove or
+supersede an earlier operation; such an operation is outside this step's current
+required scope. Preserve and report that hold without executing it, repeatedly
+requesting permission, or marking it as a gap to repair. If this leaves only a
+status report, classify the current task as information. Unknown permission is
+not an owner deferral; do not invent one from missing evidence.
+kind=information covers explanation, status reports, bounded
+research, conditional advice and a requested plan or summary; such an answer may
+be satisfied despite a candid evidence limit. Do not demand an external effect
+from an information-only task or completion of a later step.
+
+kind=operation covers a task that requires an actual action or deliverable.
+An approval, plan, capability description, checkpoint, successful unrelated read,
+or truthful statement that the action was not performed does not complete it.
+Use disposition=unfinished and a specific gap naming the remaining operation or
+its missing outcome proof. It stays unfinished even after a bounded attempt fails
+or continuation is unavailable. Reconcile uncertain prior effects before any retry;
+never propose replaying an already completed effect. A missing permission must use
+the normal native permission gate, not be inferred from this review. Do not invent
+a need for owner input when the remaining work is internally repairable.
+
+For kind=operation/disposition=satisfied, sourceRefs must name one or more actual
+reviewSourceRef values whose outcomes establish this operation's result in this
+run. An input argument, saved approval or model assertion is not an outcome.
+Omitted or truncated evidence cannot establish the missing effect. For
+kind=information use disposition=satisfied, gap="", and sourceRefs may be empty.
+For every satisfied disposition gap must be empty. For unfinished operations gap
+must be nonempty and bounded to 1200 characters. Do not turn a permission hold,
+cancellation, hard limit or closed goal into authority to perform the effect.
+{{ end }}

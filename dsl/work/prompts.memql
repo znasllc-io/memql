@@ -100,6 +100,7 @@ prompt workConversationReply {
 @level("strong")
 @templateFile("prompts/workReplyReview.tmpl")
 prompt workReplyReview {
+ stepContract string
  canContinue bool!
  statement string!
  draft string!

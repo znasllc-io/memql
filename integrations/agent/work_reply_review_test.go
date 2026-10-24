@@ -323,7 +323,7 @@ func TestEvidenceCompletionReachesBothProviderBoundariesAfterRestore(t *testing.
 			require.Equal(t, "work_evidence_completion", last.Name)
 			require.Contains(t, last.Content, "not a new user request")
 			require.Contains(t, last.Content, "Resolve item A's identifier")
-			require.Contains(t, last.Content, "authorized tool before")
+			require.Contains(t, last.Content, "already-authorized operation")
 			require.True(t, recoveryGuidance(last).IsZero(), "runtime correction must not rearm human authorization")
 		})
 	}

@@ -123,7 +123,7 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 					if actor == nil || actor.UserId != owner || run.RunId != "adopted-run" {
 						return nil, fmt.Errorf("reply review lost the persisted work owner")
 					}
-					return []map[string]any{{"reply": "Completed answer", "evidenceReviewed": false}}, nil
+					return []map[string]any{{"reply": "Completed answer", "evidenceReviewed": false, "completion": map[string]any{"kind": "information", "disposition": "satisfied", "gap": "", "sourceRefs": []string{}}}}, nil
 				}
 				return nil, nil
 			}

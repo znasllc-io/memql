@@ -107,8 +107,9 @@ func TestAnAskTurnNamesItsStepForTheSessionDoor(t *testing.T) {
 					if actor == nil || actor.UserId != owner {
 						return nil, fmt.Errorf("reply review lost the session owner")
 					}
-					// No retrieved sources in this greeting; the engine skips inference.
-					return []map[string]any{{"reply": "Hello from Claude Code", "evidenceReviewed": false}}, nil
+					// This unclassified legacy agent turn supplies an informational verdict.
+					// Known quick replies bypass this agent path in the compiled recipe.
+					return []map[string]any{{"reply": "Hello from Claude Code", "evidenceReviewed": false, "completion": map[string]any{"kind": "information", "disposition": "satisfied", "gap": "", "sourceRefs": []string{}}}}, nil
 				}
 				return nil, nil
 			}

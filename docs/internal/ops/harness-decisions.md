@@ -1009,3 +1009,57 @@ missing-transcript recovery, refused delivery, unrelated intake and ambiguity. `
 runs the real plan validator and proves the new resume point follows completed
 work. These are fixtures with the real database/plan validator; live rollout and
 completion-disposition verification are reported separately.
+
+## Current-step operation completion and retained partial effects
+
+An execution previously could finish after an honest answer said its requested
+operation was still unperformed. The operational step now requires a typed
+completion disposition from the existing bounded reply check, including specialist
+turns without a `respondToUser` envelope. Its contract combines the native current
+step task, owned running step, and current owner guidance. Information requests,
+conditional advice, later steps, and explicit owner deferrals do not require an
+unrequested effect. Direct self-contained quick replies retain their bypass through the compiled
+quick-reply recipe. Unclassified legacy agent turns receive the completion check;
+their prose alone cannot establish an information-only task. Adopted turns without
+a section task use the owned goal statement rather than treating a large source
+document as the task. Long native instructions remain intact for ordinary routed
+context admission and durable recovery; this adds no task-text length ceiling.
+
+A satisfied operation must cite available, attributed same-run tool receipts.
+Unused approvals, explicit transport errors, nonzero exits and truncated proof
+cannot satisfy it. Saved domain data that describes failures remains valid source
+data: only recognized receipt/transport status is checked mechanically. The model
+still judges relevance and sufficiency, including reuse of a previously retained
+artifact. This is a bounded semantic check, not transactional certification.
+
+An unfinished disposition first uses the existing single durable checkpoint
+continuation. Its attempt count, completed exchanges and pending reply survive a
+replica change. If the operation remains unfinished, an encoded native control
+receipt selects the normal replan path instead of successful delivery. Native
+terminal and hard-limit signals retain precedence; quoted error strings inside
+the encoded explanation cannot change classification. The explanation is exposed
+only after that decision. Replanning spends the existing run retry budget; actual
+budget exhaustion still requires the ordinary owner decision. The check grants no
+permission and does not close or accept a goal.
+
+A failed top-level step can contain completed effects. Before replacing it, the
+planner reads bounded owner/run/step-scoped tool receipts, independently of model
+prose. After installation, the new execution binding receives retained same-run
+receipts independently of its generated replacement prompt. Completed prefix
+bindings remain fixed. Foreign run receipts cannot certify the operation; missing,
+oversized or crowded-out source previews explicitly require reconciliation before
+an uncertain write. Source reads fail closed. Neither reconstruction nor a new
+binding grants permission to replay a completed effect.
+
+Regression coverage includes `unfinished_step_test.go` at the real failure path
+(zero classifier calls, quoted vendor errors, terminal precedence and retry
+limits); `unfinished_operation_db_test.go` across independent engines through
+`LoadReplanContext`, `InstallReplan`, `PrepareRerun` and `ResumeFrom`; and prepared
+streaming/nonstreaming provider requests in `work_operation_sources_test.go`.
+Reply completion tests cover specialist output, owner deferral, direct quick
+replies, malformed dispositions, source attribution, refused/truncated evidence,
+saved reports containing failure data, and bounded omissions. The database fixture
+retains one first-file receipt and creates only the missing second-file receipt.
+It establishes the native handoff and preservation contract, not arbitrary model
+obedience or exactly-once effects. Live completion remains separately unverified
+until the repaired runtime performs and retains the requested operations.

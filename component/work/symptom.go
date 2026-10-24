@@ -277,6 +277,11 @@ var rules = []rule{
 		},
 	},
 	{
+		id: "plan.unfinishedStep", tier: "plan", symptom: SymptomPlan,
+		reason: "the current step's requested operation remains unfinished after bounded checkpoint continuation; preserve completed receipts and plan the remaining work",
+		match:  func(s Signal) bool { _, ok := UnfinishedStepGap(s.ErrorMessage); return ok },
+	},
+	{
 		id: "plan.modelCallCeiling", tier: "plan", symptom: SymptomPlan,
 		reason: "one model call used its entire time allowance; divide the unfinished work into smaller checkpointed steps instead of repeating the same request",
 		match: func(s Signal) bool {

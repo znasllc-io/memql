@@ -652,6 +652,16 @@ Unavailable or oversized instruction context stops review explicitly. This does
 not authorize another operation, retry interrupted input, or make a completed
 execution count as the owner's acceptance of its results.
 
+A step assigned an operation must establish its outcome; honestly saying it was
+not performed does not complete that step. The same bounded check applies to
+specialist results without a user-facing reply. Information requests and explicit
+owner deferrals retain their scope. After one saved continuation, an unfinished
+operation enters ordinary replanning under the remaining retry budget. Retained
+tool receipts reach both the planner and the resumed step, including successful
+effects inside a failed step. Missing or omitted proof requires reconciliation
+before an uncertain write. This check does not guarantee model compliance or
+exactly-once effects, and never extends permissions or spending limits.
+
 Useful documents, scripts, patches, screenshots and verification receipts can
 be retained as bounded artifacts with provenance. File metadata alone does not
 prove that the bytes are readable. A checkout or dependency cache is a working
