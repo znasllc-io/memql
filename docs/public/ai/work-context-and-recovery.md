@@ -654,6 +654,12 @@ If a delegated app completed its operations but omitted the required reporting
 format, MemQL can make one separate conversion from the saved result and public
 receipts. That conversion has no operational tools and does not repeat the work.
 Its attempt is saved before inference, so a restart cannot reset the allowance.
+If instructions change before that conversion is committed, recovery can retain
+the completed conversion and review it under the current instructions. A missing
+stage result can only be recovered from one matching completed native receipt;
+missing or ambiguous receipts do not authorize another attempt.
+For old checkpoints without a saved conversion, this receipt recovery is limited
+to the step's first execution; later versions remain stopped without exact proof.
 The converted answer still needs the normal evidence and completion review.
 If that review cannot verify completion, the run records a stopped step and
 waits explicitly with the saved report; it must not remain shown as running.

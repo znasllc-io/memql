@@ -13937,6 +13937,23 @@ func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) stri
 	return b.String()
 }
 
+// WorkOutcomeFormatReceiptsForOwnerStep -- Reconcile one consumed formatting attempt, never authorize another inference. Two rows expose ambiguity instead of silently selecting a later answer.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workOutcomeFormatReceiptsForOwnerStep"] in generated_concepts.go).
+type WorkOutcomeFormatReceiptsForOwnerStepArgs struct {
+}
+
+// WorkOutcomeFormatReceiptsForOwnerStep calls the engine query workOutcomeFormatReceiptsForOwnerStep.
+func (qc *QueryClient) WorkOutcomeFormatReceiptsForOwnerStep(ctx context.Context, args WorkOutcomeFormatReceiptsForOwnerStepArgs) (*Result, error) {
+	call := WorkOutcomeFormatReceiptsForOwnerStepBuild(args)
+	return qc.executeNamed(ctx, "workOutcomeFormatReceiptsForOwnerStep", call)
+}
+
+func WorkOutcomeFormatReceiptsForOwnerStepBuild(args WorkOutcomeFormatReceiptsForOwnerStepArgs) string {
+	_ = args
+	return "query workOutcomeFormatReceiptsForOwnerStep()"
+}
+
 // WorkProgressCreditsForOwnerRun -- Bounded candidate lookup against durable consumed-evidence identities.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressCreditsForOwnerRun"] in generated_concepts.go).

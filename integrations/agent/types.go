@@ -116,6 +116,7 @@ type WorkRuntime interface {
 	ReadLegacyWorkOutcome(context.Context) (*memql.WorkDelegatedOutcome, error)
 	WorkDelegatedOutcomeSource(context.Context, string, []common.ChatMessage) ([]common.ChatMessage, error)
 	FormatWorkOutcome(context.Context, memql.WorkDelegatedOutcome, json.RawMessage) (string, error)
+	ReadCompletedWorkOutcomeFormat(context.Context, memql.WorkDelegatedOutcome) (string, error)
 	ReadWorkReplanSources(context.Context) (string, error)
 	ReadWorkGuidance(context.Context) ([]memql.WorkGuidance, error)
 	AcknowledgeWorkGuidance(context.Context, []string) error

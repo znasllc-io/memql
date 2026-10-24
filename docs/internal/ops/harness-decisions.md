@@ -35,6 +35,27 @@ Source reads and stage writes fail closed. Another replica retains the consumed
 attempt, and newer/different source context or guidance cannot be overwritten
 with the saved draft. An uncertain inference attempt stops rather than granting
 a fresh attempt. Successful conversion survives a later evidence-review failure.
+The normalized conversion is also saved before rechecking guidance. If direction
+changes while the step runs, Retry can review those retained bytes against the
+new instructions without another conversion or operational turn. For the older
+write gap, the native reader admits exactly one successful `workOutcomeFormat`
+journal receipt after the same-generation consumed-attempt record, for the exact
+owner/run/step and retained input. The owner-scoped query is capped at two rows:
+zero or multiple matches, changed input/generation, cancellation, corrupt state,
+or an unsuccessful receipt leaves recovery stopped. It reads no App prompt or
+transcript and creates no new inference allowance. Fresh completion review is
+still mandatory; retained output is not proof that new instructions are fulfilled.
+This legacy journal adoption is limited to the step's first execution because
+older model receipts do not name a rerun generation. Later versions must already
+have their conversion in the durable stage; a timestamp alone cannot identify
+a late response from a previous execution.
+`TestFormatRecoveryGuidanceRaceRetainsConversionWithoutReplay` covers the race,
+`TestFormatRecoveryConsumedAttemptReadsCompletedReceiptWithoutNewInference`
+covers the old gap, and `TestCompletedFormatReceiptRecoversOnlyOneOwnedAttemptOnPeer`
+checks the actual owner-scoped journal and refusal cases on another engine.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` changes recorded guidance during
+conversion in both provider lanes and verifies peer recovery through the real
+adapter with one production call and one conversion.
 The exact pre-upgrade native `invalid delegated work outcome` failure can be
 upgraded from the latest owned operational App's native handover and public
 receipts. Its owner/run/goal/step/rerun/override and ended-success interval must

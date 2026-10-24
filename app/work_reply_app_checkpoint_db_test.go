@@ -32,6 +32,7 @@ type replyAppCheckpointFixture struct {
 	invalid        bool
 	unfinished     bool
 	engine         *memql.MemQLEngine
+	onFormat       func()
 }
 
 func (*replyAppCheckpointFixture) Doors(context.Context, string) ([]memql.AppDoor, error) {
@@ -52,6 +53,10 @@ func (f *replyAppCheckpointFixture) Call(_ context.Context, req memql.AppCallReq
 			return memql.AppCallResult{}, fmt.Errorf("format helper lost the explicit model or effort: %s/%s", req.Model, req.Effort)
 		}
 		f.formats++
+		if f.onFormat != nil {
+			f.onFormat()
+			f.onFormat = nil
+		}
 		return memql.AppCallResult{Content: `{"status":"complete","response":"Hello from the saved App","question":null}`}, nil
 	}
 	return memql.AppCallResult{}, fmt.Errorf("greeting must use the session door")
@@ -133,10 +138,11 @@ automation replyAppCheckpointFixture { reason := builtin checkSavedReport() }`, 
 		repliers = append(repliers, replier)
 	}
 	for _, background := range []bool{false, true} {
-		for _, scenario := range []struct{ invalid, unfinished bool }{{}, {invalid: true}, {invalid: true, unfinished: true}} {
+		for _, scenario := range []struct{ invalid, unfinished, guidance bool }{{}, {invalid: true}, {invalid: true, unfinished: true}, {invalid: true, guidance: true}} {
 			invalid := scenario.invalid
-			t.Run(fmt.Sprintf("background=%v/invalid=%v/unfinished=%v", background, invalid, scenario.unfinished), func(t *testing.T) {
+			t.Run(fmt.Sprintf("background=%v/invalid=%v/unfinished=%v/guidance=%v", background, invalid, scenario.unfinished, scenario.guidance), func(t *testing.T) {
 				fixture.invalid, fixture.unfinished = invalid, scenario.unfinished
+				fixture.onFormat = nil
 				key := id.NewShortId()
 				owner, goalID, runID := key+"owner", key+"goal", key+"run"
 				person := auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
@@ -146,6 +152,13 @@ automation replyAppCheckpointFixture { reason := builtin checkSavedReport() }`, 
 				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Say hello", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 10, "wallClockMs": 600000}})
 				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": auto.Name, "templateFingerprint": auto.DefinitionFingerprint(id.New()), "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 				write("createWorkStep", map[string]any{"stepId": runID + "-reason", "runId": runID, "key": "reason", "seq": 0, "stepType": "builtin", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				if scenario.guidance {
+					fixture.onFormat = func() {
+						approval := id.NewShortId()
+						write("createWorkApproval", map[string]any{"approvalId": approval, "runId": runID, "stepKey": "reason", "kind": "scopeElevation", "subject": map[string]any{}, "artifactHash": "fixture", "question": "Inspect the inputs?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+						write("decideWorkApproval", map[string]any{"approvalId": approval, "decision": "answered", "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"feedback": "Leave the greeting for review."}})
+					}
+				}
 				ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: "reason", Mode: common.RunModeLive, Override: &common.StepOverride{Model: "app:codex:gpt-6-astra", Effort: "xhigh"}})
 				msg := &memqlv1.AgentGenerateTurnMsg{RequestId: key, AgentId: "fixture", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "fixture", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "hello"}}}
 				if background {
@@ -154,9 +167,11 @@ automation replyAppCheckpointFixture { reason := builtin checkSavedReport() }`, 
 				before := fixture.calls
 				formatsBefore := fixture.formats
 				var reportingError error
-				for _, replier := range repliers {
+				for replica, replier := range repliers {
 					result, err := replier.Handle(ctx, msg, knowledgeTurnSink{})
-					if scenario.unfinished {
+					if scenario.guidance && replica == 0 {
+						require.ErrorContains(t, err, "outcome recovery execution or guidance changed")
+					} else if scenario.unfinished {
 						require.ErrorContains(t, err, "work_outcome_format_unverified")
 						require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired)
 						reportingError = err

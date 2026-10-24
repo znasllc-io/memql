@@ -121,9 +121,9 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 			if pending.OutcomeFormat != nil && !pending.OutcomeFormat.Question {
 				// A format failure never grants production, even after fresh
 				// guidance. It retains its exact source and durable attempt bound.
-				if checkpoint.Saved != checkpoint.Binding {
-					return nil, fmt.Errorf("outcome recovery guidance changed; saved production retained")
-				}
+				// The reader already fenced the execution generation. New owner
+				// guidance may review a retained conversion, never replay production
+				// or reset its consumed attempt. Final review uses current direction.
 				if recoveryDigest(previousState) != recoveryDigest(latestState) {
 					return nil, fmt.Errorf("outcome recovery progress state changed; newer checkpoint retained")
 				}

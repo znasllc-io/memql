@@ -14,6 +14,7 @@ type outcomeRecoveryRuntime interface {
 	ReadLegacyWorkOutcome(context.Context) (*memql.WorkDelegatedOutcome, error)
 	WorkDelegatedOutcomeSource(context.Context, string, []common.ChatMessage) ([]common.ChatMessage, error)
 	FormatWorkOutcome(context.Context, memql.WorkDelegatedOutcome, json.RawMessage) (string, error)
+	ReadCompletedWorkOutcomeFormat(context.Context, memql.WorkDelegatedOutcome) (string, error)
 }
 type pendingOutcomeFormat struct {
 	Input        memql.WorkDelegatedOutcome `json:"input"`
@@ -21,6 +22,7 @@ type pendingOutcomeFormat struct {
 	Done         bool                       `json:"done"`
 	Question     bool                       `json:"question,omitempty"`
 	NeedsSources bool                       `json:"needsSources,omitempty"`
+	Formatted    string                     `json:"formatted,omitempty"`
 }
 
 func (r *Replier) saveOutcomeDraft(ctx context.Context, store workReplyReviewStore, binding memql.WorkReplyReviewBinding, input memql.WorkDelegatedOutcome, collect bool) (*pendingWorkReply, error) {
@@ -51,14 +53,11 @@ func (r *Replier) repairOutcomeDraft(ctx context.Context, store workReplyReviewS
 	if f == nil || f.Done {
 		return nil
 	}
-	if f.Attempts != 0 {
-		return fmt.Errorf("work_outcome_format_exhausted; saved result retained, production cannot be replayed")
-	}
 	runtime, ok := r.engine.(outcomeRecoveryRuntime)
 	if !ok {
 		return fmt.Errorf("%w: outcome recovery runtime unavailable", memql.ErrWorkCheckpointRequired)
 	}
-	if f.NeedsSources {
+	if f.NeedsSources && f.Attempts == 0 {
 		sources, err := runtime.WorkDelegatedOutcomeSource(ctx, f.Input.SessionID, f.Input.Messages)
 		if err != nil {
 			return err
@@ -72,26 +71,48 @@ func (r *Replier) repairOutcomeDraft(ctx context.Context, store workReplyReviewS
 			return err
 		}
 	}
-	choice, err := workflowhost.Run(ctx, "agentWorkOutcomeRecovery", map[string]any{"attempts": f.Attempts}, workflowhost.Options{})
-	if err != nil {
-		return err
+	raw := f.Formatted
+	var err error
+	if raw == "" && f.Attempts != 0 {
+		// A consumed attempt can only read its one completed native receipt.
+		// Missing/ambiguous records retain the stop; no new inference is allowed.
+		raw, err = runtime.ReadCompletedWorkOutcomeFormat(ctx, f.Input)
+		if err != nil {
+			return fmt.Errorf("work_outcome_format_exhausted; saved result retained, production cannot be replayed: %w", err)
+		}
 	}
-	if allow, ok := choice.(bool); !ok || !allow {
-		return fmt.Errorf("outcome format recovery disabled; completed production retained")
-	}
-	// Persist the attempt BEFORE inference. A crash or another replica cannot
-	// reset the bound. Failures retain the stage; no operational retry follows.
-	f.Attempts = 1
-	if err := savePendingWorkReply(ctx, store, binding, pending); err != nil {
-		return err
-	}
-	raw, err := runtime.FormatWorkOutcome(ctx, f.Input, json.RawMessage(outcomeFormatSchema))
-	if err != nil {
-		return fmt.Errorf("outcome format recovery: %w", err)
+	if raw == "" {
+		choice, err := workflowhost.Run(ctx, "agentWorkOutcomeRecovery", map[string]any{"attempts": f.Attempts}, workflowhost.Options{})
+		if err != nil {
+			return err
+		}
+		if allow, ok := choice.(bool); !ok || !allow {
+			return fmt.Errorf("outcome format recovery disabled; completed production retained")
+		}
+		// Persist the attempt BEFORE inference. A crash or another replica cannot
+		// reset the bound. Failures retain the stage; no operational retry follows.
+		f.Attempts = 1
+		if err := savePendingWorkReply(ctx, store, binding, pending); err != nil {
+			return err
+		}
+		raw, err = runtime.FormatWorkOutcome(ctx, f.Input, json.RawMessage(outcomeFormatSchema))
+		if err != nil {
+			return fmt.Errorf("outcome format recovery: %w", err)
+		}
 	}
 	calls, err := normalizeWorkOutcome([]common.ToolCall{{ID: "recovered-app-response", Name: RespondToUserToolName, Arguments: raw}}, "")
 	if err != nil || len(calls) != 1 {
 		return fmt.Errorf("invalid format-only outcome: %v", err)
+	}
+	// Retain the completed conversion before checking current direction. The
+	// store fences generation/cancellation while allowing its original guidance
+	// binding. A later Retry reviews these bytes under fresh instructions; it
+	// cannot spend another conversion or rerun the completed operation.
+	if f.Formatted == "" {
+		f.Formatted = raw
+		if err := savePendingWorkReply(ctx, store, binding, pending); err != nil {
+			return err
+		}
 	}
 	current, err := store.ReadWorkReplyReview(ctx)
 	if err != nil || current.Binding != binding {
