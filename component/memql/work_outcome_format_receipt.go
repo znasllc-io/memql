@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/common"
@@ -40,13 +41,15 @@ func (e *MemQLEngine) ReadCompletedWorkOutcomeFormat(ctx context.Context, input 
 	}
 	run, _ := common.RunFromContext(ctx)
 	// Old model receipts do not record the execution generation. Only the
-	// step's first execution can use this migration: a later version could
+	// step's first execution can originate this migration: a later version could
 	// otherwise mistake a late earlier-generation response for this attempt.
+	// Reporting-only Retry increments the current step version, so read the
+	// version at the consumed-attempt barrier, not the version handling Retry.
 	stepCall, err := parser.RenderCall("workStepForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": run.StepKey})
 	if err != nil {
 		return "", err
 	}
-	stepResult, err := e.Execute(ContextWithFreshRead(ctx), "query "+stepCall)
+	stepResult, err := e.Execute(ContextWithFreshRead(ctx), fmt.Sprintf("asOf(%s, %q)", stepCall, state.RecordedAt.UTC().Format(time.RFC3339Nano)))
 	if err != nil {
 		return "", err
 	}
