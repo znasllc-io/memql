@@ -40,6 +40,12 @@ func TestCompletedFormatReceiptRecoversOnlyOneOwnedAttemptOnPeer(t *testing.T) {
 	got, err := b.ReadCompletedWorkOutcomeFormat(runtime, input)
 	require.NoError(t, err)
 	require.Equal(t, answer, got)
+	// Reporting-only Retry advances the step receipt version but preserves the
+	// original consumed stage. The origin remains version 1 on the peer.
+	write("updateWorkStep", map[string]any{"stepId": runID + "-" + run.StepKey, "version": 2})
+	got, err = b.ReadCompletedWorkOutcomeFormat(runtime, input)
+	require.NoError(t, err)
+	require.Equal(t, answer, got)
 	changed := input
 	changed.SessionID = "other-production"
 	_, err = b.ReadCompletedWorkOutcomeFormat(runtime, changed)
@@ -50,7 +56,8 @@ func TestCompletedFormatReceiptRecoversOnlyOneOwnedAttemptOnPeer(t *testing.T) {
 	receipt(run.StepKey, "workOutcomeFormat", answer)
 	_, err = b.ReadCompletedWorkOutcomeFormat(runtime, input)
 	require.ErrorContains(t, err, "missing or ambiguous")
-	write("updateWorkStep", map[string]any{"stepId": runID + "-" + run.StepKey, "version": 2})
+	// A newly consumed stage originating in version 2 has no legacy migration.
+	require.NoError(t, a.SaveWorkReplyReview(runtime, state.Binding, pending))
 	_, err = b.ReadCompletedWorkOutcomeFormat(runtime, input)
 	require.ErrorContains(t, err, "initial step execution")
 	write("updateWorkRun", map[string]any{"runId": runID, "templateFingerprint": "different-generation"})

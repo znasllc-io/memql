@@ -45,10 +45,12 @@ zero or multiple matches, changed input/generation, cancellation, corrupt state,
 or an unsuccessful receipt leaves recovery stopped. It reads no App prompt or
 transcript and creates no new inference allowance. Fresh completion review is
 still mandatory; retained output is not proof that new instructions are fulfilled.
-This legacy journal adoption is limited to the step's first execution because
+This legacy journal adoption must originate in the step's first execution because
 older model receipts do not name a rerun generation. Later versions must already
 have their conversion in the durable stage; a timestamp alone cannot identify
 a late response from a previous execution.
+The version is read as of the consumed-attempt barrier: a reporting-only Retry
+increments the current step receipt while keeping that original attempt valid.
 `TestFormatRecoveryGuidanceRaceRetainsConversionWithoutReplay` covers the race,
 `TestFormatRecoveryConsumedAttemptReadsCompletedReceiptWithoutNewInference`
 covers the old gap, and `TestCompletedFormatReceiptRecoversOnlyOneOwnedAttemptOnPeer`
