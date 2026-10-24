@@ -79,6 +79,13 @@ App returns through the real adapter and durable store on two engine instances,
 including the explicit model and effort at the formatting call. An inconclusive
 review regression proves that no operational replan or terminal reply escapes.
 These checks do not establish arbitrary model compliance or exactly-once delivery.
+An exhausted conversion, malformed format or inconclusive completion review is
+a reporting failure, not a failed mandatory journal write. Its marker prevents
+operational replanning while the executor records the failed step and stopped
+run. `ErrWorkCheckpointRequired` remains reserved for an unconfirmed journal or
+checkpoint boundary; using it for review uncertainty leaves a misleading live
+intent that the watchdog later abandons. Transport errors preserve their actual
+underlying cause, including a genuine mandatory-checkpoint failure.
 
 A completed operational turn now saves a private reply-review stage before its
 separate evidence-review call. A transient review failure previously restarted

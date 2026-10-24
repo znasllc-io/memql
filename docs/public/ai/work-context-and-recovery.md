@@ -650,6 +650,8 @@ format, MemQL can make one separate conversion from the saved result and public
 receipts. That conversion has no operational tools and does not repeat the work.
 Its attempt is saved before inference, so a restart cannot reset the allowance.
 The converted answer still needs the normal evidence and completion review.
+If that review cannot verify completion, the run records a stopped step and
+waits explicitly with the saved report; it must not remain shown as running.
 Missing or changed recovery context stops delivery; it does not permit another
 operational run. A reporting-format defect does not ask you to teach the app an
 answer format, and recovery never accepts the goal on your behalf.

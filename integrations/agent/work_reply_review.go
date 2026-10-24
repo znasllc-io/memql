@@ -245,7 +245,11 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		gap := review.MissingEvidence
 		if review.Completion != nil && review.Completion.Disposition == "unfinished" {
 			if formatPending != nil {
-				return nil, work.OutcomeRecoveryError(fmt.Errorf("%w: work_outcome_format_unverified; retained result requires review, production cannot be replayed", memql.ErrWorkCheckpointRequired))
+				// This is a verified journal carrying an unverified result. A
+				// mandatory-journal error would skip the failed-step receipt and
+				// strand the run as running until its watchdog abandons it.
+				// Keep the reporting marker, which blocks operational replanning.
+				return nil, work.OutcomeRecoveryError(fmt.Errorf("work_outcome_format_unverified; retained result requires review, production cannot be replayed"))
 			}
 			gap = review.Completion.Gap
 		}

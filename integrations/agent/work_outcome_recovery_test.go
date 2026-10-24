@@ -105,6 +105,7 @@ func TestFormatRecoveryUnverifiedResultCannotReplanOrRepeatProduction(t *testing
 			return nil, nil
 		})
 		require.ErrorContains(t, err, "work_outcome_format_unverified")
+		require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired, "review uncertainty must still record a failed-step receipt")
 		require.True(t, work.IsOutcomeRecoveryFailure(err.Error()))
 		_, replan := work.UnfinishedStepGap(err.Error())
 		require.False(t, replan, "review uncertainty must not request operational replanning")
@@ -133,15 +134,30 @@ func TestFormatRecoveryFailureCannotResetAttemptOrReplayProduction(t *testing.T)
 			}
 			_, err := newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
 			require.Error(t, err)
+			require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired)
 			e.formatErr = nil
 			e.answer = `{"status":"complete","response":"Saved","question":null}`
 			_, err = newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
 			require.ErrorContains(t, err, "work_outcome_format_exhausted")
+			require.NotErrorIs(t, err, memql.ErrWorkCheckpointRequired)
 			require.Equal(t, 1, productions)
 			require.Equal(t, 1, e.formats)
 			require.Zero(t, e.calls)
 		})
 	}
+}
+
+func TestFormatRecoveryPreservesActualMandatoryCheckpointFailure(t *testing.T) {
+	e, ctx, messages := formatFixture(t)
+	e.legacy = &memql.WorkDelegatedOutcome{SessionID: "old-session", Draft: `{}`, Messages: messages, AgentID: "assistant", AgentRole: "assistant"}
+	e.formatErr = fmt.Errorf("fixture admission receipt: %w", memql.ErrWorkCheckpointRequired)
+	_, err := newTestReplier(e).runReviewedWork(ctx, &captureSink{}, func(context.Context, *replyReviewSink) (*TurnResult, error) {
+		t.Fatal("mandatory checkpoint failure repeated production")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+	require.True(t, work.IsOutcomeRecoveryFailure(err.Error()))
+	require.Equal(t, 1, e.formats)
 }
 
 func TestLegacyFormatRecoveryAndQuestionNeverRunProduction(t *testing.T) {
