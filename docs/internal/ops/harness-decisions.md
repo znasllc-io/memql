@@ -855,3 +855,35 @@ disposable test database; a skipped test is not validation. Report the exact
 commit and test result separately from live workflow evidence. These tests do
 not establish complete UI delivery, arbitrary cross-goal freshness, all worker
 artifact formats, or a completed login handoff.
+
+## Fleet workspace continuation
+
+The Fleet binding's original one-hour expiry accidentally ended productive
+work even while the owner-authorized goal remained active. The binding now keeps
+its owner, run and machine placement fixed while a native lifecycle renews the
+bounded lease when fewer than thirty minutes remain. Each renewal rechecks the
+active run, destination, enrollment and sharing. The receiver still enforces
+its five-minute idle limit, per-operation cancellation, machine capacity and
+pipeline exclusion. A longer-lived goal does not grant longer computer access.
+
+An expired binding or typed receiver state-loss receipt requires an explicit
+`workspace_recover` call naming the current generation. A row-version fence
+allows only one replica to advance that generation. Recovery repeats the fresh
+authority checks and prepares an empty generation on the same machine; it does
+not promise restored files or run a command. Retained Library evidence is the
+source for reconstruction. Completed effects and uncertain operations are never
+replayed automatically. A changed machine, inactive run, withdrawn sharing or
+stale generation refuses. Receiver tombstones remain; a new generation uses a
+different identity rather than deleting an old tombstone.
+
+The generation travels through both mesh forwarding and the machine constraint,
+so an old capacity-queued call cannot execute inside a replacement filesystem.
+`workerWorkbench` contract 2 requires generation-aware receivers. The database
+regression `TestWorkbenchBindingDBChoosesOneMachineAcrossReplicas` verifies
+native binding persistence, owner isolation and competing recovery. The tests
+in `workbench_continuation_test.go` cover loss, no replay, stale queued calls,
+sharing and cancellation. Cockpit's `TestActiveWorkbenchRenewsLeaseWithoutLosingFiles`
+uses a controlled clock beyond two hours, and
+`TestExplicitRecoveryUsesNewGenerationWithoutReplayingLostOperation` preserves
+tombstones and distinguishes the replacement container. These tests do not
+establish a two-hour live production run or restore ephemeral files.

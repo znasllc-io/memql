@@ -71,9 +71,21 @@ to the workspace budget. Pipeline builds hold an exclusive reservation against
 these workspaces. Interrupted reservations block reuse until the recorded
 container on the same Docker daemon is cleaned up.
 
-A Fleet workspace ends after five idle minutes or one hour from the goal's
-assignment. A lost, expired or cancelled workspace is not recreated for that
-goal. Save deliverables in the Library and start a new goal when needed.
+A Fleet workspace has a one-hour lease, renewed by authorized operations while
+it remains live. The lease is separate from the goal: measured progress can
+continue beyond the original hour. Five idle minutes, cancellation, a worker
+restart or an uncertain execution can still destroy its ephemeral files.
+
+A state-loss response names the lost workspace generation. To continue the same
+active goal, call `workbenchHost` with action `workspace_recover` and
+`args: {generation: N}`, using that exact generation. Recovery requires fresh
+owner, destination, enrollment and sharing checks and preserves the assigned
+machine. It prepares a new generation; the next operation creates an empty
+workspace. It does not restore files or replay the failed operation. Restore
+useful inputs from retained Library evidence, reconcile any uncertain effects,
+and choose the next operation explicitly. Recovery refuses a still-live
+workspace or a stale generation. A cancelled run cannot recover. Save important
+files to the Library before the ephemeral workspace is released.
 Capacity waits are bounded to ten minutes and 32 calls per registration on each
 originating replica. Consent and the goal's destination are checked again before
 execution; only an explicit refusal before execution can be retried.

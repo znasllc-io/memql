@@ -8900,12 +8900,14 @@
       "file": "workbench/concepts.memql",
       "fields": [
         "expiresAt",
+        "generation",
         "machineId",
         "machineOwnerUserId",
         "ownerUserId",
         "registrationId",
         "resource",
-        "runId"
+        "runId",
+        "stateLost"
       ],
       "required": [
         "expiresAt",
