@@ -10,7 +10,8 @@ import time
 
 
 ATTEMPTS = 3
-ATTEMPT_TIMEOUT_SECONDS = 120
+PREPARATION_TIMEOUT_SECONDS = 600
+CLEANUP_TIMEOUT_SECONDS = 5
 RETRY_DELAY_SECONDS = 2
 
 
@@ -18,13 +19,17 @@ class PreparationTimeout(Exception):
     pass
 
 
-def read_platform():
+def read_platform(deadline):
+    if deadline - time.monotonic() <= CLEANUP_TIMEOUT_SECONDS:
+        raise PreparationTimeout
     # Keep every child in the native worker's process group. Its teardown must
     # still reach them if cancellation kills this helper before its handler runs.
     process = subprocess.Popen(["go", "env", "GOOS", "GOARCH"], stdout=subprocess.PIPE)
     completed = False
     try:
-        output, _ = process.communicate(timeout=ATTEMPT_TIMEOUT_SECONDS)
+        # Reserve launcher cleanup inside the shared preparation deadline.
+        timeout = max(0, deadline - time.monotonic() - CLEANUP_TIMEOUT_SECONDS)
+        output, _ = process.communicate(timeout=timeout)
         completed = True
     except subprocess.TimeoutExpired:
         # No retry: a descendant may still hold a pipe. Return to the
@@ -38,7 +43,7 @@ def read_platform():
             # could wait indefinitely on an inherited pipe or the launcher.
             process.stdout.close()
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=max(0, min(CLEANUP_TIMEOUT_SECONDS, deadline - time.monotonic())))
             except subprocess.TimeoutExpired:
                 raise PreparationTimeout from None
         else:
@@ -48,8 +53,12 @@ def read_platform():
 
 def prepare_platform(goos, goarch):
     expected = f"{goos}\n{goarch}\n".encode()
+    # Retries and backoff consume one budget, leaving the lane time for tests.
+    deadline = time.monotonic() + PREPARATION_TIMEOUT_SECONDS
     for attempt in range(1, ATTEMPTS + 1):
-        output = read_platform()
+        output = read_platform(deadline)
+        if time.monotonic() >= deadline:
+            raise PreparationTimeout
         if output is not None:
             # A successful command must match exactly; wrong/partial platforms
             # are configuration errors, not another reason to download again.
@@ -60,6 +69,8 @@ def prepare_platform(goos, goarch):
                 print(f"Go toolchain preparation succeeded on attempt {attempt} of {ATTEMPTS}.", file=sys.stderr)
             return True
         if attempt < ATTEMPTS:
+            if deadline - time.monotonic() <= RETRY_DELAY_SECONDS + CLEANUP_TIMEOUT_SECONDS:
+                raise PreparationTimeout
             print(f"Go toolchain preparation failed on attempt {attempt} of {ATTEMPTS}; retrying.", file=sys.stderr)
             time.sleep(RETRY_DELAY_SECONDS)
     print(f"Go toolchain preparation failed after {ATTEMPTS} attempts.", file=sys.stderr)

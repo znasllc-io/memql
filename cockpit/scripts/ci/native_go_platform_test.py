@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
 
 
 SPEC = importlib.util.spec_from_file_location("native_go_platform", Path(__file__).with_name("native_go_platform.py"))
@@ -69,7 +70,46 @@ class NativeGoPlatformTest(unittest.TestCase):
             go.write_text('#!/bin/sh\nprintf "darwin\\narm64\\n"\nexit 1\n')
             go.chmod(0o700)
             with patch.dict(os.environ, {"PATH": directory}):
-                self.assertIsNone(PLATFORM.read_platform())
+                self.assertIsNone(PLATFORM.read_platform(time.monotonic() + 30))
+
+    def test_attempts_share_one_preparation_budget(self):
+        clock = [10.0]
+        processes = []
+        for duration, output, status in [(8, b"", 1), (8, b"", 1), (3, b"darwin\narm64\n", 0)]:
+            process = Mock(returncode=status)
+            def complete(timeout, duration=duration, output=output):
+                self.assertLess(duration, timeout)
+                clock[0] += duration
+                return output, None
+            process.communicate.side_effect = complete
+            processes.append(process)
+        def wait(seconds):
+            clock[0] += seconds
+        with patch.object(PLATFORM, "PREPARATION_TIMEOUT_SECONDS", 30), \
+                patch.object(PLATFORM.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(PLATFORM.time, "sleep", side_effect=wait), \
+                patch.object(PLATFORM.subprocess, "Popen", side_effect=processes), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(PLATFORM.prepare_platform("darwin", "arm64"))
+        self.assertEqual([p.communicate.call_args.kwargs["timeout"] for p in processes], [25, 15, 5])
+        self.assertEqual(clock[0], 33)
+
+    def test_backoff_and_cleanup_cannot_extend_the_preparation_budget(self):
+        clock = [0.0]
+        process = Mock(returncode=1)
+        def fail(timeout):
+            self.assertEqual(timeout, 5)
+            clock[0] += 4
+            return b"", None
+        process.communicate.side_effect = fail
+        with patch.object(PLATFORM, "PREPARATION_TIMEOUT_SECONDS", 10), \
+                patch.object(PLATFORM.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(PLATFORM.time, "sleep") as sleep, \
+                patch.object(PLATFORM.subprocess, "Popen", return_value=process) as launch:
+            with self.assertRaises(PLATFORM.PreparationTimeout):
+                PLATFORM.prepare_platform("darwin", "arm64")
+        self.assertEqual(launch.call_count, 1)
+        sleep.assert_not_called()
 
     def run_worker_shutdown(self, final_command, cancel=False):
         with tempfile.TemporaryDirectory() as directory:
@@ -81,7 +121,7 @@ class NativeGoPlatformTest(unittest.TestCase):
             environment = dict(os.environ, PATH=directory, PID_FILE=str(pid_file))
             # Use the same group ownership as the native worker. Only the test
             # deadline is shortened; the actual helper and subprocess path run.
-            invoke = "import importlib.util,sys; s=importlib.util.spec_from_file_location('platform',sys.argv.pop(1)); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.ATTEMPT_TIMEOUT_SECONDS=1; sys.exit(m.main())"
+            invoke = "import importlib.util,sys; s=importlib.util.spec_from_file_location('platform',sys.argv.pop(1)); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.PREPARATION_TIMEOUT_SECONDS=1; m.CLEANUP_TIMEOUT_SECONDS=0.1; sys.exit(m.main())"
             shell = '"$@"\nstatus=$?\nif test "$status" = 0; then printf "TEST_RAN\\n"; fi\nexit "$status"\n'
             with subprocess.Popen(["/bin/sh", "-c", shell, "fixture-worker", sys.executable,
                                    "-c", invoke, str(Path(__file__).with_name("native_go_platform.py")),
