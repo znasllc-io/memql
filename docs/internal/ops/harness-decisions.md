@@ -65,6 +65,10 @@ head and spend. Newer execution, cancellation, changed decisions or accepted
 results refuse recovery. Reading the control never resumes work automatically.
 The database test covers a lost dispatch; the UI recovery tests cover reload and
 stale/cancelled controls.
+Both compact run queries include `humanResumeId`, so a fresh Nexus list can
+discover that saved answer without fetching execution inputs or private reply
+state. `TestRunSummaryDBExcludesExecutionPayloads` verifies the real projections
+and their owner gates as well as the compact response bound.
 
 `work_outcome_recovery_test.go` covers both lanes, failed conversion, failed
 review, restored attempt bounds, newer sources and substantive questions.

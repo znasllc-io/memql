@@ -122,6 +122,9 @@ shape run workRunSummary {
   forkAtStepKey
   status
   waitingOn
+  // Nexus needs the saved answer identity to offer explicit recovery after
+  // a missed dispatch; the native decision gate still authorizes the resume.
+  humanResumeId
   spent
   nodeId
   heartbeatAt
