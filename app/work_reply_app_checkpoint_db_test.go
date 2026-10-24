@@ -21,6 +21,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/router"
+	workmodel "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/agent"
@@ -163,6 +164,9 @@ automation replyAppCheckpointFixture { reason := builtin checkSavedReport() }`, 
 				msg := &memqlv1.AgentGenerateTurnMsg{RequestId: key, AgentId: "fixture", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "fixture", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "hello"}}}
 				if background {
 					msg.Hints = map[string]string{agent.ExecutionLaneHintKey: agent.ExecutionLaneBackground}
+					// The native executor marks its whole request, including review
+					// helpers, as background; the synthetic entry must do the same.
+					ctx = memql.ContextWithBackgroundLane(ctx)
 				}
 				before := fixture.calls
 				formatsBefore := fixture.formats
@@ -212,6 +216,21 @@ automation replyAppCheckpointFixture { reason := builtin checkSavedReport() }`, 
 					}
 				}
 				require.Equal(t, 1, completed, "durable source must include the completed response once")
+				if scenario.guidance {
+					// The executor retains the run-level error while moving to the
+					// next step. With no App for that step, it is new production.
+					write("updateWorkRun", map[string]any{"runId": runID, "errorMessage": workmodel.OutcomeRecoveryError(fmt.Errorf("previous reporting failure")).Error()})
+					write("createWorkStep", map[string]any{"stepId": runID + "-next", "runId": runID, "key": "next", "seq": 1, "stepType": "builtin", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+					next, _ := common.RunFromContext(ctx)
+					next.StepKey = "next"
+					fixture.invalid = false
+					msg.RequestId = key + "next"
+					result, err := repliers[1].Handle(common.ContextWithRun(ctx, next), msg, knowledgeTurnSink{})
+					require.NoError(t, err)
+					require.Equal(t, "Hello from the saved App", result.FinalText)
+					require.Equal(t, before+2, fixture.calls, "the next step starts exactly one new operational turn")
+					require.Equal(t, formatsBefore+1, fixture.formats, "the old step's formatter remains consumed")
+				}
 				if reportingError != nil {
 					// Carry the actual Replier error through the outer executor and
 					// required database journal. A semantic stop must not leave the

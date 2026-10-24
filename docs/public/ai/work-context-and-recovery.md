@@ -661,6 +661,8 @@ missing or ambiguous receipts do not authorize another attempt.
 For old checkpoints without a saved conversion, this receipt recovery requires
 an attempt originating in the step's first execution. Reporting retries retain
 that origin; a new later-version attempt remains stopped without exact proof.
+A recovered step's reporting error does not block a later step that has no
+operational App receipt. MemQL must finish that receipt check before starting it.
 The converted answer still needs the normal evidence and completion review.
 If that review cannot verify completion, the run records a stopped step and
 waits explicitly with the saved report; it must not remain shown as running.
