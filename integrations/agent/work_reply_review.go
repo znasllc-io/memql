@@ -10,6 +10,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -30,9 +31,28 @@ func (s *replyReviewSink) ToolCall(id, name, arguments string) {
 }
 
 func (r *Replier) handleReviewedWork(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, sink DeltaSink) (*TurnResult, error) {
+	ctx, err := r.prepareReviewedWorkContext(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
 	return r.runReviewedWork(ctx, sink, func(callCtx context.Context, held *replyReviewSink) (*TurnResult, error) {
 		return r.handleTurn(callCtx, msg, held)
 	})
+}
+
+func (r *Replier) prepareReviewedWorkContext(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (context.Context, error) {
+	task := msg.Hints["work_section_prompt"]
+	ctx = memql.ContextWithWorkReplyTask(ctx, task)
+	if reader, ok := r.engine.(interface {
+		ReadWorkReplanSources(context.Context) (string, error)
+	}); ok {
+		sources, err := reader.ReadWorkReplanSources(ctx)
+		if err != nil {
+			return ctx, err
+		}
+		ctx = memql.ContextWithWorkReplanSources(ctx, sources)
+	}
+	return ctx, nil
 }
 
 func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce func(context.Context, *replyReviewSink) (*TurnResult, error)) (*TurnResult, error) {
@@ -102,7 +122,13 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 			if err != nil {
 				return nil, err
 			}
-			if result == nil || result.Paused || strings.TrimSpace(result.FinalText) == "" {
+			if result != nil && result.Paused {
+				return result, nil
+			}
+			if result == nil || strings.TrimSpace(result.FinalText) == "" {
+				if memql.HasWorkReplyTask(ctx) {
+					return nil, work.UnfinishedStepError("The current step returned no completed result. Reconcile its retained tool receipts, then finish or verify the required output.")
+				}
 				return result, nil
 			}
 			ctx = clearConsumedWorkContinuation(ctx)
@@ -132,7 +158,11 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 			failure, _ := r.workRecoveryReadFailure(ctx, err, messages)
 			return nil, failure
 		}
-		continued, err := r.continueWorkEvidence(ctx, messages, review.MissingEvidence, canContinue)
+		gap := review.MissingEvidence
+		if review.Completion != nil && review.Completion.Disposition == "unfinished" {
+			gap = review.Completion.Gap
+		}
+		continued, err := r.continueWorkEvidence(ctx, messages, gap, canContinue)
 		if err != nil {
 			return nil, err
 		}
@@ -148,12 +178,21 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		if err != nil || current.Binding != checkpoint.Binding {
 			return nil, fmt.Errorf("reply review execution or guidance changed before delivery: %v", err)
 		}
+		if review.Completion != nil && review.Completion.Disposition == "unfinished" {
+			// Preserve the pending result and exact operational source. A native plan
+			// continuation handles the remainder; never turn unfinished work into a
+			// successful terminal reply or manufacture a question for the owner.
+			return nil, work.UnfinishedStepError(review.Completion.Gap)
+		}
 		return deliverReviewedWorkResult(result, held, review.Reply)
 	}
 	return nil, fmt.Errorf("reply evidence continuation exceeded its bound")
 }
 
-type workReplyDecision struct{ Reply, MissingEvidence string }
+type workReplyDecision struct {
+	Reply, MissingEvidence string
+	Completion             *memql.WorkReplyCompletion
+}
 
 func (r *Replier) continueWorkEvidence(ctx context.Context, messages []common.ChatMessage, gap string, available bool) (bool, error) {
 	state, marker, err := recoveryState(messages)
@@ -205,7 +244,8 @@ func (r *Replier) continueWorkEvidence(ctx context.Context, messages []common.Ch
 }
 
 func (r *Replier) checkWorkResult(ctx context.Context, draft string, canContinue bool) (workReplyDecision, error) {
-	call, err := parser.RenderCall("work.workReviewReply", map[string]any{"draft": map[string]any{"reply": draft, "continueLookup": canContinue}})
+	completionRequired := memql.HasWorkReplyTask(ctx)
+	call, err := parser.RenderCall("work.workReviewReply", map[string]any{"draft": map[string]any{"reply": draft, "continueLookup": canContinue, "reviewCompletion": completionRequired}})
 	if err != nil {
 		return workReplyDecision{}, err
 	}
@@ -228,7 +268,17 @@ func (r *Replier) checkWorkResult(ctx context.Context, draft string, canContinue
 	if !canContinue {
 		gap = ""
 	}
-	return workReplyDecision{Reply: reply, MissingEvidence: gap}, nil
+	var completion *memql.WorkReplyCompletion
+	if completionRequired {
+		raw, err := json.Marshal(rows[0]["completion"])
+		if err != nil || json.Unmarshal(raw, &completion) != nil {
+			return workReplyDecision{}, fmt.Errorf("reply completion returned invalid data")
+		}
+		if err := completion.Validate(nil); err != nil {
+			return workReplyDecision{}, err
+		}
+	}
+	return workReplyDecision{Reply: reply, MissingEvidence: gap, Completion: completion}, nil
 }
 
 func deliverReviewedWorkResult(result *TurnResult, held *replyReviewSink, reply string) (*TurnResult, error) {

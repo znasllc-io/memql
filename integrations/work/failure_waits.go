@@ -910,6 +910,26 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 			}
 		}
 	}
+	// A failed top-level agent step may already have effects. Give the planner
+	// retained, owner-scoped source receipts before replacing that step; its
+	// failure status is not evidence that every tool call failed. Missing access
+	// refuses replanning rather than silently treating prior effects as absent.
+	if out.FailedStep != nil {
+		if gap, unfinished := work.UnfinishedStepGap(rowString(out.FailedStep, "errorMessage")); unfinished {
+			reader, supported := i.engine.(interface {
+				ReadWorkStepSources(context.Context, string, string) (map[string]any, error)
+			})
+			if !supported {
+				return ReplanContext{}, fmt.Errorf("unfinished operation source reader unavailable")
+			}
+			sources, sourceErr := reader.ReadWorkStepSources(actorCtx, runId, rowString(out.FailedStep, "key"))
+			if sourceErr != nil {
+				return ReplanContext{}, sourceErr
+			}
+			out.FailedStep["unfinishedOperation"] = gap
+			out.FailedStep["partialOperationSources"] = sources
+		}
+	}
 	// A finished plan can still leave the owner's goal unmet. Its completed
 	// receipts remain fixed; this synthetic planning target is not a failed
 	// step receipt and never authorizes replay of the completed suffix.
