@@ -12609,7 +12609,7 @@ QueryClient.prototype.workApprovalForOwner = function (this: QueryClient, args: 
   return this.executeNamed("workApprovalForOwner", buildWorkApprovalForOwner(args), opts);
 };
 
-/** Human corrections remain instructions after later permission decisions. One extra row makes the bounded reader refuse overflow, not lose history. */
+/** Human corrections remain instructions after later permission decisions. The native reader follows storage pages; the journal has no lifetime count ceiling. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalGuidanceForOwnerRun"] in generated_concepts.ts).
 export interface WorkApprovalGuidanceForOwnerRunArgs {
   runId: string;

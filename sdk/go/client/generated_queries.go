@@ -13309,7 +13309,7 @@ func WorkApprovalForOwnerBuild(args WorkApprovalForOwnerArgs) string {
 	return b.String()
 }
 
-// WorkApprovalGuidanceForOwnerRun -- Human corrections remain instructions after later permission decisions. One extra row makes the bounded reader refuse overflow, not lose history.
+// WorkApprovalGuidanceForOwnerRun -- Human corrections remain instructions after later permission decisions. The native reader follows storage pages; the journal has no lifetime count ceiling.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalGuidanceForOwnerRun"] in generated_concepts.go).
 type WorkApprovalGuidanceForOwnerRunArgs struct {
