@@ -418,6 +418,8 @@ func (i *Integration) nudgeWait(ctx context.Context, run map[string]any, runId, 
 	}
 	read, fresh := rowMap(run, "waitingOn"), rowMap(current, "waitingOn")
 	if rowString(fresh, "kind") != rowString(read, "kind") || rowString(fresh, "since") != rowString(read, "since") ||
+		rowString(fresh, "subject") != rowString(read, "subject") || rowString(fresh, "approvalKind") != rowString(read, "approvalKind") ||
+		rowString(fresh, "resumeAt") != rowString(read, "resumeAt") ||
 		rowString(current, "heartbeatAt") != rowString(run, "heartbeatAt") {
 		return false
 	}

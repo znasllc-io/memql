@@ -111,7 +111,7 @@ type Dispatcher interface {
 // DispatchRequest is everything the executor side needs, read off the run row
 // once so the seam does no graph reads of its own.
 type DispatchRequest struct {
-	// Recovery is set only by the sweep, never inferred from a graph event.
+	// Recovery is set by the sweep or a freshly rechecked automatic wait.
 	Recovery       bool
 	RunId          string
 	GoalId         string
@@ -136,6 +136,10 @@ type DispatchRequest struct {
 	// stale-heartbeat check. It permits leased takeover of the SAME answer claim if its prior
 	// claimant died before recording the resumed intent. No second key is used.
 	HumanResumeRecovery bool
+	// InferenceWait binds automatic availability recovery to one exact wait.
+	// The timer is only a hint; CanDispatchStoredRun checks the current row
+	// after the durable claim, including its approval and due timestamp.
+	InferenceWait string
 	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
 	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
 	// once and updateWorkRun does not accept it, so every copy of it is the
@@ -219,7 +223,7 @@ func runnerOwnsRecovery(triggeredBy string) bool {
 // the authoritative row. Ordinary journals belong to their scheduler; only
 // the sweep can take one over. A waiting run is eligible solely for a retry
 // that is DUE and explicitly requested, never a stale event: a due inference
-// retry the sweep asked for, or a due `retry` wait the failure path parked on
+// wait bound by its exact identity, or a due `retry` wait the failure path parked on
 // (memql#5664), asked for by that wait's own serving (serveRetry) and only
 // while the run is still parked on the very wait it names (RetryWait) -- a
 // dispatch for one failure never serves the next. A replan or repair wait is
@@ -234,7 +238,7 @@ func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn m
 	}
 	if status == runStatusWaiting && r.Status == runStatusWaiting && r.Recovery {
 		if due, inference := inferenceRetryDue(map[string]any{"waitingOn": waitingOn}, now); inference {
-			return due
+			return due && r.GoalId == goalId && r.InferenceWait != "" && r.InferenceWait == inferenceWaitIdentity(waitingOn)
 		}
 		due, retry := failureRetryDue(waitingOn, now)
 		since := strings.TrimSpace(r.RetryWait)
@@ -315,7 +319,7 @@ func (i *Integration) HandleRunEvent(ev events.Event) {
 		return
 	}
 	if req.Status == runStatusWaiting {
-		// A WAITING RUN IS NEVER EXECUTED FROM AN EVENT -- but a replan or
+		// A WAITING RUN IS NEVER EXECUTED DIRECTLY FROM AN EVENT -- a replan or
 		// repair wait is HANDED TO ITS REMEDY from one (failure_waits.go). The
 		// sweep that would otherwise serve it runs on the general cron leader,
 		// which can be any node type, so a remedy only a planner holds would
@@ -337,6 +341,8 @@ func (i *Integration) HandleRunEvent(ev events.Event) {
 			if since, resumeAt, ok := retryWaitOf(ev); ok {
 				i.armRetry(req.RunId, req.OwnerUserId, since, resumeAt)
 			}
+			payload, _ := ev.Payload["payload"].(map[string]any)
+			i.armInferenceWait(req.RunId, req.OwnerUserId, rowMap(payload, "waitingOn"))
 		}
 		return
 	}
@@ -503,6 +509,8 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 // seconds, so a retry claimed on the run id waited out the lease. It is only
 // ever a run no event dispatches (serveRetry): a goal's run is released under a
 // re-run request instead, which its own events claim under.
+// Availability recovery likewise claims its exact wait under a leased key;
+// it must not reuse a saved rerun's already-consumed once-only request claim.
 func runClaimKey(req DispatchRequest) (string, time.Duration) {
 	// Recovery uses the leased run claim after the execution heartbeat expires.
 	if !req.Recovery || req.HumanResumeRecovery {
@@ -521,6 +529,9 @@ func runClaimKey(req DispatchRequest) (string, time.Duration) {
 	}
 	if since := strings.TrimSpace(req.RetryWait); since != "" {
 		return req.RunId + "#retry:" + since, runClaimTTL
+	}
+	if wait := strings.TrimSpace(req.InferenceWait); wait != "" {
+		return req.RunId + "#inference:" + wait, runClaimTTL
 	}
 	return req.RunId, runClaimTTL
 }

@@ -7,6 +7,9 @@ import (
 )
 
 func workRunCanStart(req work.DispatchRequest, j *automations.RunJournal, now time.Time) bool {
+	if j.CancelRequested {
+		return false
+	}
 	// A run its driver owns -- a Go-written journal, a procedure's replay --
 	// is never this dispatcher's (work.IsDriverOwnedRun). Asked of the STORED
 	// row and not only of the request: an id-only event carries no
