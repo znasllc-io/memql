@@ -798,11 +798,20 @@ run event, as transient retry waits already did. The cron leader can be a node
 without an executor; asking only that leader to dispatch left restored
 subscriptions waiting indefinitely. Each agent arms one local timer per exact
 wait. A non-agent sweep reannounces an unchanged overdue wait with a heartbeat,
-so agents that restarted after the original event can recover it too. This
-backstop requires the updated sweep on the current cron leader.
+so agents that restarted after the original event can recover it too. That
+backstop requires the updated sweep on the current cron leader. During a rolling
+deployment an older product node can take the lease, so an agent also rebuilds
+its timers from the durable in-flight projection after its own `system.startup`
+event. The read uses the existing compiled maintenance principal and passes no
+maintenance authority into execution. Each timer restores its run owner's actor.
+Projection readiness is retried within a one-minute startup operation; failure
+is logged and leaves the saved waits to later events or an updated sweep. Node
+readiness is not blocked, and provider work does not run under that watchdog.
 
 The timer re-reads under the restored owner's authority and claims a leased key
-bound to the run, approval, wait start and retry time. The executor checks that
+bound to the run, approval, wait start and retry time. Bare event IDs and canonical
+projection IDs share one timer identity and the existing canonical claim spelling;
+otherwise a late event could claim the same wait a second time. The executor checks that
 identity and goal again; changed waits, cancellation, closed work and driver-owned
 runs are refused. Recovery preserves any existing rerun request, completed
 prefix, routing, overrides, usage and progress extensions. It does not consume a
@@ -813,7 +822,8 @@ sweep to retry; fresh events alone are not proof an external effect is repeatabl
 [`inference_waits_test.go`](../../../integrations/work/inference_waits_test.go)
 covers early/duplicate timers, stale waits, cancellation and missed events.
 [`TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix`](../../../app/work_inference_recovery_db_test.go)
-uses separate engines, the real Postgres claim and executor, a non-agent leader,
+uses separate engines, the real Postgres claim and executor, a non-agent leader
+or startup recovery without any scheduler announcement,
 and held prior execution claims. It checks one unfinished effect under a saved
 rerun request, refusal to repeat an unclassified effect without that request,
 retained prefix, and unchanged usage/extension counts.

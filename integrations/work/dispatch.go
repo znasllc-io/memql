@@ -531,7 +531,9 @@ func runClaimKey(req DispatchRequest) (string, time.Duration) {
 		return req.RunId + "#retry:" + since, runClaimTTL
 	}
 	if wait := strings.TrimSpace(req.InferenceWait); wait != "" {
-		return req.RunId + "#inference:" + wait, runClaimTTL
+		// The projection returns canonical IDs; event adapters can return bare
+		// IDs. Preserve the native canonical claim spelling across both paths.
+		return "v1:work:run:" + bareRunId(req.RunId) + "#inference:" + wait, runClaimTTL
 	}
 	return req.RunId, runClaimTTL
 }
