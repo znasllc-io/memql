@@ -94,6 +94,19 @@ func (i *Integration) handleCatalogSeal(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
+	// Legacy historical sealing remains independent of candidate configuration.
+	// Opt-in profiles must still possess current authority at their new effect.
+	if _, err := ledger.profileBinding(ctx, asString(args["candidateId"]), true); err == nil {
+		p, err := i.configuredCandidateFor(ctx, asString(args["candidateId"]))
+		if err != nil {
+			return nil, err
+		}
+		if err := p.checkProfileAuthority(ctx); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	if cfg.SigningKeySecret == "" || i.resolver.systemSecret == nil {
 		return nil, errors.New("release catalog signing is not configured")
 	}
@@ -117,6 +130,38 @@ func (i *Integration) handleCatalogSeal(ctx context.Context, args map[string]any
 		return nil, err
 	}
 	return catalogResult(body, verified)
+}
+
+type candidateCatalogStatus struct {
+	State      string `json:"state"`
+	ApprovalID string `json:"approvalId,omitempty"`
+	Digest     string `json:"catalogDigest,omitempty"`
+}
+
+// Failure to configure or verify a catalog must not hide private owner review
+// history. Only a successful exact lookup may report absent or sealed.
+func (i *Integration) candidateCatalogStatus(ctx context.Context, record candidateRecord) candidateCatalogStatus {
+	unavailable := candidateCatalogStatus{State: "unavailable"}
+	ledger, cfg, trust, err := i.catalog(ctx)
+	if err != nil {
+		return unavailable
+	}
+	db, err := ledger.database()
+	if err != nil {
+		return unavailable
+	}
+	_, verified, err := readCatalog(ctx, db, record.ID, cfg.Publisher, trust)
+	if errors.Is(err, sql.ErrNoRows) {
+		return candidateCatalogStatus{State: "absent"}
+	}
+	if err != nil {
+		return unavailable
+	}
+	release, err := verified.Release()
+	if err != nil || release.ApprovalID != record.ApprovalID {
+		return unavailable
+	}
+	return candidateCatalogStatus{State: "sealed", ApprovalID: release.ApprovalID, Digest: verified.Digest()}
 }
 
 func (i *Integration) handleCatalogGet(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

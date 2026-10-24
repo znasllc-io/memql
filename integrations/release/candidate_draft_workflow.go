@@ -117,7 +117,7 @@ func (s *candidateDraftScope) operations() map[string]workflowhost.Operation {
 			return operation(ctx, args)
 		}
 	}
-	return ops
+	return profileOperations(s.p, ops)
 }
 
 func (s *candidateDraftScope) check(ctx context.Context, _ map[string]any) (any, error) {

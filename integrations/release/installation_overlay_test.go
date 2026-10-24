@@ -85,6 +85,8 @@ type overlayHub struct {
 	refs, prs, writes                                             int
 	message                                                       string
 	beforeFiles, afterFiles, mergeOverrides                       map[string]string
+	expectedCreates                                               map[string]bool
+	treeOnlyFile                                                  string
 }
 
 func (h *overlayHub) files() map[string]string {
@@ -149,6 +151,9 @@ func (h *overlayHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			}
 			entries = append(entries, map[string]string{"path": file, "mode": "100644", "type": "blob", "sha": overlayBlobID(content)})
 		}
+		if h.treeOnlyFile != "" {
+			entries = append(entries, map[string]string{"path": h.treeOnlyFile, "mode": "100644", "type": "blob", "sha": strings.Repeat("7", 40)})
+		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i]["path"] < entries[j]["path"] })
 		value = map[string]any{"truncated": false, "tree": entries}
 	case strings.HasPrefix(endpoint, "/git/blobs/"):
@@ -164,11 +169,11 @@ func (h *overlayHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			Tree []struct{ Path, Content string }
 		}
 		require.NoError(h.t, json.NewDecoder(r.Body).Decode(&body))
-		require.Len(h.t, body.Tree, len(h.files()))
+		require.Len(h.t, body.Tree, len(h.files())+len(h.expectedCreates))
 		h.afterFiles = map[string]string{}
 		for _, file := range body.Tree {
 			_, ok := h.files()[file.Path]
-			require.True(h.t, ok)
+			require.True(h.t, ok || h.expectedCreates[file.Path])
 			h.afterFiles[file.Path] = file.Content
 		}
 		h.after = h.afterFiles["deploy/kustomization.yaml"]

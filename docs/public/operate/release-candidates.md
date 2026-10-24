@@ -24,6 +24,82 @@ source connection, runs the full release stages, and supplies the tag as
 publication approval. Retrying, or receiving a later release webhook, recovers
 the same attempt. Use `pipelinesRerun` to repeat a completed attempt. A different
 tag for a commit already recorded under another release version is refused.
+In a monorepo, components released under separate tags therefore need distinct
+verified commits. For example, publish the engine release first, then merge a
+separate Cockpit version change and release its later commit. Keep each tag
+pinned to its reviewed source; a rerun cannot change the recorded version.
+
+## Reuse a release profile
+
+An operator can opt in to `MEMQL_RELEASE_PROFILES` instead of adding a new
+assembly and destination configuration for each version. This separate variable
+does not alter `MEMQL_RELEASE_CANDIDATES` or its existing candidate identities.
+A profile fixes the source repositories, version files, run aliases, publication
+connections and credential references. Its installed DSL resolver selects the
+artifacts and composes versioned names from native facts.
+
+```json
+{
+  "formatVersion": 1,
+  "profiles": [{
+    "name": "engine",
+    "resolver": "productReleaseProfile",
+    "components": [{
+      "component": "engine", "repository": "acme/engine",
+      "path": "VERSION", "runs": ["release"]
+    }],
+    "versionFacts": [{
+      "name": "sdk", "component": "engine",
+      "path": "sdk/package.json", "jsonField": "version"
+    }],
+    "registries": [{
+      "id": "engine-images", "component": "engine", "artifact": "bff",
+      "origin": "https://registry.example.com", "repository": "acme/bff"
+    }]
+  }]
+}
+```
+
+The resolver is an installed `@template` automation with `args { facts object! }`.
+It has no native operations, network access or credential values. `facts`
+contains `profileName`, source `components`, declared auxiliary `versions`, and
+safe destination identities in `targets`. Each component has its exact
+`repository`, `commit`, `version`, `releaseTag` and native `runs`. A run records
+its `alias`, `workRunId`, `pipelineId`, `pipelineRunId`, `event`, `mode`, `status`,
+`releaseTag` and `definitionDigest`. The engine reads completed successful
+pipeline/work associations under their original owner; the product resolver
+requires the intended event, full mode and component tag convention.
+
+The resolver returns `components` with the ordinary artifact declarations below,
+optional `compatibility`, and `publications` selecting configured `targetId`s.
+For OCI, an optional `tag` must equal the exact component version, with or without
+`v`; omission publishes by digest. For files, the profile's `releaseAssets` fix
+the existing API/upload/download origins, repository, credential authority and
+`tagPrefix`. The resolver supplies only `assetName` and `draft` metadata. Native
+materialization binds the actual pipeline tag and source commit, requiring that
+tag to equal `tagPrefix` plus the source version. It never accepts a resolver's
+connection, credential, source SHA or release ID.
+
+Call `releaseCandidateProfiles()` to review the profile's source inputs and
+`configuration` digest. Then call
+`releaseAssembleProfileCandidate(profileName: "engine", runs: {release: "…"},
+expectedConfiguration: "sha256:…")`. The returned candidate follows the same
+separate approval, publication and signed catalog process as a legacy assembly.
+`releaseCandidateTargets(candidateId: "sha256:…")` returns its currently
+authorized, candidate-bound destinations. No global configuration append is
+needed for another version.
+
+Before artifact retention, native storage records the exact owner, source facts,
+installed resolver snapshot, selected artifact paths and fixed destination
+bindings. Another replica resumes that selection; a retry cannot silently
+rerun changed product policy. New effects still require the original owner and
+unchanged current profile authority. Removing a profile or changing its source,
+resolver, trust or credential reference requires fresh preparation and review.
+Changing an unrelated profile does not change this candidate's identity.
+Engine revisions remain part of preparation identity. Historical candidate
+reads remain available when profile or catalog configuration is unavailable;
+`catalog.state` reports `absent`, `sealed` or `unavailable` without claiming
+unverified publication.
 
 ## Declare the assembly
 
@@ -551,3 +627,52 @@ is not a promise that restoration is safe, and cannot authorize an effect.
 An in-progress restoration is reported as `state: "applying"` with
 `direction: "rollback"`; completion is `state: "rolled_back"`. Callers must
 not interpret the original candidate's identity as the restored release.
+
+## Propose a complete installation update
+
+An owner can bind `MEMQL_RELEASE_INSTALLATION_OVERLAY` to an installed proposal
+recipe and an exact set of repository files. A proposal creates a reviewable
+branch and pull request. It does not merge the change or select a production
+release. Each receiving installation retains its own repository grant and
+release trust; a foreign host cannot acquire an upstream write grant through
+this configuration.
+
+Formats 1 and 2 retain their existing image, Kustomize source and environment
+codecs. Format 3 additionally permits two explicit data codecs:
+
+- `jsonScalars` replaces existing scalar slots selected by absolute JSON key
+  pointers. The only facts are `componentVersion`, `componentTag` (the verified
+  stable version prefixed with `v`), `componentCommit`, `companionSHA256` (bare
+  hexadecimal) and `companionSize` (bytes). Unknown facts, duplicate keys,
+  overlapping pointers, missing slots and type mismatches refuse. Unbound
+  JSON values remain unchanged; arbitrary replacement data is not accepted.
+- `nativeManifest` creates one canonical evidence file at a configured path
+  containing exactly one `{version}` placeholder. The approved immutable Git
+  tree must prove that path is absent. Existing manifests are never replaced.
+
+Format 3 also declares `nativeEvidence`: the selected `component`, its
+`companionComponent` and `companionArtifact`, and explicit `images` bindings
+(`name`, `component`, `artifact`, `repository`). The image manifest records a
+single complete producing run, artifact receipts and completed publication
+receipts. It does not invent execution or remote availability claims. Its file
+companion must be a signed, published GitHub release asset for the same source
+repository, stable version and commit.
+
+The recipe composes `releaseOverlayRead`, `releaseOverlayNativeEvidence`,
+`releaseOverlayBindPublication`, `releaseOverlayBuild`, `releaseOverlayReserve`
+and `releaseOverlayPropose`. Native evidence returns bounded run facts and
+eligible companion identities. The installed DSL chooses the acceptable run
+modes and companion; the binding operation accepts only an exact identity and
+catalog digest returned in that scope. No serialized approval or caller-supplied
+fact can create authority.
+
+This extension requires the publisher's original same-owner private journals,
+including approvals and complete execution coverage. Public signatures alone
+cannot reconstruct those private facts on another installation. If they are
+unavailable, use a separately reviewed proposal; do not fabricate a manifest.
+The chosen companion, catalog and approval identities, source tuples, exact
+replacement bytes and expected absence state share one durable proposal intent.
+Another replica revalidates that exact selection, never a newer companion.
+Existing format 1 and 2 proposals keep their original identity and recovery
+semantics. Install the matching engine capability before opting into a format 3
+recipe, then qualify the repository's ordinary checks before merging its output.

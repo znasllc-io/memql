@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -41,29 +42,32 @@ type overlayImage struct {
 	Repository string `json:"repository"`
 }
 type overlayConfiguration struct {
-	FormatVersion       int            `json:"formatVersion"`
-	InstallationID      string         `json:"installationId"`
-	Repository          string         `json:"repository"`
-	OwnerUserID         string         `json:"ownerUserId"`
-	CredentialID        string         `json:"credentialId"`
-	BaseBranch          string         `json:"baseBranch"`
-	Path                string         `json:"path"`
-	ProposalWorkflow    string         `json:"proposalWorkflow"`
-	ObservationWorkflow string         `json:"observationWorkflow"`
-	Images              []overlayImage `json:"images"`
-	Files               []overlayFile  `json:"files,omitempty"`
+	FormatVersion       int                         `json:"formatVersion"`
+	InstallationID      string                      `json:"installationId"`
+	Repository          string                      `json:"repository"`
+	OwnerUserID         string                      `json:"ownerUserId"`
+	CredentialID        string                      `json:"credentialId"`
+	BaseBranch          string                      `json:"baseBranch"`
+	Path                string                      `json:"path"`
+	ProposalWorkflow    string                      `json:"proposalWorkflow"`
+	ObservationWorkflow string                      `json:"observationWorkflow"`
+	Images              []overlayImage              `json:"images"`
+	Files               []overlayFile               `json:"files,omitempty"`
+	NativeEvidence      *overlayNativeConfiguration `json:"nativeEvidence,omitempty"`
 }
 
 type overlayRequest struct{ InstallationID, RequestID, CandidateID, CatalogDigest, ExpectedBaseRevision string }
 type overlayRecord struct {
-	ID            string                        `json:"id"`
-	Owner         string                        `json:"owner"`
-	Request       overlayRequest                `json:"request"`
-	Configuration overlayConfiguration          `json:"configuration"`
-	CreatedAt     time.Time                     `json:"createdAt"`
-	Snapshot      *workflowhost.Snapshot        `json:"snapshot"`
-	Replacement   githubapp.BranchReplacement   `json:"replacement"`
-	Replacements  []githubapp.BranchReplacement `json:"replacements,omitempty"`
+	ID                string                        `json:"id"`
+	Owner             string                        `json:"owner"`
+	Request           overlayRequest                `json:"request"`
+	Configuration     overlayConfiguration          `json:"configuration"`
+	CreatedAt         time.Time                     `json:"createdAt"`
+	Snapshot          *workflowhost.Snapshot        `json:"snapshot"`
+	Replacement       githubapp.BranchReplacement   `json:"replacement"`
+	Replacements      []githubapp.BranchReplacement `json:"replacements,omitempty"`
+	NativeEvidence    *overlayNativeEvidence        `json:"nativeEvidence,omitempty"`
+	FilePreconditions []overlayFilePrecondition     `json:"filePreconditions,omitempty"`
 }
 type InstallationProposal struct {
 	ProposalID      string `json:"proposalId"`
@@ -207,20 +211,29 @@ func (i *Integration) handleInstallationProposalObserve(ctx context.Context, arg
 }
 
 type overlayScope struct {
-	integration   *Integration
-	db            *sql.DB
-	configuration overlayConfiguration
-	request       overlayRequest
-	owner, id     string
-	snapshot      *workflowhost.Snapshot
-	record        *overlayRecord
-	source        *installation.PublicationSource
-	replacements  []githubapp.BranchReplacement
-	proposed      bool
+	integration       *Integration
+	db                *sql.DB
+	configuration     overlayConfiguration
+	request           overlayRequest
+	owner, id         string
+	snapshot          *workflowhost.Snapshot
+	record            *overlayRecord
+	source            *installation.PublicationSource
+	replacements      []githubapp.BranchReplacement
+	proposed          bool
+	nativePrimary     *overlayCandidateEvidence
+	nativeCompanions  map[string]overlayCandidateEvidence
+	nativeBound       *overlayNativeEvidence
+	filePreconditions []overlayFilePrecondition
 }
 
 func (s *overlayScope) operations() map[string]workflowhost.Operation {
-	return map[string]workflowhost.Operation{"releaseOverlayRead": s.read, "releaseOverlayBuild": s.build, "releaseOverlayReserve": s.reserve, "releaseOverlayPropose": s.propose, "releaseOverlayObserve": s.observe}
+	ops := map[string]workflowhost.Operation{"releaseOverlayRead": s.read, "releaseOverlayBuild": s.build, "releaseOverlayReserve": s.reserve, "releaseOverlayPropose": s.propose, "releaseOverlayObserve": s.observe}
+	if s.configuration.FormatVersion == 3 {
+		ops["releaseOverlayNativeEvidence"] = s.nativeEvidence
+		ops["releaseOverlayBindPublication"] = s.bindNativePublication
+	}
+	return ops
 }
 func (s *overlayScope) gate(ctx context.Context, args map[string]any) error {
 	owner, err := overlayOwner(ctx)
@@ -286,6 +299,9 @@ func (s *overlayScope) build(ctx context.Context, args map[string]any) (any, err
 	if err := validateOverlaySource(s.configuration, *s.source); err != nil {
 		return nil, err
 	}
+	if s.configuration.FormatVersion == 3 && (s.nativeBound == nil || validateOverlayNativeEvidence(s.configuration, s.request, *s.nativeBound) != nil) {
+		return nil, errors.New("installation overlay requires a selected native publication pair")
+	}
 	client, err := s.client()
 	if err != nil {
 		return nil, err
@@ -302,13 +318,36 @@ func (s *overlayScope) build(ctx context.Context, args map[string]any) (any, err
 		}
 	}
 	replacements := make([]githubapp.BranchReplacement, 0, len(s.configuration.files()))
+	preconditions := []overlayFilePrecondition{}
+	paths := map[string]bool{}
 	total := 0
 	for _, file := range s.configuration.files() {
-		before, err := client.FileContents(ctx, token, parts[0], parts[1], s.request.ExpectedBaseRevision, file.Path)
-		if err != nil {
-			return nil, fmt.Errorf("installation overlay source %s could not be read", file.Path)
+		resolvedPath, err := overlayResolvedPath(file, s.nativeBound)
+		if err != nil || paths[resolvedPath] {
+			return nil, errors.New("installation overlay resolved paths are invalid or duplicated")
 		}
-		content, err := buildOverlayFile(before, file, s.source.Publication)
+		paths[resolvedPath] = true
+		before, readErr := client.FileContents(ctx, token, parts[0], parts[1], s.request.ExpectedBaseRevision, resolvedPath)
+		var content []byte
+		condition := overlayFilePrecondition{Path: resolvedPath, State: "present"}
+		if file.Codec == "nativeManifest" {
+			if readErr == nil || githubapp.StatusOf(readErr) != http.StatusNotFound {
+				return nil, errors.New("native manifest requires exact source absence")
+			}
+			condition.State = "absent"
+			content, err = buildOverlayNativeManifest(*s.nativeBound)
+		} else {
+			if readErr != nil {
+				return nil, fmt.Errorf("installation overlay source %s could not be read", resolvedPath)
+			}
+			digest := sha256.Sum256(before)
+			condition.BeforeSHA256 = hex.EncodeToString(digest[:])
+			if file.Codec == "jsonScalars" {
+				content, err = pinOverlayJSONScalars(before, file.JSONScalars, s.nativeBound.scalarFacts())
+			} else {
+				content, err = buildOverlayFile(before, file, s.source.Publication)
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("installation overlay %s: %w", file.Path, err)
 		}
@@ -316,13 +355,16 @@ func (s *overlayScope) build(ctx context.Context, args map[string]any) (any, err
 		if total > 1<<20 {
 			return nil, errors.New("installation overlay file set exceeds one MiB")
 		}
-		digest := sha256.Sum256(before)
-		replacements = append(replacements, githubapp.BranchReplacement{Path: file.Path, BeforeSHA256: hex.EncodeToString(digest[:]), Content: string(content)})
+		replacements = append(replacements, githubapp.BranchReplacement{Path: resolvedPath, BeforeSHA256: condition.BeforeSHA256, Content: string(content)})
+		if s.configuration.FormatVersion == 3 {
+			preconditions = append(preconditions, condition)
+		}
 	}
 	if s.record != nil && !slices.Equal(s.record.files(), replacements) {
 		return nil, errors.New("installation overlay proposal bytes changed")
 	}
 	s.replacements = replacements
+	s.filePreconditions = preconditions
 	return nil, nil
 }
 func (s *overlayScope) propose(ctx context.Context, args map[string]any) (any, error) {
@@ -331,6 +373,9 @@ func (s *overlayScope) propose(ctx context.Context, args map[string]any) (any, e
 	}
 	if s.record == nil || len(s.replacements) == 0 || !slices.Equal(s.replacements, s.record.files()) {
 		return nil, errors.New("installation overlay proposal has no durable exact intent")
+	}
+	if s.configuration.FormatVersion == 3 && (s.nativeBound == nil || overlayHash(s.nativeBound) != overlayHash(s.record.NativeEvidence) || !slices.Equal(s.filePreconditions, s.record.FilePreconditions)) {
+		return nil, errors.New("installation overlay native facts or absence preconditions differ from its durable intent")
 	}
 	remote, err := s.client()
 	if err != nil {

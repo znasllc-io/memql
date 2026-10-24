@@ -50,6 +50,22 @@ builtin releaseCutStatus {
 @executor("integration.release.candidateConfiguration")
 builtin releaseCandidateConfiguration { }
 
+/// Read installed opt-in release profiles, immutable configuration digests and source inputs.
+@sdk
+@executor("integration.release.candidateProfiles")
+builtin releaseCandidateProfiles { }
+
+/// Resolve an installed product profile against native completed-run facts. Never approves or publishes.
+@sdk
+@executor("integration.release.assembleProfileCandidate")
+@args(profile="object")
+builtin releaseAssembleProfileCandidate { profileName string! runs object! expectedConfiguration string! }
+
+/// Read current authorized destinations for exactly one caller-owned candidate.
+@sdk
+@executor("integration.release.candidateTargets")
+builtin releaseCandidateTargets { candidateId string! }
+
 /// Page through caller-owned review history, including interrupted preparations.
 @sdk
 @executor("integration.release.listCandidates")

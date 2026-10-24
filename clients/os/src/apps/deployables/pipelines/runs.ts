@@ -12,7 +12,7 @@ export type OutcomeKey = "passed" | "failed" | "running" | "queued" | "cancelled
 export const OUTCOME_FACETS: readonly { value: OutcomeKey; label: string }[] = [
   { value: "passed", label: "Passed" },
   { value: "failed", label: "Failed" },
-  { value: "running", label: "Running" },
+  { value: "running", label: "In progress" },
   { value: "queued", label: "Queued" },
   { value: "cancelled", label: "Cancelled" },
   { value: "refused", label: "Refused" },
@@ -143,7 +143,7 @@ export function lastRunPerBranch(runs: readonly RunRow[], defaultBranch: string)
 }
 
 /** What Latest upstream's checks say, in words, or "" when nothing honest can be said. */
-export type UpstreamChecks = "" | "checks passed, not yet deployed" | "checks passed" | "checks failed" | "checks running";
+export type UpstreamChecks = "" | "checks passed, not yet deployed" | "checks passed" | "checks failed" | "checks in progress";
 
 /**
  * Latest upstream's checks (D14: "checks passed, not yet deployed"): the
@@ -159,7 +159,7 @@ export function upstreamChecks(runs: readonly RunRow[], pipeline: PipelineRow | 
   };
   const at = runsOfPipeline(runs, pipeline.id).filter((r) => matches(r.sha) && r.conclusion !== "refused").sort(newestFirst)[0];
   if (!at) return "";
-  if (at.status !== "completed") return "checks running";
+  if (at.status !== "completed") return "checks in progress";
   if (at.conclusion === "success") {
     const deployed = deployedSha.trim().toLowerCase();
     const isDeployed = deployed !== "" && (deployed.startsWith(latest) || latest.startsWith(deployed));

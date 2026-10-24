@@ -78,6 +78,50 @@ type receiverApplication struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 }
+
+// Named scope is an explicit alternative to the complete legacy inventory.
+// Every member needs a positive project-specific registration; an unscoped
+// Secret cannot prove that Argo has no project-specific override elsewhere.
+type receiverRepositoryScope struct {
+	Profile  string                      `json:"profile"`
+	Bindings []receiverRepositoryBinding `json:"bindings"`
+}
+type receiverRepositoryBinding struct {
+	Application receiverNamed `json:"application"`
+	Secret      receiverNamed `json:"secret"`
+}
+
+const namedProjectRepositoryProfile = "argocd-2.13.3-named-project-v1"
+
+func (s *receiverRepositoryScope) validate(apps []receiverApplication) error {
+	if s == nil {
+		return nil
+	}
+	if s.Profile != namedProjectRepositoryProfile || len(s.Bindings) != len(apps) {
+		return errors.New("installation repository scope requires one named project binding per application")
+	}
+	wanted := make(map[receiverNamed]bool, len(apps))
+	for _, app := range apps {
+		wanted[receiverNamed{app.Namespace, app.Name}] = true
+	}
+	for _, binding := range s.Bindings {
+		if !wanted[binding.Application] || binding.Secret.Namespace != binding.Application.Namespace || !kubernetesSegment.MatchString(binding.Secret.Name) {
+			return errors.New("installation repository binding is invalid, duplicated or outside its application namespace")
+		}
+		delete(wanted, binding.Application)
+	}
+	return nil
+}
+
+func (s *receiverRepositoryScope) secretFor(app receiverNamed) (receiverNamed, error) {
+	for _, binding := range s.Bindings {
+		if binding.Application == app {
+			return binding.Secret, nil
+		}
+	}
+	return receiverNamed{}, errors.New("installation application has no named repository binding")
+}
+
 type receiverApplicationSnapshot struct {
 	key         string
 	application argocd.Snapshot
@@ -113,6 +157,7 @@ type receiverConfiguration struct {
 	Application        receiverNamed             `json:"application,omitempty"`
 	Applications       []receiverApplication     `json:"applications,omitempty"`
 	SourceRepositories []argocd.SourceRepository `json:"sourceRepositories,omitempty"`
+	RepositoryScope    *receiverRepositoryScope  `json:"repositoryScope,omitempty"`
 	Renderer           receiverRenderer          `json:"renderer"`
 	Collector          receiverCollector         `json:"collector"`
 	Catalog            receiverCatalog           `json:"catalog"`
@@ -193,6 +238,9 @@ func readReceiverGroupInputs(ctx context.Context, api argocd.API, namespace, nam
 	}
 	apps, err := cfg.applicationNames()
 	if err != nil {
+		return nil, err
+	}
+	if err := cfg.RepositoryScope.validate(apps); err != nil {
 		return nil, err
 	}
 	if err := argocd.ValidateSourceRepositories(cfg.SourceRepositories); err != nil {

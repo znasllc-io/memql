@@ -19,11 +19,11 @@ func checkDeliveryHost(t *testing.T, step pipelines.Step) {
 	}
 }
 
-func TestDeliveryArtifactsManifestBootstrapRunsAllProvidersAndUnknownChanges(t *testing.T) {
+func TestDeliveryArtifactsManifestSelectsAffectedProvidersAndUnknownChanges(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	step, ok := engineDeclaredStep(spec, "provider-qualification")
-	if !ok || step.Packages != "" || len(step.PackageRoots) != 0 || !strings.Contains(step.Run, "bash scripts/ci/delivery-artifacts.sh") || strings.Count(step.Run, "@sha256:") != 4 || strings.Contains(step.Run, "$MEMQL_PACKAGES") {
-		t.Fatalf("bootstrap provider qualification must run its full immutable fixture matrix: %+v", step)
+	if !ok || step.Packages != pipelines.PackagesAffected || !strings.Contains(step.Run, "bash scripts/ci/delivery-artifacts.sh") || strings.Count(step.Run, "@sha256:") != 4 {
+		t.Fatalf("provider qualification must use affected graph and immutable fixtures: %+v", step)
 	}
 	graph, _ := engineImportGraph(t)
 	for _, tc := range []struct {
@@ -49,7 +49,7 @@ func TestDeliveryArtifactsManifestBootstrapRunsAllProvidersAndUnknownChanges(t *
 		// An unavailable change list or unsafe path cannot narrow coverage.
 		{"", true},
 		{"../unknown-source.go", true},
-		{"cockpit/internal/access/cmd.go", true},
+		{"cockpit/internal/access/cmd.go", false},
 	} {
 		changed := []string{tc.path}
 		if tc.path == "" {

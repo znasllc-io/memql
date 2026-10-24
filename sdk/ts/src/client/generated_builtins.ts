@@ -4492,6 +4492,31 @@ QueryClient.prototype.releaseAssembleCandidate = function (this: QueryClient, ar
   return this.executeNamed("releaseAssembleCandidate", buildReleaseAssembleCandidate(args), opts);
 };
 
+/** Resolve an installed product profile against native completed-run facts. Never approves or publishes. */
+export interface ReleaseAssembleProfileCandidateArgs {
+  profileName: string;
+  runs: Record<string, unknown>;
+  expectedConfiguration: string;
+}
+
+export function buildReleaseAssembleProfileCandidate(args: ReleaseAssembleProfileCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("profileName: " + renderMemQLValue(args.profileName));
+  parts.push("runs: " + renderMemQLValue(args.runs));
+  parts.push("expectedConfiguration: " + renderMemQLValue(args.expectedConfiguration));
+  return "builtin releaseAssembleProfileCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseAssembleProfileCandidate(args: ReleaseAssembleProfileCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseAssembleProfileCandidate = function (this: QueryClient, args: ReleaseAssembleProfileCandidateArgs = {} as ReleaseAssembleProfileCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseAssembleProfileCandidate", buildReleaseAssembleProfileCandidate(args), opts);
+};
+
 /** Cancel the original operator's current plan only before application begins. */
 export interface ReleaseCancelInstallationArgs {
   installationId: string;
@@ -4555,6 +4580,25 @@ QueryClient.prototype.releaseCandidateDrafts = function (this: QueryClient, args
   return this.executeNamed("releaseCandidateDrafts", buildReleaseCandidateDrafts(args), opts);
 };
 
+/** Read installed opt-in release profiles, immutable configuration digests and source inputs. */
+export interface ReleaseCandidateProfilesArgs {
+}
+
+export function buildReleaseCandidateProfiles(args: ReleaseCandidateProfilesArgs): string {
+  void args;
+  return "builtin releaseCandidateProfiles()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCandidateProfiles(args?: ReleaseCandidateProfilesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCandidateProfiles = function (this: QueryClient, args: ReleaseCandidateProfilesArgs = {} as ReleaseCandidateProfilesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCandidateProfiles", buildReleaseCandidateProfiles(args), opts);
+};
+
 /** Read durable publication intents and verified completion for one candidate. */
 export interface ReleaseCandidatePublicationsArgs {
   candidateId: string;
@@ -4574,6 +4618,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseCandidatePublications = function (this: QueryClient, args: ReleaseCandidatePublicationsArgs = {} as ReleaseCandidatePublicationsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseCandidatePublications", buildReleaseCandidatePublications(args), opts);
+};
+
+/** Read current authorized destinations for exactly one caller-owned candidate. */
+export interface ReleaseCandidateTargetsArgs {
+  candidateId: string;
+}
+
+export function buildReleaseCandidateTargets(args: ReleaseCandidateTargetsArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseCandidateTargets(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCandidateTargets(args: ReleaseCandidateTargetsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCandidateTargets = function (this: QueryClient, args: ReleaseCandidateTargetsArgs = {} as ReleaseCandidateTargetsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCandidateTargets", buildReleaseCandidateTargets(args), opts);
 };
 
 /** Page through caller-owned review history, including interrupted preparations. */

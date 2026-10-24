@@ -14,7 +14,7 @@ import { runOutcome } from "./words";
 //     disconnected pipeline (pipeline_disconnected);
 //   - Re-run failed is refused unless the run failed or was cancelled with a
 //     step that failed or was cancelled (pipeline_nothing_to_rerun);
-//   - Cancel stops a queued or running run, once.
+//   - Cancel requests cancellation of an unfinished run, once.
 // And a part the session does not hold takes its act away (`rerun`,
 // `cancel`). Open on GitHub is navigation, not an act on the run, so it is
 // always there when GitHub has a page to open.
@@ -71,7 +71,7 @@ export function runBarFor(input: RunBarInput): RunBar {
   if (newerRunning) {
     // The engine refuses a re-run while the key's newest attempt is going, so
     // the act is absent and the line that explains the state says why.
-    detail = [detail, `attempt ${newer!.attempt} is running`].filter((p) => p !== "").join(", ");
+    detail = [detail, `attempt ${newer!.attempt} is in progress`].filter((p) => p !== "").join(", ");
   }
   const rerunnable = can.rerun && !newerRunning && pipelineActive && run.refusalCode !== "pipeline_fork_refused";
   if (rerunnable) {

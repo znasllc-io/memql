@@ -7,6 +7,7 @@ export interface Destination { targetId: string; targetDigest: string; component
 export interface CandidateSummary { candidateId: string; state: CandidateState; components: ComponentSummary[]; createdAt: string; evidenceCount: number }
 export interface Candidate {
   candidateId: string; state: CandidateState; approvalId?: string;
+  catalog?: { state: "absent" | "unavailable" } | { state: "sealed"; approvalId: string; catalogDigest: string };
   manifest: {
     components: (ComponentSummary & { artifacts: Artifact[] })[];
     evidence: { name: string; component: string; workRunId: string; stepKey: string; attempt: number; receiptDigest: string }[];
@@ -66,7 +67,16 @@ export function readCandidate(result: Result, expected: string): Candidate {
   const v = body(result), m = object(v.manifest);
   if (digest(v.candidateId) !== expected) throw new Error("The cluster returned a different release.");
   const s = state(v.state);
-  return { candidateId: expected, state: s, approvalId: s === "approved" ? string(v.approvalId) : undefined, manifest: {
+  let catalog: Candidate["catalog"];
+  if (v.catalog !== undefined) {
+    const c = object(v.catalog);
+    if (c.state === "sealed") {
+      if (s !== "approved" || string(c.approvalId) !== string(v.approvalId)) throw new Error("The catalog record does not match this release approval.");
+      catalog = { state: "sealed", approvalId: string(c.approvalId), catalogDigest: digest(c.catalogDigest) };
+    } else if (c.state === "absent" || c.state === "unavailable") catalog = { state: c.state };
+    else throw new Error("The catalog state is unavailable.");
+  }
+  return { candidateId: expected, state: s, approvalId: s === "approved" ? string(v.approvalId) : undefined, catalog, manifest: {
     components: array(m.components, 64).map((entry) => ({ ...component(entry), artifacts: array(object(entry).artifacts, 128).map((entry) => {
       const a = object(entry);
       if ((a.kind !== "oci" && a.kind !== "file") || typeof a.size !== "number" || !Number.isSafeInteger(a.size) || a.size < 0) throw new Error("The cluster returned an invalid release artifact.");
@@ -94,8 +104,10 @@ export function readPublications(result: Result, expected: string): Publication[
     return { candidateId: expected, approvalId: string(p.approvalId), effectId: string(p.effectId), state: p.state, target: destination(p.target), artifactKind: kind };
   });
 }
-export function readTargets(result: Result): Target[] {
-  return array(body(result).targets).map((entry) => {
+export function readTargets(result: Result, expectedCandidate?: string): Target[] {
+  const value = body(result);
+  if (expectedCandidate && digest(value.candidateId) !== expectedCandidate) throw new Error("The cluster returned destinations for another release.");
+  return array(value.targets).map((entry) => {
     const t = object(entry);
     if (t.kind !== "oci" && t.kind !== "file" && t.kind !== "npm") throw new Error("This publication destination is not supported.");
     let draft: DraftMetadata | undefined;
@@ -108,7 +120,7 @@ export function readTargets(result: Result): Target[] {
     const releaseId = typeof t.releaseId === "number" && t.releaseId > 0 ? t.releaseId : undefined;
     if (t.kind === "file" && !releaseId && !draft) throw new Error("The draft release identity is unavailable.");
     if (t.kind === "npm" && (draft || releaseId || t.assetName)) throw new Error("The package destination contains conflicting release details.");
-    return { ...destination(t), kind: t.kind, origin: string(t.origin), repository: string(t.repository), tag: t.kind !== "oci" ? string(t.tag) : undefined, distTag: t.kind === "npm" ? string(t.distTag) : undefined, assetName: t.kind === "file" ? string(t.assetName) : undefined, sourceCommit: typeof t.sourceCommit === "string" ? t.sourceCommit : undefined, releaseId, draft };
+    return { ...destination(t), kind: t.kind, origin: string(t.origin), repository: string(t.repository), tag: t.kind !== "oci" || t.tag !== undefined ? string(t.tag) : undefined, distTag: t.kind === "npm" ? string(t.distTag) : undefined, assetName: t.kind === "file" ? string(t.assetName) : undefined, sourceCommit: typeof t.sourceCommit === "string" ? t.sourceCommit : undefined, releaseId, draft };
   });
 }
 export function readDrafts(result: Result, expected: string): Draft[] {
@@ -132,6 +144,13 @@ export function historiesMatch(record: Candidate, publications: Publication[], d
 export function allPublicationsComplete(record: Candidate, publications: Publication[]): boolean {
   const destinations = record.manifest.destinations.filter((d) => d.operation === "publish");
   return destinations.length > 0 && destinations.every((d) => publications.some((p) => p.state === "complete" && p.approvalId === record.approvalId && destinationKey(d) === destinationKey(p.target) && d.targetDigest === p.target.targetDigest));
+}
+export function readyForCatalog(record: Candidate, publications: Publication[], drafts: Draft[], targets: Target[]): boolean {
+  return allPublicationsComplete(record, publications) && record.manifest.destinations.every((d) => {
+    if (d.operation !== "publish") return false;
+    const target = matchingTarget(d, targets);
+    return target && (target.kind !== "file" || drafts.some((draft) => draft.approvalId === record.approvalId && draft.state === "published" && draft.targets.includes(d.targetId)));
+  });
 }
 export function destinationKey(d: Destination): string { return `${d.targetId}/${d.component}/${d.artifact}/${d.operation}`; }
 export function matchingTarget(d: Destination, targets: Target[] | null): Target | undefined {

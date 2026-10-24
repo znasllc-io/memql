@@ -14,7 +14,7 @@ func (i *Integration) handleCandidateDraftPromote(ctx context.Context, args map[
 	return i.handleCandidateDraft(ctx, args, true)
 }
 func (i *Integration) handleCandidateDraft(ctx context.Context, args map[string]any, promote bool) ([]memorynodes.MemoryNode, error) {
-	p, err := i.configuredCandidate(ctx)
+	p, err := i.configuredCandidateFor(ctx, asString(args["candidateId"]))
 	if err != nil {
 		return nil, err
 	}

@@ -13,9 +13,116 @@ async function twice(label: string) { await pressBar(label); await pressBar(labe
 
 // A fake Date, so reading a bar costs nothing: the release reads poll on real timers.
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("release review", () => {
+  it("keeps candidate and source references optional while preserving exact copying and approval", async () => {
+    const f = releaseFixture();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    const details = screen.getByText(releaseId).closest("details")!;
+    expect(details.open).toBe(false);
+    expect(screen.getByText("d".repeat(40)).closest("details")).toBe(details);
+    expect(screen.getByRole("heading", { name: "engine 0.25.0" }).closest("details")).toBeNull();
+    fireEvent.click(screen.getByText("Release references"));
+    expect(details.open).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Copy Candidate" }));
+    await screen.findByRole("button", { name: "Copied Candidate" });
+    expect(writeText).toHaveBeenLastCalledWith(releaseId);
+    fireEvent.click(screen.getByRole("button", { name: "Copy engine revision" }));
+    await screen.findByRole("button", { name: "Copied engine revision" });
+    expect(writeText).toHaveBeenLastCalledWith("d".repeat(40));
+    await twice("Approve release");
+    await screen.findByText("Approved");
+    expect(f.state.calls.filter((c) => c.kind === "approve")).toEqual([{ kind: "approve", args: { candidateId: releaseId } }]);
+    expect(f.state.calls.some((c) => ["publish", "seal"].includes(c.kind))).toBe(false);
+  });
+  it("shows the resolved image tag before its explicit publication", async () => {
+    const f = releaseFixture("approved");
+    f.state.targets[0] = { ...f.state.targets[0]!, tag: "v0.25.0" };
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination();
+    expect(screen.getByText("Image tag")).toBeTruthy();
+    expect(screen.getByText("v0.25.0")).toBeTruthy();
+    await pressBar("Publish artifact");
+    expect(screen.getByText(/to https:\/\/registry.example.test\/memql\/bff as v0.25.0/)).toBeTruthy();
+    expect(f.state.calls.some((c) => c.kind === "publish")).toBe(false);
+  });
+  it("adds verified publication to the catalog only after a separate confirmation", async () => {
+    const f = releaseFixture("approved");
+    await f.query.releasePublishCandidate({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal", component: "engine", artifact: "bff" });
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    await pressBar("Add to release catalog");
+    expect(screen.getByText(/This does not install it/)).toBeTruthy();
+    expect(f.state.calls.some((c) => c.kind === "seal")).toBe(false);
+    await pressBar("Add to release catalog");
+    await screen.findByText("In release catalog");
+    expect(f.state.calls.filter((c) => c.kind === "seal")).toEqual([{ kind: "seal", args: { candidateId: releaseId, approvalId: "approval-exact" } }]);
+    expect(screen.queryByRole("button", { name: "Add to release catalog" })).toBeNull();
+    expect(screen.getByText(/Installation is a separate choice/)).toBeTruthy();
+  });
+  it("does not offer catalog completion for uploaded files until their release is public", async () => {
+    const f = fileReleaseFixture();
+    await f.query.releaseCreateCandidateDraft({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal" });
+    await f.query.releasePublishCandidate({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal", component: "engine", artifact: "bff" });
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    expect(screen.queryByRole("button", { name: "Add to release catalog" })).toBeNull();
+    view.rerender(<ReleaseBrowser query={f.query} connected={false} />);
+    await f.query.releasePromoteCandidateDraft({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal" });
+    view.rerender(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByRole("button", { name: "Add to release catalog" });
+    expect(f.state.calls.some((c) => c.kind === "seal")).toBe(false);
+  });
+  it("does not claim catalog readiness for a candidate containing installation effects", async () => {
+    const f = releaseFixture("approved");
+    await f.query.releasePublishCandidate({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal", component: "engine", artifact: "bff" });
+    // The native public-catalog contract accepts publication destinations only.
+    f.state.record.manifest.destinations.push(Object.assign({ ...f.state.record.manifest.destinations[0]! }, { targetId: "installation", operation: "install" }));
+    f.state.targets.push({ ...f.state.targets[0]!, targetId: "installation", operation: "install" });
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    expect(screen.queryByRole("button", { name: "Add to release catalog" })).toBeNull();
+    expect(f.state.calls.some((c) => c.kind === "seal")).toBe(false);
+  });
+  it("recovers a lost catalog reply by reading durable state without another write", async () => {
+    const f = releaseFixture("approved"); f.state.lostSealReply = true;
+    await f.query.releasePublishCandidate({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal", component: "engine", artifact: "bff" });
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await twice("Add to release catalog");
+    await screen.findByText("In release catalog");
+    view.unmount();
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await screen.findByText("In release catalog");
+    expect(f.state.calls.filter((c) => c.kind === "seal")).toHaveLength(1);
+  });
+  it("preserves catalog signing failure and distinguishes unavailable state from an absent record", async () => {
+    const f = releaseFixture("approved"); f.state.failedSeal = true;
+    await f.query.releasePublishCandidate({ candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal", component: "engine", artifact: "bff" });
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await twice("Add to release catalog");
+    await screen.findByText("Catalog signing is unavailable");
+    expect(screen.queryByText("In release catalog")).toBeNull();
+    view.rerender(<ReleaseBrowser query={f.query} connected={false} />);
+    f.state.record.catalog = { state: "unavailable" };
+    view.rerender(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByRole("button", { name: "Read status again" });
+    expect(screen.queryByRole("button", { name: "Add to release catalog" })).toBeNull();
+    expect(f.state.calls.filter((c) => c.kind === "seal")).toHaveLength(1);
+  });
+  it("refuses a catalog record for another approval and destinations for another candidate", async () => {
+    const f = releaseFixture("approved");
+    f.state.record.catalog = { state: "sealed", approvalId: "different-approval", catalogDigest: `sha256:${"7".repeat(64)}` };
+    f.query.releaseCandidateTargets = async () => releaseResult({ candidateId: `sha256:${"9".repeat(64)}`, targets: f.state.targets });
+    render(<ReleaseBrowser query={f.query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Review engine 0.25.0" }));
+    await screen.findByText("The catalog record does not match this release approval.");
+    await screen.findByText("The cluster returned destinations for another release.");
+    expect(f.state.calls.some((c) => ["seal", "approve", "publish"].includes(c.kind))).toBe(false);
+  });
   it("reviews the exact npm package, version and tag before publication without a draft", async () => {
     const f = npmReleaseFixture();
     render(<ReleaseBrowser query={f.query} connected />);

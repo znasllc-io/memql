@@ -7,7 +7,7 @@ import { buildRun, releaseFixture, releaseResult } from "./releaseFixtures";
 
 // A fake Date, so reading a bar costs nothing: the release reads poll on real timers.
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 /** Presses a bar act once the bar has been read: a step that opens changes the bar, and a bar that has just changed takes no press for a moment. */
 async function pressBar(label: string) { await screen.findByRole("button", { name: label }); await readTheBar(); fireEvent.click(screen.getByRole("button", { name: label })); }
@@ -16,17 +16,103 @@ async function start() {
   fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
   fireEvent.click(await screen.findByRole("button", { name: "Choose plan engine-release" }));
 }
-async function choose() { fireEvent.click(await screen.findByRole("button", { name: "Use run pipeline-1" })); await screen.findByText("Selected runs"); }
+async function choose() { fireEvent.click(await screen.findByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ })); await screen.findByText("Selected runs"); }
 
 describe("release preparation", () => {
-  it("assembles from work run identities and leaves approval separate", async () => {
+  it("keeps exact source revisions optional and copyable without changing the selected run", async () => {
     const f = releaseFixture();
-    f.state.runs.push({ ...buildRun, id: "wrong-source", repository: "example/other" }, { ...buildRun, id: "failed", conclusion: "failure" }, { ...buildRun, id: "affected", mode: "affected" });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
     render(<ReleaseBrowser query={f.query} connected />);
     await start();
-    expect(screen.queryByRole("button", { name: "Use run wrong-source" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Use run failed" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Use run affected" })).toBeNull();
+    await screen.findByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ });
+    const runButton = screen.getByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ });
+    expect(runButton.getAttribute("aria-label")).toContain(buildRun.releaseTag);
+    expect(runButton.getAttribute("aria-label")).not.toContain(buildRun.id);
+    const pickerDetails = screen.getByText(buildRun.sha).closest("details")!;
+    expect(pickerDetails.open).toBe(false);
+    expect(screen.getByText(buildRun.title).closest("details")).toBeNull();
+    fireEvent.click(screen.getByText("Source revision"));
+    expect(pickerDetails.open).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Copy Revision" }));
+    await screen.findByRole("button", { name: "Copied Revision" });
+    expect(writeText).toHaveBeenLastCalledWith(buildRun.sha);
+    await choose();
+    const selectedDetails = screen.getByText(buildRun.sha).closest("details")!;
+    expect(selectedDetails.open).toBe(false);
+    fireEvent.click(screen.getByText("Source revisions"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy engine / build" }));
+    await screen.findByRole("button", { name: "Copied engine / build" });
+    expect(writeText).toHaveBeenLastCalledWith(buildRun.sha);
+    await pressBar("Prepare release");
+    await screen.findByText("Versions");
+    expect(f.state.calls.find((c) => c.kind === "assemble")?.args).toEqual({ planName: "engine-release", runs: { build: "work-build-1" } });
+    expect(f.state.calls.some((c) => ["approve", "publish", "seal"].includes(c.kind))).toBe(false);
+  });
+  it("offers tagged release runs to profiles while retaining full push runs for legacy plans", async () => {
+    const f = releaseFixture();
+    f.state.profiles = [{ name: "engine", configuration: `sha256:${"4".repeat(64)}`, components: [{ name: "engine", repository: "example/memql", runs: ["release"] }] }];
+    f.state.runs.push({ ...buildRun, id: "main-push", title: "Build latest engine change", event: "push", releaseTag: "", workRunId: "work-push" }, { ...buildRun, id: "missing-tag", title: "Build without release tag", releaseTag: "", workRunId: "work-no-tag" });
+    render(<ReleaseBrowser query={f.query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose profile engine" }));
+    await screen.findByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ });
+    expect(screen.queryByRole("button", { name: /^Use run: Build latest engine change,/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Use run: Build without release tag,/ })).toBeNull();
+    await pressBar("Cancel");
+    await start();
+    fireEvent.click(await screen.findByRole("button", { name: /^Use run: Build latest engine change,/ }));
+    await pressBar("Prepare release");
+    await screen.findByText("Versions");
+    expect(f.state.calls.filter((c) => c.kind === "assemble")).toEqual([{ kind: "assemble", args: { planName: "engine-release", runs: { build: "work-push" } } }]);
+    expect(f.state.calls.some((c) => c.kind === "profile")).toBe(false);
+  });
+  it("prepares a stable profile with its reviewed digest while legacy configuration is unavailable", async () => {
+    const f = releaseFixture();
+    const configuration = `sha256:${"4".repeat(64)}`;
+    f.state.profiles = [{ name: "engine", configuration, components: [{ name: "engine", repository: "example/memql", runs: ["release"] }] }];
+    f.query.releaseCandidateConfiguration = async () => { throw new Error("Legacy plans unavailable"); };
+    render(<ReleaseBrowser query={f.query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose profile engine" }));
+    await choose();
+    expect(screen.getByText(/review the exact result before approving/)).toBeTruthy();
+    await pressBar("Prepare release");
+    await screen.findByText("Versions");
+    expect(f.state.calls.filter((c) => c.kind === "profile")).toEqual([{ kind: "profile", args: { profileName: "engine", expectedConfiguration: configuration, runs: { release: "work-build-1" } } }]);
+    expect(f.state.calls.some((c) => ["approve", "publish", "seal"].includes(c.kind))).toBe(false);
+    await screen.findByRole("button", { name: "Approve release" });
+  });
+  it("keeps a profile selection through reconnect but refuses a changed resolver digest", async () => {
+    const f = releaseFixture();
+    f.state.profiles = [{ name: "engine", configuration: `sha256:${"4".repeat(64)}`, components: [{ name: "engine", repository: "example/memql", runs: ["release"] }] }];
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose profile engine" }));
+    await choose();
+    view.rerender(<ReleaseBrowser query={f.query} connected={false} />);
+    f.state.profiles[0]!.configuration = `sha256:${"5".repeat(64)}`;
+    view.rerender(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByText(/This release plan changed/);
+    expect(screen.queryByRole("button", { name: "Prepare release" })).toBeNull();
+    expect(f.state.calls.some((c) => c.kind === "profile")).toBe(false);
+  });
+  it("keeps legacy plans usable when the profile read fails", async () => {
+    const f = releaseFixture();
+    f.query.releaseCandidateProfiles = async () => { throw new Error("Profiles unavailable"); };
+    render(<ReleaseBrowser query={f.query} connected />);
+    await start(); await choose(); await pressBar("Prepare release");
+    await screen.findByText("Versions");
+    expect(f.state.calls.filter((c) => c.kind === "assemble")).toHaveLength(1);
+  });
+  it("assembles from work run identities and leaves approval separate", async () => {
+    const f = releaseFixture();
+    f.state.runs.push({ ...buildRun, id: "wrong-source", title: "Build another repository", repository: "example/other" }, { ...buildRun, id: "failed", title: "Failed engine build", conclusion: "failure" }, { ...buildRun, id: "affected", title: "Build affected engine files", mode: "affected" });
+    render(<ReleaseBrowser query={f.query} connected />);
+    await start();
+    expect(screen.queryByRole("button", { name: /^Use run: Build another repository,/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Use run: Failed engine build,/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Use run: Build affected engine files,/ })).toBeNull();
     await choose();
     await pressBar("Prepare release");
     await screen.findByText("Versions");
@@ -51,14 +137,14 @@ describe("release preparation", () => {
   });
   it("keeps same-commit inputs distinct within each component", async () => {
     const f = releaseFixture(); f.state.assemblies[0]!.components[0]!.runs.push("tests");
-    f.state.runs.push({ ...buildRun, id: "different-commit", workRunId: "work-other", sha: "f".repeat(40) }, { ...buildRun, id: "tests-1", workRunId: "work-tests" });
+    f.state.runs.push({ ...buildRun, id: "different-commit", title: "Build another revision", workRunId: "work-other", sha: "f".repeat(40) }, { ...buildRun, id: "tests-1", title: "Verify engine release", workRunId: "work-tests" });
     render(<ReleaseBrowser query={f.query} connected />);
     await start();
-    fireEvent.click(await screen.findByRole("button", { name: "Use run pipeline-1" }));
-    await screen.findByRole("button", { name: "Use run tests-1" });
-    expect(screen.queryByRole("button", { name: "Use run pipeline-1" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Use run different-commit" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Use run tests-1" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ }));
+    await screen.findByRole("button", { name: /^Use run: Verify engine release,/ });
+    expect(screen.queryByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Use run: Build another revision,/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Use run: Verify engine release,/ }));
     await pressBar("Prepare release");
     await screen.findByText("Versions");
     expect(f.state.calls.find((c) => c.kind === "assemble")?.args).toEqual({ planName: "engine-release", runs: { build: "work-build-1", tests: "work-tests" } });

@@ -59,6 +59,8 @@ type Integration struct {
 	resolver            resolver
 	candidateDeps       atomic.Pointer[CandidateDependencies]
 	candidateDB         func() *sql.DB
+	profileSource       workflowhost.SourceLoader
+	profileRevision     func() string
 	installation        atomic.Pointer[installation.Preparer]
 	installationHealth  atomic.Pointer[installationHealthBinding]
 	installationOverlay atomic.Pointer[overlayBinding]
@@ -106,6 +108,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "candidateDrafts", Description: "Read native draft bindings and release lifecycle history without remote effects.", Handler: i.handleCandidateDrafts},
 		{Name: "candidatePublications", Description: "Read caller-owned durable publication intents and verified completion history; performs no remote effects.", Handler: i.handleCandidateEffects},
 		{Name: "listCandidates", Description: "Read caller-owned candidate review history, including interrupted preparations.", Handler: i.handleCandidateList},
+		{Name: "candidateProfiles", Description: "List installed release profiles and exact source requirements without credentials.", Handler: i.handleCandidateProfiles},
+		{Name: "assembleProfileCandidate", Description: "Materialize one installed release profile from native run/version facts for separate owner approval.", Handler: i.handleProfileAssemble},
+		{Name: "candidateTargets", Description: "Read the candidate-bound publication destinations after current authority validation.", Handler: i.handleCandidateTargets},
 		{Name: "candidateConfiguration", Description: "Read configured release version sources and exact target identities; no secrets or effects. Owner only.", Handler: i.handleCandidateConfiguration},
 		{Name: "prepareCandidate", Description: "Verify and retain a release candidate for separate owner approval; publishes nothing.", Handler: i.handleCandidatePrepare},
 		{Name: "approveCandidate", Description: "Reverify and approve one exact retained release candidate. Owner only.", Handler: i.handleCandidateApprove},

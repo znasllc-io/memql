@@ -129,13 +129,13 @@ export function checksRowLabel(run: RunRow): string {
   return `Open the newest run on ${checksBranchOf(run)}: ${runTitle(run)}, ${outcomeClause(runOutcome(run))}`;
 }
 
-/** "failed at tests, 7m 40s", "running tests", "passed, 4 stages, 4m 12s". */
+/** "failed at tests, 7m 40s", "in progress at tests", "passed, 4 stages, 4m 12s". */
 function outcomeClause(outcome: Outcome): string {
   const word = outcome.word.toLowerCase();
   if (outcome.detail === "") return word;
   // Where a run stopped or what it is running reads on from the word; any
   // other detail is a clause of its own.
-  return outcome.detail.startsWith("at ") || outcome.word === "Running" ? `${word} ${outcome.detail}` : `${word}, ${outcome.detail}`;
+  return outcome.detail.startsWith("at ") || outcome.word === "In progress" ? `${word} ${outcome.detail}` : `${word}, ${outcome.detail}`;
 }
 
 /**

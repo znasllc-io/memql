@@ -165,7 +165,7 @@ func (i *Integration) handleSweepPublishedInputs(ctx context.Context, _ map[stri
 	if scan.candidate == "" {
 		return resultNode("archiveSweep", "", map[string]any{"inspected": 0})
 	}
-	p, err := i.configuredCandidate(ownerCtx)
+	p, err := i.configuredCandidateFor(ownerCtx, scan.candidate)
 	if err != nil {
 		return nil, err
 	}

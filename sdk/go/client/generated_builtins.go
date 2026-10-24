@@ -5880,6 +5880,38 @@ func ReleaseAssembleCandidateBuild(args ReleaseAssembleCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseAssembleProfileCandidate -- Resolve an installed product profile against native completed-run facts. Never approves or publishes.
+type ReleaseAssembleProfileCandidateArgs struct {
+	ProfileName           string
+	Runs                  map[string]any
+	ExpectedConfiguration string
+}
+
+// ReleaseAssembleProfileCandidate calls the engine builtin releaseAssembleProfileCandidate.
+func (qc *QueryClient) ReleaseAssembleProfileCandidate(ctx context.Context, args ReleaseAssembleProfileCandidateArgs) (*Result, error) {
+	call := ReleaseAssembleProfileCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseAssembleProfileCandidate", call)
+}
+
+func ReleaseAssembleProfileCandidateBuild(args ReleaseAssembleProfileCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseAssembleProfileCandidate(")
+	b.WriteString("profileName: ")
+	b.WriteString(quoteMemQL(args.ProfileName))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runs: ")
+	b.WriteString(renderMemQLValue(args.Runs))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedConfiguration: ")
+	b.WriteString(quoteMemQL(args.ExpectedConfiguration))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCancelInstallation -- Cancel the original operator's current plan only before application begins.
 type ReleaseCancelInstallationArgs struct {
 	InstallationId string
@@ -5941,6 +5973,21 @@ func ReleaseCandidateDraftsBuild(args ReleaseCandidateDraftsArgs) string {
 	return b.String()
 }
 
+// ReleaseCandidateProfiles -- Read installed opt-in release profiles, immutable configuration digests and source inputs.
+type ReleaseCandidateProfilesArgs struct {
+}
+
+// ReleaseCandidateProfiles calls the engine builtin releaseCandidateProfiles.
+func (qc *QueryClient) ReleaseCandidateProfiles(ctx context.Context, args ReleaseCandidateProfilesArgs) (*Result, error) {
+	call := ReleaseCandidateProfilesBuild(args)
+	return qc.executeNamed(ctx, "releaseCandidateProfiles", call)
+}
+
+func ReleaseCandidateProfilesBuild(args ReleaseCandidateProfilesArgs) string {
+	_ = args
+	return "builtin releaseCandidateProfiles()"
+}
+
 // ReleaseCandidatePublications -- Read durable publication intents and verified completion for one candidate.
 type ReleaseCandidatePublicationsArgs struct {
 	CandidateId string
@@ -5955,6 +6002,26 @@ func (qc *QueryClient) ReleaseCandidatePublications(ctx context.Context, args Re
 func ReleaseCandidatePublicationsBuild(args ReleaseCandidatePublicationsArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin releaseCandidatePublications(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseCandidateTargets -- Read current authorized destinations for exactly one caller-owned candidate.
+type ReleaseCandidateTargetsArgs struct {
+	CandidateId string
+}
+
+// ReleaseCandidateTargets calls the engine builtin releaseCandidateTargets.
+func (qc *QueryClient) ReleaseCandidateTargets(ctx context.Context, args ReleaseCandidateTargetsArgs) (*Result, error) {
+	call := ReleaseCandidateTargetsBuild(args)
+	return qc.executeNamed(ctx, "releaseCandidateTargets", call)
+}
+
+func ReleaseCandidateTargetsBuild(args ReleaseCandidateTargetsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCandidateTargets(")
 	b.WriteString("candidateId: ")
 	b.WriteString(quoteMemQL(args.CandidateId))
 	b.WriteString(")")

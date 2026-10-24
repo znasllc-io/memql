@@ -79,7 +79,7 @@ export function StopsAcross({
                 {stop.word}
                 {stop.took !== "" ? <span className="pipeline-stop-took">{stop.took}</span> : null}
               </span>
-              <span className="os-visually-hidden">{`, ${stopStateSentence(stop.state)}`}</span>
+              <span className="os-visually-hidden">{`, ${stop.state === "current" ? "current stage" : stopStateSentence(stop.state)}`}</span>
             </button>
           </li>
         );

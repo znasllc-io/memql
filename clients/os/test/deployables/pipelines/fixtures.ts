@@ -72,6 +72,30 @@ export function step(key: string, over: Record<string, unknown> = {}): StepRow {
   return stepFromRow(stepRow(key, over));
 }
 
+export const UNCERTAIN_MESSAGE = "The API did not confirm Job creation and no Job can be found. No replacement was sent; reconcile the attempt before authorizing new work.";
+
+/** A retained failed receipt is not proof that a requested cancellation completed. */
+export function uncertainRunRow(): Row {
+  return runRow({
+    id: "r-uncertain", ownerUserId: VIEWER, workRunId: "wr-uncertain", title: "Check the OS image",
+    status: "in_progress", conclusion: "", cancelRequested: true, finishedAt: "", durationMs: 0,
+    queuedAt: minutesAgo(30),
+    stages: [
+      { name: "checks", status: "passed", durationMs: 42000, steps: 1, failed: 0 },
+      { name: "tests", status: "failed", durationMs: 3000, steps: 1, failed: 1 },
+      { name: "deploy", status: "waiting", durationMs: 0, steps: 1, failed: 0 },
+    ],
+  });
+}
+
+export function uncertainStepRows(): Row[] {
+  return [
+    stepRow("checks.vet", { seq: 0, runId: "wr-uncertain", logFileId: "" }),
+    stepRow("tests.os-image", { seq: 1, runId: "wr-uncertain", status: "failed", durationMs: 3000, errorCode: "pipeline_execution_uncertain", errorMessage: UNCERTAIN_MESSAGE, logFileId: "" }),
+    stepRow("deploy.verify", { seq: 2, runId: "wr-uncertain", status: "pending", durationMs: 0, binding: {}, logFileId: "" }),
+  ];
+}
+
 /** The viewer `withSession` signs in as, owning the pipeline rows below. */
 export const VIEWER = "u-me";
 

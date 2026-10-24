@@ -63,6 +63,10 @@ func (s *overlayScope) reserve(ctx context.Context, args map[string]any) (any, e
 	} else {
 		r.Replacements = s.replacements
 	}
+	if s.configuration.FormatVersion == 3 {
+		r.NativeEvidence = s.nativeBound
+		r.FilePreconditions = s.filePreconditions
+	}
 	if err := validateOverlayRecordFiles(r); err != nil {
 		return nil, err
 	}

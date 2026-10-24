@@ -228,49 +228,57 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 		sources = append(sources, source)
 	}
 	slices.SortFunc(sources, func(a, b candidateVersionSource) int { return strings.Compare(a.Component, b.Component) })
-	type targetView struct {
-		pl.ReleaseDestination
-		Origin               string                  `json:"origin"`
-		Repository           string                  `json:"repository"`
-		Kind                 string                  `json:"kind"`
-		Tag                  string                  `json:"tag,omitempty"`
-		DistTag              string                  `json:"distTag,omitempty"`
-		SourceCommit         string                  `json:"sourceCommit,omitempty"`
-		ReleaseID            int64                   `json:"releaseId,omitempty"`
-		Draft                *githubrelease.Metadata `json:"draft,omitempty"`
-		AssetName            string                  `json:"assetName,omitempty"`
-		CredentialConfigured bool                    `json:"credentialConfigured"`
+	targets, err := candidateTargetViews(p.targetReader)
+	if err != nil {
+		return nil, err
 	}
-	targets := make([]targetView, 0, len(p.targetReader.targets))
-	for _, target := range p.targetReader.targets {
-		_, _, digest, err := target.snapshot()
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, Tag: target.Tag, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
-	}
-	for _, target := range p.targetReader.files {
-		_, _, digest, err := target.snapshot()
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"},
-			Kind: "file", Origin: target.APIOrigin, Repository: target.Repository, Tag: target.Tag, SourceCommit: target.SourceCommit, ReleaseID: target.ReleaseID, Draft: target.Draft, AssetName: target.AssetName, CredentialConfigured: true})
-	}
-	for _, target := range p.targetReader.npm {
-		_, _, digest, err := target.snapshot()
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "npm", Origin: target.Origin, Repository: target.PackageName, Tag: target.Version, DistTag: target.DistTag, CredentialConfigured: true})
-	}
-	slices.SortFunc(targets, func(a, b targetView) int { return strings.Compare(a.TargetID, b.TargetID) })
 	return resultNode("candidate-configuration", "", map[string]any{"sources": sources, "targets": targets, "assemblies": p.assemblyPlans})
 }
 
+type candidateTargetView struct {
+	pl.ReleaseDestination
+	Origin               string                  `json:"origin"`
+	Repository           string                  `json:"repository"`
+	Kind                 string                  `json:"kind"`
+	Tag                  string                  `json:"tag,omitempty"`
+	DistTag              string                  `json:"distTag,omitempty"`
+	SourceCommit         string                  `json:"sourceCommit,omitempty"`
+	ReleaseID            int64                   `json:"releaseId,omitempty"`
+	Draft                *githubrelease.Metadata `json:"draft,omitempty"`
+	AssetName            string                  `json:"assetName,omitempty"`
+	CredentialConfigured bool                    `json:"credentialConfigured"`
+}
+
+func candidateTargetViews(r *candidateTargetReader) ([]candidateTargetView, error) {
+	targets := make([]candidateTargetView, 0, len(r.targets))
+	for _, target := range r.targets {
+		_, _, digest, err := target.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, candidateTargetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, Tag: target.Tag, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
+	}
+	for _, target := range r.files {
+		_, _, digest, err := target.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, candidateTargetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"},
+			Kind: "file", Origin: target.APIOrigin, Repository: target.Repository, Tag: target.Tag, SourceCommit: target.SourceCommit, ReleaseID: target.ReleaseID, Draft: target.Draft, AssetName: target.AssetName, CredentialConfigured: true})
+	}
+	for _, target := range r.npm {
+		_, _, digest, err := target.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, candidateTargetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "npm", Origin: target.Origin, Repository: target.PackageName, Tag: target.Version, DistTag: target.DistTag, CredentialConfigured: true})
+	}
+	slices.SortFunc(targets, func(a, b candidateTargetView) int { return strings.Compare(a.TargetID, b.TargetID) })
+	return targets, nil
+}
+
 func (i *Integration) handleCandidatePrepare(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	p, err := i.configuredCandidate(ctx)
-	if err != nil {
+	if _, err := candidateOwner(ctx); err != nil {
 		return nil, err
 	}
 	body, err := json.Marshal(args["candidate"])
@@ -281,6 +289,19 @@ func (i *Integration) handleCandidatePrepare(ctx context.Context, args map[strin
 	if err := decodeCandidateObject(body, &input); err != nil {
 		return nil, err
 	}
+	var p *candidatePreparer
+	if input.WorkflowDigest != "" {
+		_, key, canonicalErr := pl.CanonicalReleaseCandidate(input)
+		if canonicalErr != nil {
+			return nil, canonicalErr
+		}
+		p, err = i.configuredCandidateFor(ctx, key)
+	} else {
+		p, err = i.configuredCandidate(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
 	record, err := p.prepare(ctx, input)
 	if err != nil {
 		return nil, err
@@ -289,7 +310,7 @@ func (i *Integration) handleCandidatePrepare(ctx context.Context, args map[strin
 }
 
 func (i *Integration) handleCandidateApprove(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	p, err := i.configuredCandidate(ctx)
+	p, err := i.configuredCandidateFor(ctx, asString(args["candidateId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +322,7 @@ func (i *Integration) handleCandidateApprove(ctx context.Context, args map[strin
 }
 
 func (i *Integration) handleCandidatePublish(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	p, err := i.configuredCandidate(ctx)
+	p, err := i.configuredCandidateFor(ctx, asString(args["candidateId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +342,10 @@ func (i *Integration) handleCandidateGet(ctx context.Context, args map[string]an
 	if err != nil {
 		return nil, err
 	}
-	return resultNode("candidate", record.ID, record)
+	return resultNode("candidate", record.ID, struct {
+		candidateRecord
+		Catalog candidateCatalogStatus `json:"catalog"`
+	}{record, i.candidateCatalogStatus(ctx, record)})
 }
 
 func (i *Integration) handleCandidateRetire(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

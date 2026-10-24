@@ -3,13 +3,14 @@ import { flatten } from "../../../kit/rows";
 import { body, readTargets, type Target } from "./model";
 
 export interface AssemblyPlan {
+  kind: "assembly" | "profile";
   name: string;
   configuration: string;
   components: { name: string; repository: string; runs: string[]; artifacts: { name: string; run: string; stepKey: string; path: string; kind: string; platform: string }[] }[];
   targets: Target[];
   compatibility: { component: string; requires: string; minVersion: string; maxExclusive: string }[];
 }
-export interface BuildRun { id: string; workRunId: string; repository: string; commit: string; title: string; finishedAt: string }
+export interface BuildRun { id: string; workRunId: string; repository: string; commit: string; title: string; finishedAt: string; event: string; releaseTag: string }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The release assembly configuration is invalid.");
   return value as Record<string, unknown>;
@@ -49,7 +50,7 @@ export function readAssemblies(result: Result): AssemblyPlan[] {
     });
     const aliases = components.flatMap((c) => c.runs);
     if (!components.length || !aliases.length || aliases.length > 256 || new Set(aliases.map((a) => a.toLowerCase())).size !== aliases.length) throw new Error("The release plan has conflicting run inputs.");
-    return { name: text(p.name), configuration, components, targets: list(p.targets, 1024).map((id) => {
+    return { kind: "assembly", name: text(p.name), configuration, components, targets: list(p.targets, 1024).map((id) => {
       const target = targets.find((t) => t.targetId === text(id));
       if (!target) throw new Error("A release destination is no longer configured.");
       return target;
@@ -59,17 +60,34 @@ export function readAssemblies(result: Result): AssemblyPlan[] {
     }) };
   });
 }
+export function readProfiles(result: Result): AssemblyPlan[] {
+  const seen = new Set<string>();
+  return list(body(result).profiles, 64).map((entry) => {
+    const p = object(entry), name = text(p.name), configuration = text(p.configuration);
+    if (seen.has(name) || !/^sha256:[a-f0-9]{64}$/.test(configuration)) throw new Error("The release profile identity is invalid.");
+    seen.add(name);
+    const components = list(p.components, 16).map((entry) => {
+      const c = object(entry);
+      return { name: text(c.name), repository: text(c.repository), runs: list(c.runs, 16).map(text), artifacts: [] };
+    });
+    const aliases = components.flatMap((c) => c.runs);
+    if (!components.length || components.some((c) => !c.runs.length) || new Set(components.map((c) => c.name)).size !== components.length || new Set(aliases.map((a) => a.toLowerCase())).size !== aliases.length) throw new Error("The release profile has conflicting run inputs.");
+    return { kind: "profile", name, configuration, components, targets: [], compatibility: [] };
+  });
+}
+export function planKey(plan: AssemblyPlan): string { return `${plan.kind}:${plan.name}`; }
 export function readBuildRuns(result: Result): { runs: BuildRun[]; nextCursor: string } {
   // These rows help the person select inputs; the native assembler independently
   // verifies the work journal, source, receipts and bytes before creating a candidate.
   const runs = result.rows().map(flatten).filter((r) => r.status === "completed" && r.conclusion === "success" && r.mode === "full" && typeof r.workRunId === "string" && r.workRunId !== "").map((r) => {
     const commit = text(r.sha);
     if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error("A completed run has no exact source commit.");
-    return { id: text(r.id), workRunId: text(r.workRunId), repository: text(r.repository), commit, title: typeof r.title === "string" ? r.title : "", finishedAt: typeof r.finishedAt === "string" ? r.finishedAt : "" };
+    return { id: text(r.id), workRunId: text(r.workRunId), repository: text(r.repository), commit, title: typeof r.title === "string" ? r.title : "", finishedAt: typeof r.finishedAt === "string" ? r.finishedAt : "", event: typeof r.event === "string" ? r.event : "", releaseTag: typeof r.releaseTag === "string" ? r.releaseTag : "" };
   });
   return { runs, nextCursor: result.meta()?.cursor ?? "" };
 }
 export function runFits(plan: AssemblyPlan, alias: string, run: BuildRun, selections: Record<string, BuildRun>): boolean {
+  if (plan.kind === "profile" && (run.event !== "release" || !run.releaseTag.trim())) return false;
   const component = plan.components.find((c) => c.runs.includes(alias));
   return !!component && run.repository === component.repository && component.runs.every((other) => other === alias || !selections[other] || (selections[other]!.commit === run.commit && selections[other]!.workRunId !== run.workRunId));
 }
