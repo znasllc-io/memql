@@ -375,6 +375,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"policy": "string -- strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it",
 			},
 		},
+		{
+			Name:        "continueRun",
+			Description: "Continue an open, unaccepted goal from its exact finished result and the owner's feedback; preserve completed work, usage and permissions.",
+			Handler:     i.handleContinueRun,
+			ArgsSchema:  map[string]string{"runId": "string (required)", "runVersion": "string (required)", "requestId": "string (required)", "feedback": "string (required)"},
+		},
 		// INTERVENTION AND FEEDBACK (epic memql#5414). Each handler lives in
 		// its own file (rerun.go, branch.go, head.go, feedback.go,
 		// versions.go, validator.go) and refuses by name until its stream

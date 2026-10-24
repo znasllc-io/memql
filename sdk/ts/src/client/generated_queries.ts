@@ -12823,6 +12823,30 @@ QueryClient.prototype.workContextSourcesForOwnerRun = function (this: QueryClien
   return this.executeNamed("workContextSourcesForOwnerRun", buildWorkContextSourcesForOwnerRun(args), opts);
 };
 
+/** Existence check for a conflicting goal result: newest or still unfinished, even when an older active run lies beyond a page of terminal history. No execution payloads. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workContinuationConflictsForOwnerGoal"] in generated_concepts.ts).
+export interface WorkContinuationConflictsForOwnerGoalArgs {
+  goalId: string;
+  runVersion: string;
+}
+
+export function buildWorkContinuationConflictsForOwnerGoal(args: WorkContinuationConflictsForOwnerGoalArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  parts.push("runVersion: " + renderMemQLValue(args.runVersion));
+  return "query workContinuationConflictsForOwnerGoal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workContinuationConflictsForOwnerGoal(args: WorkContinuationConflictsForOwnerGoalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workContinuationConflictsForOwnerGoal = function (this: QueryClient, args: WorkContinuationConflictsForOwnerGoalArgs = {} as WorkContinuationConflictsForOwnerGoalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workContinuationConflictsForOwnerGoal", buildWorkContinuationConflictsForOwnerGoal(args), opts);
+};
+
 /** Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.ts).
 export interface WorkContinuationForOwnerRunArgs {
@@ -13314,6 +13338,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.workReplyReviewForOwnerStep = function (this: QueryClient, args: WorkReplyReviewForOwnerStepArgs = {} as WorkReplyReviewForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workReplyReviewForOwnerStep", buildWorkReplyReviewForOwnerStep(args), opts);
+};
+
+/** One stable owner-feedback receipt, including a not-yet-committed intent. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workResultFeedbackForOwnerRequest"] in generated_concepts.ts).
+export interface WorkResultFeedbackForOwnerRequestArgs {
+}
+
+export function buildWorkResultFeedbackForOwnerRequest(args: WorkResultFeedbackForOwnerRequestArgs): string {
+  void args;
+  return "query workResultFeedbackForOwnerRequest()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workResultFeedbackForOwnerRequest(args?: WorkResultFeedbackForOwnerRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workResultFeedbackForOwnerRequest = function (this: QueryClient, args: WorkResultFeedbackForOwnerRequestArgs = {} as WorkResultFeedbackForOwnerRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workResultFeedbackForOwnerRequest", buildWorkResultFeedbackForOwnerRequest(args), opts);
+};
+
+/** All accepted result feedback. The consumer follows every page and restores requestedAt order; a later continuation never erases an older direction. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workResultFeedbackForOwnerRun"] in generated_concepts.ts).
+export interface WorkResultFeedbackForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkResultFeedbackForOwnerRun(args: WorkResultFeedbackForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workResultFeedbackForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workResultFeedbackForOwnerRun(args: WorkResultFeedbackForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workResultFeedbackForOwnerRun = function (this: QueryClient, args: WorkResultFeedbackForOwnerRunArgs = {} as WorkResultFeedbackForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workResultFeedbackForOwnerRun", buildWorkResultFeedbackForOwnerRun(args), opts);
 };
 
 /** One of the caller's runs by id. */

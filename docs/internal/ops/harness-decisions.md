@@ -946,3 +946,67 @@ disposable test database; a skipped test is not validation. Report the exact
 commit and test result separately from live workflow evidence. These tests do
 not establish complete UI delivery, arbitrary cross-goal freshness, all worker
 artifact formats, or a completed login handoff.
+## Feedback after a finished, unaccepted result
+
+Ask routes a correction or request to continue to the latest finished result of
+an open goal as well as to active work. `activeWorkRun` retains its original
+meaning for queued-message projection. Closed/accepted goals, cancelled work,
+children, and older results are not automatic-continuation candidates. Unrelated
+requests still go to intake; ambiguous references still ask which goal. Discovery
+uses an owner-scoped, one-row existence query for newer or nonterminal work, so an
+older active run cannot disappear behind a page of terminal history.
+
+`work.continueRun` requires interactive owner feedback, the exact observed run
+version and an idempotency request id. Under one acquisition of the goal lifecycle,
+workload and provider gates, it rereads ownership, open/unaccepted state, result
+version, and conflicting work. Acceptance winning that gate prevents continuation;
+continuation winning it makes the old acceptance stale. Unlike an explicit step
+rerun, it never reopens accepted results. The request receipt and a native replan
+wait are written together on the same run. Duplicate payloads reuse that receipt;
+a changed payload under the same id refuses. All completed steps remain the fixed
+prefix, including the former final answer. The replanner appends the remaining
+work rather than asking the person to select a technical step or replaying an
+old effect. The sealed source must be available before a request can dispatch.
+
+Explicit feedback renews an execution window using the existing progress policy,
+reconciled with the provider ledger when present, without resetting cumulative
+usage, hard token/cost ceilings, permissions, or durable progress credits. Unknown
+or malformed provider attribution refuses; native inference admission still checks
+its actual phase, model route and operator limits before every call. The bounded
+active evidence index starts a new feedback epoch, as it does at a progress question.
+
+Each request has a stable observation identity and its original human timestamp.
+The handler journals an intent before the run write, then seals acceptance after
+it. The committed run receipt bridges a crash between those writes; an unrelated
+pending intent never becomes guidance. Before replacing that bridge, another
+continuation must seal the preceding receipt. Thus API-only feedback survives
+later requests, and a retry of any accepted id cannot renew or dispatch again.
+Observation phase writes use a timestamp strictly after the version read under
+the same gate, including when another replica's clock is behind. An accepted
+receipt never regresses to intent.
+
+The run write commits continuation. A subsequent seal failure returns an honest
+accepted response with `feedbackReceiptState: pending` and logs a repair diagnostic;
+it cannot tell Ask the message was refused after work already resumed. A retry
+seals that receipt without writing the run again. The guidance reader merges all
+accepted observations with the run bridge, always using the same stable identity
+and human time. A matching late Ask turn remains a delivery receipt but does not
+rename or duplicate its instruction, so acknowledged page prefixes stay valid.
+Routing reports continuation only after the handler acknowledges that same run.
+A refusal remains attached to the selected goal instead of silently opening another.
+
+Validation: `TestContinueFinishedResultDBAcrossReplicas` exercises two competing
+replicas, durable retry, usage/prefix preservation, native replan context and
+owner acceptance. `TestContinueConflictDBFindsOlderActiveRunBeyondHistoryPage`
+checks long history and abandoned older work. `TestContinueFeedbackWindowUsesProviderSpendAndKeepsHardLimits`
+checks actual provider counts and monetary refusals.
+`TestContinueReceiptDBRecoversPostCommitFailureAcrossSkewedReplicas` checks partial
+commit recovery, monotonic receipt phases, two API continuations and old-request
+retry. `TestAskResultFeedbackKeepsCursorAcrossSealTranscriptAndLaterAPIRequests`
+checks stable delivery across late transcript arrival and more than one query page.
+The Ask continuation tests also cover chronological guidance, transport retry,
+missing-transcript recovery,
+refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
+runs the real plan validator and proves the new resume point follows completed
+work. These are fixtures with the real database/plan validator; live rollout and
+completion-disposition verification are reported separately.

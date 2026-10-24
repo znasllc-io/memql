@@ -1650,6 +1650,44 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 	return b.String()
 }
 
+// ContinueRun -- Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation.
+type ContinueRunArgs struct {
+	RunId      string
+	RunVersion string
+	RequestId  string
+	Feedback   string
+}
+
+// ContinueRun calls the engine builtin continueRun.
+func (qc *QueryClient) ContinueRun(ctx context.Context, args ContinueRunArgs) (*Result, error) {
+	call := ContinueRunBuild(args)
+	return qc.executeNamed(ctx, "continueRun", call)
+}
+
+func ContinueRunBuild(args ContinueRunArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin continueRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runVersion: ")
+	b.WriteString(quoteMemQL(args.RunVersion))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("feedback: ")
+	b.WriteString(quoteMemQL(args.Feedback))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
 	// Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice.

@@ -8743,6 +8743,7 @@
         "errorMessage",
         "executionAuthority",
         "expectedFootprint",
+        "feedbackContinuation",
         "finishedAt",
         "forkAtStepKey",
         "forkedFromRunId",
