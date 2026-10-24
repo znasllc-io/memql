@@ -229,7 +229,7 @@ func listWorkspace(root, configPath, backupPath string, limit int) (workspaceLis
 		}
 		if d.IsDir() {
 			lines = append(lines, "d "+rel+"/")
-			if pushExcludedDirs[d.Name()] {
+			if pushExcludedDirs[d.Name()] || isBrowserRuntimeDir(path) {
 				return filepath.SkipDir
 			}
 			return nil

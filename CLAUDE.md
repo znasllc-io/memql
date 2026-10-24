@@ -269,6 +269,15 @@ consent socket) or an `fs.deny` entry is refused -- `CheckPath` alone accepts
 `$HOME` and `/`. The same paths reach the app as `harness.Spec.DenyPaths`,
 denied for READING too: without them the sandbox confines writes alone.
 
+**BROWSER PROFILES ARE RUNTIME, NOT OUTPUT.** Chromium user-data roots may have
+arbitrary names beside the proof they produced. `isBrowserRuntimeDir` recognizes
+multiple on-disk markers without reading their contents; collection, snapshots,
+fingerprints and write-byte retention share that boundary. Keep sibling PNGs,
+scripts and receipts. Do not solve over-retention by deleting work or weakening
+the output archive's integrity checks. Other task-owned runtime belongs under
+an already-excluded cache directory; cleanup and old Library artifacts are
+separate from future selection.
+
 **CLAUDE CODE'S PERMISSIONS ARE IN THE ARGV, NOT IN ~/.claude**
 (`claudeGrantArgs`): `--setting-sources=` (no settings file),
 `--strict-mcp-config`, `--permission-mode dontAsk`, `--allowedTools

@@ -439,6 +439,9 @@ func collectProduced(workspace string, before map[string]fileStamp, writes ...ma
 		}
 		name := d.Name()
 		if d.IsDir() {
+			if isBrowserRuntimeDir(path) {
+				return filepath.SkipDir
+			}
 			if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
 				files, err := repositoryInputs(path)
 				if err != nil {
@@ -547,7 +550,7 @@ func snapshotWorkspace(workspace string) map[string]fileStamp {
 			return nil
 		}
 		if d.IsDir() {
-			if path != workspace && (pushExcludedDirs[d.Name()] || d.Name() == ".memql-session") {
+			if isBrowserRuntimeDir(path) || (path != workspace && (pushExcludedDirs[d.Name()] || d.Name() == ".memql-session")) {
 				return filepath.SkipDir
 			}
 			return nil

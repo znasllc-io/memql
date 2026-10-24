@@ -19,7 +19,7 @@ import (
 // Numerous small outputs must survive as exact retrievable bytes, including
 // legitimate archive outputs. Credential filtering happens before bundling.
 func TestSession_ManyOutputsRetainExactArchiveMembers(t *testing.T) {
-	fakeApp(t, "claude", "mkdir -p evidence node_modules\ni=0; while [ $i -lt 40 ]; do printf 'evidence %s\\n' $i > evidence/proof-$i.txt; i=$((i+1)); done\nprintf '\\000\\001\\377' > evidence/source.tar\ncp \"$memql_test_config\" evidence/leaked.json\necho dependency > node_modules/cache.txt\n"+quietClaude)
+	fakeApp(t, "claude", "mkdir -p evidence node_modules evidence/runtime-17/Default/Cache\ni=0; while [ $i -lt 40 ]; do printf 'evidence %s\\n' $i > evidence/proof-$i.txt; i=$((i+1)); done\nprintf '\\000\\001\\377' > evidence/source.tar\ncp \"$memql_test_config\" evidence/leaked.json\necho dependency > node_modules/cache.txt\necho state > 'evidence/runtime-17/Local State'\necho preferences > evidence/runtime-17/Default/Preferences\necho cache > evidence/runtime-17/Default/Cache/data\n"+quietClaude)
 	h := newRig(t)
 	end := h.start(t, nil)
 	if end.GetExitCode() != 0 || end.GetError() != "" {

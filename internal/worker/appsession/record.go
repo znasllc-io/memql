@@ -340,6 +340,16 @@ func (p *contentPolicy) mayCarry(op, real string, data, seen []byte) bool {
 			return false
 		}
 	}
+	// Selection is not the only upload path: recheck every ancestor on the
+	// resolved path before carrying a write's bytes or retaining an output.
+	for dir := filepath.Dir(real); ; dir = filepath.Dir(dir) {
+		if isBrowserRuntimeDir(dir) {
+			return false
+		}
+		if dir == p.root || filepath.Dir(dir) == dir {
+			break
+		}
+	}
 	return true
 }
 

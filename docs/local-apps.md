@@ -233,6 +233,15 @@ the former `.memql-session/codex` home in the same workspace. Attach never searc
 another workspace or the user's personal conversation history. Provider state
 and the reference index remain excluded from output retention.
 
+Temporary Chromium user-data directories are also excluded from automatic
+output retention and inline write contents. The worker recognizes `Local State`
+together with a debugging-port file or a `Default`/`Profile ...` preferences
+file, regardless of the directory's task-chosen name. It checks filenames and
+file types without reading profile contents. Screenshots, scripts and receipts
+beside the profile still travel. Put other disposable runtime files under
+`.cache/`; exclusion does not delete local state or change an archive already
+uploaded, so task-owned cleanup remains a separate operation.
+
 ### The deletion is the security control
 
 The per-run bearer **cannot be revoked**. The engine's verify path is
