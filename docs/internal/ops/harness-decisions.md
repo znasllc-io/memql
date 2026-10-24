@@ -63,6 +63,11 @@ otherwise empty stage, recovery scans the current owned step's App receipts.
 An exhaustive scan with no operational App allows that new step to start; a
 completed App without its checkpoint still stops, as does an incomplete scan.
 The legacy recovery DB test and both adapter lanes cover this step boundary.
+If the saved reporting decision names a different step, the native reader first
+requires that exact owned origin to be done. Its run-level error then cannot
+block a later step merely because that step has older App receipts. An unknown
+decision binding or unfinished origin still stops; ordinary continuation gates
+remain responsible for the later step's prior effects.
 The exact pre-upgrade native `invalid delegated work outcome` failure can be
 upgraded from the latest owned operational App's native handover and public
 receipts. Its owner/run/goal/step/rerun/override and ended-success interval must
