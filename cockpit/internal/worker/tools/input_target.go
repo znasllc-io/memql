@@ -578,6 +578,8 @@ func targetModifiers(values []string) ([]string, *memqlv1.Failure) {
 	return mods, nil
 }
 
+// narrowing: GUARDED -- finite integral signed-32-bit coordinates are checked inline;
+// invalid coordinates must be refused, not clamped or replaced with zero.
 func strictInputInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
