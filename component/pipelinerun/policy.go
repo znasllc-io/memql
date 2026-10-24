@@ -73,7 +73,13 @@ func capturePipelinePolicy(ctx context.Context, d Deps, p Pipeline, o Opening) (
 		var err error
 		resolver, err = d.SystemVariable(memql.ContextWithFreshRead(ctx), PolicyResolverVariable)
 		if err != nil {
-			return nil, err
+			if !memql.IsVariableNotFound(err) {
+				return nil, err
+			}
+			// This optional setting has no seeded row. Absence selects the
+			// same portable policy as an explicitly empty value; failed reads
+			// and configured resolver errors must still refuse the opening.
+			resolver = ""
 		}
 		resolver = strings.TrimSpace(resolver)
 	}

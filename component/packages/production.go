@@ -266,7 +266,7 @@ func (b *blobStager) StageDomain(ctx context.Context, domain string, tree fs.FS)
 	}
 	prefix := blobStagePrefix(domain, hash)
 	for name, data := range files {
-		if _, err := b.uploader.Upload(ctx, b.container, prefix+name, data, "text/plain"); err != nil {
+		if _, err := b.uploader.ClusterAssets().Upload(ctx, b.container, prefix+name, data, "text/plain"); err != nil {
 			return "", err
 		}
 	}
@@ -317,7 +317,7 @@ func (b *blobStager) WriteActiveSet(ctx context.Context, set map[string]string) 
 	if err != nil {
 		return err
 	}
-	_, err = b.uploader.Upload(ctx, b.container, ActiveSetPath, raw, "application/json")
+	_, err = b.uploader.ClusterAssets().Upload(ctx, b.container, ActiveSetPath, raw, "application/json")
 	return err
 }
 
@@ -488,7 +488,7 @@ func (p *enginePublisher) resolve(ctx context.Context) error {
 		return nil
 	}
 	if p.uploader != nil {
-		p.blobs = edge.NewAzureBlobWriter(p.uploader, p.container)
+		p.blobs = edge.NewAzureBlobWriter(p.uploader.ClusterAssets(), p.container)
 		return nil
 	}
 	container := azureblob.ContainerFromEnv()
@@ -501,7 +501,7 @@ func (p *enginePublisher) resolve(ctx context.Context) error {
 		return err
 	}
 	p.uploader, p.container = up, container
-	p.blobs = edge.NewAzureBlobWriter(up, container)
+	p.blobs = edge.NewAzureBlobWriter(up.ClusterAssets(), container)
 	return nil
 }
 

@@ -636,9 +636,17 @@ object of installed template names for these roles:
 | `notificationCopy`, `notificationOutcome` | Notification text and settlement |
 | `artifactRetention` | Retention decisions |
 
-Optional roles are `supersession`, `reconciliation`, `maintenance` and
-`evidenceReuse`. Their default behavior preserves affected-PR supersession,
-cancels an invalidated queue ref, and performs no repair or evidence reuse.
+An unset or explicitly empty resolver selects the portable policy. Since
+`0.31.1`, a missing optional variable row has the same meaning as an empty
+value. A failed settings read, an invalid configured resolver or an incomplete
+role map still stops intake before any run or GitHub check is created. If a
+verified webhook has no check, inspect its intake journal before redelivering
+it; a settings failure is different from a failed test run.
+
+Optional roles are `supersession`, `reconciliation`, `maintenance`,
+`evidenceReuse` and, since `0.31.1`, `independentReview`. Their default behavior
+preserves affected-PR supersession, cancels an invalidated queue ref, and performs
+no repair, evidence reuse or ordinary-PR AI review.
 A resolver cannot change merge-group coverage mode away from `full` or grant
 repository write access.
 Source manifests declare commands and artifacts; they cannot replace this binding.

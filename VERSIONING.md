@@ -63,13 +63,17 @@ The version of a MemQL build is the **git tag** it was cut from
 - A release is cut from the reviewed commit on `main` after the prepare pull
   request sets `VERSION` to `X.Y.Z`; see
   [Cutting a release](docs/public/operate/release-cutting.md).
-  Publishing the GitHub Release delivers the native pipeline's release event.
-  The MemQL build server builds the tagged source using
+  In the saved release flow, **Pipelines → Releases → Cut release** selects
+  verified source, checks its version, creates the immutable tag and starts the
+  native release build. The MemQL build server builds that tagged source using
   [`memql-package.yaml`](memql-package.yaml) and retains OCI archives and digest
   metadata in the Library. Separate [candidate publication](docs/public/operate/release-candidates.md)
   verifies their approved destinations and records the published digests.
-  A tag alone does not start a build. To recover a missing delivery,
-  use **Run release** with that tag in MemQL Pipelines.
+  Publishing the completed GitHub Release later delivers a release event that
+  recovers the same release build rather than starting another. A tag created
+  outside this flow does not start a build by itself; the named
+  `pipelinesRunRelease` operation starts its exact tagged source. Reopen a saved
+  release to inspect or resume its recorded operation before starting a new one.
   `make release VERSION=X.Y.Z` remains a local image inspection command.
   Cloud deployment uses the native build's digests, a reviewed overlay pin,
   and ArgoCD reconciliation; see the

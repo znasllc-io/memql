@@ -2,13 +2,108 @@ package pipelinerun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
+
+func TestDeliveryPolicyAbsentOptionalResolverUsesPortableSnapshot(t *testing.T) {
+	p := testPipeline(DeliveryWebhook)
+	explicit, err := capturePipelinePolicy(context.Background(), Deps{
+		SystemVariable: func(context.Context, string) (string, error) { return "", nil },
+	}, p, prOpening())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		value string
+		err   error
+	}{
+		{"absent", "", memql.ErrVariableNotFound},
+		{"wrapped absent with unusable value", "mustNotSelectThisResolver", fmt.Errorf("lookup: %w", memql.ErrVariableNotFound)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reads := 0
+			d := Deps{SystemVariable: func(ctx context.Context, name string) (string, error) {
+				reads++
+				if name != PolicyResolverVariable || !memql.FreshReadFromContext(ctx) {
+					t.Fatal("resolver read lost its exact name or freshness")
+				}
+				return tc.value, tc.err
+			}}
+			snapshot, err := capturePipelinePolicy(context.Background(), d, p, prOpening())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reads != 1 || snapshot.Version != explicit.Version {
+				t.Fatalf("optional absence changed the portable snapshot: reads=%d version=%s", reads, snapshot.Version)
+			}
+			// Recover only the durable snapshot on another replica; neither the
+			// optional setting nor the originating replica's source is needed.
+			recovered, err := readPipelinePolicy(snapshot.Map())
+			if err != nil {
+				t.Fatal(err)
+			}
+			mode, err := policyModeForEvent(context.Background(), recovered, p, Opening{Event: pipelines.EventMergeGroup})
+			if err != nil || mode != pipelines.ModeFull {
+				t.Fatalf("portable queue coverage changed: %q, %v", mode, err)
+			}
+		})
+	}
+}
+
+func TestDeliveryPolicyAbsentOptionalResolverOpensOnce(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	h.integ.Configure(func(d *Deps) {
+		d.SystemVariable = func(context.Context, string) (string, error) {
+			return "", fmt.Errorf("global lookup: %w", memql.ErrVariableNotFound)
+		}
+	})
+	first, err := h.integ.open(context.Background(), h.integ.snapshot(), p, prOpening())
+	if err != nil || !first.Opened || first.Run.Mode != pipelines.ModeAffected || first.Run.PolicySnapshot == nil {
+		t.Fatalf("missing optional resolver blocked the ordinary PR opening: %+v, %v", first, err)
+	}
+	second, err := h.integ.open(context.Background(), h.integ.snapshot(), p, prOpening())
+	if err != nil || second.Opened || second.Run.ID != first.Run.ID || len(h.store.allRuns()) != 1 || len(h.github.createdRuns()) != 1 {
+		t.Fatalf("redelivery did not reuse the exact run and check: %+v, %v", second, err)
+	}
+}
+
+func TestDeliveryPolicyResolverReadFailuresRefuseBeforeCaptureAndEffects(t *testing.T) {
+	for _, failure := range []error{
+		errors.New("storage unavailable"),
+		errors.New("access refused"),
+		errors.New(`variable "MEMQL_PIPELINES_POLICY_RESOLVER" not found`),
+		context.Canceled,
+		context.DeadlineExceeded,
+	} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			h := newHarness(t)
+			p := testPipeline(DeliveryWebhook)
+			h.store.addPipeline(p)
+			sourceReads := 0
+			h.integ.Configure(func(d *Deps) {
+				d.SystemVariable = func(context.Context, string) (string, error) { return "", failure }
+				d.WorkflowSource = func(string, string) (string, error) {
+					sourceReads++
+					return "", errors.New("must not capture after a failed setting read")
+				}
+			})
+			_, err := h.integ.open(context.Background(), h.integ.snapshot(), p, prOpening())
+			if !errors.Is(err, failure) || sourceReads != 0 || len(h.store.allRuns()) != 0 || len(h.github.createdRuns()) != 0 || len(h.github.tokenMints) != 0 {
+				t.Fatalf("setting read failure crossed capture or effect boundary: %v (source reads %d)", err, sourceReads)
+			}
+		})
+	}
+}
 
 func TestDeliveryPolicySnapshotSurvivesAnotherReplicasBundleChange(t *testing.T) {
 	a := workflowSource(t, `@template automation pipelineVersionForEvent { args { eventName string! sha string! tag string! } return "frozen-version" }`)

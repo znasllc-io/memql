@@ -140,6 +140,13 @@ func (u *AzureBlobUploader) beginCapacity(ctx context.Context, container, object
 	if err != nil {
 		return nil, err
 	}
+	return u.beginCapacityForOwner(ctx, container, object, owner)
+}
+
+func (u *AzureBlobUploader) beginCapacityForOwner(ctx context.Context, container, object, owner string) (*storagequota.Guard, error) {
+	if !u.meterWrites {
+		return nil, nil
+	}
 	if err := u.checkRetention(ctx, nil); err != nil {
 		return nil, err
 	}

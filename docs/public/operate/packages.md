@@ -195,6 +195,19 @@ connection and `MEMQL_AZURE_BLOB_CONTAINER`; the local overlay also enables
 container creation for the emulator. Cloud instances supply their own storage
 configuration.
 
+Since `0.31.1`, the native package publisher accounts shared DSL trees, their
+active-set pointer and hosted-site files to the cluster's storage allowance.
+The original caller still authorizes the package and site operations; shared
+storage accounting does not grant access to another organization's deployable.
+Source snapshots retain their existing caller accounting. Capacity, retention
+and concurrent-write checks continue to apply.
+
+This also allows a permitted update to reuse DSL files that the storage
+inventory already recorded as cluster-owned. It does not transfer an existing
+personally owned object to the cluster. If storage still refuses an owner
+mismatch, inspect the destination and deployment journal before retrying;
+changing a ledger owner is not part of package deployment.
+
 ## Upgrading to an engine that reads the language line
 
 Every DSL domain a package ships declares the language it is written in, in

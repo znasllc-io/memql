@@ -59,6 +59,10 @@ func New(_ context.Context) (*AzureBlobUploader, error) {
 // Upload stores data in the given container under objectName and returns the
 // blob's https URL (https://<account>.blob.core.windows.net/<container>/<object>).
 func (u *AzureBlobUploader) Upload(ctx context.Context, container, objectName string, data []byte, contentType string) (string, error) {
+	return u.upload(ctx, container, objectName, data, contentType, false)
+}
+
+func (u *AzureBlobUploader) upload(ctx context.Context, container, objectName string, data []byte, contentType string, clusterAsset bool) (string, error) {
 	if u == nil || u.client == nil {
 		return "", fmt.Errorf("azure blob uploader not initialized")
 	}
@@ -70,7 +74,14 @@ func (u *AzureBlobUploader) Upload(ctx context.Context, container, objectName st
 	if objectName == "" {
 		return "", fmt.Errorf("azure blob object name is required")
 	}
-	capacity, err := u.beginCapacity(ctx, container, objectName)
+	owner, err := storageOwner(ctx, objectName)
+	if err != nil {
+		return "", err
+	}
+	if clusterAsset {
+		owner = ""
+	}
+	capacity, err := u.beginCapacityForOwner(ctx, container, objectName, owner)
 	if err != nil {
 		return "", err
 	}
