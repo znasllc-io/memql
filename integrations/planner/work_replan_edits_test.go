@@ -137,3 +137,52 @@ automation summariseTickets {
 		t.Fatalf("split lost the prefix or downstream consumer: %s", got)
 	}
 }
+
+// A replanner may need to combine retained bindings into a new agent input.
+// Exercise the actual compiler and Gate 1: object-literal call syntax remains
+// refused, while an unfinished object binding can be serialized without
+// changing or replaying the completed prefix.
+func TestReplanSerializesRetainedObjectThroughUnfinishedBinding(t *testing.T) {
+	const original = `@template
+automation summariseTickets {
+  gather := logic savedEvidence()
+  draft := logic savedEvidence()
+  deliver := draft
+}`
+	for _, tc := range []struct {
+		name, replacement string
+		valid             bool
+	}{
+		{"removed object call", `draft := toString({evidence: gather})`, false},
+		{"bound object", "retainedContext := {evidence: gather}\n  draft := toString(retainedContext)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := replanFixture()
+			rc.TemplateName = "summariseTickets"
+			rc.Template = []memql.SandboxConstruct{
+				{Kind: "automation", Name: rc.TemplateName, Source: original},
+				{Kind: "logic", Name: "savedEvidence", Source: `logic savedEvidence { return {reply: "evidence"} }`},
+			}
+			eng := &replanEngine{answer: map[string]any{"edits": []replanSourceEdit{{Find: "draft := logic savedEvidence()", Replace: tc.replacement}}, "goalAlreadyServed": false}}
+			rec := &remedyRecorder{context: rc}
+			if !newRemedy(eng, rec).Replan(context.Background(), "v1:work:run:r1", "u1", "draft", "use the retained evidence") {
+				t.Fatal("replan did not install or record its refusal")
+			}
+			if len(eng.aiCalls) != 1 {
+				t.Fatalf("generation allowance changed: %v", eng.aiCalls)
+			}
+			if !tc.valid {
+				if len(rec.installed) != 0 || len(eng.wrote("createAuthoringBundle")) != 0 || len(rec.asked) != 1 || !strings.Contains(rec.asked[0], "object-literal call args are removed") {
+					t.Fatalf("invalid call escaped the source gate: installed=%v asked=%v", rec.installed, rec.asked)
+				}
+				return
+			}
+			if len(rec.installed) != 1 || len(rec.asked) != 0 || rec.installed[0].ResumeAt != "retainedContext" {
+				t.Fatalf("valid binding was not installed after the prefix: installed=%v asked=%v", rec.installed, rec.asked)
+			}
+			if got := strings.Join(rec.installed[0].StepKeys, ","); got != "gather,retainedContext,draft,deliver" {
+				t.Fatalf("completed binding or downstream consumer changed: %s", got)
+			}
+		})
+	}
+}
