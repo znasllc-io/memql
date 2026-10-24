@@ -151,6 +151,20 @@ Reusable catalog (constructs already available to compose -- prefer these):
    later statement reads a completed step's value by the name that step's
    statement binds, exactly as it reads any other.
 
+6. Use current MemQL call syntax. Builtin and logic calls take named arguments
+   directly, for example `builtin runAgentTurn(agentId: "...", prompt: text)`;
+   never wrap their argument list in an object literal. Expression functions
+   such as `toString` accept an expression, but `toString({ ... })` is rejected
+   as the removed object-literal call form. To serialize an assembled object,
+   bind it in a new unfinished statement, then serialize that binding:
+
+   `retainedContext := {evidence: completedBinding}`
+   `contextText := toString(retainedContext)`
+
+   Use actual completed binding names from the original program. Keep both
+   new statements after the fixed prefix. Do not serialize by inventing named
+   parameters for `toString`, or change a completed statement to make room.
+
 # Output
 
 {{ if .patchExisting }}

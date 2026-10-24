@@ -284,6 +284,11 @@ Missing or changed source stops recovery before inference; journal previews
 are never a substitute for the original program. Generated edits retain the
 normal caller trust and approval gates.
 
+Replan instructions include the current call syntax and show how to assemble a
+new object after the completed steps before converting it to text. Invalid
+generated syntax still stops at compilation; instructions do not bypass that
+gate or grant another automatic generation attempt.
+
 The Spine also declares invocation substitutions that recovery must refuse.
 For example, replacing `runAgentTurn` with `ai` for the same research prompt
 would remove tool execution. The validator compares compiled calls, including

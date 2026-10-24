@@ -1168,6 +1168,18 @@ oversized or crowded-out source previews explicitly require reconciliation befor
 an uncertain write. Source reads fail closed. Neither reconstruction nor a new
 binding grants permission to replay a completed effect.
 
+The authored `replanGap` prompt also states the current call grammar. An
+observed replan tried `toString({ ... })`, which the language correctly refuses
+as the removed object-literal argument form. New assembled objects must be bound
+after the completed prefix and serialized through that binding. This is prompt
+guidance, not a compiler relaxation, source rewrite, extra automatic model
+attempt or permission to change completed definitions.
+`TestReplanSerializesRetainedObjectThroughUnfinishedBinding` exercises both the
+refused form and the valid replacement through compilation, Gate 1 and replan
+installation. A valid replacement resumes at the new binding and preserves its
+completed input and downstream consumer. This establishes accepted syntax and
+prefix preservation, not that every model-generated replan will be valid.
+
 Regression coverage includes `unfinished_step_test.go` at the real failure path
 (zero classifier calls, quoted vendor errors, terminal precedence and retry
 limits); `unfinished_operation_db_test.go` across independent engines through
