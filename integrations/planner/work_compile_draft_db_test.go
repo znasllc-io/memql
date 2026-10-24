@@ -270,8 +270,8 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	}
 	// The node's write-gate pool (memql#6022), as its database opens one: the work
 	// integration takes its decision gates there and refuses a plug-in built without
-	// it. forkRun takes none today; a test that builds the integration hands it the
-	// pool all the same, so the day it does the test fails for its own reason.
+	// it. forkRun holds the goal lifecycle gate while validating the owner and
+	// opening the derived run, so this fixture needs the same pool as a serving node.
 	gates, gerr := database.NewGatePool(dbtest.DSN(), 0)
 	if gerr != nil {
 		t.Fatal(gerr)
