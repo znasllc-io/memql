@@ -5,7 +5,7 @@ import { Wizard } from "../../../kit/Wizard";
 import type { Stop } from "../../../kit/Rail";
 import { formatMoment } from "../../../kit/format";
 import type { Act } from "../../../kit/ActionBar";
-import { body, readCandidate } from "./model";
+import { body } from "./model";
 import { planKey, readAssemblies, readProfiles, readBuildRuns, runFits, type AssemblyPlan, type BuildRun } from "./assembly";
 import { useReleaseRead } from "./useReleaseRead";
 import type { ReleaseQueries } from "./ReleasesSection";
@@ -43,7 +43,8 @@ export function PrepareRelease({ query, connected, visible, back, prepared }: { 
         : await query.releaseAssembleCandidate({ planName: plan.name, runs });
       const id = body(result).candidateId;
       if (typeof id !== "string" || !/^sha256:[a-f0-9]{64}$/.test(id)) throw new Error("The cluster did not return a release identity.");
-      readCandidate(result, id);
+      // Assembly can reopen an approved candidate without projecting its approval.
+      // The candidate page reads the authoritative record before offering actions.
       if (mounted.current) prepared(id);
     } catch (e) {
       if (mounted.current) setError(e instanceof Error ? e.message : String(e));

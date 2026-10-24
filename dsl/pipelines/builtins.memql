@@ -281,3 +281,8 @@ builtin pipelinesChannelAllow {
 /// no caller-selected repository, members, verdict, or check identity.
 @executor("integration.pipelines.reportMergeGroupReview")
 builtin pipelineReportMergeGroupReview { }
+
+/// Only an opted-in captured pipeline workflow may invoke this exact-head
+/// independent review. Browser calls and caller-supplied verdicts are refused.
+@executor("integration.pipelines.reviewPullRequest")
+builtin pipelineReviewPullRequest { }

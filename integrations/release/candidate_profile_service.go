@@ -23,9 +23,10 @@ func (i *Integration) handleCandidateProfiles(ctx context.Context, _ map[string]
 		Runs       []string `json:"runs"`
 	}
 	type profileView struct {
-		Name          string          `json:"name"`
-		Configuration string          `json:"configuration"`
-		Components    []componentView `json:"components"`
+		Name          string                   `json:"name"`
+		Configuration string                   `json:"configuration"`
+		Components    []componentView          `json:"components"`
+		Build         *releaseBuildProfileView `json:"build,omitempty"`
 	}
 	out := []profileView{}
 	for _, profile := range profiles {
@@ -34,6 +35,9 @@ func (i *Integration) handleCandidateProfiles(ctx context.Context, _ map[string]
 			return nil, err
 		}
 		view := profileView{Name: profile.Name, Configuration: digest, Components: []componentView{}}
+		if b := profile.Build; b != nil {
+			view.Build = &releaseBuildProfileView{b.Component, b.Run, b.Branch}
+		}
 		for _, c := range profile.Components {
 			view.Components = append(view.Components, componentView{c.Component, c.Repository, c.Runs})
 		}

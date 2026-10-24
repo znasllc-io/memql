@@ -55,6 +55,97 @@ token, a secret value or a log line.
 
 ---
 
+## The delivery lifecycle
+
+**A successful check, a published release and a running installation are three
+different results.** `main` can accumulate verified changes while an installation
+continues running its selected release. A merge does not, by itself, select a
+new release or authorize installation.
+
+```mermaid
+flowchart TD
+    CHANGE["PR opened or updated"] --> CHECK["Check the exact proposed change"]
+    CHECK --> REVIEW["Required tests and independent review"]
+    REVIEW --> QUEUE["Protected merge queue checks the combined change"]
+    QUEUE --> MAIN["Merge to main and verify"]
+    MAIN -. "Operator chooses a source and version" .-> BUILD["Build the selected release"]
+    BUILD --> CANDIDATE["Review retained artifacts and publication destinations"]
+    CANDIDATE --> PUBLISH["Approve and publish the exact candidate"]
+    PUBLISH --> CATALOG["Published release is available"]
+    CATALOG -. "Operator selects an installation" .-> PLAN["Review the saved installation plan"]
+    PLAN --> APPLY["Apply, observe and verify runtime health"]
+```
+
+The dotted arrows are explicit operator decisions. The solid arrows remain
+subject to their configured checks, permissions and failure handling; they are
+not a promise that every repository has enabled automatic merge or publication.
+In `0.31.0`, native review requires a governed `deliver_change` proposal.
+Version `0.31.1` adds an optional [ordinary PR review route](#independent-review-for-ordinary-pull-requests).
+An installation must enable and qualify its review workflow for ordinary PRs,
+native proposals and mixed queue groups before making the review check required.
+An existing automatic GitOps or package feed can reconcile changes to the source
+it watches. Check that feed's settings before merging an installation update;
+the separation above does not disable independently configured automation.
+
+| Trigger | Purpose | What it does not prove |
+|---|---|---|
+| PR opened or new commits pushed | Verify that exact head; use affected coverage only when the dependency and change information is complete | That a later head or combined queue tree passes |
+| Merge-queue group created | Verify the exact combined tree and required member reviews | That GitHub has merged it |
+| Push to the default branch | Record verification of the merged source | That a release was selected or installed |
+| Scheduled run | Perform the checks selected by the installed schedule and policy | Permission to change source, capacity or credentials |
+| Explicit release build | Build artifacts from the selected immutable source and version | That the artifacts are published |
+| Candidate publication | Publish approved artifacts and verify their destinations | That any installation has updated |
+| Explicit installation selection | Prepare and review a saved plan; explicitly apply it, then observe the actual runtime | Completion until its identity, revision, images and health agree |
+
+Use **Pipelines** for repositories, checks and runs; **Pipelines → Releases** for
+release candidates and publication; and **Cluster → Updates** for the installed
+version and installation decisions. **Nexus** explains goals, actions, decisions
+and attention needed. **Deployables** describes the applications a source
+produces and links to their delivery information. The detailed controls and
+requirements are documented in [Release cutting](release-cutting.md) and
+[Release candidates](release-candidates.md).
+
+### Automated repair is an installed policy
+
+The engine supplies the execution and permission boundaries. The installation's
+DSL decides whether a failure should be diagnosed, what evidence is sufficient,
+which review recipe to use, and when to stop. Installing the engine alone does
+not enable a DevOps agent or grant it upstream write access.
+
+```mermaid
+flowchart TD
+    FAIL["A check fails"] --> POLICY{"Installed policy permits diagnosis and has enough evidence?"}
+    POLICY -->|No| ATTENTION["Explain what needs attention"]
+    POLICY -->|Yes| DIAGNOSE["AI diagnoses the failure and proposes a bounded repair"]
+    DIAGNOSE --> EVIDENCE["Independent review checks the evidence and scope"]
+    EVIDENCE --> ENOUGH{"Evidence and scope accepted?"}
+    ENOUGH -->|No| ATTENTION
+    ENOUGH -->|Yes| AUTH{"Current maintainer authority permits the change?"}
+    AUTH -->|No| REQUEST["Request maintainer approval or record refusal"]
+    AUTH -->|Yes| PROPOSAL["Draft exact changes against current source"]
+    PROPOSAL --> REVIEW["Independent review of the exact proposed bytes"]
+    REVIEW --> ACCEPTED{"Accepted?"}
+    ACCEPTED -->|No| ATTENTION
+    ACCEPTED -->|Yes| PR["Create a repair PR"]
+    PR --> CHECKS["Required tests, review and protected queue"]
+    CHECKS --> OUTCOME["Record merge, refusal or attention needed"]
+```
+
+The policy must state its attempt, evidence and scope limits. Missing evidence,
+an uncertain external effect, rejected review or revoked authority is not
+permission to retry blindly. Recovery observes or resumes a saved operation
+under the native contract; it must not invent a new successful result. AI may
+explain a diagnosis and propose changes, but cannot grant permission, replace
+test evidence or declare that a deployment is healthy. The journal records
+these decisions and their evidence in readable terms; it is not an unfiltered
+record of model reasoning.
+
+Owners and developers on another host may request changes to their own
+deployables. If the request also needs a core-engine change, that part needs
+the core repository maintainer's authority. Being an owner of one installation
+does not make the requester an owner of the upstream repository. The next
+section describes the enforced request and review boundaries.
+
 ## Repository maintenance
 
 Owners and developers can request a scoped change through Ask or a repository's
@@ -192,6 +283,43 @@ write is unresolved. Branch writes use deterministic commits with the exact
 source parent, refuse force pushes, and require read-back. A replica recovering
 a lost response observes the same commit instead of repeating the branch write.
 An unresolved write fails the step and retains its evidence for reconciliation.
+
+### Independent review for ordinary pull requests
+
+Since `0.31.1`, an installed policy can select an `independentReview` recipe
+that names a captured review prompt. The engine default leaves this role empty.
+The installed workflow calls `pipelineReviewPullRequest` without arguments on
+its claimed PR run; the caller cannot choose another repository, commit,
+owner or verdict.
+
+The native adapter verifies current repository authority and reads the complete
+changed files from immutable Git objects. An ordinary PR receives a tool-free
+review of those bytes through the normal model admission policy. This creates
+no change request and grants no authority to edit code, merge, release or deploy.
+A governed proposal reuses its original valid review journal; a rejected,
+partial or changed native journal cannot fall back to the ordinary route.
+
+The run saves its evidence and model attempt before review. Rejection or an
+unconfirmed result requires attention, rather than another automatic model call.
+An accepted review may report the App-owned `MemQL / review` check for that exact
+head after fresh authority checks. The reporting attempt is saved first; an
+uncertain response is reconciled by observing that same check, without creating
+a second one.
+
+Queue validation resolves every member to its current native or ordinary proof
+and checks the complete ordered change in the synthetic merge tree. Unrelated
+advances of `main` preserve a review only when ancestry and a disjoint target
+change are proved; the reviewed head, merge base, file bytes, prompt, policy and
+source authority must still agree. Overlapping changes, additional merge
+resolutions or changed membership require fresh evidence. Mandatory tests of
+the combined tree remain separate.
+
+Evidence is bounded to 256 changed files, 1 MiB per file and 4 MiB of changed
+content. Incomplete trees, unsupported binary/link/submodule changes or
+ambiguous history refuse review. Before changing GitHub's required review
+policy, qualify ordinary PRs, governed proposals and a mixed queue group with
+the actual installed App, including moved-head and changed-membership refusal.
+Installing the engine does not enable this role or change GitHub protections.
 
 ## Connecting a pipeline
 

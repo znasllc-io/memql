@@ -631,6 +631,9 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 	if patch.CheckRunID != nil {
 		r.CheckRunID = *patch.CheckRunID
 	}
+	if patch.ReviewEvidence != nil {
+		r.ReviewEvidence = *patch.ReviewEvidence
+	}
 	if patch.SelectionFacts != nil {
 		r.SelectionFacts = *patch.SelectionFacts
 	}

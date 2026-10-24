@@ -9,6 +9,7 @@ export interface AssemblyPlan {
   components: { name: string; repository: string; runs: string[]; artifacts: { name: string; run: string; stepKey: string; path: string; kind: string; platform: string }[] }[];
   targets: Target[];
   compatibility: { component: string; requires: string; minVersion: string; maxExclusive: string }[];
+  build?: { component: string; run: string; branch: string };
 }
 export interface BuildRun { id: string; workRunId: string; repository: string; commit: string; title: string; finishedAt: string; event: string; releaseTag: string }
 function object(value: unknown): Record<string, unknown> {
@@ -72,7 +73,13 @@ export function readProfiles(result: Result): AssemblyPlan[] {
     });
     const aliases = components.flatMap((c) => c.runs);
     if (!components.length || components.some((c) => !c.runs.length) || new Set(components.map((c) => c.name)).size !== components.length || new Set(aliases.map((a) => a.toLowerCase())).size !== aliases.length) throw new Error("The release profile has conflicting run inputs.");
-    return { kind: "profile", name, configuration, components, targets: [], compatibility: [] };
+    let build: AssemblyPlan["build"];
+    if (p.build !== undefined) {
+      const b = object(p.build);
+      build = { component: text(b.component), run: text(b.run), branch: text(b.branch) };
+      if (components.length !== 1 || components[0]!.name !== build.component || components[0]!.runs.length !== 1 || components[0]!.runs[0] !== build.run) throw new Error("The release build profile has conflicting inputs.");
+    }
+    return { kind: "profile", name, configuration, components, targets: [], compatibility: [], ...(build ? { build } : {}) };
   });
 }
 export function planKey(plan: AssemblyPlan): string { return `${plan.kind}:${plan.name}`; }

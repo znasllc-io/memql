@@ -16,6 +16,21 @@ beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("release review", () => {
+  it.each(["sealed", "unavailable"])("reads archived release history with %s catalog evidence without offering effects", async (catalog) => {
+    const f = releaseFixture("archived");
+    f.state.record.catalog = catalog === "sealed" ? { state: "sealed", approvalId: "approval-exact", catalogDigest: `sha256:${"7".repeat(64)}` } : { state: "unavailable" };
+    // Empty histories must not accidentally make an archived record retireable.
+    render(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByText("Archived");
+    await open();
+    await screen.findByText(/build inputs are archived/);
+    if (catalog === "sealed") await screen.findByText("In release catalog");
+    else expect(screen.queryByText("In release catalog")).toBeNull();
+    for (const name of ["Approve release", "Retire release", "Resume verification", "Add to release catalog"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    await destination();
+    expect(screen.queryByRole("button", { name: /Publish artifact|Reconcile publication/ })).toBeNull();
+    expect(f.state.calls.some((c) => ["approve", "retire", "prepare", "publish", "seal"].includes(c.kind))).toBe(false);
+  });
   it("keeps candidate and source references optional while preserving exact copying and approval", async () => {
     const f = releaseFixture();
     const writeText = vi.fn().mockResolvedValue(undefined);

@@ -282,3 +282,11 @@ automation pipelineEvidenceReuse {
  args { event string! sourceEvent string! sourceMode string! ageSeconds int! }
  return false
 }
+
+/// Independent review is an installed-policy opt-in. An empty reviewer leaves
+/// legacy pipeline behavior unchanged and never starts a model call.
+@template
+automation pipelineIndependentReviewPolicy {
+  args { repository string! pipelineId string! ownerUserId string! }
+  return ""
+}

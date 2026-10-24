@@ -132,6 +132,7 @@ import {
 } from "../test/fleet/routingFixtures";
 import { ReleaseBrowser } from "../src/apps/cluster/releases/ReleasesSection";
 import { fileReleaseFixture, releaseFixture } from "../test/cluster/releaseFixtures";
+import { releaseJourneyFixture, intentId as releaseIntentId } from "../test/cluster/releaseJourneyFixtures";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
 import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
@@ -1240,6 +1241,13 @@ const VIEWS: Record<
   "releases-profile": { render: () => <ReleasePreview profile /> },
   "releases-catalog": { render: () => <ReleasePreview catalog /> },
   "releases-catalog-error": { render: () => <ReleasePreview catalog failedSeal /> },
+  "release-cut": { render: () => <ReleaseJourneyPreview phase="new" /> },
+  "release-cut-version": { render: () => <ReleaseJourneyPreview phase="prepared" /> },
+  "release-cut-building": { render: () => <ReleaseJourneyPreview phase="building" /> },
+  "release-cut-review": { render: () => <ReleaseJourneyPreview phase="ready" /> },
+  "release-cut-uncertain": { render: () => <ReleaseJourneyPreview phase="uncertain" /> },
+  "release-cut-published": { render: () => <ReleaseJourneyPreview phase="published" /> },
+  "release-cut-error": { render: () => <ReleaseJourneyPreview phase="prepared" unavailable /> },
   "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
@@ -2068,6 +2076,16 @@ function ReleasePreview({ empty = false, fail = false, pending = false, file = f
     return f;
   });
   return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected /></div>;
+}
+
+function ReleaseJourneyPreview({ phase, unavailable = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean }) {
+  const [fixture] = useState(() => {
+    const f = releaseJourneyFixture(phase);
+    f.journey.failedGet = unavailable;
+    if (phase === "uncertain") { f.journey.build.reason = "The build start response was lost. Its recorded attempt must be checked before continuing."; f.journey.build.pipelineRunId = ""; f.journey.build.workRunId = ""; }
+    return f;
+  });
+  return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected openRequest={phase === "new" ? undefined : { intentId: releaseIntentId, revision: 1 }} /></div>;
 }
 
 function App() {

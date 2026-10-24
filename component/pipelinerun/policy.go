@@ -30,10 +30,11 @@ var policyRoles = map[string]string{
 }
 
 var optionalPolicyRoles = map[string]string{
-	"supersession":   "pipelineSupersessionPolicy",
-	"reconciliation": "pipelineRunReconciliation",
-	"maintenance":    "pipelineMaintenancePolicy",
-	"evidenceReuse":  "pipelineEvidenceReuse",
+	"supersession":      "pipelineSupersessionPolicy",
+	"reconciliation":    "pipelineRunReconciliation",
+	"maintenance":       "pipelineMaintenancePolicy",
+	"evidenceReuse":     "pipelineEvidenceReuse",
+	"independentReview": "pipelineIndependentReviewPolicy",
 }
 
 // Capture admits the union; each invocation below receives only its own native
@@ -42,7 +43,7 @@ var optionalPolicyRoles = map[string]string{
 func pipelinePolicyOperations() map[string]workflowhost.Operation {
 	out := map[string]workflowhost.Operation{}
 	for _, name := range []string{
-		"pipelineReportMergeGroupReview", "pipelineWorkflowFacts", "pipelineSkipStep", "pipelineReportPublish", "pipelineReportObserve",
+		"pipelineReviewPullRequest", "pipelineReportMergeGroupReview", "pipelineWorkflowFacts", "pipelineSkipStep", "pipelineReportPublish", "pipelineReportObserve",
 		"pipelineRetentionSweepPage", "integration.pipelines.executeStep", "integration.pipelines.reportProgress",
 	} {
 		out[name] = func(context.Context, map[string]any) (any, error) {

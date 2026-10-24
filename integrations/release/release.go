@@ -64,6 +64,7 @@ type Integration struct {
 	installation        atomic.Pointer[installation.Preparer]
 	installationHealth  atomic.Pointer[installationHealthBinding]
 	installationOverlay atomic.Pointer[overlayBinding]
+	releaseBuild        atomic.Pointer[releaseBuildBinding]
 }
 
 // NewIntegration wires the pieces. Every collaborator is a field rather than a
@@ -89,6 +90,13 @@ func (i *Integration) IntegrationName() string { return "release" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out := append([]memql.IntegrationCapability{
+		{Name: "prepareBuild", Description: "Retain an owner-selected verified source and captured release recipes without external effects.", Handler: i.handleBuildPrepare},
+		{Name: "builds", Description: "Read this owner's saved release journeys.", Handler: i.handleBuildList},
+		{Name: "getBuild", Description: "Read one original-owner release journey without remote effects.", Handler: i.handleBuildGet},
+		{Name: "startBuild", Description: "Run a saved release recipe with immutable tag and exact-source build fences.", Handler: i.handleBuildStart},
+		{Name: "observeBuild", Description: "Observe the exact saved release build without dispatching work or preparing a candidate.", Handler: i.handleBuildObserve},
+		{Name: "resumeBuild", Description: "Reconcile a saved release and prepare its verified candidate without replacing unknown effects.", Handler: i.handleBuildResume},
+		{Name: "publishBuild", Description: "Run the captured publication recipe for one separately approved release candidate.", Handler: i.handleBuildPublish},
 		{Name: "proposeInstallation", Description: "Propose exact signed image pins in the installation repository for review; never merge or install.", Handler: i.handleInstallationPropose},
 		{Name: "observeInstallationProposal", Description: "Verify the exact proposed pull request and make its merged commit selectable.", Handler: i.handleInstallationProposalObserve},
 		{Name: "installationHealth", Description: "Read authenticated receiving identity and verified migration readiness for a bounded continuity probe.", Handler: i.handleInstallationHealth},
@@ -152,6 +160,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out = append(out, workflowhost.ScopedCapabilities((&candidateAssemblyScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateDraftScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&overlayScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities(buildCaptureOperations(false))...)
 	out = append(out, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"releaseRetentionArchiveInputs": nil})...)
 	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }

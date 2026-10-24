@@ -55,6 +55,10 @@ type Opening struct {
 	FailedOnly       bool
 	DeliveryID       string
 	InboundRequestID string
+	// beforeCreate is a native caller's final local source/lease fence. It
+	// cannot be supplied by a manifest or wire argument and performs no
+	// provider calls while the ordinary opening gate is held.
+	beforeCreate func(context.Context) error
 }
 
 // An explicit release retry keeps its manual origin for admission by another
@@ -304,6 +308,11 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		}
 
 		// The create, and nothing else of GitHub's: see above.
+		if o.beforeCreate != nil {
+			if err := o.beforeCreate(gctx); err != nil {
+				return err
+			}
+		}
 		w := writeCheckRun(gctx, d, p, run, ReportFor(p, run, nil), token, tokenErr)
 		run.CheckRunID, run.CheckRunState = w.ID, w.State
 		if w.Note != nil {

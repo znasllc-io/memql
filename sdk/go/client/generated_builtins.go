@@ -5912,6 +5912,28 @@ func ReleaseAssembleProfileCandidateBuild(args ReleaseAssembleProfileCandidateAr
 	return b.String()
 }
 
+// ReleaseBuilds -- Read this owner's saved release journeys, including interrupted attempts.
+type ReleaseBuildsArgs struct {
+	Limit int
+}
+
+// ReleaseBuilds calls the engine builtin releaseBuilds.
+func (qc *QueryClient) ReleaseBuilds(ctx context.Context, args ReleaseBuildsArgs) (*Result, error) {
+	call := ReleaseBuildsBuild(args)
+	return qc.executeNamed(ctx, "releaseBuilds", call)
+}
+
+func ReleaseBuildsBuild(args ReleaseBuildsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseBuilds(")
+	if args.Limit != 0 {
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCancelInstallation -- Cancel the original operator's current plan only before application begins.
 type ReleaseCancelInstallationArgs struct {
 	InstallationId string
@@ -6225,6 +6247,26 @@ func ReleaseDiscoverPublishedCandidatesBuild(args ReleaseDiscoverPublishedCandid
 	return b.String()
 }
 
+// ReleaseGetBuild -- Read a saved release's current candidate approval and available actions without remote effects.
+type ReleaseGetBuildArgs struct {
+	IntentId string
+}
+
+// ReleaseGetBuild calls the engine builtin releaseGetBuild.
+func (qc *QueryClient) ReleaseGetBuild(ctx context.Context, args ReleaseGetBuildArgs) (*Result, error) {
+	call := ReleaseGetBuildBuild(args)
+	return qc.executeNamed(ctx, "releaseGetBuild", call)
+}
+
+func ReleaseGetBuildBuild(args ReleaseGetBuildArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseGetBuild(")
+	b.WriteString("intentId: ")
+	b.WriteString(quoteMemQL(args.IntentId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseGetCandidate -- Read one exact release candidate owned by the caller.
 type ReleaseGetCandidateArgs struct {
 	CandidateId string
@@ -6330,6 +6372,26 @@ func ReleaseListPublishedCandidatesBuild(args ReleaseListPublishedCandidatesArgs
 	return b.String()
 }
 
+// ReleaseObserveBuild -- Observe the exact saved tag and build; never dispatch work or assemble a candidate.
+type ReleaseObserveBuildArgs struct {
+	IntentId string
+}
+
+// ReleaseObserveBuild calls the engine builtin releaseObserveBuild.
+func (qc *QueryClient) ReleaseObserveBuild(ctx context.Context, args ReleaseObserveBuildArgs) (*Result, error) {
+	call := ReleaseObserveBuildBuild(args)
+	return qc.executeNamed(ctx, "releaseObserveBuild", call)
+}
+
+func ReleaseObserveBuildBuild(args ReleaseObserveBuildArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseObserveBuild(")
+	b.WriteString("intentId: ")
+	b.WriteString(quoteMemQL(args.IntentId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseObserveInstallation -- Observe the selected installation; controller health is not a completion receipt.
 type ReleaseObserveInstallationArgs struct {
 	InstallationId string
@@ -6352,6 +6414,38 @@ func ReleaseObserveInstallationBuild(args ReleaseObserveInstallationArgs) string
 	}
 	b.WriteString("planId: ")
 	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleasePrepareBuild -- Retain a verified selected source and installed recipes. No tag, build, approval or publication effect.
+type ReleasePrepareBuildArgs struct {
+	ProfileName           string
+	PipelineId            string
+	ExpectedConfiguration string
+}
+
+// ReleasePrepareBuild calls the engine builtin releasePrepareBuild.
+func (qc *QueryClient) ReleasePrepareBuild(ctx context.Context, args ReleasePrepareBuildArgs) (*Result, error) {
+	call := ReleasePrepareBuildBuild(args)
+	return qc.executeNamed(ctx, "releasePrepareBuild", call)
+}
+
+func ReleasePrepareBuildBuild(args ReleasePrepareBuildArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releasePrepareBuild(")
+	b.WriteString("profileName: ")
+	b.WriteString(quoteMemQL(args.ProfileName))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("pipelineId: ")
+	b.WriteString(quoteMemQL(args.PipelineId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedConfiguration: ")
+	b.WriteString(quoteMemQL(args.ExpectedConfiguration))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6458,6 +6552,32 @@ func ReleasePromoteCandidateDraftBuild(args ReleasePromoteCandidateDraftArgs) st
 	return b.String()
 }
 
+// ReleasePublishBuild -- Publish only the saved candidate's separate approval using its captured, scoped product recipe.
+type ReleasePublishBuildArgs struct {
+	IntentId   string
+	ApprovalId string
+}
+
+// ReleasePublishBuild calls the engine builtin releasePublishBuild.
+func (qc *QueryClient) ReleasePublishBuild(ctx context.Context, args ReleasePublishBuildArgs) (*Result, error) {
+	call := ReleasePublishBuildBuild(args)
+	return qc.executeNamed(ctx, "releasePublishBuild", call)
+}
+
+func ReleasePublishBuildBuild(args ReleasePublishBuildArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releasePublishBuild(")
+	b.WriteString("intentId: ")
+	b.WriteString(quoteMemQL(args.IntentId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleasePublishCandidate -- Publish one artifact only under its exact durable candidate approval.
 type ReleasePublishCandidateArgs struct {
 	CandidateId string
@@ -6530,6 +6650,26 @@ func ReleaseReadDiscoveredCandidateBuild(args ReleaseReadDiscoveredCandidateArgs
 	}
 	b.WriteString("catalogDigest: ")
 	b.WriteString(quoteMemQL(args.CatalogDigest))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseResumeBuild -- Resume a saved recipe using native effect fences; unknown requests are reconciled, never replaced.
+type ReleaseResumeBuildArgs struct {
+	IntentId string
+}
+
+// ReleaseResumeBuild calls the engine builtin releaseResumeBuild.
+func (qc *QueryClient) ReleaseResumeBuild(ctx context.Context, args ReleaseResumeBuildArgs) (*Result, error) {
+	call := ReleaseResumeBuildBuild(args)
+	return qc.executeNamed(ctx, "releaseResumeBuild", call)
+}
+
+func ReleaseResumeBuildBuild(args ReleaseResumeBuildArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseResumeBuild(")
+	b.WriteString("intentId: ")
+	b.WriteString(quoteMemQL(args.IntentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -6665,6 +6805,26 @@ func (qc *QueryClient) ReleaseSources(ctx context.Context, args ReleaseSourcesAr
 func ReleaseSourcesBuild(args ReleaseSourcesArgs) string {
 	_ = args
 	return "builtin releaseSources()"
+}
+
+// ReleaseStartBuild -- Explicitly start the selected immutable tag and exact full release build through the captured product recipe.
+type ReleaseStartBuildArgs struct {
+	IntentId string
+}
+
+// ReleaseStartBuild calls the engine builtin releaseStartBuild.
+func (qc *QueryClient) ReleaseStartBuild(ctx context.Context, args ReleaseStartBuildArgs) (*Result, error) {
+	call := ReleaseStartBuildBuild(args)
+	return qc.executeNamed(ctx, "releaseStartBuild", call)
+}
+
+func ReleaseStartBuildBuild(args ReleaseStartBuildArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseStartBuild(")
+	b.WriteString("intentId: ")
+	b.WriteString(quoteMemQL(args.IntentId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // ReplayRun -- Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}.

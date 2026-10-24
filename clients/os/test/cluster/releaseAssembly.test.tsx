@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
 import { readTheBar } from "../readTheBar";
-import { buildRun, releaseFixture, releaseResult } from "./releaseFixtures";
+import { buildRun, releaseFixture, releaseId, releaseResult } from "./releaseFixtures";
 
 // A fake Date, so reading a bar costs nothing: the release reads poll on real timers.
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
@@ -19,6 +19,31 @@ async function start() {
 async function choose() { fireEvent.click(await screen.findByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ })); await screen.findByText("Selected runs"); }
 
 describe("release preparation", () => {
+  it.each(["assembly", "profile"])("reopens an approved %s from the native effect response and reads its approval separately", async (kind) => {
+    const f = releaseFixture("approved");
+    // Native assembly replay returns its ledger record, without the approval
+    // projection supplied by releaseGetCandidate. Keep the builtin node envelope.
+    const assemble = async (args: unknown) => {
+      f.state.calls.push({ kind: "reopen", args });
+      const { approvalId: _approval, ...record } = f.state.record;
+      return releaseResult({ candidate: { id: "candidate", concept: "v1:release:candidate", createdAt: "2026-10-06T18:00:00Z", payload: record } });
+    };
+    f.query.releaseAssembleCandidate = assemble;
+    f.query.releaseAssembleProfileCandidate = assemble;
+    if (kind === "profile") f.state.profiles = [{ name: "engine", configuration: `sha256:${"4".repeat(64)}`, components: [{ name: "engine", repository: "example/memql", runs: ["release"] }] }];
+    render(<ReleaseBrowser query={f.query} connected />);
+    if (kind === "assembly") await start();
+    else {
+      fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Choose profile engine" }));
+    }
+    await choose(); await pressBar("Prepare release");
+    await screen.findByText("Approved");
+    expect(f.state.calls.filter((c) => c.kind === "reopen")).toHaveLength(1);
+    expect(f.state.calls.filter((c) => c.kind === "get").map((c) => c.args)).toContainEqual({ candidateId: releaseId });
+    expect(f.state.calls.some((c) => ["approve", "publish", "seal"].includes(c.kind))).toBe(false);
+    expect(screen.queryByText(/incomplete release record/)).toBeNull();
+  });
   it("keeps exact source revisions optional and copyable without changing the selected run", async () => {
     const f = releaseFixture();
     const writeText = vi.fn().mockResolvedValue(undefined);

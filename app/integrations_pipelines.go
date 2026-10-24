@@ -65,6 +65,7 @@ func (a *App) wirePipelines() {
 		}
 		d.NodeID = nodeID
 		d.ReportMergeGroupReview = a.reportPipelineMergeGroupReview
+		d.IndependentReview = &pipelinerun.IndependentReviewDependencies{Capture: a.capturePipelineIndependentReview, Validate: a.validatePipelineIndependentReview, Review: a.invokePipelineIndependentReview, Report: a.reportPipelineIndependentReview}
 		d.OSOrigin = pipelinesOSOrigin
 		// The connect preview's delivery suggestion, by the rule the GitHub
 		// App this cluster registers is composed by: its webhook is active

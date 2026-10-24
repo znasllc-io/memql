@@ -97,6 +97,7 @@
 {"id":"automation:pipelineArtifactRetentionPolicy","kind":"automation","label":"pipelineArtifactRetentionPolicy","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:pipelineBucketIncluded","kind":"automation","label":"pipelineBucketIncluded","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:pipelineEvidenceReuse","kind":"automation","label":"pipelineEvidenceReuse","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
+{"id":"automation:pipelineIndependentReviewPolicy","kind":"automation","label":"pipelineIndependentReviewPolicy","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:pipelineMaintenancePolicy","kind":"automation","label":"pipelineMaintenancePolicy","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:pipelineModeForEvent","kind":"automation","label":"pipelineModeForEvent","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:pipelineNotificationCopy","kind":"automation","label":"pipelineNotificationCopy","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},

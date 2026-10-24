@@ -31,6 +31,7 @@ type candidateProfile struct {
 	VersionFacts  []candidateProfileVersionFact   `json:"versionFacts,omitempty"`
 	Registries    []candidateRegistryTarget       `json:"registries,omitempty"`
 	ReleaseAssets []candidateProfileFileAuthority `json:"releaseAssets,omitempty"`
+	Build         *candidateBuildConfiguration    `json:"build,omitempty"`
 }
 type candidateProfileComponent struct {
 	candidateVersionSource
@@ -123,7 +124,7 @@ func (p candidateProfile) validate() error {
 		}
 		targets[target.ID] = true
 	}
-	return nil
+	return p.validateBuild()
 }
 
 func (i *Integration) candidateProfiles(ctx context.Context) ([]candidateProfile, error) {
@@ -177,11 +178,16 @@ func (i *Integration) candidateProfile(ctx context.Context, name string) (candid
 		if i.profileRevision != nil {
 			revision = i.profileRevision()
 		}
+		build, err := i.captureBuildRecipes(p)
+		if err != nil {
+			return candidateProfile{}, nil, "", err
+		}
 		digest, err := profileDigest(struct {
 			Profile  candidateProfile
 			Resolver string
 			Engine   string
-		}{p, snapshot.Version, revision})
+			Build    *releaseBuildRecipeIdentity `json:",omitempty"`
+		}{p, snapshot.Version, revision, build.identity()})
 		return p, snapshot, digest, err
 	}
 	return candidateProfile{}, nil, "", errors.New("release profile is absent or no longer authorized")

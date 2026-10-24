@@ -3,52 +3,75 @@ import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../../chrome/access";
 import { useConnectionStatus } from "../../../chrome/connection";
 import { useOsConnection } from "../../../live/connection";
-import { Button, Caption, ContentSkeleton, Fact, Facts, Head, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Subhead } from "../../../kit";
+import { Button, Caption, ContentSkeleton, Fact, Facts, Head, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Subhead, useAppReach } from "../../../kit";
 import { AddButton } from "../../../kit/AddButton";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { formatMoment } from "../../../kit/format";
 import { allPublicationsComplete, candidateTitle, destinationKey, historiesMatch, matchingTarget, readCandidate, readDrafts, readPage, readPublications, readTargets, readyForCatalog, stateLabel, type Candidate, type Destination, type Draft, type Publication, type Target } from "./model";
 import { useReleaseRead } from "./useReleaseRead";
 import { PrepareRelease } from "./PrepareRelease";
+import { StartRelease } from "./StartRelease";
+import { ReleaseJourney, type ReleaseNavigation } from "./ReleaseJourney";
+import { buildCall, buildTitle, buildWord, readReleaseBuilds, type ReleaseBuildQueries } from "./journey";
+import { readProfiles } from "./assembly";
+import type { RunRow } from "../../deployables/pipelines/rows";
 import "./releases.css";
 
-export type ReleaseQueries = Pick<QueryClient, "releaseCandidates" | "releaseGetCandidate" | "releaseCandidatePublications" | "releaseCandidateConfiguration" | "releaseCandidateProfiles" | "releaseCandidateTargets" | "releaseApproveCandidate" | "releaseRetireCandidate" | "releasePublishCandidate" | "releasePrepareCandidate" | "releaseCandidateDrafts" | "releaseCreateCandidateDraft" | "releasePromoteCandidateDraft" | "releaseAssembleCandidate" | "releaseAssembleProfileCandidate" | "releaseSealPublishedCandidate" | "pipelineRunsForOwner">;
+export type ReleaseQueries = Pick<QueryClient, "releaseCandidates" | "releaseGetCandidate" | "releaseCandidatePublications" | "releaseCandidateConfiguration" | "releaseCandidateProfiles" | "releaseCandidateTargets" | "releaseApproveCandidate" | "releaseRetireCandidate" | "releasePublishCandidate" | "releasePrepareCandidate" | "releaseCandidateDrafts" | "releaseCreateCandidateDraft" | "releasePromoteCandidateDraft" | "releaseAssembleCandidate" | "releaseAssembleProfileCandidate" | "releaseSealPublishedCandidate" | "pipelineRunsForOwner"> & ReleaseBuildQueries;
 
-export function ReleasesSection({ visible = true }: { visible?: boolean }) {
+interface ReleaseViewProps extends ReleaseNavigation { visible?: boolean; runs?: readonly RunRow[]; runsFresh?: boolean; openRequest?: { intentId: string; revision: number } }
+
+export function ReleasesSection({ visible = true, ...navigation }: ReleaseViewProps) {
   const connection = useOsConnection();
   const status = useConnectionStatus();
   const { access } = useSession();
+  const cluster = useAppReach("cluster");
   // The engine requires an owner, independently of any grant to open a section.
   if (access?.role !== "owner") return <div className="os-cluster"><Head title="Releases" /><Notice sentence="A cluster owner must review and publish releases." /></div>;
-  return <ReleaseBrowser key={access.userId} query={connection?.query ?? null} connected={status === "connected"} visible={visible} />;
+  return <ReleaseBrowser key={access.userId} query={connection?.query ?? null} connected={status === "connected"} visible={visible} {...navigation} onUpdates={cluster.sections.includes("updates") ? () => cluster.open("updates") : undefined} />;
 }
 
-export function ReleaseBrowser({ query, connected, visible = true }: { query: ReleaseQueries | null; connected: boolean; visible?: boolean }) {
+export function ReleaseBrowser({ query, connected, visible = true, openRequest, ...navigation }: { query: ReleaseQueries | null; connected: boolean } & ReleaseViewProps) {
   const [selected, select] = useState("");
   const [preparing, setPreparing] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [intentId, selectIntent] = useState("");
+  useEffect(() => {
+    if (openRequest?.intentId) { selectIntent(openRequest.intentId); select(""); setStarting(false); setPreparing(false); }
+  }, [openRequest]);
   const list = useRef<HTMLDivElement>(null);
   const previousSelection = useRef("");
   useEffect(() => {
-    if (selected || preparing || !previousSelection.current) return;
+    if (selected || preparing || starting || intentId || !previousSelection.current) return;
     if (previousSelection.current === "prepare") { list.current?.querySelector<HTMLButtonElement>("[data-prepare-release]")?.focus(); return; }
     const item = Array.from(list.current?.querySelectorAll<HTMLElement>("[data-candidate-key]") ?? []).find((row) => row.dataset.candidateKey === previousSelection.current);
     item?.querySelector<HTMLButtonElement>("button")?.focus();
-  }, [selected, preparing]);
+  }, [selected, preparing, starting, intentId]);
   const [cursors, setCursors] = useState<string[]>([""]);
   const cursor = cursors[cursors.length - 1]!;
   const available = connected && query !== null;
-  const page = useReleaseRead(`page:${cursor}`, available ? async (signal) => readPage(await query.releaseCandidates({ cursor, limit: 20 }, { signal })) : null, visible && !selected && !preparing, query);
+  const showingList = visible && !selected && !preparing && !starting && !intentId;
+  const page = useReleaseRead(`page:${cursor}`, available ? async (signal) => readPage(await query.releaseCandidates({ cursor, limit: 20 }, { signal })) : null, showingList, query);
+  const builds = useReleaseRead("builds", available ? async signal => readReleaseBuilds(await buildCall(query, "releaseBuilds", { limit: 50 }, signal)) : null, showingList, query);
+  const profiles = useReleaseRead("build-profiles", available ? async signal => readProfiles(await query.releaseCandidateProfiles({}, { signal })) : null, showingList, query);
+  const canStart = profiles.fresh && profiles.value?.some(p => p.build);
+  if (starting) return <StartRelease query={query} connected={connected} visible={visible} back={() => setStarting(false)} prepared={id => { setStarting(false); selectIntent(id); }} />;
   if (preparing) return <PrepareRelease query={query} connected={connected} visible={visible} back={() => setPreparing(false)} prepared={(id) => { setPreparing(false); select(id); }} />;
-  if (selected) return <CandidatePage key={selected} candidateId={selected} query={query} connected={connected} visible={visible} back={() => select("")} />;
+  if (selected) return <CandidatePage key={selected} candidateId={selected} query={query} connected={connected} visible={visible} back={() => select("")} backLabel={intentId ? "Cut release" : undefined} />;
+  if (intentId) return <ReleaseJourney key={intentId} intentId={intentId} query={query} connected={connected} visible={visible} back={() => selectIntent("")} onCandidate={select} {...navigation} />;
   return <div className="os-cluster os-release-list" ref={list}>
-    <Head title="Releases" meta={page.fresh ? `${page.value?.candidates.length ?? 0} on this page` : undefined}>{available ? <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
+    <Head title="Releases">{available ? canStart ? <AddButton data-prepare-release label="Cut release" onClick={() => { previousSelection.current = "prepare"; setStarting(true); }} /> : <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
     {!available ? <Notice sentence="Disconnected. Releases will update when the cluster reconnects." /> : null}
     <ReadFailure error={page.error} retry={page.retry} />
+    <ReadFailure error={builds.error} retry={builds.retry} />
+    <ReadFailure error={profiles.error} retry={profiles.retry} />
+    {builds.value?.length ? <><Subhead>Release requests</Subhead><RecordList as="ul" label="Release requests">{builds.value.map(build => <li key={build.intentId} data-candidate-key={build.intentId}><RecordRow name={buildTitle(build)} secondary={formatMoment(build.createdAt)} state={buildWord(build)} onOpen={() => { previousSelection.current = build.intentId; selectIntent(build.intentId); }} label={`Open release ${buildTitle(build)}`} /></li>)}</RecordList><Subhead>Prepared candidates</Subhead></> : null}
     {page.value === null && available && !page.error ? <RecordListSkeleton label="Loading releases" /> : null}
     {page.value?.candidates.length === 0 ? <Caption>No release candidates have been prepared for your review.</Caption> : null}
     <RecordList as="ul" label="Release candidates">
       {page.value?.candidates.map((c) => <li key={c.candidateId} data-candidate-key={c.candidateId}><RecordRow name={candidateTitle(c)} secondary={formatMoment(c.createdAt)} state={stateLabel[c.state]} tone={c.state === "preparing" ? "warn" : "muted"} onOpen={() => { previousSelection.current = c.candidateId; select(c.candidateId); }} label={`Review ${candidateTitle(c)}`} /></li>)}
     </RecordList>
+    {canStart ? <div className="os-panel-actions"><Button tone="quiet" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }}>Use a completed build</Button></div> : null}
     {cursors.length > 1 || page.value?.nextCursor ? <div className="os-panel-actions">
       {cursors.length > 1 ? <Button onClick={() => setCursors((old) => old.slice(0, -1))}>Newer</Button> : null}
       {page.fresh && page.value?.nextCursor ? <Button onClick={() => setCursors((old) => [...old, page.value!.nextCursor!])}>Older</Button> : null}
@@ -56,7 +79,7 @@ export function ReleaseBrowser({ query, connected, visible = true }: { query: Re
   </div>;
 }
 
-function CandidatePage({ candidateId, query, connected, visible, back }: { candidateId: string; query: ReleaseQueries | null; connected: boolean; visible: boolean; back: () => void }) {
+function CandidatePage({ candidateId, query, connected, visible, back, backLabel = "Releases" }: { candidateId: string; query: ReleaseQueries | null; connected: boolean; visible: boolean; back: () => void; backLabel?: string }) {
   const available = connected && query !== null;
   const candidate = useReleaseRead(candidateId, available ? async (signal) => readCandidate(await query.releaseGetCandidate({ candidateId }, { signal }), candidateId) : null, visible, query);
   const history = useReleaseRead(candidateId, available ? async (signal) => readPublications(await query.releaseCandidatePublications({ candidateId }, { signal }), candidateId) : null, visible, query);
@@ -81,14 +104,14 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
   const draft = selected ? drafts.value?.find((d) => d.targets.includes(selected.targetId)) : undefined;
   const consistent = record && history.value && drafts.value ? historiesMatch(record, history.value, drafts.value) : false;
   const settled = available && candidate.fresh && history.fresh && drafts.fresh && consistent;
-  const canRetire = history.value?.length === 0 && drafts.value?.length === 0;
+  const canRetire = record?.state !== "archived" && history.value?.length === 0 && drafts.value?.length === 0;
   const publicationsComplete = record && history.value ? allPublicationsComplete(record, history.value) : false;
   const configured = targets.fresh && record?.manifest.destinations.every((d) => matchingTarget(d, targets.value)) === true;
   const canSeal = record?.state === "approved" && record.catalog?.state === "absent" && configured && history.value && drafts.value && targets.value && readyForCatalog(record, history.value, drafts.value, targets.value);
   const title = record ? candidateTitle(record.manifest) : "Release";
   const reread = useCallback(() => { candidate.retry(); history.retry(); targets.retry(); drafts.retry(); }, [candidate.retry, history.retry, targets.retry, drafts.retry]);
   const run = async (kind: "approve" | "retire" | "publish" | "prepare" | "draft" | "promote" | "seal") => {
-    if (executing.current || !settled || !record || !query) return;
+    if (executing.current || !settled || !record || record.state === "archived" || !query) return;
     executing.current = true;
     setBusy(kind === "seal" ? "Adding to release catalog" : kind === "draft" ? "Verifying draft release" : kind === "promote" ? "Verifying public release" : kind === "publish" ? "Verifying publication" : kind === "approve" ? "Verifying approval" : kind === "prepare" ? "Verifying release" : "Retiring release");
     setError("");
@@ -183,8 +206,9 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
   if (!settled && !busy) { footer = "Release state unavailable"; detail = "Actions return after the current state is read."; }
   return <div className="os-release-pane">
     <div className="os-release-scroll" ref={content}>
-      <Head navigationKey={`release:${candidateId}:${destination ?? "overview"}`} title={selected ? `${selected.component} / ${selected.artifact}` : title} back={{ label: selected ? title : "Releases", onSelect: () => { confirm(null); setError(""); if (selected) openDestination(null); else back(); } }} />
+      <Head navigationKey={`release:${candidateId}:${destination ?? "overview"}`} title={selected ? `${selected.component} / ${selected.artifact}` : title} back={{ label: selected ? title : backLabel, onSelect: () => { confirm(null); setError(""); if (selected) openDestination(null); else back(); } }} />
       {!available ? <Notice sentence="Disconnected. The last record is shown; actions are unavailable." /> : null}
+      {record?.state === "archived" ? <Notice sentence="This release’s build inputs are archived. Its recorded approval and publication history remain available." /> : null}
       <ReadFailure error={candidate.error || history.error || drafts.error} retry={reread} />
       {record && history.fresh && drafts.fresh && !consistent ? <Notice tone="error" sentence="The recorded release history does not match this approval and its destinations." /> : null}
       <ReadFailure error={targets.error} retry={targets.retry} />
@@ -196,7 +220,7 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
   </div>;
 }
 
-function ReviewDetails({ record, targets, history, drafts, open }: { record: Candidate; targets: Target[] | null; history: Publication[] | null; drafts: Draft[] | null; open: (d: Destination) => void }) {
+export function ReviewDetails({ record, targets, history, drafts, open }: { record: Candidate; targets: Target[] | null; history: Publication[] | null; drafts: Draft[] | null; open: (d: Destination) => void }) {
   const metadata = new Map<string, Target>();
   for (const d of record.manifest.destinations) {
     const t = matchingTarget(d, targets);

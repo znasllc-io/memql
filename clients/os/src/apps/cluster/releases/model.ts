@@ -1,6 +1,6 @@
 import type { Result } from "@znasllc-io/memql-sdk-core/client";
 
-export type CandidateState = "preparing" | "ready" | "approved" | "retired";
+export type CandidateState = "preparing" | "ready" | "approved" | "archived" | "retired";
 export interface ComponentSummary { name: string; version: string; repository: string; commit: string }
 export interface Artifact { name: string; kind: "oci" | "file"; platform: string; digest: string; imageDigest?: string; size: number }
 export interface Destination { targetId: string; targetDigest: string; component: string; artifact: string; operation: "publish" | "install" }
@@ -42,7 +42,7 @@ function digest(value: unknown): string {
   return result;
 }
 function state(value: unknown): CandidateState {
-  if (!["preparing", "ready", "approved", "retired"].includes(string(value))) throw new Error("This release state is not supported.");
+  if (!["preparing", "ready", "approved", "archived", "retired"].includes(string(value))) throw new Error("This release state is not supported.");
   return value as CandidateState;
 }
 function component(value: unknown): ComponentSummary {
@@ -71,12 +71,12 @@ export function readCandidate(result: Result, expected: string): Candidate {
   if (v.catalog !== undefined) {
     const c = object(v.catalog);
     if (c.state === "sealed") {
-      if (s !== "approved" || string(c.approvalId) !== string(v.approvalId)) throw new Error("The catalog record does not match this release approval.");
+      if ((s !== "approved" && s !== "archived") || string(c.approvalId) !== string(v.approvalId)) throw new Error("The catalog record does not match this release approval.");
       catalog = { state: "sealed", approvalId: string(c.approvalId), catalogDigest: digest(c.catalogDigest) };
     } else if (c.state === "absent" || c.state === "unavailable") catalog = { state: c.state };
     else throw new Error("The catalog state is unavailable.");
   }
-  return { candidateId: expected, state: s, approvalId: s === "approved" ? string(v.approvalId) : undefined, catalog, manifest: {
+  return { candidateId: expected, state: s, approvalId: s === "approved" || s === "archived" ? string(v.approvalId) : undefined, catalog, manifest: {
     components: array(m.components, 64).map((entry) => ({ ...component(entry), artifacts: array(object(entry).artifacts, 128).map((entry) => {
       const a = object(entry);
       if ((a.kind !== "oci" && a.kind !== "file") || typeof a.size !== "number" || !Number.isSafeInteger(a.size) || a.size < 0) throw new Error("The cluster returned an invalid release artifact.");
@@ -157,4 +157,4 @@ export function matchingTarget(d: Destination, targets: Target[] | null): Target
   return targets?.find((t) => destinationKey(t) === destinationKey(d) && t.targetDigest === d.targetDigest);
 }
 export function candidateTitle(c: Pick<CandidateSummary, "components">): string { return c.components.map((x) => `${x.name} ${x.version}`).join(", "); }
-export const stateLabel: Record<CandidateState, string> = { preparing: "Verification incomplete", ready: "Ready for review", approved: "Approved", retired: "Retired" };
+export const stateLabel: Record<CandidateState, string> = { preparing: "Verification incomplete", ready: "Ready for review", approved: "Approved", archived: "Archived", retired: "Retired" };
