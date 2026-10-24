@@ -94,7 +94,10 @@ WROTE=""
 function make_workdir() {
     umask 077
     WORK="$(mktemp -d)"; chmod 700 "$WORK"
-    trap '_cap_on_exit; cleanup_workdir' EXIT
+    # Bash 5.2 can return the original failure from an already-emitted result
+    # trap. Do not let errexit skip credential cleanup; EXIT preserves the
+    # original status, and unexpected aborts still get their one result.
+    trap '_cap_on_exit || true; cleanup_workdir' EXIT
 }
 
 function cleanup_workdir() {

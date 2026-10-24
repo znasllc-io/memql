@@ -735,6 +735,11 @@ private, call-local phase stamp after their existing admission gates:
 | Replan or repair | The waiting run still names the exact remedy kind, step and `since` value claimed by the receiving planner. | A later wait, human approval wait, cancellation, status change or expired operation window. |
 | Answer validation | The designated answer-check path has selected an exact succeeded run revision and completed step version; its configured cross-replica claim still bounds the call. | A changed run or step version, cancellation, or the original check deadline. |
 
+Each entry path constructs its stamp in the call that uses it. No helper
+returns a stamped context: `TestNoMethodReturnsAContext` enforces that boundary.
+The stamp keeps its original phase identity and deadline; provider admission
+still checks fresh run evidence.
+
 Ordinary waiting and terminal contexts remain refused. Even if a stamped run
 returns to `running`, its old compiler or remedy context cannot borrow execution
 authority. The answer-check path preserves its existing behavior when no claimer

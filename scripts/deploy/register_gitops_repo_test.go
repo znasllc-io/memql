@@ -42,6 +42,7 @@ elif args[:2]==['get','secret']:
   rows += [d.get(k,'<no value>') for k in ['url','type','githubAppID','githubAppInstallationID','githubAppEnterpriseBaseUrl']]
   out('\n'.join(rows+list(d)))
 elif args[:3]==['create','secret','generic']:
+ if os.environ.get('GITOPS_INVALID_PREPARATION'):out('{');sys.exit(0)
  data={}
  for a in args:
   if a.startswith('--from-literal='):
@@ -72,6 +73,7 @@ else:fail()
 type gitOpsFixture struct {
 	t        *testing.T
 	dir, key string
+	script   string
 	private  []byte
 }
 
@@ -82,7 +84,7 @@ func newGitOpsFixture(t *testing.T) *gitOpsFixture {
 			t.Fatalf("isolated fixture prerequisite %s: %v", name, err)
 		}
 	}
-	f := &gitOpsFixture{t: t, dir: t.TempDir()}
+	f := &gitOpsFixture{t: t, dir: t.TempDir(), script: aksScript(t, "register-gitops-repo.sh")}
 	f.key = filepath.Join(f.dir, "app-key.pem")
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -102,7 +104,7 @@ func newGitOpsFixture(t *testing.T) *gitOpsFixture {
 }
 func (f *gitOpsFixture) run(env []string, extra ...string) (map[string]any, int) {
 	f.t.Helper()
-	args := []string{aksScript(f.t, "register-gitops-repo.sh"), "--repoUrl=https://github.com/example/product.git", "--transport=github-app", "--githubAppId=123", "--githubAppInstallationId=456", "--githubAppPrivateKeyFile=" + f.key, "--secretName=product-repo"}
+	args := []string{f.script, "--repoUrl=https://github.com/example/product.git", "--transport=github-app", "--githubAppId=123", "--githubAppInstallationId=456", "--githubAppPrivateKeyFile=" + f.key, "--secretName=product-repo"}
 	args = append(args, extra...)
 	cmd := exec.Command("bash", args...)
 	cmd.Env = append(os.Environ(), "PATH="+f.dir+":"+os.Getenv("PATH"), "GITOPS_FIXTURE="+f.dir, "KUBECONFIG="+filepath.Join(f.dir, "empty-kubeconfig"))
@@ -315,6 +317,56 @@ func TestRegisterGitOpsAppPreservesConnectionBoundaries(t *testing.T) {
 			t.Fatal("concurrent edit was overwritten")
 		}
 	})
+}
+
+// Bash 5.2 can retain the original nonzero status when the already-emitted
+// result trap returns. Model that status explicitly on every test host, while
+// still executing the actual registration script and its result machinery.
+func TestRegisterGitOpsCleanupSurvivesNonzeroResultTrap(t *testing.T) {
+	f := newGitOpsFixture(t)
+	root := t.TempDir()
+	script, err := os.ReadFile(f.script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := os.ReadFile(filepath.Join(filepath.Dir(f.script), "../lib/capability.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(runtime), "function _cap_on_exit() {") != 1 {
+		t.Fatal("result trap fixture no longer names the actual runtime")
+	}
+	runtime = []byte(strings.Replace(string(runtime), "function _cap_on_exit() {", "function _fixture_cap_on_exit() {", 1) + `
+function _cap_on_exit() {
+    local original_status=$?
+    _fixture_cap_on_exit
+    return "$original_status"
+}
+`)
+	for path, data := range map[string][]byte{"deploy/register-gitops-repo.sh": script, "lib/capability.sh": runtime} {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.script = filepath.Join(root, "deploy/register-gitops-repo.sh")
+	result, code := f.run([]string{"GITOPS_WRITE_ERROR=1"})
+	if code != 5 || result["ok"] != false || result["error"].(map[string]any)["code"] != float64(5) {
+		t.Fatalf("write refusal changed its result: exit %d, %v", code, result)
+	}
+	f.noWrite()
+}
+
+func TestRegisterGitOpsCleanupPreservesUnexpectedAbort(t *testing.T) {
+	f := newGitOpsFixture(t)
+	result, code := f.run([]string{"GITOPS_INVALID_PREPARATION=1"})
+	if code != 1 || result["ok"] != false || result["error"].(map[string]any)["code"] != float64(1) {
+		t.Fatalf("unexpected abort changed its result: exit %d, %v", code, result)
+	}
+	f.noWrite()
 }
 
 func TestRegisterGitOpsExistingTransports(t *testing.T) {

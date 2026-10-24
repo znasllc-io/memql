@@ -28,11 +28,6 @@ type providerPhase struct {
 	expiresAt              time.Time
 }
 
-func withProviderPhase(ctx context.Context, rc common.RunContext, phase providerPhase) context.Context {
-	phase.runID, phase.goalID, phase.ownerID = rc.RunId, rc.GoalId, rc.OwnerUserId
-	return context.WithValue(ctx, providerPhaseKey{}, phase)
-}
-
 // Called under the workload gate after an owner-scoped fresh run read. A phase
 // context stays bound to that phase even after the run resumes execution.
 func (i *Integration) admitProviderPhase(ctx context.Context, rc common.RunContext, run map[string]any) error {
