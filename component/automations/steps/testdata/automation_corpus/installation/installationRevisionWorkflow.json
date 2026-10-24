@@ -14,9 +14,16 @@
         "calls": [
           {
             "kind": "builtin",
+            "name": "installationApplications"
+          },
+          {
+            "kind": "builtin",
             "name": "installationRevisionRead"
           },
           {
+            "args": {
+              "application": ""
+            },
             "kind": "builtin",
             "name": "installationRevisionObserve"
           }
@@ -40,9 +47,16 @@
         "calls": [
           {
             "kind": "builtin",
+            "name": "installationApplications"
+          },
+          {
+            "kind": "builtin",
             "name": "installationRevisionRead"
           },
           {
+            "args": {
+              "application": ""
+            },
             "kind": "builtin",
             "name": "installationRevisionObserve"
           }

@@ -14,6 +14,10 @@
         "calls": [
           {
             "kind": "builtin",
+            "name": "installationApplications"
+          },
+          {
+            "kind": "builtin",
             "name": "installationRollbackRead"
           },
           {
@@ -38,6 +42,10 @@
       },
       "outcome": {
         "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationApplications"
+          },
           {
             "kind": "builtin",
             "name": "installationRollbackRead"

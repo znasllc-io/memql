@@ -109,6 +109,9 @@ type logicProbe struct {
 	rows  int       // rows a query answers with
 	now   time.Time // the clock the canned rows are dated against
 	calls []probeCall
+	// Focused interpreter controls may substitute a native response shape.
+	// The historical corpus uses only the typed defaults below.
+	builtinAnswers map[string]any
 }
 
 // answer records a construct call and returns its value in the statement's
@@ -135,6 +138,12 @@ func (p *logicProbe) answer(kind, name string, args map[string]any) any {
 	case "logic":
 		return map[string]any{"logic": name}
 	default: // builtin
+		if answer, ok := p.builtinAnswers[name]; ok {
+			return canonicalJSON(answer)
+		}
+		if answer, ok := installationProbeAnswer(name); ok {
+			return answer
+		}
 		if name == "composeWorkflowFacts" {
 			// The native callback always supplies these typed facts. A generic
 			// marker object cannot stand in for arguments to a decision logic.
@@ -142,6 +151,30 @@ func (p *logicProbe) answer(kind, name string, args map[string]any) any {
 		}
 		return map[string]any{"builtin": name, "args": args}
 	}
+}
+
+// These are the native installation ports' value shapes, not authorization
+// verdicts. The baseline remains one legacy application with no remote source
+// dependencies, observer-only revision/rollback and unfinished retirement.
+// Query row count does not remove the application's admitted identity.
+func installationProbeAnswer(name string) (any, bool) {
+	switch name {
+	case "installationApplications":
+		return []any{map[string]any{"key": ""}}, true
+	case "installationSourceRequirements":
+		return []any{}, true
+	case "installationRetirementRequirements":
+		return []any{map[string]any{"key": "candidate"}, map[string]any{"key": "rollback"}}, true
+	case "installationRetirementPage":
+		return map[string]any{"items": []any{}, "complete": false}, true
+	case "installationRetirementObserve":
+		return map[string]any{"ready": false}, true
+	case "installationRevisionRead":
+		return map[string]any{"mayApply": false, "needsWrite": false}, true
+	case "installationRollbackRead":
+		return map[string]any{"needsWrite": false}, true
+	}
+	return nil, false
 }
 
 // event records a published event.
