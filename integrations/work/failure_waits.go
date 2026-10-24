@@ -364,7 +364,11 @@ func (i *Integration) releaseRetry(ctx context.Context, runId, owner, since stri
 	}
 	now := i.clock().UTC()
 	writeCtx := ownerActor(ctx, owner)
-	request, stale, ok := i.failureRetryRequest(writeCtx, run, runId, failureRetry{stepKey: rowString(rowMap(run, "waitingOn"), "subject")}, now)
+	request, stale, ok, err := i.failureRetryRequest(writeCtx, run, runId, failureRetry{stepKey: rowString(rowMap(run, "waitingOn"), "subject")}, now)
+	if err != nil {
+		i.log().Warn("work: a due retry cannot preserve its failed version", "component", "work.retry", "run", runId, "err", err)
+		return false
+	}
 	if !ok {
 		return false
 	}

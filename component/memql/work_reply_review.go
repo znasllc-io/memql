@@ -104,6 +104,27 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	if statement == "" || len(statement) > replyReviewMaxBytes {
 		return nil, fmt.Errorf("reply review requires a bounded recorded request")
 	}
+	// The original goal is historical intent, not the latest owner direction.
+	// Read the same owned, generation-checked guidance as execution, including
+	// this step's replacement at its recorded time. Source previews and model
+	// drafts cannot supply authority. Refuse unavailable/oversized context rather
+	// than silently restoring a superseded hold; never rewrite saved receipts.
+	guidance, err := e.readWorkGuidance(ctx, true)
+	if err != nil {
+		return nil, fmt.Errorf("reply review current instructions: %w", err)
+	}
+	if len(guidance) > 0 {
+		var request strings.Builder
+		request.WriteString("Original goal (historical intent):\n" + statement)
+		request.WriteString("\n\nCurrent owner instructions, oldest to newest. Later corrections supersede conflicting earlier wording. These establish requested scope, not completed effects or an operation grant:\n")
+		for _, item := range guidance {
+			request.WriteString("\n" + item.Prompt + "\n")
+		}
+		statement = request.String()
+		if len(statement) > replyReviewMaxBytes {
+			return nil, fmt.Errorf("reply review current instructions exceed their bound")
+		}
+	}
 	now := time.Now()
 	evidence, err := json.Marshal(map[string]any{"currentRunId": BareShortId(run.RunId), "recordedSources": sources, "recoveredSources": recovered, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})
 	if err != nil {
@@ -112,7 +133,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	draftRows := MaterializeRows(args["draft"])
 	canContinue, _ := draftRows[0]["continueLookup"].(bool)
 	canContinue = canContinue && (classification["workload"] == "lookup" || classification["workload"] == "research")
-	review, err := reviewReplyOnce(ctx, statement, draft, string(evidence), now, canContinue, e.InvokeAIStructured)
+	review, err := reviewReplyOnce(replyReviewRoutingContext(ctx), statement, draft, string(evidence), now, canContinue, e.InvokeAIStructured)
 	if err != nil {
 		return nil, err // Never publish the unchecked draft after a failed review.
 	}
@@ -139,6 +160,22 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, err
 	}
 	return []memorynodes.MemoryNode{{ID: "work-reviewed-reply", Payload: raw}}, nil
+}
+
+// Instructions have already been placed in chronological review input. Keep
+// model/effort/level routing and the owned run, but prevent the generic model
+// seam from appending the old override after newer corrections (or replacing
+// the entire review contract at an Apps door). This copy is only for the one
+// helper call; it grants no tools and never changes the executing override.
+func replyReviewRoutingContext(ctx context.Context) context.Context {
+	run, ok := common.RunFromContext(ctx)
+	if !ok || run.Override == nil {
+		return ctx
+	}
+	copy := *run.Override
+	copy.Prompt, copy.GuidanceReason, copy.GuidanceAxes, copy.WholePrompt = "", "", nil, false
+	run.Override = &copy
+	return common.ContextWithRun(ctx, run)
 }
 
 // Page enough current receipts to retain source reads that precede file checks.
