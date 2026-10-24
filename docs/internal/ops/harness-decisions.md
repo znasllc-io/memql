@@ -122,6 +122,28 @@ Existing late-answer and additive-correction ordering tests cover the separate
 guidance paths. These checks prove context selection, not model adherence or a
 measured latency improvement.
 
+Final reply review must use current owner direction, not only the original goal
+and conversation snapshot. A resumed execution could follow a replacement yet
+its final reviewer reinstated an obsolete hold. The reviewer now reads the same
+owner-bound, generation-checked guidance as execution on the finishing replica,
+including a whole-prompt override at the rerun's recorded time. Later corrections
+remain later. Original intent stays historical context; these instructions are
+separate from source receipts and do not prove effects or grant an operation.
+Missing lineage, unavailable guidance or oversized request context refuses the
+review rather than silently omitting direction.
+
+Only the review helper receives a copied override with instruction text removed:
+the ordered request already contains it. Model, effort and level remain pinned.
+This prevents the generic model seam from appending an older instruction after a
+newer correction or an Apps door from replacing the review contract. The actual
+execution override, checkpoints, permissions and completed effects are unchanged.
+`TestReplyReviewUsesCurrentOwnerDirectionAcrossReplicas` reproduces the old
+behavior for additive and whole-prompt reruns using a document-publication case,
+then checks chronology, foreign-user exclusion, routing and immutability at the
+structured model boundary. These tests establish context delivery, not model
+adherence. This repair does not broaden the lookup continuation policy, retry an
+input interruption or equate a successful turn with an accepted goal outcome.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an

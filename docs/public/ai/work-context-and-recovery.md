@@ -625,6 +625,13 @@ section. Additive instructions and later human corrections retain their existing
 ordering. Retained context
 does not extend permissions or bypass the operation's execution checks.
 
+The final reply reviewer also reads current owner instructions, including the
+step's replacement and later corrections in their recorded order. It keeps the
+original goal as historical context instead of restoring superseded directions.
+Unavailable or oversized instruction context stops review explicitly. This does
+not authorize another operation, retry interrupted input, or make a completed
+execution count as the owner's acceptance of its results.
+
 Useful documents, scripts, patches, screenshots and verification receipts can
 be retained as bounded artifacts with provenance. File metadata alone does not
 prove that the bytes are readable. A checkout or dependency cache is a working
