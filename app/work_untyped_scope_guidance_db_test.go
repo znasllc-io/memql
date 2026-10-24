@@ -36,10 +36,21 @@ import (
 type untypedScopeProvider struct {
 	first    bool
 	requests [][]common.ChatMessage
+	reviews  [][]common.ChatMessage
 }
 
 func (*untypedScopeProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text call")
+}
+func (p *untypedScopeProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if schema.Name != "work_reply_review" || !schema.Strict {
+		return "", fmt.Errorf("unexpected structured call: %s (strict=%v)", schema.Name, schema.Strict)
+	}
+	p.reviews = append(p.reviews, append([]common.ChatMessage(nil), messages...))
+	return `{"reply":"Correction received without executing an operation"}`, nil
 }
 func (p *untypedScopeProvider) CallChatWithTools(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	p.requests = append(p.requests, append([]common.ChatMessage(nil), messages...))
@@ -137,6 +148,9 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 		require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 		require.NoError(t, rules.Finalize())
 		rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
+		// Final evidence review uses the engine's resolver after the resumed turn.
+		// Wire the same fixture router so the real review gate also executes.
+		e.SetAIResolver(rtr)
 		replier, err := agent.NewReplier(&untypedScopeAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, effects: effects}, rtr, e.Logger)
 		require.NoError(t, err)
 		turn := &installedBudgetTurn{replierTurnRunner: &replierTurnRunner{replier: replier, engine: e}}
@@ -163,6 +177,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			for n, runner := range runners {
 				runner.first = n == 0
 				runner.requests = nil
+				runner.reviews = nil
 				turns[n].background = background
 			}
 
@@ -358,6 +373,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 					refused.Close()
 					require.Error(t, err)
 					require.Empty(t, runners[1].requests)
+					require.Empty(t, runners[1].reviews)
 					require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": completedTools, "completed-tool": completedTools}, effects)
 					insertWorkRow(t, db, rowID, concept, time.Now().UTC(), original)
 				})
@@ -369,6 +385,8 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "completed", done.Status)
 			require.Len(t, runners[1].requests, 1)
+			require.Len(t, runners[1].reviews, 1)
+			require.Contains(t, fmt.Sprint(runners[1].reviews[0]), "completed result retained", "the resumed reply review must receive the completed tool receipt")
 			require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": completedTools, "completed-tool": completedTools, "child-tail": 1, "later-section": 1}, effects)
 			retained := runners[1].requests[0]
 			require.Contains(t, retained, common.ChatMessage{Role: "tool", ToolCallId: "completed", Name: "discoverCapabilities", Content: "completed result retained"})
