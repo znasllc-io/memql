@@ -948,7 +948,7 @@
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
     "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
-    "undici": "^6.29.0",
+    "undici": "^6.29.1",
     "vscode-languageclient": "^10.1.0",
     "ws": "^8.21.3",
     "yaml": "^2.9.0"
