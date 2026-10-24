@@ -688,14 +688,12 @@ type ApprovalSeed struct {
 
 // RunBudget reports the ceilings a run inherits from its goal.
 //
-// WHY THE CEILINGS AND NOT THE SPEND. v1:work:run.spent is written by exactly
-// one thing today -- component/workjournal stamps wallClockMs when a run
-// closes -- so its tokens, cost and modelCalls are absent on every live run.
-// A cumulative check against them would compare a real ceiling to a zero that
-// means "nobody measured", conclude there is budget left, and never block:
-// the same fail-open shape this method exists to close, moved one layer down.
-// So the caller supplies what it has actually spent, which for a compile is a
-// number it counted itself.
+// WHY THE CEILINGS AND NOT THE SPEND. Run closure and budget pauses persist
+// accounting snapshots, including PauseReplanForBudget, but a live run's row
+// can lag answered calls and reserved provider attempts. A missing field is
+// unknown usage, never zero. Callers must reconcile the native usage receipts
+// at admission rather than treating this allowance projection as spend or as
+// permission to infer. The run's durable renewals apply on every serving role.
 //
 // Read under the OWNER's borrowed authority, like every other read here: the
 // goal is owner-tiered, and an unstamped read answers zero rows and no error,
