@@ -54,9 +54,15 @@ shape run pipelineRunFull {
   inboundRequestId
   pullRequest
   headBranch
+  releaseTag
   baseSha
   title
   version
+  policySnapshot
+  selectionFacts
+  maintenanceState
+  maintenanceGoalId
+  maintenanceMessage
   status
   conclusion
   refusalCode

@@ -4291,8 +4291,10 @@ type AppCallForwardRequest struct {
 	// workspace, because that is the replica whose session they land in.
 	Images []*AppCallImage `protobuf:"bytes,15,rep,name=images,proto3" json:"images,omitempty"`
 	// Optional timeout hint; the receiver clamps to its own ceiling.
-	TimeoutSec    int32               `protobuf:"varint,16,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
-	Authority     *ForwardedAuthority `protobuf:"bytes,17,opt,name=authority,proto3" json:"authority,omitempty"`
+	TimeoutSec int32               `protobuf:"varint,16,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
+	Authority  *ForwardedAuthority `protobuf:"bytes,17,opt,name=authority,proto3" json:"authority,omitempty"`
+	// Opt in to public answer deltas before the terminal response.
+	Stream        bool `protobuf:"varint,18,opt,name=stream,proto3" json:"stream,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4444,6 +4446,13 @@ func (x *AppCallForwardRequest) GetAuthority() *ForwardedAuthority {
 		return x.Authority
 	}
 	return nil
+}
+
+func (x *AppCallForwardRequest) GetStream() bool {
+	if x != nil {
+		return x.Stream
+	}
+	return false
 }
 
 // AppCallMessage is one turn of the conversation. Only the role and the text
@@ -4706,8 +4715,10 @@ type AppCallForwardResponse struct {
 	// false even for a failure -- a session that ran spent somebody's
 	// subscription and may have acted in its workspace.
 	RefusedBeforeStart bool `protobuf:"varint,14,opt,name=refused_before_start,json=refusedBeforeStart,proto3" json:"refused_before_start,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// A nonterminal public answer fragment; content carries the delta.
+	Delta         bool `protobuf:"varint,15,opt,name=delta,proto3" json:"delta,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AppCallForwardResponse) Reset() {
@@ -4834,6 +4845,13 @@ func (x *AppCallForwardResponse) GetErrorMessage() string {
 func (x *AppCallForwardResponse) GetRefusedBeforeStart() bool {
 	if x != nil {
 		return x.RefusedBeforeStart
+	}
+	return false
+}
+
+func (x *AppCallForwardResponse) GetDelta() bool {
+	if x != nil {
+		return x.Delta
 	}
 	return false
 }
@@ -5261,7 +5279,7 @@ const file_node_proto_rawDesc = "" +
 	"\x17ModelProbeForwardCancel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x9d\x05\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xb5\x05\n" +
 	"\x15AppCallForwardRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
@@ -5282,7 +5300,8 @@ const file_node_proto_rawDesc = "" +
 	"\x06images\x18\x0f \x03(\v2#.znasllc.memql.node.v1.AppCallImageR\x06images\x12\x1f\n" +
 	"\vtimeout_sec\x18\x10 \x01(\x05R\n" +
 	"timeoutSec\x12G\n" +
-	"\tauthority\x18\x11 \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\">\n" +
+	"\tauthority\x18\x11 \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\x12\x16\n" +
+	"\x06stream\x18\x12 \x01(\bR\x06stream\">\n" +
 	"\x0eAppCallMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\"~\n" +
@@ -5298,7 +5317,7 @@ const file_node_proto_rawDesc = "" +
 	"\x02by\x18\x02 \x01(\tR\x02by\"?\n" +
 	"\fAppCallImage\x12\x1b\n" +
 	"\tmime_type\x18\x01 \x01(\tR\bmimeType\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\xda\x03\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\xf0\x03\n" +
 	"\x16AppCallForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
@@ -5317,7 +5336,8 @@ const file_node_proto_rawDesc = "" +
 	"\n" +
 	"error_code\x18\f \x01(\tR\terrorCode\x12#\n" +
 	"\rerror_message\x18\r \x01(\tR\ferrorMessage\x120\n" +
-	"\x14refused_before_start\x18\x0e \x01(\bR\x12refusedBeforeStart\"M\n" +
+	"\x14refused_before_start\x18\x0e \x01(\bR\x12refusedBeforeStart\x12\x14\n" +
+	"\x05delta\x18\x0f \x01(\bR\x05delta\"M\n" +
 	"\x14AppCallForwardCancel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +

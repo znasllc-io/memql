@@ -297,3 +297,18 @@
     grid-auto-columns: minmax(92px, 1fr);
   }
 }
+
+/* Delivery stages use the same quiet left-hand reading as setup. */
+.pipeline-run-workspace { display:grid; grid-template-columns:minmax(160px, 220px) minmax(0, 1fr); gap:28px; align-items:start; }
+.pipeline-run-workspace .pipeline-stops { display:flex; flex-direction:column; overflow:visible; }
+.pipeline-run-workspace .pipeline-stop-button { display:grid; grid-template-columns:28px minmax(0,1fr); justify-items:start; text-align:left; padding:14px 8px; min-height:76px; }
+.pipeline-run-workspace .pipeline-stop-button .os-rail-mark { grid-column:1; grid-row:1 / 3; align-self:center; margin:0; }
+.pipeline-run-workspace .pipeline-stop-name, .pipeline-run-workspace .pipeline-stop-word { grid-column:2; text-align:left; margin:0; }
+.pipeline-run-workspace .pipeline-stops .os-rail-stage.pipeline-stop::before { left:21px; top:51px; bottom:-25px; right:auto; width:1px; height:auto; }
+.pipeline-run-workspace .pipeline-stage-panel { min-width:0; padding-top:4px; }
+@container (max-width:620px) {
+  .pipeline-run-workspace { grid-template-columns:minmax(0,1fr); gap:16px; }
+  .pipeline-run-workspace .pipeline-stops { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(125px,1fr); overflow-x:auto; }
+  .pipeline-run-workspace .pipeline-stop-button { min-height:72px; }
+  .pipeline-run-workspace .pipeline-stops .os-rail-stage.pipeline-stop::before { display:none; }
+}

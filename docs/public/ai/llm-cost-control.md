@@ -35,13 +35,13 @@ automatically.
 
 | Layer | Mechanism | Scope | Self-heals? | Where |
 |---|---|---|---|---|
-| **0. Kill-switch** | cumulative call + est-$ **latch** → terminal 402, never drains | process (per-scope: #1144) | **No (latches)** | `component/memql/ai_guard.go` |
+| **0. Kill-switch** | configured cumulative call + est-$ **latch** → terminal 402, never drains | process | **No (latches)** | `component/memql/ai_guard.go` |
 | 0b. Same layers, local models | the four checks above, applied to fleet calls at the provider seam | process + per-scope, **shared state** | as above | `component/memql/ai_guard_fleet.go` |
 | 1. Rate ceiling | calls/window → synthetic 429 | process, per-lane | yes (drains) | `ai_guard.go` |
 | 1. Loop breaker | identical-request repeats → 429 | per-fingerprint | yes (cooldown) | `ai_guard.go` |
 | 2. Automation budget | executions/window → skip; bounded fail-open | process, per-automation | yes (window) | `component/automations/budget.go`, `cluster_guard.go` |
 | 3. Loop terminal conditions | per-turn iteration / convergence / wallclock caps | per invocation | n/a | agent loops + the work run's ceilings |
-| 4. Per-scope budget | cumulative latch per plan-lineage / work run | per plan/run | **No (latches)** | `ai_guard.go` via context (#1144) |
+| 4. Per-scope budget | explicit hard caps; governed work uses durable progress windows for the default call allowance | per plan/run | only verified work windows renew | `ai_guard.go`, `integrations/work/provider_admission.go` |
 
 Layer 0 is the backstop **behind** every other layer: even when a higher
 layer is generous or a loop's terminal condition is loose, the cumulative
@@ -135,8 +135,8 @@ The stream-owning replica admits all local and forwarded model requests through
 one queue. It reserves both the machine-wide slot and the advertised per-model
 slot before waking a waiter. Cancelling a waiter releases any reservation, and
 a disconnected machine refuses queued work. Another capability's completion
-cannot admit a model call. Waiting and inference remain bounded by the original
-run deadline; no retry or replica hop restarts it.
+cannot admit a model call. Waiting and inference retain their operation deadlines and cancellation. A
+goal has renewable progress windows rather than a fixed lifetime deadline.
 
 Conversational file requests perform one structured evidence assessment before
 materialization. The check reads bounded owner-authorized source receipts from
@@ -164,9 +164,8 @@ automatic retry. A conversational reply tightens the call allowance to three whi
 the ten-minute admission allowance, preserving stricter existing ceilings.
 A quick workload describes effort, not whether local hardware is cold or busy. Time
 is measured from the stored run start, including classification; a retry or
-move to another replica does not restart the clock. The original declared deadline covers
-in-flight prompt calls and the agent tool loop; smaller workload estimates are
-checked between calls. Direct agent attempts also
+move to another replica does not restart the clock. Per-operation deadlines cover in-flight prompt calls; renewable workload
+windows are checked between calls. Direct agent attempts also
 consume the run's model-call allowance and write attempt receipts.
 
 A classified quick conversational reply uses the `workQuickReply` prompt at
@@ -339,22 +338,22 @@ rollback or prepare an explicit data migration first.
 ### Run time limits and progress continuation
 
 Workload estimates are checkpoints for assessing progress. At the next model
-admission, successful new task-tool receipts and verified capability reads can
-extend a spent time or call estimate automatically, up to three additional windows.
-Capability reads count newly discovered operation contracts and advertised
-modalities. Repeating a search, changing its wording or timestamp, and busy/idle
+admission, substantive new source facts and verified capability reads can
+renew a spent time or call estimate automatically, without a lifetime extension cap.
+Capability reads count newly discovered operation contracts. Repeating a
+search, changing its wording or timestamp, and advertised capacity or busy/idle
 changes do not count as new progress. A slow completed call may consume more
-than one window to catch up. Identical tool arguments, failed calls, unverified
+than one window to catch up. Equivalent source content, failed calls, unverified
 discovery calls, archived-history reads and user-facing narration
 cannot earn another window. This is a bounded activity signal, not proof that
 the result is correct. The counter and receipt fingerprints persist with the
 run under a shared decision lock, so reconnecting or changing replicas cannot
 restart them.
 
-Every extension remains within the goal's declared model-call, time, token and
-cost limits. A model operation already admitted may finish within the original
-hard deadline rather than being interrupted by a shorter workload estimate.
-Ordinary provider timeouts retain their separate recovery behavior.
+Time and call counts describe work windows, not a goal lifetime. Monetary token
+and cost ceilings remain hard. Each renewal is computed in constant time, even
+after a long operation. No context deadline cancels the whole goal at a fixed
+age; individual provider/tool timeouts retain their separate recovery behavior.
 
 Owned agent turns reconsider before exhausting their allowance. The installed
 `agentProgressRecovery` policy requests a review at 75% of a model-call limit
@@ -370,13 +369,13 @@ a specific question. Two further stalled rounds cause a native feedback pause;
 one is enough if only one model call remains. Nearing the cap alone does not
 pause productive work. Context checkpoints retain a DSL-declared reserve of
 three calls by archiving exact sources without another model summary when
-necessary. The model-call guard still enforces the hard limit, including
-context summaries and resumed work.
+necessary. The model-call guard still checks each work window, including context summaries
+and resumed work, and requires evidence or human direction to renew it.
 
 The recovery record is bounded and survives compaction and another replica.
 New accepted human guidance permits reconsideration; old answers replayed from
-history and a raised limit alone do not erase stalled progress. Guidance grants no additional access. Progress-limit feedback may continue
-within the existing overall limits, as described below. These initial thresholds are policy
+history and a raised limit alone do not erase stalled progress. Guidance grants no additional access. Progress feedback may renew a window without changing monetary limits, as
+described below. These initial thresholds are policy
 choices to evaluate against observed tasks, not universal model guarantees.
 
 The same durable recovery record also observes repeated read results across
@@ -400,11 +399,15 @@ replace current source review and ownership checks on a new turn.
 When new progress cannot justify another automatic window, Ask uses its
 ordinary feedback question: **Keep working**, **Stop here**, or a correction
 in the person's own words. An accepted answer can continue the saved work
-within the original limits. It does not reset usage, automatic continuation
-counts, repeated-call evidence, completed steps or permission decisions.
-A run has at most sixteen extra windows in total, including human-requested
-continuation. At an overall limit, the question explains that results are
-saved and offers **Stop here**; it offers no ineffective keep-working action.
+on the same goal. It does not reset usage, completed steps or permissions.
+Its decision ID makes retrying a recorded answer idempotent across replicas.
+The evidence epoch advances at that human answer and each automatic renewal;
+only receipts newer than the epoch can support another automatic renewal.
+Consumed source facts retain durable identities in the owned journal, while
+the active index holds at most 100 keys. Repeating an earlier fact cannot earn
+credit again after it leaves that index. A persisted credit whose window update
+failed can finish that same update on another replica. Monetary limits and
+unreadable or overflowing counters still refuse further admission.
 Time spent waiting for human input is excluded from active work time.
 
 The numeric budget-approval controls and deferred **Save guidance** / **Raise
@@ -569,15 +572,41 @@ ceiling as no-spend: the ordinary numeric ceiling uses zero to mean unset.
 | env | default | meaning |
 |---|---|---|
 | `MEMQL_LLM_SCOPE_GUARD_ENABLED` | true | per-(plan-lineage, work run) latch |
-| `MEMQL_LLM_SCOPE_MAX_CALLS` | 600 | cumulative calls per scope |
+| `MEMQL_LLM_SCOPE_MAX_CALLS` | 600 | default backstop for ungoverned calls; setting this variable explicitly imposes a hard cap on governed work too |
 | `MEMQL_LLM_SCOPE_MAX_COST_USD` | 20.0 | cumulative est-$ per scope |
 | `MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS` | 3600 | prune scopes idle this long |
 
-The per-scope latch is **on by default** (unlike the process caps): a scope is
-one plan-lineage or one work run, so a runaway within one scope is
-unambiguous and latching it kills just that loop — other plans are
-unaffected and no restart is needed. Caps sit above the 120-iteration per-turn
-cap so a single deep turn never trips them. Scopes are stamped via
+The per-scope guard is on by default. Owned work replaces the default 600-call
+lifetime cutoff with its existing renewable work windows. The native provider
+boundary reserves each inference attempt in an immutable owned ledger before
+dispatch, including auxiliary embeddings and HTTP retries. Replica changes and
+resumes retain that cumulative count. Calls outside owned work keep their existing
+guards; owned work refuses inference if its native guard is missing on the
+serving node. An explicit environment value, even `600`, remains a hard cap;
+disabling legacy process guards does not disable the owned work ledger.
+
+New substantive source facts from native query results and newly discovered
+capability contracts can renew a window once. Changed arguments, timestamps,
+status polling, generic command output and model-written work notes cannot.
+Consumed evidence has durable identities; the bounded active index is not a
+lifetime allowance. Scoped owner feedback can also renew a window. Neither
+mechanism changes spending limits, permissions, provider deadlines or loop
+detection, and neither accepts or closes the goal. When evidence cannot justify
+continuation, a typed refusal preserves the checkpoint and requests feedback.
+
+Logical answer accounting reads bounded pages with a stable ordering watermark.
+Only unjournaled local charges occupy its active duplicate index; a 5,000-receipt
+history does not exhaust that index. Failed, partial or regressed accounting
+reads refuse admission until accounting can be recovered.
+
+Legacy runs retain their logical-answer baseline and explicitly report unknown
+historical provider attempts. Those counts are not interchangeable. A legacy run
+with an explicit hard provider cap or a declared monetary ceiling requires
+accounting recovery before it can certify that limit. New runs record the provider
+accounting version at creation. Monetary estimates remain estimates; the ledger
+does not invent missing historical billing or usage.
+
+Scopes are stamped via
 `ContextWithBudgetScope` at the streaming + non-streaming agent loops, the
 work run's execution context (`app/work_execution_context.go`) and the compile
 pass (`integrations/work/compile.go`).

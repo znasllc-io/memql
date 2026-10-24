@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/logger"
@@ -115,6 +116,19 @@ func (i *Integration) supersede(ctx context.Context, d Deps, opened Run, earlier
 	var stale []Run
 	for _, r := range earlier {
 		if supersededBy(r, opened) {
+			if opened.PolicySnapshot != nil {
+				policy, err := readPipelinePolicy(opened.PolicySnapshot)
+				if err != nil {
+					continue
+				}
+				value, err := runPolicyPhase(ctx, policy, "pipelineSupersessionPolicy", map[string]any{
+					"event": string(opened.Event), "mode": string(opened.Mode), "previousMode": string(r.Mode), "trigger": opened.Trigger,
+				}, workflowhost.Options{})
+				allowed, _ := value.(bool)
+				if err != nil || !allowed {
+					continue
+				}
+			}
 			stale = append(stale, r)
 		}
 	}

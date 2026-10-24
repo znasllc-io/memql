@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,6 +223,81 @@ func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
 	scopes := candidates[0].RepositoryScopes
 	if !scopes.Accepts("workerHost.pipeline_step", "O/A.git") || scopes.Accepts("workerHost.pipeline_step", "o/b") {
 		t.Fatalf("persisted repository policy changed: %v", scopes)
+	}
+}
+
+// Modern workers advertise their actual display in the validated descriptor.
+// A reader on another replica must not hide that display merely because the
+// old manually configured routing label was never set on the machine.
+func TestDisplayDescriptorSuppliesMissingRoutingLabelAcrossReplicas(t *testing.T) {
+	ctx := context.Background()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(ctx); err != nil {
+		dbtest.Unreachable(t, "display routing", dbtest.DSN(), err)
+		return
+	}
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := memql.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := engine.Init(memorynodes.DefaultRegistry()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := fmt.Sprintf("display-route-%d", time.Now().UnixNano())
+	owner := "v1:identity:user:" + prefix
+	t.Cleanup(func() {
+		_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:worker:registration").Where("id LIKE ?", "v1:worker:registration:"+prefix+"-%").Exec(ctx)
+	})
+	for _, tc := range []struct {
+		name, server, reported, operator, want string
+		available                              bool
+		version                                int
+	}{
+		{"quartz", "quartz", "", "", "true", true, 1},
+		{"x11", "x11", "", "", "true", true, 1},
+		{"operator exclusion", "quartz", "", "false", "false", true, 1},
+		{"reported exclusion", "quartz", "false", "", "false", true, 1},
+		{"headless", "none", "", "", "", false, 1},
+		{"wayland", "wayland", "", "", "", false, 1},
+		{"invalid descriptor", "quartz", "", "", "", true, 999},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			labels, operator := map[string]string{}, map[string]string{}
+			if tc.reported != "" {
+				labels["display"] = tc.reported
+			}
+			if tc.operator != "" {
+				operator["display"] = tc.operator
+			}
+			desc := &worker.CapabilityDescriptor{Platform: "darwin", DisplayServer: tc.server, ComputerUseAvailable: tc.available, Actions: []string{"screenshot"}, SchemaVersion: tc.version}
+			id := "v1:worker:registration:" + prefix + "-" + strings.ReplaceAll(tc.name, " ", "-")
+			payload, err := json.Marshal(map[string]any{"name": tc.name, "ownerUserId": owner, "capabilities": []string{"COMPUTERUSE"}, "labels": labels, "operatorLabels": operator, "capabilityDescriptor": desc.AsMap(), "connectedNodeId": "another-replica", "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := memorynodes.MemoryNode{ID: id, CreatedAt: time.Now().UTC(), CreatedBy: owner, Concept: "v1:worker:registration", Type: memorynodes.NodeTypeObject, Schema: json.RawMessage(`{}`), Payload: payload, Metadata: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`)}
+			if _, err := db.NewInsert().Model(&row).Exec(ctx); err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := (&fleetcatalog.EngineStore{Engine: engine}).WorkersForOwner(ctx, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range candidates {
+				if c.RegistrationId == id {
+					if got := c.Labels["display"]; got != tc.want {
+						t.Fatalf("display routing label = %q, want %q", got, tc.want)
+					}
+					return
+				}
+			}
+			t.Fatal("persisted machine missing from independent reader")
+		})
 	}
 }
 

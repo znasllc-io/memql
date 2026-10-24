@@ -191,7 +191,7 @@ func (s *draftSourceScope) facts() map[string]any {
 	}
 	return map[string]any{"goal": s.req.Statement, "file": *s.dec.RequiresFile, "research": s.dec.RequiresResearch,
 		"capabilityFile": *s.dec.RequiresFile && s.dec.FileDelivery == "capability",
-		"quickReply":     s.dec.quickReply(), "conversational": s.req.Input["conversation"] != nil,
+		"quickReply":     s.dec.quickReply(), "replyHasSources": conversationHasSources(s.req.Input["conversation"]), "conversational": s.req.Input["conversation"] != nil,
 		"navigation": s.dec.Navigation != nil && !s.dec.Sectionable && !*s.dec.RequiresFile && strings.TrimSpace(s.dec.Navigation.App) != "",
 		"fanout":     s.dec.Sectionable && len(s.sections) >= minSectionsForFanout, "sections": items,
 		"prose":        s.fileFormat == "markdown" || s.fileFormat == "txt" || s.fileFormat == "html" || s.fileFormat == "pdf" || s.fileFormat == "docx",
@@ -215,7 +215,7 @@ func (s *draftSourceScope) append(args map[string]any) error {
 			conversation = "toString(args.conversation)"
 		}
 		s.body.WriteString("  viewer := builtin workViewerContext()\n")
-		fmt.Fprintf(&s.body, "  draft := builtin ai(templateId: %s, data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), langparser.QuoteString(instruction), conversation)
+		fmt.Fprintf(&s.body, "  draft := builtin ai(templateId: %s, progress: %t, progressMode: \"reply\", data: {statement: %s, conversation: %s, viewerContext: toString(viewer)})\n", langparser.QuoteString(getString(args, "templateId")), args["progress"] == true && !conversationHasSources(s.req.Input["conversation"]), langparser.QuoteString(instruction), conversation)
 		s.body.WriteString("  reason := builtin workReviewReply(draft: draft)\n")
 		s.hasQuickReply, s.finished = true, true
 	case "navigation":
@@ -381,4 +381,62 @@ func nonemptyDraftExpression(draft string) string {
 		return langparser.QuoteString("")
 	}
 	return draft
+}
+
+// Only known-empty source context permits publishing a reply before evidence
+// review. This is a data check; the installed draft recipe chooses streaming.
+func conversationHasSources(conversation any) bool {
+	if conversation == nil {
+		return false
+	}
+	raw, err := json.Marshal(conversation)
+	if err != nil {
+		return true
+	}
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return true
+	}
+	source, exists := value["sourceContext"]
+	if !exists || source == nil {
+		return false
+	}
+	data, ok := source.(map[string]any)
+	if !ok {
+		return true
+	}
+	profileOnly := false
+	if receipts, ok := data["recordedSources"].([]any); ok && len(receipts) > 0 {
+		profileOnly = true
+		for _, source := range receipts {
+			receipt, ok := source.(map[string]any)
+			if !ok || receipt["operation"] != "workViewerContext" {
+				profileOnly = false
+				break
+			}
+		}
+	}
+	for key, value := range data {
+		if key == "clock" || key == "note" || key == "currentProfile" {
+			continue
+		}
+		// These are navigation pointers to the receipts, not extra evidence.
+		// Any omitted receipt is represented by limitations, which still blocks.
+		if profileOnly && (key == "references" || key == "sourceHistory") {
+			continue
+		}
+		if value == nil || value == "" {
+			continue
+		}
+		if list, ok := value.([]any); ok {
+			if len(list) == 0 {
+				continue
+			}
+			if key == "recordedSources" && profileOnly {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }

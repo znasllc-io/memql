@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
+	"strings"
 )
 
 // ids.go -- the ids this package derives, and the gate keys every
@@ -59,10 +60,15 @@ func RepositoryGateKey(repository string) string {
 	return "pipelines.repository:" + normalizeRepository(repository)
 }
 
-// OpenGateKey serializes the opening of a run key: the dedup read and the
+// OpenGateKey serializes the opening of a delivery independent of the selected
+// coverage mode, so two replicas with different installed policy versions
+// cannot open competing modes for the same event. The dedup read and the
 // create are one critical section, so a redelivered webhook and a poll for
 // the same head cannot both find nothing and both open (Review Focus 1).
-func OpenGateKey(runKey string) string { return "pipelines.open:" + runKey }
+func OpenGateKey(runKey string) string {
+	key := strings.ReplaceAll(strings.ReplaceAll(runKey, ":affected:", "::"), ":full:", "::")
+	return "pipelines.open:" + key
+}
 
 // RunGateKey serializes every read-modify-write of an opened run: the
 // driver's claim, heartbeat and conclusion (Task 10b), a cancel request, and

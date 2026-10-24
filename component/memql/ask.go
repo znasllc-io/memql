@@ -320,6 +320,8 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	}
 
 	// Ask is a conversation adapter over the same intake as Nexus/API goals.
+	// Time/call defaults are initial progress windows, not a lifetime cutoff;
+	// the shared Work coordinator renews them from evidence or human feedback.
 	// Context is persisted with the run before the planner/agent replica sees it.
 	if turn.RunID == "" {
 		conversation := e.askConversationInput(ctx, conversationID, turnID, pageContext, history)

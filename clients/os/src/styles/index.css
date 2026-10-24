@@ -10241,7 +10241,7 @@ a.os-button {
    * the taller clamp that left nearly half the canvas empty above and below
    * the road in a desktop window, which reads as a picture that failed to
    * load rather than as a road with room around it. */
-  height: clamp(190px, 30vh, 380px);
+  height: clamp(380px, 58vh, 760px);
   /* A GROUND RATHER THAN A PLATE. The map is a place, not a card: the darker
    * of the two surfaces reads as depth behind the road, and the beacon's glow
    * has something to sit against. */
@@ -15495,3 +15495,63 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-role-test-banner { position: fixed; inset: 0 0 auto; height: 64px; z-index: 10000; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 6px 12px; overflow: auto; border-bottom: 1px solid var(--os-warn); background: var(--os-glass-solid); color: var(--os-ink); }
 .os-role-test-banner [role="alert"] { grid-column: 1 / -1; }
 .os-root[data-role-test] { top: 64px; }
+
+/* Work is the primary content. Evidence shares its space without duplicating a page. */
+.nexus-workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 24px; }
+.nexus-workspace:has(.nexus-workspace-inspector) { grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); }
+.nexus-workspace-spine { min-width: 0; }
+.nexus-workspace-inspector { border-left: 1px solid var(--os-line); padding-left: 24px; overflow-wrap: anywhere; }
+.nexus-step-summary { display: grid; gap: 12px; }
+.nexus-recorded-outcome { margin: 0; line-height: 1.6; max-width: 75ch; }
+.nexus-technical { margin-block: 12px; }
+.nexus-technical > summary, .os-nexus-confirm > summary { cursor: pointer; color: var(--os-muted); padding-block: 8px; width: fit-content; }
+.nexus-technical > summary:focus-visible, .os-nexus-confirm > summary:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; }
+.nexus-technical[open] > summary { color: var(--os-ink); margin-bottom: 12px; }
+.os-nexus-step-key { overflow-wrap: anywhere; }
+@container (max-width: 760px) {
+  .nexus-workspace:has(.nexus-workspace-inspector) { grid-template-columns: minmax(0, 1fr); }
+  .nexus-workspace-inspector { border-left: 0; border-top: 1px solid var(--os-line); padding: 20px 0 0; }
+}
+
+.nexus-now { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; padding:12px 0; }
+.nexus-now-title { margin:0 0 6px; font-weight:600; }
+.nexus-usage { color:var(--os-muted); font-size:var(--os-text-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
+@container (max-width:520px) { .nexus-now { flex-direction:column; gap:6px; } }
+
+.os-nexus-node-label { font-family:var(--os-font); font-size:13px; }
+.os-nexus-map[data-orientation="vertical"] .os-nexus-map-canvas { height:clamp(450px,65vh,700px); }
+
+/* A human-readable journey owns the page; the dependency map is optional evidence. */
+.nexus-journey-progress { margin: 0 0 18px; color: var(--os-muted); }
+.nexus-journey-steps { list-style: none; padding: 0; margin: 0; }
+.nexus-journey-steps > li { position: relative; }
+.nexus-journey-steps > li:not(:last-child)::after { content: ""; position: absolute; left: 21px; top: 46px; bottom: -8px; width: 2px; background: var(--os-line); pointer-events: none; }
+.nexus-journey-steps > li[data-status="done"]::after { background: var(--os-accent); }
+.nexus-journey-action { position: relative; display: flex; align-items: flex-start; gap: 18px; text-align: left; width: 100%; padding: 10px 12px 26px 4px; border: 0; border-radius: 8px; background: none; color: var(--os-ink); cursor: pointer; font: inherit; }
+.nexus-journey-action:hover, .nexus-journey-action[data-selected] { background: var(--os-accent-soft); }
+.nexus-journey-action:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.nexus-journey-marker { position: relative; z-index: 1; flex: 0 0 36px; width: 36px; height: 36px; border: 1.5px solid var(--os-line); border-radius: 50%; display: grid; place-items: center; background: var(--os-ground); color: var(--os-muted); font-variant-numeric: tabular-nums; }
+[data-status="done"] > .nexus-journey-action .nexus-journey-marker { background: var(--os-accent); color: var(--os-ground); border-color: var(--os-accent); }
+[data-status="running"] > .nexus-journey-action .nexus-journey-marker { border: 2px solid var(--os-accent); color: var(--os-accent); box-shadow: 0 0 0 4px var(--os-accent-soft); }
+[data-status="failed"] > .nexus-journey-action .nexus-journey-marker { color: var(--os-error); border-color: var(--os-error); }
+[data-status="waiting"] > .nexus-journey-action .nexus-journey-marker { color: var(--os-warn); border-color: var(--os-warn); }
+.nexus-journey-copy { display: grid; gap: 7px; flex: 1; min-width: 0; padding-top: 5px; }
+.nexus-journey-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.nexus-journey-heading strong { font-size: 16px; font-weight: 600; }
+.nexus-journey-state, .nexus-journey-context { font-size: var(--os-text-sm); color: var(--os-muted); }
+.nexus-journey-outcome { color: var(--os-ink); line-height: 1.55; }
+.nexus-journey-context { display: flex; align-items: center; gap: 5px; }
+.nexus-journey-open { flex: 0 0 auto; margin-top: 10px; color: var(--os-muted); }
+.nexus-journey[data-stale] .nexus-journey-steps { opacity: .7; }
+.nexus-workspace-inspector { padding-top: 2px; }
+@container (max-width: 760px) {
+  .nexus-workspace:has(.nexus-workspace-inspector) .nexus-workspace-inspector { grid-row: 1; padding: 0 0 18px; border-top: 0; border-bottom: 1px solid var(--os-line); }
+  .nexus-journey-heading { gap: 5px; }
+}
+
+.os-nexus-goalview { container-type: inline-size; }
+
+.nexus-journey-fold { margin: 0 0 18px 58px; text-align: left; }
+
+.repository-change { max-width: 36rem; }
+.os-nexus-goalview > .os-head .os-chip { white-space: nowrap; }

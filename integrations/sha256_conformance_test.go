@@ -46,6 +46,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"release/installation_overlay.go":        "BeforeSHA256 is the bounded GitHub branch writer's exact standard SHA-256 checksum of existing file bytes; request IDs and configuration fingerprints use core/id separately",
 		"workbench/export.go":                    "streams the standard SHA-256 file checksum required by verified storage and v1:library:file.sha256; receipt identities use core/id separately",
 		"workbench/export_test.go":               "independently verifies the exported binary bytes against their standard SHA-256 checksum",
 		"workbench/export_db_test.go":            "verifies the Library storage protocol's standard SHA-256 checksum while testing cross-replica export recovery and downloads",
@@ -53,6 +54,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"azureblob/direct.go":                    "Azure SharedKey authorization requires HMAC-SHA256 over the canonical HTTP request; core/id does not implement that wire signature",
 		"knowledge/seeddata/manifest.go":         "verifies standard SHA-256 of checked-in source and provenance bytes independently against manifest.sha256; row identities remain on core/id, whose composition is not the manifest byte checksum",
 		"library/revision_images_db_test.go":     "independently computes the immutable image's standard SHA-256 file receipt to test byte pins across replicas; core/id is not the storage checksum",
+		"library/upload_read_file_db_test.go":    "independently verifies uploaded bytes against v1:library:file.sha256 across engines; core/id is not the storage protocol's standard SHA-256 checksum",
 		"library/review_applied.go":              "verifies an existing immutable storage receipt against app/library_revision_files.go's raw SHA-256 operation path; core/id uses a different composition and cannot identify already-written blobs",
 		"library/review_applied_test.go":         "independently constructs the existing immutable blob receipt protocol for operation and byte-integrity verification",
 		"library/review_attachments.go":          "pins exact reference-file bytes in persisted approval receipts using standard SHA-256; core/id is order-independent/idempotent composition, not an interoperable byte-integrity checksum",

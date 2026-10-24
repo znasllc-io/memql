@@ -2,8 +2,6 @@ import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { Versions } from "./Versions";
 import type { SiteLifecycleActions } from "../packages/actions";
 import { AvailableVersion } from "./AvailableVersion";
-import { AutoDeploySwitch } from "./stops/Source";
-import { useState } from "react";
 import { IconButton } from "../../../kit/IconButton";
 import type { ReactNode } from "react";
 import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, ArrowUpRight, Link, Shapes, ShoppingBag, SlidersHorizontal } from "lucide-react";
@@ -25,8 +23,9 @@ import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "store";
 
-export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate, deployChoice, readiness = null }: {
-  canSources?: boolean; onUpdate?: () => void;
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onOpenSourceSettings, lifecycle, onUpdate, deployChoice, readiness = null }: {
+  onUpdate?: () => void;
+  onOpenSourceSettings?: () => void;
   /** The engine's readiness answer, read once by the page; the Store slot's connection comes from it. */
   readiness?: PreviewReadiness | null;
   /** Where a parked gate's version goes (memql#5601), when the gate may choose. */
@@ -39,7 +38,6 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
   canDomains: boolean; canStore: boolean; timelineState: string; timelineError: string; onRetryRead: () => void;
   onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; lifecycle: SiteLifecycleActions;
 }) {
-  const [modeOpen, setModeOpen] = useState(false);
   const storefront = site.kind === "shopify_storefront";
   const storeId = storefront ? boundStoreId(site) : "";
   const input: RailInput = { mode: "standing", site, pkg, run, app: site.packageDeployableName };
@@ -67,7 +65,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
 
         <div className="deployable-object-title">{site.kind === "shopify_storefront" ? <ShoppingBag size={17} aria-hidden /> : <AppWindow size={17} aria-hidden />}<span>App configuration</span></div>
         <button type="button" className="deployable-piece-chip" onClick={() => onInspect("whatItIs")}><Shapes size={14} aria-hidden />Build settings</button>
-        {pkg?.sourceKind === "repo" && !site.systemOwned ? <button type="button" className="deployable-piece-chip" onClick={() => setModeOpen(open => !open)} aria-expanded={modeOpen}><GitBranch size={14} aria-hidden />{pkg.autoDeploy ? "Automatic" : "Manual"} deployment</button> : null}
+        {pkg?.sourceKind === "repo" && !site.systemOwned ? onOpenSourceSettings ? <button type="button" className="deployable-piece-chip" onClick={onOpenSourceSettings} aria-label={`${pkg.autoDeploy ? "Automatic" : "Manual"} deployment — repository settings in Pipelines`}><GitBranch size={14} aria-hidden />{pkg.autoDeploy ? "Automatic" : "Manual"} deployment<ArrowUpRight size={14} aria-hidden /></button> : <Caption>{pkg.autoDeploy ? "Automatic" : "Manual"} deployment</Caption> : null}
         {!site.systemOwned ? <button type="button" className="deployable-piece-chip" onClick={() => onInspect("runtime")}><SlidersHorizontal size={14} aria-hidden />App values <span>{Object.keys(site.settings).length}</span></button> : null}
       </ActivityTarget>
       <div className="deployable-connections">
@@ -89,7 +87,6 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
         <ActivityTarget target={`deployables:${site.id}:client`}><Piece icon={<Building2 size={18} aria-hidden />} label="Client" detail={accountNameFrom(accounts, site.accountId) || (site.accountId ? "Client name unavailable" : "The cluster")} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
       </div>
     </section>
-    {modeOpen && pkg?.sourceKind === "repo" ? canSources ? <AutoDeploySwitch pkg={pkg} /> : <Caption>{pkg.autoDeploy ? "Automatic" : "Manual"} deployment. Only someone with source access can change this mode.</Caption> : null}
     <section className="deployable-versions" aria-label="Serving version and latest attempt">
       <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}

@@ -33,6 +33,12 @@ func (r StepRequest) Environment() map[string]string {
 	if r.Step.Shard.Count > 0 {
 		env["MEMQL_SHARD"] = strconv.Itoa(r.Step.Shard.Index) + "/" + strconv.Itoa(r.Step.Shard.Count)
 	}
+	if r.Step.Verification {
+		for _, key := range []string{"MEMQL_RUN_ID", "MEMQL_WORK_RUN_ID", "MEMQL_BASE_SHA", "MEMQL_MODE", "MEMQL_EVENT", "MEMQL_VERSION"} {
+			delete(env, key)
+		}
+		env["MEMQL_VERIFICATION"] = "true"
+	}
 	if r.Domain != "" {
 		env["MEMQL_DOMAIN"] = r.Domain
 	}

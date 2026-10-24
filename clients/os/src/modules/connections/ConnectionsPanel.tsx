@@ -17,8 +17,8 @@ import { ShopifyConnections } from "./ShopifyConnections";
 export type ConnectionProvider = "github" | "shopify" | "email";
 const PROVIDERS = [["github", "GitHub"], ["shopify", "Shopify"], ["email", "Email"]] as const;
 /** Same records, controls and navigation in every app that needs connections. */
-export function ConnectionsPanel({ appId, initialProvider = "github", connectResult = null, intent, consumeIntent, additionalSections = [] }: {
-  appId: "settings" | "deployables"; initialProvider?: ConnectionProvider; connectResult?: ConnectReturn | null;
+export function ConnectionsPanel({ appId, initialProvider = "github", connectResult = null, intent, consumeIntent, additionalSections = [], heading = true }: {
+  appId: "settings" | "deployables" | "pipelines"; heading?: boolean; initialProvider?: ConnectionProvider; connectResult?: ConnectReturn | null;
   additionalSections?: readonly { id: string; name: string; render: (active: boolean, header: ReactNode) => ReactNode }[];
   intent?: OsAppProps["intent"]; consumeIntent?: OsAppProps["consumeIntent"];
 }) {
@@ -46,14 +46,14 @@ export function ConnectionsPanel({ appId, initialProvider = "github", connectRes
   useEffect(() => {
     if (!PROVIDERS.some(([id]) => id === provider) && !additionalSections.some(section => section.id === provider)) setProvider(initialProvider);
   }, [provider, initialProvider, additionalSections]);
-  const header = <><Head title="Settings" /><LocalTabs label="Connections" value={provider} onChange={setProvider} options={[...PROVIDERS, ...additionalSections.map(section => [section.id, section.name] as const)]} /></>;
+  const header = <>{heading ? <Head title="Settings" /> : null}<LocalTabs label="Connections" value={provider} onChange={setProvider} options={[...(appId === "pipelines" ? PROVIDERS.filter(([id]) => id === "github") : PROVIDERS), ...additionalSections.map(section => [section.id, section.name] as const)]} /></>;
   const section = appId === "settings" ? "connections" : "settings";
   return <>{provider === "github" ? <GitHubAccountsSettings
     accounts={githubAccountsFor(rows, access?.userId ?? "", connections.revokedCredentialIds)}
     packages={packages.snapshot.rows.map(packageFromRow)}
     feed={{ state: credentials.snapshot.state, error: credentials.snapshot.error, retry: credentials.reseed }}
     header={header} returnPath={returnPathFor(section, appId)} connectResult={result} />
-    : provider === "email" ? <AzureEmailConnections manageCluster={appId === "settings"} header={header} /> : provider === "shopify" ? <ShopifyConnections header={header} appId={appId} result={shopifyResult} /> : null}
+    : provider === "email" ? <AzureEmailConnections manageCluster={appId === "settings"} header={header} /> : provider === "shopify" ? <ShopifyConnections header={header} appId={appId === "settings" ? "settings" : "deployables"} result={shopifyResult} /> : null}
     {additionalSections.map(section => <div className="os-deploy-pane" style={provider !== section.id ? { display: "none" } : undefined} key={section.id} hidden={provider !== section.id} inert={provider !== section.id}>{section.render(provider === section.id, header)}</div>)}
   </>;
 }

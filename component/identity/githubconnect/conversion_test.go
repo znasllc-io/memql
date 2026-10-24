@@ -41,7 +41,7 @@ var (
 		`"html_url":"https://github.com/apps/memql-on-lab-example-com","owner":{"login":"znasllc-io"},` +
 		`"client_id":"Iv1.conversionclient","client_secret":"` + testAppSecret + `","webhook_secret":"` + testHookSecret + `",` +
 		`"pem":"` + testPEMJSON + `",` +
-		`"permissions":{"checks":"write","contents":"read","merge_queues":"read","metadata":"read","pull_requests":"read"},` +
+		`"permissions":{"checks":"write","security_events":"write","contents":"write","merge_queues":"write","metadata":"read","pull_requests":"write","statuses":"read","administration":"read"},` +
 		`"events":["check_run","merge_group","pull_request","push","release"]}`
 )
 
@@ -180,15 +180,15 @@ func TestPermissionsAreCheckedAgainstWhatWasAsked(t *testing.T) {
 		want bool
 	}{
 		"exactly what was asked": {map[string]string{
-			"checks": "write", "contents": "read", "merge_queues": "read", "metadata": "read", "pull_requests": "read",
+			"checks": "write", "security_events": "write", "contents": "write", "merge_queues": "write", "metadata": "read", "pull_requests": "write", "statuses": "read", "administration": "read",
 		}, true},
 		"less":                             {map[string]string{"metadata": "read"}, true},
 		"nothing":                          {nil, true},
 		"an explicit none":                 {map[string]string{"contents": "read", "issues": "none"}, true},
-		"write where read was asked":       {map[string]string{"contents": "write", "metadata": "read"}, false},
-		"pull requests at write":           {map[string]string{"contents": "read", "pull_requests": "write"}, false},
+		"settings write was not asked":     {map[string]string{"administration": "write", "metadata": "read"}, false},
+		"status write was not asked":       {map[string]string{"contents": "read", "statuses": "write"}, false},
 		"checks above the write asked for": {map[string]string{"checks": "admin", "contents": "read"}, false},
-		"a permission nobody asked for":    {map[string]string{"contents": "read", "administration": "read"}, false},
+		"a permission nobody asked for":    {map[string]string{"contents": "read", "workflows": "write"}, false},
 		"a level this build never saw":     {map[string]string{"contents": "superuser"}, false},
 	} {
 		if got := PermissionsAreWithin(tc.got, asked); got != tc.want {

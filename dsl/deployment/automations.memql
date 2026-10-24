@@ -317,6 +317,10 @@ automation installInstance {
     repoUrl           string
     repoTransport     string
     repoTokenFile     string
+    repoGithubAppId string
+    repoGithubAppInstallationId string
+    repoGithubAppPrivateKeyFile string
+    repoGithubAppEnterpriseBaseUrl string
     repoProject       string
     acmeEmail         string
     namespace         string
@@ -401,6 +405,10 @@ automation installInstance {
         transport: args.repoTransport,
         project:   args.repoProject,
         tokenFile: args.repoTokenFile,
+        githubAppId: args.repoGithubAppId,
+        githubAppInstallationId: args.repoGithubAppInstallationId,
+        githubAppPrivateKeyFile: args.repoGithubAppPrivateKeyFile,
+        githubAppEnterpriseBaseUrl: args.repoGithubAppEnterpriseBaseUrl,
         dryRun:    args.dryRun
       )
       action argoSync(app: "memql", revision: args.revision, dryRun: args.dryRun)
@@ -537,6 +545,10 @@ automation bringUpInstance {
     repoUrl        string
     repoTransport  string
     repoTokenFile  string
+    repoGithubAppId string
+    repoGithubAppInstallationId string
+    repoGithubAppPrivateKeyFile string
+    repoGithubAppEnterpriseBaseUrl string
     repoProject    string
     acmeEmail      string
     namespace      string
@@ -575,6 +587,10 @@ automation bringUpInstance {
     repoUrl: args.repoUrl,
     repoTransport: args.repoTransport,
     repoTokenFile: args.repoTokenFile,
+    repoGithubAppId: args.repoGithubAppId,
+    repoGithubAppInstallationId: args.repoGithubAppInstallationId,
+    repoGithubAppPrivateKeyFile: args.repoGithubAppPrivateKeyFile,
+    repoGithubAppEnterpriseBaseUrl: args.repoGithubAppEnterpriseBaseUrl,
     repoProject: args.repoProject,
     acmeEmail: args.acmeEmail,
     namespace: args.namespace,

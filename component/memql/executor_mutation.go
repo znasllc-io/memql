@@ -2253,11 +2253,11 @@ func (e *MemQLEngine) checkNodeExists(ctx context.Context, conceptName, id strin
 // write-path knowledge/documentChunk use) rather than reaching into
 // pgvector here, so there is one embedding write-path, not two.
 //
-// Best-effort by contract: any failure (no embedding integration on
+// Best-effort and time-bounded: any failure (no embedding integration on
 // this node-type binary, empty content, embed error) is logged and
 // swallowed. The observation row is already durable; recall simply
 // won't surface this row until a vector exists, and a re-embed can
-// backfill.
+// backfill. Exact journal retrieval remains available without a vector.
 func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, payload []byte) {
 	if e.integrations == nil || strings.TrimSpace(id) == "" || len(payload) == 0 {
 		return
@@ -2272,13 +2272,27 @@ func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, paylo
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return
 	}
-	// Progress snapshots are presentation state, not semantic memory. A reply
-	// updates them repeatedly; embedding each update would spend inference on
-	// labels such as "response streaming" and delay the stream itself.
-	if data, ok := p["data"].(map[string]any); ok && data["execution"] != nil {
-		return
-	}
 	content, _ := p["content"].(string)
+	if data, ok := p["data"].(map[string]any); ok {
+		// Accounting writes hold the admission/renewal locks. Embedding their
+		// labels would request another provider admission while those same locks
+		// are held, recursively blocking the durable write's return. These rows
+		// retain exact journal identity and no reusable semantic finding.
+		if data["providerAdmission"] != nil || data["progressCredit"] != nil {
+			return
+		}
+		// These administrative labels say nothing about the retained evidence.
+		// Their exact receipts remain available by run/source reference; indexing
+		// "Saved execution progress" or an opaque archive hash adds no recall value.
+		if data["execution"] != nil || data["continuation"] == true || data["delegatedEvidence"] == true {
+			return
+		}
+		if data["contextHash"] != nil {
+			// A semantic checkpoint has reusable meaning; an exact-only archive
+			// has no summary yet. Never replace its source or index the hash label.
+			content, _ = data["summary"].(string)
+		}
+	}
 	if strings.TrimSpace(content) == "" {
 		return
 	}
@@ -2288,7 +2302,12 @@ func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, paylo
 		"concept":     memorynodes.ConceptWorkObservation,
 		"vectorField": "content",
 	}
-	if _, err := handler(ctx, args, 1); err != nil {
+	// The durable write must not wait indefinitely for an optional local model,
+	// including when the surrounding autonomous work has no wallclock deadline.
+	// Derive from the caller to retain ownership, cancellation and shorter limits.
+	indexCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := handler(indexCtx, args, 1); err != nil {
 		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("work observation embed failed (recall will skip this row until backfilled)",
 				"id", id, "error", err)

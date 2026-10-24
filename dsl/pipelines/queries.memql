@@ -29,7 +29,10 @@ use common.traits.{ isCompleted, statusIsActive }
 
 // ---- person-facing, owner-scoped ----
 
-/// The caller's pipelines, most recently connected first.
+/// Read the caller's repository pipelines and source package identities, most
+/// recently connected first. Use these repository and package links to locate
+/// native CI for connected application sources; a repository need not have a
+/// pipeline to be editable.
 @actor
 query pipeline pipelinesForOwner {
   filter    row => row.ownerUserId == actor.userId
@@ -225,6 +228,21 @@ query run pipelineRunsUnfinished {
   sort      "status", "asc", "cancelRequested", "desc", "queuedAt", "asc"
   paginate  500
   shape     pipelineRunFull
+}
+
+/// Failed runs whose follow-up was interrupted remain visible to every recovery
+/// replica. Completed decisions leave the page so an old failure cannot starve it.
+/// Recovery is scheduled across owners, so an actor.userId conjunct would hide
+/// interrupted follow-ups. Native maintenance restores each source owner before acting.
+@serverOnly
+@actor
+query run pipelineRunsAwaitingMaintenance {
+  filter row => isCompleted(row) && row.conclusion == "failure"
+    && (row.maintenanceState == nil || row.maintenanceState in ["", "pending"])
+    && actor.isClusterOwner == true
+  sort "finishedAt", "asc"
+  paginate 100
+  shape pipelineRunFull
 }
 
 /// Every run of one pipeline's pull request not yet completed, in any mode -- what a new push to the

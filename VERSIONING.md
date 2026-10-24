@@ -65,8 +65,10 @@ The version of a MemQL build is the **git tag** it was cut from
   [Cutting a release](docs/public/operate/release-cutting.md).
   Publishing the GitHub Release delivers the native pipeline's release event.
   The MemQL build server builds the tagged source using
-  [`memql-package.yaml`](memql-package.yaml) and publishes verified image
-  digests. A tag alone does not start a build. To recover a missing delivery,
+  [`memql-package.yaml`](memql-package.yaml) and retains OCI archives and digest
+  metadata in the Library. Separate [candidate publication](docs/public/operate/release-candidates.md)
+  verifies their approved destinations and records the published digests.
+  A tag alone does not start a build. To recover a missing delivery,
   use **Run release** with that tag in MemQL Pipelines.
   `make release VERSION=X.Y.Z` remains a local image inspection command.
   Cloud deployment uses the native build's digests, a reviewed overlay pin,

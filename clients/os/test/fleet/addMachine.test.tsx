@@ -681,23 +681,23 @@ describe("the install and uninstall lines", () => {
     expect(
       installCommand({ platform: "mac", clusterUrl: "https://api.example.com", token: TOKEN, computerUse: true, inference: false }),
     ).toBe(
-      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh" +
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/install-mac.sh" +
         ` | bash -s -- --token ${TOKEN} --cluster https://api.example.com --computeruse`,
     );
     expect(
       installCommand({ platform: "linux", clusterUrl: "https://api.example.com", token: TOKEN, computerUse: true, inference: true }),
     ).toBe(
-      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-linux.sh" +
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/install-linux.sh" +
         ` | bash -s -- --token ${TOKEN} --cluster https://api.example.com --computeruse --inference`,
     );
   });
 
   it("composes the uninstall line the same way: the cluster first, then its two optional flags", () => {
     expect(uninstallCommand("linux", { clusterUrl: "https://api.example.com" })).toBe(
-      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.example.com",
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.example.com",
     );
     expect(uninstallCommand("mac", { clusterUrl: "https://api.example.com", purge: true, userLocal: true })).toBe(
-      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.example.com --purge --user-local",
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.example.com --purge --user-local",
     );
     for (const platform of INSTALL_PLATFORMS) {
       expect(uninstallCommand(platform, { clusterUrl: "https://api.example.com", purge: true })).not.toContain("\n");

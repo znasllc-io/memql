@@ -97,6 +97,6 @@ func (e *MemQLEngine) recordWorkCapabilityEvidence(ctx context.Context, search s
 	if err != nil {
 		return err
 	}
-	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ContextWithTrainingEvidenceWrite(ctx)), "mutation "+call)
 	return err
 }

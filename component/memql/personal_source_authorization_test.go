@@ -47,8 +47,8 @@ func TestPersonalSourceScopedAdmissionUsesRealDeclarationsAndOwnedRows(t *testin
 	}
 	seedGroup(t, e, "g-"+beta, "Other source users", "account", beta)
 	seedMembership(t, e, "g-"+beta, user, "active")
-	writeGrant(t, e, auth.SubjectKindGroup, "g-"+beta, auth.VerbRead, "app:deployables", auth.GrantDeny)
-	writeGrant(t, e, auth.SubjectKindGroup, "g-"+beta, auth.VerbExecute, "app:deployables/sources", auth.GrantDeny)
+	writeGrant(t, e, auth.SubjectKindGroup, "g-"+beta, auth.VerbRead, "app:pipelines", auth.GrantDeny)
+	writeGrant(t, e, auth.SubjectKindGroup, "g-"+beta, auth.VerbExecute, "app:pipelines/repositories", auth.GrantDeny)
 	for _, owner := range []string{user, other} {
 		ctx := auth.ContextWithInternalOrigin(rankActorCtx(owner, auth.RoleOwner))
 		q := fmt.Sprintf(`mutation recordSourceConnection(connectionId: %s, credentialId: %s, installationId: "42", providerAccountId: "100", accountLogin: "acme", accountType: "Organization")`, langparser.QuoteString("conn-"+owner), langparser.QuoteString("grant-"+owner))
@@ -60,8 +60,8 @@ func TestPersonalSourceScopedAdmissionUsesRealDeclarationsAndOwnedRows(t *testin
 		ranks: map[string]int{"source-manager": 140, "owner": 400},
 		grants: map[string]map[auth.VerbResource]bool{"source-manager": {
 			{Verb: auth.VerbRead, Resource: auth.ResourceData}:            true,
-			{Verb: auth.VerbRead, Resource: "app:deployables"}:            true,
-			{Verb: auth.VerbExecute, Resource: "app:deployables/sources"}: true,
+			{Verb: auth.VerbRead, Resource: "app:pipelines"}:            true,
+			{Verb: auth.VerbExecute, Resource: "app:pipelines/repositories"}: true,
 		}},
 	}, account: account}
 	auth.SetCapabilityCatalog(catalog)
@@ -133,7 +133,7 @@ func TestPersonalSourceScopedAdmissionUsesRealDeclarationsAndOwnedRows(t *testin
 	}
 	// A direct denial overrides the scoped role and must affect both transport
 	// admission and actual named execution on a subsequent request.
-	writeGrant(t, e, auth.SubjectKindUser, user, auth.VerbExecute, "app:deployables/sources", auth.GrantDeny)
+	writeGrant(t, e, auth.SubjectKindUser, user, auth.VerbExecute, "app:pipelines/repositories", auth.GrantDeny)
 	if e.OrganizationDataPlaneEnforced(ctx, calls[0].query) {
 		t.Fatal("revoked source management retained transport admission")
 	}

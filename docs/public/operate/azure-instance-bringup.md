@@ -221,6 +221,30 @@ Drop `--dryRun=true` to apply. Each writes one JSON envelope to stdout and its
 logs to stderr, so `--print-spec` tells you the parameters without running
 anything.
 
+For a GitHub App connection, use `--transport=github-app` with
+`--githubAppId`, `--githubAppInstallationId`, and
+`--githubAppPrivateKeyFile=<path>`. The key must be an unencrypted RSA PEM file;
+its contents travel through a private file, never command arguments or the
+result. GitHub Enterprise also requires `--githubAppEnterpriseBaseUrl` such as
+`https://git.example.com/api/v3`, with the same HTTPS host as `--repoUrl`.
+These configure Argo CD's [native GitHub App repository fields](https://argo-cd.readthedocs.io/en/release-2.13/operator-manual/declarative-setup/#repositories).
+
+Before invoking this action, the caller must verify that the App installation
+has read-only repository access and authorize the target cluster and repository.
+The action configures a connection; it does not verify GitHub permissions,
+authenticate a fetch, or grant authority to change upstream code. Token, SSH
+and App arguments cannot be mixed. An existing Secret for a different URL,
+App identity or authentication mode is refused, including in dry-run. Use a
+separate Secret or explicitly remove the old connection first. Repeated runs
+converge on the same named Secret; credential rotation is allowed only within
+that connection identity.
+
+`installInstance` and `bringUpInstance` forward these as `repoGithubAppId`,
+`repoGithubAppInstallationId`, `repoGithubAppPrivateKeyFile` and
+`repoGithubAppEnterpriseBaseUrl`, alongside `repoTransport: "github-app"`.
+The existing token and SSH action forms remain available.
+
+
 Two things worth knowing before you start:
 
 - **`--acmeEmail` has no default, deliberately.** A wrong address is where the

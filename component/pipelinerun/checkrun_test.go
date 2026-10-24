@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +182,34 @@ func TestPublishingWithoutAGitHubPortIsUnavailableNotAFailure(t *testing.T) {
 	w := publishCheckRun(context.Background(), Deps{OSOrigin: func() string { return "" }}, p, r, ReportFor(p, r, nil))
 	if w.State != CheckRunUnavailable || w.Err == nil {
 		t.Errorf("write = %+v", w)
+	}
+}
+
+func TestStoredPipelineCannotPublishIndependentReviewCheck(t *testing.T) {
+	for _, name := range []string{"review", "REVIEW", " ReViEw "} {
+		for _, checkID := range []int64{0, 42} {
+			for _, event := range []pipelines.Event{pipelines.EventPullRequest, pipelines.EventMergeGroup, pipelines.EventPush} {
+				t.Run(fmt.Sprintf("%s/%d/%s", name, checkID, event), func(t *testing.T) {
+					h := newHarness(t)
+					p := testPipeline(DeliveryWebhook)
+					p.Name = name
+					r := queuedRun(p, shaA)
+					r.Event, r.CheckRunID = event, checkID
+					d := h.integ.snapshot()
+					report := ReportFor(p, r, nil)
+					for _, got := range []CheckRunWrite{
+						publishCheckRun(context.Background(), d, p, r, report),
+						writeCheckRun(context.Background(), d, p, r, report, "already-minted-token", nil),
+					} {
+						if got.State != CheckRunRefused || got.Err == nil || got.Note == nil || got.Note.Code != "pipeline_check_name_reserved" {
+							t.Fatalf("not refused: %+v", got)
+						}
+					}
+					if len(h.github.tokenMints) != 0 || len(h.github.created) != 0 || len(h.github.updated) != 0 {
+						t.Fatal("reserved check reached provider")
+					}
+				})
+			}
+		}
 	}
 }

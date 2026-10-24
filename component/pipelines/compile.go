@@ -310,6 +310,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 
 	step := Step{
+		Verification:    declared.Verification,
 		GitHubReadToken: declared.GitHubReadToken,
 		CheckoutHistory: declared.CheckoutHistory,
 		ImageBuild:      CloneImageBuild(declared.ImageBuild),
@@ -398,6 +399,23 @@ func (c *planCompiler) packagesFor(stage string, declared StepSpec) ([]string, *
 
 	var out []string
 	for _, pkg := range sorted {
+		if len(declared.PackageRoots) > 0 {
+			dir := c.in.Selector.DirOf(pkg)
+			if dir == "" {
+				return nil, Refuse(CodeSelectInvalid, "selection/"+StepKey(stage, declared.Name), "The selected package %q has no repository directory; packageRoots cannot safely select it.", pkg)
+			}
+			included := false
+			for _, root := range declared.PackageRoots {
+				root, _ = dbGatedTree(root)
+				if root == "." || dir == root || strings.HasPrefix(dir, root+"/") {
+					included = true
+					break
+				}
+			}
+			if !included {
+				continue
+			}
+		}
 		switch policy.Filter {
 		case PackageFilterAll:
 		case PackageFilterDBGated:

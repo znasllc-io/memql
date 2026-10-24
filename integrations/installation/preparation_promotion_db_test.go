@@ -66,18 +66,18 @@ func promotionFixture(t *testing.T, j *preparationJournal, execution ...string) 
 	require.NoError(t, err)
 	evidence.rollbackRender, err = argocd.RenderRevision(ctx, inventoryRenderer{manifests(before)}, rollback.Render, argocd.RepositoryCredentials{})
 	require.NoError(t, err)
-	before, after = evidence.rollbackRender, evidence.candidateRender
-	evidence.resources, err = verifyImagesAndDiff(ctx, api, evidence.published, before, after, spec.Platform, resourceBindings())
+	beforeInventory, afterInventory := evidence.rollbackRender, evidence.candidateRender
+	evidence.resources, err = verifyImagesAndDiff(ctx, api, evidence.published, beforeInventory, afterInventory, spec.Platform, resourceBindings())
 	require.NoError(t, err)
-	evidence.storage, err = verifyStoragePreservation(ctx, api, before, after)
+	evidence.storage, err = verifyStoragePreservation(ctx, api, beforeInventory, afterInventory)
 	require.NoError(t, err)
-	evidence.sensitive, err = verifySensitivePreservation(ctx, api, before, after, protected)
+	evidence.sensitive, err = verifySensitivePreservation(ctx, api, beforeInventory, afterInventory, protected)
 	require.NoError(t, err)
 	plan := testPlan()
 	plan.RequestedBy, plan.WorkflowDigest = scope.RequestedBy, scope.WorkflowDigest
 	plan.ExecutionWorkflowDigest = scope.ExecutionWorkflowDigest
 	plan.CandidateID, plan.CandidateApprovalID, plan.PublicationDigest = release.CandidateID, release.ApprovalID, evidence.published.Digest()
-	plan.RenderDigest, plan.RollbackRenderDigest, plan.ResourceDiffDigest = after.Digest(), before.Digest(), evidence.resources.digest
+	plan.RenderDigest, plan.RollbackRenderDigest, plan.ResourceDiffDigest = afterInventory.Digest(), beforeInventory.Digest(), evidence.resources.digest
 	var source struct{ TargetRevision string }
 	require.NoError(t, json.Unmarshal(spec.Render.Source, &source))
 	plan.Intent.Revision = source.TargetRevision

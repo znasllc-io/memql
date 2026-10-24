@@ -103,6 +103,13 @@ func (e *draftPromptEngine) InvokeAIProgress(ctx context.Context, name string, d
 	return e.MemQLEngine.InvokeAIProgress(ctx, name, data)
 }
 
+func (e *draftPromptEngine) InvokeAIReplyProgress(ctx context.Context, name string, data map[string]any) (any, error) {
+	if e.invoke != nil {
+		return e.invoke(ctx, name, data)
+	}
+	return e.MemQLEngine.InvokeAIReplyProgress(ctx, name, data)
+}
+
 func (e *draftPromptEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
 	if e.invoke != nil {
 		value, err := e.invoke(ctx, name, data)
@@ -263,8 +270,8 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	}
 	// The node's write-gate pool (memql#6022), as its database opens one: the work
 	// integration takes its decision gates there and refuses a plug-in built without
-	// it. forkRun takes none today; a test that builds the integration hands it the
-	// pool all the same, so the day it does the test fails for its own reason.
+	// it. forkRun holds the goal lifecycle gate while validating the owner and
+	// opening the derived run, so this fixture needs the same pool as a serving node.
 	gates, gerr := database.NewGatePool(dbtest.DSN(), 0)
 	if gerr != nil {
 		t.Fatal(gerr)
@@ -284,7 +291,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		if _, err := memql.LoadUnifiedPrompts(nil, prompts, template.New("partials")); err != nil {
 			t.Fatal(err)
 		}
-		prompt, ok := prompts.Get("workQuickReply")
+		prompt, ok := prompts.Get("workConversationReply")
 		if !ok || prompt.Level != "fast" {
 			t.Fatal("quick reply lost fast routing")
 		}
@@ -338,7 +345,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 						calls++
 						access, _ := auth.AccessFromContext(callCtx)
 						run, _ := common.RunFromContext(callCtx)
-						if name != "workQuickReply" || access == nil || access.Role != role || access.UserId != req.OwnerUserId || run.RunId != req.RunId || run.StepKey == "" {
+						if name != "workConversationReply" || access == nil || access.Role != role || access.UserId != req.OwnerUserId || run.RunId != req.RunId || run.StepKey == "" {
 							return nil, fmt.Errorf("lost authority or journal context: %s %+v %+v", name, access, run)
 						}
 						if err := prompt.ValidateData(data); err != nil {
@@ -422,8 +429,17 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 				triage = map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "first section", "outputs": []string{"first"}}, {"label": "two", "instruction": "second section", "outputs": []string{"second"}}}}
 			}
 			bridge := &draftDBCompiler{engine: plannerEngine, triage: triage}
-			req := CompileRequest{GoalId: "v1:work:goal:draft-goal", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
+			req := CompileRequest{GoalId: "v1:work:goal:" + id.NewShortId(), RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
 			req.Spine, err = workintegration.CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fork admission validates the owning goal under its lifecycle gate.
+			// Each subcase owns a fresh goal, as native goal creation does, so
+			// the receiver cannot reuse the sibling's lifecycle state.
+			_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkGoal("+encodeArgs(map[string]any{
+				"goalId": req.GoalId, "statement": req.Statement, "origin": "user", "requestedVia": "nexus", "input": req.Input,
+			})+")")
 			if err != nil {
 				t.Fatal(err)
 			}

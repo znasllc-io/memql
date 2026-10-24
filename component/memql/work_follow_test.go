@@ -244,3 +244,33 @@ func TestAcknowledgedShortTaskHandsOffAfterClassification(t *testing.T) {
 	require.ErrorAs(t, err, &pending)
 	require.Equal(t, "I’ll prepare the coffee notes.", pending.Acknowledgement)
 }
+
+func TestWorkObserverStreamsOptedInReplyBeforeSuccessWithoutRepeatingIt(t *testing.T) {
+	polls := 0
+	read := func(_ context.Context, name, _ string) ([]map[string]any, error) {
+		switch name {
+		case "workRunForOwner":
+			polls++
+			status := "running"
+			if polls == 3 {
+				status = "succeeded"
+			}
+			return []map[string]any{{"status": status, "classification": map[string]any{"workload": "quick"}, "outcome": map[string]any{"returned": map[string]any{"reply": "Hello there"}}}}, nil
+		case "workStepsForOwnerRun":
+			return nil, nil
+		}
+		text := "Hello"
+		if polls > 1 {
+			text = "Hello there"
+		}
+		return []map[string]any{{"id": "snapshot", "data": map[string]any{"execution": map[string]any{"id": "reply", "kind": "reply", "phase": "running", "text": text}}}}, nil
+	}
+	var deltas []string
+	answer, err := followWorkRun(context.Background(), "run", read, func(delta string) {
+		require.Less(t, polls, 3, "stream waited for run success")
+		deltas = append(deltas, delta)
+	}, nil, time.Millisecond)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Hello", " there"}, deltas)
+	require.Equal(t, "Hello there", answer)
+}

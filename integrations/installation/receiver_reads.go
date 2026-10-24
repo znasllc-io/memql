@@ -203,15 +203,20 @@ func (r *receiverReads) finish(ctx context.Context) (string, error) {
 // spec/generation/operation changes belong to the separately verified native
 // intent. Its actual identity remains bound here; no synthetic baseline object
 // is substituted into either read or verification.
-func (r *receiverReads) configurationInvariant(application receiverNamed) (string, error) {
-	path, err := receiverPath("argoproj.io/v1alpha1", "applications", application.Namespace, application.Name)
-	if err != nil {
-		return "", err
+func (r *receiverReads) configurationInvariant(applications ...receiverNamed) (string, error) {
+	appBindings := map[string][]string{}
+	for _, application := range applications {
+		path, err := receiverPath("argoproj.io/v1alpha1", "applications", application.Namespace, application.Name)
+		if err != nil {
+			return "", err
+		}
+		app, ok := r.reads[path]
+		if !ok || app.uid == "" || app.version == "" || app.stable == nil || appBindings[path] != nil {
+			return "", errors.New("installation invariant has no unique authenticated Application")
+		}
+		appBindings[path] = []string{"argoproj.io/v1alpha1", "Application", application.Namespace, application.Name, app.uid}
 	}
-	app, ok := r.reads[path]
-	if !ok || app.uid == "" || app.version == "" || app.stable == nil {
-		return "", errors.New("installation invariant has no authenticated Application")
-	}
+
 	paths := make([]string, 0, len(r.reads))
 	for key := range r.reads {
 		paths = append(paths, key)
@@ -221,8 +226,8 @@ func (r *receiverReads) configurationInvariant(application receiverNamed) (strin
 	for _, key := range paths {
 		read := r.reads[key]
 		stable := read.stable
-		if key == path {
-			stable = []string{"argoproj.io/v1alpha1", "Application", application.Namespace, application.Name, app.uid}
+		if binding, ok := appBindings[key]; ok {
+			stable = binding
 		} else if stable == nil {
 			stable = read.body
 			if _, collection := read.body["items"]; collection {

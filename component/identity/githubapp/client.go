@@ -136,6 +136,7 @@ type Client struct {
 	mu          sync.Mutex
 	derivedFrom [sha256.Size]byte
 	keyParsed   bool
+	keyFrom     [sha256.Size]byte
 	key         *rsa.PrivateKey
 	keyErr      error
 	tokens      map[int64]cachedToken

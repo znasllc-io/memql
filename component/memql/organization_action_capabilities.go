@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:deployables/sources", "app:deployables/preview", "app:deployables/store":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store":
 		return true
 	}
 	return false
@@ -121,7 +121,7 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 		}
 		return false, nil
 	}
-	if !e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) || !e.OrganizationCapable(ctx, account, auth.VerbRead, "app:deployables") || !e.OrganizationCapable(ctx, account, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {
+	if !e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) || !e.OrganizationCapable(ctx, account, auth.VerbRead, strings.SplitN(fn.RequiresCapability.Resource, "/", 2)[0]) || !e.OrganizationCapable(ctx, account, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {
 		return denied()
 	}
 	if requested != "" && BareShortId(requested) != BareShortId(account) && !e.OrganizationCapable(ctx, requested, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {
@@ -220,7 +220,11 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 		for _, alternatives := range checks {
 			held := false
 			for _, part := range alternatives {
-				held = held || e.OrganizationCapable(ctx, target, auth.VerbExecute, "app:deployables/"+part)
+				resource := "app:deployables/" + part
+				if part == "sources" {
+					resource = "app:pipelines/repositories"
+				}
+				held = held || e.OrganizationCapable(ctx, target, auth.VerbExecute, resource)
 			}
 			if !held {
 				return fmt.Errorf("%s: the selected organization does not permit this deployable change (%s)", CodeCapabilityNotHeld, strings.Join(alternatives, " or "))

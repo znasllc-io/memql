@@ -36,10 +36,10 @@ describe("the logs-section contract over the real registry", () => {
     expect(OS_REGISTRY.apps.length).toBeGreaterThan(0);
   });
 
-  it("logs follow their seeded roles, with Fleet reserved for owners and developers", () => {
+  it("logs follow their seeded roles, with Fleet and Pipelines reserved for owners and developers", () => {
     for (const app of OS_REGISTRY.apps) {
       const logs = (app.sections ?? []).find((s) => s.id === app.logsSection);
-      const allowed = app.id === "fleet" ? ["owner", "developer"] : ["owner", "developer", "admin"];
+      const allowed = ["fleet", "pipelines"].includes(app.id) ? ["owner", "developer"] : ["owner", "developer", "admin"];
       expect(rolesOpening(logs!.requires!), `${app.id}'s logs resource`).toEqual(allowed);
       for (const role of allowed) {
         installSeededAccess(role);

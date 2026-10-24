@@ -383,6 +383,14 @@ rather than omitting them, so a fast deploy is legible as a fast deploy -- and
 a person counting missing steps has no way to tell "nothing had to restart"
 from "it stopped here".
 
+To install changed MemQL definitions without publishing the package’s websites,
+choose **Skip** for every website in the wizard. **Install MemQL changes** is
+available only when the successful analysis confirms a changed DSL domain.
+The confirmation preserves explicit skips and requests service restarts; no
+website is built or published. Empty packages, unchanged DSL and unknown change
+evidence do not offer this action. Check the restarted services before treating
+the new definitions as ready.
+
 **The report says which it will be, before the gate**: `report.dslChanges`
 on the run row (memql#5601) is `true` when deploying this plan would change
 the cluster's active DSL set -- some domain's tree differs from what

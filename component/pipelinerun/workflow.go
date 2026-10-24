@@ -31,6 +31,7 @@ type workflowProgram struct {
 	definitions map[string]*automations.Automation
 	actions     map[string]*actions.Registry
 	fingerprint string
+	snapshot    *workflowhost.Snapshot
 }
 
 var installedPipelineWorkflows = sync.OnceValues(func() (map[string]*automations.Automation, error) {
@@ -58,6 +59,17 @@ func loadPipelineWorkflow(name string) (*automations.Automation, error) {
 }
 
 func (dr *runDriver) prepareWorkflow(name string) error {
+	if dr.run.PolicySnapshot != nil {
+		snapshot, err := readPipelinePolicy(dr.run.PolicySnapshot)
+		if err != nil {
+			return err
+		}
+		if name != "" && name != snapshot.Entry {
+			return fmt.Errorf("source workflow %q differs from the installed delivery binding %q", name, snapshot.Entry)
+		}
+		dr.workflow = &workflowProgram{root: snapshot.Entry, fingerprint: snapshot.Version, snapshot: snapshot}
+		return nil
+	}
 	if name == "" {
 		name = defaultPipelineWorkflow
 	}
@@ -79,7 +91,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 			switch step.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
 			case automations.StepTypeFunction:
-				if step.Function == nil || (step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
+				if step.Function == nil || (step.Function.Name != "pipelineReportMergeGroupReview" && step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
 					return fmt.Errorf("pipeline workflow step %q calls a function outside its run-scoped contract", step.ID)
 				}
 			case automations.StepTypeAction:
@@ -206,6 +218,17 @@ func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, eve
 			return pipelines.StageSelection{}, err
 		}
 	}
+	usesPR, err := dr.stageUsesPullRequest()
+	if err != nil {
+		return pipelines.StageSelection{}, err
+	}
+	var pullRequest map[string]any
+	if usesPR {
+		pullRequest, err = dr.stagePullRequest(ctx)
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+	}
 	selection := pipelines.StageSelection{Included: make([]string, 0, len(spec.Stages))}
 	for _, stage := range spec.Stages {
 		stageCadence := stage.Schedule
@@ -219,16 +242,27 @@ func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, eve
 		if on == nil {
 			on = []string{}
 		}
-		value, err := dr.runPinnedWorkflow(ctx, "pipelineStageIncluded", map[string]any{
+		args := map[string]any{
 			"event": string(event), "mode": string(mode), "on": on,
 			"runSchedule": runCadence, "stageSchedule": stageCadence,
-		})
+		}
+		if dr.workflow.snapshot != nil && dr.workflow.snapshot.PhaseEntry("pipelineStageIncluded") != "pipelineStageIncluded" {
+			args["stage"], args["repository"], args["sha"], args["releaseTag"] = stage.Name, dr.run.Repository, dr.run.SHA, dr.run.ReleaseTag
+		}
+		if usesPR {
+			args["pullRequest"] = maps.Clone(pullRequest)
+			args["stage"], args["repository"], args["sha"], args["releaseTag"] = stage.Name, dr.run.Repository, dr.run.SHA, dr.run.ReleaseTag
+		}
+		value, err := dr.runPinnedWorkflow(ctx, "pipelineStageIncluded", args)
 		if err != nil {
 			return pipelines.StageSelection{}, err
 		}
-		included, ok := value.(bool)
-		if !ok {
-			return pipelines.StageSelection{}, fmt.Errorf("pipeline stage policy returned %T, want bool", value)
+		included, reason, err := stageSelectionDecision(value)
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+		if err := dr.recordStageDecision(ctx, stage.Name, included, reason); err != nil {
+			return pipelines.StageSelection{}, err
 		}
 		if included {
 			selection.Included = append(selection.Included, stage.Name)
@@ -324,16 +358,24 @@ func (dr *runDriver) selectBuckets(ctx context.Context, spec *pipelines.Spec, mo
 }
 
 func (dr *runDriver) runPinnedWorkflow(ctx context.Context, name string, args map[string]any) (any, error) {
+	return dr.runPinnedWorkflowWithOptions(ctx, name, args, workflowhost.Options{})
+}
+
+func (dr *runDriver) runPinnedWorkflowWithOptions(ctx context.Context, name string, args map[string]any, opts workflowhost.Options) (any, error) {
+	if dr.workflow != nil && dr.workflow.snapshot != nil {
+		return runPolicyPhase(ctx, dr.workflow.snapshot, name, args, opts)
+	}
 	if dr.workflow == nil || dr.workflow.definitions[name] == nil {
 		return nil, fmt.Errorf("pipeline workflow %q was not pinned before selection", name)
 	}
-	return workflowhost.Run(ctx, name, args, workflowhost.Options{Load: func(want string) (*automations.Automation, error) {
+	opts.Load = func(want string) (*automations.Automation, error) {
 		a := dr.workflow.definitions[want]
 		if a == nil {
 			return nil, fmt.Errorf("pipeline workflow %q was not pinned before execution", want)
 		}
 		return a, nil
-	}})
+	}
+	return workflowhost.Run(ctx, name, args, opts)
 }
 
 func cloneWorkflowLiteral(value any) any {
@@ -379,6 +421,8 @@ func workflowCapability(name string) func(context.Context, map[string]any, int) 
 		var value any
 		var err error
 		switch name {
+		case "reportMergeGroupReview":
+			value, err = h.reportMergeGroupReview(ctx, args)
 		case "workflowFacts":
 			value = h.facts()
 		case "skipStep":
@@ -440,6 +484,8 @@ func (h *pipelineWorkflowHost) Execute(ctx context.Context, step *automations.St
 	var value any
 	if err == nil {
 		switch step.Function.Name {
+		case "pipelineReportMergeGroupReview":
+			value, err = h.reportMergeGroupReview(ctx, args)
 		case "pipelineWorkflowFacts":
 			value = h.facts()
 		case "pipelineSkipStep":
@@ -464,7 +510,7 @@ func (h *pipelineWorkflowHost) facts() map[string]any {
 			states = append(states, map[string]any{"key": t.step.Key, "stage": stage.name, "stageIndex": index, "status": string(s.Status), "kind": string(t.step.Kind), "runAfterFailure": t.step.RunAfterFailure})
 		}
 	}
-	return map[string]any{"stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled() || h.dr.cleanupFailed.Load(), "steps": states}
+	return map[string]any{"event": string(h.dr.run.Event), "stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled() || h.dr.cleanupFailed.Load(), "steps": states}
 }
 
 func (h *pipelineWorkflowHost) skip(ctx context.Context, args map[string]any) (any, error) {
@@ -539,7 +585,28 @@ func (dr *runDriver) execute(ctx context.Context) error {
 		}
 		stages = append(stages, map[string]any{"name": stage.name, "stageIndex": index, "steps": items})
 	}
-	_, err := h.TriggerAutomationWithArgs(ctx, dr.workflow.root, map[string]any{"stages": stages})
+	var err error
+	if dr.workflow.snapshot != nil {
+		ops := map[string]workflowhost.Operation{
+			"pipelineReportMergeGroupReview": h.reportMergeGroupReview,
+			"pipelineWorkflowFacts": func(_ context.Context, args map[string]any) (any, error) {
+				if len(args) != 0 {
+					return nil, fmt.Errorf("workflow facts accepts no arguments")
+				}
+				return h.facts(), nil
+			},
+			"pipelineSkipStep": h.skip,
+			"integration.pipelines.executeStep": func(ctx context.Context, args map[string]any) (any, error) {
+				return h.Invoke(ctx, "integration.pipelines.executeStep", args)
+			},
+			"integration.pipelines.reportProgress": func(ctx context.Context, args map[string]any) (any, error) {
+				return h.Invoke(ctx, "integration.pipelines.reportProgress", args)
+			},
+		}
+		_, err = runPolicyPhase(ctx, dr.workflow.snapshot, "runPipelineStages", map[string]any{"stages": stages}, workflowhost.Options{Operations: ops, Logger: dr.log, ConcurrentOperations: true})
+	} else {
+		_, err = h.TriggerAutomationWithArgs(ctx, dr.workflow.root, map[string]any{"stages": stages})
+	}
 	if dr.lease.isCancelled() {
 		for _, t := range dr.tracks {
 			if !t.finished() {

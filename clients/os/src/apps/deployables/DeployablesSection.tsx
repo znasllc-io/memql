@@ -5,7 +5,7 @@ import { AccountChip } from "../accounts/AccountPicker";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { healthExplanation } from "./health";
 import { AddButton } from "../../kit/AddButton";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivePane } from "./paneActivity";
 import { Archive, FileArchive, GitBranch, Globe, ShoppingBag } from "lucide-react";
 import { RecordRow } from "../../kit/RecordRow";
@@ -28,6 +28,8 @@ import {
 } from "../../kit";
 import { formatFreshness } from "../../kit/format";
 import type { LiveView } from "../../live/liveView";
+import { useOsConnection } from "../../live/connection";
+import { useGraphRevision } from "../../live/useGraphRevision";
 import type { ArrivalKind } from "../../live/arrival";
 import { NO_ACCOUNT_LABEL } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, accountNameFrom, type AccountRow } from "../accounts/rows";
@@ -54,7 +56,7 @@ import {
   type DeployableListRow,
   type ListFilter,
 } from "./list";
-import { runIsScopedToApp, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { deploymentFromRow, memqlOnlyStaged, runIsScopedToApp, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
 import { partsForOrganization, type PartsHeld } from "./parts";
 import { availableInAnyOrganization } from "../../system/roles";
@@ -115,7 +117,7 @@ import { runTitle } from "./pipelines/words";
 type DeployablesView =
   | { kind: "list" }
   | { kind: "deployable"; siteId: string; from?: string; detail?: "store"; result?: string; revision?: number }
-  | { kind: "source"; packageId: string; fromSite?: string }
+  | { kind: "source"; packageId: string; fromSite?: string; openView?: { section: "details" | "settings"; revision: number } }
   | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
   | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn }
   // A SOURCE'S PIPELINE (epic memql#5479): a run its Checks row opened, its
@@ -138,8 +140,8 @@ export type SectionRoot = "deployables" | "sources";
 const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deployables", sources: "Sources" };
 
 export function DeployablesSection({
-  root = "deployables",
-  active = true, navigation, openRequest, connectResult, sourceOpenRequest,
+  root = "deployables", sourceLabel = "Sources", onOpenRepository, onAddRepository,
+  active = true, navigation, openRequest, composeOpenRequest, connectResult, sourceOpenRequest, onOpenDeployable, onComposeDeployable,
   pipelines, runs, pipelinesSettled = false, pipelinesError = "", connectFlow, onOpenRuns,
   sites,
   packages,
@@ -158,12 +160,18 @@ export function DeployablesSection({
   onSettings,
 }: {
   root?: SectionRoot;
+  sourceLabel?: string;
+  onAddRepository?: () => void;
+  onOpenRepository?: ((packageId: string, repositoryView?: "settings") => void) | null;
   active?: boolean;
   navigation?: OsAppProps["navigation"];
   openRequest?: { siteId: string; revision: number; detail?: "store"; result?: string };
+  composeOpenRequest?: { packageId: string; app: string; revision: number };
+  onOpenDeployable?: (siteId: string) => void;
+  onComposeDeployable?: (packageId: string, app: string) => void;
   connectResult?: ConnectReturn | null;
   /** Open a source's page: the map's Checks node, a run page's trail. */
-  sourceOpenRequest?: { packageId: string; revision: number };
+  sourceOpenRequest?: { packageId: string; revision: number; repositoryView?: "settings" };
   /** The caller's pipelines and their runs, from the root's feeds (epic memql#5479). */
   pipelines?: LiveView<PipelineRow> | null;
   runs?: LiveView<RunRow> | null;
@@ -204,13 +212,20 @@ export function DeployablesSection({
   const [landing, setLanding] = useState(false);
   const lastNavigation = useRef<number | undefined>(undefined);
   const lastOpenRequest = useRef<number | undefined>(undefined);
+  const lastComposeRequest = useRef<number | undefined>(undefined);
   const lastSourceRequest = useRef<number | undefined>(undefined);
   function setView(next: DeployablesView) { setLanding(false); holdView(next); }
   useLayoutEffect(() => {
     if (!active) return;
+    if (composeOpenRequest && composeOpenRequest.revision !== lastComposeRequest.current) {
+      lastComposeRequest.current = composeOpenRequest.revision;
+      setView({ kind: "compose", parkedPackageId: composeOpenRequest.packageId, only: composeOpenRequest.app });
+      lastNavigation.current = navigation?.revision;
+      return;
+    }
     if (sourceOpenRequest && sourceOpenRequest.revision !== lastSourceRequest.current) {
       lastSourceRequest.current = sourceOpenRequest.revision;
-      setView({ kind: "source", packageId: sourceOpenRequest.packageId });
+      setView({ kind: "source", packageId: sourceOpenRequest.packageId, openView: { section: sourceOpenRequest.repositoryView ?? "details", revision: sourceOpenRequest.revision } });
       lastNavigation.current = navigation?.revision;
       return;
     }
@@ -224,7 +239,7 @@ export function DeployablesSection({
       lastNavigation.current = navigation.revision;
       setLanding(navigation.origin === "peer");
     }
-  }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId, sourceOpenRequest?.revision]);
+  }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId, sourceOpenRequest?.revision, composeOpenRequest?.revision]);
   const canOpenCompose = can.deploy || availableInAnyOrganization("execute", "app:deployables/deploy");
   // OAuth is a full-page return. Resume the repository step once; the
   // live credential feed decides whether this account actually connected.
@@ -354,7 +369,7 @@ export function DeployablesSection({
           viewerUserId={viewerUserId}
           credentials={credentials}
           credentialFeed={credentialFeed}
-          backLabel={view.fromSource ? "Source" : ROOT_LABEL[root]}
+          backLabel={view.fromSource ? "Source" : (root === "sources" ? sourceLabel : ROOT_LABEL[root])}
           onBack={() => view.fromSource ? setView({ kind: "source", packageId: view.fromSource }) : backToList()}
           onAsk={onAsk}
           parked={parkedFor ?? undefined}
@@ -384,7 +399,7 @@ export function DeployablesSection({
       const label = sourceName(pkg);
       const pipeline = pipelineForPackage(pipelineRows, pkg.id);
       const toSource = () => setView({ kind: "source", packageId: pkg.id });
-      const sourceCrumbs = [{ label: ROOT_LABEL[root], onSelect: backToList }, { label, onSelect: toSource }];
+      const sourceCrumbs = [{ label: (root === "sources" ? sourceLabel : ROOT_LABEL[root]), onSelect: backToList }, { label, onSelect: toSource }];
       if (view.kind === "run") {
         const run = runRows.find((r) => sameId(r.id, view.runId)) ?? null;
         return (
@@ -448,7 +463,7 @@ export function DeployablesSection({
           onOpenSourceHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
           onBack={() => setView(view.returnTo ?? (view.siteId ? { kind: "deployable", siteId: view.siteId } : { kind: "source", packageId: pkg.id }))} />;
       }
-      return sourcePage(pkg, view.fromSite);
+      return sourcePage(pkg, view.fromSite, view.openView);
     }
 
     if (view.kind === "deployable") {
@@ -470,8 +485,8 @@ export function DeployablesSection({
           clusterDomain={clusterDomain}
           onAsk={onAsk}
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
-          backLabel={view.from ? "Source" : ROOT_LABEL[root]}
-          onOpenSource={(packageId) => setView({ kind: "source", packageId, fromSite: site.id })}
+          backLabel={view.from ? "Source" : (root === "sources" ? sourceLabel : ROOT_LABEL[root])}
+          onOpenSource={onOpenRepository === null ? undefined : (packageId, repositoryView) => onOpenRepository ? onOpenRepository(packageId, repositoryView) : setView({ kind: "source", packageId, fromSite: site.id, openView: { section: repositoryView ?? "details", revision: 0 } })}
           onDeleted={(goneId, what) => {
             const gone = siteRows.find((s) => s.id === goneId);
             setJustGone(gone === undefined ? null : { name: gone.hostname, what });
@@ -490,11 +505,13 @@ export function DeployablesSection({
    * left the feed -- a pipeline read away, a flow with nowhere to hold its
    * answers -- shows the source it belongs to rather than an empty page.
    */
-  function sourcePage(pkg: PackageRow, fromSite?: string) {
-    const here: DeployablesView = { kind: "source", packageId: pkg.id, ...(fromSite ? { fromSite } : {}) };
+  function sourcePage(pkg: PackageRow, fromSite?: string, openView?: { section: "details" | "settings"; revision: number }) {
+    const here: DeployablesView = { kind: "source", packageId: pkg.id, ...(fromSite ? { fromSite } : {}), ...(openView ? { openView } : {}) };
     const pipeline = pipelineForPackage(pipelineRows, pkg.id);
     return (
       <SourceView
+        repositoryWorkspace={sourceLabel === "Repositories"}
+        openView={openView}
         key={`${pkg.id}:${viewerUserId}`}
         pkg={pkg}
         viewerUserId={viewerUserId}
@@ -503,11 +520,11 @@ export function DeployablesSection({
         appsSettled={!feedError && sites?.snapshot.state === "live" && packages?.snapshot.state === "live"}
         credentials={credentials}
         can={partsForOrganization(pkg.accountId, can)}
-        backLabel={fromSite ? (siteRows.find(s => s.id === fromSite)?.title || "Deployable") : ROOT_LABEL[root]}
+        backLabel={fromSite ? (siteRows.find(s => s.id === fromSite)?.title || "Deployable") : (root === "sources" ? sourceLabel : ROOT_LABEL[root])}
         onBack={() => fromSite ? setView({ kind: "deployable", siteId: fromSite }) : backToList()}
         onOpenHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: here })}
-        onOpenApp={openSite}
-        onOpenDeclared={(app) => openDeclared(pkg.id, app)}
+        onOpenApp={onOpenDeployable ?? openSite}
+        onOpenDeclared={(app) => onComposeDeployable ? onComposeDeployable(pkg.id, app) : openDeclared(pkg.id, app)}
         onReview={reviewFor(pkg.id)}
         onAsk={onAsk}
         pipeline={pipeline}
@@ -582,7 +599,7 @@ export function DeployablesSection({
     const filtered = filterIsNarrowing(filter);
     return (
       <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density="comfortable">
-        <Head title={ROOT_LABEL[root]} meta={!feedError && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
+        <Head title={(root === "sources" ? sourceLabel : ROOT_LABEL[root])} meta={!feedError && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
           <Refine iconOnly
             search={filter.search}
             onSearch={(search) => patch({ search })}
@@ -652,9 +669,10 @@ export function DeployablesSection({
           {root === "deployables" && canOpenCompose ? (
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
+          {root === "sources" && onAddRepository ? <AddButton label="Add repository" onClick={onAddRepository} /> : null}
           {root === "sources" ? <AutoRefresh busy={sourcesList?.snapshot.state === "seeding"} onRefresh={refreshSources} /> : null}
         </Head>
-        {root === "sources" ? <Caption>Manage sources here. Add new ones through Add deployable.</Caption> : null}
+        {root === "sources" && !onAddRepository ? <Caption>Repositories available to this account.</Caption> : null}
         {root === "sources" && (connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Retrying automatically. Configured repositories remain available." /> : null}
 
         {/* WHAT HAPPENED TO THE THING THAT IS NO LONGER HERE. The name is free
@@ -709,7 +727,7 @@ export function DeployablesSection({
             emptyText={showArchived ? "No archived sources." : filtered ? "No matching sources." : "No sources yet."}
             emptyContent={<EmptyState icon={GitBranch} title={showArchived ? "No archived sources" : filtered ? "No matching sources" : "No sources yet"}
               action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear the search</Button> : undefined}>
-              {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Start with Add deployable."}
+              {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Use Add repository to connect another source."}
             </EmptyState>}
             renderRow={(group, tick) => (
               <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} hasPipeline={pipelineForPackage(pipelineRows, group.pkg!.id)?.status === "active"} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
@@ -846,8 +864,9 @@ function DeployableLine({
 }) {
   const now = useNow();
   const site = row.site;
+  const completion = usePackageOnlyCompletion(row);
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
-  const state = row.parked ? deploymentStateWord(row.parked.status) : row.disabled ? "Inactive" : site ? siteStateWord(site) : "Not deployed";
+  const state = row.parked ? deploymentStateWord(row.parked.status) : row.disabled ? "Inactive" : site ? siteStateWord(site) : completion === "staged" ? "MemQL changes staged" : completion === "reading" ? "Reading installation status" : completion === "unavailable" ? "Installation status unavailable" : "Not deployed";
   const name = row.name;
   const client = accountNameFrom(accounts, site?.accountId ?? row.pkg?.accountId ?? "");
   // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:
@@ -857,7 +876,7 @@ function DeployableLine({
   return <RecordRow
     icon={site?.kind === "shopify_storefront" ? <ShoppingBag size={18} aria-hidden /> : <Globe size={18} aria-hidden />}
     name={name}
-    secondary={row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
+    secondary={completion === "staged" ? "MemQL package" : row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
     state={state}
     tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"}
     stateTitle={!row.parked && site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
@@ -875,4 +894,38 @@ function DeployableLine({
     {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{row.parked ? "started" : site ? "deployed" : "added"} by {deployedBy}</span> : null}
     {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
   </RecordRow>;
+}
+
+/** Source-only rows have no site state. Read one bounded receipt page only
+ * for packages with a recorded installation, without retaining every source's
+ * timeline. Connection, version and pending-run changes invalidate the answer. */
+function usePackageOnlyCompletion(row: DeployableListRow): "" | "reading" | "staged" | "unavailable" {
+  const connection = useOsConnection();
+  const pkg = row.pkg;
+  const packageId = !row.site && !row.app && !row.parked && pkg?.deployedVersion && pkg.declares.length === 0 ? pkg.id : "";
+  const version = packageId ? pkg?.deployedVersion ?? "" : "";
+  const revision = useGraphRevision([], Boolean(packageId));
+  const key = `${packageId}:${version}:${revision}`;
+  const [receipt, setReceipt] = useState<{ key: string; connection: typeof connection; state: "" | "staged" | "unavailable" } | null>(null);
+  useEffect(() => {
+    if (!packageId || !connection) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setReceipt({ key, connection, state: "unavailable" });
+      controller.abort();
+    }, 15_000);
+    void connection.query.packageDeployments({ packageId }, { signal: controller.signal }).then(result => {
+      if (controller.signal.aborted) return;
+      const staged = result.rows().map(deploymentFromRow).some(run => run.packageId === packageId && run.sourceVersion === version && memqlOnlyStaged(run));
+      // This bounded page may omit an older successful receipt. A recorded
+      // installed version without matching evidence is unknown, not absent.
+      setReceipt({ key, connection, state: staged ? "staged" : "unavailable" });
+    }).catch(() => {
+      if (!controller.signal.aborted) setReceipt({ key, connection, state: "unavailable" });
+    }).finally(() => clearTimeout(timeout));
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [connection, packageId, version, key]);
+  if (!packageId) return "";
+  if (!connection) return "unavailable";
+  return receipt?.key === key && receipt.connection === connection ? receipt.state : "reading";
 }

@@ -773,12 +773,17 @@ refused `pipeline_no_machine_for_need`, and nothing ran. An otherwise eligible
 worker that is offline can keep admission waiting for its connection; revoked
 workers, withdrawn repository consent and incompatible contracts cannot. Under contract 4, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
-When the dispatcher confirms that shared build capacity was busy, an eligible
-worker is offline, or its connection disappeared before dispatch, the fleet
-runner waits and routes again under the run's wall-clock ceiling. Every attempt rechecks consent and routing. Waiting does not consume
+When the dispatcher confirms that shared build capacity was busy or fenced by
+a retained local-build record, an eligible worker is offline, or its connection
+disappeared before dispatch, the fleet runner waits and routes again under the
+run's wall-clock ceiling. Every attempt rechecks consent and routing. Waiting does not consume
 the command's own timeout, but the run ceiling still limits its remaining
 execution time. A long wait refreshes the repository clone token and keeps
 both the old and new token masked. Cancellation ends the wait promptly.
+The retained local-build fence reports its operator recovery instructions while
+waiting. Neither the worker nor the engine clears that record automatically.
+Other capacity inspection failures remain refusals; waiting on this specific
+fence requires an engine and Cockpit that both recognize `pipeline_capacity_fenced`.
 Timeouts, disconnects after dispatch, uncertain cleanup and interrupted prior
 attempts do not permit another dispatch: a command might already have performed
 an external effect. Each dispatch is recorded like an agent's call, as a

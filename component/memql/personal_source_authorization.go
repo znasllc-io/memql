@@ -13,9 +13,9 @@ import (
 func personalSourceRequirement(name string) (verb, resource string) {
 	switch name {
 	case "sourceConnectionCreate", "sourceConnectionRemove", "sourceCredentialRevoke", "githubConnectBegin":
-		return auth.VerbExecute, "app:deployables/sources"
+		return auth.VerbExecute, "app:pipelines/repositories"
 	case "sourceInstallations", "sourceRepositories", "sourceProbe", "sourceConnectionsMine", "sourceConnectionById", "sourceCredentialsMine", "sourceCredentialById":
-		return auth.VerbRead, "app:deployables"
+		return auth.VerbRead, "app:pipelines"
 	}
 	return "", ""
 }
@@ -26,7 +26,7 @@ func (e *MemQLEngine) personalSourceCapable(ctx context.Context, verb, resource 
 	if e.GlobalDataCapable(ctx, auth.VerbRead) && e.OrganizationCapable(ctx, "", auth.VerbRead, "app:settings/connections") && e.OrganizationCapable(ctx, "", verb, "app:settings/connections") {
 		return true
 	}
-	if e.GlobalDataCapable(ctx, auth.VerbRead) && e.OrganizationCapable(ctx, "", auth.VerbRead, "app:deployables") && e.OrganizationCapable(ctx, "", verb, resource) {
+	if e.GlobalDataCapable(ctx, auth.VerbRead) && e.OrganizationCapable(ctx, "", auth.VerbRead, "app:pipelines") && e.OrganizationCapable(ctx, "", verb, resource) {
 		return true
 	}
 	scope := e.accountScopeFor(ctx)
@@ -34,7 +34,7 @@ func (e *MemQLEngine) personalSourceCapable(ctx context.Context, verb, resource 
 		return false
 	}
 	for account := range scope.accounts {
-		if e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) && e.OrganizationCapable(ctx, account, auth.VerbRead, "app:deployables") && e.OrganizationCapable(ctx, account, verb, resource) {
+		if e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) && e.OrganizationCapable(ctx, account, auth.VerbRead, "app:pipelines") && e.OrganizationCapable(ctx, account, verb, resource) {
 			return true
 		}
 	}

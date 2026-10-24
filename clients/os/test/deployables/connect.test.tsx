@@ -23,6 +23,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
+import { PipelinesApp } from "../../src/apps/pipelines/PipelinesApp";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
@@ -269,9 +270,9 @@ describe("telling a grant from a pasted token", () => {
 function ReturnedWindow() {
   const { state, actions } = useOs();
   return <><output data-testid="window-count">{Object.keys(state.shell.windows).length}</output>
-    {Object.values(state.shell.windows).map(win => win.appId === "deployables" ?
-      <DeployablesApp key={win.id} sectionId={win.sectionId} navigate={() => {}} askContext={() => {}}
-        intent={win.intent} consumeIntent={id => actions.consumeWindowIntent(win.id, id)} /> : null)}
+    {Object.values(state.shell.windows).map(win => win.appId === "pipelines" ?
+      <PipelinesApp key={win.id} sectionId={win.sectionId} navigate={() => {}} askContext={() => {}}
+        intent={win.intent} consumeIntent={id => actions.consumeWindowIntent(win.id, id)} /> : win.appId === "deployables" ? <DeployablesApp key={win.id} sectionId={win.sectionId} navigate={() => {}} askContext={() => {}} intent={win.intent} consumeIntent={id => actions.consumeWindowIntent(win.id, id)} /> : null)}
   </>;
 }
 
@@ -337,7 +338,7 @@ describe("the return from GitHub", () => {
     history.replaceState({}, "", "/?github=connected");
     captureConnectReturn(window);
     render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>));
-    expect(await screen.findByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Repositories" })).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Connected GitHub accounts" })).toBeNull();
     expect(screen.queryByText("@colleague")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
@@ -361,7 +362,7 @@ describe("the return from GitHub", () => {
     render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>, { userId: "u-me" }));
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Sources" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Repositories" })).toBeNull();
     if (reason === "connected") expect(await screen.findByRole("button", { name: "Manage GitHub account octocat" })).toBeTruthy();
     expect(screen.getByTestId("window-count").textContent).toBe("1");
   });

@@ -51,7 +51,7 @@ import (
 // product bundle no Go test in this repository walks.
 //
 // The lifetimes differ in the other direction too: this registry is
-// rebuilt on every load (ResetShopperExtensions), so a domain dropped from
+// rebuilt on every load, so a domain dropped from
 // a bundle stops extending on the next boot. The pack registry is not, and
 // must not be -- clearing it would unregister routes whose Register will
 // never run again.
@@ -102,6 +102,13 @@ var shopperExtensions = map[string]ShopperExtension{}
 // a DSL load, not an init, and a load fault belongs on the LoadReport
 // where strict boot and cmd/memqllint both already read it.
 func RegisterShopperExtension(ext ShopperExtension) error {
+	shopperMu.Lock()
+	defer shopperMu.Unlock()
+	return registerShopperExtensionIn(ext, shopperForms, shopperExtensions)
+}
+
+// The same contract can validate a candidate without publishing its routes.
+func registerShopperExtensionIn(ext ShopperExtension, forms map[string]ShopperForm, extensions map[string]ShopperExtension) error {
 	ext.Domain = strings.TrimSpace(ext.Domain)
 	ext.Pack = strings.TrimSpace(ext.Pack)
 	ext.Form = strings.TrimSpace(ext.Form)
@@ -129,11 +136,8 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 			"that wants another field declares it", ext.Domain, ext.Pack, ext.Form)
 	}
 
-	shopperMu.Lock()
-	defer shopperMu.Unlock()
-
 	key := shopperKey(ext.Pack, ext.Form)
-	form, declared := shopperForms[key]
+	form, declared := forms[key]
 	if !declared {
 		// A DISABLED PACK IS NOT A TYPO, AND THE DIFFERENCE HAD TO BE DRAWN.
 		//
@@ -157,7 +161,7 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 		// half that declares them. A pack that is live and declaring forms,
 		// none of them this one, is somebody's spelling mistake -- and that
 		// still refuses, loudly, which is what the refusal was for.
-		if shopperFormsDeclaredForLocked(ext.Pack) == 0 {
+		if shopperFormCount(forms, ext.Pack) == 0 {
 			return errShopperPackInert
 		}
 		return fmt.Errorf("shopper extension declared by %q names the form %s. The pack %q is "+
@@ -167,7 +171,7 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 	// REFUSAL 2, naming BOTH domains: the operator has to know which two
 	// declarations to reconcile, and one name sends them looking for the
 	// other.
-	if prior, taken := shopperExtensions[key]; taken {
+	if prior, taken := extensions[key]; taken {
 		return fmt.Errorf("shopper extension: %s is already extended by %q, and %q may not "+
 			"extend it as well. Which one ran would depend on load order, which is resolved "+
 			"by nothing", key, prior.Domain, ext.Domain)
@@ -185,7 +189,7 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 				ext.Domain, f.Name, key, ext.Domain)
 		}
 	}
-	shopperExtensions[key] = ext
+	extensions[key] = ext
 	return nil
 }
 
@@ -201,9 +205,13 @@ var errShopperPackInert = errors.New("the pack declares no shopper form on this 
 // shopperFormsDeclaredForLocked counts a pack's declared forms. Callers hold
 // shopperMu.
 func shopperFormsDeclaredForLocked(pack string) int {
+	return shopperFormCount(shopperForms, pack)
+}
+
+func shopperFormCount(forms map[string]ShopperForm, pack string) int {
 	n := 0
 	prefix := strings.TrimSpace(pack) + "/"
-	for key := range shopperForms {
+	for key := range forms {
 		if strings.HasPrefix(key, prefix) {
 			n++
 		}
@@ -224,11 +232,8 @@ func ShopperExtensionFor(pack, form string) *ShopperExtension {
 
 // ResetShopperExtensions clears every extension.
 //
-// PRODUCTION, NOT A TEST SEAM. The DSL tree is loaded into a registry that
-// must reflect the tree as it now is: a domain removed from a bundle, or a
-// pack disabled under it, has to stop extending. Called by the loader
-// before it walks, so a failed load cannot leave half of the previous one
-// behind.
+// The boot loader replaces the complete extension view atomically instead;
+// this explicit reset leaves the pack's declared forms intact.
 func ResetShopperExtensions() {
 	shopperMu.Lock()
 	defer shopperMu.Unlock()

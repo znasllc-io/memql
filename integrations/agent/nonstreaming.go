@@ -383,7 +383,7 @@ BackgroundLoop:
 
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
-			return nil, r.pauseAtBudgetBoundary(ctx, compactErr, messages)
+			return nil, r.pauseAfterContextRecovery(ctx, compactErr, messages)
 		}
 		messages = compacted
 
@@ -418,6 +418,9 @@ BackgroundLoop:
 			budgetFailure := r.workCallFailure(callCtx)
 			cancel()
 			stopBudget()
+			if wait := r.delegatedHumanWait(ctx, provider); wait != nil {
+				return nil, wait
+			}
 			if budgetFailure != nil {
 				return nil, r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 			}
@@ -432,15 +435,15 @@ BackgroundLoop:
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if handled, recoveryErr := r.recoverModelCeiling(ctx, stepErr, messages, attempt, stepResult == nil); handled {
+			if next, ok := r.handOffContext(ctx, stepErr, messages, &contextHandoffs, iter, requestId); ok {
+				messages = next
+				continue
+			}
+			if handled, recoveryErr := r.recoverModelCall(ctx, stepErr, messages, attempt, stepResult == nil); handled {
 				if recoveryErr != nil {
 					return nil, recoveryErr
 				}
 				attempt++
-				continue
-			}
-			if next, ok := r.handOffContext(ctx, stepErr, messages, &contextHandoffs, iter, requestId); ok {
-				messages = next
 				continue
 			}
 			if isTransientStreamError(stepErr) && attempt < streamTransientMaxRetries {
@@ -517,12 +520,14 @@ BackgroundLoop:
 			)
 		}
 
-		if workOutcomeRequired && isDelegatedWorkSession(provider) {
-			workOutcomeRequired = false
-		}
 		if workOutcomeRequired {
 			normalized, outcomeErr := normalizeWorkOutcome(turnCalls, turnText)
 			if outcomeErr != nil {
+				// A completed app session must not be repeated to repair a
+				// terminal envelope; its operational effects already happened.
+				if isDelegatedWorkSession(provider) {
+					return nil, fmt.Errorf("invalid delegated work outcome: %w", outcomeErr)
+				}
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
 				if invalidOutcomes >= 2 {

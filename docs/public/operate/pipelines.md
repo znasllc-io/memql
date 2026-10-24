@@ -9,14 +9,17 @@ owner: znas
 
 # Pipelines
 
-**Audience:** owners connecting a repository's checks, and operators running the cluster they run on.
+**Audience:** owners and developers connecting a repository's checks, and operators running the cluster they run on.
 **Design:** `docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, decisions D1-D16 and its implementation notes for epic memql#5477.
 
 A pipeline is a repository's checks: declared in the `pipeline:` block of the
 repository's `memql-package.yaml`, delivered by the cluster's GitHub App, run by
 the cluster as a work goal, and reported back to GitHub as a check run on the
-commit it checked. A pull request runs what it affects; the merge queue, a push
-to the default branch and a published release run everything.
+commit it checked. By default, pull requests select affected coverage; merge
+queue, default-branch push and published-release events select full coverage
+for their applicable stages. An installed policy can select component-specific
+stages and explicitly reuse eligible verification evidence. Artifact preparation
+and publication still require their own recorded effects.
 
 > **What runs today.** This release takes deliveries, opens and deduplicates
 > runs, plans them, executes their steps and reports them on GitHub. A step
@@ -25,7 +28,7 @@ to the default branch and a published release run everything.
 > that half, and what an operator sets up before the first run. Read
 > [What runs today](#what-runs-today) before you make the check required.
 
-A pipeline is a fact about a source. Each Deployables source
+Pipelines manages repository delivery in MemQL OS. Each configured source
 (`v1:platform:package`) has at most one, owned by the source's owner, and every
 GitHub token a run uses is minted through that owner's GitHub connection. It is
 not the order a deploy runs in, which [Packages](packages.md#the-order-and-why-it-never-changes)
@@ -42,7 +45,7 @@ checks to another source, disconnect the pipeline it has first
 |---|---|---|
 | `v1:pipelines:pipeline` | source | The repository, how deliveries arrive, where steps may run, which secrets they may resolve, what the poll has seen, the timing table. Never the manifest: every run reads that at its own commit |
 | `v1:pipelines:run` | attempt of one run key | The event and mode, status and conclusion, the refusal that ended it, the check run's id and state, the stage table, the agent driving it |
-| `v1:pipelines:channel` | notify target | Where a notify stage delivers; managed in Deployables → Settings → Channels |
+| `v1:pipelines:channel` | notify target | Where a notify stage delivers; managed in Pipelines → Settings → Channels |
 
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
@@ -54,6 +57,62 @@ token, a secret value or a log line.
 
 ## Repository maintenance
 
+Owners and developers can request a scoped change through Ask or a repository's
+request form. The installation's `MEMQL_REPOSITORY_AUTHORITY_RESOLVER` selects
+the maintainer source or request-only peer from operator bindings. Source
+visibility and a local owner role do not grant upstream write permission.
+Requests to another maintainer wait for that maintainer's recorded decision;
+requests under the caller's own current provider write authority may start
+immediately. The request records its repository's stable identity, allowed
+paths, expiry, goal and execution. Related requests retain parent links, which
+carry no additional authority.
+
+The native proposal boundary accepts one immutable set of file replacements
+against an exact base commit. A `propose_change` request authorizes a draft pull
+request only. `deliver_change` additionally authorizes independent review and
+merge-queue admission; it is available only when the installed authority route
+declares both a review prompt and a bounded review-report and queue delivery recipe. An existing
+draft request cannot be upgraded by retrying it with a different operation.
+
+The `repositoryChangeReportReview` operation accepts only the native request ID.
+It publishes the reserved app-owned `MemQL / review` check for the exact proposed
+commit after the accepted independent review, then verifies GitHub's readback.
+Its durable receipt binds the source, repository identity, proposal and captured
+review. Queue admission requires that receipt and rechecks the exact provider
+check; a matching title or success supplied by a caller grants nothing. Pipeline
+names cannot claim this reserved review context. Required tests remain separate.
+An unavailable provider leaves the same report waiting; the installed recovery
+recipe explicitly resumes reporting before queueing, without drafting again.
+
+The change recipe, independent review prompt with its partials, and delivery
+recipe are captured before approval. Changing their content or routing
+invalidates the delegation. The native reviewer receives the immutable source
+and exact proposed replacements; a caller-supplied approval cannot substitute
+for its recorded verdict. Delivery refuses any proposal that differs from the
+approved review. Every effect rechecks the maintainer's current decision,
+provider write permission, recipe and execution authority.
+
+Queue admission verifies the same PR and reviewed head, required successful
+GitHub checks, current default branch and applicable review rules. It may mark
+a reviewed draft ready so GitHub can request required reviews. CODEOWNER and
+other required approvals still block queue admission until satisfied; no admin
+bypass or direct merge occurs. Pending checks and uncertain provider responses
+retain the same durable delivery. A bounded scheduled recovery leases that
+record across replicas and runs only its captured queue recipe. Recovery may
+continue after the original run succeeds while its goal stays open; closing or
+cancelling the goal, revoking approval, or changing the reviewed head prevents
+further admission. `queued` records provider-confirmed admission, not a merge.
+After admission, recovery only observes the same PR: it records a confirmed
+merge or surfaces removal from the queue without automatically re-enqueueing.
+An outage retains that observation-only state and reports the uncertainty.
+Release publication and installation require their separate authorization.
+
+Status and request-list reads retain the statement, requested operation,
+decision, review and delivery response across reconnects and replicas. A local
+maintainer receives links to their own goal and approval. Other requesters,
+including remote installations, receive the request's status without private
+upstream goal or approval identifiers.
+
 A `repositoryChange` step applies a retained JSON proposal through the pipeline
 source's current GitHub App grant. The command that generates the proposal
 receives no writer token. This supports dependency tidy commits and draft
@@ -61,10 +120,14 @@ upgrade proposals while keeping file and branch authority in operator settings.
 
 Enable this optional writer only when the source's installed GitHub App grants
 **Contents: Read and write** and **Pull requests: Read and write**. The default
-App connection does not request repository-maintenance write access. An existing
-App needs its permissions updated and the installation owner must accept the
-change before a proposal can be applied. These permissions belong to the
-driver; proposal commands still receive only an explicitly requested read token.
+App setup now requests these permissions for governed delivery, along with
+merge-queue writes, commit-status reads and read-only administration access to
+observe classic branch protection. It never requests administration writes or
+workflow-file writes. An existing App needs its permissions updated and the
+installation owner must accept the change before a proposal or queue admission
+can proceed. Build and proposal commands still receive only an explicitly
+requested read token. The native writer checks the current source owner's
+authority; an installed App's broader grant does not replace that check.
 
 ```yaml
 - name: prepare
@@ -117,8 +180,10 @@ modes recheck the rule, source binding and grant immediately before writing.
 The proposal contains `schema: 1`, the exact source `commit`, a short `key`,
 `title`, `body`, and `files`. Each file has `path`, `baseSha256`, and UTF-8
 `content`. An empty base digest requires an absent file. The limit is 4 MiB
-for the proposal, 1 MiB per file and 256 files. Deletion, executable files,
-symlinks and workflow changes are not supported. An empty file list records
+for the proposal, 1 MiB per file and 256 files. Existing regular files retain
+their Git mode, including executable files (`100755`); new files use `100644`.
+The bounded branch writer supports content replacement, not mode changes.
+Deletion, symlinks and workflow changes are not supported. An empty file list records
 `unchanged` and mints no writer token.
 
 The driver validates the producer's successful journal, object version, size
@@ -130,8 +195,9 @@ An unresolved write fails the step and retains its evidence for reconciliation.
 
 ## Connecting a pipeline
 
-**Who:** the source's owner, holding `execute` on `app:deployables/connect`.
-**How:** in MemQL OS, **Connect pipeline** on the source's page in Deployables
+**Who:** the source's owner, holding `execute` on `app:pipelines/connect`.
+**How:** in MemQL OS, open **Pipelines → Repositories**, select the repository,
+and choose **Connect pipeline**
 ([below](#in-memql-os)); or the `pipelinesConnect` builtin.
 
 Before connecting:
@@ -207,12 +273,12 @@ Afterwards:
   deliveries are matched on the installation and the repository name a
   pipeline was connected with ([Delivery](#delivery-webhook-or-poll)).
 - **Disconnect** with `builtin pipelinesDisconnect(pipelineId: "<pipeline id>")`
-  (`execute` on `app:deployables/connect`). It opens no more runs, and a run no
+  (`execute` on `app:pipelines/connect`). It opens no more runs, and a run no
   agent has started yet concludes `pipeline_disconnected`. The pipeline and its
   runs stay, as the history, and the repository is free for another source's
   pipeline.
 - **Re-run** with `builtin pipelinesRerun(runId: "<run id>")` (`execute` on
-  `app:deployables/rerun`): the next attempt of the run's key, in the
+  `app:pipelines/rerun`): the next attempt of the run's key, in the
   original's mode and event, with a new check run. The original stays as it
   ended.
 - **Re-run failed** with `builtin pipelinesRerun(runId: "<run id>", failedOnly:
@@ -227,7 +293,7 @@ Afterwards:
   refused `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole
   re-run: one check run reports the whole run.
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
-  `app:deployables/cancel`). It flags the run; the agent driving it cancels
+  `app:pipelines/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
   queued run no agent has claimed is concluded cancelled at once. A new push
   to a pull request cancels the pull request's earlier runs the same way
@@ -240,7 +306,7 @@ whose pipeline belongs to somebody who has left. It writes the pipeline's
 status and nothing else.
 
 **Preview** with `builtin pipelinesPreview(packageId: "<package id>")`
-(`execute` on `app:deployables/connect`) to read what connecting would act on,
+(`execute` on `app:pipelines/connect`) to read what connecting would act on,
 writing nothing: the same read connect makes -- the grant proved by a mint, the
 default branch's head and the block there, validated -- answered as the stages
 and steps (their shape, never a command), the needs and secrets they name, the
@@ -250,11 +316,30 @@ otherwise). A typed refusal is the answer's `refusal`, not an error.
 
 ## In MemQL OS
 
-A pipeline lives in **Deployables**, on its source -- not in an app of its own
-(design record D12).
+The **Pipelines** app owns **Overview**, **Repositories**, **Changes**,
+**Runs**, **Releases**, **Logs** and **Settings**. Deployables shows source
+context and links to Pipelines; it manages deployed applications. Cluster
+**Updates** owns this installation’s selected release. Preparing a plan never
+applies it. If preparation is interrupted, **Resume preparation** continues the
+saved request after a reload. Before applying, its original operator can choose
+**Choose a different release** and confirm cancellation to release that plan.
+Once application has started, cancellation is unavailable; progress reads keep
+checking the same installation attempt. A repository or proposal outage is shown
+separately; saved preparation, plan cancellation and installation progress stay
+available under the original native permission checks.
 
-- **The source's page** carries a **Checks** part between its facts and the
-  apps it produces: the newest run on each branch, the default branch first,
+**Add repository** uses a left-step wizard: GitHub account, repository, MemQL
+organization, then review. Repository details use local tabs for **Details**,
+**Change requests**, **Checks**, **Deployables** and **Settings**. Change
+requests read fresh repository authority; being an owner or developer of this
+installation does not grant write access to an upstream repository. Requests
+name the intended change and allowed repository paths. The local maintainer
+can open their Nexus goal or approval; other requesters see the saved request
+and response. Draft-only work never grants queue permission. Delivery requests
+use the separately declared review and queue gates; neither option grants
+release publication or installation authority.
+
+- **The repository’s Checks tab** shows the newest run on each branch, the default branch first,
   each opening its run. Its facts gain a **Pipeline** line (the manifest, how
   many stages the newest run planned, how changes arrive, where steps run), and
   **Latest upstream** says what that commit's checks said -- *checks passed,
@@ -276,11 +361,11 @@ A pipeline lives in **Deployables**, on its source -- not in an app of its own
   request for the same head returns the same run, whichever branch reached it;
   use **Re-run** after it finishes to create another attempt. A
   source that produces no apps and runs a pipeline -- the engine repository is
-  one -- reads *pipeline* where its app count goes in the Sources list, and the
+  one -- reads *pipeline* where its app count goes in the Repositories list, and the
   Overview map draws a **Checks** node beside the deployables a checked source
   serves.
-- **Connect pipeline** is the add-a-deployable wizard's device over the source,
-  three steps. **Repository** reads `memql-package.yaml` at the default
+- **Connect pipeline** uses the same left-step wizard pattern as Fleet setup,
+  with three steps. **Repository** reads `memql-package.yaml` at the default
   branch's head with `pipelinesPreview`, so the stages show before anything is
   confirmed. **Compute** offers *Cluster* and, only when one of your machines
   reports `pipelines=allowed`, *Cluster and your fleet* -- the fleet alone
@@ -290,20 +375,21 @@ A pipeline lives in **Deployables**, on its source -- not in an app of its own
   changes arrive. A refusal lands at the stop it is about, with its remedy: a
   fleet code at Compute, a secret code at Confirm, everything else at
   Repository. Nothing is written until Connect, and leaving keeps the answers.
-- **Runs** is a tab of its own, after Sources (`read app:deployables/runs`):
+- **Runs** is a Pipelines section (`read app:pipelines/runs`):
   every run of every source you connected, newest first, grouped by day,
   Refine for the source, branch and outcome. A run rings once, when it has an
   answer.
-- **A run's page** draws the stages as stops across the top, read from the step
-  rows; the open stop's steps say where each ran and for how long; a failed
+- **A run’s page** draws the stages down the left, or across a narrow window,
+  read from the step rows; the open stop's steps say where each ran and for how long; a failed
   step shows its last lines -- read from its full log, which the runner keeps in
   your Library -- with **Open the full log**; a skipped step says why; the
   artifacts open in Files. One bar carries the state and the acts the run
   allows: **Open on GitHub**, **Re-run**, **Re-run failed**, or **Cancel** while
   it runs. The check run's details link, `https://os.<domain>/?pipelineRun=<run
   id>`, opens it.
-- **Settings -> Pipelines** (`read app:settings/pipelines`, the cluster owner)
-  is the [readiness](#readiness) item.
+- **Pipelines → Settings → Infrastructure** (`read app:settings/pipelines`,
+  the cluster owner) holds the [readiness](#readiness) report. Connections and
+  notification channels are under **Settings → Connections**.
 
 ---
 
@@ -400,7 +486,7 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 
 | Key | Value | Default | Refused when |
 |---|---|---|---|
-| `workflow` | Installed MemQL template composing the compiled steps | `runPipelineStages` | Not an identifier of at most 128 characters, or not an enabled callable installed template: `pipeline_stage_invalid` |
+| `workflow` | Optional assertion of the operator-bound workflow name | Operator-bound workflow | A different name cannot override the installation binding; execution refuses it |
 | `platform` | Default container platform (`linux/amd64` or `linux/arm64`); a step may override it | either Linux architecture on the cluster | Unknown OS/architecture: `pipeline_step_invalid` |
 | `image` | The toolchain image container steps run in. Pin it by digest | none | -- |
 | `services` | Named sidecars a step may ask for, each with `image` (required), `env` (plain `NAME: value` configuration, never a secret) and `ready` (a shell probe the runner waits on before the step's command starts) | none | A name that breaks the rule, a service with no image, or an `env` name that is not upper-case letters, digits and underscores starting with a letter or underscore: `pipeline_step_invalid`, scoped `services` or `services/<name>` |
@@ -408,11 +494,94 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 | `select` | How steps choose what to run. Required once a step names `packages` | none | [Below](#select) |
 | `stages` | The stages, in the order they run. At least one | required | Absent or empty: `pipeline_stage_invalid` |
 
-The default workflow chooses stage order, bounded parallelism and failure
-blocking. A custom `workflow` names installed DSL; the manifest cannot carry
-workflow source. Native code still enforces the run lease, authorized step
-identities, receipts and the final verdict. See
-[Pipeline workflows](../build/integration-boundary.md#pipeline-workflows).
+The operator chooses installed delivery policy with
+`MEMQL_PIPELINES_POLICY_RESOLVER`. The named pure template receives `repository`,
+`ownerUserId` and `pipelineId`. It returns `{}` for portable defaults, or a complete
+object of installed template names for these roles:
+
+| Role | Purpose |
+|---|---|
+| `workflow` | Stage order, bounded parallel work and failure blocking |
+| `stageIncluded` | Event, component and schedule selection |
+| `packageSelection`, `packageStepSelection`, `bucketIncluded` | Affected package coverage |
+| `eventMode`, `versionForEvent` | Event admission, coverage mode and artifact version |
+| `notificationCopy`, `notificationOutcome` | Notification text and settlement |
+| `artifactRetention` | Retention decisions |
+
+Optional roles are `supersession`, `reconciliation`, `maintenance` and
+`evidenceReuse`. Their default behavior preserves affected-PR supersession,
+cancels an invalidated queue ref, and performs no repair or evidence reuse.
+A resolver cannot change merge-group coverage mode away from `full` or grant
+repository write access.
+Source manifests declare commands and artifacts; they cannot replace this binding.
+
+Every new run saves the complete reachable policy source and its fingerprint
+before creating its GitHub check. Redelivery, retry and recovery use that saved
+closure, including on another replica with a newer installed bundle. Selection
+has no native effects. The stage selector additionally receives `stage`,
+`repository`, `sha` and the original `releaseTag`, so independently versioned
+components can share a checkout without sharing their publication tags.
+An installed stage selector can additionally declare `pullRequest object!` to
+opt into provider-verified selection facts. For a PR event the engine reads the
+current PR through the source owner's connection and verifies the exact PR
+number, open state, repository, branch and head commit before allocating work.
+Its argument contains `present: true`, `number`, `state`, `author`, `headRef`,
+`headRepository`, `headSha` and `baseSha`. Other events receive only
+`{present: false}`. A selector without this argument keeps its existing behavior
+and does not require this provider read.
+Install engine support before a policy that requires this argument: an older
+engine refuses the missing argument instead of presenting unverified facts as a
+decision to skip maintenance.
+
+The observation is saved with the run, source owner, credential, installation
+and captured policy version under the current driver's lease. Recovery on a
+different replica reuses that exact observation. An unavailable provider, moved
+PR, mismatched source, cancellation or lost claim refuses selection rather than
+turning unknown facts into a passing empty pipeline. These are planning facts;
+repository writes still require their own fresh authority and source checks.
+
+Stage selectors may return a boolean, or exactly
+`{included: false, reason: "No maintenance is needed for this change."}`. The
+reason must be nonempty plain text, at most 512 characters with no control
+characters. The engine records it once per stage as a run note, preserving
+unrelated notes, and refuses a changed outcome or explanation on recovery. An excluded
+stage creates no execution job. Installed DSL decides which authors, branches
+or stages apply; source manifests cannot provide verified facts or replace this
+policy.
+Native code retains leases, current authority, immutable receipts and the final
+verdict. See [Pipeline workflows](../build/integration-boundary.md#pipeline-workflows).
+
+### Reusing verification evidence
+
+A command may explicitly declare `verification: true` when its inputs completely
+determine the check. Such steps must use digest-pinned cluster containers and
+services, and cannot request secrets, repository tokens, artifacts or native
+fleet execution. Run-, event- and version-dependent environment variables are
+removed. The declaration is an author assertion: network-dependent or otherwise
+nondeterministic commands should not use it.
+
+The installed `evidenceReuse` selector can admit a successful full run's directly
+completed receipt at the same commit, owner, source, engine revision, policy
+fingerprint, command definition and package slice. Evidence older than 24 hours
+is refused. Scheduled scans and explicit retries always execute. Artifact
+production and publication always retain their own receipts; a reused test does
+not stand in for either. Equal trees with different commit hashes are currently
+checked separately.
+
+### Recovery and maintenance
+
+Recovery reads GitHub's current queue ref before cancelling work whose merge
+group disappeared or moved. An unavailable provider response leaves it running.
+Supersession cannot cancel unrelated full runs or releases.
+
+After a failed run, the frozen `maintenance` policy returns `none`, `human`, or
+`analysis` with an installed diagnosis template and an explanation. Analysis
+opens one durable owner-scoped goal keyed to the failed run; a lost response or
+another replica resumes that same request. Failed retries escalate to a person.
+Analysis receives facts and ordinary Work authority, never a repository writer
+or installation permission. Its state, explanation and linked goal are recorded
+on the pipeline run. Installation of a verified release remains a separate,
+explicit selection.
 
 `image` and `caches` are passed to the runner as written; what each cache name
 mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
@@ -537,6 +706,9 @@ a secret of the same name, which the manifest refuses anyway.
 
 ### Events and modes
 
+The portable policy selects these modes. An operator-bound installed policy may
+change event selection within the native trust and coverage constraints.
+
 | GitHub delivers | Opens | Mode |
 |---|---|---|
 | `pull_request` opened, synchronize or reopened | a run for the pull request's head | affected |
@@ -545,9 +717,14 @@ a secret of the same name, which the manifest refuses anyway.
 | `release` published | a run for the commit the tag names | full |
 | `check_run` or `check_suite` rerequested | a new attempt of the run it names | the original's mode and event |
 
-*Affected* runs what the change touches; *full* runs everything once, on the
-exact tree that lands or ships. A pull request can therefore pass and its merge
-group fail: the merge group's full run is the gate.
+*Affected* selects packages and path buckets touched by the change. *Full*
+selects every package within each applicable step's declared scope, on the
+exact commit being qualified. Event and component selectors still decide which
+stages apply; full coverage does not mean every release artifact is published.
+Eligible verification receipts may satisfy an opted-in check without executing
+it again, as described in [Reusing verification evidence](#reusing-verification-evidence).
+A pull request can therefore pass while its merge group fails: the queue checks
+the combined commit.
 
 Every other delivery opens nothing: a push to another branch (its pull request
 is what runs), a tag push, a deleted branch, a pull request closed or edited, a
@@ -566,21 +743,25 @@ check suite re-runs the newest run of the pipeline at that commit.
 A run is keyed on **(repository, SHA, mode, event)**, written
 `owner/name@<sha>:<mode>:<event>`. A second sighting of a key opens nothing:
 GitHub redelivering a webhook, or a webhook and the poll seeing the same head,
-is one run and one check run.
+is one run and one check run. Opening is serialized by repository, SHA and
+event before policy selection, so a changed installed mode cannot open a
+parallel duplicate for the same delivery; the existing policy snapshot wins.
 
 The event is part of the key because a merge queue's run and the push that
 lands its commit share a SHA and a mode. Keyed without the event, the push --
-which carries the deploy and notify stages -- would fold into the queue's run
-and never execute.
+which may carry artifact preparation and notification stages -- would fold
+into the queue's run and never execute. Matching verification evidence can be
+reused without merging the separate events or their effect receipts.
 
 A re-run is not a second sighting: it opens the key's next attempt, a new run
 row with a new check run, and leaves the original as it ended.
 
 ### Stages, in order
 
-Stages run one at a time, in the order written, and the steps of a stage run at
-once. Every step waits for every step of the stage before it, whatever `needs`
-says. The first stage that fails stops the run: every later step is skipped
+The portable workflow runs stages one at a time, in the order written, and the
+steps of a stage run at once. Every step waits for every step of the stage before
+it, whatever `needs` says. An installation can bind its own orchestration recipe;
+the captured recipe identifies the behavior that run executes. The first stage that fails stops the run: every later step is skipped
 `pipeline_stage_blocked`, and the check run's table says *Not run: an earlier
 stage failed* -- except notify stages and stages declaring
 `runAfterFailure: true`. Independent analysis can still collect evidence after
@@ -619,7 +800,7 @@ worker made. The rows are still readable by any signed-in reader
 
 ### Configure a notification channel
 
-In **Deployables → Settings → Channels**, add an email or Discord channel.
+In **Pipelines → Settings → Connections → Channels**, add an email or Discord channel.
 Use a stable name such as `releases`; the manifest's notify stage refers to
 that name. For email, enter one bare email address per line (up to 20). For
 Discord, enter the name of the secret holding the webhook URL, not the URL
@@ -630,7 +811,7 @@ Save the channel, reopen it, and select the pipelines allowed to send to it.
 Both the channel and each selected pipeline must belong to you. Configuration
 changes do not send a test message or start a run. The generated SDK exposes
 these same operations as `pipelinesChannelSave`, `pipelinesChannelArchive` and
-`pipelinesChannelAllow`, under the `app:deployables/channels` capability.
+`pipelinesChannelAllow`, under the `app:pipelines/channels` capability.
 
 Archiving keeps the channel and its history, while stopping new notification
 admissions. **Save and resume** reactivates the same name. Existing pipeline
@@ -696,6 +877,14 @@ costs minutes; selecting too little merges a red build.
 
 In a full run, `packages: affected` means every package. `packages: all` means
 every package in every run.
+
+`packageRoots: [worker]` intersects that selection with packages inside the
+repository directory `worker`, including subdirectories. The dependency graph
+is followed first: changing a shared library still selects its worker
+importers. An empty intersection skips the step before dispatching a host.
+This supports a native integration lane for one component while ordinary unit
+checks continue to cover the entire selected graph. Non-Go setup scripts that
+the graph cannot see belong in `select.full` or an explicit contract lane.
 
 `only: db-gated` then keeps the packages whose directory is a `select.dbGated`
 tree or lies under one, on a `/` boundary (`component/database` holds
@@ -1083,7 +1272,7 @@ state, check time and expiry. Missing runners, unanswered requests, failed or
 inconclusive proofs, and expired proofs do not count as ready. A substituted
 reply from another replica cannot vouch for the one that disappeared.
 
-Settings → Pipelines → Compute separates the installed dispatcher from each
+Pipelines → Settings → Infrastructure → Compute separates the installed dispatcher from each
 workbench's observed readiness. Refresh reads the last isolation results; it
 does not launch a probe. Missing reports, failed reads and expired observations
 never display as ready. The same operator-only report is available through
@@ -1098,18 +1287,18 @@ installation: a run that could not write its check run says so itself
 Nothing needs the item, so the first-run wizard does not walk it, and an owner
 may answer *Not now*.
 
-**Settings -> Pipelines** is the item, for the cluster owner. Its three
+**Pipelines → Settings → Infrastructure** is the item, for the cluster owner. Its three
 sub-steps are the report's three facts, as the agent nodes that run steps
 report them: the GitHub App (registered from Settings through GitHub's
 app-manifest flow, so the permissions arrive filled in), a repository
 connected, and a runner -- with a line about how many of your machines allow
-pipelines. While the item is neither set up nor dismissed, the Settings icon
-carries the marker; *Not now* clears it for you and the section stays.
+pipelines. Setup controls remain in this destination; they do not add
+unseen-update markers to the OS navigation.
 
 **An app whose permissions grew is named there.** Every existing installation
 of the GitHub App keeps the permissions it accepted until the account that
 installed it approves the change GitHub sends it, and until then every
-check-run write there answers 403. Settings -> Pipelines asks GitHub
+check-run write there answers 403. Pipelines → Settings → Infrastructure asks GitHub
 (`pipelinesInstallations`, `read app:settings/pipelines`) which installations
 lag what the app asks for and links each to the page where the change waits --
 before a run finds out by failing to report.
@@ -1193,6 +1382,6 @@ Deployables' codes as well as these
 - [Inbound delivery](inbound-delivery.md) -- the webhook seam and its signatures
 - [Packages and deployables](packages.md) -- the source, the manifest, and the
   update feed that reads the same deliveries
-- [Deployables](deployables.md) -- where a pipeline's source lives
+- [Deployables](deployables.md) -- the applications a repository produces
 - [Configuration readiness](configuration-readiness.md) -- what the Pipelines
   item's marks mean

@@ -38,7 +38,7 @@ describe("explicit local Cockpit test build", () => {
     expect(uninstallCommand("mac", { localTest: source, clusterUrl, purge: true })).toContain("--purge");
   });
   it("leaves the published path intact outside the explicit override", () => {
-    expect(installCommand({ platform: "mac", token: "test", clusterUrl: "https://api.example.com", computerUse: false, inference: false })).toBe("curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh | bash -s -- --token test --cluster https://api.example.com");
+    expect(installCommand({ platform: "mac", token: "test", clusterUrl: "https://api.example.com", computerUse: false, inference: false })).toBe("curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/install-mac.sh | bash -s -- --token test --cluster https://api.example.com");
   });
 });
 

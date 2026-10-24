@@ -399,7 +399,7 @@ func (s *store) setAutoDeploy(ctx context.Context, packageId string, on bool) er
 // archived -- rather than as the person's own act of flipping the switch.
 //
 // STAMPED INTERNAL, and the reason is the part vocabulary (epic memql#5288):
-// setPackageAutoDeploy carries `execute app:deployables/sources`, the
+// setPackageAutoDeploy carries `execute app:pipelines/repositories`, the
 // switch being a `sources` act, while every cascade that reaches here is a
 // `retire` act. A caller holding retire and not sources would otherwise be
 // refused HERE, after the site row was already stamped deleted -- a retire

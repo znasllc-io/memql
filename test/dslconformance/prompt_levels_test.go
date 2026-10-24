@@ -67,21 +67,24 @@ var promptLevels = map[string]string{
 	// Quick conversational replies have no research, file or tool obligations.
 	// Fast avoids paying for a strong agent loop after the classifier already
 	// excluded those tasks; the run still carries its ordinary call/time budget.
-	"workQuickReply":       "fast",
-	"responsibilityIntake": "fast",
-	"classifySymptom":      "fast",
-	"docSummary":           "fast",
-	"askSpecialist":        "fast",
-	"seedDomainBridge":     "fast",
-	"seedDomainContent":    "fast",
-	"trainerAgent":         "strong",
-	"agentFactoryAnalyze":  "strong",
-	"reactiveConductor":    "strong",
-	"authoringDesign":      "strong",
-	"authoringEmit":        "reasoning",
-	"authoringRepair":      "reasoning",
-	"replanGap":            "reasoning",
-	"compileGoal":          "reasoning",
+	"workQuickReply": "fast",
+	// The conversational tool-free path shares the same bounded, self-contained
+	// work as the quick reply and must not pay for a strong execution loop.
+	"workConversationReply": "fast",
+	"responsibilityIntake":  "fast",
+	"classifySymptom":       "fast",
+	"docSummary":            "fast",
+	"askSpecialist":         "fast",
+	"seedDomainBridge":      "fast",
+	"seedDomainContent":     "fast",
+	"trainerAgent":          "strong",
+	"agentFactoryAnalyze":   "strong",
+	"reactiveConductor":     "strong",
+	"authoringDesign":       "strong",
+	"authoringEmit":         "reasoning",
+	"authoringRepair":       "reasoning",
+	"replanGap":             "reasoning",
+	"compileGoal":           "reasoning",
 	// validateStepAnswer (epic memql#5414, design D22): the answer validator.
 	// Its caller runs it at the RUN's level; strong is the level for a run
 	// that recorded none, because judging an answer on three axes is the

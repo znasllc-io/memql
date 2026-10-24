@@ -418,3 +418,66 @@ builtin clusterSetBackgroundCapacity {
   jobs           int!
   accepting      boolean!
 }
+
+/// Read this receiving installation and its reviewed release choices; no credentials.
+@sdk
+@executor("integration.release.installationStatus")
+builtin releaseInstallationStatus { }
+
+/// Prepare one explicit release selection against the exact reviewed current revision.
+/// Verification retains a durable plan; this does not apply or publish anything.
+@sdk
+@executor("integration.release.prepareInstallation")
+builtin releasePrepareInstallation {
+  installationId string!
+  requestId string!
+  candidateId string!
+  catalogDigest string!
+  overlayRevision string!
+  expectedCurrentRevision string!
+}
+
+/// Apply the exact separately reviewed native plan with fresh receiving evidence.
+@sdk
+@executor("integration.release.applyInstallation")
+builtin releaseApplyInstallation { installationId string! planId string! }
+
+/// Observe the selected installation; controller health is not a completion receipt.
+@sdk
+@executor("integration.release.observeInstallation")
+builtin releaseObserveInstallation { installationId string! planId string! }
+
+/// Authenticated receiving probe. Returns the native build and migration evidence.
+@sdk
+@executor("integration.release.installationHealth")
+builtin releaseInstallationHealth { nonce string! }
+
+/// Create or recover a reviewable GitOps image-pin proposal. Never merge or deploy.
+@executor("integration.release.proposeInstallation")
+builtin releaseProposeInstallation {
+ installationId string!
+ requestId string!
+ candidateId string!
+ catalogDigest string!
+ expectedBaseRevision string!
+}
+
+/// Re-read the exact proposal and admit only its verified merged overlay commit.
+@executor("integration.release.observeInstallationProposal")
+builtin releaseObserveInstallationProposal { proposalId string! }
+
+/// Resume the original saved preparation after interruption; applies nothing.
+@sdk
+@executor("integration.release.resumeInstallation")
+builtin releaseResumeInstallation { installationId string! preparationId string! }
+
+/// Cancel the original operator's current plan only before application begins.
+@sdk
+@executor("integration.release.cancelInstallation")
+builtin releaseCancelInstallation { installationId string! planId string! }
+
+/// Restore the exact previous release through the selected plan's retained recipe.
+/// Only its original operator may request it; fresh native checks may refuse it.
+@sdk
+@executor("integration.release.rollbackInstallation")
+builtin releaseRollbackInstallation { installationId string! planId string! }

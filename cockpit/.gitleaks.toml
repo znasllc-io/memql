@@ -1,0 +1,36 @@
+# gitleaks configuration for memql-cockpit.
+#
+# Wired into CI via .github/workflows/gitleaks.yml. This file establishes
+# the baseline and documents the known false positives so the audit
+# history stays explicit.
+
+title = "memql-cockpit gitleaks config"
+
+[extend]
+# Inherit the upstream default rule set.
+useDefault = true
+
+# -----------------------------------------------------------------------------
+# Allowlists
+# -----------------------------------------------------------------------------
+# Each allowlist uses condition = "AND" so that BOTH the regex AND the path
+# constraint must match before a finding is suppressed. This keeps the
+# suppression narrow: a hand-crafted JWT-shaped string used in a test
+# fixture is OK in the test file, but a real JWT appearing anywhere else
+# still trips the scanner.
+
+[[allowlists]]
+description    = "Test-fixture JWT-shaped strings inside cli/crash/redact_test.go. The sanitizer's regex matches the eyJ... prefix, so the test deliberately includes JWT-shaped inputs to exercise it. The payloads decode to {alg: RS256} / {sub: test} and similar -- they're not real tokens."
+condition      = "AND"
+regexTarget    = "match"
+regexes        = ['''eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+''']
+paths = [
+  '''^cli/crash/redact_test\.go$''',
+]
+
+[[allowlists]]
+description = "The same planted sanitizer JWT after cli/crash moved to internal/crash. Its signature is the literal signature_data_here; it is never issued or used for authentication. Only these exact fixture bytes are allowed at the current test path."
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''^eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJ0ZXN0In0\.signature_data_here$''']
+paths = ['''^internal/crash/redact_test\.go$''']

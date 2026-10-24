@@ -191,16 +191,18 @@ func (r *SessionRunner) holdThroughEnd(ctx context.Context, hold *sessionHold) (
 
 // RunSpec is one delegated run.
 type RunSpec struct {
-	ToolScope   *common.DelegatedTools
-	SessionId   string
-	OwnerUserId string
-	App         string
-	Kind        string
-	Prompt      string
-	Workspace   string
-	Inputs      []string
-	RunId       string
-	StepId      string
+	// InferenceOnly disables the app tool loop for a text-only model call.
+	InferenceOnly bool
+	ToolScope     *common.DelegatedTools
+	SessionId     string
+	OwnerUserId   string
+	App           string
+	Kind          string
+	Prompt        string
+	Workspace     string
+	Inputs        []string
+	RunId         string
+	StepId        string
 	// ModelCall marks a session that answers one model call the step at
 	// RunId/StepId made, rather than doing that step's work. See
 	// RecordingOpen.ModelCall for what the recording does differently.
@@ -419,6 +421,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 	}
 
 	handle, err := w.StartAppSession(ctx, AppSessionRequest{
+		InferenceOnly:  spec.InferenceOnly,
 		SessionId:      spec.SessionId,
 		App:            spec.App,
 		Kind:           spec.Kind,
@@ -565,6 +568,20 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		Model:               outcome.Model,
 		Effort:              outcome.Effort,
 	}
+	// MCP submit writes on another replica; the cockpit's final wire event
+	// need not contain it. Read that answer before closing the recording so a
+	// needs_input terminal reaches the parent instead of becoming free text.
+	if r.Store != nil && !spec.InferenceOnly && status == AppSessionStatusEnded && (len(result.Result) == 0 || spec.ToolScope != nil) {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		submitted, err := r.Store.ReadSubmittedAppSessionResult(readCtx, spec.SessionId, spec.OwnerUserId)
+		cancel()
+		if err != nil {
+			waitErr = fmt.Errorf("worker: read submitted app result: %w", err)
+			result.Status, result.ErrorMessage = AppSessionStatusFailed, waitErr.Error()
+		} else if len(submitted) != 0 {
+			result.Result = submitted
+		}
+	}
 	// The prose goes to the Library as ONE file per session and the row names
 	// it (design D5). Stored before finishRow so the terminal row carries the
 	// pointer: a row that said "ended" and named no transcript would read as
@@ -614,6 +631,8 @@ func (r *SessionRunner) stampProduced(ctx context.Context, spec RunSpec, result 
 		Model:     result.Model,
 		Effort:    result.Effort,
 		SessionId: result.SessionId,
+		RunId:     spec.RunId,
+		StepKey:   spec.StepId,
 	}
 	if err := stamper.StampArtifactProvenance(ctx, spec.OwnerUserId, result.ProducedArtifactIds, provenance); err != nil && r.Logger != nil {
 		r.Logger.Warn("app session: could not stamp provenance on produced artifacts",
@@ -822,12 +841,23 @@ type transcriptCollector struct {
 	// answer contains prose only. Tool protocol records and diagnostics stay
 	// in the transcript; feeding them back as an answer wastes context and
 	// can exhaust the bound before the actual answer arrives.
-	answer strings.Builder
+	answer          strings.Builder
+	publicAnswer    strings.Builder
+	hasPublicAnswer bool
 }
 
 func (c *transcriptCollector) append(chunk AppSessionChunk) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if chunk.Stream == "answer" {
+		// A dedicated final-answer stream excludes the app's commentary. It is
+		// already present on the text stream, so do not duplicate the transcript.
+		c.hasPublicAnswer = true
+		if room := int(c.max) - c.publicAnswer.Len(); room > 0 {
+			c.publicAnswer.Write(chunk.Data[:min(len(chunk.Data), room)])
+		}
+		return
+	}
 	c.seen += len(chunk.Data)
 	if chunk.Stream == "text" || chunk.Stream == AppSessionStreamStdout || chunk.Stream == "" {
 		if room := int(c.max) - c.answer.Len(); room > 0 {
@@ -865,5 +895,8 @@ func (c *transcriptCollector) snapshot() (string, int, bool) {
 func (c *transcriptCollector) answerText() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.hasPublicAnswer {
+		return strings.TrimSpace(c.publicAnswer.String())
+	}
 	return strings.TrimSpace(c.answer.String())
 }

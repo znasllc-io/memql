@@ -1,3 +1,6 @@
+import { Head } from "../../kit";
+import { AddRepository } from "../pipelines/AddRepository";
+import { LocalTabs } from "../../kit/LocalTabs";
 import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { useEffect, useMemo, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -39,6 +42,10 @@ import { pipelineFromRow, runFromRow, type PipelineRow, type RunRow } from "./pi
 import { PipelineChannelsSettings } from "./pipelines/ChannelsSettings";
 import { RunsSection } from "./pipelines/RunsSection";
 import { useConnectFlow } from "./pipelines/connect/useConnectFlow";
+import { DeliveryOverview, ChangesSection } from "../pipelines/DeliveryOverview";
+import { ReleasesSection } from "../cluster/releases/ReleasesSection";
+import { PipelinesSection } from "../settings/PipelinesSection";
+import { holds } from "../../system/roles";
 
 // Deployables: the things this cluster serves, the map of what serves where,
 // and the one flow that makes a new one (epic memql#4725, rebuilt by
@@ -86,16 +93,28 @@ export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0
 }
 
 function DeployablesAppContent({
-  sectionId,
+  sectionId: requestedSection,
+  surface = "deployables",
   navigation,
   windowVisible = true,
-  navigate,
+  navigate: requestedNavigate,
   askContext,
   intent,
   consumeIntent,
   reportSetupState,
   store,
-}: OsAppProps & { store?: DeployablesSettingsStore }) {
+}: OsAppProps & { store?: DeployablesSettingsStore; surface?: "deployables" | "pipelines" }) {
+  const isPipelines = surface === "pipelines";
+  const sectionId = requestedSection === "repositories" ? "sources" : requestedSection;
+  const pipelineReach = useAppReach("pipelines");
+  const deployablesReach = useAppReach("deployables");
+  const [composeOpenRequest, setComposeOpenRequest] = useState<{ packageId: string; app: string; revision: number }>();
+  const navigate = (section: string, options?: Parameters<OsAppProps["navigate"]>[1]) => {
+    const destination = isPipelines && section === "sources" ? "repositories" : section;
+    if (options === undefined) requestedNavigate(destination); else requestedNavigate(destination, options);
+  };
+  const [addingRepository, setAddingRepository] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("infrastructure");
   // Injectable for tests, which is the whole reason the parameter exists --
   // nothing in the shell passes one.
   const settingsStore = useMemo(() => store ?? new LocalDeployablesSettingsStore(), [store]);
@@ -113,7 +132,14 @@ function DeployablesAppContent({
   // `publish` pushes a build and cannot take a site live, and every control
   // below names the part it needs. Presentation; the engine's capability gate
   // on each construct is the authority, and refuses `capability_not_held`.
-  const can = useDeployableParts();
+  const deployableParts = useDeployableParts();
+  const can = isPipelines ? { ...deployableParts,
+    connect: holds("execute", "app:pipelines/connect"),
+    rerun: holds("execute", "app:pipelines/rerun"),
+    cancel: holds("execute", "app:pipelines/cancel"),
+    channels: holds("execute", "app:pipelines/channels"),
+    sources: holds("execute", "app:pipelines/repositories"),
+  } : { ...deployableParts, connect: false, rerun: false, cancel: false, channels: false };
   // The OWNER rung, under the one ladder: a CI-pushed source is a cluster
   // owner's act (memql#4805, D1) and is NOT a part -- the concept's
   // clusterOwner tier is its gate. A client's own domain WAS this rung's and
@@ -218,7 +244,7 @@ function DeployablesAppContent({
   const pipelinesSettled = pipelines?.snapshot.state === "live" && runs?.snapshot.state === "live" && pipelinesError === "";
   // "All runs" goes to the Runs tab, so it is offered only to somebody the tab
   // is drawn for (`read app:deployables/runs`).
-  const runsReachable = useAppReach("deployables").sections.includes("runs");
+  const runsReachable = pipelineReach.sections.includes("runs");
 
   const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store"; result?: string } | undefined>();
   // A run to open on the Runs tab -- a check run's details link, a link from
@@ -226,12 +252,14 @@ function DeployablesAppContent({
   // run page's trail. Each is consumed once by revision.
   const [runOpenRequest, setRunOpenRequest] = useState<{ runId: string; revision: number } | undefined>();
   const [runsFilterRequest, setRunsFilterRequest] = useState<{ pipelineId: string; revision: number } | undefined>();
-  const [sourceOpenRequest, setSourceOpenRequest] = useState<{ packageId: string; revision: number } | undefined>();
-  function openSource(packageId: string) {
-    setSourceOpenRequest((held) => ({ packageId, revision: (held?.revision ?? 0) + 1 }));
+  const [sourceOpenRequest, setSourceOpenRequest] = useState<{ packageId: string; revision: number; repositoryView?: "settings" } | undefined>();
+  function openSource(packageId: string, repositoryView?: "settings") {
+    if (!isPipelines) { pipelineReach.open("repositories", { packageId, ...(repositoryView ? { repositoryView } : {}) }); return; }
+    setSourceOpenRequest((held) => ({ packageId, repositoryView, revision: (held?.revision ?? 0) + 1 }));
     navigate("sources", { fromContent: true });
   }
   function openRunsFor(pipelineId: string) {
+    if (!isPipelines) { pipelineReach.open("runs", { pipelineId }); return; }
     setRunsFilterRequest((held) => ({ pipelineId, revision: (held?.revision ?? 0) + 1 }));
     navigate("runs", { fromContent: true });
   }
@@ -305,17 +333,23 @@ function DeployablesAppContent({
       setOpenRequest(held => ({ siteId: requestedSite, revision: (held?.revision ?? 0) + 1 }));
       navigate("deployables");
     }
+    const composeSource = intent.payload.composeSourceId, composeApp = intent.payload.composeApp;
+    if (typeof composeSource === "string" && composeSource && typeof composeApp === "string" && composeApp) {
+      setComposeOpenRequest(held => ({ packageId: composeSource, app: composeApp, revision: (held?.revision ?? 0) + 1 }));
+      navigate("deployables");
+    }
+    const requestedPipeline = intent.payload.pipelineId;
+    if (typeof requestedPipeline === "string" && requestedPipeline) openRunsFor(requestedPipeline);
     const requestedRun = intent.payload.runId;
     if (typeof requestedRun === "string" && requestedRun) {
-      setRunOpenRequest(held => ({ runId: requestedRun, revision: (held?.revision ?? 0) + 1 }));
-      navigate("runs");
+      if (!isPipelines) pipelineReach.open("runs", { runId: requestedRun });
+      else { setRunOpenRequest(held => ({ runId: requestedRun, revision: (held?.revision ?? 0) + 1 })); navigate("runs"); }
     }
     // A source named by a link: its page, on the Sources tab -- the same
     // request the map's Checks node and a run page's trail make.
     const requestedSource = intent.payload.packageId;
     if (typeof requestedSource === "string" && requestedSource && typeof requestedRun !== "string") {
-      setSourceOpenRequest(held => ({ packageId: requestedSource, revision: (held?.revision ?? 0) + 1 }));
-      navigate("sources");
+      openSource(requestedSource, intent.payload.repositoryView === "settings" ? "settings" : undefined);
     }
     if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
     const shopify = intent.payload["shopify"];
@@ -341,7 +375,7 @@ function DeployablesAppContent({
   }, [intent, consumeIntent, sectionId]);
 
   const settingsContent = (
-    <ConnectionsPanel appId="deployables" initialProvider={connectionProvider} intent={connectionsIntent} consumeIntent={() => setConnectionsIntent(undefined)}
+    <ConnectionsPanel heading={!isPipelines} appId={isPipelines ? "pipelines" : "deployables"} initialProvider={connectionProvider} intent={connectionsIntent} consumeIntent={() => setConnectionsIntent(undefined)}
       connectResult={connectResult?.section === "settings" ? connectResult : null}
       additionalSections={can.channels ? [{ id: "channels", name: "Channels", render: (active, header) => <PipelineChannelsSettings header={header} active={active} pipelines={pipelineRows} pipelinesReady={pipelines?.snapshot.state === "live" && !pipelines.snapshot.error} refreshPipelines={reseedPipelines} /> }] : []} />
   );
@@ -352,7 +386,7 @@ function DeployablesAppContent({
   // carries at the log store's own admin floor.
   const logsContent = (
       <AppLogsSection
-        app="deployables"
+        app={surface}
         subjectConcepts={DEPLOYABLES_LOG_CONCEPTS}
         intent={intent}
         consumeIntent={consumeIntent}
@@ -369,12 +403,14 @@ function DeployablesAppContent({
           active={sectionId === "deployables"}
           navigation={navigation}
           openRequest={openRequest}
+          composeOpenRequest={composeOpenRequest}
           connectResult={connectResult?.section === "deployables" ? connectResult : null}
           pipelines={pipelines}
           runs={runs}
           pipelinesSettled={pipelinesSettled}
           pipelinesError={pipelinesError}
-          connectFlow={connectFlow}
+          connectFlow={isPipelines ? connectFlow : undefined}
+          onOpenRepository={isPipelines ? undefined : pipelineReach.sections.includes("repositories") ? openSource : null}
           onOpenRuns={runsReachable ? openRunsFor : undefined}
           sites={measuredSource}
           packages={packages}
@@ -404,10 +440,14 @@ function DeployablesAppContent({
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
           root="sources"
+          sourceLabel={isPipelines ? "Repositories" : "Sources"}
+          onAddRepository={isPipelines && can.sources ? () => setAddingRepository(true) : undefined}
           active={sectionId === "sources"}
           navigation={navigation}
           connectResult={null}
           sourceOpenRequest={sourceOpenRequest}
+          onOpenDeployable={isPipelines ? id => deployablesReach.open("deployables", { siteId: id }) : undefined}
+          onComposeDeployable={isPipelines ? (packageId, app) => deployablesReach.open("deployables", { composeSourceId: packageId, composeApp: app }) : undefined}
           pipelines={pipelines}
           runs={runs}
           pipelinesSettled={pipelinesSettled}
@@ -472,6 +512,16 @@ function DeployablesAppContent({
       onOpenSources={() => navigate("sources", { fromContent: true })}
     />
   );
+  const openRun = (runId: string) => { setRunOpenRequest(held => ({ runId, revision: (held?.revision ?? 0) + 1 })); navigate("runs", { fromContent: true }); };
+  if (isPipelines) return <ActivePane active={windowVisible}>
+    <RetainedSection active={sectionId === "overview"}><DeliveryOverview pipelines={pipelineRows} runs={runs?.snapshot.rows ?? []} ready={pipelinesSettled} error={pipelinesError} onOpenRun={openRun} onRepositories={pipelineReach.sections.includes("repositories") ? () => navigate("sources", { fromContent: true }) : undefined} onRuns={runsReachable ? () => navigate("runs", { fromContent: true }) : undefined} onReleases={pipelineReach.sections.includes("releases") ? () => navigate("releases", { fromContent: true }) : undefined} /></RetainedSection>
+    <RetainedSection active={sectionId === "sources"}><ConnectReturnNotice result={connectResult?.section === "sources" || connectResult?.section === "repositories" ? connectResult : null} />{addingRepository ? <AddRepository back={() => setAddingRepository(false)} onAdded={id => { setAddingRepository(false); reseedPackages(); openSource(id); }} onSettings={() => { setSettingsTab("connections"); navigate("settings", { fromContent: true }); }} /> : sourcesContent}</RetainedSection>
+    <RetainedSection active={sectionId === "changes"}><ChangesSection runs={runs?.snapshot.rows ?? []} ready={pipelinesSettled} error={pipelinesError} onOpenRun={openRun} /></RetainedSection>
+    <RetainedSection active={sectionId === "runs"}>{runsContent}</RetainedSection>
+    <RetainedSection active={sectionId === "releases"}><ReleasesSection visible={windowVisible && sectionId === "releases"} /></RetainedSection>
+    <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
+    <RetainedSection active={sectionId === "settings"}><div className="os-app-stack"><Head title="Settings" /><LocalTabs label="Pipeline settings" value={settingsTab} onChange={setSettingsTab} options={[["infrastructure", "Infrastructure"], ["connections", "Connections"]]} />{settingsTab === "infrastructure" ? <PipelinesSection heading={false} intent={intent} consumeIntent={consumeIntent} /> : settingsContent}</div></RetainedSection>
+  </ActivePane>;
   return <ActivePane active={windowVisible}>
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>

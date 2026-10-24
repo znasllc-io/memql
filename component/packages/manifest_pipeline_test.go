@@ -2,6 +2,7 @@ package packages
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -357,5 +358,20 @@ func TestPipelineWorkflowSurvivesManifestTransport(t *testing.T) {
 	}
 	if decoded.Pipeline.Workflow != m.Pipeline.Workflow {
 		t.Fatal("workflow lost through JSON")
+	}
+}
+
+func TestPipelineCannotClaimIndependentReviewName(t *testing.T) {
+	for _, name := range []string{"review", "REVIEW", "ReViEw", " review "} {
+		t.Run(name, func(t *testing.T) {
+			raw := strings.Replace(pipelineManifest, "name: memql", "name: "+strconv.Quote(name), 1)
+			if _, err := ParseManifest([]byte(raw)); err == nil || !strings.Contains(err.Error(), "reserved for independent review") {
+				t.Fatalf("reserved pipeline name accepted: %v", err)
+			}
+		})
+	}
+	// Packages without pipelines cannot emit a check and retain their names.
+	if _, err := ParseManifest([]byte("formatVersion: 1\nname: review\n")); err != nil {
+		t.Fatal(err)
 	}
 }

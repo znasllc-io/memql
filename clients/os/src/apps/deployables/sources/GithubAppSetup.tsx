@@ -49,7 +49,7 @@ export function organizationOf(owner: GithubAppOwner): string {
 /** What an owner is told the trip to GitHub is for: what gets made, the whole
  *  of what it may do, and that it is done once for everybody. */
 export const SET_UP_SENTENCE =
-  "This cluster is not linked to GitHub yet. Setting it up creates a GitHub App that reads the repositories people choose and reports checks on them. It is done once; everyone here then connects their own account.";
+  "This cluster is not linked to GitHub yet. Setup creates an app that reads selected repositories and their protections, reports checks and security findings, and submits approved changes through pull requests and merge queues. GitHub shows the permissions for you to approve. Everyone here then connects their own account.";
 
 export function GithubAppOwnerField({
   owner,

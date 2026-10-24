@@ -34,6 +34,8 @@ import (
 // checkPermissionMessage is the note a run carries when GitHub refused its
 // check run. It names the repair: the app's permissions, accepted per
 // installation.
+var errReservedReviewCheck = errors.New("This pipeline name is reserved for independent review evidence. Rename the package and reconnect its pipeline; no check run was written.")
+
 const checkPermissionMessage = "GitHub refused this run's check run: the GitHub App installed on this repository does not hold the checks: write permission. Add Checks (read and write) to the app's permissions and accept the change on each installation; the run itself is unaffected."
 
 // ReportFor is the run as the check run reports it: the run row's facts plus
@@ -161,6 +163,9 @@ func publishCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipe
 // grant's installations, the repository, the token), so a caller that writes
 // a check run under a gate mints BEFORE taking it.
 func checkRunToken(ctx context.Context, d Deps, p Pipeline) (string, error) {
+	if pipelines.ReservedPipelineCheckName(p.Name) {
+		return "", errReservedReviewCheck
+	}
 	if d.GitHub == nil {
 		return "", errNoGitHub
 	}
@@ -172,6 +177,12 @@ func checkRunToken(ctx context.Context, d Deps, p Pipeline) (string, error) {
 // minted: a failed mint (tokenErr) is the write's answer, unavailable, with no
 // call made.
 func writeCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipelines.RunReport, token string, tokenErr error) CheckRunWrite {
+	// Stored pipelines predate manifest admission, and opening may already
+	// have minted its token. Guard both creation and update at the effect.
+	if pipelines.ReservedPipelineCheckName(p.Name) {
+		return CheckRunWrite{State: CheckRunRefused, Err: errReservedReviewCheck,
+			Note: &Note{Code: "pipeline_check_name_reserved", Message: errReservedReviewCheck.Error()}}
+	}
 	if d.GitHub == nil {
 		return CheckRunWrite{State: CheckRunUnavailable, Err: errNoGitHub}
 	}

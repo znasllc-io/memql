@@ -10,6 +10,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { ConnectionStatusContext, type ShellConnectionStatus } from "../../src/chrome/connection";
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SITE_CONCEPT } from "../../src/apps/deployables/concepts";
@@ -177,6 +178,58 @@ function parkedRun(over: Partial<Record<string, unknown>> = {}): Row {
 }
 
 const WITH_PACKAGE: FakeSeed = { sites: [STORE, ADMIN, SHOP], packages: [ACME] };
+
+describe("MemQL-only installation receipts", () => {
+  const report = { ...REPORT, deployables: [], dslDomains: [{ domain: "delivery", files: 2, constructs: {} }] };
+  const receipt = (over: Partial<Record<string, unknown>> = {}) => parkedRun({
+    status: "succeeded", sourceVersion: "aaaaaaaaaaaaaaaaaaaa", report,
+    dslVersion: "packages/delivery/content/", deployables: [], ...over,
+  });
+  it("labels an exact completed source-only installation as staged without claiming a website or readiness", async () => {
+    const connection = fakeConnection({ packages: [ACME], deployments: { "pkg-acme": [receipt()] } });
+    mount(connection);
+    const staged = await screen.findByText("MemQL changes staged");
+    expect(staged.closest(".os-row")?.textContent).toContain("MemQL package");
+    expect(staged.closest(".os-row")?.textContent).not.toMatch(/No address yet|Not deployed|Live/);
+    expect(connection.callsNamed("packageDeployments")).toHaveLength(1);
+  });
+  it.each([
+    ["another source version", { sourceVersion: "older" }],
+    ["another source", { packageId: "pkg-other" }],
+    ["a failed installation", { status: "failed" }],
+    ["a request still rolling", { status: "rolling" }],
+    ["a missing staging receipt", { dslVersion: "" }],
+    ["no installed domain", { report: { ...report, dslDomains: [] } }],
+    ["a website publication", { deployables: [{ name: "web", siteId: "site-web" }] }],
+  ])("does not present %s as completed MemQL staging", async (_reason, over) => {
+    const connection = fakeConnection({ packages: [ACME], deployments: { "pkg-acme": [receipt(over)] } });
+    mount(connection);
+    await screen.findByText("Installation status unavailable");
+    expect(screen.queryByText("MemQL changes staged")).toBeNull();
+  });
+  it("recovers a bounded receipt read when the same connection reconnects", async () => {
+    const deployments: Record<string, Row[]> = { "pkg-acme": [] };
+    const connection = fakeConnection({ packages: [ACME], deployments });
+    h.connection = connection;
+    const store = memStore();
+    const view = (status: ShellConnectionStatus) => withSession(<ConnectionStatusContext.Provider value={status}>
+      <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={store} />
+    </ConnectionStatusContext.Provider>, { role: "owner", userId: "u-me" });
+    const mounted = render(view("connected"));
+    await screen.findByText("Installation status unavailable");
+    mounted.rerender(view("reconnecting"));
+    deployments["pkg-acme"] = [receipt()];
+    mounted.rerender(view("connected"));
+    await screen.findByText("MemQL changes staged");
+    expect(connection.callsNamed("packageDeployments")).toHaveLength(2);
+  });
+  it("does not fetch installation history for a source with no recorded installed version", async () => {
+    const connection = fakeConnection({ packages: [{ ...ACME, deployedVersion: "" } as unknown as Row] });
+    mount(connection);
+    await screen.findByText("Not deployed");
+    expect(connection.callsNamed("packageDeployments")).toHaveLength(0);
+  });
+});
 
 /** A SECOND source, so "open two groups" is expressible. */
 const WIDGETS: Row = {
@@ -372,7 +425,7 @@ describe("the list", () => {
     mount(connection, { section: "sources" });
     const acme = await screen.findByRole("button", { name: /^Open acme,/ });
     expect(screen.getByRole("heading", { name: "Sources" })).toBeTruthy();
-    expect(screen.getByText("Manage sources here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.getByText("Repositories available to this account.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add a deployable" })).toBeNull();
     expect(rowNames()).toEqual(["acme", "widgets-co"]);
     // Where it lives, how much it produced, and the one state word.

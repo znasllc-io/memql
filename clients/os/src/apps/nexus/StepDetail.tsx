@@ -1,3 +1,4 @@
+import { StepSummary } from "./StepSummary";
 import type { ReactNode } from "react";
 import {
   Chip,
@@ -80,6 +81,8 @@ export function StepDetail({
 
   return (
     <div className="os-nexus-step-detail" data-continues={continues || undefined}>
+      <StepSummary step={step} />
+      <details className="nexus-technical"><summary>Execution evidence and versions</summary>
       <p className="os-nexus-step-meaning">
         <strong>{stepKindWord(step.kind)}</strong> -- {stepKindMeaning(step.kind)}
       </p>
@@ -168,6 +171,7 @@ export function StepDetail({
           and waited for it.
         </p>
       )}
+      </details>
     </div>
   );
 }

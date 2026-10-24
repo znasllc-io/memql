@@ -144,6 +144,28 @@ func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *te
 	}
 }
 
+func TestSoftwareSourceDiscoveryFindsExistingReadContracts(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	caller := rankActorCtx("software-source-discovery", auth.RoleDeveloper)
+	for _, tc := range []struct{ search, name string }{
+		{"connected repositories", "platform.packagesAll"},
+		{"repository pipelines", "pipelines.pipelinesForOwner"},
+		{"source connections", "platform.sourceConnectionsMine"},
+	} {
+		t.Run(tc.search, func(t *testing.T) {
+			rows, err := e.workCapabilitiesBuiltin(caller, map[string]any{"search": tc.search}, 0)
+			require.NoError(t, err)
+			var response struct{ Capabilities []struct{ Name string } }
+			require.NoError(t, json.Unmarshal(rows[0].Payload, &response))
+			names := []string{}
+			for _, capability := range response.Capabilities {
+				names = append(names, capability.Name)
+			}
+			require.Contains(t, names, tc.name)
+		})
+	}
+}
+
 // TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave pins the namespace to
 // OS-app map workCapabilityApp answers. A capability is offered only to a caller
 // holding `read` on `app:<id>` (workCapabilityAllowed), and the action event it
@@ -166,6 +188,8 @@ func TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave(t *testing.T) {
 		{"campaigns/mutations.memql", "createCampaign", "email"},
 		{"accounts/queries.memql", "accounts", "accounts"},
 		{"platform/queries.memql", "sitesAll", "deployables"},
+		{"pipelines/queries.memql", "pipelinesForOwner", "pipelines"},
+		{"repositoryauthority/builtins.memql", "repositoryChangeAccess", "pipelines"},
 		{"library/queries.memql", "artifacts", "files"},
 		{"identity/queries.memql", "usersAll", "users"},
 		{"identity/queries.memql", "myProfile", "identity"},
@@ -187,4 +211,12 @@ func TestWorkCapabilityAppNamesAnAppTheSeedsAndTheOSBothHave(t *testing.T) {
 			t.Errorf("%s (%s) names app %q and the OS navigation catalog has no such app; the desktop could never open it", tc.name, tc.origin, got)
 		}
 	}
+}
+
+func TestSourceCapabilityKeepsItsPipelinesDestination(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	fn, err := e.functions.Get("platform.sourceConnectionsMine")
+	require.NoError(t, err)
+	require.Equal(t, "pipelines", workCapabilityApp(fn))
+	require.True(t, e.workCapabilityAllowed(rankActorCtx("source-developer", auth.RoleDeveloper), fn))
 }

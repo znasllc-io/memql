@@ -243,3 +243,24 @@ regexes = ['''^873afe3b-4b29-42b5-8eaa-9af278f0c981$''']
 description = "Display-only worker token from the setup wizard QA scene, introduced in 38f23c377b698143101dd646fa25a6ad6ca14295 and repeated by its checkpoint and consolidation merges. fixtureFlow injects the literal alongside the synthetic tok-studio identity and no-op actions; it is not a configured credential. The scene now uses an explicitly invalid EXAMPLE_ONLY body. Retain this exact anchored value for commit-history scanning, with no path or token-shape exemption; every other worker token remains detectable."
 regexTarget = "secret"
 regexes = ['''^mql_wkr_6m1Zt0QeJ4l7XcYp2r9WvKdB3sHnGaF8uTqLoE5yIjM$''']
+
+# Imported Cockpit crash-redaction fixtures (a29292bbef0629f8dc9ff8ce8cfbbf921b483a5a).
+# The root history scan includes these deliberate sanitizer inputs; Cockpit's
+# nested scanner configuration is not loaded. Keep exact path AND exact detected
+# bytes, including only the credential prefix the rule actually reports.
+# Target individual rules so directory scanning cannot skip this whole file.
+[[allowlists]]
+description = "Exact planted worker-token prefix detected by the native credential rule in the imported Cockpit crash-log sanitizer test; no runtime authentication use."
+condition = "AND"
+targetRules = ["memql-credential-token"]
+regexTarget = "secret"
+paths = ['''^cockpit/internal/crash/redact_test\.go$''']
+regexes = ['''^mql_wkr_AbCdEfGh\-_1234567890ABCDEFGHIJ0987654321XYZ$''']
+
+[[allowlists]]
+description = "Exact planted JWT with a deliberately invalid signature in the imported Cockpit crash-log sanitizer test; no runtime authentication use."
+condition = "AND"
+targetRules = ["jwt"]
+regexTarget = "secret"
+paths = ['''^cockpit/internal/crash/redact_test\.go$''']
+regexes = ['''^eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJ0ZXN0In0\.signature_data_here$''']

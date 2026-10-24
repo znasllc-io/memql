@@ -54,6 +54,7 @@ const GENERATE_TRIES = 6;
 export function ComposeWhereItLivesStop({
   apps,
   labels = {},
+  allowSkip = false,
   onExport,
   sourceName,
   addresses,
@@ -69,6 +70,8 @@ export function ComposeWhereItLivesStop({
   /** Every app that needs an address. One entry, named "", for a hand-made deployable. */
   apps: readonly string[];
   labels?: Readonly<Record<string, string>>;
+  /** A changed DSL package may leave even its only website inactive. */
+  allowSkip?: boolean;
   onExport?: () => void;
   /** The source's own name, for the headings. */
   sourceName: string;
@@ -133,6 +136,7 @@ export function ComposeWhereItLivesStop({
           canBindDomain={canBindDomain}
           clusterDomain={clusterDomain}
           many={apps.length > 1}
+          allowSkip={allowSkip}
           checks={checks}
           verdicts={verdicts[app] ?? {}}
         />
@@ -152,6 +156,7 @@ function AppAddress({
   canBindDomain,
   clusterDomain,
   many,
+  allowSkip,
   checks,
   verdicts,
 }: {
@@ -164,6 +169,7 @@ function AppAddress({
   canBindDomain: boolean;
   clusterDomain: string;
   many: boolean;
+  allowSkip: boolean;
   checks: AddressCheckHandle;
   verdicts: AddressVerdicts;
 }) {
@@ -227,13 +233,11 @@ function AppAddress({
     <section className="os-report-part" aria-label={`Where ${heading || "it"} lives`} data-skipped={skipped || undefined}>
       {/* A SINGLE APP NEEDS NO HEADING: the Head already names what is being
           composed, and a subhead repeating it says the scope twice (rule 7). */}
-      {many ? (
+      {many || allowSkip ? (
         <div className="os-place-head">
           <Subhead>{heading}</Subhead>
-          {/* DEPLOY OR SKIP, PER APP (memql#4930). Offered only when the
-              source declares more than one -- a choice between deploying the
-              only app and deploying nothing is not a choice, it is a
-              differently-spelled Cancel.
+          {/* Changed DSL can be installed without publishing the only website.
+              Without that evidence, skipping the only app does no work.
 
               A two-way pill rather than a checkbox: this is a CHOICE between
               two named outcomes, and each of them is a thing that happens.

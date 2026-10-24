@@ -107,6 +107,20 @@ func scopeCheckpointWitness(subject map[string]any) (map[string]any, bool) {
 	return w, scope == "observe" || scope == "full" || workbenchDestinationSubject(subject)
 }
 
+// WorkScopeCheckpoint identifies a server-bound suspension for approval
+// routing, not authority to resume it. PrepareWorkContinuation subsequently
+// checks the owned execution, immutable transcript and exact pending call.
+// Without this distinction, a desktop approval was treated as a failed-step
+// retry and replaced the very execution generation named by its checkpoint.
+func WorkScopeCheckpoint(kind string, subject map[string]any, artifactHash string) bool {
+	if kind != work.ApprovalKindScopeElevation || stringField(subject, "agentId") == "" ||
+		subject["computerPermission"] != nil || work.ArtifactHash(subject) != artifactHash {
+		return false
+	}
+	_, ok := scopeCheckpointWitness(subject)
+	return ok
+}
+
 func checkpointComputerScope(subject map[string]any) string {
 	if stringField(subject, "sessionKind") != "" {
 		if stringField(subject, "scope") != "" {

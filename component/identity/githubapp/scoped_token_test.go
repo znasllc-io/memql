@@ -2,6 +2,7 @@ package githubapp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,45 @@ import (
 	"testing"
 	"time"
 )
+
+func TestScopedTokenAppIdentitySurvivesConfigurationReplacementDuringMint(t *testing.T) {
+	first, second := testConfig(t), otherConfig(t)
+	current := first
+	reads := 0
+	hub := newHub()
+	hub.on("/app/installations/42/access_tokens", func(r *http.Request) (int, string) {
+		parts := strings.Split(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), ".")
+		if len(parts) != 3 {
+			t.Fatal("mint did not use an App assertion")
+		}
+		claims, err := base64.RawURLEncoding.DecodeString(parts[1])
+		if err != nil || !strings.Contains(string(claims), `"iss":"1234567"`) {
+			t.Fatal("mint did not use the captured App")
+		}
+		current = second
+		return http.StatusCreated, `{"token":"` + scopedToken + `","expires_at":"2026-10-23T13:00:00Z"}`
+	})
+	c := New(Config{}, WithConfigSource(func() Config { reads++; return current }), WithHTTPClient(&http.Client{Transport: hub}))
+	token, _, appID, err := c.ScopedInstallationTokenWithApp(context.Background(), 42, []string{"widget"}, map[string]string{"checks": "write"})
+	if err != nil || token != scopedToken || appID != 1234567 || reads != 1 {
+		t.Fatalf("mint identity changed: app=%d configReads=%d error=%v", appID, reads, err)
+	}
+}
+
+func TestScopedTokenWithAppRefusesUnverifiableAppIdentityBeforeMint(t *testing.T) {
+	for _, appID := range []string{"not-numeric", "0", "-1", "9223372036854775808"} {
+		t.Run(appID, func(t *testing.T) {
+			cfg := testConfig(t)
+			cfg.AppId = appID
+			hub := newHub()
+			c := New(cfg, WithHTTPClient(&http.Client{Transport: hub}))
+			token, _, id, err := c.ScopedInstallationTokenWithApp(context.Background(), 42, []string{"widget"}, map[string]string{"checks": "write"})
+			if err == nil || token != "" || id != 0 || len(hub.seen()) != 0 {
+				t.Fatal("unverifiable App identity reached the provider")
+			}
+		})
+	}
+}
 
 // scoped_token_test.go -- the narrowed installation token (epic memql#5477).
 // The substrate's runner clones a repository with a token that reads that

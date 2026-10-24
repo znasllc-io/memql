@@ -9,13 +9,13 @@ owner: znas
 
 # Cutting a release
 
-Only owners may cut a new version of MemQL, and the platform does it end to
-end: it computes the next version, creates the tag, and publishes the GitHub
-Release that starts the image build for every node type.
+Only owners may cut a new version of MemQL. The platform computes the next
+version, creates the tag, and publishes the GitHub Release that starts the
+image build for every node type.
 
-This is the manual half of an otherwise automatic pipeline. Nothing here builds
-images, pushes images, or goes near `scripts/release/release.sh` -- whose
-`--push` path remains break-glass.
+The cut starts artifact production. Verified candidate publication and the
+operator's installation selection are separate steps. The cut itself neither
+builds nor pushes images.
 
 The repo-root `VERSION` file is **read, never written**. `VERSION` equals the
 tag of the commit a cut tags (`VERSIONING.md`), so a pull request setting it
@@ -46,26 +46,35 @@ about to tag -- and refuses unless the file reads the version it computed.
    release event to MemQL. The pipeline resolves the tag to its exact commit
    and reads that commit's `memql-package.yaml`. Its image stage builds every
    node type on the MemQL build server, stamps the source commit and bare
-   release version into each binary, and publishes immutable registry digests.
+   release version into each binary, and retains OCI archives and digest
+   metadata in the Library.
    Advancing `main` cannot change a release run's pinned source.
+
+After the complete run passes, follow [Assembling release candidates](release-candidates.md)
+to assemble the retained artifacts, approve their exact destinations, publish
+them and seal the signed catalog. A successful image build alone does not
+publish registry images. Building or publishing a candidate never selects it
+for installation; the operator selects the release separately.
 
 To recover a missing release delivery, open the connected repository in
 MemQL Pipelines and use **Run release** with `vX.Y.Z`. This resolves the tag
 again and uses the native release path; it does not dispatch GitHub Actions.
 
 The platform records the cut on a `v1:cluster:releaseCut` row and writes a
-`release_cut` audit event beside it. The pipeline records the build and its
-publication evidence separately.
+`release_cut` audit event beside it. The pipeline records build evidence;
+candidate publication records its own verified receipts.
 
-**It cannot tell you the images exist.** Publishing a Release means the build
-was *asked for*. Whether it finished is a question only the container registry
-answers, which is what `releaseCutStatus` is for -- see section 6.
+**The cut does not prove images are published.** The native run reports build
+completion. Candidate receipts prove publication; `releaseCutStatus` separately
+checks registry availability for the cut version -- see section 6.
 
-### Recover a partial registry publication
+### Recover a failed build or partial publication
 
-Open the failed native release run in MemQL Pipelines and inspect its
-publication steps. Re-run failed steps after correcting the reported failure;
-retain the original tag, source commit and verified build artifacts.
+For a build failure, inspect the native release run in MemQL Pipelines and
+re-run failed steps after correcting the cause. For a publication failure,
+resume the same approved candidate through `releasePublishCandidate`, as
+described in [Assembling release candidates](release-candidates.md). Retain the
+original tag, source commit and verified build artifacts.
 
 Registry publication verifies existing tags. An identical digest is a no-op;
 a different digest is refused. Do not overwrite a version tag to make a retry
@@ -197,8 +206,10 @@ would go through; that waits for the prepare pull request.
 `VERSION` equals the tag of the commit a cut tags, and `main` refuses direct
 pushes, so the value arrives the way every other change does:
 
-1. Open a pull request whose one change sets `VERSION` to the version you are
-   about to cut -- `0.24.0`, bare, no leading `v`. A minor release also records
+1. Set `VERSION` to the version you are about to cut -- `0.24.0`, bare, no
+   leading `v` -- in a pull request. This can be a separate preparation pull
+   request or part of the final implementation pull request, before its final
+   review and required checks. A minor release also records
    in `releasedForms` (`deprecation_window_version_test.go`) every deprecated
    form whose warning it is the first to carry; that test says so when it
    applies.
@@ -285,14 +296,12 @@ answers:
 | Answer | What it means |
 |---|---|
 | Every image is published | the row moves to `images_available` |
-| Still building, cut *N* minutes ago | the row is `dispatched`; the missing images are named, and an earlier availability claim is corrected |
+| Images are not yet published, cut *N* minutes ago | the row is `dispatched`; the missing images are named, and an earlier availability claim is corrected |
 | The check could not tell | the registry errored; **the status is unchanged and nothing is guessed** |
 
-The third answer is the point of the design. A workflow can fail *after* the
-Release publishes, so only the registry knows whether a version is deployable --
-and a registry that cannot be reached knows nothing either way. Reporting that
-as "not built" would call a good release broken; reporting it as "built" would
-call a failed build deployable.
+The registry check cannot distinguish an unfinished build from a candidate
+awaiting publication. Inspect the run and candidate receipts for that progress.
+If the registry cannot be reached, availability remains unknown.
 
 The check is on demand. There is no poller and no schedule.
 
@@ -398,8 +407,9 @@ and checks from another App do not count.
 
 A missing run fails the call with a link to the recovery path in MemQL
 Pipelines. A run that has already failed also fails the call. A running build
-only proves that execution started; wait for success and verify registry
-publication before deploying.
+only proves that execution started; wait for success, complete the separately
+approved candidate publication and verify its registry receipts before selecting
+the release for installation.
 
 Five behaviours worth knowing before using it:
 
@@ -416,12 +426,10 @@ scripts/release/release-engine.sh --version=0.24.0 --dryRun=true   # verify cred
 scripts/release/release-engine.sh --version=0.24.0
 ```
 
-The result reports the **GHCR** prefix as well as the tag. That half of the
-build is public and tenant-independent, and it is what made a full cloud
-bring-up possible without ever authenticating to the retired subscription -- an
-instance lifecycle should pull from there by digest and `az acr import` into its
-own registry, rather than assuming access to whichever ACR the native pipeline
-targets.
+The result reports the **GHCR** prefix as well as the tag. That prefix is not
+publication evidence. The approved candidate destinations and verified receipts
+identify where the exact artifacts were published; an installation uses those
+immutable digests and its own registry access.
 
 ---
 

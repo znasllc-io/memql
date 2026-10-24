@@ -273,11 +273,15 @@ func newAutomationArm(t *testing.T, name string, pick func(*corpusSource) string
 
 // run is one fixture's run in comparable form.
 func (arm automationArm) run(fx automationFixture, now time.Time) logicRecord {
+	return arm.runWithBuiltinAnswers(fx, now, nil)
+}
+
+func (arm automationArm) runWithBuiltinAnswers(fx automationFixture, now time.Time, answers map[string]any) logicRecord {
 	a := arm.byName[fx.Name]
 	if a == nil {
 		return logicRecord{Refused: true, Result: "the arm has no automation " + fx.Name}
 	}
-	probe := &logicProbe{rows: fx.Rows, now: now}
+	probe := &logicProbe{rows: fx.Rows, now: now, builtinAnswers: answers}
 	arm.reg.probe = probe
 	defer func() { arm.reg.probe = nil }()
 	var event *events.Event

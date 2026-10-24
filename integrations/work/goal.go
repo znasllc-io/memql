@@ -214,6 +214,10 @@ func (i *Integration) handleCancelGoal(ctx context.Context, args map[string]any,
 	if err != nil {
 		return nil, err
 	}
+	if rc, running := common.RunFromContext(ctx); ac.Synthetic || ac.Unranked || (running && rc.IsRun()) {
+		return nil, fmt.Errorf("work: closing a goal requires the person's interactive decision")
+	}
+
 	goalId := argString(args, "goalId")
 	if goalId == "" {
 		return nil, fmt.Errorf("work: cancelGoal needs a goalId")

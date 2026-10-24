@@ -31,6 +31,14 @@ TAILWIND_VERSION="v4.1.11"
 INPUT="${REPO_ROOT}/component/identity/web/tailwind/input.css"
 OUTPUT="${REPO_ROOT}/component/identity/web/static/app.css"
 
+# The standalone compiler embeds Bun. Linux workers prohibit writable memory
+# from becoming executable, so run its JavaScript interpreter without a JIT.
+# Scope the option to Tailwind (including its version probe); do not relax the
+# worker's protections or change the environment of other build tools.
+function run_tailwind() {
+    BUN_JSC_useJIT=0 "$@"
+}
+
 # detect_platform → echoes the asset suffix Tailwind's release uses
 # (matches the names under github.com/tailwindlabs/tailwindcss/releases).
 function detect_platform() {
@@ -59,7 +67,7 @@ function resolve_tailwind_binary() {
     # change the generated CSS, so only reuse an exact, working pin.
     local installed help
     if installed="$(command -v tailwindcss)" && \
-       help="$(NO_COLOR=1 "${installed}" --help 2>/dev/null)" && \
+       help="$(NO_COLOR=1 run_tailwind "${installed}" --help 2>/dev/null)" && \
        [[ "${help%%$'\n'*}" == "≈ tailwindcss ${TAILWIND_VERSION}" ]]; then
         echo "${installed}"
         return 0
@@ -92,7 +100,7 @@ function resolve_tailwind_binary() {
 function compile_css() {
     local bin_path="$1"
     log_info "compiling Tailwind -> $(basename "${OUTPUT}")"
-    "${bin_path}" \
+    run_tailwind "${bin_path}" \
         --input  "${INPUT}" \
         --output "${OUTPUT}" \
         --minify

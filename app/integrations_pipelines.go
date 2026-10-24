@@ -64,6 +64,7 @@ func (a *App) wirePipelines() {
 			return githubconnect.WithGate(ctx, db, key, fn)
 		}
 		d.NodeID = nodeID
+		d.ReportMergeGroupReview = a.reportPipelineMergeGroupReview
 		d.OSOrigin = pipelinesOSOrigin
 		// The connect preview's delivery suggestion, by the rule the GitHub
 		// App this cluster registers is composed by: its webhook is active
@@ -82,6 +83,7 @@ func (a *App) wirePipelines() {
 			)
 		}
 	})
+	a.wirePipelineMaintenance(integ)
 }
 
 // The OS asks the BFF for readiness, while only agents register a step

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
@@ -202,4 +203,39 @@ func TestCancelledParallelScopeDoesNotStartWaitingOperation(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("cancelled waiting operation ran: %d", calls)
 	}
+}
+
+func TestFrozenHostExplicitlyAllowsConcurrentNativeOperations(t *testing.T) {
+	source := `@template
+automation concurrentScope {
+ for item in [1, 2] parallel(2) { builtin scopeProbe() }
+}`
+	snapshot, err := Capture("concurrentScope", "parallel-test", func(kind, name string) (string, error) { return source, nil }, map[string]Operation{"scopeProbe": func(context.Context, map[string]any) (any, error) { return nil, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release, done := make(chan struct{}, 2), make(chan struct{}), make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer close(release)
+	go func() {
+		_, err := RunSnapshot(ctx, snapshot, "parallel-test", nil, Options{ConcurrentOperations: true, Operations: map[string]Operation{"scopeProbe": func(ctx context.Context, _ map[string]any) (any, error) {
+			entered <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return nil, nil
+		}}})
+		done <- err
+	}()
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("native host serialized explicitly concurrent operations")
+		}
+	}
+	cancel()
+	<-done
 }

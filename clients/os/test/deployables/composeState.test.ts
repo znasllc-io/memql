@@ -7,6 +7,7 @@ import {
   addressReady,
   appsToPlace,
   duplicateSource,
+  dslOnlySelectionReady,
   movingStopFor,
   normalizeRepoSource,
   pathOf,
@@ -677,5 +678,23 @@ describe("the run a flow opened for ONE app reads as its own", () => {
     const newer = run({ id: "new", status: "analyzing", scopedTo: ["web"] });
     const older = run({ id: "old", deployables: [{ name: "web", siteId: "s", hostname: "web.example.com", bundleRef: "", version: "", created: true }] });
     expect(runForScopedFlow([newer, older], "web")).toBe(newer);
+  });
+});
+
+
+describe("an analyzed DSL-only selection", () => {
+  const report = { ok: true, dslChanges: true, dslDomains: [{ domain: "delivery", files: 2, constructs: { automation: 3 } }], deployables: [] };
+  it("permits a changed logic-only package but rejects empty, unknown and failed analysis", () => {
+    expect(dslOnlySelectionReady(report, {})).toBe(true);
+    expect(dslOnlySelectionReady({ ...report, dslDomains: [] }, {})).toBe(false);
+    expect(dslOnlySelectionReady({ ...report, dslChanges: undefined }, {})).toBe(false);
+    expect(dslOnlySelectionReady({ ...report, ok: false }, {})).toBe(false);
+    expect(dslOnlySelectionReady(null, {})).toBe(false);
+  });
+  it("never infers a skip for an unselected declared website", () => {
+    const declared = { ...report, deployables: [{ name: "website", kind: "static", path: "clients/site", buildPlan: "build", output: "out", prebuilt: false }] };
+    expect(dslOnlySelectionReady(declared, {})).toBe(false);
+    expect(dslOnlySelectionReady(declared, { website: address({ skip: false }) })).toBe(false);
+    expect(dslOnlySelectionReady(declared, { website: address({ skip: true }) })).toBe(true);
   });
 });

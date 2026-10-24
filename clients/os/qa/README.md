@@ -63,14 +63,14 @@ every label on it; an authored automation's detail; the Overview's ratio),
 or `pipeline-runs`, `pipeline-runs-empty`, `pipeline-runs-none`,
 `pipeline-run-failed`, `pipeline-run-running`, `pipeline-run-queued`,
 `pipeline-run-passed`, `pipeline-run-refused`, `pipeline-run-cancelled`,
-`pipeline-run-rerun`, `pipeline-run-developer` (Deployables > Runs and a run
+`pipeline-run-rerun`, `pipeline-run-developer` (Pipelines > Runs and a run
 page in each state, epic memql#5479; the seeds are `qa/pipelinesSeeds.ts`, and
 `pipeline-run-failed` answers the Library content route with a Go test's last
 lines so the log tail is judged with a real failure in it), or
 `pipeline-source`, `pipeline-source-none`, `pipeline-map` (a source's checks,
 a source with no pipeline, the Overview map's Checks nodes) and
 `settings-pipelines-unset`, `-partial`, `-done`, `-unreported`
-(Settings -> Pipelines in each reading), or
+(Pipelines settings in each reading), or
 `add-machine-describe`, `add-machine-waiting`, `add-machine-runtime`,
 `add-machine-pulling`, `add-machine-failed`, `add-machine-refused`,
 `add-machine-ready`, `add-machine-tools-ready` (Fleet's Add a machine in each
@@ -446,3 +446,28 @@ then Activity, must instead start at the top. Scroll again, open another record,
 and check that Back uses that new position. The QA
 window carries Fleet's app identity and dialog role so its overflow and scroll
 boundary match the desktop. Run in Safari as well as Chromium.
+
+## Delivery and readable goal journeys
+
+`delivery-overview`, `delivery-repositories`, and `delivery-changes` exercise
+the dedicated Pipelines destinations using real app components and fixture
+feeds. `nexus-readable`, `nexus-readable-waiting`, `nexus-readable-failed`, and
+`nexus-readable-long` cover a recorded business goal, its actual reasons,
+unknown usage and a 55-action history. Select an action with
+`click=Review this month’s work, Done` and open evidence with
+`click=Review this month’s work, Done|Technical details`. Inspect both modes at
+1400px and 520px: the selected action is alongside the journey on wide windows
+and above it on narrow windows. These are fixture render checks, not installed
+cluster execution evidence.
+
+Repository detail fixtures use `delivery-repository`, with
+`click=Change requests|Request changes` for the bounded request form and
+`click=Checks` for run summaries. `delivery-add-repository&click=Add repository`
+opens the real left-step wizard. Installation states are `installation-prepared`,
+`installation-applying`, `installation-complete`, `installation-restoring`,
+`installation-restored`, `installation-empty` and `installation-unavailable`.
+The complete fixture can explicitly select restoration, and the restoring fixture
+finishes only after Check progress returns its fixture receipt. Both use the
+real selection screen; they never contact a cluster or GitHub. The applying fixture has a healthy, synchronized
+controller but deliberately remains applying: only the completed backend
+receipt can say that installation was verified.

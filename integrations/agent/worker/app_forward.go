@@ -104,6 +104,7 @@ func (o AppForwardOutcome) Ok() bool { return o.ErrorCode == "" && o.ErrorMessag
 // appForwardCall is one parked app call.
 type appForwardCall struct {
 	resp chan *nodev1.AppCallForwardResponse
+	done chan struct{}
 }
 
 // ForwardAppCall sends one resolved app-door call to the replica holding the
@@ -156,7 +157,7 @@ func (r *ForwardRouter) ForwardAppCall(
 	timeout = appCallTimeout(ctx, timeout)
 
 	requestId := id.NewShortId()
-	call := &appForwardCall{resp: make(chan *nodev1.AppCallForwardResponse, 1)}
+	call := &appForwardCall{resp: make(chan *nodev1.AppCallForwardResponse, 64), done: make(chan struct{})}
 	r.appMu.Lock()
 	if r.appInflight == nil {
 		r.appInflight = make(map[string]*appForwardCall)
@@ -166,6 +167,7 @@ func (r *ForwardRouter) ForwardAppCall(
 	defer func() {
 		r.appMu.Lock()
 		delete(r.appInflight, requestId)
+		close(call.done)
 		r.appMu.Unlock()
 	}()
 
@@ -196,46 +198,63 @@ func (r *ForwardRouter) ForwardAppCall(
 
 	wait, stop := context.WithTimeout(ctx, timeout+appForwardGrace)
 	defer stop()
-	select {
-	case resp := <-call.resp:
-		return appOutcomeFromWire(resp), nil
-	case <-streamDone:
-		// AN ANSWER THAT ARRIVED IS AN ANSWER. The dialer's receive goroutine
-		// hands the holder's response to call.resp and only then sees the
-		// stream end, so when both are ready select picks one at random -- and
-		// picking this case threw Claude Code's work away and had the route
-		// spend the call again on its next Source.
+	deliver := func(resp *nodev1.AppCallForwardResponse) bool {
+		if !resp.GetDelta() {
+			return false
+		}
+		if req.OnContent != nil {
+			req.OnContent(resp.GetContent())
+		}
+		return true
+	}
+	for {
 		select {
 		case resp := <-call.resp:
+			if deliver(resp) {
+				continue
+			}
 			return appOutcomeFromWire(resp), nil
-		default:
+		case <-streamDone:
+			// AN ANSWER THAT ARRIVED IS AN ANSWER. The dialer's receive goroutine
+			// hands the holder's response to call.resp and only then sees the
+			// stream end, so when both are ready select picks one at random -- and
+			// picking this case threw Claude Code's work away and had the route
+			// spend the call again on its next Source.
+			select {
+			case resp := <-call.resp:
+				if deliver(resp) {
+					continue
+				}
+				return appOutcomeFromWire(resp), nil
+			default:
+			}
+			// No answer can come back on a stream that ended. NOT refused: the
+			// session may well have started on the machine.
+			return AppForwardOutcome{
+				ErrorCode:    AppForwardHolderGone,
+				ErrorMessage: "the connection to " + nodeId + ", the agent holding the machine's stream, ended before it answered; the session may have run there",
+			}, nil
+		case <-wait.Done():
+			// Best-effort cancel, so the machine stops the session: a caller that
+			// gave up must never leave an agent running on somebody's laptop.
+			reason := "caller_cancelled"
+			if ctx.Err() == nil {
+				reason = "sender_timeout"
+			}
+			r.sendCancel(nodeId, &nodev1.NodeClientMessage{
+				MessageId: id.NewShortId(),
+				Payload: &nodev1.NodeClientMessage_AppCallForwardCancel{
+					AppCallForwardCancel: &nodev1.AppCallForwardCancel{RequestId: requestId, Reason: reason},
+				},
+			})
+			if err := ctx.Err(); err != nil {
+				return AppForwardOutcome{}, err
+			}
+			return AppForwardOutcome{
+				ErrorCode:    AppForwardTimeout,
+				ErrorMessage: fmt.Sprintf("no answer from %s, the agent holding the machine's stream, within %s", nodeId, timeout+appForwardGrace),
+			}, nil
 		}
-		// No answer can come back on a stream that ended. NOT refused: the
-		// session may well have started on the machine.
-		return AppForwardOutcome{
-			ErrorCode:    AppForwardHolderGone,
-			ErrorMessage: "the connection to " + nodeId + ", the agent holding the machine's stream, ended before it answered; the session may have run there",
-		}, nil
-	case <-wait.Done():
-		// Best-effort cancel, so the machine stops the session: a caller that
-		// gave up must never leave an agent running on somebody's laptop.
-		reason := "caller_cancelled"
-		if ctx.Err() == nil {
-			reason = "sender_timeout"
-		}
-		r.sendCancel(nodeId, &nodev1.NodeClientMessage{
-			MessageId: id.NewShortId(),
-			Payload: &nodev1.NodeClientMessage_AppCallForwardCancel{
-				AppCallForwardCancel: &nodev1.AppCallForwardCancel{RequestId: requestId, Reason: reason},
-			},
-		})
-		if err := ctx.Err(); err != nil {
-			return AppForwardOutcome{}, err
-		}
-		return AppForwardOutcome{
-			ErrorCode:    AppForwardTimeout,
-			ErrorMessage: fmt.Sprintf("no answer from %s, the agent holding the machine's stream, within %s", nodeId, timeout+appForwardGrace),
-		}, nil
 	}
 }
 
@@ -257,8 +276,7 @@ func (r *ForwardRouter) DispatchAppCall(resp *nodev1.AppCallForwardResponse) {
 	}
 	select {
 	case call.resp <- resp:
-	default:
-		r.logger.Warn("app call forward response dropped (channel full)", "request_id", resp.GetRequestId())
+	case <-call.done:
 	}
 }
 
@@ -393,7 +411,15 @@ func (h *ForwardHandler) HandleForwardedAppCall(
 	}
 
 	// The ACTING USER is the verified subject, never the envelope's hint.
-	res, refused, err := apps.ServeForwardedAppCall(callCtx, registrationId, appCallFromEnvelope(owner, req))
+	localReq := appCallFromEnvelope(owner, req)
+	if req.GetStream() {
+		localReq.OnContent = func(text string) {
+			if err := send(&nodev1.NodeServerMessage{MessageId: id.NewShortId(), Payload: &nodev1.NodeServerMessage_AppCallForwardResponse{AppCallForwardResponse: &nodev1.AppCallForwardResponse{RequestId: requestId, Delta: true, Content: text}}}); err != nil {
+				ccancel()
+			}
+		}
+	}
+	res, refused, err := apps.ServeForwardedAppCall(callCtx, registrationId, localReq)
 	if err != nil {
 		code, message := appRefusalWire(err)
 		h.sendApp(send, &nodev1.AppCallForwardResponse{
@@ -503,6 +529,7 @@ func appCallEnvelope(requestId, registrationId, ownerUserId string, req memqleng
 		Pin:            &nodev1.AppCallPin{Pinned: req.Pin.Pinned, By: req.Pin.By},
 		TimeoutSec:     envelopeTimeoutSec(timeout),
 		Authority:      authority,
+		Stream:         req.OnContent != nil,
 	}
 	for _, m := range req.Messages {
 		env.Messages = append(env.Messages, &nodev1.AppCallMessage{Role: m.Role, Content: m.Content})
@@ -854,6 +881,14 @@ func NewRemoteAppInference(store FleetStore, policies DelegationPolicyReader, fo
 // An empty acting user reaches nothing, for AppInference.Doors' reason: an app
 // session's credential names a person, and system work has none to name.
 func (a *RemoteAppInference) Doors(ctx context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
+	doors, err := a.selectionDoors(ctx, actingUserId)
+	if err != nil || a == nil {
+		return nil, err
+	}
+	return filterAppDoors(ctx, a.store, doors)
+}
+
+func (a *RemoteAppInference) selectionDoors(ctx context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
 	if a == nil || a.store == nil || strings.TrimSpace(actingUserId) == "" {
 		return nil, nil
 	}
@@ -861,9 +896,9 @@ func (a *RemoteAppInference) Doors(ctx context.Context, actingUserId string) ([]
 	if err != nil {
 		return nil, err
 	}
-	return filterAppDoors(ctx, a.store, projectAppDoors(machines, a.clock(), func(c Candidate) (bool, bool) {
+	return projectAppDoors(machines, a.clock(), func(c Candidate) (bool, bool) {
 		return false, canForwardTo(c, a.forward, a.selfNodeId)
-	}))
+	}), nil
 }
 
 // AppOrder reads the owner's preferred app order off their delegation policy,

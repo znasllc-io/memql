@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -11,6 +11,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
+const { GoalView } = await import("../../src/apps/nexus/GoalView");
+const { goalFromRow } = await import("../../src/apps/nexus/rows");
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { approvalRow, fakeConnection, goalRow, rowsResult, runRow, stepRow, withSession } = await import(
@@ -93,12 +95,12 @@ describe("the map draws what the rows say", () => {
     mount(seeded());
     await openGoal();
     expect(screen.getByLabelText("Start, where the goal was set")).toBeTruthy();
-    expect(screen.getByLabelText(/^Automation nightlyReconcile/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Automation Work begins/)).toBeTruthy();
     // The beacon carries the goal's own words and how far the work has got.
     // Two readings of the same fact -- the count under the ring and the map's
     // own accessible name -- which is exactly the "colour is never the only
     // carrier" rule applied to a number.
-    expect(screen.getAllByText("1 of 3").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1 of 3 steps complete").length).toBeGreaterThan(0);
     expect(screen.getByRole("application").getAttribute("aria-label")).toContain(
       "1 of 3 steps done",
     );
@@ -107,9 +109,9 @@ describe("the map draws what the rows say", () => {
   it("gives every step a node that says its state in words", async () => {
     mount(seeded());
     await openGoal();
-    expect(screen.getByLabelText("Step read, done")).toBeTruthy();
-    expect(screen.getByLabelText("Step decide, running")).toBeTruthy();
-    expect(screen.getByLabelText("Step write, pending")).toBeTruthy();
+    expect(screen.getByLabelText("Step Read, done")).toBeTruthy();
+    expect(screen.getByLabelText("Step Decide, running")).toBeTruthy();
+    expect(screen.getByLabelText("Step Write, pending")).toBeTruthy();
   });
 
   it("says the run is working it out rather than drawing a fraction of nothing", async () => {
@@ -133,7 +135,92 @@ describe("the map draws what the rows say", () => {
       }),
     );
     await openGoal();
-    expect(screen.getByLabelText("Waiting on you: sideEffect")).toBeTruthy();
+    expect(screen.getByLabelText("Waiting on you: Review a decision")).toBeTruthy();
+  });
+});
+
+describe("attempts without recorded actions", () => {
+  it("does not infer an empty journal until the disconnected history has been read", async () => {
+    const rawGoal = goalRow({ id: "g1" });
+    const run = runRow({ id: "r1", goalId: "g1", status: "failed", errorMessage: "An unclassified failure" });
+    const props = {
+      goal: goalFromRow(rawGoal), goalRow: rawGoal, runRows: [run], stepRows: [], artifactRows: [], approvalRows: [],
+      openRunId: "r1", onPickRun: vi.fn(), onBack: vi.fn(), onOpenRun: vi.fn(), onOpenApproval: vi.fn(),
+      cancel: { busy: false, error: "", reset: vi.fn(), cancel: vi.fn(async () => true) },
+      derive: { busy: false, error: "", reset: vi.fn(), derivedRunId: "", replay: vi.fn(async () => "") },
+    };
+    const draw = (stepsState: LiveState) => withSession(<GoalView {...props} stepsState={stepsState} />);
+    const view = render(draw("disconnected"));
+    for (const state of ["disconnected", "degraded", "seeding"] as const) {
+      view.rerender(draw(state));
+      const progress = screen.getByRole("region", { name: "Current progress" });
+      expect(within(progress).getByText(state === "seeding" ? "Loading recorded actions." : "The action history is unavailable. Reconnect to read this attempt.")).toBeTruthy();
+      expect(screen.queryByText("This attempt failed before any actions were recorded.")).toBeNull();
+      expect(screen.queryByText("No actions recorded")).toBeNull();
+      expect(screen.queryByText("This run recorded no steps.")).toBeNull();
+      expect(screen.queryByText("No action was recorded as running when it stopped.")).toBeNull();
+      expect(screen.queryByLabelText("No recorded steps.")).toBeNull();
+      expect(screen.queryByRole("application")).toBeNull();
+      await readTheBar();
+      expect(screen.queryByText("No recorded actions to review")).toBeNull();
+    }
+    view.rerender(draw("live"));
+    expect(within(screen.getByRole("region", { name: "Current progress" })).getByText("This attempt failed before any actions were recorded.")).toBeTruthy();
+    expect(screen.getByText("No actions recorded")).toBeTruthy();
+    expect(screen.getByText("This run recorded no steps.")).toBeTruthy();
+    expect(screen.getByLabelText("No recorded steps.")).toBeTruthy();
+    await readTheBar();
+    expect(screen.getByText("No recorded actions to review")).toBeTruthy();
+    expect(props.cancel.cancel).not.toHaveBeenCalled();
+    expect(props.derive.replay).not.toHaveBeenCalled();
+  });
+
+  it("summarizes the recorded planning refusal without exposing provider diagnostics as the main explanation", async () => {
+    // The live pre-step failure shape; identifiers and model name are neutral fixtures.
+    const diagnostic = 'work compile: intent classification failed; retry the request: ai call via provider "fleet:example-model" failed: run v1:work:run:fixture reached its unevaluated ceiling at step <unnamed step> (limit , ): provider admission could not be verified: work is no longer running under this goal';
+    mount(seeded({ steps: [], runs: [runRow({ id: "r1", goalId: "g1", status: "failed", errorMessage: diagnostic })] }));
+    await openGoal();
+    const progress = screen.getByRole("region", { name: "Current progress" });
+    expect(within(progress).getByText("Planning stopped because permission to use the model could not be verified.")).toBeTruthy();
+    expect(within(progress).queryByText(diagnostic)).toBeNull();
+    const disclosure = screen.getByText("Usage and execution details").closest("details")!;
+    expect(disclosure.open).toBe(false);
+    expect(within(disclosure).getByText(diagnostic)).toBeTruthy();
+    expect(within(disclosure).getByText("No recorded steps to summarize.")).toBeTruthy();
+    expect(within(disclosure).getByText("No action was recorded as running when it stopped.")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Goal journey" })).getByText("No actions recorded")).toBeTruthy();
+    expect(screen.queryByText("The work is taking shape")).toBeNull();
+    expect(screen.queryByText("The next action has not been recorded yet.")).toBeNull();
+    expect(screen.queryByText(/The band fills in/)).toBeNull();
+    await readTheBar();
+    expect(screen.queryByText("Select an action to review its result")).toBeNull();
+    expect(screen.getByText("No recorded actions to review")).toBeTruthy();
+  });
+
+  it.each([
+    { status: "failed", errorCode: "", errorMessage: "Unrecognized technical failure ref-123", summary: "This attempt failed before any actions were recorded." },
+    { status: "failed", errorCode: "run_refused", errorMessage: "The saved gate refused the request", summary: "This request was refused before any actions were recorded." },
+    { status: "cancelled", summary: "This attempt was stopped before any actions were recorded." },
+    { status: "abandoned", summary: "The process running this attempt was lost. No actions were recorded." },
+    { status: "succeeded", summary: "This attempt finished without recorded actions." },
+  ])("keeps an empty $status attempt in the past without inventing a reason", async ({ status, summary, ...fields }) => {
+    mount(seeded({ steps: [], runs: [runRow({ id: "r1", goalId: "g1", status, ...fields })] }));
+    await openGoal();
+    expect(within(screen.getByRole("region", { name: "Current progress" })).getByText(summary)).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Goal journey" })).getByText("No actions recorded")).toBeTruthy();
+    expect(screen.queryByText(/The band fills in/)).toBeNull();
+    await readTheBar();
+    expect(screen.queryByText("Select an action to review its result")).toBeNull();
+  });
+
+  it("shows the actual wait before the first action instead of suggesting planning is running", async () => {
+    mount(seeded({ steps: [], runs: [runRow({ id: "r1", goalId: "g1", status: "waiting", finishedAt: "", waitingOn: { kind: "external", subject: "fixture" } })] }));
+    await openGoal();
+    expect(within(screen.getByRole("region", { name: "Current progress" })).getByText("Waiting for something outside the cluster. No actions have been recorded.")).toBeTruthy();
+    expect(screen.queryByText("The work is taking shape")).toBeNull();
+    expect(screen.queryByText(/The band fills in/)).toBeNull();
+    await readTheBar();
+    expect(screen.queryByText("Follow the actions above to see what happens next")).toBeNull();
   });
 });
 
@@ -141,23 +228,23 @@ describe("one selection, shared by the map and the rail", () => {
   it("opens the rail's step when its node is clicked", async () => {
     mount(seeded());
     await openGoal();
-    fireEvent.click(screen.getByLabelText("Step decide, running"));
+    fireEvent.click(screen.getByLabelText("Step Decide, running"));
     // The rail row for that step is now expanded, which is the shared
     // selection arriving on the other surface.
-    const row = screen.getByRole("button", { name: /^Step 2, decide/ });
+    const row = screen.getByRole("button", { name: /^Decide, / });
     expect(row.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("keeps the selection to ONE step, so opening another closes the first", async () => {
     mount(seeded());
     await openGoal();
-    fireEvent.click(screen.getByLabelText("Step decide, running"));
-    fireEvent.click(screen.getByLabelText("Step write, pending"));
+    fireEvent.click(screen.getByLabelText("Step Decide, running"));
+    fireEvent.click(screen.getByLabelText("Step Write, pending"));
     expect(
-      screen.getByRole("button", { name: /^Step 2, decide/ }).getAttribute("aria-expanded"),
+      screen.getByRole("button", { name: /^Decide, / }).getAttribute("aria-expanded"),
     ).toBe("false");
     expect(
-      screen.getByRole("button", { name: /^Step 3, write/ }).getAttribute("aria-expanded"),
+      screen.getByRole("button", { name: /^Write, / }).getAttribute("aria-expanded"),
     ).toBe("true");
   });
 });
@@ -185,7 +272,7 @@ describe("density: a finished stretch folds and says how much it stands for", ()
     expect(screen.queryByLabelText("Step s0, done")).toBeNull();
 
     fireEvent.click(fold);
-    expect(screen.getByLabelText("Step s0, done")).toBeTruthy();
+    expect(document.querySelectorAll('.os-nexus-node[data-kind="step"]')).toHaveLength(6);
     expect(screen.queryByLabelText("6 finished steps, folded. Open to see them.")).toBeNull();
   });
 });
@@ -253,7 +340,7 @@ describe("rewind", () => {
     );
     await screen.findByRole("group", { name: "What you can do with this" });
     expect(screen.queryByRole("button", { name: /^Rewind/ })).toBeNull();
-    expect(screen.getByText("no run to act on yet")).toBeTruthy();
+    expect(screen.getByText("No attempt is available yet")).toBeTruthy();
   });
 
   it("is offered, and says plainly that it spends nothing", async () => {
@@ -314,7 +401,7 @@ describe("rewind", () => {
       payload: { goalId: "g1", at: "2026-09-01T09:00:11Z" },
     });
     await screen.findByRole("application");
-    const rail = screen.getAllByRole("button", { name: /^Step \d+, / });
+    const rail = screen.getAllByRole("button", { name: /^(Read|Decide|Write), / });
     // Every rail row agrees with the map: nothing is `done` at a moment when
     // the run had not finished a step.
     for (const row of rail) {
@@ -351,7 +438,7 @@ describe("the acts legal from the run's state", () => {
     await openGoal();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).getByText("Answer it")).toBeTruthy();
-    expect(screen.getByText(/parked on you: sends mail outside the cluster/)).toBeTruthy();
+    expect(screen.getByText(/sends mail outside the cluster/)).toBeTruthy();
   });
 
   it("offers no Replay while the run is still going, and says why", async () => {
@@ -359,7 +446,7 @@ describe("the acts legal from the run's state", () => {
     await openGoal();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).queryByText("Replay")).toBeNull();
-    expect(screen.getByText(/replay and branching wait until the run finishes/)).toBeTruthy();
+    expect(screen.getByText(/Follow the actions above to see what happens next/)).toBeTruthy();
   });
 
   it("offers Replay once the run is terminal", async () => {

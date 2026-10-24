@@ -63,7 +63,8 @@ func captureRevisionWithRenderFixture(t *testing.T, message string, template *ar
 	config := add("blob", []byte("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: private-config}\ndata: {message: private-source-contents}\n"))
 	kustomization := add("blob", []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [config.yaml]\n"))
 	tree := add("tree", append(entry("100644", "config.yaml", config), entry("100644", "kustomization.yaml", kustomization)...))
-	root := add("tree", entry("40000", "overlay", tree))
+	deploy := add("tree", append(entry("40000", "engine", tree), entry("40000", "product", tree)...))
+	root := add("tree", append(entry("40000", "deploy", deploy), entry("40000", "overlay", tree)...))
 	commit := add("commit", []byte("tree "+root+"\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\n\n"+message+"\n"))
 	spec := sourceCaptureSpec{OwnerUserID: "operator-one", RunID: "capture-run", WorkRunID: "capture-work", StepKey: "prepare.source", Attempt: 1,
 		RunStartedAt: time.Now().UTC().Format(time.RFC3339Nano), Repository: pl.Repository{Owner: "example", Name: "installation", CloneURL: "https://github.com/example/installation.git"},
@@ -73,9 +74,11 @@ func captureRevisionWithRenderFixture(t *testing.T, message string, template *ar
 			ProjectSourceRepos: []string{"https://github.com/example/installation.git"}, TrackingMethod: "annotation+label", InstallationID: "installation",
 			KubeVersion: "1.35.7", APIVersions: []string{"v1/ConfigMap"}}}
 	if template != nil {
-		source := spec.Render.Source
+		var source map[string]any
+		require.NoError(t, json.Unmarshal(template.Source, &source))
+		source["targetRevision"] = commit
 		spec.Render = *template
-		spec.Render.Source = source
+		spec.Render.Source, _ = json.Marshal(source)
 	}
 	var archive bytes.Buffer
 	_, err := argocd.CaptureSourceArchive(context.Background(), objects, spec.Render, &archive)

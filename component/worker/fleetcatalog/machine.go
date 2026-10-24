@@ -140,3 +140,16 @@ func MergeLabels(cockpit, operator map[string]string) map[string]string {
 	}
 	return out
 }
+
+// routingLabels bridges older display selectors to the worker's validated
+// capability report. Recent Cockpit builds report Quartz/X11 in their descriptor
+// without a manual display=true label. Fill only an absent fact, then apply the
+// owner's overrides as before: an explicit exclusion must never be widened.
+// Neither source map nor the stored registration is changed by this read.
+func routingLabels(cockpit, operator map[string]string, descriptor any) map[string]string {
+	out := MergeLabels(cockpit, operator)
+	if _, set := out["display"]; !set && workerservice.DisplayAvailableFromMap(descriptor) {
+		out["display"] = "true"
+	}
+	return out
+}

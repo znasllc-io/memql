@@ -32,7 +32,7 @@ function mount(connection: FakeConnection, opts: { navigate?: (id: string, optio
   h.connection = connection;
   return render(
     withSession(
-      <DeployablesApp sectionId="sources" navigate={opts.navigate ?? vi.fn()} askContext={vi.fn()} store={memStore()} />,
+      <DeployablesApp surface="pipelines" sectionId="sources" navigate={opts.navigate ?? vi.fn()} askContext={vi.fn()} store={memStore()} />,
       { role: "owner", userId: VIEWER, ...(opts.capabilities ? { capabilities: opts.capabilities } : {}) },
     ),
   );
@@ -52,7 +52,10 @@ function seed(over: Partial<FakeSeed> = {}): FakeSeed {
 
 async function openSource(): Promise<HTMLElement> {
   await click(await screen.findByRole("button", { name: (label) => label.startsWith("Open shop,") }));
-  return screen.findByRole("region", { name: "Source shop" });
+  const source = await screen.findByRole("region", { name: "Source shop" });
+  const checks = within(source).queryByRole("button", { name: "Checks" });
+  if (checks) await click(checks);
+  return source;
 }
 
 /** A fact's value as it reads, whatever spans it is drawn in. */
@@ -80,13 +83,11 @@ beforeEach(() => {
 });
 
 describe("a source with a pipeline that runs", () => {
-  it("reads the Pipeline fact from the newest planned run, beside Tracking", async () => {
+  it("reads the Pipeline fact from the newest planned run", async () => {
     mount(fakeConnection(seed()));
     const page = await openSource();
     // The newest run anywhere planned three stages (the cart run), so three.
     await waitFor(() => expect(fact(page, "Pipeline")).toBe("memql-package.yaml, 3 stages, webhook, cluster"));
-    const terms = [...page.querySelectorAll("dt")].map((dt) => dt.textContent);
-    expect(terms.indexOf("Pipeline")).toBe(terms.indexOf("Tracking") + 1);
   });
 
   it("says Latest upstream's checks passed and it is not yet deployed", async () => {
@@ -166,7 +167,7 @@ describe("a source with a pipeline that runs", () => {
   });
 
   it("keeps checks on and leaves out the act for an owner withheld the connect part", async () => {
-    mount(fakeConnection(seed()), { capabilities: seededAccessWithout("owner", "app:deployables/connect") });
+    mount(fakeConnection(seed()), { capabilities: seededAccessWithout("owner", "app:pipelines/connect") });
     const page = await openSource();
     await waitFor(() => expect(fact(page, "Pipeline")).toBe("memql-package.yaml, 3 stages, webhook, cluster"));
     // The reading is the owner's to see; the act is the part's to grant.

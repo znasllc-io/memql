@@ -4,6 +4,7 @@ package pipelinesteps
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -12,10 +13,10 @@ import (
 )
 
 // Capacity is admission, not an execution retry. Only a dispatcher's confirmed
-// busy-before-start result or an eligible worker awaiting connection may wait
-// and re-route. A transport error, policy withdrawal or uncertain execution
-// returns immediately. Each re-route repeats current routing, consent and
-// receiving-replica checks.
+// busy-before-start result, retained local-build fence or eligible worker
+// awaiting connection may wait and re-route. A transport error, policy
+// withdrawal or uncertain execution returns immediately. Each re-route repeats
+// current routing, consent and receiving-replica checks.
 func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRequest, run *StepRun, token string, capture *Capture, chunk func(*nodev1.WorkerForwardStream)) (worker.Result, *pl.StepResult, error) {
 	deadline, deadlineErr := time.Parse(time.RFC3339Nano, run.RunDeadline)
 	ownTimeout := run.TimeoutSeconds
@@ -26,6 +27,8 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 	}
 	maxDelay := 6 * delay
 	queued := false
+	lastReason := ""
+	capacityNotices := 0
 	for {
 		if ctx.Err() != nil {
 			res := stoppedResult(ctx)
@@ -64,6 +67,19 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			capture.Note("memql: waiting for the owner's shared build capacity; no command has started")
 			queued = true
 		}
+		// Preserve the machine's actionable capacity explanation (for example
+		// insufficient disk) without repeating it on every polling attempt.
+		// Available bytes may change every poll: cap live notices, retaining
+		// further changes in the bounded archive rather than flooding the store.
+		if reason := cutBytes(strings.TrimSpace(result.ErrorMessage), 2048); reason != "" && reason != lastReason {
+			if capacityNotices < 4 {
+				capture.Notice("memql: " + reason)
+				capacityNotices++
+			} else {
+				capture.Note("memql: " + reason)
+			}
+			lastReason = reason
+		}
 		wait := delay
 		if remaining := deadline.Sub(f.now()); remaining < wait {
 			wait = remaining
@@ -90,7 +106,7 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 // contract. A lost reply after dispatch must never replay the command.
 func fleetMayWait(result worker.Result) bool {
 	switch result.ErrorCode {
-	case "pipeline_capacity_busy", "worker_disconnected", "worker_unreachable":
+	case "pipeline_capacity_busy", "pipeline_capacity_fenced", "worker_disconnected", "worker_unreachable":
 		return true
 	case "no_worker_available":
 		return result.WaitForConnection

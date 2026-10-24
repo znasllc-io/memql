@@ -15,7 +15,11 @@ type workTemplateTrigger struct {
 type workTemplateStackKey struct{}
 
 func (t *workTemplateTrigger) executor() *automations.Executor {
-	return automations.NewExecutor(automations.ExecutorOptions{Logger: t.app.Logger, Engine: t.app.engine, EventBus: t.app.eventBus, StepRegistry: t.app.stepRegistry, AutomationTrigger: t})
+	var registry automations.StepExecutorRegistry = t.app.stepRegistry
+	if t.template.prepared != nil {
+		registry = t.template.prepared.StepRegistry()
+	}
+	return automations.NewExecutor(automations.ExecutorOptions{Logger: t.app.Logger, Engine: t.app.engine, EventBus: t.app.eventBus, StepRegistry: registry, AutomationTrigger: t})
 }
 func (t *workTemplateTrigger) TriggerAutomation(ctx context.Context, name string) (*automations.AutomationExecution, error) {
 	return t.TriggerAutomationWithArgs(ctx, name, nil)
@@ -41,6 +45,9 @@ func (t *workTemplateTrigger) TriggerAutomationWithArgs(ctx context.Context, nam
 // ResolveAutomation uses the same pinned draft members and installed fallback
 // for an initial invocation and a saved child continuation.
 func (t *workTemplateTrigger) ResolveAutomation(ctx context.Context, name string) (*automations.Automation, error) {
+	if t.template.prepared != nil {
+		return t.template.prepared.Automation(name)
+	}
 	auto := t.template.members[name]
 	if auto == nil {
 		var err error

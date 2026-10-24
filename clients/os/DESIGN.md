@@ -499,7 +499,8 @@ components as their overview data is added, without changing their workflows.
 ### A tab is a different kind of thing; a subset is a filter
 
 An app's section tabs are its NOUNS. Fleet's are machines, policies, the model
-library; Deployables' are **deployables** and **sources**. A slice of one noun
+library; Deployables holds **deployables**, while Pipelines holds
+**repositories**, **changes**, **runs** and **releases**. A slice of one noun
 -- standalone ones, the ones from a zip, the live ones -- is a question asked of
 a list, and belongs behind `Refine` (rule 2), not on a tab.
 
@@ -519,18 +520,18 @@ Deployables used to draw both nouns in one list: a source was a row with its
 apps indented beneath it, then a "Standalone" heading over the rest. A tree
 inside a list, with two row types and an order that followed origin rather than
 anything a person was looking for; the owner's word was "I really hate that
-combined list". Two lists now, in one row language (`RecordRow`):
+combined list". Keep two lists in the same row language (`RecordRow`), with distinct ownership:
 
 - **Deployables** is every deployable, flat. A row is there because it has an
   address of its own. Where it came from is a FACT ON THE ROW (the source's
   name, "Zip", "CI", "Built in") and a facet in Refine -- never a heading over
   it and an indent.
-- **Sources** is the single configured repository catalog. Each row shows its
+- **Pipelines → Repositories** is the single configured repository catalog. Each row shows its
   GitHub identity, organization or personal target, repository and tracked
   branch, alongside the separate MemQL owning account. Credentials and saved
   installation bindings provide access metadata rather than separate list
-  entries. There are no sibling Repositories or Accounts pages. Settings manages
-  personal GitHub accounts; Sources manages the saved repository combinations. A source's detail
+  entries. There are no sibling Repositories or Accounts pages. Pipelines Settings manages
+  personal GitHub accounts; Repositories manages the saved combinations. A source's detail
   holds its access, settings, apps and history. ZIP-backed apps remain in
   Deployables and retain their existing detail and lifecycle controls.
 - **Every listed source is summarised by everything it made.** A
@@ -542,12 +543,12 @@ combined list". Two lists now, in one row language (`RecordRow`):
   over the deployables list's answer it inherited that list's questions, and
   showed three of five seeded sources.
 - **Remove source changes catalog visibility only.** It hides the configured
-  repository from Sources and saved choices while preserving its grant,
+  repository from Repositories and saved choices while preserving its grant,
   installation binding, package ID, automatic updates, deployables and history.
-  Add deployable registers, reuses or restores the same authorized configuration
+  Add repository registers, reuses or restores the same authorized configuration
   atomically; it does not borrow a different identity's or MemQL account's
-  history. Archive remains the distinct lifecycle operation. Add deployable
-  creates sources and can connect accounts inline; Settings can also add,
+  history. Archive remains the distinct lifecycle operation. Add repository
+  uses the shared left-step wizard; Pipelines Settings can also add,
   reconnect and disconnect personal GitHub accounts.
 - **Disconnect GitHub changes repository access only.** Saved sources,
   deployables, deployed files and serving sites remain intact and online.
@@ -560,11 +561,33 @@ combined list". Two lists now, in one row language (`RecordRow`):
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.
 - The trail keeps the way in: `Deployables > storefront`, or
-  `Sources > acme/storefront > admin` when that is how the person got there.
+  `Pipelines > Repositories > acme/storefront` for source management. Opening
+  a deployed app crosses into Deployables; a contextual repository link returns
+  to Pipelines when permitted.
 
-One component draws both (`DeployablesSection` with a `root`), because every
-page either list opens is the same page. Two instances, so drilling into a
-source does not move the other tab off whatever it was showing.
+Shared repository and deployable components keep one data model. Their app
+surface decides which controls belong there. Deployables may show repository
+facts, but repository, run and release management belongs in Pipelines.
+
+### A readable account of a goal
+
+Nexus starts with the person’s goal, its current action or blocker, and a large
+readable journey. Each action has a plain title, observed outcome and text state.
+Show a reason only when one was recorded. Selecting an action reveals that
+reason and recorded usage in the same viewport; at narrow widths the selection
+precedes the journey. Fold long completed prefixes while preserving the recent
+and current work. Technical references, execution evidence and the dependency
+map remain available in clearly named disclosures. Unknown usage is “Not
+reported”, never zero; abbreviated token totals represent reported values.
+Routine pipeline attempts are available through a filter, not mixed into the
+default list of user outcome goals.
+
+Cluster owns installation health, runtime, data, updates, logs and settings.
+Related runtime views use local tabs. Pipelines owns repository delivery and
+publication. Cluster Updates owns the explicit installation choice: prepare a
+draft configuration proposal, observe its reviewed merge, prepare the exact
+installation plan, then apply it. No successful check or published candidate
+silently changes the selected installation release.
 
 ### One trail row, and the window draws it
 

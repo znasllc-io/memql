@@ -3,8 +3,10 @@ package pipelinerun
 import (
 	"context"
 	"fmt"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -26,13 +28,60 @@ automation independentPipelineChecks {
   }
 }`
 
+var testWorkflowSources sync.Map
+
 func workflowSource(t *testing.T, source string) *automations.Automation {
 	t.Helper()
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(source, "workflow-test.memql")
 	if err != nil {
 		t.Fatal(err)
 	}
+	testWorkflowSources.Store(a, strings.ReplaceAll(source, "@template automation", "@template\nautomation"))
 	return a
+}
+
+func bindTestWorkflow(d *Deps, a *automations.Automation) {
+	roles := map[string]string{}
+	for role, name := range policyRoles {
+		roles[role] = name
+	}
+	isHelper := a.Name == "pipelineSARIFDelivery"
+	for _, name := range optionalPolicyRoles {
+		if name == a.Name {
+			isHelper = true
+		}
+	}
+	for _, name := range policyRoles {
+		if name == a.Name {
+			isHelper = true
+		}
+	}
+	if !isHelper {
+		roles["workflow"] = a.Name
+	}
+	body, _ := testWorkflowSources.Load(a)
+	parts := []string{}
+	for role, name := range roles {
+		parts = append(parts, fmt.Sprintf("%s: %q", role, name))
+	}
+	slices.Sort(parts)
+	profile := "{" + strings.Join(parts, ", ") + "}"
+	d.SystemVariable = func(_ context.Context, name string) (string, error) {
+		if name == PolicyResolverVariable {
+			return "testDeliveryProfile", nil
+		}
+		return "", nil
+	}
+	d.WorkflowSource = func(kind, name string) (string, error) {
+		if kind == "automation" && name == "testDeliveryProfile" {
+			return "@template\nautomation testDeliveryProfile { args { repository string! ownerUserId string! pipelineId string! } return " + profile + " }", nil
+		}
+		if kind == "automation" && name == a.Name {
+			return body.(string), nil
+		}
+		return workflowhost.InstalledSource(kind, name)
+	}
+	d.LoadWorkflow = workflowLoader(a)
 }
 
 func workflowLoader(definitions ...*automations.Automation) func(string) (*automations.Automation, error) {
@@ -53,7 +102,7 @@ func manifestWorkflow(manifest, name string) string {
 func TestASeparatelyNamedDSLWorkflowChangesFailurePolicy(t *testing.T) {
 	a := workflowSource(t, independentWorkflow)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 		if req.StepKey == "checks.vet" {
 			return pipelines.StepResult{Status: pipelines.OutcomeFailed, ExitCode: 1}, nil
@@ -79,7 +128,7 @@ automation wrappedPipelineChecks {
   automation runPipelineStages(stages: args.stages)
 }`)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	run := dh.openRun(t, prOpening())
 	deliver(t, dh.integ, run)
 	got, _ := dh.store.run(run.ID)
@@ -98,7 +147,7 @@ automation forgedPipelineStep {
   }
 }`)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	run := dh.openRun(t, prOpening())
 	deliver(t, dh.integ, run)
 	got, _ := dh.store.run(run.ID)
@@ -116,12 +165,10 @@ automation unscopedPipelineEffect {
   }
 }`)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
-	run := dh.openRun(t, prOpening())
-	deliver(t, dh.integ, run)
-	got, _ := dh.store.run(run.ID)
-	if got.RefusalCode != pipelines.CodeStageInvalid || got.WorkRunID != "" || len(dh.exec.sentKeys()) != 0 {
-		t.Fatalf("unscoped workflow was not refused before work: %+v", got)
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
+	_, err := dh.integ.open(context.Background(), dh.integ.snapshot(), dh.p, prOpening())
+	if err == nil || len(dh.store.allRuns()) != 0 || len(dh.exec.sentKeys()) != 0 {
+		t.Fatalf("unscoped workflow was not refused at admission: %v", err)
 	}
 }
 
@@ -130,7 +177,7 @@ func TestRepeatedWorkflowActionsKeepOneReceipt(t *testing.T) {
 		"action executePipelineStep(stepKey: item.key)",
 		"parallel { branch first { action executePipelineStep(stepKey: item.key) } branch second { action executePipelineStep(stepKey: item.key) } }", 1))
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	run := dh.openRun(t, prOpening())
 	deliver(t, dh.integ, run)
 	got, _ := dh.store.run(run.ID)
@@ -741,7 +788,7 @@ func TestEmptyStageSelectionCannotEraseExistingWork(t *testing.T) {
 func TestPipelineWorkflowCannotReturnEarlyAndPass(t *testing.T) {
 	a := workflowSource(t, `@template automation emptyPipelineWorkflow { args { stages []any! } return true }`)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	run := dh.openRun(t, prOpening())
 	deliver(t, dh.integ, run)
 	got, _ := dh.store.run(run.ID)
@@ -761,7 +808,7 @@ automation fabricatedPassingWorkflow {
  }
 }`)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
-	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	dh.integ.Configure(func(d *Deps) { bindTestWorkflow(d, a) })
 	run := dh.openRun(t, prOpening())
 	deliver(t, dh.integ, run)
 	got, _ := dh.store.run(run.ID)

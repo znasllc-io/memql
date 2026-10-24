@@ -73,12 +73,12 @@ func storageBytes(raw string) (*big.Int, error) {
 // verifyStoragePreservation is read-only and deliberately refuses resizing:
 // applying the original rollback revision after an expansion would ask for a
 // shrink. That needs a separately qualified maintenance/rollback contract.
-func verifyStoragePreservation(ctx context.Context, api argocd.API, before, after argocd.RenderedRevision) (storageEvidence, error) {
+func verifyStoragePreservation(ctx context.Context, api argocd.API, before, after argocd.RenderInventory) (storageEvidence, error) {
 	observed := time.Now().UTC()
-	if api == nil || before.Digest() == "" || after.Digest() == "" {
+	if api == nil || !validRenderInventory(before) || !validRenderInventory(after) {
 		return storageEvidence{}, errors.New("storage verification requires native renders and cluster reads")
 	}
-	if err := sameRenderScope(before.Spec(), after.Spec()); err != nil {
+	if err := sameRenderInventoryScope(before, after); err != nil {
 		return storageEvidence{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)

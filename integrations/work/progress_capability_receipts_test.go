@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	workstate "github.com/znasllc-io/memql/component/work"
@@ -20,7 +21,7 @@ func capabilityProgressReceipt(t *testing.T, search, content string) map[string]
 		{Role: "tool", Name: "workCapabilities", ToolCallId: "discovery", Content: content},
 	})
 	require.NoError(t, err)
-	return map[string]any{"runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "note", "data": map[string]any{
+	return map[string]any{"createdAt": rfc(testNow.Add(time.Second)), "runId": ceilingRunId, "ownerUserId": ceilingOwner, "kind": "note", "data": map[string]any{
 		"capabilityEvidence": true, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(messages),
 	}}
 }
@@ -46,7 +47,7 @@ func TestCapabilityProgressCreditsFactsOnceAcrossReplicas(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, continued)
 	// A newly resolved operation contract is real new evidence. The existing
-	// three-window and original hard-ceiling tests apply to this same path.
+	// evidence and monetary-ceiling tests apply to this same path.
 	e.reply("workProgressReceiptsForOwnerRun", first, capabilityProgressReceipt(t, "image", `{"capabilities":[{"name":"library.generateImage","kind":"mutation","app":"files"}]}`))
 	continued, err = peer.ContinueWorkProgress(context.Background(), rc, workstate.Spent{WallClockMs: 1250000}, 0)
 	require.NoError(t, err)
@@ -81,7 +82,7 @@ func TestCapabilityProgressRejectsIncompleteOrUnrelatedReceipts(t *testing.T) {
 }
 
 func TestCapabilityProgressPreservesHardCeilings(t *testing.T) {
-	for _, spent := range []workstate.Spent{{ModelCalls: 96}, {WallClockMs: 7200000}, {Cost: 0.5}, {Tokens: 1001}} {
+	for _, spent := range []workstate.Spent{{Cost: 0.5}, {Tokens: 1001}} {
 		i, e, _, rc := progressFixture(t)
 		e.reply("workProgressReceiptsForOwnerRun", capabilityProgressReceipt(t, "files", capabilityProgressFacts))
 		continued, err := i.ContinueWorkProgress(context.Background(), rc, spent, 0)

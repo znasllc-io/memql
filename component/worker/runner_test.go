@@ -18,10 +18,51 @@ type recordingAppSessionStore struct {
 	finished  []AppSessionRow
 	allocated map[string]int
 	allocErr  error
+	submitted []byte
+	readErr   error
 	// refuseStatusWrites refuses that many progress writes naming a status,
 	// as an engine blip would. A refused write did not land, so it is not
 	// recorded in appends.
 	refuseStatusWrites int
+}
+
+func (s *recordingAppSessionStore) ReadSubmittedAppSessionResult(context.Context, string, string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.submitted, s.readErr
+}
+
+func TestRunnerReturnsTheMCPSubmissionWhenTheWorkerEndsWithoutIt(t *testing.T) {
+	for _, status := range []string{"complete", "needs_input", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
+			submitted := []byte(`{"terminalTool":"respondToUser","arguments":{"status":"` + status + `","question":{"kind":"text","text":"Please sign in to the service in the separate browser tab."}}}`)
+			go func() {
+				waitForSession(t, session, "sess-run")
+				store.mu.Lock()
+				store.submitted = submitted
+				store.mu.Unlock()
+				session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+			}()
+			result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+			if err != nil || string(result.Result) != string(submitted) || string(store.terminal()[0].Result) != string(submitted) {
+				t.Fatalf("MCP terminal lost at session return: result=%s err=%v", result.Result, err)
+			}
+		})
+	}
+}
+
+func TestRunnerDoesNotReportSuccessWhenSubmittedResultCannotBeRead(t *testing.T) {
+	runner, session, store, _ := newRunnerFixture(t, SubscriptionPresent)
+	store.readErr = errors.New("database unavailable")
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+	if err == nil || result.Status != AppSessionStatusFailed || !strings.Contains(result.ErrorMessage, "read submitted app result") {
+		t.Fatalf("lost submission became success: %+v %v", result, err)
+	}
 }
 
 func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSessionRow) error {
@@ -281,6 +322,29 @@ func TestRunnerRefusesWithoutAMinter(t *testing.T) {
 	}
 	if len(store.created) != 0 {
 		t.Fatal("a refused run must not leave a session row")
+	}
+}
+
+func TestRunnerPreservesToolModeForModelCallsWithInputs(t *testing.T) {
+	for _, inferenceOnly := range []bool{false, true} {
+		runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+		spec := runSpec()
+		spec.ModelCall = true
+		spec.InferenceOnly = inferenceOnly
+		if !inferenceOnly {
+			spec.Inputs = []string{"image-artifact"}
+		}
+		go func() {
+			waitForSession(t, session, spec.SessionId)
+			session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: spec.SessionId})
+		}()
+		if _, err := runner.Run(context.Background(), session.worker, spec, nil); err != nil {
+			t.Fatal(err)
+		}
+		starts := session.stream.(*fakeCockpitStream).starts()
+		if len(starts) != 1 || starts[0].GetInferenceOnly() != inferenceOnly {
+			t.Fatalf("model-call recording changed the requested tool mode: %+v", starts)
+		}
 	}
 }
 
@@ -576,6 +640,9 @@ func TestEveryProducedArtifactIsStamped(t *testing.T) {
 	got := stamps[0]
 	if got.App != AppIdClaudeCode || got.SessionId != "sess-run" {
 		t.Fatalf("the stamp must name the app and the session: %+v", got)
+	}
+	if got.RunId != "plan-1" || got.StepKey != "task-1" {
+		t.Fatalf("the native work identity must accompany returned evidence: %+v", got)
 	}
 	if got.Model != "claude-opus-5" || got.Effort != "high" {
 		t.Fatalf("the stamp carries the APP'S REPORT: %+v", got)

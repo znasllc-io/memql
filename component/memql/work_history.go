@@ -77,6 +77,9 @@ func workHistorySourceIndex(checkpoint string, messages []common.ChatMessage, st
 	}
 	for ; index < len(messages) && len(entries) < 8; index++ {
 		message := messages[index]
+		if message.Role == "" {
+			continue
+		}
 		entry := map[string]any{"index": index, "role": excerpt(message.Role, 16)}
 		if isWorkMemory(message) {
 			entry["kind"] = "derived-checkpoint"
@@ -125,7 +128,14 @@ func (e *MemQLEngine) recallWorkHistoryBuiltin(ctx context.Context, args map[str
 		return nil, fmt.Errorf("work history is unavailable")
 	}
 	if sourceRunID != "" {
-		return e.recallWorkSourceHistory(ctx, rows[0], run.RunId, sourceRunID, args)
+		return e.recallWorkSourceHistory(ctx, rows[0], run.RunId, sourceRunID, args, false)
+	}
+	if fingerprint == "" {
+		// Searching consolidated context recursively finds previous searches
+		// and their copied answers. Search original tool fields from both the
+		// execution journal and compaction archives instead. Exact checkpoint
+		// and conversation reads retain their existing bytes and selectors.
+		return e.recallWorkSourceHistory(ctx, rows[0], run.RunId, run.RunId, args, true)
 	}
 	limit := min(4000, max(128, workHistoryInt(args, "maxChars", 1600)))
 	offset := max(0, workHistoryInt(args, "offset", 0))
@@ -150,16 +160,7 @@ func (e *MemQLEngine) recallWorkHistoryBuiltin(ctx context.Context, args map[str
 		remaining -= utf8.RuneCountInString(page["source"].(string))
 		matches = append(matches, page)
 	}
-	// The live run's original conversation is considered once, on page one.
-	if fingerprint == "" && cursor == "" {
-		input, _ := rows[0]["input"].(map[string]any)
-		conversation, _ := input["conversation"].(map[string]any)
-		messages, _ := conversation["messages"].([]any)
-		sources = append(sources, map[string]any{"checkpoint": "conversation", "messageCount": len(messages)})
-		for i, entry := range messages {
-			appendPage(entry, "conversation", i)
-		}
-	} else if fingerprint == "conversation" {
+	if fingerprint == "conversation" {
 		input, _ := rows[0]["input"].(map[string]any)
 		conversation, _ := input["conversation"].(map[string]any)
 		messages, _ := conversation["messages"].([]any)

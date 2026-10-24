@@ -45,8 +45,8 @@ import (
 //     would be ignored by every reader, and "registered" would be a lie.
 //   - THE APP IS THE ONE THIS CLUSTER ASKED FOR. The owner can edit only the
 //     app's name on GitHub's page, so anything wider than
-//     githubconnect.RequestedPermissions -- reads on the chosen repositories
-//     and checks write -- coming back is not from this cluster's manifest, and
+//     githubconnect.RequestedPermissions -- the declared delivery permissions,
+//     never settings writes -- coming back is not from this cluster's manifest, and
 //     its credentials are not ones to keep.
 //
 // ===========================================================================

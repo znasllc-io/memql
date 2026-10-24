@@ -1,3 +1,6 @@
+import { useLayoutEffect, useState } from "react";
+import { LocalTabs } from "../../../kit/LocalTabs";
+import { RepositoryChange } from "../../pipelines/RepositoryChange";
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
 import { sourceName } from "../list";
@@ -8,10 +11,9 @@ import { RemoveSource } from "../sources/RemoveSource";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { useAccountOptions } from "../../accounts/tie";
 import { accountNameFrom } from "../../accounts/rows";
-import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
-import { Caption, Fact, Facts, Head, Panel } from "../../../kit";
+import { Caption, Details, DetailsSection, Fact, Facts, Head, Panel } from "../../../kit";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -71,6 +73,8 @@ import { runsOfPipeline, upstreamChecks } from "../pipelines/runs";
 
 export function SourceView({
   pkg,
+  repositoryWorkspace = false,
+  openView,
   viewerUserId,
   onRemoved,
   apps,
@@ -97,6 +101,8 @@ export function SourceView({
   onPipelineSettings,
 }: {
   pkg: PackageRow;
+  repositoryWorkspace?: boolean;
+  openView?: { section: "details" | "settings"; revision: number };
   viewerUserId?: string;
   onRemoved?: () => void;
   /** The apps this source produced, from the root's site feed. */
@@ -150,6 +156,10 @@ export function SourceView({
   onConnectPipeline?: () => void;
   onPipelineSettings?: () => void;
 }) {
+  const [section, setSection] = useState("details");
+  useLayoutEffect(() => {
+    if (openView) setSection(openView.section);
+  }, [openView?.revision, openView?.section]);
   const accounts = useAccountOptions();
   const label = sourceName(pkg);
   const connections = useSourceConnections();
@@ -219,45 +229,58 @@ export function SourceView({
         <Panel label={`Source ${label}`}>
           <Head navigationKey={`source:${pkg.id}`} title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }}>{can.sources && mine && pkg.sourceKind === "repo" && !pkg.sourceRemoved ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : null}</Head>
 
-          <Caption>
-            {pkg.sourceKind === "repo" ? provenance.provenance : "Shared ZIP package"}
-          </Caption>
-
-          {pkg.sourceRemoved ? <Caption>Removed from Sources. Its deployables and repository history are retained.</Caption> : null}
-          <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
-          {pkg.updateAvailable ? <Caption>A newer version is available: {shortVersion(pkg.latestKnownVersion)}. Open an app to review and deploy it.</Caption> : null}
-          <Facts>
-            <Fact label="MemQL account" value={accountNameFrom(accounts, pkg.accountId)} />
-            {pkg.sourceKind === "repo" ? <Fact label="GitHub account" value={provenance.identity} /> : null}
-            {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} /> : null}
-            {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
-            {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
+          {repositoryWorkspace ? <LocalTabs label="Repository views" value={section} onChange={setSection} options={[["details", "Details"], ["changes", "Change requests"], ...(checked ? [["checks", "Checks"] as const] : []), ["apps", "Deployables"], ["settings", "Settings"]]} /> : null}
+          <div hidden={repositoryWorkspace && section !== "details"}>
+          {pkg.sourceRemoved ? <Caption>Removed from the repository catalog. Its deployables and repository history are retained.</Caption> : null}
+          <Details>
+          <DetailsSection title="Source">
+            <Facts>
+              {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} copyValue={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} copyValue={pkg.artifactId} />}
+              {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} copyValue={pkg.repoRef || undefined} /> : null}
+              <Fact label="Added" value={formatMoment(pkg.createdAt)} copyValue={pkg.createdAt} />
+            </Facts>
+          </DetailsSection>
+          <DetailsSection title="Access">
+            <Facts>
+              <Fact label="MemQL account" value={accountNameFrom(accounts, pkg.accountId)} />
+              {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} copyValue={provenance.target} /> : null}
+              {pkg.sourceKind === "repo" ? <Fact label="Connection" value={<CredentialChip pkg={pkg} credentials={credentials} />} /> : null}
+            </Facts>
+          </DetailsSection>
+          <DetailsSection title="Delivery">
+            <Facts>
             {checked ? (
               <Fact
                 label="Pipeline"
                 value={settled ? pipelineFact(pipeline, runs) : pipelinesError !== "" ? "Could not be read" : <InlineSkeleton label="Loading the pipeline" />}
               />
             ) : null}
-            <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
+            <Fact label="Deployed" value={pkg.deployedVersion !== "" ? shortVersion(pkg.deployedVersion) : !appsSettled ? <InlineSkeleton label="Loading deployed apps" /> : apps.length > 0 ? "Version not recorded" : "Not deployed"} copyValue={pkg.deployedVersion || undefined} mono={pkg.deployedVersion !== ""} />
             {/* WHAT THAT COMMIT'S CHECKS SAID, beside it (D14): "checks
                 passed, not yet deployed" is the reading that says a newer
                 version is ready to go. The commit stays in the data voice and
                 the words do not. */}
             <Fact
               label="Latest upstream"
-              value={upstream === "" ? latest : <><span className="os-mono">{latest}</span>, {upstream}</>}
-              mono={upstream === ""}
+              value={upstream === "" ? latest || "Not checked yet" : <><span className="os-mono">{latest}</span>, {upstream}</>}
+              copyValue={pkg.latestKnownVersion || undefined}
+              mono={upstream === "" && latest !== ""}
             />
-            <Fact label="Added" value={formatMoment(pkg.createdAt)} />
-            {deployedBy === "" ? null : <Fact label="Deployed by" value={deployedBy} />}
-          </Facts>
-
-          <AvailableVersion key={pkg.id} pkg={pkg} />
+            {pkg.sourceKind === "repo" ? <Fact label="Update" value={latest === "" ? "Not checked yet" : pkg.updateAvailable ? "Available" : "No newer version detected"} /> : null}
+            {deployedBy === "" || (pkg.deployedVersion === "" && apps.length === 0) ? null : <Fact label="Deployed by" value={deployedBy} />}
+            </Facts>
+          </DetailsSection>
+          </Details>
+          </div>
+          {repositoryWorkspace && pkg.sourceKind === "repo" ? <div hidden={section !== "changes"}><RepositoryChange key={pkg.id} sourceId={pkg.id} visible={section === "changes"} /></div> : null}
+          <div hidden={repositoryWorkspace && section !== "checks"}>
 
           {checked ? (
             <ChecksPart pipeline={pipeline} runs={runs} settled={settled} error={pipelinesError} onOpenRun={onOpenRun} onOpenRuns={onOpenRuns} />
           ) : null}
 
+          </div>
+          <div hidden={repositoryWorkspace && section !== "apps"}>
           {/* WHAT IT DECLARES, not only what it deployed.
               A site row is written only for an app that actually deployed, so
               an app skipped at the confirm gate had no row and was missing
@@ -305,8 +328,13 @@ export function SourceView({
             ) : null}
           </section>
 
+          </div>
+          <div hidden={repositoryWorkspace && section !== "settings"}>
           {pkg.sourceKind === "repo" && can.sources && mine ? <SourceAccess key={`${pkg.id}:${pkg.credentialId}:${pkg.sourceConnectionId}`} pkg={pkg} credentials={credentials} /> : null}
           {can.sources && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
+          {can.retire ? <PackageLifecycle pkg={pkg} apps={apps} /> : null}
+          {!can.sources && !can.retire ? <Caption>You can read this repository. Repository settings are managed by its maintainer.</Caption> : null}
+          </div>
 
           <button type="button" className="os-deploy-history-line" onClick={onOpenHistory}>
             <History size={12} aria-hidden />
@@ -319,7 +347,6 @@ export function SourceView({
           {/* THE CASCADE LIVES HERE AND NOWHERE ELSE. It deactivates every app
               the source produced, so the only honest place for it is the page
               whose subject is the source. */}
-          {can.retire ? <PackageLifecycle pkg={pkg} apps={apps} /> : null}
         </Panel>
       </div>
 

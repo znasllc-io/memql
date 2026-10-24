@@ -256,9 +256,15 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	// first, twice is two sessions. The "already checked" test above cannot
 	// close that race: both read before either writes. Which nodes serve
 	// checks is app/'s decision (app/integrations_work_validator.go).
+	// The whole check, including prompt preparation, is inside the original
+	// claim window. A delayed renderer cannot mint a fresh provider window
+	// after another replica is allowed to take over the expired claim.
+	phaseExpiresAt := i.clock().Add(validatorClaimTTL)
+	scoped, cancelCheck := context.WithTimeout(scoped, validatorClaimTTL)
+	defer cancelCheck()
 	if claimer := role.claimer; claimer != nil {
 		key := fmt.Sprintf("%s#%s@%d", runId, stepKey, version)
-		if !claimer.ClaimWithTTL(ctx, validatorClaimName, key, validatorClaimTTL) {
+		if !claimer.ClaimWithTTL(scoped, validatorClaimName, key, validatorClaimTTL) {
 			return skipped(fmt.Sprintf("version %d of %s is being checked by another replica", version, stepKey)), nil
 		}
 	}
@@ -289,12 +295,18 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	// attributed on the decision record -- rather than a model call nobody
 	// can trace to the work that caused it. It is always a LIVE call: the
 	// check is new work, and nothing recorded answers it.
-	callCtx := common.ContextWithRun(scoped, common.RunContext{
+	rc := common.RunContext{
 		RunId:       runId,
 		GoalId:      goalId,
 		StepKey:     stepKey,
 		Mode:        common.RunModeLive,
 		OwnerUserId: owner,
+	}
+	callCtx := common.ContextWithRun(scoped, rc)
+	runVersion, _ := rowTime(run, "createdAt")
+	callCtx = context.WithValue(callCtx, providerPhaseKey{}, providerPhase{
+		runID: rc.RunId, goalID: rc.GoalId, ownerID: rc.OwnerUserId,
+		status: runStatusSucceeded, runVersion: runVersion, stepKey: stepKey, stepVersion: version, expiresAt: phaseExpiresAt,
 	})
 	result, err := judge.CallAIStructured(callCtx, airoute.ResolveRequest{
 		Level:      level,

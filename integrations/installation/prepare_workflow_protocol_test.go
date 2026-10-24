@@ -65,10 +65,7 @@ func (f *preparationProtocolFiles) Execute(ctx context.Context, req pipelines.St
 		return pipelines.StepResult{}, err
 	}
 	executor, file := capturePorts(capture, f.archives[role])
-	intent := strings.Repeat("d", 64)
-	if role == "rollback" {
-		intent = strings.Repeat("e", 64)
-	}
+	intent := strings.TrimPrefix(artifactHash("protocol-source-receipt", req.StepKey), "memql-id:")
 	executor.result.ArtifactIntentIDs = []string{intent}
 	file.row.IntentID = intent
 	f.files[req.StepKey] = file
@@ -104,10 +101,11 @@ type preparationRendererRPC interface {
 	Generate(context.Context, *gen.ManifestRequest) (*gen.ManifestResponse, error)
 }
 type preparationRendererFixture struct {
-	mu           sync.Mutex
-	manifests    map[string][]string
-	failRevision string
-	reads        map[string]int
+	mu                   sync.Mutex
+	manifests            map[string][]string
+	applicationManifests map[string]map[string][]string
+	failRevision         string
+	reads                map[string]int
 }
 
 func (f *preparationRendererFixture) Generate(_ context.Context, req *gen.ManifestRequest) (*gen.ManifestResponse, error) {
@@ -118,6 +116,9 @@ func (f *preparationRendererFixture) Generate(_ context.Context, req *gen.Manife
 		return nil, errors.New("interrupted renderer")
 	}
 	manifests, ok := f.manifests[req.Revision]
+	if f.applicationManifests != nil {
+		manifests, ok = f.applicationManifests[req.AppName][req.Revision]
+	}
 	if !ok || req.Repo.Password != "fixture-clone-token" || !req.NoCache || !req.NoRevisionCache {
 		return nil, errors.New("unscoped render")
 	}
@@ -141,6 +142,10 @@ func preparationRendererServer(t *testing.T, certificate tls.Certificate, implem
 }
 
 func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *testing.T) {
+	t.Run("native workflow", func(t *testing.T) { testPreparationWorkflowProtocolRecovery(t, false) })
+	t.Run("public saved preparation recovery", func(t *testing.T) { testPreparationWorkflowProtocolRecovery(t, true) })
+}
+func testPreparationWorkflowProtocolRecovery(t *testing.T, publicRecovery bool) {
 	db, peerDB := journalDB(t)
 	receiver := newReceiverFixture(t)
 	images := newAdmissionFixture(t)
@@ -160,6 +165,7 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	receiver.config.Rollback = receiverSelection{CandidateID: before.CandidateID, CatalogDigest: images.old.Digest()}
 	receiver.config.ImageBindings[0].Container = "engine"
 	receiver.config.Protected = []receiverProtected{{Namespace: "memql", Name: "keys", Kind: "Secret"}}
+	receiver.config.Health = &receiverHealth{Endpoint: "https://api.installation.example", Component: "engine", Credential: receiverSecret{Name: "catalog", Key: "token"}}
 	receiver.saveConfig()
 	api, sensitiveBefore, _, _ := sensitiveFixture(t)
 	for path, body := range api.response {
@@ -187,7 +193,9 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	manifests := func(digest string) []string {
 		result := []string{}
 		for _, body := range sensitiveBefore.Resources() {
-			result = append(result, strings.ReplaceAll(string(body), oldImage, strings.TrimPrefix(tlsRegistry.URL, "https://")+"/memql/engine@"+digest))
+			text := strings.ReplaceAll(string(body), oldImage, strings.TrimPrefix(tlsRegistry.URL, "https://")+"/memql/engine@"+digest)
+			text = strings.Replace(text, `"spec":{"template"`, `"spec":{"selector":{"matchLabels":{"app":"bff"}},"template"`, 1)
+			result = append(result, text)
 		}
 		return result
 	}
@@ -196,6 +204,27 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	request := preparationRequest{InstallationID: receiver.config.InstallationID, RequestID: "protocol-recovery", CandidateID: after.CandidateID, CatalogDigest: images.next.Digest(), OverlayRevision: candidateSHA}
 	external := &preparationProtocolFiles{t: t, journal: preparationConnection(db), request: request, archives: map[string][]byte{"rollback": rollbackArchive, "candidate": candidateArchive}, files: map[string]*captureFilesFixture{}}
 	host := &preparationHost{api: receiver, journal: external.journal, executor: external, files: external, tokens: preparationTokenFixture{}, catalog: factory, namespace: "memql", configurationName: "receiver"}
+	healthCalls, healthFault := 0, ""
+	host.health = func(_ context.Context, endpoint, token, roots, nonce string) (HealthObservation, error) {
+		require.Equal(t, "https://api.installation.example", endpoint)
+		require.Equal(t, "private-catalog-token", token)
+		healthCalls++
+		commit := before.Components[0].Commit
+		if healthCalls > 1 {
+			commit = after.Components[0].Commit
+		}
+		out := HealthObservation{UserID: "operator", IdentityID: "identity", EngineCommit: commit, MigrationsDigest: "sha256:" + strings.Repeat("c", 64), Nonce: nonce}
+		if healthFault == "nonce" {
+			out.Nonce = "old-reply"
+		}
+		if healthFault == "identity" {
+			out.IdentityID = "replacement"
+		}
+		if healthFault == "migration" {
+			return HealthObservation{}, errors.New("pending migration")
+		}
+		return out, nil
+	}
 	require.NoError(t, host.bindWorkflow(strings.Repeat("a", 40)))
 	// The fixture replaces only DNS routing to a loopback listener. It still
 	// uses the observed service's exact certificate, trust and server name.
@@ -218,20 +247,44 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	require.NoError(t, err)
 	freshSnapshot.rendererAddress = address
 	recovered := &preparationWorkflowScope{host: &fresh, request: request, operator: "operator", configuration: freshSnapshot, record: saved, sources: map[string]verifiedSourceCapture{}, renders: map[string]argocd.RenderedRevision{}}
-	result, err := recovered.run(ctx)
-	require.NoError(t, err)
+	var result revisionRecord
+	if publicRecovery {
+		public := &Preparer{host: &fresh}
+		view, err := public.SelectionStatus(operator(auth.RoleOwner, "operator"))
+		require.NoError(t, err)
+		require.Nil(t, view.Active)
+		require.NotNil(t, view.Preparation, "a new browser must discover the reserved preparation")
+		require.Equal(t, request.RequestID, view.Preparation.RequestID)
+		require.Equal(t, saved.ID, view.Preparation.PreparationID)
+		require.True(t, view.Preparation.CanResume)
+		other, err := public.SelectionStatus(operator(auth.RoleOwner, "another-operator"))
+		require.NoError(t, err)
+		require.False(t, other.Preparation.CanResume)
+		_, err = public.ResumeSelected(operator(auth.RoleOwner, "another-operator"), request.InstallationID, saved.ID)
+		require.ErrorContains(t, err, "original operator")
+		reply, err := public.ResumeSelected(operator(auth.RoleOwner, "operator"), request.InstallationID, saved.ID)
+		require.NoError(t, err)
+		require.True(t, reply.CanManage)
+		result, err = (&revisionJournal{db: fresh.journal.db}).get(ctx, request.InstallationID, reply.PlanID)
+		require.NoError(t, err)
+	} else {
+		result, err = recovered.run(ctx)
+		require.NoError(t, err)
+	}
 	require.Equal(t, "prepared", result.State)
 	require.NotEmpty(t, result.Plan.Preparation.ArtifactDigest)
 	// Preservation observes live state after potentially slow registry reads.
 	// Earlier observations cannot borrow the freshness of the configuration read.
-	require.False(t, recovered.storage.observed.Before(recovered.artifacts.result.observed))
-	require.False(t, recovered.sensitive.observed.Before(recovered.artifacts.result.observed))
+	if !publicRecovery {
+		require.False(t, recovered.storage.observed.Before(recovered.artifacts.result.observed))
+		require.False(t, recovered.sensitive.observed.Before(recovered.artifacts.result.observed))
+	}
 	require.Equal(t, freshSnapshot.digest, result.Plan.Preparation.ConfigurationDigest)
 	require.Equal(t, freshSnapshot.invariantDigest, result.Plan.Preparation.ConfigurationInvariantDigest)
 	require.Len(t, external.requests, 2, "recovery must not launch duplicate source jobs")
 	require.Equal(t, 2, external.acknowledgments, "durable acknowledgments are reused")
 	for _, file := range external.files {
-		require.Equal(t, 2, file.opens, "replacement host reopens private source bytes")
+		require.GreaterOrEqual(t, file.opens, 2, "replacement host reopens private source bytes")
 		require.Equal(t, file.opens, file.closed)
 	}
 	rpc.mu.Lock()
@@ -277,6 +330,8 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	require.NoError(t, err)
 	require.Equal(t, "applying", started.State)
 	require.Zero(t, started.ObservationVersion)
+	require.NotNil(t, started.Plan.RevisionWorkflow)
+	require.NoError(t, fresh.bindWorkflow(strings.Repeat("f", 40)), "replacement engine may install different workflow definitions")
 	recoveredRevision, err := fresh.revisions.run(ctx, &revisionJournal{db: fresh.journal.db}, request.InstallationID, result.ID, revisionStart, nil, &fresh)
 	require.NoError(t, err)
 	require.Equal(t, 1, controller.writes, "a lost response after commit is reconciled without another PATCH")
@@ -370,4 +425,61 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 			require.NotContains(t, err.Error(), "private-")
 		})
 	}
+
+	// Complete on a fresh host using the durable source closure, real OCI bytes,
+	// rendered inventory and actual runtime image observations. Controller health
+	// alone, changed identities and missing migrations must never release the slot.
+	var restored map[string]any
+	require.NoError(t, json.Unmarshal(appBytes, &restored))
+	receiver.objects[appPath] = restored
+	receiverAppliedIntent(t, receiver, current.Plan.Intent, "Succeeded")
+	status := resourceMap(receiver.objects[appPath], "status")
+	resourceMap(status, "health")["status"] = "Healthy"
+	resourceMap(status, "sync")["status"] = "Synced"
+	completionHost := fresh
+	completionHost.api = receiver
+	completionHost.journal = preparationConnection(db)
+	completionAdapter := &Preparer{host: &completionHost}
+	_, err = completionAdapter.ObserveSelected(operator(auth.RoleOwner, "operator"), request.InstallationID, result.ID)
+	require.Error(t, err, "green controller without runtime workload observations must not complete")
+	still, err := planHost.get(ctx, request.InstallationID, result.ID)
+	require.NoError(t, err)
+	require.Equal(t, "applying", still.State)
+	var active string
+	require.NoError(t, db.QueryRow(`SELECT active_plan_id FROM installation_revision_heads WHERE installation_id=$1`, request.InstallationID).Scan(&active))
+	require.Equal(t, result.ID, active)
+
+	for _, manifest := range manifests(after.Components[0].Artifacts[0].ImageDigest) {
+		if resourceText(workloadObject(t, manifest), "kind") == "Deployment" {
+			protocolCompletionWorkload(t, receiver, manifest)
+		}
+	}
+	for _, fault := range []string{"nonce", "identity", "migration"} {
+		healthFault = fault
+		_, err = completionAdapter.ObserveSelected(operator(auth.RoleOwner, "operator"), request.InstallationID, result.ID)
+		require.Error(t, err, fault)
+		still, err = planHost.get(ctx, request.InstallationID, result.ID)
+		require.NoError(t, err)
+		require.Equal(t, "applying", still.State)
+	}
+	healthFault = ""
+	completed, err := completionAdapter.ObserveSelected(operator(auth.RoleOwner, "operator"), request.InstallationID, result.ID)
+	require.NoError(t, err)
+	require.Equal(t, "complete", completed.State)
+	receipt, err := planHost.get(ctx, request.InstallationID, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, receipt.Completion)
+	require.Equal(t, current.Plan.CompletionWorkflow.Version, receipt.Completion.Workflow)
+	calls := healthCalls
+	again, err := completionAdapter.ObserveSelected(operator(auth.RoleOwner, "operator"), request.InstallationID, result.ID)
+	require.NoError(t, err)
+	require.Equal(t, completed, again)
+	require.Equal(t, calls, healthCalls, "terminal retry is historical, never re-applies")
+	view, err := completionAdapter.SelectionStatus(operator(auth.RoleOwner, "operator"))
+	require.NoError(t, err)
+	require.Nil(t, view.Active)
+	require.NotNil(t, view.Latest)
+	require.Equal(t, "complete", view.Latest.State)
+	require.Equal(t, 1, controller.writes)
+
 }

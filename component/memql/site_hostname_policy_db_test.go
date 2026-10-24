@@ -48,13 +48,14 @@ func userSiteCtx(userId string) context.Context {
 func installSiteOrganizationCapabilities(t *testing.T, extra ...auth.VerbResource) {
 	t.Helper()
 	grants := map[auth.VerbResource]bool{
-		{Verb: auth.VerbRead, Resource: auth.ResourceData}:            true,
-		{Verb: auth.VerbCreate, Resource: auth.ResourceData}:          true,
-		{Verb: auth.VerbUpdate, Resource: auth.ResourceData}:          true,
-		{Verb: auth.VerbRead, Resource: "app:deployables"}:            true,
-		{Verb: auth.VerbExecute, Resource: "app:deployables/sources"}: true,
-		{Verb: auth.VerbExecute, Resource: "app:deployables/publish"}: true,
-		{Verb: auth.VerbExecute, Resource: "app:deployables/retire"}:  true,
+		{Verb: auth.VerbRead, Resource: auth.ResourceData}:               true,
+		{Verb: auth.VerbCreate, Resource: auth.ResourceData}:             true,
+		{Verb: auth.VerbUpdate, Resource: auth.ResourceData}:             true,
+		{Verb: auth.VerbRead, Resource: "app:deployables"}:               true,
+		{Verb: auth.VerbRead, Resource: "app:pipelines"}:                 true,
+		{Verb: auth.VerbExecute, Resource: "app:pipelines/repositories"}: true,
+		{Verb: auth.VerbExecute, Resource: "app:deployables/publish"}:    true,
+		{Verb: auth.VerbExecute, Resource: "app:deployables/retire"}:     true,
 	}
 	for _, permission := range extra {
 		grants[permission] = true

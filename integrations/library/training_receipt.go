@@ -20,6 +20,9 @@ type trainingSelectionReceipt struct {
 	MaxBytes          int              `json:"maxBytes"`
 	CandidateLimit    int              `json:"candidateLimit"`
 	Status            string           `json:"status"`
+	AvailabilityKey   string           `json:"availabilityKey,omitempty"`
+	RetryAt           string           `json:"retryAt,omitempty"`
+	ReusedReceiptID   string           `json:"reusedReceiptId,omitempty"`
 	Selected          []map[string]any `json:"selected"`
 	Rejected          []map[string]any `json:"rejected"`
 }

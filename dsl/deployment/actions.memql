@@ -355,10 +355,14 @@ action registerGitOpsRepo {
     username      string
     tokenFile     string
     sshKeyFile    string
+    githubAppId string
+    githubAppInstallationId string
+    githubAppPrivateKeyFile string
+    githubAppEnterpriseBaseUrl string
     secretName    string
     dryRun        boolean
   }
-  capability script(script: "deploy.registerGitOpsRepo", repoUrl: args.repoUrl, transport: args.transport, project: args.project, argoNamespace: args.argoNamespace, username: args.username, tokenFile: args.tokenFile, sshKeyFile: args.sshKeyFile, secretName: args.secretName, dryRun: args.dryRun)
+  capability script(script: "deploy.registerGitOpsRepo", repoUrl: args.repoUrl, transport: args.transport, project: args.project, argoNamespace: args.argoNamespace, username: args.username, tokenFile: args.tokenFile, sshKeyFile: args.sshKeyFile, githubAppId: args.githubAppId, githubAppInstallationId: args.githubAppInstallationId, githubAppPrivateKeyFile: args.githubAppPrivateKeyFile, githubAppEnterpriseBaseUrl: args.githubAppEnterpriseBaseUrl, secretName: args.secretName, dryRun: args.dryRun)
 }
 
 // Backend: scripts/deploy/verify-install-dependencies.sh.

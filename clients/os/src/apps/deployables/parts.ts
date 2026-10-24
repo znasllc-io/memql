@@ -79,7 +79,7 @@ export type PartsHeld = Readonly<Record<DeployablePart, boolean>>;
 
 /** The resource a part is spelled as in the seeds and on the grants. */
 export function partResource(part: DeployablePart): string {
-  return `app:deployables/${part}`;
+  return part === "sources" ? "app:pipelines/repositories" : PIPELINE_PARTS.has(part) ? `app:pipelines/${part}` : `app:deployables/${part}`;
 }
 
 /** No part held: what a reader, or a shell before its read landed, resolves to. */
@@ -151,14 +151,14 @@ export function useDeployableParts(): PartsHeld {
 export function partsForOrganization(accountId: string, fallback: PartsHeld, dataVerb: "create" | "update" = "update"): PartsHeld {
   if (!hasOrganizationDecisions()) return fallback;
   const allowed = holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
-  return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, PIPELINE_PARTS.has(part) ? fallback[part] : allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
+  return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, PIPELINE_PARTS.has(part) ? fallback[part] : (part === "sources" ? holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:pipelines") && holdsForOrganization(accountId, dataVerb, "data") : allowed) && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
 }
 
 /** Personal GitHub grants and installation bindings have no owning MemQL
  * account. The server admits their management when one authorized account
  * permits all three capabilities; this never authorizes a package write. */
 export function canManagePersonalSources(): boolean {
-  return (holds("read", "data") && holds("read", "app:deployables") && holds("execute", partResource("sources"))) ||
+  return (holds("read", "data") && holds("read", "app:pipelines") && holds("execute", partResource("sources"))) ||
     availableInAnyOrganization("execute", partResource("sources"));
 }
 export function useCanManagePersonalSources(): boolean {

@@ -47,7 +47,7 @@ func TestDirectGoalDoesNotEmitRunWhenConsumerCannotBind(t *testing.T) {
 			t.Fatal("dispatched run without composition")
 		}
 	}
-	if got := eng.callTo(t, "updateWorkGoal").Args(t)["status"]; got != "closed" {
-		t.Fatalf("orphan goal state: %v", got)
+	if got := eng.callsTo("updateWorkGoal"); len(got) != 0 {
+		t.Fatalf("admission failure must not close a human goal: %v", got)
 	}
 }

@@ -148,7 +148,7 @@ WHERE owner_user_id=$1 AND work_run_id=$2 AND lease_id=$3`, scan.owner, scan.wor
 			return answer, nil
 		},
 	}
-	_, err = workflowhost.Run(ownerCtx, "pipelineArtifactRetentionPolicy", map[string]any{
+	_, err = workflowhost.RunPhase(ownerCtx, run.PolicySnapshot, pipelinePolicyContract, "pipelineArtifactRetentionPolicy", map[string]any{
 		"terminal": terminal, "ageSeconds": ageSeconds, "eventName": string(run.Event), "conclusion": run.Conclusion,
 	}, workflowhost.Options{Load: d.LoadWorkflow, Operations: ops, Logger: d.Logger})
 	if err != nil {

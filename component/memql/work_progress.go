@@ -76,6 +76,7 @@ func (e *MemQLEngine) RecordWorkProgress(ctx context.Context, event WorkEvent) e
 // ObserveWorkCalls is installed on the replica that makes the calls, including
 // compilation. It records the exact router metadata available at that moment.
 func (e *MemQLEngine) ObserveWorkCalls(ctx context.Context, cancel context.CancelCauseFunc) context.Context {
+	ctx = e.modelSeam.withProviderAdmission(ctx)
 	watch := e.modelCancellation(ctx, cancel)
 	spend := e.modelSeam.observeAgentSpend(ctx, cancel)
 	return airoute.WithObserver(ctx, func(call airoute.CallObservation) {

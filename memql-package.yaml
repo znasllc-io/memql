@@ -63,6 +63,8 @@ pipeline:
   caches: [go, npm]
   select:
     go: import-graph
+    # Native test setup has no Go imports, so its changes need full coverage.
+    full: [cockpit/Makefile, "cockpit/scripts/**", "scripts/ci/delivery-artifacts.sh", "scripts/ci/delivery_artifacts*", "scripts/lib/capability.sh", "scripts/identity/build-css.sh"]
     # The trees whose packages need a database, as
     # scripts/ci/db-gated-packages.sh --trees prints them: that script is the
     # canonical list, and the test holds this copy to it. db-tests takes these
@@ -85,6 +87,7 @@ pipeline:
       - component/node
       - component/packages
       - component/pipelinerun
+      - component/repositoryauthority
       - component/retention
       - component/server
       - component/sitehealth
@@ -282,6 +285,62 @@ pipeline:
           run: |
             set -eu
             bash ./scripts/ci/bash32-smoke.sh
+    # Generic Go lanes cover Cockpit unit tests/build/vet. This lane adds only
+    # Docker and macOS computer-use behavior. During bootstrap these native
+    # lanes run all Cockpit packages; the installed parser predates packageRoots.
+    - name: cockpit
+      steps:
+        - name: docker-integration
+          placement: fleet
+          execution: native
+          caches: []
+          platform: linux/amd64
+          needs: { docker: true }
+          timeout: 30m
+          run: |
+            set -eu
+            . ./cockpit/scripts/ci/native-env.sh
+            export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
+            docker info >/dev/null
+            export MEMQL_TEST_DOCKER_IMAGE=alpine@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
+            export MEMQL_TEST_PIPELINE_POSTGRES_IMAGE=postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+            export MEMQL_FLEET_DOCKER_TEST=1
+            bash scripts/identity/build-css.sh
+            go test -race -count=1 -timeout=600s ./cockpit/...
+        - name: computeruse
+          placement: fleet
+          execution: native
+          caches: []
+          platform: darwin/arm64
+          needs: { macos_tooling: true }
+          timeout: 30m
+          run: |
+            set -eu
+            . ./cockpit/scripts/ci/native-env.sh
+            export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
+            native_go_platform darwin arm64
+            bash scripts/identity/build-css.sh
+            go test -race -tags computeruse -count=1 -timeout=600s ./cockpit/...
+    - name: delivery-artifacts
+      steps:
+        - name: provider-qualification
+          placement: fleet
+          execution: native
+          caches: []
+          platform: linux/amd64
+          needs: { docker: true }
+          timeout: 35m
+          artifacts: [.memql-artifact-evidence]
+          run: |
+            set -eu
+            . ./cockpit/scripts/ci/native-env.sh
+            export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
+            bash scripts/ci/delivery-artifacts.sh \
+              --database-image=ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631 \
+              --blob-image=mcr.microsoft.com/azure-storage/azurite@sha256:647c63a91102a9d8e8000aab803436e1fc85fbb285e7ce830a82ee5d6661cf37 \
+              --registry-image=docker.io/library/registry@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e \
+              --artifact-image=docker.io/library/python@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a \
+              --output=.memql-artifact-evidence
     - name: vulnerabilities
       on: [pull_request, merge_group, push, release, schedule, manual]
       runAfterFailure: true
@@ -601,12 +660,28 @@ pipeline:
             jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
         - name: test-agent
           placement: cluster
-          timeout: 30m
+          # Agent-tagged persistence cases are absent from untagged DB shards.
+          # A dedicated service and required DB mode prevent a skipped green.
+          services: [postgres]
+          cpuMilli: 2750
+          timeout: 45m
           run: |
             set -eu
-            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            export GOFLAGS=-p=1 GOMEMLIMIT=2GiB GOGC=100 GOMAXPROCS=3
             bash scripts/identity/build-css.sh
-            go test -tags agent -timeout=300s ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
+            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS vector;
+            SQL
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            # With database cases enabled, app reached the 300s package alarm
+            # while its current subtest was only 4s old. Bound the full app
+            # suite separately; keep every other package's existing alarm.
+            go test -tags agent -count=1 -timeout=900s -v ./app/
+            go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
         - name: test-bff
           placement: cluster
           timeout: 30m
@@ -907,6 +982,9 @@ pipeline:
             export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
             go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture
 
+    # Separate Cockpit releases require the installed component-tag policy.
+    # See docs/internal/ops/delivery-qualification.md before restoring the
+    # reviewed follow-up manifest and its affected-selection metadata.
     - name: release-files
       on: [release]
       steps:

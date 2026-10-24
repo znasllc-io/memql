@@ -172,3 +172,40 @@ func TestCapabilityArtifactWorkloadIncludesGenerationAndKeepsExplicitCeilings(t 
 		}
 	}
 }
+
+func TestSelfContainedConversationPublishesProgressWithoutToolLoop(t *testing.T) {
+	for _, message := range []string{"hi there", "not sure how can you help me?"} {
+		eng := &countingCompileEngine{triage: map[string]any{"intent": "reply", "complexity": "trivial", "workload": "quick", "requiresFile": false, "requiresResearch": false}}
+		_, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), conversationReq(message, "Hi there! How can I help?"), nil, realSandbox{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := strings.Join(eng.queries, "\n")
+		if !strings.Contains(source, "progress: true") || strings.Contains(source, "runAgentTurn") {
+			t.Fatalf("simple reply not streamed: %s", source)
+		}
+	}
+}
+
+func TestProfileContextAloneDoesNotRequireEvidenceReview(t *testing.T) {
+	profile := map[string]any{"sourceContext": map[string]any{
+		"currentProfile":  map[string]any{"person": map[string]any{"displayName": "Test user"}},
+		"recordedSources": []any{map[string]any{"operation": "workViewerContext", "runId": "greeting"}},
+		"references":      []any{map[string]any{"kind": "query", "ref": "workStepForOwnerRun(runId: \"greeting\", stepKey: \"viewer\")"}},
+		"sourceHistory":   []any{map[string]any{"sourceRunId": "greeting", "tool": "recallWorkHistory"}},
+		"limitations":     []any{},
+	}}
+	if conversationHasSources(profile) {
+		t.Fatal("profile turned ordinary chat into evidence-dependent reply")
+	}
+	context := profile["sourceContext"].(map[string]any)
+	context["limitations"] = []any{"Some prior tool sources were omitted."}
+	if !conversationHasSources(profile) {
+		t.Fatal("incomplete source preview bypassed review")
+	}
+	context["limitations"] = []any{}
+	profile["sourceContext"].(map[string]any)["recordedSources"] = []any{map[string]any{"operation": "readWeather"}}
+	if !conversationHasSources(profile) {
+		t.Fatal("external evidence bypassed review")
+	}
+}

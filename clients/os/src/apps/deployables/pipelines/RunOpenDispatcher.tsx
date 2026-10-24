@@ -16,11 +16,11 @@ export function RunOpenDispatcher() {
   useEffect(() => {
     // Startup mounts the shell before capabilities arrive. Leave the intent
     // parked until its actual destination is admitted, then consume it once.
-    const app = appById(registry, "deployables");
+    const app = appById(registry, "pipelines");
     if (!app || !canOpen(registry, app.id) || !sectionsFor(app).some(section => section.id === "runs")) return;
     const runId = takeParkedRunOpen();
     if (runId === null) return;
-    actions.openApp("deployables", "runs", { runId });
+    actions.openApp("pipelines", "runs", { runId });
   }, [actions, registry, accessEpoch]);
   return null;
 }

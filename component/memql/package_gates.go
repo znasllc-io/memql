@@ -16,22 +16,11 @@ package memql
 // (memoryNodes.NewRegistry) and hands THAT to a throwaway engine's Init. The
 // default registry is never read, never written, and never momentarily empty.
 //
-// WHAT IS STILL GLOBAL, precisely. Init's construct loaders read the process
-// tree (dsl.Tree()) rather than taking one, so the candidate's domains must be
-// mounted there for the width of the pass. That leaves exactly one observable:
-// for that width, dsl.Tree() lists the candidate's product domains alongside
-// the cluster's own. Nothing rebuilds the live engine from it -- app/engine.go
-// is the only runtime Init and it runs once, at boot -- so the live engine's
-// constructs, specs, schemas and tiers are all fixed before this can run. The
-// three runtime readers that remain are bounded: the capability-name set is a
-// boot-warmed sync.Once, a prompt lookup is by exact name, and a namespace pin
-// is per-domain and so cannot be changed by an unrelated domain arriving. A
-// package CANNOT shadow a core domain in any of them: MountOverlayDomains
-// skips a colliding name outright, which is also how this pass learns to
-// refuse dsl_domain_reserved.
-//
-// packageGateMu serializes passes against each other, because two candidate
-// trees mounted at once would validate each against the other's domains.
+// Every candidate is validated against a private filesystem view: embedded
+// core plus the registered product domains, with this package's domains
+// replaced by its candidate bytes. Neither the live DSL registry nor serving
+// bindings (providers, secret resolvers, shopper routes or cache metrics) are
+// published by this pass. Concurrent requests continue reading the live tree.
 
 import (
 	"io"
@@ -39,15 +28,12 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
-	"sync"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
-
-var packageGateMu sync.Mutex
 
 // PackageDSLResult is what one candidate tree's Init-grade validation found.
 type PackageDSLResult struct {
@@ -81,11 +67,10 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	}
 
-	packageGateMu.Lock()
-	defer packageGateMu.Unlock()
-
-	mounted, skippedCore, unmount := memqldsl.MountOverlayDomains(logger, root)
-	defer unmount()
+	tree, mounted, skippedCore, err := memqldsl.CandidateTree(root)
+	if err != nil {
+		return PackageDSLResult{}, err
+	}
 
 	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore}
 	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
@@ -93,7 +78,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg, Severity: LintSeverityWarning}
 	}
 
-	concepts, conceptSkips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
+	concepts, conceptSkips, err := BuildUnifiedConcepts(logger, tree)
 
 	// A concept the loader could not BUILD leaves no trace in the load report,
 	// which covers construct-phase skips only. Reporting it is the difference
@@ -109,13 +94,13 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 		return result, nil
 	}
 
-	eng, engErr := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	eng, engErr := newEngine(nil, false, (&component.Component{}).WithLoggerWriter(io.Discard))
 	if engErr != nil {
 		return result, engErr
 	}
 	eng.Logger = logger
 
-	initErr := eng.Init(memoryNodes.NewRegistry(concepts))
+	initErr := eng.initFromTree(memoryNodes.NewRegistry(concepts), tree, false)
 
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {

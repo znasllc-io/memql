@@ -104,7 +104,7 @@ func newWorkloadFixture(t *testing.T, kinds ...string) *workloadFixture {
 		candidate := workloadJSON(t, manifest)
 		after = append(after, candidate)
 		before = append(before, strings.ReplaceAll(candidate, nextRef, oldRef))
-		f.artifacts.config.Bindings = append(f.artifacts.config.Bindings, imageBinding{slot, "engine", "bff"})
+		f.artifacts.config.Bindings = append(f.artifacts.config.Bindings, imageBinding{Slot: slot, Component: "engine", Artifact: "bff"})
 		live := workloadObject(t, candidate)
 		live["metadata"], live["status"] = workloadMeta(name), status
 		base, _, err := apiVersionPath(version)

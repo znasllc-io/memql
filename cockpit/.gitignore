@@ -1,0 +1,53 @@
+# Binaries and build outputs
+bin/
+dist/
+.memql-ci/
+.memql-security/
+__pycache__/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Go workspace file (per-developer, not shared)
+go.work
+go.work.sum
+
+# Editor / debug
+__debug*
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Local env override (see memql/component/genesis/localenv.go).
+# Each developer's values are theirs; production binaries don't
+# carry a .env at all.
+.env
+.env.local
+
+# Claude Code project state. OPT IN, NOT OPT OUT, as in the engine repo
+# (memql#3344): `.claude/` is ignored wholesale and only what should travel
+# with the project is negated back in, so a new kind of state stays private
+# by default instead of sitting in `git status` until someone notices.
+# epics/ and prds/ (CCPM working state) stay ignored deliberately: CCPM syncs
+# them to GitHub Issues, and the local files churn every session.
+.claude/*
+!.claude/skills/
+!.claude/commands/
+!.claude/agents/
+!.claude/settings.json
+
+# Never shared, whatever the negations above may later allow.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/

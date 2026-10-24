@@ -21,6 +21,10 @@
             "name": "installationRetirementStop"
           },
           {
+            "kind": "builtin",
+            "name": "installationRetirementRequirements"
+          },
+          {
             "args": {
               "role": "candidate"
             },
@@ -105,6 +109,10 @@
           {
             "kind": "builtin",
             "name": "installationRetirementStop"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationRetirementRequirements"
           },
           {
             "args": {

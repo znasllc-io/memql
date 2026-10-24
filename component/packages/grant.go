@@ -78,9 +78,14 @@ func grantInstallationToken(ctx context.Context, gh *githubapp.Client, rc Resolv
 // Revalidate even when an installation token is cached on this replica. A
 // grant can lose access while the app remains installed for other people.
 func verifyGrantRepository(ctx context.Context, gh *githubapp.Client, rc ResolvedCredential, owner, repo string, installationId int64) error {
+	_, err := readGrantRepository(ctx, gh, rc, owner, repo, installationId)
+	return err
+}
+
+func readGrantRepository(ctx context.Context, gh *githubapp.Client, rc ResolvedCredential, owner, repo string, installationId int64) (githubapp.Repository, error) {
 	installations, err := gh.UserInstallations(ctx, rc.Bearer)
 	if err != nil {
-		return grantRefusal(err, rc, owner, repo, gh.InstallURL())
+		return githubapp.Repository{}, grantRefusal(err, rc, owner, repo, gh.InstallURL())
 	}
 	allowed := false
 	for _, installation := range installations {
@@ -90,15 +95,16 @@ func verifyGrantRepository(ctx context.Context, gh *githubapp.Client, rc Resolve
 		}
 	}
 	if !allowed {
-		return refuse("repository_not_accessible", "this GitHub connection cannot access the repository's installation")
+		return githubapp.Repository{}, refuse("repository_not_accessible", "this GitHub connection cannot access the repository's installation")
 	}
-	if _, err := gh.UserRepository(ctx, rc.Bearer, owner, repo); err != nil {
+	repository, err := gh.UserRepository(ctx, rc.Bearer, owner, repo)
+	if err != nil {
 		if githubapp.StatusOf(err) == http.StatusForbidden || githubapp.StatusOf(err) == http.StatusNotFound {
-			return refuse("repository_not_accessible", "this GitHub connection cannot access that repository")
+			return githubapp.Repository{}, refuse("repository_not_accessible", "this GitHub connection cannot access that repository")
 		}
-		return grantRefusal(err, rc, owner, repo, gh.InstallURL())
+		return githubapp.Repository{}, grantRefusal(err, rc, owner, repo, gh.InstallURL())
 	}
-	return nil
+	return repository, nil
 }
 
 // grantRefusal turns a githubapp failure into this package's own typed

@@ -2,12 +2,69 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+type submittedResultEngine struct {
+	row   map[string]any
+	reads int
+}
+
+func (e *submittedResultEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	if !strings.HasPrefix(query, "query appSessionById(") {
+		return &memql.ExecuteResult{}, nil
+	}
+	e.reads++
+	if _, err := langparser.ParseExpression(strings.TrimPrefix(query, "query ")); err != nil {
+		return nil, err
+	}
+	access, ok := auth.AccessFromContext(ctx)
+	if !ok || access.UserId != "user-1" || access.IsClusterOwner() || auth.OriginFromContext(ctx) == auth.OriginInternal || !memql.FreshReadFromContext(ctx) {
+		return nil, fmt.Errorf("result read lost its owner, row gate or cross-replica freshness")
+	}
+	if e.row == nil {
+		return &memql.ExecuteResult{}, nil
+	}
+	payload, err := structpb.NewStruct(e.row)
+	return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{{Payload: payload}}}}, err
+}
+
+func TestRunnerReadsSubmittedTerminalThroughTheEngineStore(t *testing.T) {
+	runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+	terminal := map[string]any{"terminalTool": "respondToUser", "arguments": map[string]any{"status": "needs_input"}}
+	engine := &submittedResultEngine{row: map[string]any{"ownerUserId": "user-1", "resultSubmittedAt": time.Now().Format(time.RFC3339Nano), "result": terminal}}
+	runner.Store = &EngineStore{Engine: engine}
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+	want, _ := json.Marshal(terminal)
+	if err != nil || string(result.Result) != string(want) || engine.reads != 1 {
+		t.Fatalf("persisted submission did not return through the deployed store: %s, %v, reads=%d", result.Result, err, engine.reads)
+	}
+	for name, row := range map[string]map[string]any{
+		"missing":     nil,
+		"other owner": {"ownerUserId": "other", "resultSubmittedAt": "now", "result": terminal},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine.row = row
+			if _, err := runner.Store.ReadSubmittedAppSessionResult(context.Background(), "sess-run", "user-1"); err == nil {
+				t.Fatal("unreadable or foreign session became a result")
+			}
+		})
+	}
+}
 
 // TestAppSessionWritesCarryInternalOrigin is the regression guard for a
 // failure that is INVISIBLE at the call site.
@@ -81,6 +138,22 @@ func TestTranscriptCollectorMarksItsOwnTruncation(t *testing.T) {
 	}
 	if len(text) <= 16 {
 		t.Fatalf("the truncation notice must be appended even past the bound; got %q", text)
+	}
+}
+
+func TestTranscriptCollectorUsesFinalAnswerWithoutDuplicatingTranscript(t *testing.T) {
+	c := &transcriptCollector{max: 1024}
+	c.append(AppSessionChunk{Stream: "text", Data: []byte("Let me think.\n")})
+	c.append(AppSessionChunk{Stream: "answer", Data: []byte("Hello")})
+	c.append(AppSessionChunk{Stream: "text", Data: []byte("Hello")})
+	c.append(AppSessionChunk{Stream: "answer", Data: []byte(" there.\n")})
+	c.append(AppSessionChunk{Stream: "text", Data: []byte(" there.\n")})
+	if got := c.answerText(); got != "Hello there." {
+		t.Fatalf("commentary leaked into the final answer: %q", got)
+	}
+	text, _, _ := c.snapshot()
+	if text != "Let me think.\nHello there.\n" {
+		t.Fatalf("answer deltas duplicated the transcript: %q", text)
 	}
 }
 

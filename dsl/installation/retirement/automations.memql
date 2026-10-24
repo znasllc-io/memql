@@ -4,14 +4,15 @@
 automation installationRetirementWorkflow {
   builtin installationRetirementBegin()
   builtin installationRetirementStop()
-  for role in ["candidate", "rollback"] {
-    builtin installationRetirementFence(role: role)
-    builtin installationRetirementRelease(role: role)
-    pending := builtin installationRetirementPage(role: role)
+  requirements := builtin installationRetirementRequirements()
+  for capture in requirements {
+    builtin installationRetirementFence(role: capture.key)
+    builtin installationRetirementRelease(role: capture.key)
+    pending := builtin installationRetirementPage(role: capture.key)
     for artifact in pending.items {
-      builtin installationRetirementArtifact(role: role, intentId: artifact.intentId)
+      builtin installationRetirementArtifact(role: capture.key, intentId: artifact.intentId)
     }
-    builtin installationRetirementPage(role: role)
+    builtin installationRetirementPage(role: capture.key)
   }
   observed := builtin installationRetirementObserve()
   if observed.ready {

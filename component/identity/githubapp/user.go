@@ -61,18 +61,33 @@ type Installation struct {
 // from. InstallationId is stamped by the caller rather than by GitHub: the
 // listing is per installation, so the id is known from the request.
 type Repository struct {
-	FullName      string `json:"full_name"`
-	Name          string `json:"name"`
-	Private       bool   `json:"private"`
-	Visibility    string `json:"visibility"`
-	DefaultBranch string `json:"default_branch"`
-	PushedAt      string `json:"pushed_at"`
-	HTMLURL       string `json:"html_url"`
+	ID            int64                 `json:"id"`
+	NodeID        string                `json:"node_id"`
+	Permissions   RepositoryPermissions `json:"permissions"`
+	FullName      string                `json:"full_name"`
+	Name          string                `json:"name"`
+	Private       bool                  `json:"private"`
+	Visibility    string                `json:"visibility"`
+	DefaultBranch string                `json:"default_branch"`
+	PushedAt      string                `json:"pushed_at"`
+	HTMLURL       string                `json:"html_url"`
 	Owner         struct {
 		Login string `json:"login"`
 	} `json:"owner"`
 	InstallationId int64 `json:"-"`
 }
+
+// RepositoryPermissions is GitHub's answer under the person's own bearer.
+// Read visibility, an installation role and an App's permissions are never a
+// substitute for this answer when borrowing repository write authority.
+type RepositoryPermissions struct {
+	Admin    bool `json:"admin"`
+	Maintain bool `json:"maintain"`
+	Push     bool `json:"push"`
+	Pull     bool `json:"pull"`
+}
+
+func (p RepositoryPermissions) CanWrite() bool { return p.Admin || p.Maintain || p.Push }
 
 // InstallationRequest is an installation waiting for an organization owner's
 // approval. GitHub surfaces these to the APP rather than to the person, which

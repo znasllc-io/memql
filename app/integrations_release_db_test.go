@@ -102,6 +102,7 @@ func TestReleaseCandidateThroughNativeLibraryAndSecondEngine(t *testing.T) {
 	store, engine, db := pipelineStreamDBStore(t, uploader)
 	store.bucket = container
 	owner := "candidate-owner-" + id.NewShortId()
+	preparePipelineAzuriteAccounting(t, engine, db, uploader, owner)
 	actor := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleOwner})
 	actor = auth.ContextWithToken(actor, &auth.TokenInfo{Subject: owner})
 	t.Cleanup(func() {
@@ -273,6 +274,7 @@ func TestReleaseCandidateThroughNativeLibraryAndSecondEngine(t *testing.T) {
 	if publication["state"] != "complete" {
 		t.Fatal("native publication incomplete")
 	}
+	assertPipelineAzuriteCharge(t, secondUploader, owner, int64(len(body)))
 	effectHistory := candidateEngineRows(t, engine, actor, "builtin", "releaseCandidatePublications", map[string]any{"candidateId": key})[0]
 	effectBody, err := json.Marshal(effectHistory["publications"])
 	if err != nil {

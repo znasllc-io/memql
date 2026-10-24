@@ -336,7 +336,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// An ordinary question pauses the current execution. Its answer must keep
 	// that lineage: the saved tool checkpoint is bound to it, including inside
 	// an explicit rerun. Answering it is not a failure retry.
-	if retry == nil && !(kind == "feedback" && work.IsReasoningCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission)) {
+	// A native session-scope approval has that same boundary. Creating another
+	// rerun here invalidates its saved request ID before the executor can resume.
+	// Legacy requests without a native witness retain their existing retry path;
+	// the executor still proves every witness before any model or effect runs.
+	nativeScopeCheckpoint := memql.WorkScopeCheckpoint(kind, rowMap(approval, "subject"), storedHash)
+	if retry == nil && !(kind == "feedback" && work.IsReasoningCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission && !nativeScopeCheckpoint)) {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
@@ -529,7 +534,9 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 				if len(act.order) > len(topLevelOrder(rowStringSlice(run, "stepOrder"))) {
 					fields["stepOrder"] = act.checkpointOrder()
 				}
-			} else if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
+			} else if request, stale, ok, err := i.failureRetryRequest(ctx, run, runId, *retry, now); err != nil {
+				return false, err
+			} else if ok {
 				fields["rerun"] = request
 				fields["staleSteps"] = stale
 			}
@@ -566,26 +573,52 @@ type failureRetry struct {
 // released bare, as it was before: a run that is not the executor's to run
 // again (actRun.requireExecutable -- a goalless scheduler journal among them,
 // which the event path never dispatches), a question naming no step, or one
-// naming a step the run never recorded. A version read that fails is the same
-// answer, said in the log: the decision has landed, and a run left on a
-// decided question would wait for an answer nobody can give again.
-func (i *Integration) failureRetryRequest(ctx context.Context, row map[string]any, runId string, retry failureRetry, now time.Time) (map[string]any, []string, bool) {
+// naming a step the run never recorded. Once version recovery is applicable,
+// missing history or instruction chronology is an error: releasing a bare run
+// would silently discard the very override this recovery must preserve.
+func (i *Integration) failureRetryRequest(ctx context.Context, row map[string]any, runId string, retry failureRetry, now time.Time) (map[string]any, []string, bool, error) {
 	run := actRun{row: row, id: runId, owner: rowString(row, "ownerUserId"), order: topLevelOrder(rowStringSlice(row, "stepOrder"))}
 	key := topLevelStepKey(retry.stepKey)
 	if key == "" || run.requireExecutable() != nil || run.requireTopLevel(key) != nil {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 	versions, err := i.readVersions(ctx, runId, run.order)
 	if err != nil {
-		i.log().Warn("work: the run's versions could not be read; releasing it without a request of its own",
-			"component", "work.approval", "run", runId, "step", key, "err", err)
-		return nil, nil, false
+		return nil, nil, false, fmt.Errorf("work: retry cannot read the failed version: %w", err)
 	}
 	plan, err := work.PlanRerun(run.order, versions.byKey, key)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, false, fmt.Errorf("work: retry cannot identify the failed version: %w", err)
 	}
-	return rerunRequest(rerunReasonRerun, key, work.Override{}, plan.Versions, nil, "", retry.decidedBy, now), plan.Stale, true
+	// Retry repeats the failed version's requested work. An empty override here
+	// silently restored the compiled prompt and default model after an owner had
+	// replaced them. Read only this admitted step's latest recorded version;
+	// never borrow another step's run-level override or revive an older version.
+	failed := versions.row(key, versions.newest(key))
+	override := work.ParseOverride(rowMap(failed, "override"))
+	if err := work.ValidateOverride(override); err != nil {
+		return nil, nil, false, fmt.Errorf("work: retry cannot preserve the recorded override: %w", err)
+	}
+	request := rerunRequest(rerunReasonRerun, key, override, plan.Versions, nil, "", retry.decidedBy, now)
+	if !override.Empty() {
+		// A retry is not a newly authored instruction. Preserve its chronology
+		// so corrections recorded after the original instruction still win.
+		prior := rowMap(row, "rerun")
+		at := rowString(failed, "startedAt")
+		if rowString(prior, "stepKey") == key && work.ArtifactHash(work.ParseOverride(rowMap(prior, "override")).Object()) == work.ArtifactHash(override.Object()) {
+			inherited, exists := prior["overrideRequestedAt"]
+			if !exists {
+				inherited = prior["requestedAt"]
+			}
+			at, _ = inherited.(string)
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil || parsed.After(now) {
+			return nil, nil, false, fmt.Errorf("work: retry cannot establish the recorded override's original time; use Run again to provide current instructions")
+		}
+		request["overrideRequestedAt"] = rfc(parsed)
+	}
+	return request, plan.Stale, true, nil
 }
 
 // topLevelStepKey is the run's own step a key belongs to: the key itself, or

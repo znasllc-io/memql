@@ -62,6 +62,7 @@ func TestDevNoWaitDoesNotClaimVerifiedReadiness(t *testing.T) {
 	cmd := exec.Command(filepath.Join(root, "scripts/k3d/dev.sh"), "--node=workbench", "--no-wait", "--cluster=memql", "--namespace=memql")
 	cmd.Env = append(os.Environ(), "PATH="+tmp+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"FAKE_RESTART_LOG="+filepath.Join(tmp, "restart"), "FAKE_PATCH_LOG="+filepath.Join(tmp, "patch"))
+	cmd.Env = append(cmd.Env, installLocalBuildTestRuntime(t, tmp)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("no-wait update: %v\n%s", err, out)

@@ -151,7 +151,9 @@ func RetryBudget(c Ceilings) int {
 	return DefaultMaxRetries
 }
 
-// Ceilings is v1:work:goal.ceilings, inherited by every run.
+// Ceilings is v1:work:goal.ceilings, inherited by every run. The pure checker
+// compares numbers; the Work coordinator interprets time/call values as renewable
+// windows for goal execution. Token/cost values remain lifetime monetary bounds.
 type Ceilings struct {
 	TokenBudget   int     `json:"tokenBudget,omitempty"`
 	CostCeiling   float64 `json:"costCeiling,omitempty"`

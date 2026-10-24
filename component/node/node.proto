@@ -922,6 +922,8 @@ message AppCallForwardRequest {
   // Optional timeout hint; the receiver clamps to its own ceiling.
   int32 timeout_sec = 16;
   ForwardedAuthority authority = 17;
+  // Opt in to public answer deltas before the terminal response.
+  bool stream = 18;
 }
 
 // AppCallMessage is one turn of the conversation. Only the role and the text
@@ -981,6 +983,8 @@ message AppCallForwardResponse {
   // false even for a failure -- a session that ran spent somebody's
   // subscription and may have acted in its workspace.
   bool refused_before_start = 14;
+  // A nonterminal public answer fragment; content carries the delta.
+  bool delta = 15;
 }
 
 // AppCallForwardCancel stops a forwarded app call: the receiver cancels the

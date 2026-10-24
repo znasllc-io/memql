@@ -22,6 +22,7 @@ package memql
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 
@@ -38,6 +39,10 @@ import (
 // forget: an unfinalized registry answers Ordered() with nil, and a router
 // walking nil rules resolves every call through no rule at all.
 func LoadUnifiedRules(logger *slog.Logger, registry *RuleRegistry, report ...*LoadReport) (int, error) {
+	return loadUnifiedRulesFromTree(memqldsl.Tree(), logger, registry, report...)
+}
+
+func loadUnifiedRulesFromTree(tree fs.FS, logger *slog.Logger, registry *RuleRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("rule registry is nil")
 	}
@@ -45,7 +50,7 @@ func LoadUnifiedRules(logger *slog.Logger, registry *RuleRegistry, report ...*Lo
 	core := coreDomainSet()
 	total := 0
 
-	for _, raw := range baseloader.ReadAll(logger) {
+	for _, raw := range baseloader.ReadAllFrom(tree, logger) {
 		for _, slice := range ExtractKeywordSlices(raw.Content, "rule") {
 			decl, err := languageParser.ParseRuleDecl(slice.Source)
 			if err != nil {

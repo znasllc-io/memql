@@ -67,6 +67,7 @@ describe("the receipt", () => {
       },
     });
     const card = receipt(unmeasured);
+    expect(card?.tokens).toBeNull();
     expect(card?.cost).toBeNull();
     expect(card?.modelCalls).toBeNull();
     expect(card?.subscriptionTokens).toBeNull();

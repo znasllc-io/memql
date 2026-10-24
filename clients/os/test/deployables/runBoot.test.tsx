@@ -84,25 +84,25 @@ async function hydrate(desktop: ReturnType<typeof deferred<Result>>) {
 describe("GitHub check details through real shell startup", () => {
   it.each(["desktop first", "capabilities first"])("opens the requested run once with %s", async order => {
     const { capabilities, desktop } = boot();
-    expect(screen.queryByRole("dialog", { name: "Deployables" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Pipelines" })).toBeNull();
     if (order === "desktop first") await hydrate(desktop);
     await allow(capabilities);
     const heading = await screen.findByRole("heading", { name: "The linked pipeline run" });
-    const originalWindow = screen.getByRole("dialog", { name: "Deployables" });
+    const originalWindow = screen.getByRole("dialog", { name: "Pipelines" });
     if (order === "capabilities first") await hydrate(desktop);
     await waitFor(() => expect(new LocalDesktopStore().load()?.desks.some(d => d.id === "remote-desk")).toBe(true));
     expect(screen.getByRole("heading", { name: "The linked pipeline run" })).toBe(heading);
-    expect(screen.getByRole("dialog", { name: "Deployables" })).toBe(originalWindow);
-    expect(screen.getAllByRole("dialog", { name: "Deployables" })).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "Pipelines" })).toBe(originalWindow);
+    expect(screen.getAllByRole("dialog", { name: "Pipelines" })).toHaveLength(1);
     expect(takeParkedRunOpen()).toBeNull();
     expect(window.location.search).toBe("?keep=1");
     expect(JSON.stringify(new LocalDesktopStore().load())).not.toContain("run-linked");
   });
-  it.each(["app:deployables", "app:deployables/runs"])("keeps the intent parked when %s is denied", async resource => {
+  it.each(["app:pipelines", "app:pipelines/runs"])("keeps the intent parked when %s is denied", async resource => {
     const { capabilities, desktop } = boot();
     await hydrate(desktop);
     await act(async () => capabilities.resolve(builtinReply("effectiveCapabilitiesForActor", [{ ok: true, entries: seededAccessWithout("owner", resource) }])));
-    expect(screen.queryByRole("dialog", { name: "Deployables" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Pipelines" })).toBeNull();
     expect(takeParkedRunOpen()).toBe("run-linked");
   });
 });

@@ -40,16 +40,16 @@ describe("the manifest", () => {
     // RUNS IS THE THIRD NOUN (epic memql#5479, D12): every pipeline run of
     // every source the person connected. A run has a page of its own, which is
     // what a source's Checks row and a GitHub check's details link open.
-    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "sources", "runs", "logs", "settings"]);
-    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Sources", "Runs", "Logs", "Settings"]);
+    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "logs", "settings"]);
+    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Logs", "Settings"]);
     // The gated ones differ by role, so the window nav genuinely does: Logs is
     // the log store's admin floor, Runs is the roles that connect pipelines.
     installSeededAccess("reader");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "settings"]);
     installSeededAccess("admin");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "logs", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "logs", "settings"]);
     installSeededAccess("developer");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "runs", "logs", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "logs", "settings"]);
   });
 
   it("announces the unified Sources destination without a second repository or account section", () => {
@@ -77,14 +77,14 @@ describe("the manifest", () => {
     expect(deployables?.requires).toBe("app:deployables");
     expect(rolesOpening("app:deployables")).toEqual(["owner", "developer", "admin", "user", "viewer"]);
     const gated = (deployables?.sections ?? []).filter((s) => s.requires !== undefined);
-    expect(gated.map((s) => s.id)).toEqual(["runs", "logs"]);
+    expect(gated.map((s) => s.id)).toEqual(["logs"]);
     for (const section of gated) {
       expect(section.requires).toBe(`app:deployables/${section.id}`);
     }
     expect(rolesOpening("app:deployables/logs")).toEqual(["owner", "developer", "admin"]);
     // Runs lists the runs of pipelines the viewer connected, read owner-scoped;
     // the `connect` part is owner and developer, so the tab is too.
-    expect(rolesOpening("app:deployables/runs")).toEqual(["owner", "developer"]);
+    expect(rolesOpening("app:pipelines/runs")).toEqual(["owner", "developer"]);
   });
 
   it("declares the settings section its gear points at", () => {

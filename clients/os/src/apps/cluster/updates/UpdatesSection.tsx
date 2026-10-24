@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import type { ProposedRelease } from "./InstallationProposals";
+import { InstallationUpdates } from "./InstallationUpdates";
+import { LocalTabs } from "../../../kit/LocalTabs";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../../chrome/access";
 import { useConnectionStatus } from "../../../chrome/connection";
@@ -13,11 +16,14 @@ export type UpdateQueries = Pick<QueryClient, "releaseSources" | "releaseDiscove
 export function UpdatesSection({ visible = true }: { visible?: boolean }) {
   const connection = useOsConnection(), status = useConnectionStatus();
   const { access } = useSession();
+  const [section, setSection] = useState("installation");
+  const [proposedRelease, setProposedRelease] = useState<ProposedRelease | null>(null);
+  const navigation = <LocalTabs label="Updates" value={section} onChange={setSection} options={[["installation", "This installation"], ["publishers", "Published releases"]]} />;
   if (!access || !["owner", "admin", "developer"].includes(access.role)) return <div className="os-cluster"><Head title="Updates" /><Notice sentence="A developer, admin or owner can check for updates." /></div>;
-  return <UpdateBrowser key={access.userId} query={connection?.query ?? null} connected={status === "connected"} visible={visible} />;
+  return section === "installation" ? <div className="os-cluster"><Head title="Updates" />{navigation}<InstallationUpdates query={connection?.query ?? null} connected={status === "connected"} visible={visible} proposedRelease={proposedRelease} onClearProposedRelease={() => setProposedRelease(null)} /></div> : <UpdateBrowser key={access.userId} onPrepare={release => { setProposedRelease({ candidateId: release.candidateId, catalogDigest: release.catalogDigest, label: title(release) }); setSection("installation"); }} navigation={navigation} query={connection?.query ?? null} connected={status === "connected"} visible={visible} />;
 }
 
-export function UpdateBrowser({ query, connected, visible = true }: { query: UpdateQueries | null; connected: boolean; visible?: boolean }) {
+export function UpdateBrowser({ query, connected, visible = true, navigation, onPrepare }: { query: UpdateQueries | null; connected: boolean; visible?: boolean; navigation?: ReactNode; onPrepare?: (release: Release) => void }) {
   const [source, selectSource] = useState<Source | null>(null);
   const [selected, selectRelease] = useState<Release | null>(null);
   const [cursors, setCursors] = useState<string[]>([""]);
@@ -38,6 +44,7 @@ export function UpdateBrowser({ query, connected, visible = true }: { query: Upd
   const back = selected ? { label: source!.publisher, onSelect: () => { restore.current = selected.candidateId; selectRelease(null); } } : source ? { label: "Updates", onSelect: () => { restore.current = source.id; selectSource(null); setCursors([""]); } } : undefined;
   return <div className="os-cluster" ref={container}>
     <Head navigationKey={`update:${source?.id ?? "sources"}:${selected?.candidateId ?? "releases"}`} title={selected ? "Release" : source ? source.publisher : "Updates"} back={back}>{available && !current.error ? <Button onClick={current.retry} busy={visible && !current.fresh}>Check again</Button> : null}</Head>
+    {!source ? navigation : null}
     {!available ? <Notice sentence="Disconnected. Update information will refresh when the cluster reconnects." /> : null}
     {current.error ? <Notice tone="error" sentence={current.error}><Button onClick={current.retry}>Try again</Button></Notice> : null}
     {current.value === null && available && !current.error ? selected ? <ContentSkeleton label="Verifying release" /> : <RecordListSkeleton label="Checking updates" /> : null}
@@ -53,7 +60,8 @@ export function UpdateBrowser({ query, connected, visible = true }: { query: Upd
       </div> : null}
     </> : release.value ? <>
       {release.value.components.map(c => <Panel key={c.name} label={c.name}><Subhead>{c.name}</Subhead><Facts><Fact label="Version" value={c.version} /><Fact label="Source" value={c.repository} /><Fact label="Commit" value={c.commit} /></Facts></Panel>)}
-      <Caption>Installation requires a separate review of this cluster and its rollback plan.</Caption>
+      <Caption>Prepare a draft update pull request for this installation. After that change is reviewed and merged, you can review the installation plan and choose when to apply it.</Caption>
+      {onPrepare ? <Button tone="primary" disabled={!release.fresh} onClick={() => onPrepare(release.value!)}>Select for this installation</Button> : null}
     </> : null}
   </div>;
 }

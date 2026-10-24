@@ -123,6 +123,9 @@ export interface StepBinding {
 }
 
 export interface StepRow {
+  displayTitle?: string;
+  summary?: string;
+  reason?: string;
   id: string;
   runId: string;
   key: string;
@@ -305,6 +308,9 @@ export function readStep(row: Row): StepRow {
   const attempt = rowNumber(row, "attempt");
   const skills = binding === null ? [] : binding["skillIds"];
   return {
+    displayTitle: rowString(row, "displayTitle") || rowString(row, "title") || rowString(row, "action") || nested(call, "displayTitle"),
+    summary: rowString(row, "summary"),
+    reason: rowString(row, "reason"),
     id: rowString(row, "id"),
     runId: rowString(row, "runId"),
     key: rowString(row, "key"),

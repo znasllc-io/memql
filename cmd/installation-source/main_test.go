@@ -221,3 +221,43 @@ func TestGitObjectReaderReapsProcessAfterBoundedReadAndCancellation(t *testing.T
 		require.NotNil(t, reader.(*objectProcess).cmd.ProcessState, "Close must reap the process")
 	}
 }
+
+func TestCollectorCapturesPartialGraphWithoutResolvingRemote(t *testing.T) {
+	objects, render := collectorFixture(t)
+	reference := "https://github.com/example/engine//overlay?ref=" + strings.Repeat("a", 40) + "&timeout=120s&submodules=false"
+	require.NoError(t, os.WriteFile(filepath.Join(objects.repository, "overlay", "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n - settings.yaml\n - "+reference+"\n"), 0600))
+	fixtureGit(t, objects.repository, nil, "add", "overlay/kustomization.yaml")
+	fixtureGit(t, objects.repository, nil, "commit", "--quiet", "--no-gpg-sign", "-m", "remote source fixture")
+	var source map[string]any
+	require.NoError(t, json.Unmarshal(render.Source, &source))
+	source["targetRevision"] = fixtureGit(t, objects.repository, nil, "rev-parse", "HEAD")
+	render.Source, _ = json.Marshal(source)
+	spec := argocd.SourceFragmentSpec{Render: render, AllowedDependencies: []argocd.SourceRepository{{Repository: "https://github.com/example/engine.git", Paths: []string{"overlay"}}}}
+	directory := t.TempDir()
+	body, err := json.Marshal(spec)
+	require.NoError(t, err)
+	specPath := filepath.Join(directory, "spec.json")
+	output := filepath.Join(directory, "source.tar")
+	require.NoError(t, os.WriteFile(specPath, body, 0600))
+	args := []string{"--repository=" + objects.repository, "--spec=" + specPath, "--output=" + output, "--fragment"}
+	for attempt := 0; attempt < 2; attempt++ {
+		var stdout, stderr bytes.Buffer
+		require.Equal(t, 0, execute(context.Background(), args, &stdout, &stderr), stderr.String())
+		require.NotContains(t, stdout.String()+stderr.String(), "private-fixture-material")
+		var envelope struct {
+			Changed bool          `json:"changed"`
+			Result  captureResult `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(stdout.Bytes(), &envelope))
+		require.Equal(t, attempt == 0, envelope.Changed)
+		archive, err := os.ReadFile(output)
+		require.NoError(t, err)
+		fragment, err := argocd.VerifySourceFragmentArchive(context.Background(), archive, spec)
+		require.NoError(t, err)
+		require.Equal(t, envelope.Result.Digest, fragment.Digest())
+		require.Len(t, fragment.Dependencies(), 1)
+		closed, err := argocd.VerifySourceArchive(context.Background(), archive, render)
+		require.Error(t, err)
+		require.Empty(t, closed.Digest())
+	}
+}

@@ -44,7 +44,7 @@ export interface Receipt {
    *  see `kindCalledAModel`, which answers three ways. */
   thought: number;
   approvals: number;
-  tokens: number;
+  tokens: number | null;
   /**
    * What a subscription covered. `null` when the run row carries no `spent`
    * object at all, which is a different fact from "covered nothing" and
@@ -115,7 +115,7 @@ export function receipt(world: GoalWorld): Receipt | null {
     attempts: rows.length,
     thought: steps.filter(stepThought).length,
     approvals: world.approvals.filter((approval) => approval.runId === run.id).length,
-    tokens: spend.tokens,
+    tokens: spend.present ? spend.tokens : null,
     subscriptionTokens: spend.present ? spend.tokensSubscription : null,
     cost: spend.present ? spend.cost : null,
     modelCalls: spend.present ? spend.modelCalls : null,

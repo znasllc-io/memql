@@ -16,7 +16,7 @@ func TestInstallationsNamesOnlyThoseThatLagTheApp(t *testing.T) {
 	h := newHarness(t)
 	h.github.installations = []githubapp.AppInstallation{
 		{ID: 1, Account: "current", AccountType: "Organization", HTMLURL: "https://github.com/organizations/current/settings/installations/1",
-			Permissions: map[string]string{"checks": "write", "security_events": "write", "contents": "read", "merge_queues": "read", "metadata": "read", "pull_requests": "write"}},
+			Permissions: map[string]string{"administration": "write", "checks": "write", "security_events": "write", "contents": "write", "merge_queues": "write", "metadata": "read", "pull_requests": "write", "statuses": "read"}},
 		{ID: 2, Account: "acme", AccountType: "User", HTMLURL: "https://github.com/settings/installations/2",
 			Permissions: map[string]string{"contents": "read", "metadata": "read"}},
 		{ID: 3, Account: "readonly", AccountType: "Organization", HTMLURL: "https://github.com/organizations/readonly/settings/installations/3",
@@ -31,14 +31,15 @@ func TestInstallationsNamesOnlyThoseThatLagTheApp(t *testing.T) {
 	if len(got) != 2 || got[0].InstallationID != 2 || got[1].InstallationID != 3 {
 		t.Fatalf("only the installations that lag, in id order: %+v", got)
 	}
-	if !slices.Equal(got[0].Missing, []string{"checks:write", "merge_queues:read", "pull_requests:read", "security_events:write"}) ||
+	if !slices.Equal(got[0].Missing, []string{"administration:read", "checks:write", "contents:write", "merge_queues:write", "pull_requests:write", "security_events:write", "statuses:read"}) ||
 		got[0].Account != "acme" || got[0].AccountType != "User" || got[0].HTMLURL != "https://github.com/settings/installations/2" {
 		t.Errorf("acme lags by everything pipelines added: %+v", got[0])
 	}
-	// A WIDER grant than asked (contents write, pull_requests write on
-	// "current") is not a lag; a narrower one (checks read) is.
-	if !slices.Equal(got[1].Missing, []string{"checks:write", "security_events:write"}) || !got[1].Suspended {
-		t.Errorf("readonly lags on reporting permissions, and says it is suspended: %+v", got[1])
+	// An existing WIDER grant than requested (administration write on
+	// "current") is not a lag; a narrower one (checks read) is. The current
+	// manifest asks only for administration read; this read does not grant it.
+	if !slices.Equal(got[1].Missing, []string{"administration:read", "checks:write", "merge_queues:write", "pull_requests:write", "security_events:write", "statuses:read"}) || !got[1].Suspended {
+		t.Errorf("readonly lags on reporting, policy reads and queue permissions, and says it is suspended: %+v", got[1])
 	}
 }
 

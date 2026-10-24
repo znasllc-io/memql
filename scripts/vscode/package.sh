@@ -187,6 +187,8 @@ function capability_script_relpaths() {
 function support_file_relpaths() {
     ( cd "$REPO_ROOT" && printf '%s\n' \
         scripts/lib/*.sh \
+        scripts/lib/host_build_guard.py \
+        scripts/k3d/image_cache.py \
         scripts/install/graph/*.json \
         scripts/install/tool-pins.env )
 }

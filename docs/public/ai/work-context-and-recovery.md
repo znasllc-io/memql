@@ -14,6 +14,87 @@ A goal can outlive a model call, a context window, a client connection, or an
 execution replica. Progress belongs in the durable work journal. A model's
 active context is a bounded working set, not the sole record of the goal.
 
+The current stage's execution instructions remain explicit when older evidence
+is summarized, including after an approval or later guidance. Resuming work
+restores those instructions from the executing workflow alongside the verified
+saved context and new human answer. Completed tool results stay in order and
+the original checkpoint remains unchanged. Retaining the instructions does not
+grant new access or prove that the model followed them.
+
+An approval resume reuses the saved history and adds the current decision. It
+does not reload every older answered question after those bodies have already
+been summarized. A fresh execution still receives historical answers, and late
+optional answers or later corrections continue to arrive through the guidance
+journal. The original answers remain available for exact recall.
+
+A correction sent instead of granting an approval remains guidance for the
+unfinished work after another approval, retry or worker restart. The executing
+worker recovers that correction from the owner's decision journal and orders it
+with other human guidance by time. Permission receipts do not replace earlier
+instructions, and restoring instructions does not grant access or repeat a
+completed operation. The active guidance sources have explicit context bounds;
+overflow is reported rather than silently losing a correction.
+
+## From changed inputs to a verified result
+
+Changing source or a document's inputs does not by itself update the result a
+person uses. Shared execution guidance asks work to discover the supported path
+to the requested target, reuse applicable saved procedures, and check only
+missing or changed setup information. The path may involve a build, export,
+reload or restart; automatic reload must also be observed rather than assumed.
+
+Verification connects the produced revision, build or content to the actual
+result opened or served, then checks the requested behavior. Source tests,
+preview fixtures and successful build commands are useful supporting evidence,
+but cannot substitute for checking the requested target. When another section
+owns delivery, the handoff preserves completed work and identifies the remaining
+gap. Useful procedures retain source versions, applicability and observed results
+so they can be reused without assuming they remain current forever.
+
+Existing authorization and operation gates still apply. Work should reuse
+authorization already given for a local build or verification step rather than
+ask for it again. Permission to edit source alone does not authorize a production
+release or access to another target. These are model instructions, not a promise
+of automatic learning or a deterministic guarantee of successful delivery.
+
+## Adapting knowledge to the work
+
+The initial skill snapshot belongs to a step version and stays fixed for
+replay. Live work can use `consultWorkKnowledge` when it discovers a different
+knowledge need. The consultation reads current reviewed skill instructions and
+Training passages, rather than loading a whole role's manuals or requiring the
+person to name a language, build system or technical procedure.
+
+Each consultation accepts one specific need and a short account of relevant
+observations. It selects at most two skill instructions within 4,000 serialized
+bytes and three Training passages within the existing 1,200-token conservative
+allocation. Skills use their declared match terms; Training uses semantic
+similarity. Current review and source checks still apply. The initial snapshot
+is preserved; a new receipt records the consultation. A replay consumes recorded
+tool results instead of performing a fresh lookup.
+
+The response distinguishes retrieval availability, such as an empty eligible
+corpus, unavailable index or embedding timeout. Its readiness is explicitly
+`not-assessed`: related material does not establish sufficient knowledge. The
+working model must compare its next action with applicable instructions,
+prerequisites and source evidence, then resolve remaining gaps through bounded
+research or a necessary human question. This is an available adaptive retrieval
+path and model guidance, not a deterministic completeness assessment.
+
+Research also includes permitted concept queries, earlier work and semantic
+artifact search. `artifactSearch` is available directly to owned work; exact
+record and file readers remain discoverable through their authorized contracts.
+Search snippets identify candidate evidence. Read relevant contents and verify
+source versions before relying on them. An incomplete index is not evidence of
+absence. Blob storage retains bytes; indexed passages and source metadata make
+those bytes discoverable, without making them automatically approved Training.
+
+Consultation neither trains nor indexes content on demand. Existing ingestion,
+indexing and review paths remain separate. Findings and useful procedures can be
+retained as evidence with provenance, applicability and limitations; they do not
+become approved lessons merely because a model wrote them. Selection and journal
+receipts do not prove prompt adherence, task success or performance improvement.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:
@@ -30,6 +111,11 @@ These have different owners and recovery paths:
 A command's nonzero exit status is not, by itself, a reason to abandon a
 goal or ask a human. The harness should analyze its evidence and continue
 using capabilities already within the goal's authority. A missing executable
+is a prerequisite failure, not evidence that the prepared result is wrong.
+Work should check the relevant setup instructions, reconcile partial effects,
+and reuse prepared artifacts whose inputs still match. Repeating unchanged
+source surveys is unnecessary; fresh reads should address the identified gap.
+A missing executable
 does not grant permission to install software; an access refusal does not
 grant permission to obtain broader access. Recovery must still respect the
 same authorization and side-effect gates as the original operation.
@@ -59,11 +145,35 @@ In-flight tool failures cannot enter this path. Missing or changed checkpoints a
 suspension stop execution. Older failed runs without native waiting child links
 still require the existing explicit recovery controls; no links are inferred.
 
+The same checkpoint suspension applies when bounded context compaction cannot
+fit the active request, or a model still rejects its context after recovery.
+When older history consists entirely of derived checkpoints, bounded exact
+archival can consolidate their envelopes without another model summary. Their
+original sources remain available, and required instructions, current decisions
+and pending operations remain exact. Archival must reduce the active context;
+it does not raise the model window or grant permission.
+There is no extra automatic retry with identical input. The question retains
+the existing execution generation and model override when answered, just as a
+provider-call ceiling pause does. It does not create an ordinary failure rerun.
+The saved question retains
+the exact prepared tool calls and completed receipts; Retry or guidance resumes
+that suspended execution after the capacity problem is addressed. It does not
+restart the stage or discard its working context. Storage and authorization
+failures are separate errors, and context from older failed stages is not
+silently attached to a new execution.
+
 If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
 further replanning attempt for the unfinished work. It preserves the completed
 prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
-failed step. Either decision is persisted for the cluster to resume safely.
+failed step. The new attempt keeps that failed version's authored instructions,
+inputs, model and effort, including a whole-prompt replacement. It does not
+restore an earlier workspace snapshot or borrow another step's settings.
+Inherited instructions retain their original date, so a later owner correction
+does not lose priority merely because Retry created a new execution request.
+If that original time cannot be established, recovery stops and asks for current
+instructions through **Run again**; it does not treat the old instruction as new.
+Either decision is persisted for the cluster to resume safely.
 
 Clarifications can be optional when useful authorized work can proceed without
 the answer. The pinned Spine policy allows 60 seconds to answer; the durable
@@ -318,23 +428,56 @@ reports the missing capability and preserves its progress.
 
 ## Keeping active context useful
 
+Before repeating research, the shared work guidance asks the agent to consider
+authorized retained sources, relevant prior results and reviewed knowledge.
+Reuse depends on applicability and freshness: source revision, content hash,
+validator or another appropriate check must still support the current question.
+Refresh the missing or changed portion when that costs less than starting over.
+An old summary, an unrelated result or an unavailable original is not proof.
+This guidance supports reuse across goals; it does not guarantee that a model
+will choose the same path, and it grants no access to another goal's records.
+
 Owned work uses the following layers:
 
-1. **Keep authority and the request exact.** System messages, the original
-   request, the newest human correction, and incomplete tool exchanges are
+The proactive history budget counts a prepared current operation's exact
+arguments, including when approval arrives after preparation. It also counts
+returned results in an incomplete call group. These cannot be safely replaced
+with a summary merely to meet a history preference. Completed result bodies
+and older consumed calls still use the archival paths below. The selected
+provider's actual context capacity and output reserve remain enforced; this
+calculation does not grant permission or execute the approved operation.
+
+1. **Keep authority and the request exact.** System messages, the current stage
+   instruction, the original request, the newest human correction, and incomplete tool exchanges are
    not summarized. A complete assistant tool call and all of its results form
    one unit. A preference for recent messages cannot split that unit.
+   The newest recorded approval or feedback also remains exact when existing
+   goal guidance appears after it. Older decision receipts can be archived.
+   The proactive budget includes this current receipt; actual model capacity
+   remains a hard limit. Keeping an answer in context neither grants access nor
+   proves an operation ran: execution still checks its current permission record.
+   Approval of a desktop, file-write or HTTP session bound to a native checkpoint
+   continues that same execution attempt. It does not start the section again;
+   changed or mismatched checkpoints are refused before work resumes.
 2. **Archive bulky results.** When the context is over budget, completed large
    tool results are stored in the owner-scoped journal before replacement
    with a short, explicitly incomplete preview and an exact reference. The
    call ID and tool name remain intact. This requires no summarization call.
    If several medium results collectively overflow the newest exchange, the
    engine also offloads them until the combined context fits.
+   Before an Apps session asks for feedback, a public result larger than
+   64 KiB is referenced from its existing journal receipt instead of copied
+   into the continuation. The original bytes remain unchanged, and the
+   reference includes their hash and exact recall coordinates. Small results
+   and call arguments remain intact. This allows a sequence of screenshots
+   to suspend without exhausting the 4 MiB retained-content limit; individual
+   receipt and scan limits still apply. It does not upload a Library artifact
+   or claim that the images were inspected.
 3. **Checkpoint older complete exchanges.** The DSL checkpoint prompt retains
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
    consolidated with fresh evidence; their sources remain retrievable.
-   A bounded excerpt of the original request and latest correction guides
+   Bounded excerpts of the current stage, original request and latest correction guide
    relevance without becoming evidence. This context shares the summarizer's
    input budget and is part of its cache identity. The DSL distinguishes
    retrieved metadata from verified findings and tool parameters from human
@@ -353,11 +496,28 @@ Owned work uses the following layers:
    memory incomplete. It never truncates a claim or source URL to make it
    fit. Exact source messages are saved before the bounded memory replaces
    them, so verbosity alone does not stop the goal or spend another model call.
-4. **Retrieve only what is needed.** `recallWorkHistory` searches a bounded
-   page of archive records. An exact checkpoint and message index retrieve
+4. **Retrieve only what is needed.** By default, `recallWorkHistory` searches
+   original tool results and call arguments across current-run execution
+   receipts and compaction archives. It excludes earlier recall requests and
+   their nested answers, assistant prose, approval requests, and generated call
+   IDs from matching. An argument-only hit returns the completed result with
+   `matchedField: "arguments"`; its directory identifies the corresponding call.
+   Search directories omit excluded calls without renumbering source indexes.
+   An exact checkpoint and message index retrieve
    character pages of the original serialized message, including tool-call
    arguments. `nextOffset` continues that message; `cursor` continues a
    search. An empty page with `hasMore` does not mean the evidence is absent.
+   Current-run search and searches of earlier tool receipts in the same owned
+   conversation scan at most eight four-receipt pages per call before returning
+   a cursor. Keep `sourceRunId` when returned with a receipt reference; context
+   archive references retain their existing checkpoint route without it.
+   `checkpoint: "conversation"` selects original input conversation messages.
+   Explicit checkpoint reads preserve their original contents and offsets.
+   Search stops at a page with matches; directory browsing skips receipts
+   without original sources. Derived retrieval responses stay in the journal
+   but are excluded from the original-source projection, including when a
+   capability wrapper performed the retrieval. Saved message indexes remain
+   stable so older exact references still identify the same source.
    `matchLimitReached` means that some excerpts could not fit the response;
    narrow the search or read exact indexes from its listed source records.
    If a recalled page itself exceeds the active budget, the engine directs
@@ -390,11 +550,30 @@ original conversation. If a checkpoint would be larger than its source, that
 exchange stays exact while the engine tries another complete exchange. A short
 older exchange before a pinned correction cannot block later tool evidence
 from being compacted. All candidates share the same eight-attempt bound; if
-none can make the context fit, the original conversation remains unchanged.
+the bounded semantic pass cannot make the context fit, the engine attempts
+exact archival of the remaining completed results without another model call.
+If small calls and previews still overflow the window, it can archive whole
+older completed exchanges, including their arguments. This final storage pass
+uses at most eight attempts, each limited to 4 MiB of exact source; these bytes
+are never sent to a summarizer. It preserves the same protected requests,
+authority and pending exchanges, and labels the replacement preview incomplete.
+If the request still exceeds its budget, it fails and retains the originals.
+
+The call reserve for recovery uses the current renewed work window and the
+full cumulative usage. Spending the original estimate does not permanently
+force archive-only compaction after progress has renewed the window. Reading
+that allowance does not grant another renewal or bypass provider call caps,
+monetary limits or execution permissions.
+
+Semantic summaries are cached by both exact source bytes and request relevance.
+An unchanged pair can be reused on another replica without inference. New human
+direction can require a new summary even when the source is unchanged; reusing
+an answer focused on the old direction would be misleading. Exact archives
+remain available independently of the semantic summary cache.
 
 The proactive working-set threshold is an estimate that includes message
 envelopes, tool schemas and arguments. Its preference is 20,000 tokens. When
-pinned authority, the original request, the latest human correction and tool
+pinned authority, the current stage, the original request, the latest human correction and tool
 contracts would leave less than 4,000 tokens of working room, the target
 becomes their estimated size plus that working room. Accumulated tool results, model replies and
 derived memories do not enlarge that allowance. This lets a large document
@@ -407,10 +586,79 @@ arbitrary input fits any model.
 
 ## Durability, resources and validation
 
+When an Apps session returns evidence, MemQL associates the Library entry and
+its backing file with the native work run; the file also records the executing
+step. Model and effort remain what the app reported, which may be empty.
+Ownership is checked before stamping, and evidence already associated with a
+different producing run is not reassigned. An ordinary conversation without a
+run preserves any existing work identity. This metadata helps find and reuse
+evidence; it does not prove that its bytes were inspected or that a goal passed
+verification. Older records are not automatically backfilled, and a stamping
+failure is logged without discarding the completed app work.
+
 Archives and execution checkpoints live in shared persistent storage, under
 the run owner's authority. Retrieval from another replica must not depend on
 the first replica's memory. A reference grants no access to another owner's
 data or another run's archive.
+
+Optional knowledge search and observation indexing each have a five-second
+child deadline, honoring earlier cancellation or deadlines from the caller.
+An unavailable embedding model must not hold a durable receipt indefinitely.
+Administrative receipt labels are not indexed; meaningful checkpoint summaries
+can be indexed. Provider-admission and work-window credit receipts remain exact
+journal records without requesting another embedding from inside accounting.
+Failed indexing can reduce semantic discoverability until
+backfill, while exact journal reads remain available. Required instruction
+reads and source verification retain their own failure behavior.
+
+Apps delegation keeps the same owner, run and permission boundaries. Before a
+feedback or access request pauses work, the server saves the delegated native
+context and the public tool exchanges it observed. The app's claimed narrative
+does not establish completed effects. A native wait ends the app session and
+resumes the same saved work after the appropriate recorded decision; ordinary
+guidance does not approve a blocked operation. Empty workspace snapshots can
+resume without filesystem restoration. Populated snapshots remain refused
+where restoration is unsupported, rather than pretending their files survived.
+
+An approval resume also preserves that recovered context through the final App
+handoff. If the original rerun replaced the whole prompt, that old replacement
+is not applied again over completed results, a prepared operation or the latest
+recorded decision. The delegate checks the continuation's owner, run, step and
+override binding before launch. Model and effort choices still apply, and a
+fresh explicit rerun still honors whole-prompt replacement. That replacement is
+also retained as the active instruction before the first checkpoint and used
+for skill preparation, so a later approval cannot restore the obsolete compiled
+section. Additive instructions and later human corrections retain their existing
+ordering. Retained context
+does not extend permissions or bypass the operation's execution checks.
+
+The final reply reviewer also reads current owner instructions, including the
+step's replacement and later corrections in their recorded order. It keeps the
+original goal as historical context instead of restoring superseded directions.
+Unavailable or oversized instruction context stops review explicitly. This does
+not authorize another operation, retry interrupted input, or make a completed
+execution count as the owner's acceptance of its results.
+
+Useful documents, scripts, patches, screenshots and verification receipts can
+be retained as bounded artifacts with provenance. File metadata alone does not
+prove that the bytes are readable. A checkout or dependency cache is a working
+resource, not an automatic archival artifact; reuse it only when safe and worth
+the cost. Resource reuse does not replay effects or inherit expired permissions.
+
+When Apps calls the native computer screenshot tool through MCP, a validated
+PNG or JPEG is delivered as image content, with its original metadata and a
+content hash beside it. The delegated journal records that same response.
+Base64 text alone does not establish that the model received a viewable image.
+Unreadable, inconsistent or oversized captures remain explicit text evidence
+with an image-delivery failure; the adapter does not retry capture, enlarge
+computer access or bypass retention limits. Receiving pixels is separate from
+inspecting the correct interface and retaining a readable evidence artifact.
+
+Large arguments from completed older tool calls, such as a file transfer, can
+be archived exactly before spending model calls to compress smaller history.
+The active instruction, human requests, pending calls and latest exchange
+remain protected. Archive references appear only after durable storage succeeds;
+their short previews are incomplete evidence, not verified summaries.
 
 Execution continuations preserve complete tool exchanges in an encoded JSON
 receipt, including control characters that the storage layer cannot accept
@@ -426,9 +674,15 @@ definition, arguments and exact suspended tool receipt across replicas.
 Completed parent and child steps stay complete; the approval grants no blanket
 permission to repeat their effects. If an answer arrives before the waiting
 receipt is saved, dispatch waits briefly without consuming its claim. The
-recovery sweep can deliver the saved answer later under the same claim identity.
-The existing stale-executor abandonment policy still applies after a claimant
-stops responding.
+settling executor re-offers that exact answer once its waiting receipt is saved,
+using the same answer claim and execution generation. This does not depend on
+the scheduled recovery sweep running on an agent: an identity or BFF leader has
+no step dispatcher. Duplicate decision and settlement events cannot start the
+answer twice. A later answer uses its normal decision event; a stale answer,
+changed generation, cancelled run or active step cannot be adopted by settlement.
+An executing recovery sweep can still recover a lost claimant under the existing
+lease and stale-executor policy; settlement does not extend that lease or grant
+permission to repeat effects.
 
 On resumption, the model receives the recorded permission decision or feedback
 alongside its saved exchanges. Permission context includes the approved scope
@@ -443,14 +697,44 @@ recovery attempts retain finite time and resource budgets. A long-lived goal
 must make progress through checkpointed steps and waits; it does not require
 one unbounded model call or an open client connection.
 
-Work can extend an estimate up to three times when successful tool receipts
-show new activity and the original overall limits still allow it. When that
-allowance is spent, ordinary feedback offers **Keep working**, **Stop here**,
-or a change of direction. A continuation preserves the saved execution,
-accumulated usage and extension count across replicas. It never raises the
-original limits. At an overall limit, the results remain saved and the work
-stops. Numeric budget approvals are no longer accepted. See
-[LLM cost control](llm-cost-control.md) for the bounded continuation policy.
+A goal has no fixed lifetime or automatic-extension count. Time and model-call
+estimates are renewable work windows. Substantive, previously uncredited source
+facts and native capability contracts can renew a window; heartbeats, elapsed
+time, repeated reads, generic command output and model claims cannot. Consumed
+evidence stays in the owned journal after leaving the bounded active index.
+Renewal checks bounded receipt pages beyond recent non-progress calls and keeps
+concurrent arrivals eligible for the next window. A receipt-read timeout or
+failure refuses renewal; it does not certify that no progress occurred.
+Native and Apps executions use the same conservative signal for completed source
+queries. The result must contain substantive returned content; an app's claimed
+success or a digest supplied in its arguments does not count.
+The existing loop detector also pauses repeated stalled work.
+When progress cannot justify renewal, MemQL preserves the work and asks for
+direction. A fresh human answer renews a window on the same goal, preserving
+usage and completed effects. Waiting for the person does not spend active time.
+Spending limits, operation timeouts and access approvals remain separate controls.
+See [LLM cost control](llm-cost-control.md) for the evidence and recovery bounds.
+
+Preparing a plan, repairing a failed step and checking a finished answer can each
+require inference outside ordinary execution. Those calls belong to the specific
+native operation that admitted them. Before reserving another provider attempt,
+MemQL rechecks the owner, goal, cancellation state and current compiler, waiting
+step or answer version. A paused or finished run alone does not authorize a
+call, and an old operation cannot continue after the run changes phase.
+
+Repair and answer-check deadlines start before the operation claims its work.
+Waiting to acquire that claim or preparing its prompt consumes the same window;
+it cannot extend the window. Calls retain cancellation and cumulative usage
+across these phases. Database regressions exercise these boundaries across
+separate engines; provider availability and a deployed installation still need
+end-to-end verification with a fresh inference request.
+
+A run finishing is not acceptance of the goal's results. The goal stays open
+until its owner explicitly accepts the reviewed result or chooses to close it.
+The acceptance operation records the exact run revision, person, time and
+optional feedback. It refuses stale results, live runs and agent self-acceptance.
+A person may accept a useful partial result; an execution's success flag cannot
+make that decision for them. Initial plan approval only authorizes execution.
 
 The regression suite exercises parallel tool groups, pending calls, repeated
 context pressure, exact Unicode/source reconstruction, cross-replica reads,

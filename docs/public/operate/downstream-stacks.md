@@ -156,10 +156,10 @@ docker build -t <product>-frontend:local .
 bash ../memql/scripts/k3d/import-image.sh --image=<product>-frontend:local --dryRun=false
 ```
 
-## Composition model: one Application per repo
+## Composition model: independent resource ownership
 
-A product stack is composed of one ArgoCD Application per repo, all in the
-same namespace -- NOT a single overlay that cross-references repos:
+This bring-up model uses separate ArgoCD Applications for engine and product
+repositories in the same namespace, each owning its own resources:
 
 1. **Engine app** (`memql-local`): the engine's own overlay, from this
    (public) repo. Registered by the engine `make up` the product target
@@ -171,11 +171,21 @@ same namespace -- NOT a single overlay that cross-references repos:
    by a second, idempotent `up.sh` call with the product's
    `--app-name/--app-project/--project-manifest/--repo-url/--overlay-path`.
 
-Why not a kustomize remote base? ArgoCD's repo-server resolves remote
-bases outside the Application's credential -- a private product repo (the
-normal case) cannot be fetched that way, and a private base would also
-couple manifest revisions across repos. Independent Applications keep each
-repo's resources owned, pruned, and versioned by that repo.
+Independent Applications keep each repository's resources owned, pruned and
+versioned separately. This is an ownership choice, not a restriction against
+private product repositories using public engine bases. ArgoCD's Kustomize
+renderer inherits the root Application's repository credential for remote
+fetches; it does not select credentials belonging to another Application.
+A private root can therefore compose public bases pinned to immutable commits.
+Another private base requires credentials that authorize that repository; the
+receiver's qualified source graph currently admits only public dependencies.
+See ArgoCD's [remote base credential contract](https://argo-cd.readthedocs.io/en/release-2.13/user-guide/kustomize/#private-remote-bases).
+
+The [selected-release receiver](release-candidates.md) also supports a
+configured group of Applications rooted in the same product repository and
+selected commit. Each Application retains independent resource ownership,
+while one installation selection coordinates the group. Remote dependencies
+must pass its explicit repository, path and immutable-source qualification.
 
 The engine bring-up is idempotent, so the product repo's `make up` simply
 runs it twice: once as the engine bring-up (with the stack's `EXTRA_PORTS`),

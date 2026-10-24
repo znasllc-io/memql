@@ -87,6 +87,10 @@ type SARIFReport struct {
 // StepSpec declares a command, isolated image build or driver-owned report.
 // Commands have the same shell contract as a deployable's build.command.
 type StepSpec struct {
+	// Verification opts a deterministic, input-only command into exact-commit
+	// evidence reuse. It receives a stable verification environment, not event,
+	// release-version or run identity variables, and cannot produce artifacts.
+	Verification bool `yaml:"verification,omitempty" json:"verification,omitempty"`
 	// GitHubReadToken explicitly grants a cluster command or image build a short-lived,
 	// read-only token for this repository. Ordinary commands receive none.
 	GitHubReadToken bool `yaml:"githubReadToken,omitempty" json:"githubReadToken,omitempty"`
@@ -117,6 +121,10 @@ type StepSpec struct {
 	// Packages selects Go packages into MEMQL_PACKAGES: PackagesAffected or
 	// PackagesAll. Empty means the step selects none.
 	Packages string `yaml:"packages,omitempty" json:"packages,omitempty"`
+	// PackageRoots intersects the selected import-graph packages with these
+	// repository directories. Dependencies still select their importers before
+	// this filter; an empty intersection is an explicit skipped step.
+	PackageRoots []string `yaml:"packageRoots,omitempty" json:"packageRoots,omitempty"`
 	// Only narrows the packages to the db-gated trees, or to everything else.
 	Only string `yaml:"only,omitempty" json:"only,omitempty"`
 	// Shards splits the packages over up to this many steps, by the timing

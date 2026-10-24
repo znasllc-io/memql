@@ -107,6 +107,7 @@ export interface FakeSeed {
   accounts?: Row[];
   steps?: Row[] | Error;
   modelCalls?: Row[] | Error;
+  modelUsage?: Row[] | Error;
   observations?: Row[] | Error;
   byId?: Record<string, Row>;
   /** Make a write REFUSE, which is the interesting case while the executors
@@ -241,6 +242,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
         rowsResult([{ id: "v1:work:feedbackPolicy:primary", validateAnswers: true, reusableAfterSignatures: 2 }]),
       ),
       workModelCallsPageForOwnerRun: read(seed.modelCalls),
+      workModelUsageForOwnerRun: read(seed.modelUsage),
       workObservationSummariesForOwnerRun: read(seed.observations),
       workVerdictsForOwnerRun: read(seed.observations),
       workModelCallsForOwnerRun: read(seed.modelCalls),

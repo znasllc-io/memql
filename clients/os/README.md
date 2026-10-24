@@ -932,15 +932,20 @@ repetitions of what the app already had.
   source moves, then what", which is a property of the source rather than of
   any one run.
 
-### Pipelines, on the source (epic memql#5479)
+### Pipelines: delivery management
 
-A pipeline is a fact about a source (design record
-`docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, D12-D15 and
-section 10), so it lives here rather than in an app of its own: a tab of its
-own, **Runs**, a source's **Checks** and Pipeline fact, a run's page, the
-connect flow, and Settings -> Pipelines for the cluster owner. Everything reads
-from `apps/deployables/pipelines/`. Seven things are worth knowing before
-changing it.
+The dedicated Pipelines app owns Overview, Repositories, Changes, Runs,
+Releases, Logs and Settings. Shared pipeline components remain under
+`apps/deployables/pipelines/`; their implementation location does not make
+Deployables their navigation owner. Deployables exposes contextual source
+facts and links, while Cluster Updates selects this installation’s release.
+Legacy saved routes and GitHub callbacks resolve to Pipelines.
+
+Repository read access is distinct from write authority. `RepositoryChange`
+reads the backend’s fresh repository authority, creates an immutable bounded
+request, and opens its saved Nexus goal or approval. Installed roles never
+establish upstream repository ownership. Request history is server-backed;
+connection failures do not become a claim of read-only access or empty history.
 
 - **TWO MORE FEEDS AT THE ROOT, AND TWO ON THE RUN PAGE.** The caller's
   pipelines and runs are retained by `DeployablesApp` like every other concept
@@ -2542,16 +2547,17 @@ and starts its analysis. A saved repository is silently reused only with the sam
 GitHub binding and MemQL ownership; its history never impersonates a different
 selected identity. Progress marks the visible step, not merely prefilled values.
 
-**Sources is the single configured repository catalog.** Each row projects the
+**Pipelines → Repositories is the single configured repository catalog.** Each row projects the
 GitHub identity, organization or personal target, repository and tracked branch
 from the saved package and its verified access records. The MemQL owning account
-is separate attribution. There are no sibling Repositories or Accounts sections,
-and Settings links here without duplicating the credential roster. Opening a
+is separate attribution. There are no duplicate repository or account catalogs,
+and Pipelines Settings links here without duplicating the credential roster. Opening a
 source exposes its access, repository settings, deployables and history. Missing
 personal metadata is labelled unknown; the repository URL cannot establish the
 GitHub identity that authorized it.
 
-Sources is management-only: new source setup remains in Add deployable. Remove
+Repository setup uses Pipelines’ Add repository wizard. Deployables retains
+deployed app management and contextual repository links. Remove
 source hides that configured package from the catalog and saved choices; it
 preserves the package ID, automatic updates, deployment history, running sites,
 shared credential and installation binding. Adding the same active configuration

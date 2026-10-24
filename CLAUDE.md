@@ -31,6 +31,31 @@ Use the available `frontend-design` skill within this MemQL brief. The owner
 expects simple, minimal interfaces without losing functionality, and should
 not have to repeat this preference or request a design skill each time.
 
+## Harness changes: document decisions and paths (required)
+
+Agents and developers changing the harness must update its documentation and
+relevant code comments in the same change. This applies across projects, goals,
+models and execution routes. Explain **why** a non-obvious branch exists: its
+trigger, evidence used, chosen path, alternatives or tradeoff, fallback and stop
+conditions, and the invariant it protects. Cover permission and ownership checks,
+reuse and freshness decisions, retained versus temporary data, and what survives
+a retry, pause or replica change when those behaviors are affected.
+
+A goal has no fixed lifetime while measured progress continues. Keep progress
+windows, per-operation watchdogs, spending limits and permission gates distinct.
+Execution finishing means results are ready for review; only the owner's explicit
+acceptance of those results or decision to close ends the goal. Initial plan
+approval is not result acceptance. Preserve the feedback and exact reviewed
+result version, and do not let a model accept its own work.
+
+Keep rationale beside the decision in code; keep the connected workflow in the
+existing reference or runbook. Link the relevant regression tests and identify
+unverified behavior or known limitations. Do not describe intended behavior as
+verified, repeat obvious statements line by line, or use comments as a substitute
+for tests. A behavior change is incomplete while its comments or documentation
+still describe the old path. Start with the [harness decision map](docs/internal/ops/harness-decisions.md)
+and [work context and recovery](docs/public/ai/work-context-and-recovery.md).
+
 ## Quick Start
 
 **Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
@@ -184,8 +209,8 @@ normal app destinations without acknowledgment tracking.
 - [Environment variables](docs/public/operate/env-vars.md) · [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md)
 
 **Tooling:** **MemQL Cockpit** -- the fleet worker runtime + cluster CLI,
-installed as the `memql` command on operator machines; its own repo is
-`github.com/znasllc-io/memql-cockpit`. This repo's `bin/memql` is the engine
+installed as the `memql` command on operator machines; its source is in
+`cockpit/`, a separate module in this repository. This repo's `bin/memql` is the engine
 binary, which ships only inside container images; the two never share a PATH,
 so do not "fix" the name collision by renaming either.
 
@@ -808,7 +833,7 @@ the `mcp.<domain>` endpoint.
   subscription tokens, the LOOP caps INCLUDE the call. Billing falls to
   `unknown` when the usage report or the subscription signal is silent.
 
-The cockpit half lives in `memql-cockpit`; this repo fixes the protocol and
+The cockpit half lives in `cockpit/`; this repository fixes the protocol and
 the engine side.
 
 ### Workers (computer_use_headless / computer_use_embodied)

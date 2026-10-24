@@ -143,3 +143,56 @@ func TestSnapshotEntryArgumentsAreCheckedBeforeAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPrepareSnapshotEntryUsesOnlyCapturedPhase(t *testing.T) {
+	s, err := CaptureEntries("entry", "test/1", []string{"phase"}, sourceFixture(map[string]string{
+		"automation:entry": "@template\nautomation entry { return true }",
+		"automation:phase": "@template\nautomation phase { args { pullRequest object! }\nreturn automation child() }",
+		"automation:child": "@template\nautomation child { return true }",
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Recovery has only the durable snapshot. No installed loader is available.
+	restored, err := SnapshotFromMap(s.Map())
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Load: func(string) (*automations.Automation, error) {
+		t.Fatal("consulted installed source")
+		return nil, nil
+	}}
+	root, err := PrepareSnapshot(restored, "test/1", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.Automation("phase"); err == nil {
+		t.Fatal("root preparation exposed an unrelated native phase")
+	}
+	prepared, err := PrepareSnapshotEntry(restored, "test/1", "phase", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phase, err := prepared.Automation("phase")
+	if err != nil || phase.Args == nil || len(phase.Args.Fields) != 1 || phase.Args.Fields[0].Name != "pullRequest" {
+		t.Fatalf("phase signature was not preserved: %v", err)
+	}
+	if _, err := prepared.Automation("child"); err != nil {
+		t.Fatal("captured phase lost its reachable child:", err)
+	}
+	for _, entry := range []string{"child", "missing"} {
+		if _, err := PrepareSnapshotEntry(restored, "test/1", entry, opts); err == nil {
+			t.Fatalf("unadmitted native entry %q was accepted", entry)
+		}
+	}
+	if _, err := PrepareSnapshotEntry(restored, "other/1", "phase", opts); err == nil {
+		t.Fatal("incompatible contract accepted")
+	}
+	if _, err := PrepareSnapshotEntry(nil, "test/1", "phase", opts); err == nil {
+		t.Fatal("missing snapshot accepted")
+	}
+	restored.Constructs[0].Source += "\n// changed"
+	if _, err := PrepareSnapshotEntry(restored, "test/1", "phase", opts); err == nil {
+		t.Fatal("changed source accepted")
+	}
+}

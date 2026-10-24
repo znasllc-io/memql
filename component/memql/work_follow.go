@@ -52,6 +52,20 @@ func (p *workPending) Error() string {
 func followWorkRun(ctx context.Context, runID string, read workRowReader, onText func(string), onEvent func(WorkEvent) error, interval time.Duration) (string, error) {
 	seen := map[string]string{}
 	answer := ""
+	published := ""
+	publish := func(text string) error {
+		if onText == nil {
+			return nil
+		}
+		if !strings.HasPrefix(text, published) {
+			return fmt.Errorf("reply changed after streaming; reload the saved conversation")
+		}
+		if suffix := strings.TrimPrefix(text, published); suffix != "" {
+			onText(suffix)
+		}
+		published = text
+		return nil
+	}
 	for {
 		// Read status first and evidence second: once terminal, the last progress
 		// write necessarily preceded this snapshot. The opposite order loses tails.
@@ -92,8 +106,15 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 		}
 		sort.SliceStable(progress, func(i, j int) bool { return progress[i].event.At.Before(progress[j].event.At) })
 		completedResponse := ""
+		streamingReply := ""
 		for _, p := range progress {
 			event := p.event
+			if event.Kind == "reply" {
+				if event.Phase != "paused" {
+					streamingReply = event.Text
+				}
+				continue
+			}
 			if event.Kind == "response" {
 				// A draft can be rejected, interrupted by a question, or replaced
 				// by a structured response. It is not an append-only answer.
@@ -113,6 +134,11 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 				}
 			}
 		}
+		if status == "running" && workload == "quick" && streamingReply != "" {
+			if err := publish(streamingReply); err != nil {
+				return answer, err
+			}
+		}
 		switch run["status"] {
 		case "succeeded":
 			steps, err := read(ctx, "workStepsForOwnerRun", runID)
@@ -130,8 +156,8 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			// identifies the successful attempt even when another replica's
 			// clock makes an older response event appear newer.
 			answer = workResultText(run, steps, completedResponse)
-			if onText != nil {
-				onText(answer)
+			if err := publish(answer); err != nil {
+				return answer, err
 			}
 			return answer, nil
 		case "waiting":

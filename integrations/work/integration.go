@@ -315,6 +315,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "requestWorkbenchUse", Description: "Request permission to use the Workbench for a Computer-selected goal.", Handler: i.handleRequestWorkbenchUse},
 		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
 		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},
+		{Name: "consultKnowledge", Description: "Consult bounded reviewed knowledge for a newly discovered need in owned live work.", Handler: i.handleConsultKnowledge},
 		{Name: "recordGoalEvaluation", Description: "Publish owned external-harness evidence after verifying goal and model receipts.", Handler: i.handleRecordGoalEvaluation},
 		{Name: "approvalDiscussionState", Description: "Read human-guidance eligibility for one owned approval.", Handler: i.handleApprovalDiscussionState},
 		{Name: "openApprovalDiscussion", Description: "Record a human discussion message and open its bounded read-only child run.", Handler: i.handleOpenApprovalDiscussion},
@@ -335,6 +336,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"noPaidProviders": "bool -- inherited hard ceiling across every model modality",
 			},
 		},
+		{Name: "acceptGoalResults", Description: "Record the owner's acceptance of exact finished goal results and optional feedback, then close the goal. A running job cannot accept itself.", Handler: i.handleAcceptGoalResults},
+
 		{
 			Name:        "cancelGoal",
 			Description: "Ask every live run of one of the caller's goals to stop. Cancellation is REQUESTED rather than done: a run notices at its next step boundary, so a step already in flight finishes and is journaled. Returns {goalId, runsAsked, goalClosed}.",

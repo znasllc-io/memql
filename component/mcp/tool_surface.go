@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // ToolLister is the slice of the tool registry the surface reads. The concrete
@@ -439,7 +440,7 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 			result = errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
 			return result
 		}
-		result = toolResultFromJSON(raw)
+		result, _ = presentExecutedToolResult(name, args, raw)
 		return result
 	}
 }
@@ -820,6 +821,7 @@ type engineAdapter struct{ c concreteEngine }
 type concreteEngine interface {
 	Tools() *memql.ToolRegistry
 	RecordDelegatedToolSource(context.Context, string, map[string]any, string) error
+	PrepareDelegatedFeedback(context.Context, string, []common.ChatMessage, string, map[string]any) error
 	ToolListed(ctx context.Context, t *memql.Tool) bool
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
@@ -842,6 +844,9 @@ var _ concreteEngine = (*memql.MemQLEngine)(nil)
 func (a engineAdapter) Tools() ToolLister { return a.c.Tools() }
 func (a engineAdapter) RecordDelegatedToolSource(ctx context.Context, name string, args map[string]any, result string) error {
 	return a.c.RecordDelegatedToolSource(ctx, name, args, result)
+}
+func (a engineAdapter) PrepareDelegatedFeedback(ctx context.Context, sessionID string, messages []common.ChatMessage, name string, args map[string]any) error {
+	return a.c.PrepareDelegatedFeedback(ctx, sessionID, messages, name, args)
 }
 func (a engineAdapter) ToolListed(ctx context.Context, t *memql.Tool) bool {
 	return a.c.ToolListed(ctx, t)

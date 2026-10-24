@@ -6,7 +6,8 @@ builtin installationRollbackRead { }
 builtin installationRollbackConfiguration { }
 /// Reopen only the original promoted preparation's retained source bytes.
 @executor("integration.installation.installationRollbackReopenSource")
-builtin installationRollbackReopenSource { role string! }
+@args(profile="object")
+builtin installationRollbackReopenSource { role string! application string }
 /// Recheck native resource identity after potentially slow artifact reads.
 @executor("integration.installation.installationRollbackRecheckResources")
 builtin installationRollbackRecheckResources { }
@@ -21,7 +22,8 @@ builtin installationRollbackReserve { }
 builtin installationRollbackBegin { }
 /// Apply or reconcile only the exact admitted reversal.
 @executor("integration.installation.installationRollbackApply")
-builtin installationRollbackApply { }
+@args(profile="optionalObject")
+builtin installationRollbackApply { application string }
 /// Record controller facts without completing the installation.
 @executor("integration.installation.installationRollbackObserve")
 builtin installationRollbackObserve { }

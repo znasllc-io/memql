@@ -4404,6 +4404,29 @@ QueryClient.prototype.refreshComputerPermission = function (this: QueryClient, a
   return this.executeNamed("refreshComputerPermission", buildRefreshComputerPermission(args), opts);
 };
 
+/** Apply the exact separately reviewed native plan with fresh receiving evidence. */
+export interface ReleaseApplyInstallationArgs {
+  installationId: string;
+  planId: string;
+}
+
+export function buildReleaseApplyInstallation(args: ReleaseApplyInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "builtin releaseApplyInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseApplyInstallation(args: ReleaseApplyInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseApplyInstallation = function (this: QueryClient, args: ReleaseApplyInstallationArgs = {} as ReleaseApplyInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseApplyInstallation", buildReleaseApplyInstallation(args), opts);
+};
+
 /** Separately approve the exact reviewed candidate after fresh verification. */
 export interface ReleaseApproveCandidateArgs {
   candidateId: string;
@@ -4467,6 +4490,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseAssembleCandidate = function (this: QueryClient, args: ReleaseAssembleCandidateArgs = {} as ReleaseAssembleCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseAssembleCandidate", buildReleaseAssembleCandidate(args), opts);
+};
+
+/** Cancel the original operator's current plan only before application begins. */
+export interface ReleaseCancelInstallationArgs {
+  installationId: string;
+  planId: string;
+}
+
+export function buildReleaseCancelInstallation(args: ReleaseCancelInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "builtin releaseCancelInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCancelInstallation(args: ReleaseCancelInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCancelInstallation = function (this: QueryClient, args: ReleaseCancelInstallationArgs = {} as ReleaseCancelInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCancelInstallation", buildReleaseCancelInstallation(args), opts);
 };
 
 /** Read configured release sources and exact publication target identities. Owner only. */
@@ -4708,6 +4754,46 @@ QueryClient.prototype.releaseGetPublishedCandidate = function (this: QueryClient
   return this.executeNamed("releaseGetPublishedCandidate", buildReleaseGetPublishedCandidate(args), opts);
 };
 
+/** Authenticated receiving probe. Returns the native build and migration evidence. */
+export interface ReleaseInstallationHealthArgs {
+  nonce: string;
+}
+
+export function buildReleaseInstallationHealth(args: ReleaseInstallationHealthArgs): string {
+  const parts: string[] = [];
+  parts.push("nonce: " + renderMemQLValue(args.nonce));
+  return "builtin releaseInstallationHealth(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseInstallationHealth(args: ReleaseInstallationHealthArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseInstallationHealth = function (this: QueryClient, args: ReleaseInstallationHealthArgs = {} as ReleaseInstallationHealthArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseInstallationHealth", buildReleaseInstallationHealth(args), opts);
+};
+
+/** Read this receiving installation and its reviewed release choices; no credentials. */
+export interface ReleaseInstallationStatusArgs {
+}
+
+export function buildReleaseInstallationStatus(args: ReleaseInstallationStatusArgs): string {
+  void args;
+  return "builtin releaseInstallationStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseInstallationStatus(args?: ReleaseInstallationStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseInstallationStatus = function (this: QueryClient, args: ReleaseInstallationStatusArgs = {} as ReleaseInstallationStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseInstallationStatus", buildReleaseInstallationStatus(args), opts);
+};
+
 /** List verified published releases; identified developers, admins and owners may read. */
 export interface ReleaseListPublishedCandidatesArgs {
   cursor?: string;
@@ -4731,6 +4817,29 @@ QueryClient.prototype.releaseListPublishedCandidates = function (this: QueryClie
   return this.executeNamed("releaseListPublishedCandidates", buildReleaseListPublishedCandidates(args), opts);
 };
 
+/** Observe the selected installation; controller health is not a completion receipt. */
+export interface ReleaseObserveInstallationArgs {
+  installationId: string;
+  planId: string;
+}
+
+export function buildReleaseObserveInstallation(args: ReleaseObserveInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "builtin releaseObserveInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseObserveInstallation(args: ReleaseObserveInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseObserveInstallation = function (this: QueryClient, args: ReleaseObserveInstallationArgs = {} as ReleaseObserveInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseObserveInstallation", buildReleaseObserveInstallation(args), opts);
+};
+
 /** Verify an immutable candidate using complete work evidence and operator configuration. This retains artifacts for review and does not approve or publish them. */
 export interface ReleasePrepareCandidateArgs {
   candidate: Record<string, unknown>;
@@ -4750,6 +4859,37 @@ declare module "./query.js" {
 
 QueryClient.prototype.releasePrepareCandidate = function (this: QueryClient, args: ReleasePrepareCandidateArgs = {} as ReleasePrepareCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releasePrepareCandidate", buildReleasePrepareCandidate(args), opts);
+};
+
+/** Prepare one explicit release selection against the exact reviewed current revision. Verification retains a durable plan; this does not apply or publish anything. */
+export interface ReleasePrepareInstallationArgs {
+  installationId: string;
+  requestId: string;
+  candidateId: string;
+  catalogDigest: string;
+  overlayRevision: string;
+  expectedCurrentRevision: string;
+}
+
+export function buildReleasePrepareInstallation(args: ReleasePrepareInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  parts.push("catalogDigest: " + renderMemQLValue(args.catalogDigest));
+  parts.push("overlayRevision: " + renderMemQLValue(args.overlayRevision));
+  parts.push("expectedCurrentRevision: " + renderMemQLValue(args.expectedCurrentRevision));
+  return "builtin releasePrepareInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releasePrepareInstallation(args: ReleasePrepareInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releasePrepareInstallation = function (this: QueryClient, args: ReleasePrepareInstallationArgs = {} as ReleasePrepareInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releasePrepareInstallation", buildReleasePrepareInstallation(args), opts);
 };
 
 /** Separately promote a verified draft with the exact approved asset set. */
@@ -4831,6 +4971,29 @@ QueryClient.prototype.releaseReadDiscoveredCandidate = function (this: QueryClie
   return this.executeNamed("releaseReadDiscoveredCandidate", buildReleaseReadDiscoveredCandidate(args), opts);
 };
 
+/** Resume the original saved preparation after interruption; applies nothing. */
+export interface ReleaseResumeInstallationArgs {
+  installationId: string;
+  preparationId: string;
+}
+
+export function buildReleaseResumeInstallation(args: ReleaseResumeInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("preparationId: " + renderMemQLValue(args.preparationId));
+  return "builtin releaseResumeInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseResumeInstallation(args: ReleaseResumeInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseResumeInstallation = function (this: QueryClient, args: ReleaseResumeInstallationArgs = {} as ReleaseResumeInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseResumeInstallation", buildReleaseResumeInstallation(args), opts);
+};
+
 /** Permanently retire an unpublished candidate and release its retention pins. */
 export interface ReleaseRetireCandidateArgs {
   candidateId: string;
@@ -4850,6 +5013,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseRetireCandidate = function (this: QueryClient, args: ReleaseRetireCandidateArgs = {} as ReleaseRetireCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseRetireCandidate", buildReleaseRetireCandidate(args), opts);
+};
+
+/** Restore the exact previous release through the selected plan's retained recipe. Only its original operator may request it; fresh native checks may refuse it. */
+export interface ReleaseRollbackInstallationArgs {
+  installationId: string;
+  planId: string;
+}
+
+export function buildReleaseRollbackInstallation(args: ReleaseRollbackInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  return "builtin releaseRollbackInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseRollbackInstallation(args: ReleaseRollbackInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseRollbackInstallation = function (this: QueryClient, args: ReleaseRollbackInstallationArgs = {} as ReleaseRollbackInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseRollbackInstallation", buildReleaseRollbackInstallation(args), opts);
 };
 
 /** Seal complete native publication evidence as an immutable signed catalog record. */
@@ -4938,6 +5124,144 @@ declare module "./query.js" {
 
 QueryClient.prototype.replayRun = function (this: QueryClient, args: ReplayRunArgs = {} as ReplayRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("replayRun", buildReplayRun(args), opts);
+};
+
+/** Read current GitHub write authority and the configured request route. A local owner role alone never grants upstream repository write permission. */
+export interface RepositoryChangeAccessArgs {
+  sourceId: string;
+}
+
+export function buildRepositoryChangeAccess(args: RepositoryChangeAccessArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceId: " + renderMemQLValue(args.sourceId));
+  return "builtin repositoryChangeAccess(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeAccess(args: RepositoryChangeAccessArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeAccess = function (this: QueryClient, args: RepositoryChangeAccessArgs = {} as RepositoryChangeAccessArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeAccess", buildRepositoryChangeAccess(args), opts);
+};
+
+/** Authenticated peer request intake; sender ownership and decisions are never imported. */
+export interface RepositoryChangeReceiveArgs {
+  transfer: Record<string, unknown>;
+}
+
+export function buildRepositoryChangeReceive(args: RepositoryChangeReceiveArgs): string {
+  const parts: string[] = [];
+  parts.push("transfer: " + renderMemQLValue(args.transfer));
+  return "builtin repositoryChangeReceive(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeReceive(args: RepositoryChangeReceiveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeReceive = function (this: QueryClient, args: RepositoryChangeReceiveArgs = {} as RepositoryChangeReceiveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeReceive", buildRepositoryChangeReceive(args), opts);
+};
+
+/** Submit an immutable bounded request. Its maintainer and workflow come only from operator-bound installed DSL. Request-only authority never permits writes. */
+export interface RepositoryChangeRequestArgs {
+  sourceId: string;
+  requestId: string;
+  statement: string;
+  operation: string;
+  paths: string[];
+  parentRequestId?: string;
+}
+
+export function buildRepositoryChangeRequest(args: RepositoryChangeRequestArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceId: " + renderMemQLValue(args.sourceId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("statement: " + renderMemQLValue(args.statement));
+  parts.push("operation: " + renderMemQLValue(args.operation));
+  parts.push("paths: " + renderMemQLValue(args.paths));
+  if (args.parentRequestId !== undefined) parts.push("parentRequestId: " + renderMemQLValue(args.parentRequestId));
+  return "builtin repositoryChangeRequest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeRequest(args: RepositoryChangeRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeRequest = function (this: QueryClient, args: RepositoryChangeRequestArgs = {} as RepositoryChangeRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeRequest", buildRepositoryChangeRequest(args), opts);
+};
+
+/** List durable requests for a visible source, restricted to requester or maintainer. */
+export interface RepositoryChangeRequestsArgs {
+  sourceId: string;
+}
+
+export function buildRepositoryChangeRequests(args: RepositoryChangeRequestsArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceId: " + renderMemQLValue(args.sourceId));
+  return "builtin repositoryChangeRequests(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeRequests(args: RepositoryChangeRequestsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeRequests = function (this: QueryClient, args: RepositoryChangeRequestsArgs = {} as RepositoryChangeRequestsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeRequests", buildRepositoryChangeRequests(args), opts);
+};
+
+/** Revoke this maintainer's delegation with a recorded explanation. */
+export interface RepositoryChangeRevokeArgs {
+  requestId: string;
+  reason: string;
+}
+
+export function buildRepositoryChangeRevoke(args: RepositoryChangeRevokeArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin repositoryChangeRevoke(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeRevoke(args: RepositoryChangeRevokeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeRevoke = function (this: QueryClient, args: RepositoryChangeRevokeArgs = {} as RepositoryChangeRevokeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeRevoke", buildRepositoryChangeRevoke(args), opts);
+};
+
+/** Read only a request owned by the caller or assigned to that exact maintainer. */
+export interface RepositoryChangeStatusArgs {
+  requestId: string;
+}
+
+export function buildRepositoryChangeStatus(args: RepositoryChangeStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin repositoryChangeStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeStatus(args: RepositoryChangeStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeStatus = function (this: QueryClient, args: RepositoryChangeStatusArgs = {} as RepositoryChangeStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeStatus", buildRepositoryChangeStatus(args), opts);
 };
 
 /** Ask for a specialist to be trained, as a decision a person makes rather than a thing an agent does. Raises a skillMint approval on one of the caller's runs; approving it opens the trainSpecialist work -- the SAME template the refresh cadence opens, so approval and cadence cannot drift into two trainers.
@@ -6384,6 +6708,35 @@ declare module "./query.js" {
 
 QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: StorefrontProbeArgs = {} as StorefrontProbeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
+};
+
+/** Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance. */
+export interface WorkAcceptGoalResultsArgs {
+  goalId: string;
+  runId: string;
+  /** createdAt of the reviewed run row; a changed result requires a fresh review. */
+  runVersion: string;
+  /** Optional owner feedback on the accepted result, at most 4000 characters. */
+  feedback?: string;
+}
+
+export function buildWorkAcceptGoalResults(args: WorkAcceptGoalResultsArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("runVersion: " + renderMemQLValue(args.runVersion));
+  if (args.feedback !== undefined) parts.push("feedback: " + renderMemQLValue(args.feedback));
+  return "builtin workAcceptGoalResults(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workAcceptGoalResults(args: WorkAcceptGoalResultsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workAcceptGoalResults = function (this: QueryClient, args: WorkAcceptGoalResultsArgs = {} as WorkAcceptGoalResultsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workAcceptGoalResults", buildWorkAcceptGoalResults(args), opts);
 };
 
 /** Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused. */

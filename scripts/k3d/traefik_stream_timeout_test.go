@@ -42,6 +42,10 @@ ensure_db_image(){ :; }
 prewarm_build_frontend(){ :; }
 build_and_import_nodes(){ :; }
 point_application_at_local_images(){ exit 0; }
+# This fixture owns only the ingress seam. The supervisor's re-exec would
+# discard these shell stubs; its real admission is covered separately.
+check_local_build_disk(){ :; }
+export MEMQL_HOST_BUILD_LOCK_FD=fixture-only
 main --cluster=timeout-fixture --node=bff --image-source=checkout --repo-root="$TRAEFIK_ROOT"
 `
 			// Up's closed parameter set does not contain dev's build options.
@@ -51,6 +55,19 @@ main --cluster=timeout-fixture --node=bff --image-source=checkout --repo-root="$
 			cmd := exec.Command("bash", "-c", script)
 			cmd.Dir = root
 			cmd.Env = append(os.Environ(), "PATH="+tmp+string(os.PathListSeparator)+os.Getenv("PATH"), "TRAEFIK_DRIVER="+filepath.Join(root, "scripts", "k3d", driver+".sh"), "TRAEFIK_ROOT="+root, "TRAEFIK_MANIFEST="+manifest, "TRAEFIK_ARGS="+args)
+			// Defense in depth: if the fixture accidentally reaches admission,
+			// its account directory is still temporary and daemon tools refuse.
+			cmd.Env = append(cmd.Env, installLocalBuildTestRuntime(t, tmp)...)
+			t.Cleanup(func() {
+				if _, err := os.Stat(filepath.Join(tmp, "account/.memql/worker-capacity/local-build.json")); !os.IsNotExist(err) {
+					t.Errorf("ingress fixture escaped into build supervision: %v", err)
+				}
+			})
+			for _, name := range []string{"docker", "k3d"} {
+				if err := os.WriteFile(filepath.Join(tmp, name), []byte("#!/bin/sh\necho 'unexpected daemon command in ingress fixture' >&2\nexit 97\n"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("driver failed: %v\n%s", err, out)

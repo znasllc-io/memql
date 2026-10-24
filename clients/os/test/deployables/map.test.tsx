@@ -20,7 +20,7 @@ import {
   emit,
   fakeConnection,
   siteRow,
-  withSession,
+  withDeliverySession as withSession,
   type FakeConnection,
   type FakeSeed,
 } from "./harness";
@@ -112,6 +112,23 @@ describe("what the map draws", () => {
     mount(connection);
     const bundle = await screen.findByLabelText(/Bundle baked site, serving 2 deployables/);
     expect(bundle).toBeTruthy();
+  });
+
+  it.each([
+    ["MemQL OS", "file:///app/os", "os"],
+    ["VS Code", "file:///app/vscode-site", "vscode"],
+  ])("names the built-in %s site without exposing its path and preserves keyboard navigation", async (name, reference, host) => {
+    const navigate = vi.fn();
+    mount(fakeConnection({ sites: [siteRow({
+      id: `site-${host}`, hostname: `${host}.memql.example.com`,
+      bundleRef: reference, systemOwned: true,
+    })] }), { navigate });
+    const bundle = await screen.findByRole("button", { name: `Bundle Built-in site: ${name}` });
+    expect(bundle.querySelector(".os-deploy-node-sub")?.textContent).toBe(name);
+    expect(bundle.querySelector("title")?.textContent).toBe(name);
+    expect(canvas().textContent).not.toContain("file://");
+    fireEvent.keyDown(bundle, { key: "Enter" });
+    expect(navigate).toHaveBeenCalledWith("deployables", { fromContent: true });
   });
 
   it("draws nothing and says so when there is nothing to draw", async () => {
@@ -652,13 +669,12 @@ describe("a source's checks on the map", () => {
     const app = (section: string) =>
       withSession(<DeployablesApp sectionId={section} navigate={navigate} askContext={vi.fn()} store={store} />, { role: "owner", userId: VIEWER });
     h.connection = fakeConnection(checkedSeed());
-    const view = render(app("map"));
+    render(app("map"));
     await click(await screen.findByLabelText(/^Checks for acme\/shop/));
-    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    expect(navigate).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith("deployables", expect.anything());
     expect(document.querySelector(".os-deploy-node[data-selected]")).toBeNull();
     // Where the navigation lands: the source's own page, on the Sources tab.
-    view.rerender(app("sources"));
     expect(await screen.findByRole("region", { name: "Source shop" })).toBeTruthy();
   });
 
@@ -666,7 +682,8 @@ describe("a source's checks on the map", () => {
     const navigate = vi.fn();
     mount(fakeConnection(checkedSeed()), { navigate });
     fireEvent.keyDown(await screen.findByLabelText(/^Checks for acme\/shop/), { key: "Enter" });
-    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    expect(navigate).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalledWith("deployables", expect.anything());
+    expect(await screen.findByRole("region", { name: "Source shop" })).toBeTruthy();
   });
 });

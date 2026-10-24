@@ -553,6 +553,7 @@ func (e *MemQLEngine) ExecuteToolByName(ctx context.Context, name string, args m
 	if e == nil || e.tools == nil {
 		return "", fmt.Errorf("tools not configured")
 	}
+	ctx = e.modelSeam.withProviderAdmission(ctx)
 	tool, err := e.tools.Get(strings.TrimSpace(name))
 	if err != nil {
 		return "", fmt.Errorf("tool %q not found: %w", name, err)

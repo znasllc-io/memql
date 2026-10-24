@@ -29,22 +29,22 @@ builtin installationReservePreparation { }
 /// Acquire or recover one exact source capture.
 @executor("integration.installation.installationCaptureSource")
 @args(profile="object")
-builtin installationCaptureSource { role string! }
+builtin installationCaptureSource { role string! application string }
 
 /// Reopen and verify one private captured source archive.
 @executor("integration.installation.installationVerifySource")
 @args(profile="object")
-builtin installationVerifySource { role string! }
+builtin installationVerifySource { role string! application string }
 
 /// Acknowledge only a durably verified source capture.
 @executor("integration.installation.installationAcknowledgeSource")
 @args(profile="object")
-builtin installationAcknowledgeSource { role string! }
+builtin installationAcknowledgeSource { role string! application string }
 
 /// Render one verified source with the authenticated native renderer.
 @executor("integration.installation.installationRenderSource")
 @args(profile="object")
-builtin installationRenderSource { role string! }
+builtin installationRenderSource { role string! application string }
 
 /// Verify the complete image and resource diff and scope artifact reads.
 @executor("integration.installation.installationVerifyResources")
@@ -69,3 +69,22 @@ builtin installationReobserveConfiguration { }
 /// Atomically promote only complete native preparation evidence.
 @executor("integration.installation.installationPromotePreparation")
 builtin installationPromotePreparation { }
+
+/// Verify the configured authenticated session and migration baseline before installation.
+@executor("integration.installation.installationContinuityBaseline")
+builtin installationContinuityBaseline { }
+
+@executor("integration.release.releaseOverlayRead")
+builtin releaseOverlayRead {}
+@executor("integration.release.releaseOverlayBuild")
+builtin releaseOverlayBuild {}
+@executor("integration.release.releaseOverlayReserve")
+builtin releaseOverlayReserve {}
+@executor("integration.release.releaseOverlayPropose")
+builtin releaseOverlayPropose {}
+@executor("integration.release.releaseOverlayObserve")
+builtin releaseOverlayObserve {}
+
+/// Enumerate the exact Applications admitted by this native installation scope.
+@executor("integration.installation.installationApplications")
+builtin installationApplications { }

@@ -1,0 +1,49 @@
+{
+  "automation": "pipelines/automations.memql pipelineRunReconciliation",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "event": "s-event",
+            "refState": "s-refState",
+            "status": "s-status",
+            "trigger": "s-trigger"
+          },
+          "topic": "automation.invocation.pipelineRunReconciliation"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "continue",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "event": "s-event",
+            "refState": "s-refState",
+            "status": "s-status",
+            "trigger": "s-trigger"
+          },
+          "topic": "automation.invocation.pipelineRunReconciliation"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "continue",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

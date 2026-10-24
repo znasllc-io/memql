@@ -1,5 +1,6 @@
+import { useWide } from "../../kit/useWide";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption, formatMoment } from "../../kit";
@@ -167,22 +168,25 @@ export function BeaconMap({
   onToggleFold,
   at,
 }: BeaconMapProps) {
+  const frame = useRef<HTMLDivElement>(null);
+  const horizontal = useWide(frame, 760);
   const model: LayoutResult = useMemo(
     () => layout(world, { expandedColumns, expandedFolds }),
     [world, expandedColumns, expandedFolds],
   );
   const progress = useMemo(() => goalProgress(world), [world]);
 
-  const width = (model.bounds.maxX - model.bounds.minX) * UNIT + PAD * 2;
-  const height = (model.bounds.maxY - model.bounds.minY) * UNIT + PAD * 2;
+  const extentX = model.bounds.maxX - model.bounds.minX, extentY = model.bounds.maxY - model.bounds.minY;
+  const width = horizontal ? extentX * UNIT + PAD * 2 : extentY * UNIT + PAD * 2 + 230;
+  const height = horizontal ? extentY * UNIT + PAD * 2 : extentX * 11 + PAD * 2;
 
   // A DEGRADED FEED MUST NOT READ AS A LIVE RUN. A map is a picture of now;
   // when the subscription is behind, the picture is of some earlier now, and
   // the only honest thing to do is say so and dim it.
   const behind = state === "degraded" || state === "disconnected";
 
-  const px = useCallback((x: number) => (x - model.bounds.minX) * UNIT + PAD, [model.bounds.minX]);
-  const py = useCallback((y: number) => (y - model.bounds.minY) * UNIT + PAD, [model.bounds.minY]);
+  const px = useCallback((x: number, y: number) => horizontal ? (x - model.bounds.minX) * UNIT + PAD : (y - model.bounds.minY) * UNIT + PAD, [model.bounds.minX, model.bounds.minY, horizontal]);
+  const py = useCallback((x: number, y: number) => horizontal ? (y - model.bounds.minY) * UNIT + PAD : (x - model.bounds.minX) * 11 + PAD, [model.bounds.minX, model.bounds.minY, horizontal]);
 
   /* What stands at each point on the road, so a stretch can stop short of it.
    *
@@ -219,7 +223,7 @@ export function BeaconMap({
 
   if (world.goal === null) {
     return (
-      <div className="os-nexus-map" data-empty>
+      <div className="os-nexus-map" ref={frame} data-empty>
         {state === "seeding" ? <ContentSkeleton kind="map" label="Loading from the cluster" /> : <Caption>{"Nothing to draw yet."}</Caption>}
       </div>
     );
@@ -229,7 +233,7 @@ export function BeaconMap({
   const road = model.road;
 
   return (
-    <div className="os-nexus-map" data-behind={behind || undefined}>
+    <div className="os-nexus-map" ref={frame} data-orientation={horizontal ? "horizontal" : "vertical"} data-behind={behind || undefined}>
       <MapCanvas
         label={mapDescription(world, progress, at)}
         canvasClassName="os-nexus-map-canvas"
@@ -249,10 +253,10 @@ export function BeaconMap({
             // arrival, and the polyline has to stay continuous through it --
             // hence 0 rather than a bare gap.
             const seg = arrive(
-              px(from.x),
-              py(from.y),
-              px(point.x),
-              py(point.y),
+              px(from.x, from.y),
+              py(from.x, from.y),
+              px(point.x, point.y),
+              py(point.x, point.y),
               standoffAt.get(roadKey(from.x)) ?? 0,
               standoffAt.get(roadKey(point.x)) ?? 0,
             );
@@ -281,10 +285,10 @@ export function BeaconMap({
             const b = model.nodes.get(edge.to);
             if (a === undefined || b === undefined) return null;
             const seg = arrive(
-              px(a.x),
-              py(a.y),
-              px(b.x),
-              py(b.y),
+              px(a.x, a.y),
+              py(a.x, a.y),
+              px(b.x, b.y),
+              py(b.x, b.y),
               standoff(a.kind),
               standoff(b.kind),
             );
@@ -307,8 +311,8 @@ export function BeaconMap({
               <Beacon
                 key={node.id}
                 node={node}
-                cx={px(node.x)}
-                cy={py(node.y)}
+                cx={px(node.x, node.y)}
+                cy={py(node.x, node.y)}
                 fraction={progress.fraction}
                 lit={progress.lit}
                 compiling={progress.compiling}
@@ -319,8 +323,9 @@ export function BeaconMap({
               <MapNode
                 key={node.id}
                 node={node}
-                cx={px(node.x)}
-                cy={py(node.y)}
+                cx={px(node.x, node.y)}
+                cy={py(node.x, node.y)}
+                vertical={!horizontal}
                 selected={node.stepKey !== "" && node.stepKey === selectedStepKey}
                 onActivate={() => activate(node)}
               />
@@ -404,7 +409,7 @@ function Beacon({
           beacon's <title> above still carries it for a reader who cannot see
           which page they are on. */}
       <text className="os-nexus-beacon-count" x={cx} y={cy + BEACON_R + 20} textAnchor="middle">
-        {compiling ? "working it out" : total === 0 ? "" : `${completed} of ${total}`}
+        {compiling ? "working it out" : total === 0 ? "" : `${completed} of ${total} steps complete`}
       </text>
     </g>
   );
@@ -415,12 +420,14 @@ function MapNode({
   cx,
   cy,
   selected,
+  vertical,
   onActivate,
 }: {
   node: LayoutNode;
   cx: number;
   cy: number;
   selected: boolean;
+  vertical: boolean;
   onActivate: () => void;
 }) {
   const spoken = describe(node);
@@ -446,8 +453,8 @@ function MapNode({
       <title>{spoken}</title>
       {shapeFor(node, cx, cy)}
       {node.kind === "fold" ? null : (
-        <text className="os-nexus-node-label" x={cx} y={cy - STEP_R - 7} textAnchor="middle">
-          {truncate(node.label, node.kind === "template" ? 26 : 18)}
+        <text className="os-nexus-node-label" x={vertical ? cx + 22 : cx} y={vertical ? cy + 4 : cy - STEP_R - 20} textAnchor={vertical ? "start" : "middle"}>
+          {labelLines(node.label).map((line, index) => <tspan key={index} x={vertical ? cx + 22 : cx} dy={index ? 14 : 0}>{line}</tspan>)}
         </text>
       )}
     </g>
@@ -570,7 +577,7 @@ function describe(node: LayoutNode): string {
 function legend(progress: { completed: number; total: number; compiling: boolean }): string {
   if (progress.compiling) return "Working out how to do this. The map fills in as steps appear.";
   if (progress.total === 0) return "No steps yet.";
-  return "Thick road is where the machine had to think.";
+  return "Select an action to read its result and recorded reason.";
 }
 
 function mapDescription(
@@ -593,4 +600,10 @@ function truncate(text: string, max: number): string {
   // is pure and takes no DOM reads, and a label that measured itself would
   // make the map lay out differently in a test and on a screen.
   return `${trimmed.slice(0, max - 1)}…`;
+}
+
+function labelLines(label: string): string[] {
+ const words = label.split(/\s+/); const lines = [""];
+ for (const word of words) { const i=lines.length-1; if (lines[i]!.length + word.length > 24 && lines[i]) { if(lines.length === 2) { lines[i] = truncate(lines[i]! + " " + word, 24); break; } lines.push(word); } else lines[i] += (lines[i] ? " " : "") + word; }
+ return lines;
 }

@@ -37,8 +37,17 @@ function check_module() {
 }
 
 function check_versions() {
+    local dirs="$1" dir status=0
     go work sync || return 1
-    git diff --exit-code -- go.mod go.sum go.work go.work.sum '**/go.mod' '**/go.sum'
+    # Sync selects workspace versions, but its package loader can discard
+    # standalone test dependencies/checksums (observed with Go 1.27.3).
+    # Restore each standalone closure before comparing the normalized files;
+    # the build/vet/tidy-diff checks above still reject stale input metadata.
+    while IFS= read -r dir; do
+        (cd "$dir" && GOWORK=off go mod tidy) || status=1
+    done <<< "$dirs"
+    git diff --exit-code -- go.mod go.sum go.work go.work.sum '**/go.mod' '**/go.sum' || status=1
+    return "$status"
 }
 
 function check_package_coverage() {
@@ -63,7 +72,7 @@ function main() {
     while IFS= read -r dir; do
         check_module "$dir" || status=1
     done <<< "$dirs"
-    check_versions || status=1
+    check_versions "$dirs" || status=1
     check_package_coverage || status=1
     return "$status"
 }

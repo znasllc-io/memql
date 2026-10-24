@@ -160,6 +160,23 @@ WHERE 1-(v.embedding <=> $2::vector) >= $3
 ORDER BY v.embedding <=> $2::vector,(s.artifact_id<>'') DESC,s.id LIMIT $4`
 
 func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) (result []memorynodes.MemoryNode, failure error) {
+	var receipt trainingSelectionReceipt
+	var receiptID string
+	result, failure = i.readOwnedTrainingLessons(ctx, args, func(id string, r trainingSelectionReceipt) { receiptID, receipt = id, r })
+	if failure == nil && args["includeAvailability"] == true && receiptID != "" {
+		raw, err := json.Marshal(map[string]any{"trainingAvailability": receipt.Status, "retryAt": receipt.RetryAt, "receiptId": receiptID})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, memorynodes.MemoryNode{ID: receiptID + "-availability", Concept: resultConcept, Payload: raw})
+	}
+	return result, failure
+}
+
+// The ordinary prompt reader preserves its passage-only contract. A native
+// consultation also receives the saved receipt's availability status, so an
+// empty corpus, missing index and no ranked matches are not conflated.
+func (i *Integration) readOwnedTrainingLessons(ctx context.Context, args map[string]any, selected func(string, trainingSelectionReceipt)) (result []memorynodes.MemoryNode, failure error) {
 	run, goal, err := i.ownedTrainingScope(ctx)
 	if err != nil {
 		return nil, err
@@ -171,6 +188,14 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	limit, valid := intArg(args["limit"])
 	tokens, validTokens := intArg(args["maxTokens"])
 	threshold := floatField(args, "minimumSimilarity")
+	retrySeconds := 0
+	if args["retryUnavailableAfterSeconds"] != nil {
+		var validRetry bool
+		retrySeconds, validRetry = intArg(args["retryUnavailableAfterSeconds"])
+		if !validRetry || retrySeconds < 0 || retrySeconds > 900 {
+			return nil, fmt.Errorf("Training availability retry must be between 0 and 900 seconds")
+		}
+	}
 	text := strings.TrimSpace(asString(args["text"]))
 	if !valid || !validTokens || limit < 1 || limit > 10 || tokens < 1 || tokens > 4000 || math.IsNaN(threshold) || threshold < 0 || threshold > 1 || text == "" || len(text) > 12000 {
 		return nil, fmt.Errorf("owned Training retrieval requires bounded text, count, similarity and context limits")
@@ -182,6 +207,8 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 			failure = i.saveTrainingSelection(ctx, run, receiptID, receipt)
 			if failure != nil {
 				result = nil
+			} else if selected != nil {
+				selected(receiptID, receipt)
 			}
 		}
 	}()
@@ -258,9 +285,30 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	if err != nil {
 		return nil, err
 	}
-	vector, err := r.embed.Embed(ctx, text, provider)
+	if retrySeconds > 0 {
+		receipt.AvailabilityKey, err = i.trainingAvailabilityKey(ctx, run, text, provider)
+		if err != nil {
+			return nil, err
+		}
+		prior, priorID, err := i.recentTrainingTimeout(ctx, run, receipt.AvailabilityKey, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if priorID != "" {
+			receipt.Status, receipt.RetryAt, receipt.ReusedReceiptID = "embedding-backoff", prior.RetryAt, priorID
+			return nil, nil
+		}
+	}
+	vector, unavailable, err := optionalTrainingVector(ctx, func(lookup context.Context) ([]float32, error) { return r.embed.Embed(lookup, text, provider) })
 	if err != nil {
 		return nil, fmt.Errorf("embed Training query: %w", err)
+	}
+	if unavailable {
+		receipt.Status = "embedding-timeout"
+		if receipt.AvailabilityKey != "" {
+			receipt.RetryAt = time.Now().Add(time.Duration(retrySeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+		}
+		return nil, nil
 	}
 	table, err := memql.EmbeddingVectorTable(provider, len(vector))
 	if err != nil {
@@ -461,4 +509,28 @@ func (i *Integration) revalidateReleaseLesson(ctx context.Context, c trainingCan
 		return nil, false, nil
 	}
 	return map[string]any{"chunkId": seed.ID, "chunkVersionAt": latest.CreatedAt.Format(time.RFC3339Nano), "domainId": seed.Domain, "source": "appStructure", "sourceRef": seed.SourceRef, "seedRevision": seed.Revision, "citation": "Shipped knowledge: " + seed.SourceRef, "similarity": c.score, "text": seed.Text}, true, nil
+}
+
+// Similarity retrieval is optional context, not an execution prerequisite. A
+// slow inference door must not consume the whole turn before work starts. Only
+// this child deadline is optional: owner/source validation, explicit evaluation
+// lessons, provider faults and cancellation of the caller still propagate.
+// The caller records the omission on the normal Training selection receipt.
+func optionalTrainingVector(ctx context.Context, embed func(context.Context) ([]float32, error)) ([]float32, bool, error) {
+	return trainingVectorWithin(ctx, 5*time.Second, embed)
+}
+
+var errTrainingLookupTimeout = errors.New("optional Training query timed out")
+
+func trainingVectorWithin(ctx context.Context, budget time.Duration, embed func(context.Context) ([]float32, error)) ([]float32, bool, error) {
+	lookup, cancel := context.WithTimeoutCause(ctx, budget, errTrainingLookupTimeout)
+	defer cancel()
+	vector, err := embed(lookup)
+	if ctx.Err() != nil {
+		return nil, false, ctx.Err()
+	}
+	if errors.Is(context.Cause(lookup), errTrainingLookupTimeout) {
+		return nil, true, nil
+	}
+	return vector, false, err
 }

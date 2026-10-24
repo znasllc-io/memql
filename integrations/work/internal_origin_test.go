@@ -132,6 +132,7 @@ func TestEveryWorkWriteStampsInternalOrigin(t *testing.T) {
 			// A PLAIN caller context: no origin stamped, which is exactly
 			// what a browser's stream carries. If the handler does not stamp,
 			// the engine sees OriginClient and the write is refused.
+			eng.reply("workGoalForOwner", map[string]any{"id": "v1:work:goal:g1", "ownerUserId": "u1", "status": "open"})
 			ctx := callerContext("u1")
 			if origin := auth.OriginFromContext(ctx); origin.IsInternal() {
 				t.Fatalf("the caller context already carried internal origin, so this test would pass without the handler doing anything")

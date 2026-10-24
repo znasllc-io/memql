@@ -112,6 +112,8 @@ automation runPipelineStages {
     } else {
       for item in stage.steps parallel(16) {
         action executePipelineStep(stepKey: item.key)
+        // Publish the recorded outcome without waiting for slower siblings.
+        action reportPipelineProgress()
       }
       if stage.stageIndex < args.stages.count() - 1 {
         action reportPipelineProgress()
@@ -247,4 +249,36 @@ automation pipelineVersionForEvent {
 automation pipelineNotificationOutcome {
  args { failed bool! previousFailed bool! }
  return args.failed ? "failed" : args.previousFailed ? "recovered" : "passed"
+}
+
+/// A current pull request head replaces older affected validation. Native code
+/// still proves repository, request identity and current head before cancellation.
+@template
+automation pipelineSupersessionPolicy {
+ args { event string! mode string! previousMode string! trigger string! }
+ return args.event == "pull_request" && args.mode == "affected" && args.previousMode == "affected" && args.trigger != "rerun"
+}
+
+/// A queue ref that no longer names the checked tree cannot still land. Unknown
+/// provider state retains the run; installations may choose a stricter policy.
+@template
+automation pipelineRunReconciliation {
+ args { event string! trigger string! refState string! status string! }
+ return args.event == "merge_group" && (args.refState == "absent" || args.refState == "moved") ? "cancel" : "continue"
+}
+
+/// Installations opt into bounded diagnosis through their own policy and
+/// analysis template. A copied engine default creates no repair or writer.
+@template
+automation pipelineMaintenancePolicy {
+ args { event string! conclusion string! failureCode string! attempt int! repository string! sha string! }
+ return {action: "none", template: "", reason: ""}
+}
+
+/// Evidence reuse is explicitly enabled by an installation, separately from a
+/// source command's opt-in verification contract. Generic defaults rerun work.
+@template
+automation pipelineEvidenceReuse {
+ args { event string! sourceEvent string! sourceMode string! ageSeconds int! }
+ return false
 }

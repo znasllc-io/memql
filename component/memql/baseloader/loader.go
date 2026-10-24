@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -53,7 +54,11 @@ type RawFile struct {
 // whose language line is refused is left out too, without a word here: that
 // domain's refusal is reported once, and nothing read from it may cascade.
 func ReadAll(logger *slog.Logger) []RawFile {
-	tree := memqldsl.Tree()
+	return ReadAllFrom(memqldsl.Tree(), logger)
+}
+
+// ReadAllFrom reads one explicit tree without changing the process registry.
+func ReadAllFrom(tree fs.FS, logger *slog.Logger) []RawFile {
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
 		if logger != nil {

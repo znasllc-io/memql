@@ -214,6 +214,17 @@ export interface DeploymentRow {
   createdAt: string;
 }
 
+/** A terminal receipt proves staging, not that every service loaded the tree.
+ * A skipped website must be explicit; a failed or missing website outcome is
+ * not a successful MemQL-only installation. Unchanged DSL can carry a version
+ * too, so this receipt does not by itself prove a new restart was requested. */
+export function memqlOnlyStaged(run: DeploymentRow | null): boolean {
+  if (!run || run.status !== "succeeded" || !run.dslVersion.trim() || !run.report) return false;
+  if (!(run.report.dslDomains ?? []).some(domain => !domain.reserved && domain.domain.trim() && domain.files > 0)) return false;
+  if (run.deployables.some(outcome => outcome.siteId || outcome.hostname || outcome.bundleRef || outcome.candidateRef || outcome.refusal?.code !== "deployable_skipped")) return false;
+  return (run.report.deployables ?? []).every(app => run.deployables.some(outcome => outcome.name === app.name && outcome.refusal?.code === "deployable_skipped"));
+}
+
 /**
  * Is this run about that app?
  *

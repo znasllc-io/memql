@@ -248,7 +248,11 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // measured by the strict loader in the native retention release.
 // +1 askMessageRouting from the consolidated Ask routing PRs; measured by
 // TestStrictAutomationBoot_EmbeddedTreeIsClean on 2026-10-21.
-const shippedAutomationCount = 185
+// 185 -> 192: four pipeline policy templates (supersession, reconciliation,
+// maintenance and evidence reuse), installationCompletionWorkflow, and the
+// installation overlay proposal/observation templates. Measured by the strict
+// loader after the delivery redesign; seven added, none removed.
+const shippedAutomationCount = 192
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strings"
 
@@ -18,7 +20,7 @@ import (
 // Construct only after the mesh's existing workbench router is wired. This
 // uploader and bucket are the serving node’s existing Library transport. The
 // adapter does not register a public action or another global pipeline executor.
-// The installation entry point remains gated on local rollout qualification.
+// The entry point exists only with an explicit named receiving configuration.
 func (a *App) installationPreparer(uploader server.FileUploader, bucket string) (*installation.Preparer, error) {
 	name := strings.TrimSpace(os.Getenv("MEMQL_INSTALLATION_CONFIG_NAME"))
 	if name == "" {
@@ -49,6 +51,13 @@ func (a *App) installationPreparer(uploader server.FileUploader, bucket string) 
 		return nil
 	}, Executor: pipelinesteps.NewExecutor(pipelinesteps.ConfigFromEnv(nil), workbench.ForwardRouter(), nil, a.Logger), Files: store, Tokens: a.pipelinesTokenMinterFor(), Catalog: func(ctx context.Context, configuration []byte, credential string) (installation.Catalog, error) {
 		return releasecatalog.NewSnapshot(ctx, configuration, credential)
-	}, Namespace: deploycontrol.NamespaceFromEnv(), ConfigurationName: name, EngineRevision: buildinfo.Commit()}
+	}, Namespace: deploycontrol.NamespaceFromEnv(), ConfigurationName: name, EngineRevision: buildinfo.Commit(), Health: installationServingProbe}
+	if raw := strings.TrimSpace(os.Getenv("MEMQL_INSTALLATION_WORKFLOWS")); raw != "" {
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&deps.Workflows) != nil || decoder.Decode(new(any)) != io.EOF {
+			return nil, errors.New("installation workflow configuration is invalid")
+		}
+	}
 	return installation.NewPreparer(deps)
 }

@@ -52,6 +52,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "reportObserve", Handler: workflowCapability("reportObserve")},
 		{Name: "readSARIF", Description: "Observe a caller-owned native SARIF upload without re-uploading. Only complete proves ingestion; uncertain never retries the write.", Handler: i.handleReadSARIF, ArgsSchema: map[string]string{"publicationId": "string (required) -- exact native SARIF publication identity"}},
 		{Name: "publishSARIF", Description: "Publish one successful native scanner artifact through the source owner's current GitHub grant. Journal the upload before observing ingestion; repeated calls never retry an uncertain POST.", Handler: i.handlePublishSARIF, ArgsSchema: map[string]string{"runId": "string (required) -- caller-owned pipeline run", "stepKey": "string (required) -- completed scanner step", "path": "string (required) -- exact retained .sarif path"}},
+		{Name: "reportMergeGroupReview", Description: "Report exact native independent reviews for this claimed merge group.", Handler: workflowCapability("reportMergeGroupReview")},
 		{Name: "workflowFacts", Description: "Read the current claimed workflow's step receipts.", Handler: workflowCapability("workflowFacts")},
 		{Name: "skipStep", Description: "Record a skipped step in the current claimed workflow's journal.", Handler: workflowCapability("skipStep")},
 		{Name: "executeStep", Description: "Execute one compiled step of the current claimed workflow.", Handler: workflowCapability("executeStep")},

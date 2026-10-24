@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,15 +73,28 @@ type receiverCollector struct {
 	CloneInstallationID int64           `json:"cloneInstallationId"`
 	PullCredential      *receiverSecret `json:"pullCredential,omitempty"`
 }
-type receiverImageBinding struct {
-	Group     string `json:"group"`
-	Kind      string `json:"kind"`
+type receiverApplication struct {
+	Key       string `json:"key"`
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	Field     string `json:"field"`
-	Container string `json:"container"`
-	Component string `json:"component"`
-	Artifact  string `json:"artifact"`
+}
+type receiverApplicationSnapshot struct {
+	key         string
+	application argocd.Snapshot
+	target      argocd.Target
+	render      argocd.RenderSpec
+}
+
+type receiverImageBinding struct {
+	Application string `json:"application,omitempty"`
+	Group       string `json:"group"`
+	Kind        string `json:"kind"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	Field       string `json:"field"`
+	Container   string `json:"container"`
+	Component   string `json:"component"`
+	Artifact    string `json:"artifact"`
 }
 type receiverProtected struct {
 	Namespace string `json:"namespace"`
@@ -92,38 +106,43 @@ type receiverDependency struct {
 	Requires  string `json:"requires"`
 }
 type receiverConfiguration struct {
-	FormatVersion  int                    `json:"formatVersion"`
-	InstallationID string                 `json:"installationId"`
-	Platform       string                 `json:"platform"`
-	Application    receiverNamed          `json:"application"`
-	Renderer       receiverRenderer       `json:"renderer"`
-	Collector      receiverCollector      `json:"collector"`
-	Catalog        receiverCatalog        `json:"catalog"`
-	Rollback       receiverSelection      `json:"rollback"`
-	Registries     []receiverRegistry     `json:"registries"`
-	ImageBindings  []receiverImageBinding `json:"imageBindings"`
-	Dependencies   []receiverDependency   `json:"dependencies"`
-	Protected      []receiverProtected    `json:"protected"`
+	Health             *receiverHealth           `json:"health,omitempty"`
+	FormatVersion      int                       `json:"formatVersion"`
+	InstallationID     string                    `json:"installationId"`
+	Platform           string                    `json:"platform"`
+	Application        receiverNamed             `json:"application,omitempty"`
+	Applications       []receiverApplication     `json:"applications,omitempty"`
+	SourceRepositories []argocd.SourceRepository `json:"sourceRepositories,omitempty"`
+	Renderer           receiverRenderer          `json:"renderer"`
+	Collector          receiverCollector         `json:"collector"`
+	Catalog            receiverCatalog           `json:"catalog"`
+	Rollback           receiverSelection         `json:"rollback"`
+	Registries         []receiverRegistry        `json:"registries"`
+	ImageBindings      []receiverImageBinding    `json:"imageBindings"`
+	Dependencies       []receiverDependency      `json:"dependencies"`
+	Protected          []receiverProtected       `json:"protected"`
 }
 
 // The snapshot owns private configuration and credentials. Only its digest can
 // be persisted; every replacement receiver obtains and validates fresh reads.
 type receiverSnapshot struct {
-	configuration     receiverConfiguration
-	digest            string
-	invariantDigest   string
-	observed          time.Time
-	application       argocd.Snapshot
-	applicationTarget argocd.Target
-	render            argocd.RenderSpec
-	catalog           Catalog
-	registries        []ociregistry.Target
-	bindings          []imageBinding
-	dependencies      []pipelines.ReleaseDependency
-	protected         []resourceIdentity
-	pullCredential    string
-	rendererAddress   string
-	rendererTLS       *tls.Config
+	healthCredential, healthRoots string
+	configuration                 receiverConfiguration
+	digest                        string
+	invariantDigest               string
+	observed                      time.Time
+	applications                  []receiverApplicationSnapshot
+	application                   argocd.Snapshot
+	applicationTarget             argocd.Target
+	render                        argocd.RenderSpec
+	catalog                       Catalog
+	registries                    []ociregistry.Target
+	bindings                      []imageBinding
+	dependencies                  []pipelines.ReleaseDependency
+	protected                     []resourceIdentity
+	pullCredential                string
+	rendererAddress               string
+	rendererTLS                   *tls.Config
 }
 
 func (s *receiverSnapshot) String() string {
@@ -141,6 +160,14 @@ func readReceiver(ctx context.Context, api argocd.API, namespace, name string, f
 // A continuation substitutes a stricter owned-intent requirement for the idle
 // baseline requirement. The actual Application bytes are never rewritten.
 func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name string, factory CatalogFactory, active *argocd.Intent) (*receiverSnapshot, error) {
+	var intents map[string]argocd.Intent
+	if active != nil {
+		intents = map[string]argocd.Intent{"": *active}
+	}
+	return readReceiverGroupInputs(ctx, api, namespace, name, factory, intents)
+}
+
+func readReceiverGroupInputs(ctx context.Context, api argocd.API, namespace, name string, factory CatalogFactory, active map[string]argocd.Intent) (*receiverSnapshot, error) {
 	if _, err := preparationActor(ctx); err != nil {
 		return nil, err
 	}
@@ -156,7 +183,7 @@ func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name str
 	}
 	raw := resourceText(resourceMap(cm, "data"), "installation.json")
 	var cfg receiverConfiguration
-	if len(raw) > 256<<10 || receiverJSON([]byte(raw), &cfg) != nil || cfg.FormatVersion != 1 || !identifier.MatchString(cfg.InstallationID) ||
+	if len(raw) > 256<<10 || receiverJSON([]byte(raw), &cfg) != nil || (cfg.FormatVersion != 1 && cfg.FormatVersion != 2) || !identifier.MatchString(cfg.InstallationID) ||
 		(cfg.Platform != "linux/arm64" && cfg.Platform != "linux/amd64") || len(cfg.ImageBindings) == 0 || len(cfg.ImageBindings) > 512 || len(cfg.Registries) == 0 || len(cfg.Registries) > 512 || len(cfg.Dependencies) > 512 || len(cfg.Protected) == 0 || len(cfg.Protected) > 128 || cfg.Collector.CloneInstallationID < 0 ||
 		!artifactDigest.MatchString(cfg.Rollback.CandidateID) || !artifactDigest.MatchString(cfg.Rollback.CatalogDigest) {
 		return nil, errors.New("installation requires complete bounded receiving configuration")
@@ -164,7 +191,30 @@ func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name str
 	if _, err := immutableImage(cfg.Collector.Image); err != nil {
 		return nil, errors.New("installation collector image must be immutable")
 	}
+	apps, err := cfg.applicationNames()
+	if err != nil {
+		return nil, err
+	}
+	if err := argocd.ValidateSourceRepositories(cfg.SourceRepositories); err != nil {
+		return nil, err
+	}
+	if cfg.FormatVersion == 2 {
+		cfg.Application = receiverNamed{apps[0].Namespace, apps[0].Name}
+	}
 	s := &receiverSnapshot{configuration: cfg, observed: time.Now().UTC()}
+	if cfg.Health != nil {
+		var err error
+		s.healthCredential, err = r.secret(ctx, namespace, cfg.Health.Credential)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Health.RootCA != nil {
+			s.healthRoots, err = r.secret(ctx, namespace, *cfg.Health.RootCA)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	token, err := r.secret(ctx, namespace, cfg.Catalog.Credential)
 	if err != nil {
 		return nil, err
@@ -222,8 +272,21 @@ func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name str
 		if !kubernetesSegment.MatchString(b.Kind) || !kubernetesSegment.MatchString(b.Name) || !receiverDNS.MatchString(b.Namespace) || !receiverKey.MatchString(b.Field) || (!receiverKey.MatchString(b.Container) && !(b.Field == "imageName" && b.Container == "")) || !receiverKey.MatchString(b.Component) || !receiverKey.MatchString(b.Artifact) || seen[slot] {
 			return nil, errors.New("installation image binding is invalid or duplicated")
 		}
+		if cfg.FormatVersion == 2 {
+			found := false
+			for _, app := range apps {
+				if app.Key == b.Application {
+					found = true
+				}
+			}
+			if !found {
+				return nil, errors.New("image binding must name one configured application")
+			}
+		} else if b.Application != "" {
+			return nil, errors.New("single application binding cannot name a group member")
+		}
 		seen[slot] = true
-		s.bindings = append(s.bindings, imageBinding{Slot: slot, Component: b.Component, Artifact: b.Artifact})
+		s.bindings = append(s.bindings, imageBinding{Slot: slot, Component: b.Component, Artifact: b.Artifact, Application: b.Application})
 	}
 	for _, d := range cfg.Dependencies {
 		s.dependencies = append(s.dependencies, pipelines.ReleaseDependency{Component: d.Component, Requires: d.Requires})
@@ -235,8 +298,41 @@ func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name str
 		}
 		s.protected = append(s.protected, key)
 	}
-	if err := s.observeArgo(ctx, r, active); err != nil {
-		return nil, err
+	for _, app := range apps {
+		member := *s
+		member.configuration.Application = receiverNamed{app.Namespace, app.Name}
+		var intent *argocd.Intent
+		if v, ok := active[app.Key]; ok {
+			copy := v
+			intent = &copy
+		}
+		if err := member.observeArgo(ctx, r, intent); err != nil {
+			return nil, err
+		}
+		s.applications = append(s.applications, receiverApplicationSnapshot{app.Key, member.application, member.applicationTarget, member.render})
+	}
+	if len(active) > len(apps) {
+		return nil, errors.New("continuation has undeclared application intents")
+	}
+	for key := range active {
+		if _, err := s.applicationByKey(key); err != nil {
+			return nil, err
+		}
+	}
+	s.application, s.applicationTarget, s.render = s.applications[0].application, s.applications[0].target, s.applications[0].render
+	for _, app := range s.applications {
+		if sourceRepository(app.render.Source) != sourceRepository(s.render.Source) || app.render.Namespace != s.render.Namespace || (len(active) == 0 && sourceRevision(app.render.Source) != sourceRevision(s.render.Source)) {
+			return nil, errors.New("installation applications must share one repository, destination and immutable baseline")
+		}
+	}
+	if cfg.FormatVersion == 2 {
+		for i := range s.bindings {
+			member, err := s.applicationByKey(s.bindings[i].Application)
+			if err != nil || member.render.AppName == "" {
+				return nil, errors.New("image binding has no verified application render scope")
+			}
+			s.bindings[i].Application = member.render.AppName
+		}
 	}
 	if err := s.observeRenderer(ctx, r); err != nil {
 		return nil, err
@@ -245,7 +341,11 @@ func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name str
 	if err != nil {
 		return nil, err
 	}
-	s.invariantDigest, err = r.configurationInvariant(cfg.Application)
+	names := make([]receiverNamed, len(apps))
+	for i, app := range apps {
+		names[i] = receiverNamed{app.Namespace, app.Name}
+	}
+	s.invariantDigest, err = r.configurationInvariant(names...)
 	if err != nil {
 		return nil, err
 	}
@@ -267,4 +367,52 @@ func receiverStringList(value any) ([]string, error) {
 		out[i] = s
 	}
 	return out, nil
+}
+
+func (c receiverConfiguration) applicationNames() ([]receiverApplication, error) {
+	if c.FormatVersion == 1 {
+		if len(c.Applications) != 0 || !receiverDNS.MatchString(c.Application.Namespace) || !receiverDNS.MatchString(c.Application.Name) {
+			return nil, errors.New("single application configuration is invalid")
+		}
+		return []receiverApplication{{Namespace: c.Application.Namespace, Name: c.Application.Name}}, nil
+	}
+	if c.FormatVersion != 2 || c.Application != (receiverNamed{}) || len(c.Applications) == 0 || len(c.Applications) > 8 {
+		return nil, errors.New("installation group requires one to eight named applications")
+	}
+	out := append([]receiverApplication(nil), c.Applications...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	keys, targets := map[string]bool{}, map[string]bool{}
+	for _, app := range out {
+		target := app.Namespace + "/" + app.Name
+		if !identifier.MatchString(app.Key) || len(app.Key) > 48 || !receiverDNS.MatchString(app.Namespace) || !receiverDNS.MatchString(app.Name) || app.Namespace != out[0].Namespace || keys[app.Key] || targets[target] {
+			return nil, errors.New("installation application identities are invalid or duplicated")
+		}
+		keys[app.Key], targets[target] = true, true
+	}
+	return out, nil
+}
+func (s *receiverSnapshot) applicationByKey(key string) (receiverApplicationSnapshot, error) {
+	for _, app := range s.applications {
+		if app.key == key {
+			return app, nil
+		}
+	}
+	// Existing native single-application fixtures predate the group projection.
+	if len(s.applications) == 0 && key == "" && s.applicationTarget.Name != "" {
+		return receiverApplicationSnapshot{"", s.application, s.applicationTarget, s.render}, nil
+	}
+	return receiverApplicationSnapshot{}, errors.New("application is outside the admitted installation")
+}
+func (s *receiverSnapshot) applicationMembers() []receiverApplicationSnapshot {
+	if len(s.applications) != 0 {
+		return append([]receiverApplicationSnapshot(nil), s.applications...)
+	}
+	return []receiverApplicationSnapshot{{"", s.application, s.applicationTarget, s.render}}
+}
+func sourceRepository(source json.RawMessage) string {
+	var v struct {
+		RepoURL string `json:"repoURL"`
+	}
+	_ = json.Unmarshal(source, &v)
+	return v.RepoURL
 }

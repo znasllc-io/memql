@@ -9,7 +9,8 @@ import (
 )
 
 // WorkModelCallBudget is an observation, not admission or a new allowance.
-// The installed guard reconciles receipts and reads approved limits freshly.
+// The installed guard reconciles receipts and reads the current renewed window
+// freshly; it never refunds cumulative usage or grants another renewal.
 func (e *MemQLEngine) WorkModelCallBudget(ctx context.Context) (int, int, error) {
 	run, err := recoveryOwnedRun(ctx)
 	if err != nil {

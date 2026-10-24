@@ -230,6 +230,13 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 			ManifestName)
 	}
 
+	// This is an authority boundary, not validation of pipeline execution
+	// semantics: a package may not impersonate native independent review.
+	if m.Pipeline != nil && pipelines.ReservedPipelineCheckName(m.Name) {
+		return nil, refuse(CodeManifestInvalid,
+			"%s uses a pipeline name reserved for independent review evidence. Choose a different package name.", ManifestName)
+	}
+
 	if err := m.Campaigns.Validate(); err != nil {
 		return nil, refuse(CodeManifestInvalid, "%v", err)
 	}

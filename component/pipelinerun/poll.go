@@ -200,7 +200,7 @@ func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pol
 		}
 		if res.Opened {
 			out.opened = append(out.opened, res.Run)
-		} else {
+		} else if res.Ignored == "" {
 			out.existing = append(out.existing, res.Run)
 		}
 	}

@@ -2,15 +2,26 @@ package memql
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
+
+type delegatedSessionKey struct{}
+
+// ContextWithDelegatedSession tags server-observed receipts with their session.
+// It carries provenance only; delegatedScope separately verifies authority.
+func ContextWithDelegatedSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, delegatedSessionKey{}, sessionID)
+}
 
 // RecordDelegatedToolSource preserves an executed MCP exchange for the same
 // source projection used by normal agent turns. It is not a continuation:
@@ -35,6 +46,19 @@ func (e *MemQLEngine) RecordDelegatedToolSource(ctx context.Context, name string
 		return err
 	}
 	data := map[string]any{"delegatedEvidence": true}
+	// Apps/MCP observes the same executed source reads as the native loop.
+	// Derive credit from the registered query and bounded returned content,
+	// never the app's arguments or claimed result. The shared parser rejects
+	// error envelopes, work journals and opaque commands; durable progress
+	// credits deduplicate unchanged facts across both routes.
+	if kind, _, known := e.ToolCallee(name); known && kind == "query" {
+		if evidence := work.SourceReadEvidence(result); evidence != "" {
+			data["tool"], data["isError"], data["nativeResultEvidence"] = name, false, evidence
+		}
+	}
+	if sessionID, _ := ctx.Value(delegatedSessionKey{}).(string); sessionID != "" {
+		data["appSessionId"] = sessionID
+	}
 	// The reader already bounds each preview and excludes secret tools and
 	// generated prose. An oversized exchange leaves an explicit missing source,
 	// rather than turning truncated bytes into a complete receipt.
@@ -51,6 +75,177 @@ func (e *MemQLEngine) RecordDelegatedToolSource(ctx context.Context, name string
 	if err != nil {
 		return err
 	}
-	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ContextWithTrainingEvidenceWrite(ctx)), "mutation "+call)
 	return err
+}
+
+func (e *MemQLEngine) delegatedSessionRow(ctx context.Context, sessionID string) (map[string]any, error) {
+	run, ok := common.RunFromContext(ctx)
+	ac, _ := auth.AccessFromContext(ctx)
+	if !ok || ac == nil || run.GoalId == "" || BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) {
+		return nil, fmt.Errorf("delegated continuation requires owned work")
+	}
+	call, err := parser.RenderCall("appSessionById", map[string]any{"sessionId": sessionID})
+	if err != nil {
+		return nil, err
+	}
+	result, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
+	if err != nil {
+		return nil, err
+	}
+	rows := MaterializeRows(result.OutputPayload())
+	if len(rows) != 1 || BareShortId(stringArg(rows[0], "ownerUserId")) != BareShortId(run.OwnerUserId) ||
+		BareShortId(stringArg(rows[0], "runId")) != BareShortId(run.RunId) || BareShortId(stringArg(rows[0], "stepId")) != BareShortId(run.StepKey) {
+		return nil, fmt.Errorf("delegated session does not belong to this work step")
+	}
+	return rows[0], nil
+}
+
+// PrepareDelegatedFeedback preserves the native turn plus all public executed
+// exchanges from this app session before a tool can create an approval. The app
+// transcript is never used as resumable state or as proof of completed effects.
+func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID string, initial []common.ChatMessage, tool string, args map[string]any) error {
+	if len(initial) == 0 {
+		return fmt.Errorf("%w: delegated turn context is unavailable", ErrWorkCheckpointRequired)
+	}
+	session, err := e.delegatedSessionRow(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	started, valid := askTimestamp(session["startedAt"])
+	if !valid {
+		return fmt.Errorf("%w: delegated session start is unavailable", ErrWorkCheckpointRequired)
+	}
+	run, _ := common.RunFromContext(ctx)
+	call, _ := parser.RenderCall("workDelegatedSourcesForOwnerRun", map[string]any{"runId": run.RunId})
+	var exchanges [][]common.ChatMessage
+	cursor, complete, bytes := "", false, 0
+	for range 16 {
+		result, err := e.Execute(ContextWithCursor(ContextWithFreshRead(ctx), cursor), "query "+call)
+		if err != nil {
+			return err
+		}
+		for _, row := range MaterializeRows(result.OutputPayload()) {
+			if at, ok := askTimestamp(row["createdAt"]); ok && at.Before(started) {
+				complete = true
+				break
+			}
+			data, _ := row["data"].(map[string]any)
+			if BareShortId(stringArg(data, "appSessionId")) != BareShortId(sessionID) {
+				continue
+			}
+			if BareShortId(stringArg(row, "stepKey")) != BareShortId(run.StepKey) || data["sourceOmitted"] == true {
+				return fmt.Errorf("%w: delegated source receipt is incomplete", ErrWorkCheckpointRequired)
+			}
+			pair, err := decodeWorkContinuation(data)
+			if err != nil || len(pair) != 2 || pair[0].Role != "assistant" || len(pair[0].ToolCalls) != 1 || pair[1].Role != "tool" || pair[1].ToolCallId != pair[0].ToolCalls[0].ID {
+				return fmt.Errorf("%w: delegated source receipt is invalid", ErrWorkCheckpointRequired)
+			}
+			pair, err = delegatedFeedbackReference(run.RunId, stringArg(row, "id"), pair)
+			if err != nil {
+				return err
+			}
+			bytes += len(pair[0].ToolCalls[0].Arguments) + len(pair[1].Content)
+			if bytes > 4*1024*1024 {
+				return fmt.Errorf("%w: delegated continuation exceeds its byte bound", ErrWorkCheckpointRequired)
+			}
+			exchanges = append(exchanges, pair)
+		}
+		cursor = ""
+		if meta := result.GetMeta(); meta != nil {
+			cursor = meta.Cursor
+		}
+		if cursor == "" || complete {
+			complete = true
+			break
+		}
+	}
+	if !complete {
+		return fmt.Errorf("%w: delegated continuation exceeds its scan bound", ErrWorkCheckpointRequired)
+	}
+	messages := append([]common.ChatMessage(nil), initial...)
+	// initial is the native context actually delegated, including its existing
+	// archive references. Add only this session's observed exchanges, in order:
+	// reconstructing earlier sessions here would undo compaction and could make
+	// completed effects look like new work. The full journal stays separate.
+	for i := len(exchanges) - 1; i >= 0; i-- {
+		messages = append(messages, exchanges[i]...)
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	callID := "delegated-question-" + id.NewShortId()
+	messages = append(messages,
+		common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{{ID: callID, Name: tool, Arguments: string(raw)}}},
+		common.ChatMessage{Role: "tool", Name: tool, ToolCallId: callID, Content: common.UnexecutedWorkToolResult})
+	return e.SaveWorkContinuation(ctx, messages)
+}
+
+// Screenshots and document reads are already stored in the owner's public
+// source journal. Copying each large result into a suspension can exhaust its
+// 4 MiB bound after a handful of captures, making an ordinary approval
+// impossible. Reference that exact durable receipt before counting retained
+// bytes; do not duplicate it in another archive or invoke a model to summarize
+// it. Small receipts and all call arguments remain verbatim. The scan, original
+// per-receipt and retained-content bounds still refuse incomplete histories.
+func delegatedFeedbackReference(runID, observationID string, pair []common.ChatMessage) ([]common.ChatMessage, error) {
+	if len(pair[1].Content) <= 64*1024 {
+		return pair, nil
+	}
+	if BareShortId(observationID) == "" || BareShortId(runID) == "" {
+		return nil, fmt.Errorf("%w: durable delegated source reference is unavailable", ErrWorkCheckpointRequired)
+	}
+	args, err := json.Marshal(map[string]any{"sourceRunId": BareShortId(runID), "checkpoint": BareShortId(observationID), "messageIndex": 1, "maxChars": 1600})
+	if err != nil {
+		return nil, err
+	}
+	result := pair[1]
+	result.Content = fmt.Sprintf("[Archived tool result (delegated source)]\nExact public result retained in this run's journal (%d bytes; SHA256 %x). This reference is not a summary or proof of successful execution. Use recallWorkHistory with %s and continue with nextOffset for the original result. No operation needs to be replayed to recover it.", len(pair[1].Content), sha256.Sum256([]byte(pair[1].Content)), args)
+	return []common.ChatMessage{pair[0], result}, nil
+}
+
+// DelegatedWorkHumanWait reads the native control plane after an app returns.
+// A question tool already committed its approval and wait; model prose must not
+// create a second question or turn the suspended step into a contract failure.
+func (e *MemQLEngine) DelegatedWorkHumanWait(ctx context.Context, sessionID string) error {
+	session, err := e.delegatedSessionRow(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	run, _ := common.RunFromContext(ctx)
+	rows, err := e.workRows(ContextWithFreshRead(ctx), "workRunForOwner", run.RunId)
+	if err != nil || len(rows) != 1 {
+		return fmt.Errorf("delegated work state is unavailable: %v", err)
+	}
+	current := rows[0]
+	rerun, _ := current["rerun"].(map[string]any)
+	if BareShortId(stringArg(current, "ownerUserId")) != BareShortId(run.OwnerUserId) || BareShortId(stringArg(current, "goalId")) != BareShortId(run.GoalId) || current["cancelRequested"] == true || stringArg(rerun, "requestId") != run.RerunRequestId {
+		return fmt.Errorf("delegated work execution is no longer current")
+	}
+	waiting, _ := current["waitingOn"].(map[string]any)
+	approvalID := ""
+	if current["status"] == "waiting" && waiting["kind"] == "approval" {
+		approvalID = stringArg(waiting, "subject")
+	} else if current["status"] == "running" {
+		// The person can answer while the app is shutting down. Yield the old
+		// invocation without overwriting that already-committed resume.
+		approvalID = stringArg(current, "humanResumeId")
+		if run.Continuation != nil && BareShortId(approvalID) == BareShortId(run.Continuation.ApprovalID) {
+			return nil
+		}
+	}
+	if approvalID == "" {
+		return nil
+	}
+	approval, _, err := e.approvalRows(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+	created, ok := askTimestamp(approval["requestedAt"])
+	started, startOK := askTimestamp(session["startedAt"])
+	if !ok || !startOK || created.Before(started) || created.After(time.Now()) || BareShortId(stringArg(approval, "runId")) != BareShortId(run.RunId) || BareShortId(stringArg(approval, "stepKey")) != BareShortId(run.StepKey) {
+		return nil
+	}
+	return &work.HumanWait{ApprovalID: approvalID}
 }

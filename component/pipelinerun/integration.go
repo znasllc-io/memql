@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
 )
@@ -42,14 +43,24 @@ import (
 // Deps are the integration's ports. New takes them, and Configure sets the
 // ones only app/ can build after every plug-in has materialized.
 type Deps struct {
+	// ReportMergeGroupReview is available only to a captured, claimed pipeline
+	// workflow. The callback must recheck the supplied lease fence at effects.
+	ReportMergeGroupReview func(context.Context, Pipeline, Run, func(context.Context) error) (map[string]any, error)
+
 	// ArtifactRetention supplies the same durable artifact journal and provider
 	// fences used by producers and publication consumers on every replica.
 	ArtifactRetention *ArtifactRetentionDependencies
 	// LoadWorkflow resolves installed definitions. Nil uses the boot-time DSL tree.
 	LoadWorkflow func(string) (*automations.Automation, error)
-	Store        Store
-	GitHub       GitHub
-	Gate         Gate
+	// WorkflowSource resolves installed source for durable policy snapshots.
+	// It is a bootstrap/test port, never supplied by a source manifest or caller.
+	WorkflowSource workflowhost.SourceLoader
+	// OpenMaintenanceGoal creates only an owner-bound, idempotent analysis goal.
+	// It grants no repository write, merge or installation authority.
+	OpenMaintenanceGoal func(context.Context, MaintenanceRequest) (string, error)
+	Store               Store
+	GitHub              GitHub
+	Gate                Gate
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies

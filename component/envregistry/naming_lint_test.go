@@ -24,6 +24,16 @@ var knownExternalRegistryNames = map[string]bool{
 	"LANG":                true,
 	"TZ":                  true,
 	"CI":                  true,
+	// Host settings consumed by Cockpit; mirror the scanner's exact names.
+	"DISPLAY":         true,
+	"DOCKER_CONTEXT":  true,
+	"DOCKER_HOST":     true,
+	"OLLAMA_HOST":     true,
+	"OLLAMA_MODELS":   true,
+	"TERMINAL":        true,
+	"WAYLAND_DISPLAY": true,
+	"XDG_CONFIG_HOME": true,
+	"XDG_DATA_HOME":   true,
 }
 
 var knownExternalRegistryPrefixes = []string{"GITHUB_", "RUNNER_", "GO"}

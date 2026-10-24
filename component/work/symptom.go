@@ -273,7 +273,7 @@ var rules = []rule{
 		id: RuleIdContextExhausted, tier: "escalate", symptom: SymptomHuman,
 		reason: "the active request still exceeds the model's context budget after checkpointing; its history is retained, and retrying unchanged does not resolve the limit",
 		match: func(s Signal) bool {
-			return s.ErrorCode == "context_length_exceeded" || anyOf(lower(s.ErrorMessage), contextExhaustedMarkers...)
+			return s.ErrorCode == "context_length_exceeded" || IsContextCapacityFailure(s.ErrorMessage)
 		},
 	},
 	{
@@ -473,6 +473,13 @@ func ApprovalKindForVerdict(a Act, ev Evidence) string {
 		return ApprovalKindFeedback
 	}
 	return ApprovalKindFor(a)
+}
+
+// IsContextCapacityFailure shares the narrow capacity vocabulary with native
+// reasoning-boundary suspension. It does not classify storage, authorization,
+// cancellation, or arbitrary tool failures as safe model continuations.
+func IsContextCapacityFailure(message string) bool {
+	return anyOf(lower(message), contextExhaustedMarkers...)
 }
 
 // IsModelCallCeiling recognizes the worker protocol's whole-call failure, not

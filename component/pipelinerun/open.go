@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/logger"
@@ -67,8 +68,9 @@ func (o Opening) isRerun() bool {
 // OpenResult says what an opening did. Run is the run opened, or the newest
 // existing run of the key when nothing was opened.
 type OpenResult struct {
-	Run    Run
-	Opened bool
+	Run     Run
+	Opened  bool
+	Ignored string
 }
 
 // open opens o on p, or finds the run that already answers it, minting the
@@ -110,21 +112,69 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	if sha == "" {
 		return OpenResult{}, fmt.Errorf("pipelines: a run of %s needs a commit, and none was named", p.Repository)
 	}
+	// Delivery identity is independent of a later policy edit. A redelivery
+	// must not open another mode/key or replace a saved closure simply because
+	// the installation changed its resolver while this head was running.
+	var savedPolicy map[string]any
+	if !o.isRerun() {
+		prior, err := d.Store.RunsForPipelineSHA(memql.ContextWithFreshRead(ctx), p.ID, sha)
+		if err != nil {
+			return OpenResult{}, err
+		}
+		var latest *Run
+		for index := range prior {
+			r := &prior[index]
+			if r.Event != o.Event || r.PolicySnapshot == nil {
+				continue
+			}
+			if o.Event == pipelines.EventSchedule {
+				slot, ok := pipelines.ScheduledSlotFromRunKey(r.RunKey)
+				if !ok || slot != o.ScheduleSlot {
+					continue
+				}
+			}
+			if latest == nil || r.Attempt > latest.Attempt {
+				latest = r
+			}
+		}
+		if latest != nil {
+			savedPolicy = latest.PolicySnapshot
+			o.Mode = latest.Mode
+		}
+	}
+	var policy *workflowhost.Snapshot
+	var err error
+	if savedPolicy != nil {
+		policy, err = readPipelinePolicy(savedPolicy)
+	} else {
+		policy, err = capturePipelinePolicy(ctx, d, p, o)
+	}
+	if err != nil {
+		return OpenResult{}, err
+	}
 	mode := o.Mode
-	if mode == "" {
-		m, err := modeForEvent(ctx, o.Event)
+	if !o.isRerun() || mode == "" {
+		m, err := policyModeForEvent(ctx, policy, p, o)
 		if err != nil {
 			return OpenResult{}, err
 		}
 		if m == "" {
-			return OpenResult{}, fmt.Errorf("pipelines: event %q opens no run", o.Event)
+			return OpenResult{Ignored: fmt.Sprintf("installed delivery policy does not open %s runs", o.Event)}, nil
 		}
-		mode = m
+		if mode == "" {
+			mode = m
+		}
+	}
+	if mode != pipelines.ModeFull && mode != pipelines.ModeAffected {
+		return OpenResult{}, fmt.Errorf("unsupported pipeline mode %q", mode)
+	}
+	if o.Event == pipelines.EventMergeGroup && mode != pipelines.ModeFull {
+		return OpenResult{}, fmt.Errorf("merge-group validation requires full coverage")
 	}
 	version := o.Version
 	if version == "" {
 		var err error
-		version, err = versionForEvent(ctx, o.Event, sha, o.ReleaseTag)
+		version, err = policyVersionForEvent(ctx, policy, o, sha)
 		if err != nil {
 			return OpenResult{}, err
 		}
@@ -166,6 +216,14 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			headBackFor = superseded.ID
 		}
 	}
+	if old, attempts := newestAttempt(runs); attempts > 0 && !o.isRerun() && o.Event == pipelines.EventMergeGroup && old.CancelledBy == queueInvalidatedBy && (old.CancelRequested || old.Conclusion == ConclusionCancelled) {
+		if token == "" {
+			token, tokenErr = checkRunToken(ctx, d, p)
+		}
+		if queueRefRestored(ctx, d, p, o, sha, token, tokenErr) {
+			headBackFor = old.ID
+		}
+	}
 	if run, ok := answeredBy(runs, o, headBackFor); ok {
 		return OpenResult{Run: run}, nil
 	}
@@ -182,6 +240,17 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		keyed, err := d.Store.RunsForKey(memql.ContextWithFreshRead(gctx), key)
 		if err != nil {
 			return err
+		}
+		if !o.isRerun() && o.Event != pipelines.EventSchedule {
+			observed, err := d.Store.RunsForPipelineSHA(memql.ContextWithFreshRead(gctx), p.ID, sha)
+			if err != nil {
+				return err
+			}
+			for _, r := range observed {
+				if r.Event == o.Event && r.RunKey != key {
+					keyed = append(keyed, r)
+				}
+			}
 		}
 		runs := runsOf(keyed, p.ID)
 		if run, ok := answeredBy(runs, o, headBackFor); ok {
@@ -215,9 +284,11 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			InboundRequestID: bareID(o.InboundRequestID),
 			PullRequest:      o.PullRequest,
 			HeadBranch:       strings.TrimSpace(o.Branch),
+			ReleaseTag:       strings.TrimSpace(o.ReleaseTag),
 			BaseSHA:          strings.ToLower(strings.TrimSpace(o.BaseSHA)),
 			Title:            strings.TrimSpace(o.Title),
 			Version:          version,
+			PolicySnapshot:   policy.Map(),
 			Status:           StatusQueued,
 			QueuedAt:         now,
 		}
@@ -296,7 +367,7 @@ func answeredBy(runs []Run, o Opening, headBackFor string) (Run, bool) {
 		if !o.Fork && onlyForkRefusals(runs) {
 			return Run{}, false
 		}
-		if headBackFor != "" && sameID(newest.ID, headBackFor) && stoppedBySupersede(newest) {
+		if headBackFor != "" && sameID(newest.ID, headBackFor) && (stoppedBySupersede(newest) || newest.CancelledBy == queueInvalidatedBy && o.Event == pipelines.EventMergeGroup) {
 			return Run{}, false
 		}
 		return newest, true

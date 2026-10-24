@@ -149,6 +149,16 @@ func (a *AppInference) SetForward(forward *ForwardRouter, selfNodeId string) {
 // has no person to name. So system work has no app door, rather than a shared
 // one -- narrower, which is the safe direction.
 func (a *AppInference) Doors(ctx context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
+	doors, err := a.selectionDoors(ctx, actingUserId)
+	if err != nil || a == nil {
+		return nil, err
+	}
+	return filterAppDoors(ctx, a.store, doors)
+}
+
+// Selection performs its own current policy/quota checks. Do not first pay for
+// the same history reads through the provider-availability filter.
+func (a *AppInference) selectionDoors(ctx context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
 	if a == nil || a.store == nil {
 		return nil, nil
 	}
@@ -159,7 +169,7 @@ func (a *AppInference) Doors(ctx context.Context, actingUserId string) ([]memqle
 	if err != nil {
 		return nil, err
 	}
-	return filterAppDoors(ctx, a.store, a.projectDoors(machines))
+	return a.projectDoors(machines), nil
 }
 
 // projectDoors turns registrations into one entry per KNOWN app id, placing
@@ -252,7 +262,7 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 }
 
 func (a *AppInference) SelectApp(ctx context.Context, req memqlengine.AppCallRequest, localOnly bool, excluded []string) (memqlengine.AppSelection, error) {
-	doors, err := a.Doors(ctx, req.ActingUserId)
+	doors, err := a.selectionDoors(ctx, req.ActingUserId)
 	if err != nil {
 		return memqlengine.AppSelection{}, err
 	}
@@ -434,7 +444,12 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		// ONE MODEL CALL the step at RunId/StepId made, not the step's work:
 		// the recording names the calling run and claims nothing on its step
 		// (worker.RecordingOpen.ModelCall).
-		ModelCall: true,
+		ModelCall:     true,
+		InferenceOnly: len(req.Images) == 0 && len(req.Inputs) == 0,
+	}
+
+	if spec.InferenceOnly {
+		spec.ToolScope = &common.DelegatedTools{}
 	}
 
 	// Asked again here, at the point of no return: staging images can take a
@@ -446,7 +461,11 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 
 	// FROM HERE ON, NOTHING IS RE-PICKABLE: the session row is written and
 	// the start goes on the wire, so the call may have run on the machine.
-	result, err := a.runner.Run(ctx, w, spec, nil)
+	result, err := a.runner.Run(ctx, w, spec, func(chunk workerservice.AppSessionChunk) {
+		if req.OnContent != nil && req.Schema == nil && chunk.Stream == "answer" {
+			req.OnContent(string(chunk.Data))
+		}
+	})
 	surface := AppSurfacePrefix + req.AppId + "@" + result.WorkerId
 	if quota := appQuotaRefusal(result); quota != nil {
 		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, quota

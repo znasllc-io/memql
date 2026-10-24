@@ -585,6 +585,10 @@ export function OsProvider({
 
     actionsRef.current = {
       openApp: (appId, sectionId, payload) => {
+        // Saved links and Ask actions keep pointing to the same object after its workspace moves.
+        if (appId === "deployables" && (sectionId === "sources" || sectionId === "runs")) { appId = "pipelines"; sectionId = sectionId === "sources" ? "repositories" : "runs"; }
+        if (appId === "cluster" && sectionId === "releases") { appId = "pipelines"; }
+        if (appId === "settings" && sectionId === "pipelines") { appId = "pipelines"; sectionId = "settings"; }
         lastEffect = { kind: "none" };
         // Minted OUTSIDE the updater: React may re-run updaters, and an id
         // minted inside would advance the counter once per run.

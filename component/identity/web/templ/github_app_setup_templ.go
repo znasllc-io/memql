@@ -97,7 +97,7 @@ func GitHubAppSetup(data GitHubAppSetupData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, ". It can read the repositories you choose and report checks and security findings.</p><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, ". It can read selected repositories and their protections, report checks and security findings, and submit approved changes through pull requests and merge queues.</p><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -40,7 +40,7 @@ export function ConnectReturnDispatcher() {
     // The shell mounts before effective capabilities arrive. Keep the return
     // parked until the same gate as openApp admits it; the access epoch
     // retries this effect when the asynchronous permission read completes.
-    if (!viewer || (!canOpen(registry, "deployables") && !canOpen(registry, "settings"))) return;
+    if (!viewer || (!canOpen(registry, "deployables") && !canOpen(registry, "settings") && !canOpen(registry, "pipelines"))) return;
     // TAKE, not read: the parked value is consumed here and this effect is
     // free to run again -- a StrictMode remount does, and so does any change
     // in `actions` identity -- and every later run correctly finds nothing.
@@ -58,11 +58,12 @@ export function ConnectReturnDispatcher() {
     const result = takeParkedConnectReturn();
     if (result === null) return;
     const correlated = correlateConnectReturn(result, viewer);
-    const appId = correlated.appId ?? "deployables";
+    const oldDestination = correlated.appId ?? "deployables";
+    const appId = oldDestination === "deployables" && ["sources", "runs"].includes(correlated.section) ? "pipelines" : oldDestination;
     // Settings has two places a GitHub trip starts from: Connections, and the
     // Pipelines readiness item (epic memql#5479). "pipelines" names nothing in
     // Deployables, so there it falls back to where every other return lands.
-    const section = appId === "settings"
+    const section = appId === "pipelines" ? (correlated.section === "sources" ? "repositories" : correlated.section) : appId === "settings"
       ? (correlated.section === "pipelines" ? "pipelines" : "connections")
       : (correlated.section === "pipelines" ? DEFAULT_CONNECT_SECTION : correlated.section);
     if (canOpen(registry, appId)) actions.openApp(appId, section, { connect: correlated });

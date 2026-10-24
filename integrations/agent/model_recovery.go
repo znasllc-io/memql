@@ -11,10 +11,11 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-// Called only on a provider-return error before any tool from that response
-// executes. A partial stream may be checkpointed, but never retried invisibly.
-func (r *Replier) recoverModelCeiling(ctx context.Context, failure error, messages []common.ChatMessage, attempt int, emptyResponse bool) (handled bool, err error) {
-	if failure == nil || !work.IsModelCallCeiling(failure.Error()) || !isOwnedWorkExecution(ctx) {
+// Called only before tool dispatch: after bounded context recovery or a failed
+// provider return. A capacity refusal suspends the exact exchange, rather than
+// turning into a generic failure whose Retry restarts the current stage.
+func (r *Replier) recoverModelCall(ctx context.Context, failure error, messages []common.ChatMessage, attempt int, emptyResponse bool) (handled bool, err error) {
+	if failure == nil || (!work.IsModelCallCeiling(failure.Error()) && !work.IsContextCapacityFailure(failure.Error())) || !isOwnedWorkExecution(ctx) {
 		return false, nil
 	}
 	if budget := r.workCallFailure(ctx); budget != nil {
@@ -30,7 +31,7 @@ func (r *Replier) recoverModelCeiling(ctx context.Context, failure error, messag
 		return true, fmt.Errorf("%w: model recovery is unavailable", memql.ErrWorkCheckpointRequired)
 	}
 	maximum := streamTransientMaxRetries
-	if !emptyResponse {
+	if !emptyResponse || work.IsContextCapacityFailure(failure.Error()) {
 		maximum = 0
 	}
 	retry, err := runtime.RecoverWorkModelCall(ctx, failure.Error(), attempt, maximum, closePendingCalls(messages))
@@ -58,4 +59,14 @@ func (r *Replier) recoverModelCeiling(ctx context.Context, failure error, messag
 	case <-timer.C:
 		return true, nil
 	}
+}
+
+// Compaction errors arrive before inference. Recognized capacity refusals use
+// the same durable suspension as exhausted model calls; unrelated failures and
+// run-budget refusals retain their separate failure/feedback paths.
+func (r *Replier) pauseAfterContextRecovery(ctx context.Context, failure error, messages []common.ChatMessage) error {
+	if handled, err := r.recoverModelCall(ctx, failure, messages, 0, false); handled {
+		return err
+	}
+	return r.pauseAtBudgetBoundary(ctx, failure, messages)
 }

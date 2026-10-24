@@ -33,14 +33,31 @@ func (e deliveryConsumerEngine) Execute(ctx context.Context, query string) (any,
 
 func TestDeliveryConsumersKeepTheirOperationalAuthority(t *testing.T) {
 	ctx := t.Context()
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
-	t.Cleanup(func() { _ = db.Close() })
+	admin := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	t.Cleanup(func() { _ = admin.Close() })
+	db := admin
 	ping, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ping); err != nil {
 		dbtest.Unreachable(t, "delivery consumer authority", dbtest.DSN(), err)
 	}
-	_, err := memql.LoadUnifiedConcepts(nil)
+	// The drain reads the oldest 50 pending messages across owners. Other test
+	// binaries share this database and can fill that page. Keep the actual drain
+	// query and actor, but give this fixture an isolated outbox and identity graph.
+	schema := fmt.Sprintf("delivery_consumers_%d", time.Now().UnixNano())
+	_, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := admin.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)
+		require.NoError(t, err)
+	})
+	for _, table := range []string{`"MemoryNodes"`, `memory_liveness`} {
+		_, err = admin.ExecContext(ctx, `CREATE TABLE `+schema+`.`+table+` (LIKE public.`+table+` INCLUDING ALL)`)
+		require.NoError(t, err)
+	}
+	db = bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()), pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = memql.LoadUnifiedConcepts(nil)
 	require.NoError(t, err)
 	eng, err := memql.New(db)
 	require.NoError(t, err)

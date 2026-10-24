@@ -31,8 +31,14 @@ function docker() {
    return 0 ;;
   pull) return 0 ;;
   image)
+   case "$*" in *RootFS.Layers*) echo "$FAKE_IMAGE_A"; return ;; esac
    case "$*" in *memql-bff:local*) if [ -f "$FAKE_STATE" ]; then echo "$FAKE_IMAGE_B"; return; fi ;; esac
    echo "$FAKE_IMAGE_A" ;;
+  create) printf '%064d\n' 1 ;;
+  cp)
+   [ "${FAKE_COPY_FAIL:-}" != 1 ] || return 1
+   cp "$FAKE_FILES/${2##*/}" "$3" ;;
+  rm) return 0 ;;
   ps)
    [ "${FAKE_LIST_FAIL:-}" != 1 ] || return 1
    [ "${FAKE_EMPTY:-}" != 1 ] || return 0
@@ -41,6 +47,7 @@ function docker() {
    local node="$2"
    local imported="${FAKE_IMPORTED}.${node}"
    [ "$node" != "${FAKE_EXEC_FAIL:-}" ] || return 1
+   if [ "$3" = sh ]; then shift 2; FAKE_NODE="$node" "$@"; return; fi
    case "$*" in
     *'images ls'*)
      [ -f "$imported" ] || { echo 'REF TYPE DIGEST SIZE'; return 0; }
@@ -86,20 +93,136 @@ function k3d() {
 function restart_deployment() { echo restarted >> "$FAKE_CALLS"; }
 `
 
+const imageProofCtrHarness = `#!/bin/sh
+set -eu
+printf 'proof %s %s\n' "$FAKE_NODE" "$*" >> "$FAKE_CALLS"
+shift 2
+root=$4
+case "$1 $2" in
+ 'images mount')
+  mkdir "$root/app"
+  cp "$FAKE_FILES/memql" "$FAKE_FILES/healthcheck" "$root/app/"
+  chain=$FAKE_IMAGE_A
+  if [ "$FAKE_NODE" = "${FAKE_PROOF_NODE:-k3d-memql-server-1}" ]; then
+   case "${FAKE_PROOF_CASE:-}" in
+    empty-memql) : > "$root/app/memql" ;;
+    empty-healthcheck) : > "$root/app/healthcheck" ;;
+    bytes) printf 'different executable bytes\n' > "$root/app/memql" ;;
+    mode) chmod 700 "$root/app/healthcheck" ;;
+    missing) rm "$root/app/healthcheck" ;;
+    chain) chain=$FAKE_IMAGE_B ;;
+    mount) exit 1 ;;
+   esac
+  fi
+  printf '%s\n%s\n' "$chain" "$root" ;;
+ 'images unmount')
+  if [ "$FAKE_NODE" = "${FAKE_PROOF_NODE:-k3d-memql-server-1}" ] && [ "${FAKE_PROOF_CASE:-}" = cleanup ]; then exit 1; fi
+  rm -f "$root/app/memql" "$root/app/healthcheck"
+  rmdir "$root/app" ;;
+ *) exit 1 ;;
+esac
+`
+
 func runImageIntegrity(t *testing.T, body string, vars ...string) (bool, string, string) {
 	t.Helper()
 	tmp := t.TempDir()
 	calls := filepath.Join(tmp, "calls")
+	files := filepath.Join(tmp, "files")
+	bin := filepath.Join(tmp, "bin")
+	for _, dir := range []string{files, bin} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"memql", "healthcheck"} {
+		if err := os.WriteFile(filepath.Join(files, name), []byte("executable fixture: "+name+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Run the real verification shell against a fake mount operation. The
+	// fixture deliberately keeps image IDs and ready metadata valid while
+	// changing the bytes/mode visible through one node's merged rootfs.
+	if err := os.WriteFile(filepath.Join(bin, "ctr"), []byte(imageProofCtrHarness), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := exec.LookPath("sha256sum")
+	shaArgs := ""
+	if err != nil {
+		sha, err = exec.LookPath("shasum")
+		shaArgs = " -a 256"
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	shaScript := "#!/bin/sh\nif [ \"${FAKE_NODE:-}\" = \"${FAKE_PROOF_NODE:-k3d-memql-server-1}\" ] && [ \"${FAKE_PROOF_CASE:-}\" = read ]; then exit 1; fi\nexec " + shellQuote(sha) + shaArgs + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "sha256sum"), []byte(shaScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	// A hung import must fail the test rather than hang it.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "bash", "-c", "source \""+filepath.Join(repoRoot(t), "scripts/k3d/dev.sh")+"\"\n"+imageIntegrityHarness+"\n"+body)
 	command.WaitDelay = time.Second
-	command.Env = append(os.Environ(), "FAKE_CALLS="+calls, "FAKE_STATE="+filepath.Join(tmp, "changed"), "FAKE_IMPORTED="+filepath.Join(tmp, "imported"), "FAKE_IMPORT_COUNT="+filepath.Join(tmp, "import-count"))
+	command.Env = append(os.Environ(), "FAKE_CALLS="+calls, "FAKE_STATE="+filepath.Join(tmp, "changed"), "FAKE_IMPORTED="+filepath.Join(tmp, "imported"), "FAKE_IMPORT_COUNT="+filepath.Join(tmp, "import-count"), "FAKE_FILES="+files, "TMPDIR="+tmp, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	command.Env = append(command.Env, vars...)
 	output, err := command.CombinedOutput()
 	raw, _ := os.ReadFile(calls)
+	// An unmount failure must preserve its mountpoint instead of recursively
+	// deleting a potentially mounted filesystem. Every other exit cleans up.
+	if !strings.Contains(strings.Join(vars, "\n"), "FAKE_PROOF_CASE=cleanup") {
+		leftovers, globErr := filepath.Glob(filepath.Join(tmp, "memql-image-proof.*"))
+		if globErr != nil || len(leftovers) != 0 {
+			t.Errorf("verification left temporary copies/views behind: %v (%v)\n%s", leftovers, globErr, output)
+		}
+	}
 	return err == nil, string(output), string(raw)
+}
+
+func TestEngineImageImportChecksUnpackedExecutables(t *testing.T) {
+	ok, out, calls := runImageIntegrity(t, `IMAGE_SOURCE=images; install_node bff "$FAKE_IMAGE_A"`, "FAKE_IMPORT_FAIL_AFTER_COMPLETE=1")
+	if !ok {
+		t.Fatalf("verified engine import failed: %s\n%s", out, calls)
+	}
+	if !strings.Contains(calls, "docker create --pull=never --read-only --network none --entrypoint /app/memql sha256:") || strings.Contains(calls, "docker start") {
+		t.Fatalf("source proof did not use the immutable, never-started image: %s", calls)
+	}
+	for _, node := range []string{"server-0", "server-1", "agent-0"} {
+		prefix := "proof k3d-memql-" + node
+		if !strings.Contains(calls, prefix+" -n k8s.io images mount ") || !strings.Contains(calls, prefix+" -n k8s.io images unmount --rm ") {
+			t.Fatalf("node %s was not verified and cleaned: %s", node, calls)
+		}
+	}
+	if !strings.Contains(calls, "restarted") || !strings.Contains(out, "Adopted complete image contents") {
+		t.Fatalf("verified import was not adopted/restarted: %s\n%s", out, calls)
+	}
+}
+
+func TestEngineImageImportRejectsCorruptSnapshotsAndCleansUp(t *testing.T) {
+	for _, failure := range []string{"empty-memql", "empty-healthcheck", "bytes", "mode", "missing", "chain", "read", "mount", "cleanup"} {
+		t.Run(failure, func(t *testing.T) {
+			ok, out, calls := runImageIntegrity(t, `IMAGE_SOURCE=images; install_node bff "$FAKE_IMAGE_A"`, "FAKE_PROOF_CASE="+failure, "FAKE_IMPORT_FAIL_AFTER_COMPLETE=1")
+			if ok || strings.Contains(calls, "restarted") || strings.Contains(out, "Adopted complete image contents") {
+				t.Fatalf("unsafe engine contents were adopted: %s\n%s", out, calls)
+			}
+			if strings.Count(calls, "proof k3d-memql-server-1 -n k8s.io images unmount --rm ") != 2 || !strings.Contains(calls, "docker rm -v ") {
+				t.Fatalf("failure did not clean both attempts and source container: %s", calls)
+			}
+		})
+	}
+}
+
+func TestEngineImageProofReadFailureStopsBeforeImport(t *testing.T) {
+	ok, out, calls := runImageIntegrity(t, `install_node bff "$FAKE_IMAGE_A"`, "FAKE_COPY_FAIL=1")
+	if ok || strings.Contains(calls, "k3d image import") || !strings.Contains(calls, "docker rm -v ") {
+		t.Fatalf("failed source proof imported or leaked its container: %s\n%s", out, calls)
+	}
+}
+
+func TestGenericImageImportDoesNotRequireEngineFiles(t *testing.T) {
+	ok, out, calls := runImageIntegrity(t, `import_image memql-bff:local "$FAKE_IMAGE_A"`, "FAKE_COPY_FAIL=1")
+	if !ok || strings.Contains(calls, "docker create ") || strings.Contains(calls, "proof k3d-") {
+		t.Fatalf("generic import assumed engine paths: %s\n%s", out, calls)
+	}
 }
 
 func TestImageImportVerifiesEveryClusterNode(t *testing.T) {
@@ -236,7 +359,10 @@ func TestImageIntegrityHelperShipsInStagedRunner(t *testing.T) {
 	}
 	body.WriteString("staged=" + shellQuote(tmp) + "\nwhile read -r rel; do stage_one \"$rel\" \"$staged\"; done < <(support_file_relpaths)\n")
 	body.WriteString("stage_one scripts/k3d/dev.sh \"$staged\"\n")
-	body.WriteString("test -f \"$staged/scripts/lib/local_images.sh\"\nbash \"$staged/scripts/k3d/dev.sh\" --print-spec\n")
+	for _, helper := range []string{"lib/local_images.sh", "lib/host_build_guard.py", "k3d/image_cache.py"} {
+		body.WriteString("test -f \"$staged/scripts/" + helper + "\"\n")
+	}
+	body.WriteString("bash \"$staged/scripts/k3d/dev.sh\" --print-spec\n")
 	out, err := exec.Command("bash", "-c", body.String()).CombinedOutput()
 	if err != nil {
 		t.Fatalf("staged runner missing integrity helper: %v\n%s", err, out)

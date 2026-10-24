@@ -58,9 +58,9 @@ describe("the shape", () => {
     expect(result.road.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("labels the template node `compiling` before the automation is known", () => {
+  it("labels the template node in plain language before the automation is known", () => {
     const result = layout(world({ run: run({ automationName: "", status: "compiling" }) }));
-    expect(nodesOfKind(result, "template")[0]?.label).toBe("compiling");
+    expect(nodesOfKind(result, "template")[0]?.label).toBe("Work begins");
   });
 });
 

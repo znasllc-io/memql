@@ -95,7 +95,12 @@ func newRepositoryHarness(t *testing.T) *repositoryHarness {
 	d := h.integ.snapshot()
 	d.GitHub = g
 	d.SARIF = &SARIFDependencies{Engine: engine, Library: l}
-	d.SystemVariable = func(context.Context, string) (string, error) { return out.config, nil }
+	d.SystemVariable = func(_ context.Context, name string) (string, error) {
+		if name == RepositoryChangeConfigurationVariable {
+			return out.config, nil
+		}
+		return "", nil
+	}
 	out.i = New(d)
 	return out
 }

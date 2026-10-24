@@ -111,6 +111,11 @@ func (i *Integration) RecoverRuns(ctx context.Context) error {
 	}
 	now := d.now()
 	for _, r := range runs {
+		if cancelled, err := i.reconcileQueueRun(ctx, d, r); err != nil {
+			d.Logger.Warn("pipelines: queue reconciliation could not be confirmed", "run", r.ID, "error", err)
+		} else if cancelled {
+			continue
+		}
 		if i.driving(r.ID) != nil || !recoverable(r, d.NodeID, now) || i.backingOff(r.ID, now) {
 			continue
 		}
@@ -122,6 +127,9 @@ func (i *Integration) RecoverRuns(ctx context.Context) error {
 	if len(runs) >= pollPageLimit {
 		d.Logger.Warn("pipelines: recovery read a full page of unfinished runs; any beyond it wait for the next pass",
 			"component", "pipelinerun", "runs", len(runs))
+	}
+	if err := i.recoverMaintenance(ctx, d); err != nil {
+		return err
 	}
 	return i.republishFinalCheckRuns(ctx, d)
 }

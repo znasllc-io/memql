@@ -60,8 +60,9 @@ func requiresWorkOutcome(ctx context.Context, tools []common.ToolDefinition) boo
 	return false // Specialists do not have a human-facing response tool.
 }
 
-// A delegated app owns the entire step and its human-feedback protocol. Its
-// completed session result must not cause MemQL to run a second agent loop.
+// A delegated app owns operational execution of the step. The parent still
+// validates its terminal response and persists human feedback, but must never
+// run a second app session to repair that completed session's result.
 func isDelegatedWorkSession(provider any) bool {
 	reporter, ok := provider.(interface {
 		LastSession() (memql.AppSessionOutcome, bool)

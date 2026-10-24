@@ -79,6 +79,7 @@ mutation run createWorkRun {
       ownerUserId: actor.userId
       mode: args.mode ?? "live"
       callerSuppliedPayload: args.callerSuppliedPayload ?? false
+      providerAccountingVersion: 1
       replayPolicy: args.replayPolicy ?? "strict"
       cancelRequested: false
     }
@@ -330,36 +331,28 @@ mutation goal createWorkGoal {
   }
 }
 
-/// Advance a goal: the lifecycle, and how it closed. Read-merge, so every field not named keeps
-/// its prior value.
-///
-/// THE COUNTERPART OF updateWorkRun, and it exists for one reason a reader should not have to
-/// infer: `createWorkGoal` stamps `open` and nothing else could ever move it. A goal whose only
-/// run has finished reads as work still in progress on every surface that shows one, and the
-/// Library's analysis pass produces one of these per file -- so without this every file anybody
-/// ever uploaded would sit in a person's goal list, permanently open.
-///
-/// @serverOnly, and scoping to actor.userId is not the alternative. A goal's lifecycle is the
-/// ENGINE's account of work it is doing: the run opens the goal when it starts and closes it when
-/// it finishes, and both edges are facts about an execution rather than a person's intent. An
-/// actor.userId conjunct would narrow this to the goal's owner and change nothing that matters --
-/// the owner still could not honestly say a run had finished, and the system-origin goals the
-/// Library pass writes carry a present-and-empty owner that no caller matches at all, so the one
-/// population this construct exists for would be the population it could never reach. The
-/// client-reachable lifecycle act is cancelGoal, which epic A2 adds with its own gate.
+/// Record the owner's lifecycle decision without conflating execution success
+/// with acceptance. Runs may finish, fail or wait while the goal remains open.
+/// Only the interactive accept/cancel handlers close a goal. The server-only
+/// mutation preserves the owner-checked acceptance receipt and optional feedback.
+/// Scoping to actor.userId alone cannot attest human acceptance: a delegated
+/// agent also acts as that owner and must not certify its own results. The
+/// interactive handler validates the decision, acceptance receipt and reviewed
+/// version first.
 @serverOnly
 mutation goal updateWorkGoal {
   args {
     goalId       string!
     status       string
     closedAt     string
+    acceptance   object
     closeReason  string
     accountIds   []string
     ceilings     object
     versionTime  datetime
   }
   update {
-    accept { status, closedAt, closeReason, accountIds, ceilings }
+    accept { status, closedAt, closeReason, acceptance, accountIds, ceilings }
     stamp {
       id: args.goalId
       createdAt: args.versionTime ?? now
@@ -410,6 +403,7 @@ mutation modelCall createWorkModelCall {
 mutation observation createWorkObservation {
   args {
     observationId  string!
+    versionTime    datetime
     runId          string!
     stepKey        string
     kind           string!
@@ -420,6 +414,7 @@ mutation observation createWorkObservation {
     accept { runId, stepKey, kind, content, data }
     stamp {
       id: args.observationId
+      createdAt: args.versionTime ?? now
       ownerUserId: actor.userId
     }
   }

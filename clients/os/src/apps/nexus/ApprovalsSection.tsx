@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
@@ -10,6 +10,7 @@ import {
   CopyValue,
   Fact,
   Facts,
+  Field,
   Head,
   Input,
   LiveList,
@@ -20,6 +21,7 @@ import {
   RecordRow as KitRow,
   listCount,
   Subhead,
+  TextArea,
   formatFreshness,
   formatMoment,
   useLiveView,
@@ -118,6 +120,7 @@ export function isFailureQuestion(approval: ApprovalRow): boolean {
 }
 
 function approvalLabel(approval: ApprovalRow): string {
+  if (isRepositoryReview(approval)) return "Repository change";
   return isFailureQuestion(approval) ? "Work stopped" : approvalKindWord(approval.kind);
 }
 
@@ -319,11 +322,16 @@ export function ApprovalsSection({
       // feed, so its page and its row follow the answer without a re-read.
       const documentReview = selected.subject?.reviewType === "library-document"
         ? { requestId: String(selected.subject.requestId), proposalHash: selected.artifactHash } : undefined;
-      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? permission ? { permissionMode, permissionHash: selected.artifactHash } : undefined : undefined, documentReview);
+      const decideIt = (decision: "approved" | "rejected") => {
+        const answer = decision === "approved"
+          ? permission ? { permissionMode, permissionHash: selected.artifactHash } : undefined
+          : isRepositoryReview(selected) && freeText.trim() ? { reason: freeText.trim() } : undefined;
+        void decide.decide(selected.id, decision, answer, documentReview);
+      };
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
-        ariaLabel: `${labels.reject === "Reject" ? "Reject this" : labels.reject}: ${approvalRejectMeaning(selected.kind)}`,
+        ariaLabel: isRepositoryReview(selected) ? "Decline this repository change" : `${labels.reject === "Reject" ? "Reject this" : labels.reject}: ${approvalRejectMeaning(selected.kind)}`,
         onAct: () => decideIt("rejected"),
       });
       if (answerReady && !invalidPermission) acts.push({
@@ -407,8 +415,8 @@ export function ApprovalsSection({
         {decide.error || approvalResume.error ? <span className="os-nexus-act-error os-mono" role="alert">{decide.error || approvalResume.error}</span> : null}
       </ActionBar> : selected === null ? decide.error ? <Notice tone="error" sentence="This request could not be completed." detail={decide.error} /> : null : (
         <ActionBar
-          state={selected.decision === "" && lapsed ? "Lapsed" : decisionWord(selected.decision)}
-          detail={selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision)
+          state={selected.decision === "" && lapsed ? "Lapsed" : approvalDecisionWord(selected)}
+          detail={selected.decision !== "" ? approvalDecisionNext(selected)
             : lapsed ? "This request has expired."
             : failure ? "Retry resumes saved work. Abandon stops this run."
             : invalidPermission ? "This permission request cannot be read."
@@ -417,6 +425,7 @@ export function ApprovalsSection({
             : selected.kind === "scopeElevation" ? "Allows access for this work until the request expires."
             : answerInAsk ? undefined
             : isFeedback && !answerReady ? hasOptions ? "Pick an answer above to send it." : "Write an answer above to send it."
+            : isRepositoryReview(selected) ? "Your decision applies only to the requested scope."
             : selected.kind === PROCEDURE_PROMOTION ? undefined : approvalKindMeaning(selected.kind)}
           tone={canDecide ? "paused" : "none"}
           acts={acts}
@@ -530,6 +539,12 @@ function ApprovalDetail({
   rememberPermission: boolean;
   onRememberPermission: (remember: boolean) => void;
 }) {
+  const repositoryReplyId = useId();
+  const repositoryReview = isRepositoryReview(approval);
+  const statement = typeof approval.subject?.statement === "string" ? approval.subject.statement.trim() : "";
+  const repository = typeof approval.subject?.repository === "string" ? approval.subject.repository : "";
+  const paths = Array.isArray(approval.subject?.paths) && approval.subject.paths.every(path => typeof path === "string" && path.trim()) ? approval.subject.paths as string[] : [];
+  const declineReply = repositoryReview && approval.decision === "rejected" && typeof approval.answer?.reason === "string" ? approval.answer.reason : "";
   const failure = isFailureQuestion(approval);
   const permission = !failure && approval.kind === "scopeElevation" ? computerPermission(approval.subject) : null;
   const destination = approval.kind === "scopeElevation" ? executionDestinationChange(approval.subject) : null;
@@ -560,9 +575,16 @@ function ApprovalDetail({
   return (
     <>
       <Panel label="What is being asked">
-        <p className="os-nexus-approval-ask">{approvalSubjectLine(approval)}</p>
+        <p className="os-nexus-approval-ask">{repositoryReview ? statement || "The requested change was not recorded." : approvalSubjectLine(approval)}</p>
         {/* SAID ONCE: a promotion's question already says what promoting does. */}
-        {approval.kind === PROCEDURE_PROMOTION || isFeedback || failure || approval.kind === "scopeElevation" ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
+        {repositoryReview ? <>
+          <Facts>
+            <Fact label="Repository" value={repository || "Not recorded"} />
+            <Fact label="Requested paths" value={paths.length ? paths.join(", ") : "Not recorded"} />
+            {approval.expiresAt ? <Fact label="Approval expires" value={formatMoment(approval.expiresAt)} /> : null}
+          </Facts>
+          <Caption>{repositoryReviewScope(approval)}</Caption>
+        </> : approval.kind === PROCEDURE_PROMOTION || isFeedback || failure || approval.kind === "scopeElevation" ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
         {failure && typeof approval.subject?.errorMessage === "string" ? <p className="os-nexus-approval-failure">{approval.subject.errorMessage}</p> : null}
 
         {isFeedback && canDecide ? (
@@ -597,6 +619,12 @@ function ApprovalDetail({
             </>
           )
         ) : null}
+        {repositoryReview && canDecide ? <div className="os-form" style={{ maxWidth: "34rem" }}>
+          <Field label="Reply if declined (optional)">
+            <TextArea id={repositoryReplyId} label="Reply if declined (optional)" value={freeText} onChange={onFreeText} />
+          </Field>
+          <Caption>Your reply is shared with the person who requested this change.</Caption>
+        </div> : null}
       </Panel>
 
       {!failure && destination ? <Panel label="Execution destination"><Facts>
@@ -670,6 +698,7 @@ function ApprovalDetail({
         </Panel>
       )}
 
+      <ApprovalEvidence collapsed={repositoryReview}>
       {/* THE EVIDENCE, VERBATIM AND IN THE DATA VOICE. This is the classifier's
           own account of why the run stopped rather than carrying on, and the
           rule id is where somebody goes to change the policy. A paraphrase
@@ -771,15 +800,18 @@ function ApprovalDetail({
           </>
         )}
       </Panel>
+      </ApprovalEvidence>
 
       {approval.decision === "" ? null : (
         <Notice
           tone="info"
-          sentence={`${decisionWord(approval.decision)}${
+          sentence={`${approvalDecisionWord(approval)}${
             approval.decidedAt === "" ? "" : ` on ${formatMoment(approval.decidedAt)}`
           }.`}
-          next={approvalDecidedNext(approval.kind, approval.decision)}
-        />
+          next={approvalDecisionNext(approval)}
+        >
+          {declineReply.trim() ? <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxWidth: "80ch" }}>{declineReply}</p> : null}
+        </Notice>
       )}
     </>
   );
@@ -811,6 +843,7 @@ function approvalContext(approval: ApprovalRow, run: RunRow | null): string {
  * falls back to the words every other kind uses.
  */
 function decisionLabels(approval: ApprovalRow): { approve: string; reject: string } {
+  if (isRepositoryReview(approval)) return { approve: "Approve", reject: "Decline" };
   if (approval.kind === "scopeElevation") return { approve: executionDestinationChange(approval.subject)?.to === "workbench" ? "Use Workbench" : "Allow for this work", reject: "Reject" };
   if (approval.subject?.reviewType === "library-document") return { approve: "Apply all changes", reject: "Decline all" };
   if (approval.kind !== PROCEDURE_PROMOTION) return { approve: "Approve", reject: "Reject" };
@@ -818,6 +851,32 @@ function decisionLabels(approval: ApprovalRow): { approve: string; reject: strin
   const approve = offered("approved");
   const reject = offered("rejected");
   return { approve: approve || "Approve", reject: reject || "Reject" };
+}
+
+function isRepositoryReview(approval: ApprovalRow): boolean {
+  return approval.kind === "planReview" && approval.subject?.reviewType === "repository-change" && !isFailureQuestion(approval);
+}
+
+function approvalDecisionWord(approval: ApprovalRow): string {
+  return isRepositoryReview(approval) && approval.decision === "rejected" ? "Declined" : decisionWord(approval.decision);
+}
+
+function approvalDecisionNext(approval: ApprovalRow): string {
+  if (isRepositoryReview(approval)) {
+    if (approval.decision === "rejected") return "This request will not proceed.";
+    if (approval.decision === "approved") return "Work can continue within the approved scope. Production still requires a selected release.";
+  }
+  return approvalDecidedNext(approval.kind, approval.decision);
+}
+
+function repositoryReviewScope(approval: ApprovalRow): string {
+  if (approval.subject?.operation === "propose_change") return "Approval allows a pull request within these paths. Merging and deployment need separate authorization.";
+  if (approval.subject?.operation === "deliver_change") return "Approval allows independent review, required tests and merge queue admission within these paths. GitHub’s required reviews still apply. Select a production release separately.";
+  return "The requested scope was not recorded.";
+}
+
+function ApprovalEvidence({ collapsed, children }: { collapsed: boolean; children: ReactNode }) {
+  return collapsed ? <details className="nexus-technical"><summary>Technical details</summary>{children}</details> : <>{children}</>;
 }
 
 /**

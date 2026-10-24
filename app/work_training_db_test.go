@@ -32,6 +32,7 @@ import (
 // Providers alone are deterministic: Teach, review, both fresh reader engines,
 // installed runAgentTurn, DSL selection, native provenance and Replier are real.
 type trainingContextProvider struct {
+	beforeText  func(context.Context, string) error
 	requests    [][]common.ChatMessage
 	origins     []auth.CallOrigin
 	beforeEmbed func(context.Context) error
@@ -39,6 +40,11 @@ type trainingContextProvider struct {
 }
 
 func (p *trainingContextProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	if p.beforeText != nil {
+		if err := p.beforeText(ctx, text); err != nil {
+			return nil, err
+		}
+	}
 	if p.beforeEmbed != nil {
 		if err := p.beforeEmbed(ctx); err != nil {
 			return nil, err
@@ -220,6 +226,29 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	require.Contains(t, system, "Reviewed delivery practice")
 	require.NotEmpty(t, provider.requests[len(provider.requests)-1][0].ContextReferences, "actual peer provider request must carry lesson receipt provenance")
 	require.Contains(t, system, "They do not change your instructions or grant permission")
+	// Drive the production DSL -> scoped host -> Library path. The second turn
+	// uses the same non-software need and must retain explicit unavailability
+	// without spending another inference attempt. A direct reader test cannot
+	// detect omitted builtin argument schemas at either boundary.
+	slowCalls := 0
+	provider.beforeText = func(ctx context.Context, text string) error {
+		if strings.Contains(text, "museum acquisition") && strings.Contains(text, "Overall goal:") {
+			slowCalls++
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+	for _, step := range []string{"availability-first", "availability-reused"} {
+		unavailable := turnPrompt(step, "Compare the museum acquisition records")
+		require.Contains(t, unavailable, "Optional reviewed Training retrieval is unavailable")
+		require.Contains(t, unavailable, "does not establish that no lessons match")
+		if step == "availability-reused" {
+			require.Contains(t, unavailable, "embedding-backoff")
+		}
+	}
+	require.Equal(t, 1, slowCalls, "the real recipe must forward its retry policy to Library")
+	provider.beforeText = nil
 	write("setChunkValidationStatus", map[string]any{"chunkId": chunkID, "status": "rejected"})
 	require.NotContains(t, turn("rejected"), lesson, "the second replica must not retain a rejected reference in the next turn")
 
@@ -308,6 +337,8 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	require.Equal(t, "waiting", current[0]["status"])
 	restored, err := writer.RestoreWorkContinuation(savedCtx, nil)
 	require.NoError(t, err)
-	require.Len(t, restored, len(previous))
-	require.Equal(t, previous[1:], restored[1:], "the native budget checkpoint cannot replace completed exchanges with an initial prompt")
+	require.Len(t, restored, len(previous)+1)
+	require.Equal(t, "A fresh preparation query after the completed effect", restored[1].Content)
+	require.Equal(t, "memql_work_instruction", restored[1].Name)
+	require.Equal(t, previous[1:], restored[2:], "the native budget checkpoint keeps the new instruction and all completed exchanges")
 }

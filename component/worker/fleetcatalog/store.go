@@ -70,7 +70,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			// The merge happens HERE, once, on the way out of the store --
 			// so no caller can accidentally match on the cockpit's map alone
 			// and quietly ignore the labels the owner set.
-			Labels: MergeLabels(rowStringMap(row, "labels"), rowStringMap(row, "operatorLabels")),
+			Labels: routingLabels(rowStringMap(row, "labels"), rowStringMap(row, "operatorLabels"), row["capabilityDescriptor"]),
 			// Read from operatorLabels ALONE, deliberately not from the
 			// merge one line above (epic memql#4676): the cockpit rewrites
 			// `labels` on every reconnect, so an opt-in found there was
@@ -142,7 +142,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			Name:             rowString(row, "name"),
 			DisplayName:      rowString(row, "displayName"),
 			Capabilities:     rowStringList(row, "capabilities"),
-			Labels:           MergeLabels(rowStringMap(row, "labels"), operator),
+			Labels:           routingLabels(rowStringMap(row, "labels"), operator, row["capabilityDescriptor"]),
 			WorkbenchSharing: workerservice.SharingFromRow(row["workbenchSharing"]),
 			SharingMode:      sharing.Mode,
 			ModelSetup:       memqlengine.ModelSetupFromRow(row["modelSetup"]),

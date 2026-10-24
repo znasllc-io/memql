@@ -332,8 +332,23 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					if boundary == "repair-rerun" {
 						// Automatic contract repair persists this same guidance on the request.
 						repaired := load(reader, runID)
-						recorded := map[string]any{"requestId": repaired.Rerun.RequestId, "stepKey": repaired.Rerun.StepKey, "reason": "rerun", "versions": repaired.Rerun.Versions, "override": map[string]any{"guidance": map[string]any{"reason": "The prior turn did not produce a valid completion or durable question."}}}
+						require.NotNil(t, repaired.Rerun)
+						require.False(t, repaired.Rerun.RequestedAt.IsZero(), "public rerun intake must record its guidance chronology")
+						// Preserve the saved intake timestamp, not a new clock value or
+						// the earlier approval's decision time: this is the same attempt.
+						recorded := map[string]any{
+							"requestId":   repaired.Rerun.RequestId,
+							"requestedAt": repaired.Rerun.RequestedAt.Format(time.RFC3339Nano),
+							"stepKey":     repaired.Rerun.StepKey,
+							"reason":      "rerun",
+							"versions":    repaired.Rerun.Versions,
+							"override":    map[string]any{"guidance": map[string]any{"reason": "The prior turn did not produce a valid completion or durable question."}},
+						}
 						write("updateWorkRun", map[string]any{"runId": runID, "rerun": recorded})
+						reloaded := load(reader, runID)
+						require.NotNil(t, reloaded.Rerun)
+						require.Equal(t, repaired.Rerun.RequestId, reloaded.Rerun.RequestId)
+						require.Equal(t, repaired.Rerun.RequestedAt, reloaded.Rerun.RequestedAt, "guidance keeps its original place when another replica resumes it")
 					}
 					j := load(reader, runID)
 					require.NotNil(t, j.Rerun)
@@ -480,7 +495,9 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 							case "override":
 								spec.Override = &common.StepOverride{Prompt: "Changed input"}
 							case "snapshot":
-								spec.Snapshot = &common.WorkspaceSnapshot{}
+								// An empty snapshot changes no workspace. Exercise the
+								// forbidden replacement without weakening that distinction.
+								spec.Snapshot = &common.WorkspaceSnapshot{Files: []common.SnapshotFile{{Path: "changed.txt", FileId: "v1:library:file:replacement"}}}
 							case "missing child":
 								bad.StepStates = map[string]automations.StepState{}
 								for k, v := range journal.StepStates {

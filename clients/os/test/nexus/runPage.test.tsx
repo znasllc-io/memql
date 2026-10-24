@@ -68,11 +68,11 @@ describe("the timeline", () => {
       .getAllByRole("button")
       .map((b) => b.getAttribute("aria-label") ?? "");
     expect(keys.map((label) => label.split(", ")[1])).toEqual([
-      "fetchLedger",
-      "normalise",
-      "classify",
-      "writeReport",
-      "notify",
+      "Fetch ledger",
+      "Normalise",
+      "Classify",
+      "Write report",
+      "Notify",
     ]);
   });
 
@@ -86,18 +86,18 @@ describe("the timeline", () => {
       .getAllByRole("button")
       .filter((b) => b.getAttribute("data-thought") === "true");
     expect(thought).toHaveLength(1);
-    expect(thought[0]?.getAttribute("aria-label")).toContain("classify");
+    expect(thought[0]?.getAttribute("aria-label")).toContain("Classify");
   });
 
   it("says in WORDS what the drawing says, for a reader who cannot see it", async () => {
     const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     const timeline = await openRun(conn);
     expect(
-      within(timeline).getByLabelText("Step 3, classify, Reasoning, called a model, Done"),
+      within(timeline).getByLabelText("Step 3, Classify, Reasoning, called a model, Done"),
     ).toBeTruthy();
     expect(
       within(timeline).getByLabelText(
-        "Step 1, fetchLedger, Deterministic, ran without calling a model, Done",
+        "Step 1, Fetch ledger, Deterministic, ran without calling a model, Done",
       ),
     ).toBeTruthy();
   });
@@ -106,7 +106,7 @@ describe("the timeline", () => {
     const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     const timeline = await openRun(conn);
     // A dash on four rows to say "free" is four things to read past.
-    expect(within(timeline).getAllByText("1.2k tok")).toHaveLength(1);
+    expect(within(timeline).getAllByText("1.2k tokens")).toHaveLength(1);
     expect(within(timeline).getAllByText("$0.0041")).toHaveLength(1);
   });
 
@@ -122,7 +122,7 @@ describe("the timeline", () => {
     // false would mark every run in the cluster failed on a field nobody wrote.
     const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     const timeline = await openRun(conn);
-    fireEvent.click(within(timeline).getByLabelText(/Step 1, fetchLedger/));
+    fireEvent.click(within(timeline).getByLabelText(/Step 1, Fetch ledger/));
     expect(await screen.findByText("none declared")).toBeTruthy();
   });
 
@@ -194,7 +194,7 @@ describe("what a run's bar offers", () => {
     const timeline = await openRun(conn);
     expect(screen.queryByText("Branch from here")).toBeNull();
 
-    fireEvent.click(within(timeline).getByLabelText(/Step 3, classify/));
+    fireEvent.click(within(timeline).getByLabelText(/Step 3, Classify/));
     await screen.findByText("Branch from here");
     // Picking the step changed the bar, and a bar that has just changed takes no press for a moment.
     await readTheBar();
@@ -457,7 +457,7 @@ describe("the journal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Older activity" }));
     await screen.findByText("temporarily unavailable");
     expect(screen.queryByText("Current evidence")).toBeNull();
-    fireEvent.click(within(screen.getByLabelText("The journal for this run")).getByRole("button", { name: "Retry" }));
+    fireEvent.click(within(screen.getByLabelText("Activity for this run")).getByRole("button", { name: "Retry" }));
     await screen.findByText("Recovered earlier evidence");
     fireEvent.click(screen.getByRole("button", { name: "Newer activity" }));
     await screen.findByText("Current evidence");
@@ -507,9 +507,11 @@ describe("the journal", () => {
     await openRun(conn);
     await waitFor(() => expect(conn.query.workModelCallsPageForOwnerRun).toHaveBeenCalled());
     expect(conn.query.workObservationSummariesForOwnerRun).toHaveBeenCalled();
-    expect((await screen.findByRole("heading", { name: /^Model calls/ })).querySelector(".os-subhead-meta")?.textContent).toBe("1");
+    expect(await screen.findByRole("heading", { name: "Token usage" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Models and usage details"));
+    expect(within(screen.getByRole("list", { name: "Model activity" })).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("served from the journal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /^Observations/ }).querySelector(".os-subhead-meta")?.textContent).toBe("1");
+    expect(within(screen.getByRole("list", { name: "Recorded actions and outcomes" })).getAllByRole("listitem")).toHaveLength(1);
 
     // It says what an on-demand read costs, rather than implying liveness.
 
@@ -544,7 +546,7 @@ describe("the steps feed", () => {
   it("folds a live step update into the timeline in place", async () => {
     const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     const timeline = await openRun(conn);
-    expect(within(timeline).getByLabelText(/Step 5, notify, Human,.*Waiting/)).toBeTruthy();
+    expect(within(timeline).getByLabelText(/Step 5, Notify, Human,.*Waiting/)).toBeTruthy();
 
     await act(async () => {
       conn.subscriptions.emit(
@@ -553,7 +555,7 @@ describe("the steps feed", () => {
       );
     });
     await waitFor(() =>
-      expect(within(timeline).getByLabelText(/Step 5, notify, Human,.*Done/)).toBeTruthy(),
+      expect(within(timeline).getByLabelText(/Step 5, Notify, Human,.*Done/)).toBeTruthy(),
     );
   });
 });
@@ -660,7 +662,8 @@ describe("each step's decision", () => {
     const timeline = await openRunAndReadJournal(conn);
     await screen.findByRole("button", { name: "Older activity" });
     expect(timeline.querySelector(".os-nexus-step-decision")).toBeNull();
-    expect(screen.getByRole("list", { name: "Model calls" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Models and usage details"));
+    expect(screen.getByRole("list", { name: "Model activity" })).toBeTruthy();
   });
 
   it("names your own fleet, and puts no money on it", async () => {
@@ -673,7 +676,7 @@ describe("each step's decision", () => {
       modelCalls: decisionCalls(),
     });
     const timeline = await openRunAndReadJournal(conn);
-    const row = within(timeline).getByLabelText(/Step 3, summarise/);
+    const row = within(timeline).getByLabelText(/Step 3, Summarise/);
     const line = row.querySelector(".os-nexus-step-decision");
     expect(line?.textContent).toBe("your fleet · qwen3:8b");
     // Asserted on the LINE and on the name, because a money figure could
@@ -713,7 +716,7 @@ describe("each step's decision", () => {
     });
     const timeline = await openRunAndReadJournal(conn);
     expect(timeline.querySelectorAll(".os-nexus-step-decision")).toHaveLength(3);
-    const free = within(timeline).getByLabelText(/Step 1, fetchLedger/);
+    const free = within(timeline).getByLabelText(/Step 1, Fetch ledger/);
     expect(free.querySelector(".os-nexus-step-decision")).toBeNull();
   });
 
@@ -729,12 +732,12 @@ describe("each step's decision", () => {
     const timeline = await openRunAndReadJournal(conn);
     expect(
       within(timeline).getByLabelText(
-        "Step 2, classify, Reasoning, called a model, Done, anthropic · claude-sonnet-4 · $0.0041",
+        "Step 2, Classify, Reasoning, called a model, Done, anthropic · claude-sonnet-4 · $0.0041",
       ),
     ).toBeTruthy();
     expect(
       within(timeline).getByLabelText(
-        "Step 4, draft, Reasoning, called a model, Done, replayed · claude-haiku, no call made",
+        "Step 4, Draft, Reasoning, called a model, Done, replayed · claude-haiku, no call made",
       ),
     ).toBeTruthy();
   });
@@ -763,7 +766,7 @@ it("keeps unrelated live steps out of an open run and uses its work title", asyn
     conn.subscriptions.emit(STEP, stepRow({ id: "foreign", runId: "r2", seq: 0, key: "unrelatedSweep" }));
     conn.subscriptions.emit(STEP, stepRow({ id: "mine", runId: "r1", seq: 0, key: "lookupEvidence" }));
   });
-  await waitFor(() => expect(within(timeline).getByText("lookupEvidence")).toBeTruthy());
+  await waitFor(() => expect(within(timeline).getByText("Lookup evidence")).toBeTruthy());
   expect(within(timeline).queryByText("unrelatedSweep")).toBeNull();
   expect(screen.getByRole("heading", { name: "Find saved information" })).toBeTruthy();
 });

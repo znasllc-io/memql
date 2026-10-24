@@ -80,13 +80,13 @@ const DONE: Row = {
   buildLogTail: "",
 } as unknown as Row;
 
-function mount(connection: FakeConnection, section: string, role = "owner") {
+function mount(connection: FakeConnection, section: string, role = "owner", sourceId?: string) {
   h.connection = connection;
   installSeededAccess(role);
   return render(
     withSession(
       <>
-        <DeployablesApp sectionId={section} navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />
+        <DeployablesApp sectionId={section} navigate={vi.fn()} askContext={vi.fn()} store={memStore()} surface={sourceId ? "pipelines" : "deployables"} intent={sourceId ? { id: "open-source", payload: { packageId: sourceId } } : undefined} consumeIntent={vi.fn()} />
         <WindowsProbe />
       </>,
       { role },
@@ -129,13 +129,8 @@ describe("the deployable's Logs action", () => {
 
 describe("the deployment's Logs action", () => {
   it("opens the Logs app on Search carrying the deployment as the subject", async () => {
-    mount(fakeConnection({ sites: [SHOP_FROM_PACKAGE], packages: [ACME], deployments: { "pkg-acme": [DONE] } }), "deployables", "admin");
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    // THE ATTEMPTS ARE THE SOURCE'S, ON ITS OWN HISTORY VIEW (epic
-    // memql#4937): they are read by packageId, so a two-app source used to
-    // draw the identical 2,600px wall on both of its apps' pages.
-    const page = await screen.findByRole("region", { name: /^Deployable / });
-    await click(within(page).getByRole("button", { name: /^Open / }));
+    mount(fakeConnection({ sites: [SHOP_FROM_PACKAGE], packages: [ACME], deployments: { "pkg-acme": [DONE] } }), "repositories", "owner", "pkg-acme");
+    // Delivery attempts belong to the repository's history in Pipelines.
     const source = await screen.findByRole("region", { name: /^Source / });
     await click(within(source).getByRole("button", { name: /^History/ }));
     const history = await screen.findByRole("region", { name: /^History of / });
@@ -143,8 +138,9 @@ describe("the deployment's Logs action", () => {
     await click(within(attempts).getByRole("button", { name: /^Logs of the .* deploy$/ }));
 
     const opened = windows();
-    expect(opened[0]).toMatchObject({ appId: "logs", sectionId: "search" });
-    expect(opened[0]?.intent?.payload).toEqual({
+    const logs = opened.find(window => window.appId === "logs");
+    expect(logs).toMatchObject({ appId: "logs", sectionId: "search" });
+    expect(logs?.intent?.payload).toEqual({
       subject: "dep-1",
       subjectConcept: "v1:platform:packageDeployment",
     });

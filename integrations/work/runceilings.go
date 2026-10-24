@@ -1,62 +1,28 @@
 package work
 
-// runceilings.go -- the run's ceilings, read and enforced (memql#5580).
+// Goal admission separates monetary limits from renewable work windows. Every
+// answered model call counts, including local, subscription and replay calls;
+// only metered tokens/cost consume monetary ceilings. Before a new call, fresh
+// owner-scoped receipts reconcile local charges without double-counting peers.
 //
-// component/work.CheckCeilings was written, documented and unit-tested with no
-// production caller: a goal's costCeiling, tokenBudget and maxModelCalls were
-// settable fields nothing read. This is the caller. component/memql holds the
-// SEAM (run_ceilings.go, which says why it is that seam and not the step
-// runner, the journal or the router); this holds the decision, beside the rows
-// it is made from -- exactly as ModelJournal holds work.DecideServe's.
+// Time/model-call windows renew only through ContinueWorkProgress, which verifies
+// new durable evidence or a human answer. No fixed goal-age deadline may cancel
+// productive work. Provider/tool deadlines, cancellation, permission expiry and
+// the stalled-loop detector remain independent. Retry counters belong to the
+// executor; maxEvents is still warned as unenforced, never silently certified.
 //
-// Before each admission, fresh owner-scoped summary pages are folded into an
-// identity-based union with local charges. Warm replicas therefore see calls
-// completed on peers without recharging their own durable receipts. Failed
-// journal writes and unjournaled cache answers remain counted locally. Observed
-// receipts never disappear from spend if a later read omits them.
-//
-// This accounts for completed requests, not distributed in-flight reservations:
-// simultaneous calls can still be admitted before either has finished. A failed
-// journal write also cannot be recovered by a different process. Receipt IDs are
-// bounded per tracked run; exhausting that bound refuses further admission.
-//
-// THE BLAST RADIUS IS GOAL-BACKED RUNS, DELIBERATELY. A run with no goalId on
-// its context inherits no ceilings -- ceilings live on v1:work:goal, and an
-// automation's run has no goal -- so it is admitted with no read at all. That
-// is not a silent pass: there is nothing declared to evaluate. Every automation
-// run in the cluster therefore costs this guard nothing, and the runs that DID
-// declare a ceiling are the only ones that can be refused by one.
-//
-// WHERE IT FAILS CLOSED. A run whose goal is named and whose ceilings cannot
-// be READ is refused, with `unevaluated` as the ceiling name: a limit nobody
-// could read and a limit nobody set are the same number, and only one of them
-// means unbounded on purpose. The seed is retried on the next call, so a
-// transient database blip costs one refused call rather than the run.
-//
-// WHAT IT DOES NOT EVALUATE, AND WHERE THAT GOES. maxRetries and maxEvents
-// are the EXECUTOR's counters -- the run's re-attempts and its published
-// events -- and neither reaches a model call, so passing a zero for them to
-// CheckCeilings would clear them silently on every call; they are cleared from
-// the ceilings this seam checks. maxRetries IS enforced, by the failure path
-// (component/automations' classifyAndAct): every retry, repair and re-plan it
-// orders counts against spent.retries, and past the budget the run asks a
-// person (memql#5664). maxEvents is enforced nowhere, so it alone is WARNED
-// about once per run: an operator who set it is told it is not a limit rather
-// than believing it is.
-//
-// RE-ENTRY: SPEND ACCUMULATES, A NEW RUN STARTS FRESH. A resumed or
-// re-dispatched run is the same v1:work:run id, so admission folds the calls it
-// already made and the second attempt continues the first one's budget -- park,
-// approve, park again is not a way to buy another allowance. A replay or a
-// fork is a DIFFERENT run id with its own (empty) journal and its own
-// ceilings, which is right: it is a different run. The one gap is a modelCall
-// row whose write failed (the journal is best-effort by design), which
-// under-counts by that call across a re-entry and not within a process.
+// A missing goal, unreadable usage or identity overflow fails closed rather than
+// inventing budget. Local unjournaled answers remain counted on this replica;
+// actual provider attempts have their separate durable reservation ledger.
+// The active pending index is bounded separately from goal lifetime, and an
+// exhausted set needs accounting recovery,
+// not a claim that the owner's objective was accepted or completed.
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -71,8 +37,8 @@ import (
 // read rather than an allowance.
 const maxTrackedRuns = 2048
 
-// Bound identity retention even when a goal has no model-call ceiling. Do not
-// evict individual receipt IDs: that would silently double-count on reread.
+// Bound unjournaled local charges, not a run's lifetime. Confirmed receipts
+// leave this active index only after a complete durable accounting read.
 const maxTrackedRunReceipts = 4096
 
 // RunCeilings implements memqlengine.RunCeilingGuard over v1:work:goal's
@@ -94,6 +60,9 @@ type runBudget struct {
 	// seeded is false until the rows have been read once.
 	seeded          bool
 	receipts        map[string]struct{}
+	pending         map[string]work.CallSpend
+	durable         work.Spent
+	unrecorded      work.Spent
 	receiptOverflow bool
 	// ceilings are the goal's, with the two this seam cannot evaluate
 	// cleared. unbounded is true when nothing is left to check.
@@ -206,18 +175,29 @@ func (c *RunCeilings) Charge(ctx context.Context, rc common.RunContext, spend me
 	b := c.budgetFor(rc)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	call := work.CallSpend{Served: spend.Served, InputTokens: spend.InputTokens, OutputTokens: spend.OutputTokens, Cost: spend.Cost}
+	charge := work.CallSpend{Served: spend.Served, InputTokens: spend.InputTokens, OutputTokens: spend.OutputTokens, Cost: spend.Cost}
 	if receiptID := memqlengine.BareShortId(strings.TrimSpace(spend.ReceiptID)); receiptID != "" {
-		if err := b.addReceipt(receiptID, call); err != nil {
+		if _, pending := b.receipts[receiptID]; !pending {
+			rows, err := c.store.query(ownerActor(memqlengine.ContextWithFreshRead(ctx), rc.OwnerUserId), "query "+call("workModelCallReceiptForOwnerRun", map[string]any{"runId": rc.RunId, "receiptId": receiptID}))
+			if err == nil && len(rows) > 0 {
+				// A late completion retry may name a receipt already included in
+				// the durable total. Reconcile instead of charging it twice.
+				if err := c.refreshReceipts(ctx, rc, b); err == nil {
+					return
+				}
+			}
+		}
+		if err := b.addReceipt(receiptID, charge); err != nil {
 			// An already-admitted answer must still count even after the bound was
 			// reached. No further calls can be admitted with uncertain identity.
 			b.receiptOverflow = true
-			b.spent = work.AddCall(b.spent, call)
+			b.spent = work.AddCall(b.spent, charge)
 		}
 		return
 	}
 	// Cache hits have no durable row and therefore cannot overlap a fresh read.
-	b.spent = work.AddCall(b.spent, call)
+	b.spent = work.AddCall(b.spent, charge)
+	b.unrecorded = work.AddCall(b.unrecorded, charge)
 }
 
 // Spent reports the run's spend so far, for a refusal to carry onto the row.
@@ -299,7 +279,11 @@ func (b *runBudget) addReceipt(receiptID string, call work.CallSpend) error {
 	if b.receipts == nil {
 		b.receipts = map[string]struct{}{}
 	}
+	if b.pending == nil {
+		b.pending = map[string]work.CallSpend{}
+	}
 	b.receipts[receiptID] = struct{}{}
+	b.pending[receiptID] = call
 	b.spent = work.AddCall(b.spent, call)
 	return nil
 }
@@ -309,29 +293,99 @@ func (b *runBudget) addReceipt(receiptID string, call work.CallSpend) error {
 // but cannot authorize a call; a retry deduplicates the same IDs.
 func (c *RunCeilings) refreshReceipts(ctx context.Context, rc common.RunContext, b *runBudget) error {
 	if b.receiptOverflow {
-		return fmt.Errorf("model usage receipt tracking is exhausted")
+		return fmt.Errorf("unjournaled model usage exceeded the recoverable pending index")
 	}
+	// This is a bounded-time accounting read, not a lifetime receipt cap.
+	// Stable (createdAt, ID) ordering proves uniqueness with one watermark across pages;
+	// only not-yet-journaled local charges require an active duplicate index.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	query := "query " + call("workModelCallsPageForOwnerRun", map[string]any{"runId": rc.RunId})
-	err := memqlengine.WalkQueryPages(ownerActor(ctx, rc.OwnerUserId), c.store.engine.Execute, query, maxTrackedRunReceipts+1, func(result *memqlengine.ExecuteResult) error {
-		for _, row := range memqlRows(result) {
-			receiptID := memqlengine.BareShortId(rowString(row, "id"))
-			if receiptID == "" {
-				return fmt.Errorf("model usage receipt has no identity")
+	var total work.Spent
+	pending := make(map[string]work.CallSpend, len(b.pending))
+	for id, spend := range b.pending {
+		pending[id] = spend
+	}
+	lastID, cursor := "", ""
+	var lastAt time.Time
+	emptyPages := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		result, err := c.store.engine.Execute(memqlengine.ContextWithCursor(ownerActor(memqlengine.ContextWithFreshRead(ctx), rc.OwnerUserId), cursor), query)
+		if err != nil {
+			return err
+		}
+		if result == nil {
+			return fmt.Errorf("model usage returned no page")
+		}
+		rows := memqlRows(result)
+		// Node-set materialization need not preserve the query's page order.
+		// Restore it inside the page before checking the cross-page watermark.
+		sort.Slice(rows, func(a, b int) bool {
+			at, _ := rowTime(rows[a], "createdAt")
+			bt, _ := rowTime(rows[b], "createdAt")
+			if !at.Equal(bt) {
+				return at.Before(bt)
 			}
+			return rowString(rows[a], "id") < rowString(rows[b], "id")
+		})
+		if len(rows) == 0 {
+			emptyPages++
+		} else {
+			emptyPages = 0
+		}
+		if emptyPages > 32 {
+			return fmt.Errorf("model usage pagination made no progress")
+		}
+		for _, row := range rows {
+			receiptID := memqlengine.BareShortId(rowString(row, "id"))
+			at, validTime := rowTime(row, "createdAt")
+			if !validTime || receiptID == "" || (!lastAt.IsZero() && (at.Before(lastAt) || (at.Equal(lastAt) && receiptID <= lastID))) {
+				return fmt.Errorf("model usage identities did not advance in stable order (%q after %q)", receiptID, lastID)
+			}
+			lastID = receiptID
+			lastAt = at
 			if memqlengine.BareShortId(rowString(row, "ownerUserId")) != memqlengine.BareShortId(strings.TrimSpace(rc.OwnerUserId)) || memqlengine.BareShortId(rowString(row, "runId")) != memqlengine.BareShortId(rc.RunId) {
 				return fmt.Errorf("model usage receipt attribution does not match this run")
 			}
-			if err := b.addReceipt(receiptID, work.CallSpend{Served: rowString(row, "served"), InputTokens: rowInt(row, "inputTokens"), OutputTokens: rowInt(row, "outputTokens"), Cost: rowFloat(row, "cost")}); err != nil {
-				return err
+			total = work.AddCall(total, work.CallSpend{Served: rowString(row, "served"), InputTokens: rowInt(row, "inputTokens"), OutputTokens: rowInt(row, "outputTokens"), Cost: rowFloat(row, "cost")})
+			delete(pending, receiptID)
+		}
+		next := ""
+		if meta := result.GetMeta(); meta != nil {
+			next = meta.Cursor
+			if meta.HasMore && next == "" {
+				return fmt.Errorf("model usage has more rows without a cursor")
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return err
+		if next == "" {
+			break
+		}
+		if next == cursor {
+			return fmt.Errorf("model usage cursor did not advance")
+		}
+		cursor = next
 	}
-	if len(b.receipts) >= maxTrackedRunReceipts {
-		return fmt.Errorf("model usage receipt tracking reached its %d-receipt safety bound", maxTrackedRunReceipts)
+	if total.ModelCalls < b.durable.ModelCalls || total.Tokens < b.durable.Tokens || total.TokensLocal < b.durable.TokensLocal || total.TokensSubscription < b.durable.TokensSubscription || total.Cost < b.durable.Cost {
+		return fmt.Errorf("durable model usage regressed; accounting recovery is required before another call")
+	}
+	b.durable = total
+	b.pending = pending
+	b.receipts = map[string]struct{}{}
+	b.spent = total
+	for id, spend := range pending {
+		b.receipts[id] = struct{}{}
+		b.spent = work.AddCall(b.spent, spend)
+	}
+	b.spent.ModelCalls += b.unrecorded.ModelCalls
+	b.spent.Tokens += b.unrecorded.Tokens
+	b.spent.TokensLocal += b.unrecorded.TokensLocal
+	b.spent.TokensSubscription += b.unrecorded.TokensSubscription
+	b.spent.Cost += b.unrecorded.Cost
+	if len(b.pending) >= maxTrackedRunReceipts {
+		return fmt.Errorf("unjournaled model usage reached the bounded pending index; durable receipts must be recovered")
 	}
 	return nil
 }
@@ -352,6 +406,9 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 		return work.Ceilings{}, fmt.Errorf("goal %s is not readable as %s", rc.GoalId, owner)
 	}
 	ceilings, err := ceilingsOf(goal)
+	if rowString(goal, "status") == "closed" {
+		return work.Ceilings{}, fmt.Errorf("the work goal is closed")
+	}
 	if err != nil {
 		return work.Ceilings{}, fmt.Errorf("goal %s ceilings: %w", rc.GoalId, err)
 	}
@@ -487,10 +544,11 @@ func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.
 	return c.DeclaredDeadline(ctx, rc)
 }
 
-// DeclaredDeadline bounds the entire tool loop by the person's hard limit.
-// Each model call separately passes the current admission estimate. An
-// execution that discovers missing evidence can grow from quick to lookup
-// without inheriting an obsolete quick-response parent deadline.
+// DeclaredDeadline verifies the goal/run binding but imposes no lifetime
+// deadline. A context deadline cannot be renewed by progress after it is made,
+// and used to kill productive tool loops at two hours. Admission checks renewable
+// windows; individual model/tool requests retain their own timeout and idle
+// watchdogs. Cancellation and permission expiry remain independent controls.
 func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
 	if rc.GoalId == "" {
 		return time.Time{}, nil
@@ -500,18 +558,15 @@ func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext
 	if err != nil || run == nil {
 		return time.Time{}, fmt.Errorf("run deadline unavailable: %v", err)
 	}
+	if memqlengine.BareShortId(rowString(run, "goalId")) != memqlengine.BareShortId(rc.GoalId) {
+		return time.Time{}, fmt.Errorf("run does not belong to the named goal")
+	}
 	goal, err := c.store.goalForOwner(ctx, rc.GoalId)
 	if err != nil || goal == nil {
 		return time.Time{}, fmt.Errorf("goal deadline unavailable: %v", err)
 	}
-	ceilings, err := ceilingsOf(goal)
-	if err != nil {
+	if _, err := ceilingsOf(goal); err != nil {
 		return time.Time{}, err
 	}
-	start, ok := rowTime(run, "startedAt")
-	if !ok {
-		return time.Time{}, fmt.Errorf("run start time unavailable")
-	}
-	credit := max(int64(0), min(int64(rowInt(run, "humanWaitMs")), max(int64(0), c.clock().Sub(start).Milliseconds())))
-	return work.RunDeadline(start.Add(time.Duration(credit)*time.Millisecond), ceilings.WallClockMs)
+	return time.Time{}, nil
 }

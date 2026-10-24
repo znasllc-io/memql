@@ -13,7 +13,7 @@ func TestModuleIntegrityFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fault := range []string{"none", "membership", "build", "vet", "tidy", "sync", "packages"} {
+	for _, fault := range []string{"none", "normalization", "membership", "build", "vet", "tidy", "sync", "normalization-error", "normalization-drift", "packages"} {
 		t.Run(fault, func(t *testing.T) {
 			root := t.TempDir()
 			for _, dir := range []string{"scripts/ci", "bin", "child"} {
@@ -29,7 +29,7 @@ func TestModuleIntegrityFailsClosed(t *testing.T) {
 			}
 			write("scripts/ci/module-integrity.sh", script, 0755)
 			write("go.mod", []byte("module example.test/root\n"), 0644)
-			write("child/go.mod", []byte("module example.test/child\n"), 0644)
+			write("child/go.mod", []byte("module example.test/child\n// standalone-test-closure\n"), 0644)
 			write("bin/go", []byte(`#!/bin/bash
 function main() {
     case "$1:$2" in
@@ -42,9 +42,20 @@ function main() {
             ;;
         work:sync)
             if [[ "$FAULT" == sync ]]; then printf '\n// drift\n' >> go.mod; fi
+            if [[ "$FAULT" == normalization ]]; then
+                printf 'module example.test/child\n' > child/go.mod
+            fi
             ;;
         build:*|vet:*|mod:tidy)
             printf '%s %s %s\n' "$PWD" "$1" "$2" >> "$CALLS"
+            if [[ "$GOWORK" != off ]]; then return 1; fi
+            if [[ "$1:$2" == mod:tidy && "${3:-}" != -diff ]]; then
+                if [[ "$FAULT" == normalization-error ]]; then return 1; fi
+                if [[ "$FAULT" == normalization-drift ]]; then printf '\n// new drift\n' >> go.mod; fi
+                if [[ "$FAULT" == normalization && "$PWD" == */child ]]; then
+                    printf 'module example.test/child\n// standalone-test-closure\n' > go.mod
+                fi
+            fi
             if [[ "$FAULT" == "$1" || ( "$FAULT" == tidy && "$1:$2" == mod:tidy ) ]]; then return 1; fi
             ;;
         list:*)
@@ -71,7 +82,7 @@ main "$@"
 			cmd.Dir = root
 			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "bin")+":"+os.Getenv("PATH"), "FAULT="+fault, "CALLS="+calls)
 			out, err := cmd.CombinedOutput()
-			if (err == nil) != (fault == "none") {
+			if (err == nil) != (fault == "none" || fault == "normalization") {
 				t.Fatalf("fault=%s: err=%v\n%s", fault, err, out)
 			}
 			if fault == "build" || fault == "vet" || fault == "tidy" {

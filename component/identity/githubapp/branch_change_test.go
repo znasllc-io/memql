@@ -158,3 +158,24 @@ func TestChangePullRequestRecoversLostReplyAndDoesNotReopenClosedProposal(t *tes
 		})
 	}
 }
+
+func TestChangePullRequestRevalidatesAfterLookupBeforeCreation(t *testing.T) {
+	c, h, _, _ := branchFixture(t)
+	lookedUp := false
+	h.on("/repos/acme/widget/pulls", func(r *http.Request) (int, string) {
+		if r.Method != http.MethodGet {
+			t.Fatal("revoked credential created a pull request")
+		}
+		lookedUp = true
+		return 200, `[]`
+	})
+	_, err := c.EnsureAuthorizedChangePullRequest(context.Background(), installToken, "acme", "widget", "memql/change-123", "main", "Fix", "Proposal", func(context.Context) (string, error) {
+		if !lookedUp {
+			t.Fatal("authorization was checked only before provider reconciliation")
+		}
+		return "", errors.New("revoked after lookup")
+	})
+	if err == nil {
+		t.Fatal("revocation was ignored")
+	}
+}

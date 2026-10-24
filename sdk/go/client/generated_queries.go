@@ -6591,7 +6591,7 @@ func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
 	return "query packageDeploymentsPending()"
 }
 
-// PackagesAll -- The packages this caller may see, active only. The OS packages list.
+// PackagesAll -- Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).
 type PackagesAllArgs struct {
@@ -6992,7 +6992,7 @@ func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	return b.String()
 }
 
-// PipelinesForOwner -- The caller's pipelines, most recently connected first.
+// PipelinesForOwner -- Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable.
 //
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.go).
 type PipelinesForOwnerArgs struct {
@@ -12493,7 +12493,7 @@ func SourceConnectionByIdBuild(args SourceConnectionByIdArgs) string {
 	return b.String()
 }
 
-// SourceConnectionsMine -- The caller's active saved source connections, independent of MemQL accounts.
+// SourceConnectionsMine -- Read the caller's active saved source connections for discovering accessible repositories, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for their repository listing contract.
 //
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.go).
 type SourceConnectionsMineArgs struct {
@@ -13309,6 +13309,28 @@ func WorkApprovalForOwnerBuild(args WorkApprovalForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkApprovalGuidanceForOwnerRun -- Human corrections remain instructions after later permission decisions. One extra row makes the bounded reader refuse overflow, not lose history.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalGuidanceForOwnerRun"] in generated_concepts.go).
+type WorkApprovalGuidanceForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkApprovalGuidanceForOwnerRun calls the engine query workApprovalGuidanceForOwnerRun.
+func (qc *QueryClient) WorkApprovalGuidanceForOwnerRun(ctx context.Context, args WorkApprovalGuidanceForOwnerRunArgs) (*Result, error) {
+	call := WorkApprovalGuidanceForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workApprovalGuidanceForOwnerRun", call)
+}
+
+func WorkApprovalGuidanceForOwnerRunBuild(args WorkApprovalGuidanceForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalGuidanceForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkApprovalsForOwnedRun -- Durable decisions for one of the caller's runs, including decided reviews.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.go).
@@ -13721,6 +13743,45 @@ func WorkGoalsForResponsibilityBuild(args WorkGoalsForResponsibilityArgs) string
 	return b.String()
 }
 
+// WorkHistorySearchSourcesForOwnerRun -- Search original tool fields across execution receipts and compaction archives. The engine projects public source fields; these raw rows are not model context.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workHistorySearchSourcesForOwnerRun"] in generated_concepts.go).
+type WorkHistorySearchSourcesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkHistorySearchSourcesForOwnerRun calls the engine query workHistorySearchSourcesForOwnerRun.
+func (qc *QueryClient) WorkHistorySearchSourcesForOwnerRun(ctx context.Context, args WorkHistorySearchSourcesForOwnerRunArgs) (*Result, error) {
+	call := WorkHistorySearchSourcesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workHistorySearchSourcesForOwnerRun", call)
+}
+
+func WorkHistorySearchSourcesForOwnerRunBuild(args WorkHistorySearchSourcesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workHistorySearchSourcesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkModelCallReceiptForOwnerRun -- Reconcile a late completion against its exact durable receipt.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallReceiptForOwnerRun"] in generated_concepts.go).
+type WorkModelCallReceiptForOwnerRunArgs struct {
+}
+
+// WorkModelCallReceiptForOwnerRun calls the engine query workModelCallReceiptForOwnerRun.
+func (qc *QueryClient) WorkModelCallReceiptForOwnerRun(ctx context.Context, args WorkModelCallReceiptForOwnerRunArgs) (*Result, error) {
+	call := WorkModelCallReceiptForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workModelCallReceiptForOwnerRun", call)
+}
+
+func WorkModelCallReceiptForOwnerRunBuild(args WorkModelCallReceiptForOwnerRunArgs) string {
+	_ = args
+	return "query workModelCallReceiptForOwnerRun()"
+}
+
 // WorkModelCallsForOwnerRun -- Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this.
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerRun"] in generated_concepts.go).
@@ -13782,6 +13843,28 @@ func WorkModelCallsPageForOwnerRunBuild(args WorkModelCallsPageForOwnerRunArgs) 
 	return b.String()
 }
 
+// WorkModelUsageForOwnerRun -- Bounded completed model-usage receipts for one caller-owned run, without model content.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workModelUsageForOwnerRun"] in generated_concepts.go).
+type WorkModelUsageForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkModelUsageForOwnerRun calls the engine query workModelUsageForOwnerRun.
+func (qc *QueryClient) WorkModelUsageForOwnerRun(ctx context.Context, args WorkModelUsageForOwnerRunArgs) (*Result, error) {
+	call := WorkModelUsageForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workModelUsageForOwnerRun", call)
+}
+
+func WorkModelUsageForOwnerRunBuild(args WorkModelUsageForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workModelUsageForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkObservationSummariesForOwnerRun -- Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.go).
@@ -13826,7 +13909,24 @@ func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) stri
 	return b.String()
 }
 
-// WorkProgressReceiptsForOwnerRun -- Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work.
+// WorkProgressCreditsForOwnerRun -- Bounded candidate lookup against durable consumed-evidence identities.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressCreditsForOwnerRun"] in generated_concepts.go).
+type WorkProgressCreditsForOwnerRunArgs struct {
+}
+
+// WorkProgressCreditsForOwnerRun calls the engine query workProgressCreditsForOwnerRun.
+func (qc *QueryClient) WorkProgressCreditsForOwnerRun(ctx context.Context, args WorkProgressCreditsForOwnerRunArgs) (*Result, error) {
+	call := WorkProgressCreditsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workProgressCreditsForOwnerRun", call)
+}
+
+func WorkProgressCreditsForOwnerRunBuild(args WorkProgressCreditsForOwnerRunArgs) string {
+	_ = args
+	return "query workProgressCreditsForOwnerRun()"
+}
+
+// WorkProgressReceiptsForOwnerRun -- Completed native/delegated source reads and capability contracts; checkpoints and model prose cannot buy more work.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressReceiptsForOwnerRun"] in generated_concepts.go).
 type WorkProgressReceiptsForOwnerRunArgs struct {
@@ -13842,6 +13942,28 @@ func (qc *QueryClient) WorkProgressReceiptsForOwnerRun(ctx context.Context, args
 func WorkProgressReceiptsForOwnerRunBuild(args WorkProgressReceiptsForOwnerRunArgs) string {
 	var b strings.Builder
 	b.WriteString("query workProgressReceiptsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkProviderAdmissionForOwnerRun -- The cumulative native provider ledger survives process and replica changes.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProviderAdmissionForOwnerRun"] in generated_concepts.go).
+type WorkProviderAdmissionForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkProviderAdmissionForOwnerRun calls the engine query workProviderAdmissionForOwnerRun.
+func (qc *QueryClient) WorkProviderAdmissionForOwnerRun(ctx context.Context, args WorkProviderAdmissionForOwnerRunArgs) (*Result, error) {
+	call := WorkProviderAdmissionForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workProviderAdmissionForOwnerRun", call)
+}
+
+func WorkProviderAdmissionForOwnerRunBuild(args WorkProviderAdmissionForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workProviderAdmissionForOwnerRun(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")

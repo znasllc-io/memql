@@ -294,16 +294,17 @@ func cleanMember(raw string) (string, error) {
 }
 
 func (g *packagesGitHub) RepositoryWriterToken(ctx context.Context, credential, user, repository string) (string, int64, error) {
-	_, installation, err := g.InstallationToken(ctx, credential, user, repository)
+	owner, name, err := splitRepository(repository)
 	if err != nil {
 		return "", 0, err
 	}
-	c, _, name, err := g.target(repository)
-	if err != nil {
-		return "", 0, err
+	access, ok := g.pkgs.(interface {
+		RepositoryWriterToken(context.Context, string, string, string, string) (string, int64, error)
+	})
+	if !ok {
+		return "", 0, errors.New("repository write authority cannot be verified")
 	}
-	token, _, err := c.ScopedInstallationToken(ctx, installation, []string{name}, map[string]string{"contents": "write", "pull_requests": "write"})
-	return token, installation, err
+	return access.RepositoryWriterToken(ctx, credential, user, owner, name)
 }
 
 func (g *packagesGitHub) ApplyBranchChange(ctx context.Context, token, repository string, edit githubapp.BranchChange) (string, error) {

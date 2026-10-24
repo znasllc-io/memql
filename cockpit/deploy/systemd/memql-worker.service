@@ -1,0 +1,58 @@
+# deploy/systemd/memql-worker.service
+# ============================================
+#
+# Template user-systemd unit for memql-worker on Linux.
+# scripts/install/install-linux.sh copies this to
+# ~/.config/systemd/user/ with the binary path filled in.
+#
+# User-systemd (not system-wide) is the right choice for the
+# headless variant; the GUI variant additionally requires the
+# user's X11 session, which is also user-scoped.
+
+[Unit]
+Description=memQL Cockpit Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=__BINARY_PATH__ worker run
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:__STATE_DIR__/worker.log
+StandardError=append:__STATE_DIR__/worker.log
+
+# Environment file for the worker token + cluster URL. Marked with
+# leading `-` so systemd doesn't fail if the file is missing; the
+# worker also reads from ~/.memql/worker.yaml. Use this file (mode
+# 0600) instead of inline Environment= so the token does NOT show
+# up in `systemctl show` output.
+EnvironmentFile=-__STATE_DIR__/../worker.env
+
+# Resource caps. Phase 7 wires per-call rlimits on `exec` calls;
+# these process-level caps are a coarser ceiling.
+LimitNOFILE=4096
+TasksMax=128
+
+# Hardening directives. The headless worker doesn't need write
+# access to the system tree or other users' home dirs; tighten
+# accordingly. The GUI build (computer_use_embodied) drives the
+# user's desktop and may need to relax ProtectHome; the headless
+# install path uses the values below.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__STATE_DIR__
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target

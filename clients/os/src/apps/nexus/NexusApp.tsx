@@ -1,3 +1,4 @@
+import { useModelUsage } from "./useModelUsage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -455,6 +456,8 @@ function GoalViewHost(
   props: Omit<ComponentProps<typeof GoalView>, "stepRows" | "stepsState" | "artifactRows">,
 ) {
   const steps = useRunSteps(props.openRunId);
+  const selectedRun = props.runRows.map(runFromRow).find(run => idTail(run.id) === idTail(props.openRunId));
+  const usage = useModelUsage(props.openRunId, !!selectedRun && !["succeeded", "failed", "cancelled", "abandoned"].includes(selectedRun.status));
   // Keyed on the same run for the same reason. It is a SECOND collection
   // rather than a field on the first because the two are different concepts
   // with different reads -- `useLiveCollection` is per concept, and folding
@@ -463,6 +466,7 @@ function GoalViewHost(
   return (
     <GoalView
       {...props}
+      usage={usage}
       stepRows={steps.snapshot.rows}
       stepsState={steps.snapshot.state}
       artifactRows={artifacts.snapshot.rows}
@@ -510,6 +514,7 @@ function RunView({
 }) {
   const steps = useRunSteps(run.id);
   const journal = useJournal(run.id, !["succeeded", "failed", "cancelled", "abandoned"].includes(run.status));
+  const usage = useModelUsage(run.id, !["succeeded", "failed", "cancelled", "abandoned"].includes(run.status));
 
   // ORDERED BY `seq` HERE AND NOT BY THE READ. `workStepsForOwnerRun` carries
   // `@unbounded`, which excludes `sort`, so the rows arrive in whatever order
@@ -530,6 +535,7 @@ function RunView({
       stepsState={steps.snapshot.state}
       approvals={approvals}
       journal={journal}
+      usage={usage}
       derive={derive}
       backLabel={backLabel}
       onBack={onBack}

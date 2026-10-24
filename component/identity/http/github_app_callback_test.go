@@ -198,11 +198,11 @@ func runApp(s *Server, query string) *httptest.ResponseRecorder {
 }
 
 // okGitHub answers what GitHub creates from this cluster's manifest: the whole
-// ask, the check write included, so a registration test also proves the
+// ask, including approved delivery writes, so a registration test also proves the
 // callback keeps the app the manifest describes.
 func okGitHub() *appFakeGitHub {
 	return &appFakeGitHub{status: http.StatusCreated, body: appConversionBody(
-		`{"checks":"write","contents":"read","merge_queues":"read","metadata":"read","pull_requests":"read"}`)}
+		`{"checks":"write","security_events":"write","contents":"write","merge_queues":"write","metadata":"read","pull_requests":"write","statuses":"read","administration":"read"}`)}
 }
 
 // ---------------------------------------------------------------------------
@@ -390,15 +390,14 @@ func TestASetupCallbackRefuses(t *testing.T) {
 		// app this cluster's manifest described.
 		"an app with more than was asked for": {
 			query: "code=" + appSetupCode + "&state=" + appSetupState, state: liveAppState(nil), user: ownerRow(),
-			gh:     &appFakeGitHub{status: http.StatusCreated, body: appConversionBody(`{"contents":"write","metadata":"read"}`)},
+			gh:     &appFakeGitHub{status: http.StatusCreated, body: appConversionBody(`{"workflows":"write","metadata":"read"}`)},
 			result: "github_app_setup_failed", audit: "github_app_setup_failed", spent: true, asked: 1,
 		},
-		// The whole ask, with one of its reads come back as a write: the check
-		// write is the only one the manifest asks for.
-		"an app that may write pull requests": {
+		// Protection observation must never acquire permission to change it.
+		"an app that may change repository settings": {
 			query: "code=" + appSetupCode + "&state=" + appSetupState, state: liveAppState(nil), user: ownerRow(),
 			gh: &appFakeGitHub{status: http.StatusCreated, body: appConversionBody(
-				`{"checks":"write","contents":"read","merge_queues":"read","metadata":"read","pull_requests":"write"}`)},
+				`{"checks":"write","contents":"write","merge_queues":"write","metadata":"read","pull_requests":"write","administration":"write"}`)},
 			result: "github_app_setup_failed", audit: "github_app_setup_failed", spent: true, asked: 1,
 		},
 	} {

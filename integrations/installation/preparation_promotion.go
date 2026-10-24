@@ -49,11 +49,13 @@ func (b preparationBinding) validate() error {
 // exposing an update. This private journal operation only transfers ownership
 // and verifies the relationships among the supplied native observations.
 type promotionEvidence struct {
+	sources                         map[string]verifiedSourceCapture
+	renders                         map[string]argocd.RenderedRevision
 	configuration                   *receiverSnapshot
 	artifacts                       artifactEvidence
 	published                       pipelines.VerifiedPublishedRelease
 	candidateSource, rollbackSource verifiedSourceCapture
-	candidateRender, rollbackRender argocd.RenderedRevision
+	candidateRender, rollbackRender argocd.RenderInventory
 	resources                       resourceEvidence
 	storage                         storageEvidence
 	sensitive                       sensitiveEvidence
@@ -78,19 +80,39 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 	if err != nil || evidence.published.Digest() != plan.PublicationDigest || release.CandidateID != plan.CandidateID || release.ApprovalID != plan.CandidateApprovalID {
 		return preparedPlan{}, errors.New("installation plan differs from its signed publication")
 	}
-	for role, proof := range map[string]verifiedSourceCapture{"candidate": evidence.candidateSource, "rollback": evidence.rollbackSource} {
-		entry := r.Captures[role]
-		capture, err := newSourceCapture(r.Scope.Captures[role])
-		if err != nil || !entry.Acknowledged || entry.Receipt == nil || proof.scope != capture.digest ||
-			proof.receipt.IntentID != entry.Receipt.IntentID || proof.source.Digest() == "" ||
-			proof.source.Digest() != entry.SourceDigest || preparationReceiptDigest(proof.receipt) != entry.ReceiptDigest ||
-			!sameJSON(proof.source.Spec(), capture.render) {
-			return preparedPlan{}, errors.New("promotion requires the exact verified and acknowledged source captures")
+	proofs := evidence.sources
+	if proofs == nil {
+		proofs = map[string]verifiedSourceCapture{"candidate": evidence.candidateSource, "rollback": evidence.rollbackSource}
+	}
+	for _, member := range r.Scope.applicationMembers() {
+		for _, role := range []string{"candidate", "rollback"} {
+			key := applicationCaptureKey(member.Key, role)
+			proof := proofs[key]
+			entry := r.Captures[key]
+			capture, err := newSourceCapture(r.Scope.Captures[key])
+			if err != nil || !entry.Acknowledged || entry.Receipt == nil || proof.scope != capture.digest || proof.receipt.IntentID != entry.Receipt.IntentID || proof.source.Digest() == "" || proof.source.Digest() != entry.SourceDigest || preparationReceiptDigest(proof.receipt) != entry.ReceiptDigest || !sameJSON(proof.source.Spec(), capture.render) {
+				return preparedPlan{}, errors.New("promotion requires exact verified and acknowledged source captures")
+			}
+			if plan.FormatVersion == 2 {
+				render := evidence.renders[key]
+				app, memberErr := plan.application(member.Key)
+				wantRender, wantSource, wantReceipt := app.RenderDigest, app.CandidateSourceDigest, app.CandidateReceiptDigest
+				if role == "rollback" {
+					wantRender, wantSource, wantReceipt = app.RollbackRenderDigest, app.RollbackSourceDigest, app.RollbackReceiptDigest
+				}
+				if memberErr != nil || wantRender != render.Digest() || wantSource != entry.SourceDigest || wantReceipt != entry.ReceiptDigest {
+					return preparedPlan{}, errors.New("group plan member differs from native source and render evidence")
+				}
+				if render.Digest() == "" || !sameJSON(render.Spec(), proof.source.Spec()) {
+					return preparedPlan{}, errors.New("group member render differs from closed source")
+				}
+			}
 		}
 	}
+
 	before, after := evidence.rollbackRender, evidence.candidateRender
-	if before.Digest() == "" || after.Digest() == "" ||
-		!sameJSON(before.Spec(), evidence.rollbackSource.source.Spec()) || !sameJSON(after.Spec(), evidence.candidateSource.source.Spec()) ||
+	if !validRenderInventory(before) || !validRenderInventory(after) ||
+		(plan.FormatVersion == 1 && (!sameJSON(before.RenderScopes()[0], evidence.rollbackSource.source.Spec()) || !sameJSON(after.RenderScopes()[0], evidence.candidateSource.source.Spec()))) ||
 		plan.RenderDigest != after.Digest() || plan.RollbackRenderDigest != before.Digest() ||
 		evidence.resources.publication != plan.PublicationDigest || evidence.resources.before != before.Digest() || evidence.resources.after != after.Digest() ||
 		plan.ResourceDiffDigest != evidence.resources.digest || !internalDigest.MatchString(evidence.resources.digest) ||
@@ -106,8 +128,8 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 		return preparedPlan{}, err
 	}
 	plan.Preparation = &preparationBinding{ID: r.ID, ConfigurationDigest: configuration, ConfigurationInvariantDigest: evidence.configuration.invariantDigest,
-		CandidateSourceDigest: r.Captures["candidate"].SourceDigest, RollbackSourceDigest: r.Captures["rollback"].SourceDigest,
-		CandidateReceiptDigest: r.Captures["candidate"].ReceiptDigest, RollbackReceiptDigest: r.Captures["rollback"].ReceiptDigest,
+		CandidateSourceDigest: preparationSourcesDigest(r, "candidate", false), RollbackSourceDigest: preparationSourcesDigest(r, "rollback", false),
+		CandidateReceiptDigest: preparationSourcesDigest(r, "candidate", true), RollbackReceiptDigest: preparationSourcesDigest(r, "rollback", true),
 		StorageDigest: evidence.storage.digest, SensitiveDigest: evidence.sensitive.digest,
 		ArtifactDigest: artifacts.digest, ArtifactWorkflowDigest: artifacts.workflow, ArtifactExpiresAt: artifacts.expires.UTC().Format(time.RFC3339Nano), RollbackPublicationDigest: artifacts.rollback}
 	if _, _, err := plan.canonical(); err != nil {
@@ -122,6 +144,23 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 // must still authenticate that baseline and renderer; this comparison does not
 // discover a live Application from a name or a claimed configuration digest.
 func promotionIntentMatches(scope preparationScope, plan preparedPlan) error {
+	if scope.FormatVersion == 2 {
+		if plan.FormatVersion != 2 || len(plan.Applications) != len(scope.Applications) {
+			return errors.New("group plan membership differs from preparation")
+		}
+		for i, member := range scope.Applications {
+			app := plan.Applications[i]
+			if app.Key != member.Key {
+				return errors.New("group plan application order differs")
+			}
+			one := preparationScope{Intent: member.Intent, Captures: map[string]sourceCaptureSpec{"candidate": scope.Captures[applicationCaptureKey(member.Key, "candidate")], "rollback": scope.Captures[applicationCaptureKey(member.Key, "rollback")]}}
+			if err := promotionIntentMatches(one, preparedPlan{Intent: app.Intent}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	expectedIntent, expectedErr := scope.Intent.Digest()
 	actualIntent, actualErr := plan.Intent.Digest()
 	if expectedErr != nil || actualErr != nil || expectedIntent != actualIntent {
@@ -164,8 +203,8 @@ func promotedRevision(ctx context.Context, tx *sql.Tx, r preparationRecord) (rev
 	if r.State != "promoted" || b == nil || b.ID != r.ID || b.ConfigurationDigest != r.Scope.ConfigurationDigest || b.ConfigurationInvariantDigest != r.Scope.ConfigurationInvariantDigest ||
 		revision.SlotEpoch != r.SlotEpoch+1 || revision.Plan.RequestedBy != r.Scope.RequestedBy ||
 		revision.Plan.WorkflowDigest != r.Scope.WorkflowDigest || revision.Plan.CandidateID != r.Scope.CandidateID || revision.Plan.PublicationDigest != r.Scope.PublicationDigest ||
-		b.CandidateSourceDigest != r.Captures["candidate"].SourceDigest || b.RollbackSourceDigest != r.Captures["rollback"].SourceDigest ||
-		b.CandidateReceiptDigest != r.Captures["candidate"].ReceiptDigest || b.RollbackReceiptDigest != r.Captures["rollback"].ReceiptDigest {
+		b.CandidateSourceDigest != preparationSourcesDigest(r, "candidate", false) || b.RollbackSourceDigest != preparationSourcesDigest(r, "rollback", false) ||
+		b.CandidateReceiptDigest != preparationSourcesDigest(r, "candidate", true) || b.RollbackReceiptDigest != preparationSourcesDigest(r, "rollback", true) {
 		return revisionRecord{}, errors.New("installation preparation and promoted revision disagree")
 	}
 	if err := promotionIntentMatches(r.Scope, revision.Plan); err != nil {
@@ -254,4 +293,25 @@ func (j *preparationJournal) promote(ctx context.Context, installation, key, wor
 		return revisionRecord{}, err
 	}
 	return revision, nil
+}
+
+func preparationSourcesDigest(r preparationRecord, role string, receipt bool) string {
+	if r.Scope.FormatVersion != 2 {
+		c := r.Captures[role]
+		if receipt {
+			return c.ReceiptDigest
+		}
+		return c.SourceDigest
+	}
+	var bindings []any
+	for _, app := range r.Scope.Applications {
+		key := applicationCaptureKey(app.Key, role)
+		c := r.Captures[key]
+		digest := c.SourceDigest
+		if receipt {
+			digest = c.ReceiptDigest
+		}
+		bindings = append(bindings, []string{key, digest})
+	}
+	return artifactHash("installation-group-source-v1", bindings)
 }

@@ -109,6 +109,7 @@ type lane struct {
 	tags     []string
 	pkgs     []string
 	workflow string
+	platform string
 	// compileOnly marks a `go test -c` step: it builds the test binary and
 	// never runs it, so it proves the package compiles and nothing else.
 	compileOnly bool
@@ -153,9 +154,11 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// mergeSteps reads only unconditional native commands that run on BOTH PRs
-// and merge candidates. A scheduled/release-only command, a path-gated step,
-// or a selected subset of packages cannot establish coverage for every merge.
+// mergeSteps reads commands that run on BOTH PRs and merge candidates. A
+// scheduled/release-only or bucket-gated step cannot establish merge coverage.
+// The affected-package selector is admitted only without a db/non-db filter:
+// merge candidates use full mode, and a PR selects changed packages and their
+// importers. PackageRoots then bounds the real package universe of that lane.
 func mergeSteps(spec *pipelines.Spec) map[string]pipelines.StepSpec {
 	out := map[string]pipelines.StepSpec{}
 	for _, stage := range spec.Stages {
@@ -163,7 +166,10 @@ func mergeSteps(spec *pipelines.Spec) map[string]pipelines.StepSpec {
 			continue
 		}
 		for _, step := range stage.Steps {
-			if step.When == nil && step.Packages == "" && step.Run != "" {
+			if step.When == nil && step.Only == "" && step.Run != "" && (step.Packages == "" || step.Packages == pipelines.PackagesAffected || step.Packages == pipelines.PackagesAll) {
+				if step.Platform == "" {
+					step.Platform = spec.Platform
+				}
 				out[pipelines.StepKey(stage.Name, step.Name)] = step
 			}
 		}
@@ -200,8 +206,9 @@ func lanesFromSteps(steps map[string]pipelines.StepSpec) []lane {
 		for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
 			args := cmd[1]
 			m := tagsFlag.FindStringSubmatch(args)
-			if m == nil {
-				continue
+			var tags []string
+			if m != nil {
+				tags = strings.Split(m[1], ",")
 			}
 			var pkgs []string
 			compileOnly, filtered := false, false
@@ -216,8 +223,19 @@ func lanesFromSteps(steps map[string]pipelines.StepSpec) []lane {
 					filtered = true
 				}
 			}
-			if !filtered {
-				out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: name, compileOnly: compileOnly})
+			// A selected lane covers only the packages actually passed to go test.
+			// A command that forgets MEMQL_PACKAGES proves no selected coverage.
+			if step.Packages != "" && slices.Contains(strings.Fields(args), "$MEMQL_PACKAGES") {
+				if len(step.PackageRoots) == 0 {
+					pkgs = append(pkgs, "./...")
+				} else {
+					for _, root := range step.PackageRoots {
+						pkgs = append(pkgs, "./"+root+"/...")
+					}
+				}
+			}
+			if !filtered && len(pkgs) > 0 {
+				out = append(out, lane{tags: tags, pkgs: pkgs, workflow: name, platform: step.Platform, compileOnly: compileOnly})
 			}
 		}
 	}
@@ -236,7 +254,8 @@ func TestOnlyMergeGatingNativeCommandsCountAsTagCoverage(t *testing.T) {
 			{Name: "real", Run: command},
 			{Name: "label-go-test-tags-agent", Run: "set -eu\n# go test -tags agent ./app/\necho ok"},
 			{Name: "conditional", Run: command, When: &pipelines.When{Bucket: "go"}},
-			{Name: "selected", Run: command, Packages: "affected"},
+			{Name: "selected", Run: "set -eu\ngo test -tags computeruse $MEMQL_PACKAGES", Packages: "affected", PackageRoots: []string{"cockpit"}, Platform: "darwin/arm64"},
+			{Name: "selected-filtered", Run: command, Packages: "affected", Only: "db"},
 			{Name: "filtered", Run: command + " -run TestOne"},
 			{Name: "swallowed", Run: command + " || true"},
 			{Name: "compile", Run: command + " -c"},
@@ -250,9 +269,14 @@ func TestOnlyMergeGatingNativeCommandsCountAsTagCoverage(t *testing.T) {
 	for _, lane := range lanes {
 		got[lane.workflow] = lane.compileOnly
 	}
-	want := map[string]bool{"checks.real": false, "checks.compile": true, "both.real": false}
+	want := map[string]bool{"checks.real": false, "checks.compile": true, "both.real": false, "checks.selected": false}
 	if !maps.Equal(got, want) {
 		t.Fatalf("merge-gating lanes = %v, want %v", got, want)
+	}
+	for _, l := range lanes {
+		if l.workflow == "checks.selected" && (!l.covers("cockpit/internal/worker/tools") || l.covers("component/memql") || l.platform != "darwin/arm64") {
+			t.Fatalf("selected lane ignored package roots or host: %+v", l)
+		}
 	}
 }
 
@@ -260,7 +284,15 @@ func TestOnlyMergeGatingNativeCommandsCountAsTagCoverage(t *testing.T) {
 // tags, using the real toolchain matcher.
 func buildsUnder(t *testing.T, dir, name string, tags []string) bool {
 	t.Helper()
+	return buildsOn(t, dir, name, tags, "")
+}
+
+func buildsOn(t *testing.T, dir, name string, tags []string, platform string) bool {
+	t.Helper()
 	ctx := build.Default
+	if os, arch, ok := strings.Cut(platform, "/"); ok {
+		ctx.GOOS, ctx.GOARCH = os, arch
+	}
 	ctx.BuildTags = tags
 	ok, err := ctx.MatchFile(dir, name)
 	if err != nil {
@@ -403,7 +435,7 @@ func TestEveryTaggedTestFileIsRunSomewhere(t *testing.T) {
 			if l.compileOnly {
 				continue // compiles it; does not run it (see the header)
 			}
-			if buildsUnder(t, dir, name, l.tags) && l.covers(relDir) {
+			if buildsOn(t, dir, name, l.tags, l.platform) && l.covers(relDir) {
 				covered = true
 				break
 			}

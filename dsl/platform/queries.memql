@@ -779,7 +779,9 @@ query syncState syncStatesAll {
 // written-out term: they run under the engine's own operator identity and are
 // not a person's view.
 
-/// The packages this caller may see, active only. The OS packages list.
+/// Read connected repositories and application sources, with repository URLs,
+/// refs and declared applications. Includes sources without pipelines; returns
+/// only active records this caller may read.
 @actor
 query package packagesAll {
   filter  row => statusIsActive(row)
@@ -1009,7 +1011,7 @@ query site sitesArchived {
 /// does not recognise, so TestRowAuthzEnforcementLandGate reports the read undecidable. Written
 /// the way every composite-tier sibling writes the term, it is recognised as the tier's own.
 @actor
-@requiresCapability("read", "app:deployables")
+@requiresCapability("read", "app:pipelines")
 query sourceCredential sourceCredentialsMine {
   filter  row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort    "label", "asc"
@@ -1019,7 +1021,7 @@ query sourceCredential sourceCredentialsMine {
 /// One credential by id -- the Source stop's credential chip. Card shape, so metadata only.
 @unbounded("credential by id -- bounded to a single row (id is the row's own primary key)")
 @actor
-@requiresCapability("read", "app:deployables")
+@requiresCapability("read", "app:pipelines")
 query sourceCredential sourceCredentialById {
   args {
     credentialId  string!
@@ -1258,10 +1260,12 @@ query modelMeasurement measurementsForCaller {
   shape    modelMeasurementFull
 }
 
-/// The caller's active saved source connections, independent of MemQL accounts.
+/// Read the caller's active saved source connections for discovering accessible
+/// repositories, independent of MemQL accounts and pipeline membership. Inspect
+/// sourceRepositories for their repository listing contract.
 @actor
 @unbounded("personal installation bindings -- one per caller, grant and installation")
-@requiresCapability("read", "app:deployables")
+@requiresCapability("read", "app:pipelines")
 query sourceConnection sourceConnectionsMine {
   filter row => row.ownerUserId == actor.userId && statusIsActive(row)
   shape sourceConnectionCard
@@ -1271,7 +1275,7 @@ query sourceConnection sourceConnectionsMine {
 /// for idempotent removal. No cluster-owner branch borrows another user's grant.
 @actor
 @cache(0)
-@requiresCapability("read", "app:deployables")
+@requiresCapability("read", "app:pipelines")
 query sourceConnection sourceConnectionById {
   args { connectionId string! }
   filter row => row.id == args.connectionId && row.ownerUserId == actor.userId

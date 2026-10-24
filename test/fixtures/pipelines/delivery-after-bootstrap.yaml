@@ -1,0 +1,1326 @@
+# memql-package.yaml -- the engine repository's own pipeline (epic memql#5478,
+# issue memql#5496).
+#
+# This repository is a source like any other: a pipeline and no apps (design
+# record D12). A run reads this file at its own commit; the seam
+# (component/pipelines, component/pipelinerun) compiles the pipeline: block into
+# steps. Portable steps use isolated Workbench Jobs; native host work is declared
+# explicitly in separate steps. The package targets linux/amd64, the
+# architecture of the local build node and of AKS (design record
+# 2026-10-11-pipelines-local-green-and-fast, D9).
+#
+# The command parity gates compare the retained GitHub lanes with this package.
+# Working legacy workflows remain until equivalent local and production evidence
+# and retirement gates are satisfied. Remaining gaps include installed-cluster
+# lifecycle tests, native editor host qualification,
+# SARIF publication and release publication. Release image builds are declared
+# below; their cloud publication still requires verified candidate receipts. The daily scan is declared here but still needs a real
+# run from an installed MemQL build. No missing lane is considered passed.
+formatVersion: 1
+name: memql
+pipeline:
+  schedule: daily
+  platform: linux/amd64
+  # deploy/toolchain-image: Go 1.27.2, Node 22, protoc 33.4, kubectl 1.32.13, the
+  # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
+  # as uid 1000, with the Linux editor-host libraries and Xvfb. Native release
+  # v0.29.23, run 517b203755fd72a42c422493c691ad77, built this exact image in
+  # AKS; its archive passed the actual-image smoke script before reviewed
+  # native publication verified every registry blob. A rebuild needs a new
+  # immutable version and reviewed digest pin. Go selects the patched compiler
+  # declared in go.work until the rebuilt image is published and re-pinned.
+  # This package is public; private
+  # image access must use the Workbench registry credential contract.
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
+  services:
+    # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
+    # digest and with the same user, password and database (the test holds all
+    # four equal), so the pipeline and that lane test against one image. A
+    # service shares the step's container network, so the step reaches it on
+    # localhost:5432. The password is the local development one ci.yml uses, not
+    # a secret.
+    postgres:
+      image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+      env:
+        POSTGRES_USER: memql
+        POSTGRES_PASSWORD: memql_dev
+        POSTGRES_DB: memql
+        # A throwaway database never waits on the disk. A build node's steps
+        # share one, and on a workstation a commit there took seconds while the
+        # tests stage built, long enough to expire a db test's read deadline.
+        # These change only what survives a crash, never what a query sees.
+        # initdb takes -c from PostgreSQL 16, which the image runs.
+        POSTGRES_INITDB_ARGS: -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+      # Over TCP, the way the step connects. The image's first start runs its
+      # initialization on a server listening on its socket alone and then
+      # restarts it, so a socket probe can pass before the server the step will
+      # reach is up. ci.yml's lanes wait on the same TCP check before their
+      # first query.
+      ready: pg_isready -h localhost -U memql
+  # Reserve at least 4096 MiB for a substantial Workbench step: the Sense
+  # stress case and architecture extraction exceed smaller limits. Go steps also serialize compilation and collect
+  # earlier to keep cold-cache compiler pressure bounded.
+  caches: [go, npm]
+  select:
+    go: import-graph
+    # Native test setup has no Go imports, so its changes need full coverage.
+    full: [cockpit/Makefile, "cockpit/scripts/**", "scripts/ci/delivery-artifacts.sh", "scripts/ci/delivery_artifacts*", "scripts/lib/capability.sh", "scripts/identity/build-css.sh"]
+    # The trees whose packages need a database, as
+    # scripts/ci/db-gated-packages.sh --trees prints them: that script is the
+    # canonical list, and the test holds this copy to it. db-tests takes these
+    # trees and go-tests everything else, the split ci.yml's two lanes make. A
+    # tree missing here would run its database tests in go-tests, with no
+    # database, where they skip.
+    dbGated:
+      - component/filebackups
+      - app
+      - component/memql
+      - component/automations
+      - component/backup
+      - component/campaigns
+      - component/database
+      - component/datasync
+      - component/emailrules
+      - component/grpc
+      - component/identity
+      - component/logstore
+      - component/node
+      - component/packages
+      - component/pipelinerun
+      - component/repositoryauthority
+      - component/retention
+      - component/server
+      - component/sitehealth
+      - component/sitetraffic
+      - component/worker
+      - integrations/compose
+      - integrations/embedding
+      - integrations/knowledge
+      - integrations/similarity
+      - integrations/library
+      - integrations/groups
+      - integrations/installation
+      - integrations/planner
+      - integrations/procedure
+      - integrations/release
+      - integrations/shopify
+      - integrations/email
+      - integrations/sitepreview
+      - integrations/work
+      - integrations/workbench
+      - examples/referencepack
+      - packs
+      - test/inboundhop
+      - test/pipelinehop
+      - test/clustere2e
+    buckets:
+      installer:
+        - scripts/install/**
+        - scripts/lib/capability.sh
+        - editors/vscode/src/install/**
+        - scripts/ci/pipeline_installer_test.go
+        - memql-package.yaml
+      # Filesystem gates read Go source as well as manifests and docs. The
+      # import graph cannot discover these dependencies, so every PR runs them,
+      # using the declared gate packages in scripts/ci/selection.
+      gates: ["**"]
+      deploy-gate:
+        - cmd/deploy-gate-check/**
+        - component/grpc/gen/**
+        - core/id/**
+        - go.mod
+        - go.sum
+        - go.work
+        - go.work.sum
+        - "**/go.mod"
+        - "**/go.sum"
+        - memql-package.yaml
+      database-image:
+        - deploy/db-image/**
+        - scripts/db-image/**
+        - memql-package.yaml
+      # Shell source and the Docker stage that packages it.
+      # Keep Dockerfile changes in the same validation path as the shell.
+      os:
+        - integrations/agent/worker/pipeline_purpose.go
+        - Dockerfile
+        - clients/**
+        - sdk/ts/**
+        - brand/**
+        - scripts/os/**
+        - component/memql/os_navigation.json
+        - Makefile
+        - memql-package.yaml
+      editor-site:
+        - editors/vscode/site/**
+        - editors/vscode/themes/**
+        - examples/research-desk/**
+        - brand/**
+        - scripts/ci/editor-site.sh
+        - scripts/ci/retry.sh
+        - memql-package.yaml
+      editors:
+        - brand/tokens.css
+        - brand/editorAppearance.ts
+        - editors/**
+        - cmd/memql-lsp/**
+        - scripts/vscode/**
+        - scripts/ci/editor-host.sh
+        - sdk/ts/**
+        - sdk/ts-viewkit/**
+        - test/fixtures/**
+        - component/compose/emaildoc/**
+        - Makefile
+        - memql-package.yaml
+  stages:
+    # Stages run in the order written, and a failed stage skips every later one:
+    # a change that does not build, vet or pass its drift gates starts no test.
+    # A step's timeout is its lane's cap in ci.yml where that cap is over the
+    # 20-minute default.
+    - name: checks
+      steps:
+        # ci.yml go-checks: build, vet, the env-var registry, the DSL lint and
+        # engine load, and the SDK, concept-snapshot, authoring-surface and proto
+        # drift gates. These read the whole tree, so they run on every change
+        # rather than behind a copy of ci.yml's go, dsl and proto buckets.
+        # The saved event base survives the replica hop and supplies the
+        # authoring-surface comparison; a first push has no predecessor.
+        - name: go-checks
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build github.com/znasllc-io/memql/...
+            go vet github.com/znasllc-io/memql/...
+            make env-registry-check
+            go run ./cmd/memqllint dsl/
+            go test -run TestEngineInitLoadsFullDSL ./component/memql/
+            make sdk-gen-check
+            make concept-snapshot-check
+            BASE_SHA="$MEMQL_BASE_SHA" bash scripts/ci/memqlbreaking-base.sh
+            make proto-gen-check
+        # ci.yml path-routing: the path-routing and CI-configuration guards, on
+        # every change.
+        - name: path-routing
+          verification: true
+          placement: cluster
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
+            python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py
+            python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
+        - name: build-identity
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags identity github.com/znasllc-io/memql/...
+            go vet -tags identity github.com/znasllc-io/memql/...
+        - name: build-mcp
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags mcp github.com/znasllc-io/memql/...
+            go vet -tags mcp github.com/znasllc-io/memql/...
+        - name: build-agent
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags agent github.com/znasllc-io/memql/...
+            go vet -tags agent github.com/znasllc-io/memql/...
+        - name: build-planner
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags planner github.com/znasllc-io/memql/...
+            go vet -tags planner github.com/znasllc-io/memql/...
+        - name: build-workbench
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags workbench github.com/znasllc-io/memql/...
+            go vet -tags workbench github.com/znasllc-io/memql/...
+        - name: build-clustere2e
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            export GOWORK=off
+            go vet -tags clustere2e ./test/clustere2e/
+            go test -tags clustere2e -c -o /dev/null ./test/clustere2e/
+            go vet -tags clustere2e,agent ./test/clustere2e/
+            go test -tags clustere2e,agent -c -o /dev/null ./test/clustere2e/
+        - name: module-boundaries
+          verification: true
+          placement: cluster
+          timeout: 60m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            bash scripts/ci/module-integrity.sh
+        - name: bash32-smoke
+          verification: true
+          placement: cluster
+          timeout: 10m
+          image: docker.io/library/bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89
+          caches: []
+          run: |
+            set -eu
+            bash ./scripts/ci/bash32-smoke.sh
+    # Generic Go lanes cover Cockpit unit tests/build/vet. This lane adds only
+    # Docker and macOS computer-use behavior for affected Cockpit packages and dependencies.
+    - name: cockpit
+      steps:
+        - name: docker-integration
+          packages: affected
+          packageRoots: [cockpit]
+          placement: fleet
+          execution: native
+          caches: []
+          platform: linux/amd64
+          needs: { docker: true }
+          timeout: 30m
+          run: |
+            set -eu
+            . ./cockpit/scripts/ci/native-env.sh
+            export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
+            docker info >/dev/null
+            export MEMQL_TEST_DOCKER_IMAGE=alpine@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
+            export MEMQL_TEST_PIPELINE_POSTGRES_IMAGE=postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+            export MEMQL_FLEET_DOCKER_TEST=1
+            bash scripts/identity/build-css.sh
+            go test -race -count=1 -timeout=600s $MEMQL_PACKAGES
+        - name: computeruse
+          packages: affected
+          packageRoots: [cockpit]
+          placement: fleet
+          execution: native
+          caches: []
+          platform: darwin/arm64
+          needs: { macos_tooling: true }
+          timeout: 30m
+          run: |
+            set -eu
+            . ./cockpit/scripts/ci/native-env.sh
+            export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
+            native_go_platform darwin arm64
+            bash scripts/identity/build-css.sh
+            go test -race -tags computeruse -count=1 -timeout=600s $MEMQL_PACKAGES
+    - name: delivery-artifacts
+      steps:
+        - name: provider-qualification
+          packages: affected
+          packageRoots: [app, integrations/release, integrations/ociregistry, integrations/azureblob, integrations/pipelinesteps, integrations/installation, component/pipelinerun, component/pipelines, component/workjournal, component/database, component/memql]
+          placement: fleet
+          execution: native
+          caches: []
+          platform: linux/amd64
+          needs: { docker: true }
+          timeout: 35m
+          artifacts: [.memql-artifact-evidence]
+          run: |
+            set -eu
+            . ./cockpit/scripts/ci/native-env.sh
+            export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
+            bash scripts/ci/delivery-artifacts.sh \
+              --database-image=ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631 \
+              --blob-image=mcr.microsoft.com/azure-storage/azurite@sha256:647c63a91102a9d8e8000aab803436e1fc85fbb285e7ce830a82ee5d6661cf37 \
+              --registry-image=docker.io/library/registry@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e \
+              --artifact-image=docker.io/library/python@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a \
+              --output=.memql-artifact-evidence
+    - name: vulnerabilities
+      on: [pull_request, merge_group, push, release, schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: go-vulnerabilities
+          placement: cluster
+          timeout: 30m
+          # govulncheck over every module holds the whole program in memory:
+          # at the namespace default (4 GiB) the kernel killed it at 4.2 GB
+          # resident (run 45f5502f, 2026-10-11).
+          memoryMiB: 8192
+          artifacts: [.memql-security/go]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            mkdir -p .memql-security/go
+            go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            govulncheck -version > .memql-security/go/scanner.txt
+            export GOMEMLIMIT=7GiB GOGC=100
+            status=0
+            govulncheck github.com/znasllc-io/memql/... > .memql-security/go/findings.txt 2> .memql-security/go/errors.txt || status=$?
+            cat .memql-security/go/findings.txt .memql-security/go/errors.txt
+            test "$status" -eq 0
+        - name: npm-vulnerabilities
+          placement: cluster
+          timeout: 30m
+          artifacts: [.memql-security/npm]
+          run: |
+            set -eu
+            python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm
+    # Event selection is declared, so the plan exposes the selected scan.
+    # New-commit scans preserve reports even when an earlier check failed.
+    # Full history shares the later weekly analysis stage with CodeQL, so
+    # the two-job admission can overlap the expensive work.
+    - name: secrets-current
+      on: [pull_request, merge_group, push]
+      runAfterFailure: true
+      steps:
+        - name: gitleaks
+          placement: cluster
+          timeout: 30m
+          cpuMilli: 3000
+          memoryMiB: 6144
+          artifacts: [.memql-security/gitleaks]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-security/gitleaks
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1
+            export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --base="$MEMQL_BASE_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=1 --timeout=1500
+    - name: tests
+      steps:
+        # ci.yml go-tests: every package outside the db-gated trees that the
+        # change reaches, over four shards, the count ci.yml's class table gives
+        # that lane today (a hand copy). Uncached, as ci.yml runs the root
+        # package: a step cannot give that package a flag of its own, and its
+        # gates read `git ls-files`, a set no test cache sees.
+        - name: go-tests
+          verification: true
+          placement: cluster
+          packages: affected
+          only: not-db-gated
+          shards: 4
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -count=1 -timeout=600s $MEMQL_PACKAGES
+        # Each shard keeps its own Postgres. The runner gives each selected
+        # timeout class a fresh database, preserving CI's suite isolation and
+        # budgets without carrying engine fixture rows into unrelated tests.
+        - name: db-tests
+          verification: true
+          placement: cluster
+          # Keep three Go execution threads after the heap-budget fix, with
+          # a quarter-core of admission headroom per shard. Including Postgres,
+          # each shard reserves three cores; two leave room in a 6.5-core pool
+          # for auxiliary containers. Test overlap, selection and operation
+          # deadlines are unchanged; native qualification must still pass.
+          cpuMilli: 2750
+          packages: affected
+          only: db-gated
+          shards: 5
+          services: [postgres]
+          timeout: 40m
+          run: |
+            set -eu
+            # Engine fixtures repeatedly load the DSL. Leave room for that live
+            # heap within the existing 4 GiB container instead of spending CPU
+            # collecting at the compiler's conservative 512 MiB setting.
+            export GOFLAGS=-p=1 GOMEMLIMIT=2GiB GOGC=100 GOMAXPROCS=3
+            bash scripts/identity/build-css.sh
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            python3 scripts/ci/pipeline-db-tests.py
+        # ci.yml go-checks' bounded fuzz, a step of its own here so the search
+        # holds no test behind it. None of the three packages imports
+        # component/identity/web, so it needs no stylesheet.
+        - name: fuzz
+          placement: cluster
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            go test ./component/language/parser -run '^FuzzLexer$' -fuzz '^FuzzLexer$' -fuzztime=40s
+            go test ./component/language/parser -run '^FuzzParseV1Expression$' -fuzz '^FuzzParseV1Expression$' -fuzztime=40s
+            go test ./component/memql -run '^FuzzLower$' -fuzz '^FuzzLower$' -fuzztime=40s
+            go test ./component/memql -run '^FuzzEvalExpr$' -fuzz '^FuzzEvalExpr$' -fuzztime=40s
+            go test ./test/conformance -run '^FuzzParse$' -fuzz '^FuzzParse$' -fuzztime=40s
+        # ci.yml os-checks. Network setup may retry; tests run once.
+        - name: os-checks
+          placement: cluster
+          # The full UI suite can exceed the default 20-minute deadline on
+          # shared runners; retain time for its typecheck and production build.
+          timeout: 30m
+          artifacts: [clients/os/dist]
+          when: { bucket: os }
+          run: |
+            set -eu
+            scripts/ci/retry.sh -- make os-install
+            make os-typecheck
+            make os-test
+            make os-build
+        # The fixed rootless builder validates the same Docker stage as CI.
+        # Its OCI archive and metadata are retained by the image-build contract.
+        - name: os-image
+          placement: cluster
+          when: { bucket: os }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 30m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: spa-build
+        # Preserve the deploy-gate workflow's build validation, including the
+        # workspace manifests its nested Go modules need. The builder returns
+        # an unpublished OCI archive and its immutable provenance.
+        - name: deploy-gate-image
+          placement: cluster
+          when: { bucket: deploy-gate }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 30m
+          imageBuild:
+            context: .
+            dockerfile: cmd/deploy-gate-check/Dockerfile
+        # The verified target starts a disposable Postgres inside the fixed
+        # rootless build. It checks Community features and the N-1 upgrade
+        # before an OCI archive can be retained; it has no registry credential.
+        - name: database-image
+          placement: cluster
+          when: { bucket: database-image }
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 4096
+          timeout: 30m
+          imageBuild:
+            context: deploy/db-image
+            dockerfile: deploy/db-image/Dockerfile
+            target: verified
+        - name: editor-site
+          placement: cluster
+          when: { bucket: editor-site }
+          # Native-published toolchain includes Chromium's system libraries.
+          image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
+          caches: [npm]
+          cpuMilli: 2000
+          memoryMiB: 4096
+          timeout: 15m
+          artifacts: [editors/vscode/site/dist, editors/vscode/site/artifacts]
+          run: bash scripts/ci/editor-site.sh
+        - name: editor-packages
+          placement: cluster
+          when: { bucket: editors }
+          timeout: 30m
+          artifacts: [.memql-editor]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-editor
+            bash scripts/identity/build-css.sh
+            go test -count=1 ./cmd/memql-lsp/...
+            make vscode-test
+            node editors/browser/build.mjs
+            npm --prefix editors/browser run typecheck
+            npm --prefix editors/browser test
+            npm --prefix editors/productivity test
+            scripts/ci/retry.sh -- bash scripts/vscode/package.sh --out="$PWD/.memql-editor/memql.vsix"
+            test -s .memql-editor/memql.vsix
+        # Real Electron/browser hosts cover activation and runtime contracts
+        # that the portable unit/package tests cannot exercise. Mac steps use
+        # an owner-authorized native worker, independently of computer use.
+        - name: vscode-desktop-linux-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh vscode-desktop 1.91.0
+        - name: vscode-desktop-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh vscode-desktop stable
+        - name: productivity-web-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-web stable
+        - name: productivity-desktop-linux-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
+        - name: productivity-desktop-linux-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: cluster
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop stable
+        - name: productivity-web-darwin-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-web stable
+        - name: productivity-desktop-darwin-1-91-0
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
+        - name: productivity-desktop-darwin-stable
+          when: { bucket: editors }
+          timeout: 25m
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          needs: { macos_tooling: true }
+          artifacts: [.memql-host-reports]
+          run: bash scripts/ci/editor-host.sh productivity-desktop stable
+        - name: sdk-ts-typecheck
+          verification: true
+          placement: cluster
+          run: |
+            set -eu
+            scripts/ci/retry.sh -- make sdk-ts-install
+            make sdk-ts-typecheck
+            make sdk-ts-test
+        - name: viewkit-checks
+          verification: true
+          placement: cluster
+          run: |
+            set -eu
+            scripts/ci/retry.sh -- make viewkit-install
+            make viewkit-typecheck
+            make viewkit-test
+        - name: mcp-conformance
+          placement: cluster
+          services: [postgres]
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS vector;
+            SQL
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            export MEMQL_DIFFERENTIAL_REQUIRED=1
+            go test -count=1 -timeout=600s -v ./test/conformance/...
+            go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
+        - name: proving
+          placement: cluster
+          services: [postgres]
+          timeout: 30m
+          artifacts: [.memql-proving]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS vector;
+            SQL
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            mkdir -p .memql-proving
+            go run ./cmd/memql-bench --print-spec > .memql-proving/spec.json
+            test "$(wc -l < .memql-proving/spec.json)" -eq 1
+            jq -e '.capability == "bench.run" and (.params | length) > 0' .memql-proving/spec.json > /dev/null
+            status=0
+            go run ./cmd/memql-bench --do=gate --runner=workbench-linux-amd64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
+            cat .memql-proving/gate.txt
+            test "$(wc -l < .memql-proving/envelope.json)" -eq 1
+            jq -e '.ok == true' .memql-proving/envelope.json > /dev/null
+            test "$status" -eq 0
+            go run ./cmd/memql-bench --do=scorecard --check > .memql-proving/scorecard.json
+            jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
+        - name: test-agent
+          verification: true
+          placement: cluster
+          # Agent-tagged persistence cases are absent from untagged DB shards.
+          # A dedicated service and required DB mode prevent a skipped green.
+          services: [postgres]
+          cpuMilli: 2750
+          timeout: 45m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=2GiB GOGC=100 GOMAXPROCS=3
+            bash scripts/identity/build-css.sh
+            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS vector;
+            SQL
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            # With database cases enabled, app reached the 300s package alarm
+            # while its current subtest was only 4s old. Bound the full app
+            # suite separately; keep every other package's existing alarm.
+            go test -tags agent -count=1 -timeout=900s -v ./app/
+            go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
+        - name: test-bff
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
+        - name: test-edge
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
+        - name: test-identity
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags identity -timeout=300s ./app/ ./component/node/
+        - name: test-mcp
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
+        - name: test-planner
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags planner -timeout=300s ./app/ ./component/node/
+        - name: test-workbench
+          verification: true
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags workbench -timeout=300s ./app/ ./component/node/
+    # ci.yml go-checks' gate-inputs step, which ci.yml runs on a pull request
+    # only: a full run tests every package in go-tests, these among them, so
+    # this stage is planned for every pull request, including Go-only changes.
+    # The stage comes after the tests so a red gate
+    # never skips a test; a red test stage skips it in turn, as the seam skips
+    # every stage after a failed one. The packages are ci.yml's GATE_PACKAGES;
+    # the test holds them equal.
+    - name: gates
+      on: [pull_request, manual]
+      steps:
+        - name: gate-inputs
+          placement: cluster
+          when: { bucket: gates }
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+
+    - name: installer-smoke
+      on: [pull_request, merge_group, push, manual]
+      steps:
+        - name: no-cluster
+          when: { bucket: installer }
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 40m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=no-cluster
+
+    # Full installer lifecycle is weekly and operator-triggered. It runs on an
+    # opted-in Linux machine, with a disposable inner daemon and finite limits.
+    # Neither PRs nor merge candidates may start privileged installer fixtures.
+    - name: installer-lifecycle
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: round-trip
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=round-trip
+        - name: repair
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=repair
+        - name: upgrade
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 95m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=upgrade
+        - name: from-source
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 135m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=from-source
+        - name: pipelines
+          placement: fleet
+          execution: native
+          platform: linux/amd64
+          needs: { docker: true }
+          caches: []
+          timeout: 180m
+          artifacts: [.memql-install-evidence]
+          run: python3 scripts/install/ci/fleet-fixture.py --leg=pipelines
+
+    # Public repository facts need no publication token. These audits describe
+    # live configuration, so their results never satisfy a PR or queue check.
+    - name: repository-audit
+      schedule: daily
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: ruleset-drift
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 5m
+          run: |
+            set -eu
+            RULESET_DRIFT_PUBLIC_API=1 bash scripts/ci/ruleset-drift.sh
+        - name: ruleset-enforcement-copilot
+          placement: cluster
+          caches: []
+          cpuMilli: 250
+          memoryMiB: 256
+          timeout: 5m
+          run: |
+            set -eu
+            RULESET_DRIFT_PUBLIC_API=1 RULESET_DRIFT_ID=19450314 RULESET_DRIFT_EXPECTED=copilot_code_review RULESET_DRIFT_ENFORCEMENT=disabled bash scripts/ci/ruleset-drift.sh
+
+    - name: documentation-audit
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: docs-current
+          # Observe the public site from outside its hosting cluster. The
+          # isolated cloud runner cannot hairpin through that cluster's load
+          # balancer; an opted-in Fleet container keeps private ingress closed.
+          placement: fleet
+          execution: container
+          platform: linux/amd64
+          caches: []
+          timeout: 10m
+          run: |
+            set -eu
+            bash scripts/docs/current-check.sh --public-api --repo="$MEMQL_REPOSITORY"
+
+    # Analysis records findings independently of build/test success. The deep
+    # history and CodeQL scans run weekly (or on demand), not on every release.
+    # The saved UTC week prevents new main heads from repeating the audit.
+    - name: analysis
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: gitleaks
+          placement: cluster
+          # Full history runs on the weekly audit or on demand. Three CPUs
+          # leave room for another Job and its services on the bounded pool.
+          # Restart scanners after each commit: large historical patches
+          # accumulate beyond the soft Go memory limit in multi-commit batches.
+          timeout: 6h
+          cpuMilli: 3000
+          memoryMiB: 6144
+          artifacts: [.memql-security/gitleaks]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-security/gitleaks
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1
+            export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --fetch-remote="https://github.com/${MEMQL_REPOSITORY}.git" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=3 --batch-size=1 --timeout=20700
+        - name: scorecard
+          placement: cluster
+          githubReadToken: true
+          cpuMilli: 1000
+          memoryMiB: 2048
+          timeout: 25m
+          artifacts: [.memql-security/scorecard]
+          run: |
+            set -eu
+            python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
+        - name: codeql-go
+          placement: cluster
+          memoryMiB: 6144
+          # Measured ARM64 security-extended analysis takes over two hours,
+          # including SARIF paths. The operator's run ceiling must also cover it.
+          timeout: 3h
+          artifacts: [.memql-security/codeql-go]
+          run: |
+            set -eu
+            python3 scripts/ci/codeql-scan.py --language=go --ram=3072 --output-dir=.memql-security/codeql-go
+        - name: codeql-javascript
+          placement: cluster
+          memoryMiB: 6144
+          timeout: 45m
+          artifacts: [.memql-security/codeql-javascript]
+          run: |
+            set -eu
+            python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=5120 --threads=1 --output-dir=.memql-security/codeql-javascript
+        - name: codeql-python
+          placement: cluster
+          timeout: 45m
+          artifacts: [.memql-security/codeql-python]
+          run: |
+            set -eu
+            python3 scripts/ci/codeql-scan.py --language=python --ram=3072 --output-dir=.memql-security/codeql-python
+    # Dependency inventory is a release deliverable, not a deep code scan.
+    # Preserve main-push/release coverage without adding it to PR/queue gates.
+    - name: inventory
+      schedule: weekly
+      on: [push, release, schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: sbom
+          placement: cluster
+          timeout: 60m
+          artifacts: [.memql-security/sbom]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+            go install github.com/anchore/syft/cmd/syft@v1.54.1
+            python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
+
+    - name: security-reports
+      schedule: weekly
+      on: [schedule, manual]
+      runAfterFailure: true
+      steps:
+        - name: scorecard
+          timeout: 5m
+          sarif:
+            step: analysis.scorecard
+            path: .memql-security/scorecard/results.sarif
+        - name: codeql-go
+          timeout: 5m
+          sarif:
+            step: analysis.codeql-go
+            path: .memql-security/codeql-go/results.sarif
+        - name: codeql-javascript
+          timeout: 5m
+          sarif:
+            step: analysis.codeql-javascript
+            path: .memql-security/codeql-javascript/results.sarif
+        - name: codeql-python
+          timeout: 5m
+          sarif:
+            step: analysis.codeql-python
+            path: .memql-security/codeql-python/results.sarif
+
+    # Refreshing a public fixture is deliberate maintenance. Keep both supported
+    # native platforms and their provenance, retain exact bytes, and publish through a
+    # separately approved candidate. No registry credential enters this command.
+    - name: fixtures
+      on: [manual]
+      steps:
+        - name: timescaledb
+          placement: cluster
+          cpuMilli: 1000
+          memoryMiB: 2048
+          timeout: 20m
+          artifacts: [.memql-fixture]
+          run: |
+            set -eu
+            export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
+            go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture
+
+    - name: cockpit-release
+      'on':
+      - release
+      steps:
+      - name: headless
+        placement: cluster
+        caches: [go]
+        timeout: 60m
+        artifacts:
+        - cockpit/dist
+        - cockpit/bin
+        - cockpit/sbom
+        run: |
+          set -eu
+          export GOFLAGS=-p=2 GOMAXPROCS=2
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          env -u GOFLAGS make dist
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+      - name: computeruse-darwin-arm64
+        placement: fleet
+        timeout: 60m
+        execution: native
+        caches: []
+        platform: darwin/arm64
+        needs:
+          macos_tooling: true
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          . ./cockpit/scripts/ci/native-env.sh
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          native_go_platform darwin arm64
+          env -u GOFLAGS make cockpit-computeruse-host
+          ./scripts/macos/package-menubar.sh --arch=arm64
+          python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-arm64.tar.gz
+          ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-arm64" --arch=arm64
+          python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-arm64.tar.gz
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py darwin-arm64
+      - name: computeruse-darwin-amd64
+        placement: fleet
+        timeout: 60m
+        execution: native
+        caches: []
+        platform: darwin/arm64
+        needs:
+          macos_tooling: true
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          . ./cockpit/scripts/ci/native-env.sh
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          native_go_platform darwin arm64
+          pkgutil --pkg-info com.apple.pkg.RosettaUpdateAuto >/dev/null
+          env -u GOFLAGS make cockpit-computeruse-darwin-amd64
+          ./bin/memql-computeruse-darwin-amd64 --version
+          ./scripts/macos/package-menubar.sh --arch=amd64
+          python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-amd64.tar.gz
+          ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-amd64" --arch=amd64
+          python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-amd64.tar.gz
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py darwin-amd64
+      - name: computeruse-linux-arm64
+        placement: cluster
+        timeout: 60m
+        caches: [go]
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          export GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+          CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ env -u GOFLAGS make cockpit-computeruse-linux-arm64
+          timeout --signal=KILL 60s qemu-aarch64 -L / ./bin/memql-computeruse-linux-arm64 --version
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py linux-arm64
+      - name: computeruse-linux-amd64
+        placement: cluster
+        timeout: 60m
+        caches: [go]
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          export GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+          env -u GOFLAGS make cockpit-computeruse-linux-amd64
+          ./bin/memql-computeruse-linux-amd64 --version
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py linux-amd64
+
+    - name: release-files
+      on: [release]
+      steps:
+        - name: packages
+          placement: cluster
+          cpuMilli: 3000
+          memoryMiB: 6144
+          timeout: 60m
+          artifacts: [.memql-release]
+          run: |
+            set -eu
+            export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
+            python3 scripts/ci/pipeline-release-assets.py
+
+    # Release images are produced by the fixed rootless builder, from the
+    # release event's exact source commit. It stamps MEMQL_COMMIT/MEMQL_RELEASE
+    # and returns an OCI archive plus digest metadata to the Library. Registry
+    # credentials belong only to the separate verified publication service.
+    # Bootstrap the next pinned toolchain using the currently installed one.
+    # The isolated builder retains an OCI archive; publication is a separate
+    # reviewed release effect. The verified target runs the full smoke suite
+    # offline before the builder can export that exact cloud-built image.
+    - name: build-tools
+      on: [release]
+      steps:
+        - name: toolchain
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 45m
+          imageBuild:
+            context: .
+            dockerfile: deploy/toolchain-image/Dockerfile
+            target: verified
+
+    - name: images
+      on: [release]
+      steps:
+        - name: identity
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: identity
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: bff
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: bff
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: mcp
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: mcp
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: agent
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: agent
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: planner
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: planner
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: workbench
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: workbench-runtime
+            args:
+              BUILD_TAGS: workbench
+              SPA_DIST_STAGE: spa-skip
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+        - name: edge
+          placement: cluster
+          caches: []
+          cpuMilli: 3000
+          memoryMiB: 8192
+          timeout: 90m
+          imageBuild:
+            context: .
+            dockerfile: Dockerfile
+            target: runtime
+            args:
+              BUILD_TAGS: edge
+              SPA_DIST_STAGE: spa-build
+              GOFLAGS: -p=2
+              GOMEMLIMIT: 1GiB
+              GOGC: "75"
+
+    - name: dependency-proposal
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: tidy
+        placement: cluster
+        githubReadToken: true
+        timeout: 25m
+        cpuMilli: 2000
+        memoryMiB: 4096
+        artifacts: [.reports/dependency-proposal.json]
+        run: python3 scripts/ci/repository-proposal.py dependabot-tidy --output=.reports/dependency-proposal.json
+    - name: dependency-proposal-write
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+      - name: apply
+        timeout: 5m
+        repositoryChange:
+          rule: dependabot-go-tidy
+          step: dependency-proposal.tidy
+          path: .reports/dependency-proposal.json

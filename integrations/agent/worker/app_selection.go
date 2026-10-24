@@ -35,7 +35,7 @@ func (s *EngineStore) SelectAppForCall(ctx context.Context, req memqlengine.AppC
 }
 
 func (a *RemoteAppInference) SelectApp(ctx context.Context, req memqlengine.AppCallRequest, localOnly bool, excluded []string) (memqlengine.AppSelection, error) {
-	doors, err := a.Doors(ctx, req.ActingUserId)
+	doors, err := a.selectionDoors(ctx, req.ActingUserId)
 	if err != nil {
 		return memqlengine.AppSelection{}, err
 	}

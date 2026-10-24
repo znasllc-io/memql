@@ -62,6 +62,49 @@ type replyReviewModel struct {
 	run      common.RunContext
 }
 
+func TestReplyReviewUsesCurrentOwnerDirectionAfterRetryAcrossReplicas(t *testing.T) {
+	for _, whole := range []bool{false, true} {
+		t.Run(fmt.Sprint("whole-", whole), func(t *testing.T) {
+			a, b, ctx, _, runID, write := guidanceFixture(t)
+			actor, _ := auth.AccessFromContext(ctx)
+			write("createWorkGoal", map[string]any{"goalId": "fixture-goal", "statement": "Revise the document; hold publication.", "origin": "user"})
+			recordApprovalGuidance(write, actor.UserId, runID, "Prepare the revised document for review.")
+			at := time.Now().UTC()
+			ov := &common.StepOverride{Prompt: "Publish the approved revision after verification.", WholePrompt: whole, Model: "fleet:review", Effort: "xhigh", RequestedBy: actor.UserId}
+			write("updateWorkRun", map[string]any{"runId": runID, "rerun": map[string]any{"requestId": "review-attempt", "requestedAt": at.Format(time.RFC3339Nano)}})
+			recordApprovalGuidance(write, actor.UserId, runID, "Use the corrected document title for publication.")
+			recordApprovalGuidance(write, "another-person", runID, "FOREIGN_DIRECTION_MUST_NOT_APPEAR")
+			// Recovery keeps the old instruction's date. Giving it the new
+			// request's date would elevate it above the later correction.
+			write("updateWorkRun", map[string]any{"runId": runID, "rerun": map[string]any{"requestId": "retry-review-attempt", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano), "overrideRequestedAt": at.Format(time.RFC3339Nano)}})
+			runtime := common.ContextWithRun(ctx, common.RunContext{RunId: runID, GoalId: "fixture-goal", OwnerUserId: actor.UserId, StepKey: "section", RerunRequestId: "retry-review-attempt", Override: ov})
+			require.NoError(t, a.RecordDelegatedToolSource(WithActingAgentId(runtime, "editor"), "readDocument", map[string]any{}, `{"verified":true}`))
+			model := &replyReviewModel{}
+			b.SetAIResolver(testAIResolver{fn: func(_ context.Context, req airoute.ResolveRequest) (ResolvedProvider, error) {
+				require.Equal(t, "xhigh", req.Effort)
+				return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:review", Model: "test"}}, nil
+			}})
+			_, err := b.workReviewReplyBuiltin(runtime, map[string]any{"draft": map[string]any{"reply": "Publication is still on hold."}}, 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, model.calls)
+			text := flattenForSession(model.messages)
+			require.Contains(t, text, "Use the corrected document title for publication.")
+			require.NotContains(t, text, "FOREIGN_DIRECTION_MUST_NOT_APPEAR")
+			require.Greater(t, strings.LastIndex(text, "Use the corrected document title"), strings.LastIndex(text, ov.Prompt), "the old override must not be appended again after the later correction")
+			require.Contains(t, text, "Revise the document; hold publication.", "retain original intent as historical context")
+			require.Contains(t, text, "Check whether the recorded source receipts", "whole-prompt replacement must not replace the review contract")
+			require.Equal(t, "fleet:review", model.run.Override.Model)
+			require.Empty(t, model.run.Override.Prompt, "review input already carries the instructions in chronology")
+			require.Equal(t, "Publish the approved revision after verification.", ov.Prompt, "the executing override is immutable")
+			changed, _ := common.RunFromContext(runtime)
+			changed.RerunRequestId = "obsolete-attempt"
+			_, err = b.workReviewReplyBuiltin(common.ContextWithRun(runtime, changed), map[string]any{"draft": map[string]any{"reply": "An unchecked draft"}}, 0)
+			require.ErrorContains(t, err, "execution changed")
+			require.Equal(t, 1, model.calls, "a changed execution must not publish or spend a review call")
+		})
+	}
+}
+
 func TestReplyReviewPriorRequestsDoNotPromoteAssistantClaims(t *testing.T) {
 	requests := reviewPriorRequests([]any{
 		map[string]any{"role": "user", "content": "What is happening in location A?"},
@@ -148,6 +191,13 @@ func TestLookupReplyWithNoReceiptCannotBypassEvidenceReview(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, model.calls)
 	raw, _ := json.Marshal(model.messages)
+	require.Contains(t, string(raw), "no successful source receipt was recorded")
+	// Reading a profile cannot satisfy a lookup's need for source evidence.
+	require.NoError(t, e.RecordDelegatedToolSource(WithActingAgentId(ctx, "chat-agent"), "workViewerContext", map[string]any{}, `{"name":"Test user"}`))
+	_, err = e.workReviewReplyBuiltin(ctx, map[string]any{"draft": map[string]any{"reply": "The live service is definitely unavailable."}}, 0)
+	require.NoError(t, err)
+	require.Equal(t, 2, model.calls)
+	raw, _ = json.Marshal(model.messages)
 	require.Contains(t, string(raw), "no successful source receipt was recorded")
 	model.answer = `{"reply":"The requested entity has not been checked.","missingEvidence":"Resolve the named entity from a source."}`
 	for _, allowed := range []bool{false, true} {
@@ -238,4 +288,10 @@ func TestReplyReviewKeepsRecoveryUnderFilePreviewPressure(t *testing.T) {
 		require.Contains(t, string(raw), fmt.Sprint("history/source-", n), "later file previews must not evict earlier recovery proofs")
 	}
 	require.Equal(t, 9, strings.Count(string(raw), `\"complete\":true`))
+}
+
+func TestProfileOnlyReplyDoesNotTriggerEvidenceModel(t *testing.T) {
+	require.False(t, replyHasEvidenceSources([]any{map[string]any{"operation": "workViewerContext"}}))
+	require.True(t, replyHasEvidenceSources([]any{map[string]any{"operation": "workViewerContext"}, map[string]any{"operation": "readStatus"}}))
+	require.True(t, replyHasEvidenceSources([]any{nil}))
 }

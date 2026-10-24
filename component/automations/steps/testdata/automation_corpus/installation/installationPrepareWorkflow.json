@@ -25,7 +25,12 @@
             "name": "installationReservePreparation"
           },
           {
+            "kind": "builtin",
+            "name": "installationApplications"
+          },
+          {
             "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
@@ -33,13 +38,23 @@
           },
           {
             "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
-            "name": "installationVerifySource"
+            "name": "installationSourceRequirements"
           },
           {
             "args": {
+              "application": "",
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySourceGraph"
+          },
+          {
+            "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
@@ -47,6 +62,7 @@
           },
           {
             "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
@@ -54,6 +70,7 @@
           },
           {
             "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
@@ -61,13 +78,23 @@
           },
           {
             "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
-            "name": "installationVerifySource"
+            "name": "installationSourceRequirements"
           },
           {
             "args": {
+              "application": "",
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySourceGraph"
+          },
+          {
+            "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
@@ -75,6 +102,7 @@
           },
           {
             "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
@@ -99,6 +127,10 @@
           {
             "kind": "builtin",
             "name": "installationVerifyProtected"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationContinuityBaseline"
           },
           {
             "kind": "builtin",
@@ -139,7 +171,12 @@
             "name": "installationReservePreparation"
           },
           {
+            "kind": "builtin",
+            "name": "installationApplications"
+          },
+          {
             "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
@@ -147,13 +184,23 @@
           },
           {
             "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
-            "name": "installationVerifySource"
+            "name": "installationSourceRequirements"
           },
           {
             "args": {
+              "application": "",
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySourceGraph"
+          },
+          {
+            "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
@@ -161,6 +208,7 @@
           },
           {
             "args": {
+              "application": "",
               "role": "rollback"
             },
             "kind": "builtin",
@@ -168,6 +216,7 @@
           },
           {
             "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
@@ -175,13 +224,23 @@
           },
           {
             "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
-            "name": "installationVerifySource"
+            "name": "installationSourceRequirements"
           },
           {
             "args": {
+              "application": "",
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySourceGraph"
+          },
+          {
+            "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
@@ -189,6 +248,7 @@
           },
           {
             "args": {
+              "application": "",
               "role": "candidate"
             },
             "kind": "builtin",
@@ -213,6 +273,10 @@
           {
             "kind": "builtin",
             "name": "installationVerifyProtected"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationContinuityBaseline"
           },
           {
             "kind": "builtin",

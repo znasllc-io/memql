@@ -25,9 +25,11 @@ func readPolicyDocument(ctx context.Context, db bun.IDB) (PolicyDocument, error)
 		Revision  int64
 		Overrides json.RawMessage
 		Rules     json.RawMessage
+		Routes    json.RawMessage
+		Auto      json.RawMessage
 		UpdatedBy string
 	}
-	err := db.NewRaw(`SELECT revision, overrides, rules, updated_by FROM router_policy_revision ORDER BY revision DESC LIMIT 1`).Scan(ctx, &row)
+	err := db.NewRaw(`SELECT revision, overrides, rules, routes, auto, updated_by FROM router_policy_revision ORDER BY revision DESC LIMIT 1`).Scan(ctx, &row)
 	if err != nil {
 		return PolicyDocument{}, err
 	}
@@ -39,6 +41,12 @@ func readPolicyDocument(ctx context.Context, db bun.IDB) (PolicyDocument, error)
 		if err := json.Unmarshal(row.Rules, &doc.Rules); err != nil {
 			return PolicyDocument{}, err
 		}
+	}
+	if err := json.Unmarshal(row.Routes, &doc.Routes); err != nil {
+		return PolicyDocument{}, err
+	}
+	if err := json.Unmarshal(row.Auto, &doc.Auto); err != nil {
+		return PolicyDocument{}, err
 	}
 	return doc, nil
 }
@@ -66,7 +74,15 @@ func (s databasePolicyStore) CompareAndSwap(ctx context.Context, expected int64,
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO router_policy_revision (revision,overrides,rules,updated_by) VALUES (?,?::jsonb,?::jsonb,?)`, next.Revision, string(raw), string(ruleJSON), next.UpdatedBy)
+		routeJSON, err := json.Marshal(next.Routes)
+		if err != nil {
+			return err
+		}
+		autoJSON, err := json.Marshal(next.Auto)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO router_policy_revision (revision,overrides,rules,routes,auto,updated_by) VALUES (?,?::jsonb,?::jsonb,?::jsonb,?::jsonb,?)`, next.Revision, string(raw), string(ruleJSON), string(routeJSON), string(autoJSON), next.UpdatedBy)
 		return err
 	})
 }

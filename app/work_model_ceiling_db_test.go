@@ -36,8 +36,20 @@ import (
 // native checkpoint writes, nested journals, human decision and peer resume run.
 type ceilingDBProvider struct {
 	calls, timeouts int
+	reviews         int
 	requests        [][]common.ChatMessage
 	beforeFailure   func()
+	failure         string
+}
+
+// Reply review is a separate structured operation, counted independently of
+// the tool-loop attempts whose retry behavior this fixture verifies.
+func (p *ceilingDBProvider) CallChatStructured(ctx context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	p.reviews++
+	return `{"reply":"Completed synthetic section"}`, nil
 }
 
 func (*ceilingDBProvider) Call(context.Context, string) (any, error) {
@@ -55,6 +67,9 @@ func (p *ceilingDBProvider) CallChatWithTools(ctx context.Context, m []common.Ch
 	if p.calls > 1 && p.calls <= 1+p.timeouts {
 		if p.beforeFailure != nil {
 			p.beforeFailure()
+		}
+		if p.failure != "" {
+			return nil, errors.New(p.failure)
 		}
 		return nil, fmt.Errorf("worker: model call exceeded its 10m0s ceiling")
 	}
@@ -95,7 +110,7 @@ func TestWorkDBModelCeilingKeepsExactNestedProgress(t *testing.T) {
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
 	for _, background := range []bool{false, true} {
-		for _, mode := range []string{"recover", "exhausted", "early-answer", "repeated", "entry-checkpoint-failure", "checkpoint-failure", "cancelled", "closed-goal", "policy-ask", "guidance", "abandon"} {
+		for _, mode := range []string{"recover", "exhausted", "early-answer", "repeated", "entry-checkpoint-failure", "checkpoint-failure", "cancelled", "closed-goal", "policy-ask", "guidance", "abandon", "context-capacity"} {
 			t.Run(fmt.Sprintf("background=%v/%s", background, mode), func(t *testing.T) {
 				var turns []*ceilingDBTurn
 				writer, db := workTemplateDBEngineAndDB(t)
@@ -111,6 +126,9 @@ func TestWorkDBModelCeilingKeepsExactNestedProgress(t *testing.T) {
 				effects := map[string]int{}
 				reads := 0
 				providers := []*ceilingDBProvider{{timeouts: 2}, {}}
+				if mode == "context-capacity" {
+					providers[0].failure = "context_length_exceeded"
+				}
 				if mode == "recover" {
 					providers[0].timeouts = 1
 				}
@@ -158,6 +176,10 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 					require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 					require.NoError(t, rules.Finalize())
 					rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
+					// The real final-reply review also uses the engine router. Without
+					// this wiring, authored on-error-continue concealed its boot fault
+					// and made a failed child look like successful resumed work.
+					e.SetAIResolver(rtr)
 					adapter := &modelBudgetAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, reads: &reads}
 					replier, err := agent.NewReplier(adapter, rtr, e.Logger)
 					require.NoError(t, err)
@@ -276,7 +298,7 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 					require.ErrorAs(t, err, &wait)
 					require.Equal(t, 1, reads)
 					require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 1}, effects)
-					if mode == "policy-ask" {
+					if mode == "policy-ask" || mode == "context-capacity" {
 						require.Equal(t, 2, providers[0].calls)
 					} else {
 						require.Equal(t, 3, providers[0].calls)
@@ -386,6 +408,12 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 					}
 				}
 				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 1, "child-tail": 1, "later-section": 1}, effects)
+				var failedSteps []string
+				require.NoError(t, db.NewRaw(`SELECT id FROM (
+SELECT DISTINCT ON (id) id,payload FROM "MemoryNodes"
+WHERE concept='v1:work:step' AND payload->>'ownerUserId' IN (?,?)
+ORDER BY id,"createdAt" DESC) latest WHERE payload->>'status'='failed'`, owner, "v1:identity:user:"+owner).Scan(person, &failedSteps))
+				require.Empty(t, failedSteps, "on-error-continue must not conceal a failed agent/reply-review step")
 				if mode != "repeated" {
 					require.Equal(t, 1, reads)
 				}
@@ -395,7 +423,7 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 				require.Contains(t, raw, `"events": 7`)
 				var modelCalls int
 				require.NoError(t, db.NewRaw(`SELECT count(DISTINCT id) FROM "MemoryNodes" WHERE concept='v1:work:modelCall' AND payload->>'runId'=?`, "v1:work:run:"+runID).Scan(person, &modelCalls))
-				require.Equal(t, providers[0].calls+providers[1].calls, modelCalls, "each provider attempt stays charged")
+				require.Equal(t, providers[0].calls+providers[1].calls+providers[0].reviews+providers[1].reviews, modelCalls, "each provider attempt and review stays charged")
 			})
 		}
 	}

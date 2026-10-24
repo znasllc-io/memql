@@ -247,14 +247,60 @@ func RunSnapshot(ctx context.Context, s *Snapshot, contract string, args map[str
 
 // RunSnapshotEntry invokes one admitted phase without substituting installed source.
 func RunSnapshotEntry(ctx context.Context, s *Snapshot, contract, entry string, args map[string]any, opts Options) (any, error) {
+	frozen, err := snapshotOptions(s, contract, entry, opts)
+	if err != nil {
+		return nil, err
+	}
+	return Run(ctx, entry, args, frozen)
+}
+
+// PreparedSnapshot supplies the same frozen, preflighted definitions and
+// bounded step operations to a native journal-owning executor. It opens no
+// run and grants no authority. Child resolution never consults installed DSL.
+type PreparedSnapshot struct{ host *host }
+
+func (p *PreparedSnapshot) Automation(name string) (*automations.Automation, error) {
+	if p == nil || p.host == nil || p.host.definitions[name] == nil {
+		return nil, fmt.Errorf("workflow %q is outside the captured closure", name)
+	}
+	return p.host.definitions[name], nil
+}
+
+func (p *PreparedSnapshot) StepRegistry() automations.StepExecutorRegistry { return p.host.registry }
+
+// PrepareSnapshot retains the ordinary executor's journaling and recovery
+// while fencing its function, logic and action steps to this exact snapshot.
+func PrepareSnapshot(s *Snapshot, contract string, opts Options) (*PreparedSnapshot, error) {
+	if s == nil {
+		return nil, fmt.Errorf("missing workflow snapshot")
+	}
+	return PrepareSnapshotEntry(s, contract, s.Entry, opts)
+}
+
+// PrepareSnapshotEntry prepares one captured native phase and its reachable
+// definitions. It uses the same admission checks as RunSnapshotEntry and never
+// substitutes installed source for the stored closure.
+func PrepareSnapshotEntry(s *Snapshot, contract, entry string, opts Options) (*PreparedSnapshot, error) {
+	frozen, err := snapshotOptions(s, contract, entry, opts)
+	if err != nil {
+		return nil, err
+	}
+	h, err := prepareHost(entry, frozen)
+	if err != nil {
+		return nil, err
+	}
+	return &PreparedSnapshot{host: h}, nil
+}
+
+func snapshotOptions(s *Snapshot, contract, entry string, opts Options) (Options, error) {
 	if s == nil || s.Contract != contract || s.Entry == "" || s.Version != s.digest() {
-		return nil, fmt.Errorf("invalid or incompatible workflow snapshot")
+		return Options{}, fmt.Errorf("invalid or incompatible workflow snapshot")
 	}
 	if entry != s.Entry && !slices.Contains(s.Entries, entry) {
-		return nil, fmt.Errorf("workflow entry %q was not captured", entry)
+		return Options{}, fmt.Errorf("workflow entry %q was not captured", entry)
 	}
 	if len(s.Constructs) == 0 || len(s.Constructs) > maxSnapshotConstructs {
-		return nil, fmt.Errorf("invalid workflow snapshot size")
+		return Options{}, fmt.Errorf("invalid workflow snapshot size")
 	}
 	all := map[string]string{}
 	bytes := 0
@@ -262,7 +308,7 @@ func RunSnapshotEntry(ctx context.Context, s *Snapshot, contract, entry string, 
 		key := d.Kind + ":" + d.Name
 		bytes += len(d.Source)
 		if bytes > maxSnapshotBytes || (d.Kind != "automation" && d.Kind != "logic" && d.Kind != "action") || d.Name == "" || all[key] != "" {
-			return nil, fmt.Errorf("invalid workflow snapshot definition %q", key)
+			return Options{}, fmt.Errorf("invalid workflow snapshot definition %q", key)
 		}
 		all[key] = d.Source
 	}
@@ -274,7 +320,8 @@ func RunSnapshotEntry(ctx context.Context, s *Snapshot, contract, entry string, 
 		return body, nil
 	}, opts.Operations)
 	frozen.AmbientEngine, frozen.Logger = opts.AmbientEngine, opts.Logger
-	return Run(ctx, entry, args, frozen)
+	frozen.ConcurrentOperations = opts.ConcurrentOperations
+	return frozen, nil
 }
 
 // Map is a detached JSON object suitable for an immutable, server-written row.

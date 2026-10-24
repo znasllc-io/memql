@@ -25,6 +25,10 @@ import (
 var toolHandlerCorpus = []struct {
 	tool, v1, rendered string
 }{
+	{"inspectRepositoryAuthority", `builtin repositoryChangeAccess(sourceId: args.sourceId)`, `builtin repositoryChangeAccess(sourceId: "v-sourceId")`},
+	{"requestRepositoryChange", `builtin repositoryChangeRequest(sourceId: args.sourceId, requestId: args.requestId, statement: args.statement, operation: args.operation, paths: args.paths, parentRequestId: args.parentRequestId)`, `builtin repositoryChangeRequest(sourceId: "v-sourceId", requestId: "v-requestId", statement: "v-statement", operation: "v-operation", paths: ["a","b"], parentRequestId: "v-parentRequestId")`},
+	{"repositoryChangeRequestStatus", `builtin repositoryChangeStatus(requestId: args.requestId)`, `builtin repositoryChangeStatus(requestId: "v-requestId")`},
+	{"listRepositoryChangeRequests", `builtin repositoryChangeRequests(sourceId: args.sourceId)`, `builtin repositoryChangeRequests(sourceId: "v-sourceId")`},
 	{"recallMemory", `query workRecallMemory(search: args.search)`, `query workRecallMemory(search: "v-search")`},
 	{"recallWorkHistory", `query workRecallHistory(sourceRunId: args.sourceRunId, search: args.search, checkpoint: args.checkpoint, messageIndex: args.messageIndex, offset: args.offset, maxChars: args.maxChars, cursor: args.cursor)`, `query workRecallHistory(sourceRunId: "v-sourceRunId", search: "v-search", checkpoint: "v-checkpoint", messageIndex: 7, offset: 7, maxChars: 7, cursor: "v-cursor")`},
 	{"discoverCapabilities", `query workCapabilities(search: args.search)`, `query workCapabilities(search: "v-search")`},

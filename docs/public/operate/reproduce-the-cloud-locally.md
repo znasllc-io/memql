@@ -365,6 +365,79 @@ make dev PULL_INFRA=1
 The inner loop is **pure-Argo**: no manifest files are applied directly. The
 pod restart is purely at the pod level; ArgoCD still owns the Deployment spec.
 
+Local updates reserve the same machine capacity as Fleet pipelines. A second
+update or pipeline cannot start until the reservation is released. The workspace must
+have at least 20 GiB available before work begins and before each image build
+and import (`scripts/k3d/dev.sh --min-free-disk-mib=20480` changes this floor;
+minimum 1024 MiB). This measures the workspace filesystem; Docker's own disk
+must also have enough room.
+
+Before restarting pods, the update verifies each imported engine image on every
+cluster node, including the SHA-256, size and executable mode of `memql` and
+`healthcheck` in its unpacked filesystem. Matching image metadata alone cannot
+detect damaged unpacked files after a full disk.
+
+After a healthy rollout, cache maintenance retains at least the two newest
+owned builds per node type in host Docker and on each cluster node. Use
+`--image-cache-keep=3` to retain more. It preserves tagged, digested, pinned and
+referenced images, including stopped containers and cluster images whose host
+tag has moved to a newer build. It ignores images without this build path's
+ownership labels. Host removal names each reviewed image explicitly and never
+prunes parent images, build caches or data volumes. `--no-wait` skips readiness verification and this maintenance. A failed
+maintenance operation reports the completed rollout and any confirmed removals,
+but the overall update fails and keeps its recovery record.
+
+### Recovering an interrupted local update
+
+A failed or interrupted update retains a separate `local-build.json` record.
+This prevents another local update or Fleet pipeline from starting while Docker
+may still be working. Even an ordinary compile failure needs reconciliation;
+process exit alone does not prove that daemon-side work has stopped.
+
+1. Run `python3 scripts/lib/host_build_guard.py --inspect`. Keep the returned
+   `record` digest and inspect the recorded workspace and process group. Wait
+   for or stop its remaining processes, and establish that its Docker builds,
+   exports, imports and image-removal operations have finished. Use the failed
+   operation's logs and Docker build history; if completion cannot be established,
+   keep the reservation and investigate rather than clearing it.
+2. Reconcile every image the failed operation built or imported with the desired
+   ArgoCD Application and Deployment state. For imports, verify the exact Docker
+   image ID and both engine executables on every node using the same gate as
+   the update. From the checkout, the following verifies one affected image;
+   repeat for each affected node type and use the operation's captured image ID:
+
+   ```bash
+   source scripts/lib/local_images.sh
+   image=memql-bff:local
+   image_id='sha256:<captured-image-id>'
+   cluster=memql
+   proof=$(local_engine_image_proof "$image_id") || exit 1
+   nodes=$(local_image_nodes "$cluster") || exit 1
+   local_image_matches "$image" "$image_id" || exit 1
+   local_image_nodes_match "$image" "$image_id" \
+     "$(local_image_canonical_ref "$image")" "$nodes" "$proof" || exit 1
+   ```
+
+   These checks make temporary inspection containers and read-only views, then
+   remove them; they do not rebuild or import images. Inspect Application sync
+   and Deployment rollout status as well. If the failure occurred before any
+   import, verify the existing desired images remain healthy; an unimported
+   failed build is not a completed deployment. Repair a failed integrity check
+   before admitting another update.
+3. Only after that reconciliation, acknowledge the **exact inspected record**:
+
+   ```bash
+   python3 scripts/lib/host_build_guard.py --recover \
+     --record='<digest-from-inspect>' --confirm=reconciled-local-build
+   ```
+
+The recovery command takes a fresh exclusive reservation, refuses live recorded
+processes or a changed record, and removes only that acknowledged local marker.
+The confirmation asserts that Docker and image reconciliation is complete; the
+command does not infer it from missing PIDs. Then retry `make dev`. Never delete
+or truncate `pipeline.lock`, and never remove Fleet's interrupted execution
+records to bypass recovery.
+
 ### Rebuilding a wizard-installed cluster
 
 A cluster the install wizard created runs RELEASED images: `k3d.up

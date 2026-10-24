@@ -11,7 +11,7 @@
 # cockpit/runner no-op surface for local replay.
 #
 # Capability-script contract: docs/internal/design/capability-script-contract.md
-# Exit codes: 0 ok | 2 bad param | 4 k3d absent (when applying) | 5 import failed
+# Exit codes: 0 ok | 2 bad param | 4 docker/k3d absent | 5 import/verification failed
 #
 # Refs: #2222 #2221 #2061
 
@@ -20,6 +20,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/local_images.sh
+source "${SCRIPT_DIR}/../lib/local_images.sh"
 
 cap_init "k3d.importImage" "Import a built image into the local k3d cluster."
 cap_spec_param "nodeType" "engine node type whose image to import (memql-<type>:<version>)"
@@ -31,7 +33,7 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local nodeType cluster version dry image
+    local nodeType cluster version dry image expected integrity=metadata
     nodeType="$(cap_param nodeType "")"
     image="$(cap_param image "")"
     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
@@ -60,8 +62,15 @@ function main() {
     if ! command -v k3d &>/dev/null; then
         cap_fail 4 "k3d is not installed on the runner"
     fi
+    command -v docker &>/dev/null || cap_fail 4 "docker is not installed on the runner"
+    # A nodeType explicitly selects the engine's executable contract. Generic
+    # downstream images retain metadata verification without assuming /app.
+    [[ -z "$nodeType" ]] || integrity=engine
+    expected="$(docker image inspect --format '{{.Id}}' "$image")" \
+        || cap_fail 5 "could not inspect ${image} before import"
     cap_info "Importing ${image} into k3d cluster ${cluster}..."
-    k3d image import "$image" -c "$cluster" >&2 || cap_fail 5 "k3d image import of ${image} failed"
+    import_local_image_verified "$image" "$cluster" "$expected" "$integrity" \
+        || cap_fail 5 "importing or verifying ${image} failed"
     cap_changed
     cap_result_set_raw dryRun false
     cap_ok

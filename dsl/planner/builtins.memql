@@ -286,6 +286,7 @@ builtin spineDraftFacts {}
 @args(profile="object")
 builtin spineDraftAppend {
  kind string!
+ progress bool
  section string
  instruction string
  inputHeading string

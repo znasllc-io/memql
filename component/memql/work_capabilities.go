@@ -78,6 +78,11 @@ func workCapabilitySecret(field *FunctionArgsField) bool {
 }
 
 func workCapabilityApp(fn *Function) string {
+	// Source connections live in the platform namespace but their declared
+	// capability and navigation destination belong to Pipelines.
+	if fn.RequiresCapability.Resource == "app:pipelines" || strings.HasPrefix(fn.RequiresCapability.Resource, "app:pipelines/") {
+		return "pipelines"
+	}
 	if fn.Name == "workSearchConversations" || fn.Name == "workRecallMemory" || fn.Name == "workViewerContext" || fn.Name == "askConversationById" {
 		return "ask"
 	}
@@ -99,6 +104,8 @@ func workCapabilityApp(fn *Function) string {
 		return "files"
 	case "accounts":
 		return "accounts"
+	case "pipelines", "repositoryauthority":
+		return "pipelines"
 	case "campaigns":
 		return "email"
 	case "platform":

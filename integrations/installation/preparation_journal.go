@@ -9,16 +9,20 @@ import (
 	"fmt"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/integrations/argocd"
 )
 
 type preparationJournal struct{ db func() *sql.DB }
 
 type preparationCapture struct {
-	Started       bool                  `json:"started"`
-	Receipt       *sourceCaptureReceipt `json:"receipt"`
-	SourceDigest  string                `json:"sourceDigest"`
-	ReceiptDigest string                `json:"receiptDigest"`
-	Acknowledged  bool                  `json:"acknowledged"`
+	Spec           *sourceCaptureSpec    `json:"spec,omitempty"`
+	Parent         string                `json:"parent,omitempty"`
+	FragmentDigest string                `json:"fragmentDigest,omitempty"`
+	Started        bool                  `json:"started"`
+	Receipt        *sourceCaptureReceipt `json:"receipt"`
+	SourceDigest   string                `json:"sourceDigest"`
+	ReceiptDigest  string                `json:"receiptDigest"`
+	Acknowledged   bool                  `json:"acknowledged"`
 }
 
 type preparationRecord struct {
@@ -110,9 +114,16 @@ func (j *preparationJournal) reserve(ctx context.Context, scope preparationScope
 	if active != "" || plan != "" {
 		return preparationRecord{}, errBusy
 	}
-	captures, _ := json.Marshal(map[string]preparationCapture{"candidate": {}, "rollback": {}})
+	captureEntries := map[string]preparationCapture{}
+	for key := range scope.Captures {
+		captureEntries[key] = preparationCapture{}
+	}
+	captures, _ := json.Marshal(captureEntries)
 	_, err = tx.ExecContext(ctx, `INSERT INTO installation_preparations(preparation_id,installation_id,request_id,requested_by,source_run_id,slot_epoch,scope,captures,state) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,'preparing')`, key, scope.InstallationID, scope.RequestID, actor, preparationSourceRun(scope.InstallationID, scope.RequestID, actor), epoch+1, string(body), string(captures))
 	if err != nil {
+		return preparationRecord{}, err
+	}
+	if err = claimApplications(ctx, tx, scope, key); err != nil {
 		return preparationRecord{}, err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE installation_revision_heads SET active_preparation_id=$2,slot_epoch=$3 WHERE installation_id=$1`, scope.InstallationID, key, epoch+1)
@@ -151,12 +162,12 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 	if err != nil {
 		return preparationRecord{}, err
 	}
-	if len(captures) > 64<<10 {
+	if len(captures) > 2<<20 {
 		return preparationRecord{}, errors.New("preparation capture records exceed their bound")
 	}
 	d := json.NewDecoder(bytes.NewReader(captures))
 	d.DisallowUnknownFields()
-	if d.Decode(&r.Captures) != nil || len(r.Captures) != 2 {
+	if d.Decode(&r.Captures) != nil || len(r.Captures) < len(r.Scope.Captures) || len(r.Captures) > len(r.Scope.Captures)*(1+argocd.MaxSourceDependencies) {
 		return preparationRecord{}, errors.New("preparation capture records are malformed")
 	}
 	encoded, _ := json.Marshal(r.Captures)
@@ -165,9 +176,36 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 	if ea != nil || eb != nil || !bytes.Equal(a, b) {
 		return preparationRecord{}, errors.New("preparation capture records are noncanonical")
 	}
-	for role, spec := range r.Scope.Captures {
-		c, exists := r.Captures[role]
-		if !exists || (!c.Started && (c.Receipt != nil || c.SourceDigest != "" || c.ReceiptDigest != "" || c.Acknowledged)) || (r.State == "cancelled" && c.Started && r.Retirement == nil) {
+
+	for role := range r.Scope.Captures {
+		if _, found := r.Captures[role]; !found {
+			return preparationRecord{}, errors.New("preparation is missing a root capture")
+		}
+	}
+	if r.Retirement != nil {
+		if len(r.Retirement.Captures) != len(r.Captures) {
+			return preparationRecord{}, errors.New("retirement omits source graph captures")
+		}
+		for key := range r.Captures {
+			if _, found := r.Retirement.Captures[key]; !found {
+				return preparationRecord{}, errors.New("retirement changes source graph capture identities")
+			}
+		}
+	}
+
+	children := map[string]int{}
+	for role, c := range r.Captures {
+		spec, err := preparationCaptureSpec(r, role)
+		if err != nil {
+			return preparationRecord{}, err
+		}
+		if c.Parent != "" {
+			children[c.Parent]++
+			if children[c.Parent] > argocd.MaxSourceDependencies {
+				return preparationRecord{}, errors.New("source graph exceeds its dependency bound")
+			}
+		}
+		if (!c.Started && (c.Receipt != nil || c.SourceDigest != "" || c.FragmentDigest != "" || c.ReceiptDigest != "" || c.Acknowledged)) || (r.State == "cancelled" && c.Started && r.Retirement == nil) {
 			return preparationRecord{}, errors.New("preparation capture markers are inconsistent")
 		}
 		capture, err := newSourceCapture(spec)
@@ -179,16 +217,24 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 				return preparationRecord{}, err
 			}
 		}
-		if (c.SourceDigest != "" || c.ReceiptDigest != "") && (c.Receipt == nil || !internalDigest.MatchString(c.SourceDigest) || !internalDigest.MatchString(c.ReceiptDigest)) {
+		evidence := c.SourceDigest
+		if spec.Fragment != nil {
+			evidence = c.FragmentDigest
+		}
+		if (evidence != "" || c.ReceiptDigest != "") && (c.Receipt == nil || !internalDigest.MatchString(evidence) || !internalDigest.MatchString(c.ReceiptDigest)) {
 			return preparationRecord{}, errors.New("preparation source proof is incomplete")
 		}
-		if c.Acknowledged && c.SourceDigest == "" {
+		if (spec.Fragment == nil && c.FragmentDigest != "") || (c.SourceDigest != "" && (!internalDigest.MatchString(c.SourceDigest) || evidence == "" || c.Parent != "")) {
+			return preparationRecord{}, errors.New("preparation source proof kind is inconsistent")
+		}
+		if c.Acknowledged && (evidence == "" || (c.Parent == "" && c.SourceDigest == "")) {
 			return preparationRecord{}, errors.New("unverified source Job was acknowledged")
 		}
 		if r.State == "promoted" && !c.Acknowledged {
 			return preparationRecord{}, errors.New("promoted preparation has unfinished source evidence or cleanup")
 		}
 	}
+
 	return r, nil
 }
 
@@ -251,6 +297,9 @@ func (j *preparationJournal) withRecordState(ctx context.Context, installation, 
 			return preparationRecord{}, err
 		}
 		if r.State == "cancelled" {
+			if err = releaseApplicationClaims(ctx, tx, installation, key); err != nil {
+				return preparationRecord{}, err
+			}
 			_, err = tx.ExecContext(ctx, `UPDATE installation_revision_heads SET active_preparation_id=NULL WHERE installation_id=$1 AND active_preparation_id=$2 AND slot_epoch=$3`, installation, key, epoch)
 			if err != nil {
 				return preparationRecord{}, err
@@ -329,7 +378,11 @@ func (j *preparationJournal) recordReceipt(ctx context.Context, installation, ke
 		if !exists || !c.Started {
 			return errors.New("source capture has no committed dispatch intent")
 		}
-		capture, err := newSourceCapture(r.Scope.Captures[role])
+		spec, err := preparationCaptureSpec(*r, role)
+		if err != nil {
+			return err
+		}
+		capture, err := newSourceCapture(spec)
 		if err != nil {
 			return err
 		}

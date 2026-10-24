@@ -46,13 +46,15 @@ import { kindBreakdownLabel, type KindBreakdown } from "./rows";
  */
 const MIN_VISIBLE_SHARE = 0.012;
 
-export function KindBand({ breakdown }: { breakdown: KindBreakdown }) {
+export function KindBand({ breakdown, runStatus = "", stepsKnown = true }: { breakdown: KindBreakdown; runStatus?: string; stepsKnown?: boolean }) {
+  if (!stepsKnown && breakdown.empty) return <Caption>The step summary is unavailable until recorded actions are read.</Caption>;
   if (breakdown.empty) {
+    const planning = runStatus === "compiling" || runStatus === "running";
     return (
       <div className="os-nexus-band">
-        <div className="os-nexus-band-bar" data-empty role="img" aria-label={kindBreakdownLabel(breakdown)} />
+        <div className="os-nexus-band-bar" data-empty role="img" aria-label={planning ? kindBreakdownLabel(breakdown) : "No recorded steps."} />
         <Caption>
-          No steps yet. The band fills in as the run works out what it has to do.
+          {planning ? "No steps yet. The band fills in as the run works out what it has to do." : "No recorded steps to summarize."}
         </Caption>
       </div>
     );

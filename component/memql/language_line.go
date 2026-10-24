@@ -98,7 +98,10 @@ func languageLineSkip(p LanguageLineProblem) baseloader.Skip {
 // domain whose line the engine will not read, and a file its edition's front
 // end refuses.
 func (e *MemQLEngine) resolveLanguageLines(report *LoadReport) {
-	tree := memqldsl.Tree()
+	e.resolveLanguageLinesFromTree(memqldsl.Tree(), report)
+}
+
+func (e *MemQLEngine) resolveLanguageLinesFromTree(tree fs.FS, report *LoadReport) {
 	lines, problems := ResolveLanguageLines(tree)
 	e.languageLines = lines
 	for _, p := range problems {

@@ -1,5 +1,5 @@
 import { siteStateWord } from "../words";
-import { bundleForm, bundleFormLabel, domainOf, siteName, type SiteRow } from "../rows";
+import { builtInSiteName, bundleForm, bundleFormLabel, domainOf, siteName, type SiteRow } from "../rows";
 import { idTail } from "../pipelines/rows";
 import type { OutcomeKey } from "../pipelines/runs";
 
@@ -299,15 +299,15 @@ export function layout(sites: readonly SiteRow[], checks?: ReadonlyMap<string, M
       // than by a box saying "none".
       const bundleId = form === "none" ? "" : `bundle:${domain}:${site.bundleRef}`;
       if (form !== "none") {
+        const builtInName = builtInSiteName(site.bundleRef);
         pushOnce(nodes, {
           id: bundleId,
           kind: "bundle",
           label: bundleFormLabel(form),
-          // MIDDLE-ellipsized: a bundle reference's head says which KIND of
-          // reference it is and its tail says which version, and losing either
-          // end makes two different bundles read the same.
-          sublabel: middleEllipsize(site.bundleRef, SUB_CHARS),
-          full: site.bundleRef,
+          // Built-in paths remain in Source details. Other references keep
+          // both ends so their kind and version remain distinguishable.
+          sublabel: builtInName || middleEllipsize(site.bundleRef, SUB_CHARS),
+          full: builtInName || site.bundleRef,
           x: COLUMN_X[2],
           y: bandY,
           w: NODE_W,

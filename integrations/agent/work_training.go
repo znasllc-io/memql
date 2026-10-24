@@ -114,6 +114,22 @@ func appendWorkTraining(data map[string]any, passages []map[string]any) {
 	data["systemKnowledge"] = data["knowledge"]
 }
 
+// Availability facts are native retrieval metadata, never a selected lesson or
+// proof of no matches. Keep them out of citations and delivered-passage counts.
+func separateTrainingAvailability(data map[string]any, rows []map[string]any) []map[string]any {
+	var passages []map[string]any
+	for _, row := range rows {
+		if status, _ := row["trainingAvailability"].(string); status != "" {
+			if status == "embedding-timeout" || status == "embedding-backoff" {
+				data["trainingAvailability"] = row
+			}
+			continue
+		}
+		passages = append(passages, row)
+	}
+	return passages
+}
+
 // CognitionEngineAdapter wraps native builtin output under data. Unwrap that
 // axis before the canonical node-set decoder; PreserveOrder answers may retain
 // their payload envelope, unlike shaped query rows.

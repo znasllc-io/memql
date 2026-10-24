@@ -17,11 +17,13 @@ package memql
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // LoadUnifiedFunctions walks the unified DSL tree, extracts every
@@ -35,6 +37,10 @@ import (
 // logged + skipped (best-effort registration; legacy loader covers
 // any gaps).
 func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conceptRegistry memoryNodes.Registry, report ...*LoadReport) (int, map[languageParser.FunctionType]int, error) {
+	return loadUnifiedFunctionsFromTree(memqldsl.Tree(), logger, registry, conceptRegistry, report...)
+}
+
+func loadUnifiedFunctionsFromTree(tree fs.FS, logger *slog.Logger, registry *FunctionRegistry, conceptRegistry memoryNodes.Registry, report ...*LoadReport) (int, map[languageParser.FunctionType]int, error) {
 	if registry == nil {
 		return 0, nil, fmt.Errorf("function registry is nil")
 	}
@@ -43,14 +49,14 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 	counts := make(map[languageParser.FunctionType]int)
 	total := 0
 
-	for _, raw := range baseloader.ReadAll(logger) {
+	for _, raw := range baseloader.ReadAllFrom(tree, logger) {
 		slices := ExtractFunctionSlices(raw.Content)
 		if len(slices) == 0 {
 			continue
 		}
 
 		for _, slice := range slices {
-			fn, parseErr := dispatchPerConstructParser(slice, "unified:"+raw.Path, conceptRegistry)
+			fn, parseErr := tryParseFunctionSliceInNamespace(slice.Name, string(slice.Kind), slice.Source, "unified:"+raw.Path, conceptRegistry, slice.Line, slice.BodyOffset, declaredNamespaceForDomainFromTree(tree, NamespaceFromFilePath(raw.Path)))
 			if parseErr != nil {
 				if logger != nil {
 					logger.Warn("unified function loader: skipping slice that failed to parse",

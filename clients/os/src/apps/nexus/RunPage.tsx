@@ -1,3 +1,4 @@
+import type { ModelUsageState } from "./useModelUsage";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { GitBranch, Pin, Redo2, RotateCcw } from "lucide-react";
@@ -142,6 +143,7 @@ export interface RunPageProps {
   stepsState: string;
   approvals: readonly ApprovalRow[];
   journal: Journal;
+  usage?: ModelUsageState;
   derive: DeriveRunState;
   /** Every run this person owns: a step's child run says whether an app session answered it. */
   runs?: readonly RunRow[];
@@ -165,6 +167,7 @@ export function RunPage({
   stepsState,
   approvals,
   journal,
+  usage,
   derive,
   runs = [],
   backLabel = "Runs",
@@ -500,8 +503,7 @@ export function RunPage({
               <>No goal asked for this run -- it is an automation execution.</>
             ) : (
               <>
-                For a goal this window cannot read (
-                <span className="os-mono">{run.goalId}</span>).
+                For a goal this window cannot read.
               </>
             )
           ) : (
@@ -649,8 +651,7 @@ export function RunPage({
           </Caption>
         ) : null}
 
-        <Panel label="What this run is made of">
-          <KindBand breakdown={breakdown} />
+        <section aria-label="Run usage" className="os-app-stack">
           {/* THE SPEND IS THE BAND'S LEGEND LINE, not four stat cards beside
               it: it is the same question the band asks, answered in figures.
               Every value can be ABSENT and renders as an em dash -- epic A1
@@ -670,6 +671,7 @@ export function RunPage({
               <span className="os-nexus-spend-label">started</span>
             </li>
           </ul>
+          <details className="nexus-technical"><summary>Execution details</summary><KindBand breakdown={breakdown} runStatus={run.status} stepsKnown={steps.length > 0 || stepsState === "live"} />
           {breakdown.unclassified > 0 ? (
             <Caption>
               {breakdown.unclassified} of these steps{" "}
@@ -677,7 +679,8 @@ export function RunPage({
               whether they called a model, so they are counted separately rather than assumed free.
             </Caption>
           ) : null}
-        </Panel>
+          </details>
+        </section>
 
         {/* THE RUN'S OWN VERDICT, where the summary is -- and the validator's
             beside it, naming the step it checked, because this is where a
@@ -773,7 +776,7 @@ export function RunPage({
           ) : null}
         </section>
 
-        <JournalPanel journal={journal} />
+        <JournalPanel journal={journal} usage={usage} />
       </div>
 
       <ActionBar

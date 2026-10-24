@@ -280,6 +280,7 @@ readonly DB_GATED_TREES=(
 	"component/node"
 	"component/packages"
 	"component/pipelinerun"
+	"component/repositoryauthority"
 	"component/server"
 	"component/sitehealth"
 	"component/sitetraffic"

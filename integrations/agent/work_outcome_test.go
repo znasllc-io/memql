@@ -20,10 +20,15 @@ import (
 )
 
 type outcomeProvider struct {
-	steps    [][]common.ToolCall
-	texts    []string
-	calls    int
-	messages []common.ChatMessage
+	steps     [][]common.ToolCall
+	texts     []string
+	calls     int
+	messages  []common.ChatMessage
+	delegated bool
+}
+
+func (p *outcomeProvider) LastSession() (memql.AppSessionOutcome, bool) {
+	return memql.AppSessionOutcome{SessionId: "completed-session"}, p.delegated
 }
 
 func (p *outcomeProvider) CallChatWithTools(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
@@ -83,41 +88,44 @@ func outcomeCall(args string) []common.ToolCall {
 // question and stop before another model call or side effect.
 func TestOwnedWorkOutcomePausesBothLanes(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
-		for _, question := range []string{
-			`{"text":"Which supplier should this report cover?","kind":"text"}`,
-			`{"text":"Which region?","kind":"choice","options":[{"label":"West","value":"west"},{"label":"East","value":"east"}]}`,
-			`{"text":"Which formats?","kind":"multi","options":[{"label":"PDF","value":"pdf"}]}`,
-		} {
-			t.Run(fmt.Sprintf("stream=%v/%s", streaming, question), func(t *testing.T) {
-				ctx, err := auth.ContextWithPersistedOwner(context.Background(), "owner", nil, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: "owner"})
-				p := &outcomeProvider{steps: [][]common.ToolCall{outcomeCall(`{"status":"needs_input","question":` + question + `,"ownerUserId":"attacker","runId":"other"}`)}}
-				executor := &questionExecutor{}
-				saved := &workPromptEngine{}
-				r := testReplier()
-				r.engine = saved
-				r.stamper = newToolRecorder(executor, r.logger)
-				tools := []common.ToolDefinition{workResponseToolDefinition()}
-				turn := turnContext{AgentId: "assistant", RunId: "adopted-run", OwnerUserId: "owner", IsWorkExecution: true}
-				if streaming {
-					_, err = r.runStreamingToolLoop(ctx, p, nil, tools, &captureSink{}, time.Now(), "outcome", turn)
-				} else {
-					_, err = r.runNonStreamingToolLoop(ctx, p, nil, nil, tools, &captureSink{}, time.Now(), "outcome", turn)
-				}
-				var wait *work.HumanWait
-				if !errors.As(err, &wait) || wait.ApprovalID != "question-on-another-replica" {
-					t.Fatalf("did not suspend: %v", err)
-				}
-				if p.calls != 1 || executor.calls != 1 || executor.args["ownerUserId"] != "owner" || executor.args["runId"] != "adopted-run" {
-					t.Fatalf("invalid dispatch: calls=%d args=%v", p.calls, executor.args)
-				}
-				if len(saved.savedContinuation) != 2 || saved.savedContinuation[0].ToolCalls[0].Name != "requestUserFeedback" || saved.savedContinuation[1].ToolCallId != "outcome" {
-					t.Fatalf("unresumable checkpoint: %+v", saved.savedContinuation)
-				}
-			})
+		for _, delegated := range []bool{false, true} {
+			for _, question := range []string{
+				`{"text":"Which supplier should this report cover?","kind":"text"}`,
+				`{"text":"Which region?","kind":"choice","options":[{"label":"West","value":"west"},{"label":"East","value":"east"}]}`,
+				`{"text":"Which formats?","kind":"multi","options":[{"label":"PDF","value":"pdf"}]}`,
+			} {
+				t.Run(fmt.Sprintf("stream=%v/delegated=%v/%s", streaming, delegated, question), func(t *testing.T) {
+					ctx, err := auth.ContextWithPersistedOwner(context.Background(), "owner", nil, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: "owner"})
+					p := &outcomeProvider{steps: [][]common.ToolCall{outcomeCall(`{"status":"needs_input","question":` + question + `,"ownerUserId":"attacker","runId":"other"}`)}}
+					p.delegated = delegated
+					executor := &questionExecutor{}
+					saved := &workPromptEngine{}
+					r := testReplier()
+					r.engine = saved
+					r.stamper = newToolRecorder(executor, r.logger)
+					tools := []common.ToolDefinition{workResponseToolDefinition()}
+					turn := turnContext{AgentId: "assistant", RunId: "adopted-run", OwnerUserId: "owner", IsWorkExecution: true}
+					if streaming {
+						_, err = r.runStreamingToolLoop(ctx, p, nil, tools, &captureSink{}, time.Now(), "outcome", turn)
+					} else {
+						_, err = r.runNonStreamingToolLoop(ctx, p, nil, nil, tools, &captureSink{}, time.Now(), "outcome", turn)
+					}
+					var wait *work.HumanWait
+					if !errors.As(err, &wait) || wait.ApprovalID != "question-on-another-replica" {
+						t.Fatalf("did not suspend: %v", err)
+					}
+					if p.calls != 1 || executor.calls != 1 || executor.args["ownerUserId"] != "owner" || executor.args["runId"] != "adopted-run" {
+						t.Fatalf("invalid dispatch: calls=%d args=%v", p.calls, executor.args)
+					}
+					if len(saved.savedContinuation) != 2 || saved.savedContinuation[0].ToolCalls[0].Name != "requestUserFeedback" || saved.savedContinuation[1].ToolCallId != "outcome" {
+						t.Fatalf("unresumable checkpoint: %+v", saved.savedContinuation)
+					}
+				})
+			}
 		}
 	}
 }
@@ -187,6 +195,53 @@ func TestWorkOutcomeDoesNotGrantAuthorityOrConstrainSpecialists(t *testing.T) {
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
 	if requiresWorkOutcome(ctx, ScopeToolDefinitionsForRole(RoleSpecialist, tools)) {
 		t.Fatal("specialist required to use forbidden human response tool")
+	}
+}
+
+func TestInvalidDelegatedOutcomeNeverRepeatsTheAppSession(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", streaming), func(t *testing.T) {
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+			p := &outcomeProvider{delegated: true, steps: [][]common.ToolCall{nil}, texts: []string{"Please provide the source."}}
+			r := testReplier()
+			r.engine = &workPromptEngine{}
+			executor := &questionExecutor{}
+			r.stamper = newToolRecorder(executor, r.logger)
+			tools := []common.ToolDefinition{workResponseToolDefinition()}
+			var err error
+			if streaming {
+				_, err = r.runStreamingToolLoop(ctx, p, nil, tools, &captureSink{}, time.Now(), "delegated", turnContext{})
+			} else {
+				_, err = r.runNonStreamingToolLoop(ctx, p, nil, nil, tools, &captureSink{}, time.Now(), "delegated", turnContext{})
+			}
+			if err == nil || !strings.Contains(err.Error(), "invalid delegated work outcome") || p.calls != 1 || executor.calls != 0 {
+				t.Fatalf("invalid app result accepted or replayed: err=%v calls=%d effects=%d", err, p.calls, executor.calls)
+			}
+		})
+	}
+}
+
+func TestDelegatedApprovalWaitDoesNotCreateAnotherQuestionOrReplayTools(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, calls := range [][]common.ToolCall{nil, outcomeCall(`{"status":"needs_input","question":{"kind":"text","text":"Approve the existing request."}}`)} {
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+			p := &outcomeProvider{delegated: true, steps: [][]common.ToolCall{calls}, texts: []string{"Waiting for approval."}}
+			r := testReplier()
+			r.engine = &workPromptEngine{delegatedWait: &work.HumanWait{ApprovalID: "existing-native-approval"}}
+			executor := &questionExecutor{}
+			r.stamper = newToolRecorder(executor, r.logger)
+			tools := []common.ToolDefinition{workResponseToolDefinition()}
+			var err error
+			if streaming {
+				_, err = r.runStreamingToolLoop(ctx, p, nil, tools, &captureSink{}, time.Now(), "delegated", turnContext{})
+			} else {
+				_, err = r.runNonStreamingToolLoop(ctx, p, nil, nil, tools, &captureSink{}, time.Now(), "delegated", turnContext{})
+			}
+			var wait *work.HumanWait
+			if !errors.As(err, &wait) || wait.ApprovalID != "existing-native-approval" || p.calls != 1 || executor.calls != 0 {
+				t.Fatalf("native approval duplicated or lost: stream=%v err=%v model=%d effects=%d", streaming, err, p.calls, executor.calls)
+			}
+		}
 	}
 }
 

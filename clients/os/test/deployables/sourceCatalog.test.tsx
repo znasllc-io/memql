@@ -47,6 +47,13 @@ describe("configured Sources catalog", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /Open Website, @alice-renamed/ })).toBeNull());
     expect(screen.getByRole("button", { name: /Open Website, @bob/ })).toBeTruthy();
   });
+  it("does not attribute a deployment to the owner of a source with no deployed apps", async () => {
+    mount({ packages: [A] });
+    await click(await screen.findByRole("button", { name: /Open Website, @alice/ }));
+    const source = await screen.findByRole("region", { name: "Source Website" });
+    await waitFor(() => expect(within(source).getByText("Not deployed")).toBeTruthy());
+    expect(within(source).queryByText("Deployed by")).toBeNull();
+  });
   it("confirms catalog removal and calls only the narrow visibility mutation", async () => {
     const { connection } = mount({ packages: [A] });
     const source = await screen.findByRole("button", { name: /Open Website, @alice/ });

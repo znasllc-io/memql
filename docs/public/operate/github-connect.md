@@ -9,8 +9,8 @@ owner: znas
 
 # GitHub Connect
 
-**Audience:** operators setting a cluster up, and anyone answering "why does
-Deployables ask me for a token".
+**Audience:** operators setting a cluster up and people connecting repositories
+in Pipelines.
 **Design:** `docs/superpowers/specs/2026-09-03-github-connect-design.md`
 (decisions C1-C8), program decisions P10 and P11 in
 `docs/superpowers/specs/2026-09-02-deployables-program-design.md`, and D4 of
@@ -18,10 +18,9 @@ Deployables ask me for a token".
 C8 for pipelines.
 
 A person connects GitHub once, anywhere in the product, and from then on picks a
-repository from a list instead of typing a URL and pasting a token. The pasted
-token stays, as the other answer to the same question ("A token" beside
-"GitHub"), for a host this is not, or an organization that will not install an
-app.
+repository from a list instead of typing a URL and pasting a token. New
+connections use the GitHub App flow; previously stored credentials remain
+manageable.
 
 **It is a connection, not a sign-in.** Nothing here changes who a person IS in
 this cluster. Connecting writes one `v1:platform:sourceCredential` row that the
@@ -36,22 +35,21 @@ from the product in a single trip to GitHub
 an operator can instead register one by hand and set it in the deployment
 ([Creating the GitHub App](#creating-the-github-app)). Until one of them has,
 Connect is not offered: the surfaces say the cluster is not linked to GitHub yet,
-who can change that, and offer the token path meanwhile.
+and who can change that. ZIP package imports remain available without GitHub.
 
 ---
 
 ## Registering the app from the product
 
-**Who:** a cluster owner. **Where:** the Repository step of Add a deployable, or
-Deployables -> Settings -> Sources. **What it takes:** one press here and one on
-GitHub.
+**Who:** a cluster owner. **Where:** Pipelines -> Settings -> Infrastructure ->
+GitHub App. The same setup is available under Settings -> Integrations ->
+Pipelines, and from GitHub Connections when no app is configured.
 
-On a cluster with no GitHub App, those two surfaces do not offer Connect GitHub
+On a cluster with no GitHub App, these surfaces do not offer Connect GitHub
 -- it could not work. A cluster owner is offered **Set up GitHub** instead, with
 the one question registering an app has: whose GitHub account it is registered
 under, **your account** or **an organization** (named by its login; you must be
-able to create apps for it). Everybody else is told a cluster owner sets it up,
-and is offered the token path.
+able to create apps for it). Everybody else is told a cluster owner sets it up.
 
 What happens when it is pressed:
 
@@ -71,16 +69,19 @@ What happens when it is pressed:
    one-time code. The cluster exchanges it, once, for the six values an operator
    would otherwise have copied out of a settings page, and stores them.
 4. The browser is sent straight on to the new app's **installation page**, so the
-   owner chooses which account and repositories it may read, authorizes, and
-   lands back where they started -- connected, with their repositories listed.
+   owner chooses which account and repositories receive the listed permissions,
+   authorizes, and lands back where they started -- connected, with their
+   repositories listed.
    Registering and connecting are one trip.
 
 **The manifest is the cluster's, and nothing a browser sends can change it.** It
 is composed from `MEMQL_DOMAIN` on the identity node and is exactly the
 registration the manual steps below describe: the permissions and events in
-[that table](#creating-the-github-app) (reads on the repositories people choose,
-and checks write), authorization requested during installation, installable on
-any account, the callback the cluster derives for itself. What comes back is
+[that table](#creating-the-github-app): write access for checks, code scanning
+alerts, contents, pull requests and merge queues; read access for metadata,
+commit statuses and repository administration. It requests authorization during
+installation, is installable on any account, and uses the callback the cluster
+derives for itself. What comes back is
 checked against it: an app carrying any permission the manifest did not ask for,
 or a read come back as a write, is refused and its credentials are not kept.
 
@@ -108,14 +109,17 @@ an IP address) the webhook is registered **off**, with an inert placeholder
 address and no events, and polling notices pushes instead. The permissions are
 the same either way. See [Locally](#locally).
 
-**Removing it.** Deployables -> Settings -> Sources -> GitHub App -> Remove, for
-an app registered from the product. It clears the six stored values, so every
-GitHub connection on the cluster stops fetching until an app is set up again and
+**Removing it.** A cluster owner opens Pipelines -> Settings -> Infrastructure
+and uses **Remove GitHub App** in the GitHub App row, then confirms the
+cluster-wide effect. This is available for an app registered from the product.
+It clears the six stored values, so every GitHub connection on the cluster
+stops fetching until an app is set up again and
 each person reconnects. It does **not** delete the app at GitHub, and earlier
 versions of the sealed rows remain in the store's history like any rotated
 secret. If you are removing an app because its credentials may have leaked,
 **delete it at GitHub** -- that is what makes them worthless. An app set by the
 deployment has no Remove; it is changed where the cluster is deployed.
+Disconnecting one person's account under Connections is a separate action.
 
 Every registration and removal writes an audit event (category `configuration`)
 naming who did it and the app's slug. No credential is ever logged, audited or
@@ -155,36 +159,44 @@ under Settings -> Developer settings -> GitHub Apps):
 | **Webhook URL** | `https://api.<domain>/inbound/github` |
 | **Webhook secret** | generate one; it is `MEMQL_GITHUB_APP_WEBHOOK_SECRET` below |
 | **Repository permissions -> Checks** | Read and write |
-| **Repository permissions -> Contents** | Read-only |
-| **Repository permissions -> Merge queues** | Read-only |
+| **Repository permissions -> Contents** | Read and write |
+| **Repository permissions -> Merge queues** | Read and write |
 | **Repository permissions -> Metadata** | Read-only (GitHub selects this for you) |
-| **Repository permissions -> Pull requests** | Read-only |
+| **Repository permissions -> Pull requests** | Read and write |
+| **Repository permissions -> Commit statuses** | Read-only |
+| **Repository permissions -> Administration** | Read-only |
+| **Repository permissions -> Code scanning alerts** | Read and write (`security_events`) |
 | **Subscribe to events** | Check run, Merge group, Pull request, Push, Release |
 | **Where can this app be installed** | your choice |
 
-Nothing else. **Every permission is a read on the repositories people choose,
-except checks**, which is how a pipeline run reports back (decision C8, widened
-by the pipelines record's D4):
+These permissions cover verification and explicitly authorized repository
+delivery. The app has no administration or workflow-file write permission.
+The installation selects the repositories the app can access. Source fetches
+and build jobs receive narrower read tokens; repository mutations use the
+requesting maintainer's current user authorization.
 
 | Permission | Why it is asked |
 |---|---|
-| Contents read | Deployables fetches a source, and a pipeline run reads the tree at the commit it runs. GitHub delivers `push` and `release` under it |
-| Metadata read | GitHub grants it with any repository permission |
-| Checks write | A pipeline run reports a check run on the commit it ran: queued, in progress, then its result, with the stage table as the summary. The one write the app holds |
-| Pull requests read | The heads a pull-request run is for, whether GitHub delivers them as `pull_request` events or the poll reads them |
-| Merge queues read | GitHub subscribes an app to `merge_group` only when it holds this; a merge queue's run is the full suite on the exact tree that lands |
+| Contents write | Read source and create a branch for a bounded, approved proposal |
+| Metadata read | Identify the selected repository and read its applied rules |
+| Checks write | Report verification results and inspect required checks |
+| Security events write | Upload retained scanner reports and observe their ingestion |
+| Pull requests write | Read change heads, open draft proposals and mark an authorized delivery ready |
+| Merge queues write | Observe merge groups and submit an eligible, independently reviewed revision to the queue |
+| Commit statuses read | Verify required commit statuses in addition to check runs |
+| Administration read | Read classic branch protection; changing settings is not permitted |
 
-A push lights the update cue and starts the default branch's pipeline run; a
-pull request, a merge group and a published release each start a pipeline
-run; `check_run` is how a re-run pressed on GitHub reaches the cluster.
-`check_suite` is not in the list because GitHub subscribes every app holding
-checks write to it.
+A push starts the default branch's pipeline run; a pull request, a merge group
+and a published release each start a pipeline run. `check_run` carries a
+re-run requested on GitHub. `check_suite` is not in the event list because
+GitHub subscribes every app holding checks write to it. A local installation
+with its webhook disabled uses polling instead.
 
-A later capability that needs more -- an agent opening a pull request --
-requests it as its own permission change, which GitHub then surfaces to every
-installation for re-approval. Pipelines were such a change:
-[Upgrading an app registered before pipelines](#upgrading-an-app-registered-before-pipelines)
-is what it asks of an app that already exists.
+[Governed repository delivery](pipelines.md) distinguishes a draft-only
+proposal from an authorized delivery through the queue. Neither permits
+bypassing repository protection or installing a release. An existing app and
+its installations must explicitly approve the expanded permissions; see
+[Upgrading an app registered before pipelines](#upgrading-an-app-registered-before-pipelines).
 
 GitHub uses this same registered callback for authorization and post-install
 landings. Identity relays the callback to
@@ -286,16 +298,17 @@ sends every app; see [what stays current, and how](#what-stays-current-and-how).
 
 ## Upgrading an app registered before pipelines
 
-An app registered before pipelines -- from the product or by hand -- asks for
-contents and metadata read and subscribes to pushes. It goes on working for
-everything Deployables does. Pipelines need the wider ask above, and GitHub
-never widens an app by itself:
+Earlier apps may have only source-read access, or source reads plus pipeline
+reporting. Existing grants continue to cover their original operations.
+Governed delivery needs the permissions above, and GitHub never widens an app
+by itself:
 
 1. At GitHub, open the app's settings: Settings -> Developer settings -> GitHub
    Apps -> the app -> **Permissions & events** (in the organization's Settings,
    for an app registered under an organization).
-2. Under **Repository permissions**, set **Checks** to Read and write, and
-   **Pull requests** and **Merge queues** to Read-only.
+2. Under **Repository permissions**, match the complete permission table
+   above. **Administration** remains Read-only; do not grant settings or
+   workflow-file write access.
 3. Under **Subscribe to events**, check **Check run**, **Merge group**, **Pull
    request** and **Release** beside **Push**. On an app whose webhook is off (a
    local cluster's), skip this step: it receives nothing, and the permissions
@@ -304,11 +317,11 @@ never widens an app by itself:
    permissions, and an owner of each account accepts them.
 
 Until an account accepts, its installation keeps the permissions it had.
-Fetching keeps working and a push still starts a pipeline run, but every
-check-run write answers 403: the run records its check as refused, carries the
-note `pipeline_check_permission_missing`, and runs to its end all the same.
-Accepting is the whole repair, and the next run reports its check. Nothing on
-the cluster changes: the six values stay as they are, and nobody reconnects.
+Operations already covered continue to work. A missing check-reporting grant
+produces `pipeline_check_permission_missing`; a proposal or queue operation
+without its required grant is refused. Reauthorize the user connection if
+GitHub requests it after the permission change. The app identifiers and
+existing secret references remain the same.
 
 ---
 
@@ -330,31 +343,27 @@ why the surface names the organization rather than apologising.
 
 ## What a person sees
 
-**Settings -> Sources**, connected: "Connected to GitHub as @login", the
-installations the grant reaches as chips, any pending ones marked, a link to
-install on another organization, and Disconnect.
+**Pipelines -> Settings -> Connections -> GitHub** lists connected accounts.
+The plus button adds an account. Opening one shows its organizations and access,
+including pending organization approval, and the action to disconnect that
+account. Settings -> Connections -> GitHub opens the same account controls.
 
-**The Source stop of a new deployable**, connected: a searchable list of the
-repositories that grant can reach, grouped by owner, each with its visibility,
-default branch and last push. Choosing one runs the probe under the grant, fills
-the ref picker with the repository's branches (default first), and previews what
-the manifest says the package contains -- all before Analyze runs.
+**Pipelines -> Repositories -> Add repository** asks for the GitHub account,
+repository, MemQL owning organization and a final review. It uses verified saved
+connections and links to connection management when an account is missing.
+Registration starts no deployment; the repository's pipeline is connected
+separately. Deployables retains deployed app management and links to its
+repository in Pipelines.
 
-**Not connected, app configured:** what connecting is for, with Connect GitHub
-as the step's forward act and "A token" as the other choice beside "GitHub".
+**No app, cluster owner:** the GitHub App setup asks whose account should own
+the app, then offers **Set up GitHub**. GitHub presents the permissions for
+approval. **No app, anybody else:** the same surface names the cluster owner
+who can set it up, with no setup action.
 
-**No app, cluster owner:** the sentence saying this cluster is not linked to
-GitHub yet, the one question (your account, or an organization), and Set up
-GitHub -- on the wizard's floor, or beside the question in Settings.
-
-**No app, anybody else:** the same sentence naming who can change it, and no
-act. The token path is one choice away.
-
-Both are known before anybody presses anything: the surfaces ask
-`githubAppStatus`, a read that writes nothing, as they open. A cluster that
-cannot answer it keeps the older behaviour -- Connect is offered, the cluster
-refuses it, and the URL-and-token form becomes the whole stop under the
-sentence saying why.
+The surfaces ask `githubAppStatus`, a read that writes nothing, as they open.
+An unavailable status is not evidence that no app exists or that the caller
+can manage it. The Infrastructure row offers no setup or removal based on an
+unavailable answer; connection failures are reported in place.
 
 Every refusal renders in place, with the product's headline above and the
 server's own sentence beneath:

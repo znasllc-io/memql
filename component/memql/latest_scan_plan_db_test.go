@@ -98,7 +98,7 @@ func TestLatestScanPlanBoundsPayloadReadsAcrossTimescaleChunks(t *testing.T) {
 	require.GreaterOrEqual(t, len(queries), 3, "capture the real scan AND latest recheck queries")
 	for _, query := range queries {
 		var raw []byte
-		require.NoError(t, db.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+query).Scan(&raw))
+		require.NoError(t, db.QueryRowContext(ctx, `EXPLAIN (ANALYZE,VERBOSE,FORMAT JSON) `+query).Scan(&raw))
 		var plans []map[string]any
 		require.NoError(t, json.Unmarshal(raw, &plans))
 		payloadProbes := 0
@@ -107,7 +107,10 @@ func TestLatestScanPlanBoundsPayloadReadsAcrossTimescaleChunks(t *testing.T) {
 			relation, _ := plan["Relation Name"].(string)
 			nodeType, _ := plan["Node Type"].(string)
 			loops, _ := plan["Actual Loops"].(float64)
-			if strings.Contains(relation, "_chunk") && loops > 0 && nodeType != "Index Only Scan" && nodeType != "Custom Scan" {
+			// Key enumeration may use a heap/bitmap scan when the planner's
+			// estimates prefer it. VERBOSE distinguishes key-only output from
+			// loading historical JSON; only actual payload retrieval is bounded.
+			if strings.Contains(relation, "_chunk") && loops > 0 && latestPlanOutputsPayload(plan) && nodeType != "Custom Scan" {
 				condition, _ := plan["Index Cond"].(string)
 				filter, _ := plan["Filter"].(string)
 				require.Equal(t, "Index Scan", nodeType, "historical payload scan: %s", raw)
@@ -128,5 +131,24 @@ func TestLatestScanPlanBoundsPayloadReadsAcrossTimescaleChunks(t *testing.T) {
 		}
 		inspect(plans[0]["Plan"].(map[string]any))
 		require.Positive(t, payloadProbes, "must exercise canonical payload retrieval")
+	}
+}
+
+func latestPlanOutputsPayload(plan map[string]any) bool {
+	output, _ := plan["Output"].([]any)
+	for _, field := range output {
+		name, _ := field.(string)
+		if strings.HasSuffix(name, ".payload") || strings.HasSuffix(name, ".schema") || name == "payload" || name == "schema" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLatestPlanDistinguishesKeysFromPayloads(t *testing.T) {
+	for _, node := range []string{"Index Scan", "Bitmap Heap Scan", "Seq Scan"} {
+		require.False(t, latestPlanOutputsPayload(map[string]any{"Node Type": node, "Output": []any{"chunk.id", `chunk."createdAt"`}}))
+		require.True(t, latestPlanOutputsPayload(map[string]any{"Node Type": node, "Output": []any{"chunk.id", "chunk.payload"}}))
+		require.True(t, latestPlanOutputsPayload(map[string]any{"Node Type": node, "Output": []any{"chunk.schema"}}))
 	}
 }

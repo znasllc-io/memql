@@ -6528,7 +6528,7 @@ QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, a
   return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
 };
 
-/** The packages this caller may see, active only. The OS packages list. */
+/** Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {
 }
@@ -6954,7 +6954,7 @@ QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: 
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
 };
 
-/** The caller's pipelines, most recently connected first. */
+/** Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
 export interface PipelinesForOwnerArgs {
 }
@@ -11830,7 +11830,7 @@ QueryClient.prototype.sourceConnectionById = function (this: QueryClient, args: 
   return this.executeNamed("sourceConnectionById", buildSourceConnectionById(args), opts);
 };
 
-/** The caller's active saved source connections, independent of MemQL accounts. */
+/** Read the caller's active saved source connections for discovering accessible repositories, independent of MemQL accounts and pipeline membership. Inspect sourceRepositories for their repository listing contract. */
 // Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.ts).
 export interface SourceConnectionsMineArgs {
 }
@@ -12609,6 +12609,28 @@ QueryClient.prototype.workApprovalForOwner = function (this: QueryClient, args: 
   return this.executeNamed("workApprovalForOwner", buildWorkApprovalForOwner(args), opts);
 };
 
+/** Human corrections remain instructions after later permission decisions. One extra row makes the bounded reader refuse overflow, not lose history. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalGuidanceForOwnerRun"] in generated_concepts.ts).
+export interface WorkApprovalGuidanceForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkApprovalGuidanceForOwnerRun(args: WorkApprovalGuidanceForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workApprovalGuidanceForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalGuidanceForOwnerRun(args: WorkApprovalGuidanceForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalGuidanceForOwnerRun = function (this: QueryClient, args: WorkApprovalGuidanceForOwnerRunArgs = {} as WorkApprovalGuidanceForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalGuidanceForOwnerRun", buildWorkApprovalGuidanceForOwnerRun(args), opts);
+};
+
 /** Durable decisions for one of the caller's runs, including decided reviews. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.ts).
 export interface WorkApprovalsForOwnedRunArgs {
@@ -13038,6 +13060,48 @@ QueryClient.prototype.workGoalsForResponsibility = function (this: QueryClient, 
   return this.executeNamed("workGoalsForResponsibility", buildWorkGoalsForResponsibility(args), opts);
 };
 
+/** Search original tool fields across execution receipts and compaction archives. The engine projects public source fields; these raw rows are not model context. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workHistorySearchSourcesForOwnerRun"] in generated_concepts.ts).
+export interface WorkHistorySearchSourcesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkHistorySearchSourcesForOwnerRun(args: WorkHistorySearchSourcesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workHistorySearchSourcesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workHistorySearchSourcesForOwnerRun(args: WorkHistorySearchSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workHistorySearchSourcesForOwnerRun = function (this: QueryClient, args: WorkHistorySearchSourcesForOwnerRunArgs = {} as WorkHistorySearchSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workHistorySearchSourcesForOwnerRun", buildWorkHistorySearchSourcesForOwnerRun(args), opts);
+};
+
+/** Reconcile a late completion against its exact durable receipt. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallReceiptForOwnerRun"] in generated_concepts.ts).
+export interface WorkModelCallReceiptForOwnerRunArgs {
+}
+
+export function buildWorkModelCallReceiptForOwnerRun(args: WorkModelCallReceiptForOwnerRunArgs): string {
+  void args;
+  return "query workModelCallReceiptForOwnerRun()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelCallReceiptForOwnerRun(args?: WorkModelCallReceiptForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelCallReceiptForOwnerRun = function (this: QueryClient, args: WorkModelCallReceiptForOwnerRunArgs = {} as WorkModelCallReceiptForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelCallReceiptForOwnerRun", buildWorkModelCallReceiptForOwnerRun(args), opts);
+};
+
 /** Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerRun"] in generated_concepts.ts).
 export interface WorkModelCallsForOwnerRunArgs {
@@ -13102,6 +13166,28 @@ QueryClient.prototype.workModelCallsPageForOwnerRun = function (this: QueryClien
   return this.executeNamed("workModelCallsPageForOwnerRun", buildWorkModelCallsPageForOwnerRun(args), opts);
 };
 
+/** Bounded completed model-usage receipts for one caller-owned run, without model content. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workModelUsageForOwnerRun"] in generated_concepts.ts).
+export interface WorkModelUsageForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkModelUsageForOwnerRun(args: WorkModelUsageForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workModelUsageForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelUsageForOwnerRun(args: WorkModelUsageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelUsageForOwnerRun = function (this: QueryClient, args: WorkModelUsageForOwnerRunArgs = {} as WorkModelUsageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelUsageForOwnerRun", buildWorkModelUsageForOwnerRun(args), opts);
+};
+
 /** Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.ts).
 export interface WorkObservationSummariesForOwnerRunArgs {
@@ -13146,7 +13232,27 @@ QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient,
   return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
 };
 
-/** Completed tools and recorded capability reads; checkpoints and model prose cannot buy more work. */
+/** Bounded candidate lookup against durable consumed-evidence identities. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressCreditsForOwnerRun"] in generated_concepts.ts).
+export interface WorkProgressCreditsForOwnerRunArgs {
+}
+
+export function buildWorkProgressCreditsForOwnerRun(args: WorkProgressCreditsForOwnerRunArgs): string {
+  void args;
+  return "query workProgressCreditsForOwnerRun()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workProgressCreditsForOwnerRun(args?: WorkProgressCreditsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workProgressCreditsForOwnerRun = function (this: QueryClient, args: WorkProgressCreditsForOwnerRunArgs = {} as WorkProgressCreditsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workProgressCreditsForOwnerRun", buildWorkProgressCreditsForOwnerRun(args), opts);
+};
+
+/** Completed native/delegated source reads and capability contracts; checkpoints and model prose cannot buy more work. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressReceiptsForOwnerRun"] in generated_concepts.ts).
 export interface WorkProgressReceiptsForOwnerRunArgs {
   runId: string;
@@ -13166,6 +13272,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workProgressReceiptsForOwnerRun = function (this: QueryClient, args: WorkProgressReceiptsForOwnerRunArgs = {} as WorkProgressReceiptsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workProgressReceiptsForOwnerRun", buildWorkProgressReceiptsForOwnerRun(args), opts);
+};
+
+/** The cumulative native provider ledger survives process and replica changes. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProviderAdmissionForOwnerRun"] in generated_concepts.ts).
+export interface WorkProviderAdmissionForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkProviderAdmissionForOwnerRun(args: WorkProviderAdmissionForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workProviderAdmissionForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workProviderAdmissionForOwnerRun(args: WorkProviderAdmissionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workProviderAdmissionForOwnerRun = function (this: QueryClient, args: WorkProviderAdmissionForOwnerRunArgs = {} as WorkProviderAdmissionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workProviderAdmissionForOwnerRun", buildWorkProviderAdmissionForOwnerRun(args), opts);
 };
 
 /** Questions and decisions on this owner's run, used to resume on any replica. */

@@ -51,7 +51,7 @@ import (
 // (memql#5357, EmbeddedManifest below). It is not a domain, and every walker
 // reads only .memql files, so nothing loads it but EmbeddedManifest.
 //
-//go:embed memql.toml all:accounts all:actions all:agents all:authoring all:bench all:calendar all:campaigns all:capabilities all:cluster all:compose all:commerce all:common all:data all:deployment all:email all:forge all:healing all:identity all:install all:installation all:integrations all:knowledge all:library all:memory all:memql all:models all:notes all:observability all:os all:pipelines all:planner all:platform all:policies all:procedure all:providers all:rbac all:router all:rules all:safety all:shopify all:skills all:todos all:work all:workbench all:worker
+//go:embed memql.toml all:accounts all:actions all:agents all:authoring all:bench all:calendar all:campaigns all:capabilities all:cluster all:compose all:commerce all:common all:data all:deployment all:email all:forge all:healing all:identity all:install all:installation all:integrations all:knowledge all:library all:memory all:memql all:models all:notes all:observability all:os all:pipelines all:planner all:platform all:policies all:procedure all:providers all:rbac all:repositoryauthority all:router all:rules all:safety all:shopify all:skills all:todos all:work all:workbench all:worker
 var embedFS embed.FS
 
 // EmbeddedManifestPath is where the embedded tree's language line lives in the
@@ -121,12 +121,13 @@ func (EmbeddedTree) EmbeddedManifestPath() string { return EmbeddedManifestPath 
 // the FS rooted at the domain's contents (the consumer's embed.FS
 // containing `concepts.memql, queries.memql, prompts/`, etc).
 //
-// Indexed by domain name so RegisterTree is idempotent on the same
-// domain (re-registering replaces; this keeps tests + duplicate-init
-// scenarios well-defined).
+// Indexed by domain name; registration refuses duplicate ownership.
 var (
 	pluginTreesMu sync.RWMutex
 	pluginTrees   = map[string]fs.FS{}
+	// Runtime-owned domains may be replaced by an analyzed package update;
+	// compiled pack registrations remain exclusively owned by their binary.
+	runtimeTrees = map[string]bool{}
 )
 
 // RegisterTree mounts an additional DSL subtree under `domain/` in
@@ -160,6 +161,10 @@ var (
 //
 // Panics on empty/slash/colliding domain or nil tree.
 func RegisterTree(domain string, tree fs.FS) {
+	registerTree(domain, tree, false)
+}
+
+func registerTree(domain string, tree fs.FS, runtime bool) {
 	if tree == nil {
 		panic("dsl.RegisterTree: tree must not be nil")
 	}
@@ -170,6 +175,7 @@ func RegisterTree(domain string, tree fs.FS) {
 		panic("dsl.RegisterTree: " + err.Error())
 	}
 	pluginTrees[trimmed] = tree
+	runtimeTrees[trimmed] = runtime
 }
 
 // pluginTreeRegistered reports whether a plugin tree is already registered
@@ -198,6 +204,7 @@ func UnregisterTree(domain string) {
 	pluginTreesMu.Lock()
 	defer pluginTreesMu.Unlock()
 	delete(pluginTrees, domain)
+	delete(runtimeTrees, domain)
 }
 
 // Tree returns an fs.FS rooted at the unified DSL tree. Each top-

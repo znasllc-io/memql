@@ -159,6 +159,8 @@ automation agentWorkTrainingContext {
   text: facts.section + "\nOverall goal: " + facts.goal,
   limit: 3,
   minimumSimilarity: 0.60,
+  retryUnavailableAfterSeconds: 300,
+  includeAvailability: true,
   maxTokens: 1200
  )
 }

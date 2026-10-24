@@ -74,6 +74,30 @@ export function runStatusWord(status: string): string {
   }
 }
 
+/** No-step summaries use only recorded state and known failure categories.
+ * Provider details, identifiers and unknown diagnostics stay in the disclosure. */
+export function runWithoutStepsSummary(run: { status: string; errorCode?: string; errorMessage?: string; waitingOnKind?: string }): string {
+  switch (run.status) {
+    case "failed": {
+      const message = run.errorMessage ?? "";
+      if (/^work compile: intent classification failed\b/.test(message)) {
+        return message.includes("provider admission could not be verified:")
+          ? "Planning stopped because permission to use the model could not be verified."
+          : "MemQL could not finish understanding the request.";
+      }
+      if (run.errorCode === "compile_failed" || /^work compile:/.test(message)) return "MemQL could not finish planning this request.";
+      if (run.errorCode === "run_refused") return "This request was refused before any actions were recorded.";
+      return "This attempt failed before any actions were recorded.";
+    }
+    case "cancelled": return "This attempt was stopped before any actions were recorded.";
+    case "abandoned": return "The process running this attempt was lost. No actions were recorded.";
+    case "succeeded": return "This attempt finished without recorded actions.";
+    case "waiting": return `${waitingWord(run.waitingOnKind ?? "")}. No actions have been recorded.`;
+    case "blocked": return "This attempt is blocked. No actions have been recorded.";
+    default: return "The next action has not been recorded yet.";
+  }
+}
+
 /**
  * What that state MEANS, in one clause -- the ActionBar's `detail` slot.
  *

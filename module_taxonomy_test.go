@@ -94,10 +94,11 @@ var pluginKinds = map[string]moduleKind{
 	// verified grant from component/packages, and reads and reports on the
 	// operator's OWN repository -- the relationship packages has to GitHub's
 	// tarball API, which this table already classifies a component.
-	"backgroundCapacity": kindComponent, // Owner controls for this cluster's own Kubernetes admission budget; mandatory DSL builtins.
-	"pipelines":          kindComponent,
-	"sitePublish":        kindComponent, // see the note below
-	"siteHealth":         kindComponent, // Mandatory deployable observation storage and readiness reporting.
+	"backgroundCapacity":  kindComponent, // Owner controls for this cluster's own Kubernetes admission budget; mandatory DSL builtins.
+	"pipelines":           kindComponent,
+	"repositoryauthority": kindComponent, // Mandatory source-bound authority and approval enforcement; provider access is borrowed from packages.
+	"sitePublish":         kindComponent, // see the note below
+	"siteHealth":          kindComponent, // Mandatory deployable observation storage and readiness reporting.
 	// The edge's request log and the traffic figure folded from it (epic
 	// memql#4906). A COMPONENT by this table's own test: turning it off does
 	// not remove a feature, it breaks the engine. `siteTrafficInWindow` is

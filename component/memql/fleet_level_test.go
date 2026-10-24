@@ -116,16 +116,19 @@ func TestAnAIExpressionCarriesItsLevelToTheFleet(t *testing.T) {
 
 	// A person's re-run at another level is the level that leaves, not the
 	// prompt's own: the binding reads the RESOLVED request.
-	ctx := common.ContextWithRun(userCtx("alice"), common.RunContext{
+	run := common.RunContext{
 		RunId: "v1:work:run:r1", GoalId: "v1:work:goal:g1", StepKey: "triage",
 		OwnerUserId: "alice", Mode: common.RunModeLive, Override: &common.StepOverride{Level: "strong"},
-	})
+	}
+	admission := wireResultProviderAdmission(e, run)
+	ctx := common.ContextWithRun(userCtx("alice"), run)
 	if _, err := e.InvokeAI(ctx, "triage", map[string]any{"goal": "hi again"}); err != nil {
 		t.Fatal(err)
 	}
 	if fleet.lastReq.Level != "strong" {
 		t.Fatalf("a step re-run at strong reached the machine with level %q", fleet.lastReq.Level)
 	}
+	admission.assertCalls(t, 1)
 }
 
 // A provider with no level knob -- a vendor record -- is called exactly as it
