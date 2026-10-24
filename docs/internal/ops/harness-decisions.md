@@ -671,6 +671,53 @@ old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
+A stale serving replica can still write a hard call/time stop using the retired
+lifetime policy. Refresh every role that serves the affected path: the BFF's
+interactive approval, the agent's execution and the planner's replan/remedy
+each need their actual runtime build identity verified. A fresh agent pod alone
+does not establish planner compatibility. Read startup build-identity logs;
+do not launch the engine with an assumed `--version` flag (older binaries ignore
+it and start another server). Local repairs use the supported role-scoped dev
+build and must preserve unrelated release candidates and active CI.
+
+After such a repair, the existing discussion action can reconsider a saved
+hard replan call/time stop only if fresh owned state proves its versioned, already
+renewed window covers recorded spend. The original approval remains unchanged;
+guidance neither adds a window nor clears spend, credits or the evidence epoch.
+The answer and release still use the ordinary receipt gate and exact wait, and
+recovery after a partial write repeats the same fresh check. Genuine monetary
+limits, exhausted windows, missing/malformed state, closed goals, cancellation,
+foreign ownership and result reviews refuse. The saved replan reason survives
+before the latest correction; inference still reconciles receipts and passes
+explicit provider caps at admission. `TestStaleProgressStopRechecksExistingWindowWithoutRenewal`
+and `TestProgressStopRecheckDBAcrossReplicas` cover this boundary, including a
+lost release, a newly tightened monetary cap, idempotent recovery and a provider
+hard cap that still refuses after recovery.
+
+An `unevaluated` admission stop is a failed check, not measured exhaustion.
+The same discussion gate may reconsider that saved replan inside its current
+initial or renewed allowance, with complete recorded usage and current owner,
+goal, wait and artifact checks. It never recognizes recovery by matching prose,
+rewrites the old question, grants a phase claim, renews a window or clears
+usage. New questions describe verification failure accurately and remain closed
+until that gate succeeds. The retried native phase must still pass fresh logical
+and provider admission; unavailable accounting or an explicit cap still refuses.
+`TestUnevaluatedStopRecheckDBAcrossReplicas` covers a saved answer, failed release,
+tightened monetary limit, peer recovery and unchanged cumulative accounting.
+
+Provider admission recognizes compiler ownership, a claimed remedy's exact wait,
+or an answer validator's exact completed version through private native context.
+Ordinary waiting/compiling contexts cannot mint that evidence. Remedy and answer
+check deadlines start before claim/preparation, so delays cannot extend their
+claim window. Compiler ownership is rechecked against its persisted node and
+heartbeat. Stale phases do not turn into execution authority when status changes.
+Only current execution, compilation and remedy phases can renew progress from
+fresh completed evidence; terminal answer validation cannot renew. The native
+cross-replica tests in `provider_phase_db_test.go` exercise admission, claim
+expiry, changed waits/owners/nodes, cancellation, progress-credit consumption
+and unchanged provider caps. Runtime role versions must include these gates;
+changing a saved run's status to bypass them is not a recovery procedure.
+
 Recovery observes that same current cumulative window. `ModelCallBudget`
 previously reloaded the original goal estimate after calculating the renewed
 allowance, so a run beyond its first window appeared permanently exhausted to
@@ -855,3 +902,35 @@ disposable test database; a skipped test is not validation. Report the exact
 commit and test result separately from live workflow evidence. These tests do
 not establish complete UI delivery, arbitrary cross-goal freshness, all worker
 artifact formats, or a completed login handoff.
+
+## Fleet workspace continuation
+
+The Fleet binding's original one-hour expiry accidentally ended productive
+work even while the owner-authorized goal remained active. The binding now keeps
+its owner, run and machine placement fixed while a native lifecycle renews the
+bounded lease when fewer than thirty minutes remain. Each renewal rechecks the
+active run, destination, enrollment and sharing. The receiver still enforces
+its five-minute idle limit, per-operation cancellation, machine capacity and
+pipeline exclusion. A longer-lived goal does not grant longer computer access.
+
+An expired binding or typed receiver state-loss receipt requires an explicit
+`workspace_recover` call naming the current generation. A row-version fence
+allows only one replica to advance that generation. Recovery repeats the fresh
+authority checks and prepares an empty generation on the same machine; it does
+not promise restored files or run a command. Retained Library evidence is the
+source for reconstruction. Completed effects and uncertain operations are never
+replayed automatically. A changed machine, inactive run, withdrawn sharing or
+stale generation refuses. Receiver tombstones remain; a new generation uses a
+different identity rather than deleting an old tombstone.
+
+The generation travels through both mesh forwarding and the machine constraint,
+so an old capacity-queued call cannot execute inside a replacement filesystem.
+`workerWorkbench` contract 2 requires generation-aware receivers. The database
+regression `TestWorkbenchBindingDBChoosesOneMachineAcrossReplicas` verifies
+native binding persistence, owner isolation and competing recovery. The tests
+in `workbench_continuation_test.go` cover loss, no replay, stale queued calls,
+sharing and cancellation. Cockpit's `TestActiveWorkbenchRenewsLeaseWithoutLosingFiles`
+uses a controlled clock beyond two hours, and
+`TestExplicitRecoveryUsesNewGenerationWithoutReplayingLostOperation` preserves
+tombstones and distinguishes the replacement container. These tests do not
+establish a two-hour live production run or restore ephemeral files.
