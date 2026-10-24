@@ -496,12 +496,14 @@ query approval workQuestionsForOwnerRun {
 }
 
 /// Human corrections remain instructions after later permission decisions.
-/// One extra row makes the bounded reader refuse overflow, not lose history.
+/// The native reader follows storage pages; the journal has no lifetime count ceiling.
 @actor
 query approval workApprovalGuidanceForOwnerRun {
  args { runId string! }
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.decidedBy == actor.userId && row.decision == "answered" && row.?answer.feedback != nil
- sort "decidedAt", "asc"
+ // Use the storage keyset for complete paging; the reader restores human
+ // decidedAt order after joining routed and optional-answer instructions.
+ sort "row.createdAt", "asc"
  paginate 17
  shape workApprovalFull
 }

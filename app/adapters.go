@@ -440,6 +440,12 @@ func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templat
 func (a *CognitionEngineAdapter) ReadWorkGuidance(ctx context.Context) ([]memql.WorkGuidance, error) {
 	return a.Engine.ReadWorkGuidance(ctx)
 }
+func (a *CognitionEngineAdapter) ReadWorkGuidancePage(ctx context.Context, after memql.WorkGuidanceCursor) (memql.WorkGuidancePage, error) {
+	return a.Engine.ReadWorkGuidancePage(ctx, after)
+}
+func (a *CognitionEngineAdapter) AcknowledgeWorkGuidancePage(ctx context.Context, through memql.WorkGuidanceCursor) error {
+	return a.Engine.AcknowledgeWorkGuidancePage(ctx, through)
+}
 func (a *CognitionEngineAdapter) AcknowledgeWorkGuidance(ctx context.Context, ids []string) error {
 	return a.Engine.AcknowledgeWorkGuidance(ctx, ids)
 }

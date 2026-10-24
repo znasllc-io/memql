@@ -285,7 +285,7 @@ func guidanceTargetsLocked(conversationID string, transcript askTranscript, goal
 			target.ApprovalID, target.Status, target.Reason = BareShortId(stringArg(goal.Approval, "id")), routeNotDelivered, routeReasonRefused
 		case !guidanceReaches(run, conversationID):
 			target.Status, target.Reason = routeNotDelivered, routeReasonRefused
-		case guidanceFits(transcript, run, text):
+		case guidanceFits(text):
 			target.Status = routeQueued
 		default:
 			target.Status, target.Reason = routeNotDelivered, routeReasonLimit
@@ -304,20 +304,8 @@ func guidanceReaches(run map[string]any, conversationID string) bool {
 	return own != "" && own == BareShortId(conversationID)
 }
 
-// guidanceFits reports whether one more message stays within what the agent's
-// read accepts for run: exactly the targets workGuidanceTarget returns, at most
-// sixteen messages and 16,000 runes, and the message itself at most 4,000.
-func guidanceFits(transcript askTranscript, run map[string]any, text string) bool {
-	runes := utf8.RuneCountInString(text)
-	if runes > askRouteMessageRunes {
-		return false
-	}
-	messages := 1
-	for n := range transcript.Turns {
-		if target := workGuidanceTarget(&transcript.Turns[n], run); target != nil {
-			messages++
-			runes += utf8.RuneCountInString(target.Text)
-		}
-	}
-	return messages <= maxWorkGuidanceMessages && runes <= maxWorkGuidanceRunes
+// Each incoming message remains bounded. Existing durable history cannot make
+// later human direction undeliverable; the reader pages that history instead.
+func guidanceFits(text string) bool {
+	return utf8.RuneCountInString(text) <= askRouteMessageRunes
 }

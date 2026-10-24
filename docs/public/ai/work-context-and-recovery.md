@@ -32,8 +32,11 @@ unfinished work after another approval, retry or worker restart. The executing
 worker recovers that correction from the owner's decision journal and orders it
 with other human guidance by time. Permission receipts do not replace earlier
 instructions, and restoring instructions does not grant access or repeat a
-completed operation. The active guidance sources have explicit context bounds;
-overflow is reported rather than silently losing a correction.
+completed operation. Instructions arrive in bounded chronological pages. Exact
+originals stay in the journal when older pages become checkpoint memory. A saved
+cursor lets another worker continue reading without treating old guidance as new
+progress. A changed earlier source causes rereading, and a storage or context
+failure stops delivery rather than silently losing a correction.
 
 ## From changed inputs to a verified result
 
@@ -221,10 +224,11 @@ the limit. A request that takes no messages, such as a plan review, does not
 receive it; open the request to answer it.
 
 Each message is at most 4,000 characters. A longer message, or one with
-attachments, goes through normal intake instead. Routed guidance has its own
-budget of 16 messages and 16,000 characters per run, and the late answers to
-optional questions described above have a separate budget of the same size. A
-message past its budget is not delivered. Guidance does not grant permissions,
+attachments, goes through normal intake instead. Guidance is delivered in pages
+of up to 16 messages and 16,000 characters, keeping one indivisible instruction
+whole. The durable history has no message-count lifetime ceiling. Before another
+operation, the agent reads the remaining pages through its normal context recovery.
+Guidance does not grant permissions,
 raise budgets, reset retries, or approve a waiting request; those stay with the
 request's own decision controls. If a send is uncertain, retrying it recovers
 the original outcome and delivers nothing twice.

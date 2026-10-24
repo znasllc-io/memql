@@ -25,27 +25,49 @@ decision checkpoint. A later permission receipt could make the older correction
 archivable, and a fresh Apps worker could resume the superseded task. The native
 guidance reader now retrieves answered corrections from the owner's approval
 journal, including the current run and its root, on every normal guidance read.
-An acknowledgment is not a delivery cursor: a later worker reads them again and
-deduplicates in its own active context. Retry and replan generation changes do
-not invalidate human direction about the remaining goal.
+An acknowledgment is not a delivery cursor. Each executing context reads the
+owner-scoped chronological journal in pages, then checkpoints the exact consumed
+prefix with its saved exchanges. Retry and replan generation changes do not
+invalidate human direction about the remaining goal.
 
 `workApprovalGuidanceForOwnerRun` selects only the owner's answered feedback,
 with the same owner as decision maker. The reader validates the typed guidance
 contract, decision time and run binding; approved commands and rejected requests
-are not instructions. These corrections have their own 16-message/16,000-rune
-context bound. The query reads an extra row so overflow refuses explicitly
-instead of silently dropping legitimate history. This is a context bound, not
-a goal lifetime limit. Routed messages, late optional answers and corrections
-are presented in human timestamp order so source-query order cannot reverse a
-later change of direction. Restoring feedback neither grants permission nor
-replays an operation. Existing ownership, cancellation and execution checks
-still gate the read and every effect.
+are not instructions. Approval and optional-answer queries follow every storage
+page rather than mistaking the first query page for the complete journal. Sources
+are ordered by human timestamp, then receipt ID for ties. The complete source
+read currently uses memory proportional to the scoped journal and remains subject
+to ordinary cancellation and read deadlines; active model delivery is bounded.
 
-`work_approval_guidance_db_test.go` reproduces the missing correction using real
-storage and verifies later approvals, retries, another replica, delegated child
-work, chronology, ownership and overflow. The regression uses document editing;
-no repository, language or feature-specific branch is involved. These checks
-establish delivery, not model adherence or a completed user task.
+The former 16-message/16,000-character lifetime ceiling could accept a correction
+and then prevent every subsequent resume before context recovery ran. Those
+numbers now bound delivery pages, not the goal's lifetime. Each page is saved
+verbatim with a constant-size count-and-digest cursor before compaction or another
+read. Ordinary context checkpoints retain exact originals before deriving memory.
+The agent drains the remaining pages before its operational model call. One
+indivisible instruction is never clipped; genuine provider or checkpoint limits
+still stop with its original retained. A late insertion invalidates the consumed
+prefix and causes chronological rereading instead of being skipped by a timestamp
+watermark. Final reply review rebuilds the same bounded, recallable context.
+
+A cursor is restored only with the owned, generation-checked continuation. Source
+identity, rather than rendered grouping or a growing lifetime ID array, controls
+recovery rearming. An unchanged prefix on another replica is not new progress.
+Acknowledgment revalidates that prefix and writes bounded batches; it makes no
+completion claim. Existing old checkpoint ID arrays are read once when continuing
+saved work, then replaced by the cursor. Storage failure stops before another
+operation. None of these receipts, summaries or cursors grants permission, changes
+spending limits, or authorizes replaying completed effects.
+
+`work_guidance_pages_test.go` covers Unicode page reconstruction, late insertion,
+changed source identity, storage pagination, another replica, and prefix-specific
+acknowledgment. The agent guidance tests cover both execution lanes and interruption
+between calls; recovery tests cover more than the former lifetime ID limit and
+unchanged-prefix replay. The `paged-guidance` case in
+`app/work_permission_guidance_db_test.go` resumes an actual suspended nested run
+on a peer after forty corrections, preserves completed effects, and still requires
+a new exact command grant. These tests establish delivery and enforcement, not
+model adherence or successful completion of arbitrary downstream work.
 
 The live Apps check exposed a second ordering seam: the newer correction was
 present, but compaction had archived an older additive step override, and the
