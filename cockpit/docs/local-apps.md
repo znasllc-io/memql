@@ -214,15 +214,33 @@ status in the error; `pending` (still connecting) does not.
 
 | Path | What it is | Lifetime |
 |---|---|---|
-| `<workspace>/.mcp.json` | Claude Code's project-scoped MCP config, `0600`, carrying the per-run bearer | deleted at session end |
-| `<workspace>/.memql-session/codex/config.toml` | Codex's MCP config in a per-session `CODEX_HOME` | deleted at session end |
-| `<workspace>/.memql-session/transcript.log` | the full transcript | pushed to the Library, then deleted |
-| `<workspace>/.memql-session/open-launcher.sh` | the `open` kind's terminal launcher | deleted at session end |
+| `<workspace>/.memql-session/mcp-<unique>.json` | Claude Code's explicit MCP config, `0600`, carrying this session's bearer | deleted at session end |
+| `<workspace>/.memql-session/codex-<unique>/config.toml` | Codex's MCP config in a conversation-scoped `CODEX_HOME` | credential deleted at session end; provider state retained for attach |
+| `<workspace>/.memql-session/codex-refs/<ref-hash>` | workspace-local provider ref to home index, with no credentials or history | retained with the workspace |
+| `<workspace>/.memql-session/transcript-<unique>.log` | this session's full transcript | pushed to the Library, then deleted; retained on failed push |
+| `<workspace>/.memql-session/open-<unique>/` | this `open` session's launcher and exit receipt | deleted at session end |
 | `<state_dir>/appsessions/<id>.json` | the write ledger — **paths only, never the bearer** | deleted at session end |
 
-A pre-existing `.mcp.json` in the workspace is moved aside and **restored** at
-the end, so an `open` or `attach` session pointed at a real project does not
-destroy a config somebody wrote.
+Overlapping sessions never share transcript or credential paths. Claude receives
+its exact private config through `--mcp-config`, including interactive sessions;
+the project's `.mcp.json` stays untouched. Startup still restores backups named
+by an older worker's crash ledger.
+
+Codex attach reuses the original conversation's provider state in this workspace,
+with a fresh credential. An OS lock refuses a second active writer to that home
+before it can replace the credential; a crash releases the lock. Older refs use
+the former `.memql-session/codex` home in the same workspace. Attach never searches
+another workspace or the user's personal conversation history. Provider state
+and the reference index remain excluded from output retention.
+
+Temporary Chromium user-data directories are also excluded from automatic
+output retention and inline write contents. The worker recognizes `Local State`
+together with a debugging-port file or a `Default`/`Profile ...` preferences
+file, regardless of the directory's task-chosen name. It checks filenames and
+file types without reading profile contents. Screenshots, scripts and receipts
+beside the profile still travel. Put other disposable runtime files under
+`.cache/`; exclusion does not delete local state or change an archive already
+uploaded, so task-owned cleanup remains a separate operation.
 
 ### The deletion is the security control
 
@@ -713,8 +731,11 @@ Files the run created or changed in the workspace are pushed to the Library,
 plus the full transcript. Bounded, and the bounds are announced rather than
 applied silently:
 
-- 64 MiB per file, 32 files and 128 MiB total per session. Candidates omitted
-  by these limits are named in the transcript and an `outputs.json` artifact;
+- 64 MiB per source file and per output artifact, 128 MiB total, and at most
+  32 output uploads per session. More than 32 files use bounded ZIP parts
+  (stored without compression); archive overhead counts toward both byte
+  limits. At most 4096 source entries bound the manifest and ZIP metadata.
+  Candidates omitted by limits are named in an `outputs.json` artifact;
 - a repository acquired during the session is an input. Unchanged tracked
   files do not enter the upload budget. Changed files and explicitly recorded
   writes are retained, including recorded writes committed before the session
@@ -731,16 +752,57 @@ applied silently:
   different directories would otherwise arrive indistinguishable.
 
 The output manifest links retained files to their workspace-relative paths,
-sizes and Library artifact IDs, and links the transcript. It records omissions
-and transfer failures. An incomplete export reports an error and preserves the
+sizes, SHA-256 digests and Library artifact IDs, and links the transcript.
+Manifest version 2 adds `archiveEntry` when a file lives inside a ZIP, plus an
+`archives` list with each uploaded ZIP’s ID, byte length and SHA-256. Download
+the artifact, verify its digest, then read the named member and verify that
+member’s length and digest. Small sets still have individual artifacts.
+Each file is checked through one regular-file descriptor inside the workspace;
+its exact retained bytes are scanned for session credentials before bundling
+and hashed in the same read. Missing, changed or unreadable files are explicit
+gaps. Only successfully uploaded members enter `files`; failed parts name all
+their members in `omitted`. The manifest records omissions and transfer failures. An incomplete export reports an error and preserves the
 workspace for recovery; a transcript whose upload failed is also preserved.
 This is separate from the action journal, which retains file revisions as the
 app records them. Clean checkouts and dependency caches remain reusable local
-resources rather than Library copies of a repository.
+resources rather than Library copies of a repository. Existing `.tar` and
+`.zip` outputs remain eligible under the same rules. A later session takes a
+new input snapshot, so unchanged files omitted by an earlier export must be
+explicitly recovered as newly produced evidence; restarting alone does not
+retroactively retain them.
+
+Uploads declare a type from the produced bytes instead of multipart's default
+`application/octet-stream`. Recognized binary signatures retain their type.
+Text candidates must be valid UTF-8 across the whole body and contain no binary
+control bytes (tab, newline and carriage return are allowed); checking only the
+first 512 bytes would miss a binary suffix. Valid `.json` files declare
+`application/json`, Markdown declares `text/markdown`, and other text uses the
+sniffed type. An empty file stays opaque. A misleading extension cannot promote
+binary content into text. This classification preserves the exact uploaded bytes
+and digest and changes neither output limits nor credential/ownership/provenance
+checks. MIME is a format hint, not trusted content or a schema verdict.
+
+The Library deliberately honors a declared type. Its saved-file reader still
+checks the current owner and revision, its text-type gate, UTF-8 and the 2 MiB
+read bound. Previously retained opaque files are not relabeled by this change;
+they need a normal authorized upload/version or a format-specific reader.
+Readable does not imply indexed: semantic extraction and archive contents have
+their own coverage limits. `TestLibraryPushContentTypePreservesBytes` exercises
+the actual multipart upload for both file and in-memory outputs, including
+misleading names and suffix corruption. The engine's
+`UploadedJSONReadAcrossEngines` database case connects multipart ingestion to a
+fresh replica's saved-file reader and verifies that binary and owner gates hold.
 
 ---
 
 ## When it does not work
+
+An approved `workerHost.exec` script may start with a no-argument command
+followed by a newline. The local shell-policy name classifier recognizes that
+newline without joining the next line to the command name. It does not rewrite
+the reviewed script: quoted multiline text, the exact-command receipt, local
+consent, working-directory checks, resource limits, and allow/deny lists retain
+their existing behavior. A scoped approval does not override the local policy.
 
 | What you see | What it means |
 |---|---|

@@ -20,3 +20,14 @@ the MemQL UI design skill before changing human-facing output or native UI.
 Source imported from `znasllc-io/memql-cockpit` at
 `669820bd06f8f008982f174af0e975f6aef479b4`, including the streaming and retained
 evidence companion changes. Earlier history remains in that repository.
+
+The imported source is followed by the reviewed input guard and retained-output
+repairs from `memql-cockpit` through `7a0eee681c6a`. Preserve them when updating
+the worker: input is bound to a fresh screenshot receipt and retained window;
+interruption latches, with no automatic reacquisition. See
+[computer use](docs/computer-use.md) for sampled target checks and platform
+limitations. App conversations isolate provider state and serialise attachment
+across processes; browser runtime profiles stay out of output archives and
+inline retained content. See [local Apps](docs/local-apps.md) for the recording,
+recovery and exclusion rules. These source changes do not extend local consent
+or authorize input in an active task.

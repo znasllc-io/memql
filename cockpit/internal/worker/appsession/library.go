@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // library.go moves a session's inputs in and its outputs back out
@@ -48,8 +50,10 @@ const (
 	// coding agent is a build directory somebody forgot to exclude.
 	maxPushFileBytes int64 = 64 << 20
 
-	// maxPushFiles bounds how many produced files one session pushes.
+	// maxPushFiles bounds Library output uploads; larger sets are bundled.
 	maxPushFiles = 32
+	// Bound archive metadata independently of the number of Library requests.
+	maxOutputEntries = 4096
 	// Bound aggregate uploads too: 32 individually legal files need not be
 	// two GiB of evidence. Omitted candidates remain in the retention manifest.
 	maxPushTotalBytes int64 = 128 << 20
@@ -310,13 +314,20 @@ func (l *Library) PushBytes(ctx context.Context, body []byte, name string) (stri
 }
 
 func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (string, error) {
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile(libraryFormFileKey, name)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", fmt.Errorf("library: push %s: %w", name, err)
 	}
-	if _, err := io.Copy(part, r); err != nil {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": libraryFormFileKey, "filename": name}))
+	header.Set("Content-Type", producedContentType(name, data))
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return "", fmt.Errorf("library: push %s: %w", name, err)
+	}
+	if _, err := part.Write(data); err != nil {
 		return "", fmt.Errorf("library: push %s: %w", name, err)
 	}
 	if err := writer.WriteField(libraryFormNameKey, name); err != nil {
@@ -356,6 +367,40 @@ func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (str
 	return out.ArtifactId, nil
 }
 
+// The Library honors an explicit part type. CreateFormFile's octet-stream
+// default therefore stranded JSON manifests and logs behind the binary-reader
+// gate. Classify the existing bytes here; never rewrite them or relax that gate.
+// A filename alone cannot turn binary data into text, and a 512-byte sniff can
+// miss a binary suffix, so text declarations require the whole body to be UTF-8
+// without binary control bytes. Recognized binary signatures keep their type.
+// This is a format hint, not trust, schema validation or an indexing guarantee.
+func producedContentType(name string, data []byte) string {
+	if len(data) == 0 {
+		return "application/octet-stream"
+	}
+	sniffed := http.DetectContentType(data)
+	if !strings.HasPrefix(sniffed, "text/") {
+		return sniffed
+	}
+	if !utf8.Valid(data) {
+		return "application/octet-stream"
+	}
+	for _, b := range data {
+		if b < 0x20 && b != '\t' && b != '\n' && b != '\r' || b == 0x7f {
+			return "application/octet-stream"
+		}
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".json":
+		if json.Valid(data) {
+			return "application/json"
+		}
+	case ".md", ".markdown":
+		return "text/markdown; charset=utf-8"
+	}
+	return sniffed
+}
+
 // The multipart field names the Library's upload route reads.
 const (
 	libraryFormFileKey = "file"
@@ -367,6 +412,7 @@ type producedFile struct {
 	path string
 	rel  string
 	size int64
+	info os.FileInfo
 }
 
 // collectProduced walks the workspace for files the run created or
@@ -393,6 +439,9 @@ func collectProduced(workspace string, before map[string]fileStamp, writes ...ma
 		}
 		name := d.Name()
 		if d.IsDir() {
+			if isBrowserRuntimeDir(path) {
+				return filepath.SkipDir
+			}
 			if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
 				files, err := repositoryInputs(path)
 				if err != nil {
@@ -439,7 +488,7 @@ func collectProduced(workspace string, before map[string]fileStamp, writes ...ma
 				rel, info.Size(), maxPushFileBytes))
 			return nil
 		}
-		out = append(out, producedFile{path: path, rel: rel, size: info.Size()})
+		out = append(out, producedFile{path: path, rel: rel, size: info.Size(), info: info})
 		return nil
 	})
 
@@ -449,8 +498,8 @@ func collectProduced(workspace string, before map[string]fileStamp, writes ...ma
 	var selected []producedFile
 	var bytes int64
 	for _, f := range out {
-		if len(selected) >= maxPushFiles {
-			skipped = append(skipped, fmt.Sprintf("%s (over the %d-file cap)", f.rel, maxPushFiles))
+		if len(selected) >= maxOutputEntries {
+			skipped = append(skipped, fmt.Sprintf("%s (over the %d-file cap)", f.rel, maxOutputEntries))
 		} else if f.size > maxPushTotalBytes-bytes {
 			skipped = append(skipped, fmt.Sprintf("%s (%d bytes, over the %d-byte total cap)", f.rel, f.size, maxPushTotalBytes))
 		} else {
@@ -501,7 +550,7 @@ func snapshotWorkspace(workspace string) map[string]fileStamp {
 			return nil
 		}
 		if d.IsDir() {
-			if path != workspace && (pushExcludedDirs[d.Name()] || d.Name() == ".memql-session") {
+			if isBrowserRuntimeDir(path) || (path != workspace && (pushExcludedDirs[d.Name()] || d.Name() == ".memql-session")) {
 				return filepath.SkipDir
 			}
 			return nil
