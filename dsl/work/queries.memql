@@ -519,6 +519,17 @@ query observation workContinuationForOwnerRun {
  shape workObservationFull
 }
 
+/// The latest private reply-review checkpoint of this owner's step. A completed
+/// operational result survives a failed helper without rerunning its effects.
+@actor
+query observation workReplyReviewForOwnerStep {
+ args { runId string! stepKey string! }
+ filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId && row.?data.replyReviewStage != nil
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}
+
 /// Read only this run's own computer-use decisions, including previous grants.
 @actor
 @unbounded("scope decisions of one owned work run")

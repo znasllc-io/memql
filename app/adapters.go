@@ -431,6 +431,12 @@ func (a *CognitionEngineAdapter) DelegatedWorkHumanWait(ctx context.Context, ses
 func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	return a.Engine.RestoreWorkContinuation(ctx, messages)
 }
+func (a *CognitionEngineAdapter) ReadWorkReplyReview(ctx context.Context) (memql.WorkReplyReviewCheckpoint, error) {
+	return a.Engine.ReadWorkReplyReview(ctx)
+}
+func (a *CognitionEngineAdapter) SaveWorkReplyReview(ctx context.Context, binding memql.WorkReplyReviewBinding, value json.RawMessage) error {
+	return a.Engine.SaveWorkReplyReview(ctx, binding, value)
+}
 
 // InvokeAIStructured keeps model routing and strict output validation at the engine seam.
 func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {

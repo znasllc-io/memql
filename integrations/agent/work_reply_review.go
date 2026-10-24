@@ -36,34 +36,95 @@ func (r *Replier) handleReviewedWork(ctx context.Context, msg *memqlv1.AgentGene
 }
 
 func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce func(context.Context, *replyReviewSink) (*TurnResult, error)) (*TurnResult, error) {
+	if !isOwnedWorkExecution(ctx) {
+		return nil, fmt.Errorf("reply review requires owned work")
+	}
+	store, ok := r.engine.(workReplyReviewStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: reply review checkpoint store unavailable", memql.ErrWorkCheckpointRequired)
+	}
 	// The native ceiling is one continuation. The installed recipe decides
 	// whether to use it, and the original run retains every spend/deadline gate.
 	for attempt := 0; attempt < 2; attempt++ {
+		checkpoint, err := store.ReadWorkReplyReview(ctx)
+		if err != nil {
+			return nil, err
+		}
 		held := &replyReviewSink{DeltaSink: sink}
-		result, err := produce(ctx, held)
-		if err != nil {
-			return nil, err
+		var result *TurnResult
+		var messages []common.ChatMessage
+		sourceCompatible := true
+		priorRepairs := 0
+		if len(checkpoint.Pending) > 0 {
+			pending, err := decodePendingWorkReply(checkpoint.Pending)
+			if err != nil {
+				return nil, err
+			}
+			latest, err := r.restoreAfterQuestion(ctx, nil)
+			if err != nil {
+				return nil, fmt.Errorf("pending reply source checkpoint unavailable: %w", err)
+			}
+			if len(latest) == 0 {
+				return nil, fmt.Errorf("%w: pending reply source checkpoint missing", memql.ErrWorkCheckpointRequired)
+			}
+			ctx = clearConsumedWorkContinuation(ctx)
+			previousState, _, err := recoveryState(pending.Messages)
+			if err != nil {
+				return nil, err
+			}
+			latestState, _, err := recoveryState(latest)
+			if err != nil {
+				return nil, err
+			}
+			messages = latest
+			priorRepairs = previousState.EvidenceRepairs
+			// A crash between the evidence-continuation barrier and retiring the
+			// draft must not resurrect the earlier repair allowance. New guidance
+			// instead resumes production with completed exchanges, never the draft
+			// as a substitute for the newly requested work.
+			var added bool
+			sourceCompatible, added = replySourceExtends(pending.Messages, latest)
+			continued := latestState.EvidenceRepairs > previousState.EvidenceRepairs || added
+			if checkpoint.Saved.Guidance != checkpoint.Binding.Guidance || continued {
+				if !sourceCompatible {
+					return nil, fmt.Errorf("%w: pending reply source changed before production continuation", memql.ErrWorkCheckpointRequired)
+				}
+				if err := savePendingWorkReply(ctx, store, checkpoint.Binding, nil); err != nil {
+					return nil, err
+				}
+			} else {
+				result = pending.Result
+				held.terminalID, held.terminalArguments = pending.TerminalID, pending.TerminalArguments
+			}
 		}
-		if result == nil || result.Paused || strings.TrimSpace(result.FinalText) == "" {
-			return result, nil
+		if result == nil {
+			result, err = produce(ctx, held)
+			if err != nil {
+				return nil, err
+			}
+			if result == nil || result.Paused || strings.TrimSpace(result.FinalText) == "" {
+				return result, nil
+			}
+			ctx = clearConsumedWorkContinuation(ctx)
+			messages, err = r.restoreAfterQuestion(ctx, nil)
+			if err != nil {
+				return nil, err
+			}
+			pending := &pendingWorkReply{Version: 1, Result: result, TerminalID: held.terminalID, TerminalArguments: held.terminalArguments, Messages: messages}
+			if err := savePendingWorkReply(ctx, store, checkpoint.Binding, pending); err != nil {
+				return nil, err
+			}
 		}
-		// A successful turn has consumed any exact resume proof and may have
-		// saved newer receipts. Subsequent reads/continuation use that latest
-		// checkpoint, retaining owner, step, override, lineage and deadline.
-		if run, ok := common.RunFromContext(ctx); ok && run.Continuation != nil {
-			run.Continuation = nil
-			ctx = common.ContextWithRun(ctx, run)
-		}
-		messages, err := r.restoreAfterQuestion(ctx, nil)
-		if err != nil {
-			return nil, err
+		current, err := store.ReadWorkReplyReview(ctx)
+		if err != nil || current.Binding != checkpoint.Binding {
+			return nil, fmt.Errorf("reply review execution or guidance changed before review: %v", err)
 		}
 		state, _, err := recoveryState(messages)
 		if err != nil {
 			return nil, err
 		}
-		canContinue := attempt == 0 && len(messages) > 1 && state.EvidenceRepairs == 0
-		review, err := r.checkWorkResult(ctx, result.FinalText, canContinue)
+		canContinue := attempt == 0 && sourceCompatible && len(messages) > 1 && state.EvidenceRepairs == 0 && priorRepairs == 0
+		review, err := r.checkWorkResult(memql.ContextWithWorkReplyReviewSource(ctx, messages), result.FinalText, canContinue)
 		if err != nil {
 			// Review is a reasoning boundary after all tool receipts are saved.
 			// A native ceiling must suspend this exact checkpoint; a raw ceiling
@@ -76,7 +137,16 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 			return nil, err
 		}
 		if continued {
+			if err := savePendingWorkReply(ctx, store, checkpoint.Binding, nil); err != nil {
+				return nil, err
+			}
 			continue
+		}
+		// Review may be slow. Recheck current authority and direction before
+		// exposing its answer; a saved draft never grants a completion claim.
+		current, err = store.ReadWorkReplyReview(ctx)
+		if err != nil || current.Binding != checkpoint.Binding {
+			return nil, fmt.Errorf("reply review execution or guidance changed before delivery: %v", err)
 		}
 		return deliverReviewedWorkResult(result, held, review.Reply)
 	}
