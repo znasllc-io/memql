@@ -324,3 +324,13 @@ func (e *workPromptEngine) SaveWorkContinuation(_ context.Context, messages []co
 	e.savedContinuation = append([]common.ChatMessage(nil), messages...)
 	return nil
 }
+
+func (e *workPromptEngine) RestoreWorkContinuation(_ context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	// Lightweight prompt fixtures keep their supplied initial context. A
+	// post-turn review read must see the progress they actually saved; native
+	// proof/merge semantics are covered by the database continuation tests.
+	if len(messages) == 0 {
+		return append([]common.ChatMessage(nil), e.savedContinuation...), nil
+	}
+	return messages, nil
+}

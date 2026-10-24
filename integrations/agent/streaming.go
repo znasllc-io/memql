@@ -928,6 +928,14 @@ StreamLoop:
 		}
 		citations = terminalEnvelope.Citations
 	}
+	// A delegated App may complete without a local tool batch. Review recovery
+	// still needs this exact final source, rather than an absent or pre-call
+	// checkpoint. Persist it before returning the completed result for review.
+	if terminalErr == nil && finalText != "" {
+		if err := r.saveWorkProgress(ctx, messages); err != nil {
+			return nil, err
+		}
+	}
 
 	completion := "agent streaming: complete"
 	if terminalErr != nil {
