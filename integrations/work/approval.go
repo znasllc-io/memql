@@ -525,7 +525,17 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 			// completed prefix. Automatic retry limits and spend stay intact.
 			act := actRun{row: run, id: runId, owner: rowString(run, "ownerUserId"), order: topLevelOrder(rowStringSlice(run, "stepOrder"))}
 			key := topLevelStepKey(retry.stepKey)
-			if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil {
+			if work.IsOutcomeRecoveryFailure(rowString(run, "errorMessage")) {
+				// This App already returned. A new rerun id would discard its
+				// retained result and attempt bound. Resume the original request;
+				// the agent rechecks exact source/owner/override before conversion.
+				if err := act.requireExecutable(); err != nil {
+					return false, err
+				}
+				if err := i.requireApprovalStep(ctx, &act, key); err != nil {
+					return false, err
+				}
+			} else if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil {
 				if err := i.requireApprovalStep(ctx, &act, key); err != nil {
 					return false, err
 				}

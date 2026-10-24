@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/common"
 	"strings"
@@ -581,6 +582,38 @@ func TestOrdinaryFeedbackAnswerPreservesCurrentRequest(t *testing.T) {
 					}
 				}
 			})
+		}
+	}
+}
+
+func TestFormatFailureRetryPreservesCompletedExecutionBinding(t *testing.T) {
+	for _, message := range []string{`function "runAgentTurn" execution failed: runAgentTurn: invalid delegated work outcome: missing marker`, work.OutcomeRecoveryError(fmt.Errorf("bounded conversion failed")).Error()} {
+		i, eng, store := newActsIntegration(t)
+		addVersion(store, actRunId, "fetch", 0, 1, "done", nil, nil)
+		addVersion(store, actRunId, "draft", 1, 3, "failed", nil, nil)
+		req := work.FailureApproval(work.ApprovalKindFeedback, actRunId, "draft", work.SymptomContract, message, "Inspect saved result", work.Evidence{}, testNow, time.Hour)
+		eng.reply("workApprovalsForOwner", map[string]any{"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": "draft", "kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash, "options": req.Options})
+		run := actRunRow(runStatusWaiting, "fetch", "draft")
+		run["errorMessage"] = message
+		run["rerun"] = map[string]any{"requestId": "original-request", "stepKey": "draft", "override": map[string]any{"model": "app:codex:gpt-6-astra", "effort": "xhigh"}}
+		run["spent"] = map[string]any{"retries": 2, "modelCalls": 40}
+		run["waitingOn"] = map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "since": rfc(testNow.Add(-time.Minute))}
+		eng.reply("workRunForOwner", run)
+		_, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": "v1:work:approval:a1", "decision": "answered", "answer": map[string]any{"value": work.FailureAnswerRetry}}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		update := argsOf(t, eng, "updateWorkRun")
+		if update["status"] != runStatusRunning || update["humanResumeId"] != "a1" {
+			t.Fatalf("not resumed: %v", update)
+		}
+		for _, field := range []string{"rerun", "head", "staleSteps", "spent", "errorMessage"} {
+			if _, changed := update[field]; changed {
+				t.Fatalf("format recovery changed %s: %v", field, update)
+			}
+		}
+		if len(eng.callsTo("updateWorkStep")) != 0 || len(eng.callsTo("updateWorkGoal")) != 0 {
+			t.Fatal("format retry rewrote completed work or owner acceptance")
 		}
 	}
 }

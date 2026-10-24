@@ -627,7 +627,7 @@ StreamLoop:
 				// The app already executed this step. Validate its terminal
 				// signal without launching another session that could replay it.
 				if isDelegatedWorkSession(provider) {
-					return nil, fmt.Errorf("invalid delegated work outcome: %w", outcomeErr)
+					return nil, delegatedOutcomeFailure(ctx, provider, messages, turnText, turnCalls, turnCtx, outcomeErr)
 				}
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -55,7 +56,17 @@ func (r *Replier) prepareReviewedWorkContext(ctx context.Context, msg *memqlv1.A
 	return ctx, nil
 }
 
-func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce func(context.Context, *replyReviewSink) (*TurnResult, error)) (*TurnResult, error) {
+func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce func(context.Context, *replyReviewSink) (*TurnResult, error)) (delivered *TurnResult, failure error) {
+	formatRecovery := false
+	defer func() {
+		var wait *work.HumanWait
+		if formatRecovery && failure != nil && !errors.As(failure, &wait) && !work.IsOutcomeRecoveryFailure(failure.Error()) {
+			// Every failure after retaining a completed App stays bound to that
+			// stage, including a later review/storage failure. Retry cannot make
+			// a new generation that forgets its consumed conversion allowance.
+			failure = work.OutcomeRecoveryError(failure)
+		}
+	}()
 	if !isOwnedWorkExecution(ctx) {
 		return nil, fmt.Errorf("reply review requires owned work")
 	}
@@ -73,6 +84,7 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		held := &replyReviewSink{DeltaSink: sink}
 		var result *TurnResult
 		var messages []common.ChatMessage
+		var formatPending *pendingWorkReply
 		sourceCompatible := true
 		priorRepairs := 0
 		if len(checkpoint.Pending) > 0 {
@@ -80,6 +92,7 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 			if err != nil {
 				return nil, err
 			}
+			formatRecovery = pending.OutcomeFormat != nil
 			latest, err := r.restoreAfterQuestion(ctx, nil)
 			if err != nil {
 				return nil, fmt.Errorf("pending reply source checkpoint unavailable: %w", err)
@@ -105,41 +118,112 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 			var added bool
 			sourceCompatible, added = replySourceExtends(pending.Messages, latest)
 			continued := latestState.EvidenceRepairs > previousState.EvidenceRepairs || added
-			if checkpoint.Saved.Guidance != checkpoint.Binding.Guidance || continued {
+			if pending.OutcomeFormat != nil && !pending.OutcomeFormat.Question {
+				// A format failure never grants production, even after fresh
+				// guidance. It retains its exact source and durable attempt bound.
+				if checkpoint.Saved != checkpoint.Binding {
+					return nil, fmt.Errorf("outcome recovery guidance changed; saved production retained")
+				}
+				if recoveryDigest(previousState) != recoveryDigest(latestState) {
+					return nil, fmt.Errorf("outcome recovery progress state changed; newer checkpoint retained")
+				}
+				if !sourceCompatible || added {
+					// Only the final terminal checkpoint may be one write behind
+					// its already-saved stage. Any newer/different source stops.
+					extends, extra := replySourceExtends(latest, pending.Messages)
+					if !pending.OutcomeFormat.Done || !extends || !extra || len(pending.Messages) != len(latest)+2 {
+						return nil, fmt.Errorf("outcome recovery source changed; newer progress retained")
+					}
+					if err := r.saveWorkProgress(ctx, pending.Messages); err != nil {
+						return nil, err
+					}
+				}
+				formatPending = pending
+				result, messages = pending.Result, pending.Messages
+				held.terminalID, held.terminalArguments = pending.TerminalID, pending.TerminalArguments
+			} else if checkpoint.Saved.Guidance != checkpoint.Binding.Guidance || continued {
 				if !sourceCompatible {
 					return nil, fmt.Errorf("%w: pending reply source changed before production continuation", memql.ErrWorkCheckpointRequired)
 				}
 				if err := savePendingWorkReply(ctx, store, checkpoint.Binding, nil); err != nil {
 					return nil, err
 				}
+				formatRecovery = false
 			} else {
+				if pending.OutcomeFormat != nil && pending.OutcomeFormat.Question {
+					return nil, fmt.Errorf("outcome recovery awaits its recorded question")
+				}
 				result = pending.Result
 				held.terminalID, held.terminalArguments = pending.TerminalID, pending.TerminalArguments
 			}
 		}
 		if result == nil {
-			result, err = produce(ctx, held)
-			if err != nil {
-				return nil, err
+			if runtime, ok := r.engine.(outcomeRecoveryRuntime); ok && len(checkpoint.Pending) == 0 {
+				legacy, readErr := runtime.ReadLegacyWorkOutcome(ctx)
+				if readErr != nil {
+					return nil, work.OutcomeRecoveryError(readErr)
+				}
+				if legacy != nil {
+					formatRecovery = true
+					// Validate any native approval proof before upgrading old state.
+					if _, err := r.restoreAfterQuestion(ctx, nil); err != nil {
+						return nil, err
+					}
+					ctx = clearConsumedWorkContinuation(ctx)
+					formatPending, err = r.saveOutcomeDraft(ctx, store, checkpoint.Binding, *legacy, false)
+					if err != nil {
+						return nil, work.OutcomeRecoveryError(err)
+					}
+				}
+			}
+			if formatPending == nil {
+				result, err = produce(ctx, held)
+				if err != nil {
+					var failure *delegatedOutcomeError
+					if !errors.As(err, &failure) {
+						return nil, err
+					}
+					formatRecovery = true
+					ctx = clearConsumedWorkContinuation(ctx)
+					formatPending, err = r.saveOutcomeDraft(ctx, store, checkpoint.Binding, failure.input, true)
+					if err != nil {
+						return nil, work.OutcomeRecoveryError(err)
+					}
+				}
+			}
+			if formatPending != nil {
+				result, messages = formatPending.Result, formatPending.Messages
 			}
 			if result != nil && result.Paused {
 				return result, nil
 			}
-			if result == nil || strings.TrimSpace(result.FinalText) == "" {
+			if formatPending == nil && (result == nil || strings.TrimSpace(result.FinalText) == "") {
 				if memql.HasWorkReplyTask(ctx) {
 					return nil, work.UnfinishedStepError("The current step returned no completed result. Reconcile its retained tool receipts, then finish or verify the required output.")
 				}
 				return result, nil
 			}
 			ctx = clearConsumedWorkContinuation(ctx)
-			messages, err = r.restoreAfterQuestion(ctx, nil)
-			if err != nil {
+			if formatPending == nil {
+				messages, err = r.restoreAfterQuestion(ctx, nil)
+				if err != nil {
+					return nil, err
+				}
+				pending := &pendingWorkReply{Version: 1, Result: result, TerminalID: held.terminalID, TerminalArguments: held.terminalArguments, Messages: messages}
+				if err := savePendingWorkReply(ctx, store, checkpoint.Binding, pending); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if formatPending != nil {
+			if err := r.repairOutcomeDraft(ctx, store, checkpoint.Binding, formatPending, held); err != nil {
+				var wait *work.HumanWait
+				if !errors.As(err, &wait) {
+					err = work.OutcomeRecoveryError(err)
+				}
 				return nil, err
 			}
-			pending := &pendingWorkReply{Version: 1, Result: result, TerminalID: held.terminalID, TerminalArguments: held.terminalArguments, Messages: messages}
-			if err := savePendingWorkReply(ctx, store, checkpoint.Binding, pending); err != nil {
-				return nil, err
-			}
+			result, messages = formatPending.Result, formatPending.Messages
 		}
 		current, err := store.ReadWorkReplyReview(ctx)
 		if err != nil || current.Binding != checkpoint.Binding {
@@ -149,7 +233,7 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		if err != nil {
 			return nil, err
 		}
-		canContinue := attempt == 0 && sourceCompatible && len(messages) > 1 && state.EvidenceRepairs == 0 && priorRepairs == 0
+		canContinue := formatPending == nil && attempt == 0 && sourceCompatible && len(messages) > 1 && state.EvidenceRepairs == 0 && priorRepairs == 0
 		review, err := r.checkWorkResult(memql.ContextWithWorkReplyReviewSource(ctx, messages), result.FinalText, canContinue)
 		if err != nil {
 			// Review is a reasoning boundary after all tool receipts are saved.
@@ -160,6 +244,9 @@ func (r *Replier) runReviewedWork(ctx context.Context, sink DeltaSink, produce f
 		}
 		gap := review.MissingEvidence
 		if review.Completion != nil && review.Completion.Disposition == "unfinished" {
+			if formatPending != nil {
+				return nil, work.OutcomeRecoveryError(fmt.Errorf("%w: work_outcome_format_unverified; retained result requires review, production cannot be replayed", memql.ErrWorkCheckpointRequired))
+			}
 			gap = review.Completion.Gap
 		}
 		continued, err := r.continueWorkEvidence(ctx, messages, gap, canContinue)

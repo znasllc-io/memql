@@ -544,7 +544,7 @@ func (i *Integration) serveRemedy(ctx context.Context, remedy Remedy, kind, runI
 	}
 	ctx = common.ContextWithRun(ctx, rc)
 	ctx = memql.ContextWithBudgetScope(ctx, memql.BudgetScopeId("run", runId), memql.BudgetScopeId("goal", rc.GoalId))
-	ctx = withProviderPhase(ctx, rc, providerPhase{status: runStatusWaiting, waitKind: kind, since: since, stepKey: stepKey, expiresAt: expiresAt})
+	ctx = context.WithValue(ctx, providerPhaseKey{}, bindProviderPhase(rc, providerPhase{status: runStatusWaiting, waitKind: kind, since: since, stepKey: stepKey, expiresAt: expiresAt}))
 
 	took := false
 	if kind == waitKindReplan {

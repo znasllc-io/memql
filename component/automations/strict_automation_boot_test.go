@@ -248,7 +248,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // measured by the strict loader in the native retention release.
 // +1 askMessageRouting from the consolidated Ask routing PRs; measured by
 // TestStrictAutomationBoot_EmbeddedTreeIsClean on 2026-10-21.
-const shippedAutomationCount = 185
+// 185 -> 186: agentWorkOutcomeRecovery, the bounded inference-only reporting
+// conversion policy; measured by the strict loader.
+const shippedAutomationCount = 186
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

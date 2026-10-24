@@ -304,7 +304,7 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	}
 	callCtx := common.ContextWithRun(scoped, rc)
 	runVersion, _ := rowTime(run, "createdAt")
-	callCtx = withProviderPhase(callCtx, rc, providerPhase{status: runStatusSucceeded, runVersion: runVersion, stepKey: stepKey, stepVersion: version, expiresAt: phaseExpiresAt})
+	callCtx = context.WithValue(callCtx, providerPhaseKey{}, bindProviderPhase(rc, providerPhase{status: runStatusSucceeded, runVersion: runVersion, stepKey: stepKey, stepVersion: version, expiresAt: phaseExpiresAt}))
 	result, err := judge.CallAIStructured(callCtx, airoute.ResolveRequest{
 		Level:      level,
 		Modality:   airoute.ModalityStructured,
