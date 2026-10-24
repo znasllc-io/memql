@@ -144,10 +144,14 @@ func (c *child) terminate() {
 		return
 	}
 	c.killOnce.Do(func() {
+		// A JSON-RPC harness calls Terminate before Wait. Start the single reaper
+		// here too, or exited cannot close and every clean turn pays the full grace.
+		go func() { _ = c.wait() }()
 		signalGroup(c.cmd, false)
 		select {
 		case <-c.exited:
-			// It took the hint.
+			// The leader exited; reap any descendants that ignored the signal.
+			signalGroup(c.cmd, true)
 		case <-time.After(terminateGrace):
 			signalGroup(c.cmd, true)
 		}

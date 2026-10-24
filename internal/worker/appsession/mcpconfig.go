@@ -68,9 +68,10 @@ const (
 // arrives on the stream while the run is in flight, and cleanup can be
 // driven by either the run finishing or the stream dying.
 type sessionMCPSettings struct {
-	Tools        []string
-	DenyPaths    []string
-	RuntimePaths []string
+	InferenceOnly bool
+	Tools         []string
+	DenyPaths     []string
+	RuntimePaths  []string
 }
 
 type mcpConfig struct {
@@ -268,7 +269,11 @@ func (m *mcpConfig) Renew(credential string) error {
 	var err error
 	switch m.app {
 	case apps.IDClaudeCode:
-		body, err = claudeCodeMCPBody(m.endpoint, credential)
+		if m.settings.InferenceOnly {
+			body = []byte(`{"mcpServers":{}}`)
+		} else {
+			body, err = claudeCodeMCPBody(m.endpoint, credential)
+		}
 	case apps.IDCodex:
 		body, err = codexMCPBody(m.endpoint, credential, m.settings)
 	default:
@@ -464,16 +469,18 @@ func codexMCPBody(endpoint, credential string, options ...sessionMCPSettings) ([
 		settings = options[0]
 	}
 	fmt.Fprintln(&b, `default_permissions = "memql_session"`)
-	fmt.Fprintf(&b, "[mcp_servers.%s]\n", mcpServerName)
-	fmt.Fprintln(&b, "required = true")
-	if len(settings.Tools) > 0 {
-		names, _ := json.Marshal(settings.Tools)
-		fmt.Fprintf(&b, "enabled_tools = %s\n", names)
-	}
-	fmt.Fprintf(&b, "url = %q\n", endpoint)
-	fmt.Fprintf(&b, "http_headers = { %q = %q }\n", "Authorization", "Bearer "+credential)
-	for _, name := range settings.Tools {
-		fmt.Fprintf(&b, "[mcp_servers.%s.tools.%q]\napproval_mode = \"approve\"\n", mcpServerName, name)
+	if !settings.InferenceOnly {
+		fmt.Fprintf(&b, "[mcp_servers.%s]\n", mcpServerName)
+		fmt.Fprintln(&b, "required = true")
+		if len(settings.Tools) > 0 {
+			names, _ := json.Marshal(settings.Tools)
+			fmt.Fprintf(&b, "enabled_tools = %s\n", names)
+		}
+		fmt.Fprintf(&b, "url = %q\n", endpoint)
+		fmt.Fprintf(&b, "http_headers = { %q = %q }\n", "Authorization", "Bearer "+credential)
+		for _, name := range settings.Tools {
+			fmt.Fprintf(&b, "[mcp_servers.%s.tools.%q]\napproval_mode = \"approve\"\n", mcpServerName, name)
+		}
 	}
 	// App consent grants this workspace. Keep Codex's baseline protected
 	// directories and confine command reads to runtime paths + the workspace.

@@ -215,8 +215,8 @@ func (h *claudeHeadless) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 			fmt.Errorf("harness: could not start %s: %w", spec.Binary, err)
 	}
 
-	turn := &claudeTurn{sink: sink, rec: rec, cwd: spec.Workspace}
-	if strings.TrimSpace(spec.MCPConfigPath) != "" {
+	turn := &claudeTurn{sink: sink, rec: rec, cwd: spec.Workspace, inferenceOnly: spec.InferenceOnly}
+	if strings.TrimSpace(spec.MCPConfigPath) != "" && !spec.InferenceOnly {
 		// Only a session that configured MemQL's server can be let down
 		// by it; the stop is the process group, as a cancel's is.
 		turn.mcpServer = MCPServerName
@@ -363,7 +363,11 @@ func claudeArgv(spec Spec, knobs Knobs, prompt, ref string) []string {
 	if knobs.Effort != "" {
 		argv = append(argv, "--effort", knobs.Effort)
 	}
-	argv = append(argv, claudeGrantArgs(spec.DenyPaths)...)
+	if spec.InferenceOnly {
+		argv = append(argv, "--tools", "", "--strict-mcp-config", "--include-partial-messages", "--system-prompt", "Follow the supplied prompt and return its requested answer.")
+	} else {
+		argv = append(argv, claudeGrantArgs(spec.DenyPaths)...)
+	}
 	if path := strings.TrimSpace(spec.MCPConfigPath); path != "" {
 		argv = append(argv, "--mcp-config", path)
 	}
@@ -551,8 +555,9 @@ func claudeEnv(env []string) []string {
 // which is a cheaper guarantee than a lock and a stricter one than a
 // comment.
 type claudeTurn struct {
-	sink   Sink
-	sinkMu sync.Mutex
+	inferenceOnly bool
+	sink          Sink
+	sinkMu        sync.Mutex
 	// rec is the session's recording, shared by every turn.
 	rec *recording
 
@@ -680,6 +685,22 @@ func (t *claudeTurn) route(line []byte) {
 	}
 
 	switch ev.Type {
+	case "stream_event":
+		if t.inferenceOnly {
+			var partial struct {
+				Event struct {
+					Type  string `json:"type"`
+					Delta struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"delta"`
+				} `json:"event"`
+			}
+			if json.Unmarshal(trimmed, &partial) == nil && partial.Event.Type == "content_block_delta" && partial.Event.Delta.Type == "text_delta" {
+				t.emit(StreamAnswer, []byte(partial.Event.Delta.Text))
+			}
+		}
+		t.emit(StreamEvent, line)
 	case claudeTypeAssistant, claudeTypeUser:
 		var env claudeRecordEnvelope
 		_ = decodeTolerant(trimmed, &env)
