@@ -860,6 +860,32 @@ unbounded in-memory tracking or as owner acceptance.
 
 ## Recovery boundaries and remaining limits
 
+An `inferenceUnavailable` wait with a retry time now reaches agents from its
+run event, as transient retry waits already did. The cron leader can be a node
+without an executor; asking only that leader to dispatch left restored
+subscriptions waiting indefinitely. Each agent arms one local timer per exact
+wait. A non-agent sweep reannounces an unchanged overdue wait with a heartbeat,
+so agents that restarted after the original event can recover it too. This
+backstop requires the updated sweep on the current cron leader.
+
+The timer re-reads under the restored owner's authority and claims a leased key
+bound to the run, approval, wait start and retry time. The executor checks that
+identity and goal again; changed waits, cancellation, closed work and driver-owned
+runs are refused. Recovery preserves any existing rerun request, completed
+prefix, routing, overrides, usage and progress extensions. It does not consume a
+new human answer, select a paid provider, or treat a cost-ceiling approval without
+a retry time as automatic permission. A dead claimant leaves a lease for the
+sweep to retry; fresh events alone are not proof an external effect is repeatable.
+
+[`inference_waits_test.go`](../../../integrations/work/inference_waits_test.go)
+covers early/duplicate timers, stale waits, cancellation and missed events.
+[`TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix`](../../../app/work_inference_recovery_db_test.go)
+uses separate engines, the real Postgres claim and executor, a non-agent leader,
+and held prior execution claims. It checks one unfinished effect under a saved
+rerun request, refusal to repeat an unclassified effect without that request,
+retained prefix, and unchanged usage/extension counts.
+These fixtures do not certify a provider's actual account availability.
+
 Failure Retry creates a new execution request but preserves the failed step's
 latest admitted version override. Creating that request with an empty override
 restored the compiled section prompt and default routing after an owner had
