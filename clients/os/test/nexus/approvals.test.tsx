@@ -105,6 +105,126 @@ describe("the inbox", () => {
 });
 
 describe("deciding one", () => {
+  it("returns a repository decline reply and preserves it when saving fails", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", subject: { reviewType: "repository-change", requestId: "request-one" } })] });
+    conn.query.decideApproval.mockRejectedValueOnce(new Error("Connection interrupted"));
+    mount(conn);
+    fireEvent.click(await screen.findByText("Allow this repository change?"));
+    const reply = screen.getByRole("textbox", { name: "Reply if declined (optional)" });
+    fireEvent.change(reply, { target: { value: "  Please limit the change to the requested filter.\nWe can review exports separately.  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Decline this repository change" }));
+    await screen.findByText("Connection interrupted");
+    expect((reply as HTMLTextAreaElement).value).toContain("We can review exports separately.");
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Decline this repository change" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledTimes(2));
+    for (const [args] of conn.query.decideApproval.mock.calls) expect(args).toEqual({
+      approvalId: "repository-review", decision: "rejected",
+      answer: { reason: "Please limit the change to the requested filter.\nWe can review exports separately." },
+    });
+  });
+
+  it("keeps repository approval unchanged even when a decline reply was drafted", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", subject: { reviewType: "repository-change" } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Allow this repository change?"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply if declined (optional)" }), { target: { value: "An unsent decline draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "repository-review", decision: "approved" }));
+  });
+
+  it("does not carry a repository decline reply to another request or an ordinary approval", async () => {
+    const conn = fakeConnection({ approvals: [
+      approvalRow({ id: "repository-one", kind: "planReview", question: "Allow the first change?", subject: { reviewType: "repository-change" } }),
+      approvalRow({ id: "repository-two", kind: "planReview", question: "Allow the second change?", subject: { reviewType: "repository-change" } }),
+      approvalRow({ id: "ordinary", question: "Send the invoice?" }),
+    ] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Allow the first change?"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply if declined (optional)" }), { target: { value: "Only for the first request" } });
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    fireEvent.click(await screen.findByText("Allow the second change?"));
+    expect((screen.getByRole("textbox", { name: "Reply if declined (optional)" }) as HTMLTextAreaElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Decline this repository change" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "repository-two", decision: "rejected" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    fireEvent.click(await screen.findByText("Send the invoice?"));
+    expect(screen.queryByRole("textbox", { name: "Reply if declined (optional)" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Reject this:/ }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenLastCalledWith({ approvalId: "ordinary", decision: "rejected" }));
+  });
+
+  it.each([
+    ["propose_change", "Approval allows a pull request within these paths. Merging and deployment need separate authorization."],
+    ["deliver_change", "Approval allows independent review, required tests and merge queue admission within these paths. GitHub’s required reviews still apply. Select a production release separately."],
+  ])("shows the captured %s scope with technical references collapsed", async (operation, scope) => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", artifactHash: "exact-request-hash", subject: {
+      reviewType: "repository-change", requestId: "request-reference", repository: "acme/shop", operation, paths: ["clients/os/", "README.md"], statement: "Add a saved filter for overdue invoices.",
+    } })] }));
+    fireEvent.click(await screen.findByText("Allow this repository change?"));
+    const request = screen.getByRole("region", { name: "What is being asked" });
+    expect(within(request).getByText("Add a saved filter for overdue invoices.")).toBeTruthy();
+    expect(within(request).getByText("acme/shop")).toBeTruthy();
+    expect(within(request).getByText("clients/os/, README.md")).toBeTruthy();
+    expect(within(request).getByText(scope)).toBeTruthy();
+    expect(screen.queryByText(/A repair was proposed/)).toBeNull();
+    const details = screen.getByText("Technical details").closest("details")!;
+    expect(details.open).toBe(false);
+    expect(within(details).getByText("exact-request-hash")).toBeTruthy();
+    expect(within(details).getByText("request-reference")).toBeTruthy();
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(details.open).toBe(true);
+  });
+
+  it("does not invent missing repository request facts", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", subject: { reviewType: "repository-change" } })] }));
+    fireEvent.click(await screen.findByText("Allow this repository change?"));
+    const request = screen.getByRole("region", { name: "What is being asked" });
+    expect(within(request).getByText("The requested change was not recorded.")).toBeTruthy();
+    expect(within(request).getByText("The requested scope was not recorded.")).toBeTruthy();
+    expect(within(request).getAllByText("Not recorded")).toHaveLength(2);
+    expect(within(request).queryByText(/Approval allows/)).toBeNull();
+  });
+
+  it.each(["rejected", "approved"])("keeps the actual repository %s decision visible after its live receipt arrives", async decision => {
+    const original = approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", subject: { reviewType: "repository-change", operation: "propose_change", statement: "Add a saved filter." } });
+    const conn = fakeConnection({ approvals: [original] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Allow this repository change?"));
+    await act(async () => conn.subscriptions.emit(APPROVAL, { ...original, decision, answer: { reason: "Please limit the change to saved filters." }, createdAt: "2026-09-01T13:00:00Z" }, "NODE_UPDATED"));
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Decline this repository change" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Reply if declined (optional)" })).toBeNull();
+    if (decision === "rejected") {
+      expect(screen.getByText("Declined.")).toBeTruthy();
+      expect(screen.getByText("Please limit the change to saved filters.").closest("details")).toBeNull();
+      expect(screen.queryByText("Rejected")).toBeNull();
+    } else {
+      expect(screen.getAllByText("Work can continue within the approved scope. Production still requires a selected release.").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Please limit the change to saved filters.")).toBeNull();
+    }
+  });
+
+  it("keeps repository expiry visible when it prevents a decision", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", expiresAt: "2020-01-01T00:00:00Z", subject: { reviewType: "repository-change", statement: "Add a saved filter." } })] }));
+    fireEvent.click(await screen.findByText("Allow this repository change?"));
+    expect(within(screen.getByRole("region", { name: "What is being asked" })).getByText("Approval expires")).toBeTruthy();
+    expect(screen.getByText("This request has expired.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Decline this repository change" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Reply if declined (optional)" })).toBeNull();
+  });
+
+  it("keeps retry and abandon semantics for a legacy repository failure question", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "repository-failure", kind: "planReview", question: "How should this work continue?", subject: { reviewType: "repository-change", errorMessage: "The checkout could not be read." }, options: [{ value: "retry", label: "Retry" }, { value: "abandon", label: "Abandon" }] })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("How should this work continue?"));
+    expect(screen.getByText("The checkout could not be read.")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Reply if declined (optional)" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Decline this repository change" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "repository-failure", decision: "answered", answer: { value: "retry" } }));
+  });
+
   it("binds Apply all changes to the exact document proposal's item IDs", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({id:'a1',kind:'planReview',artifactHash:'exact-proposal',subject:{reviewType:'library-document',requestId:'request'}})] });
     const status=vi.fn().mockResolvedValue({rows:()=>[{approvalId:'a1',proposalHash:'exact-proposal',items:[{id:'item-a'},{id:'item-b'}]}]});

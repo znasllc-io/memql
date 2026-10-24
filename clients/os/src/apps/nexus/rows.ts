@@ -753,6 +753,7 @@ export interface ApprovalRow {
   stepKey: string;
   kind: string;
   subject: Record<string, unknown> | null;
+  answer: Record<string, unknown> | null;
   artifactHash: string;
   question: string;
   options: ApprovalOption[];
@@ -779,6 +780,7 @@ export function approvalFromRow(row: Row): ApprovalRow {
     stepKey: rowString(flat, "stepKey"),
     kind: rowString(flat, "kind"),
     subject: objectField(flat, "subject"),
+    answer: objectField(flat, "answer"),
     artifactHash: rowString(flat, "artifactHash"),
     question: rowString(flat, "question"),
     options: approvalOptions(flat["options"]),

@@ -61,6 +61,15 @@ export function nexusApprovalScenes(frame: Frame) {
     render: () => <NexusApprovalWindow frame={frame} approvalId={detail ? "progress-resume" : undefined} />,
   });
   return {
+    "nexus-approval-repository": {
+      ...view(),
+      connect: () => fakeConnection({
+        approvals: [approvalRow({ id: "repository-review", kind: "planReview", question: "Allow this repository change?", subject: { reviewType: "repository-change", requestId: "request-one", repository: "acme/shop", operation: "propose_change", paths: ["clients/os/"], statement: "Add a saved filter for overdue invoices." } })],
+        runs: [runRow({ id: "run-1", workTitle: "Add a saved invoice filter", status: "waiting" })],
+        writeError: new Error("The connection was interrupted. Try again."),
+      }),
+      render: () => <NexusApprovalWindow frame={frame} approvalId="repository-review" />,
+    },
     "nexus-approval-expired-scope": {
       ...view(),
       connect: () => fakeConnection({
