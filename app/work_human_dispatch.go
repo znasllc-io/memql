@@ -116,6 +116,12 @@ func (d *workRunDispatcher) wakeSettledHumanWait(ctx context.Context, req work.D
 }
 
 func humanResumeReceiptReady(journal *automations.RunJournal) bool {
+	if journal.OutcomeRecovery && journal.HumanResumeId != "" && journal.StepStates[journal.FailedStep].Status == "failed" {
+		// Reporting recovery reuses the completed execution and its consumed
+		// formatting allowance. Requiring a higher version would strand this
+		// saved answer before the agent can validate the exact retained stage.
+		return true
+	}
 	if journal.StepStates[journal.FailedStep].Status == "waiting" {
 		return true
 	}
