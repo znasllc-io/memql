@@ -252,7 +252,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // maintenance and evidence reuse), installationCompletionWorkflow, and the
 // installation overlay proposal/observation templates. Measured by the strict
 // loader after the delivery redesign; seven added, none removed.
-const shippedAutomationCount = 192
+// 192 -> 193: pipelineIndependentReviewPolicy, the opt-in review template;
+// measured by the strict loader in PR #6288 CI on 2026-10-24.
+const shippedAutomationCount = 193
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

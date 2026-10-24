@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -58,31 +61,68 @@ func TestCandidateHistoryPagesByImmutablePositionAndOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Another instance can recover review history with neither blob wiring nor
-	// valid operator configuration; configuration must not hide interrupted work.
-	i := NewIntegration(nil, &tripwireEngine{t: t}, resolver{systemVariable: func(context.Context, string) (string, error) {
-		t.Fatal("history read required live configuration")
-		return "", nil
-	}})
+	// Listing stays entirely independent of live configuration and blob wiring.
+	// Detail may add fresh public catalog status, but unavailable trust must not
+	// hide the owner's immutable record or durable approval.
+	catalogAllowed := false
+	catalogCalls := 0
+	catalogRaw := ""
+	var catalogError error
+	i := NewIntegration(nil, &tripwireEngine{t: t}, resolver{
+		systemVariable: func(ctx context.Context, name string) (string, error) {
+			if !catalogAllowed {
+				t.Fatal("history list required live configuration")
+			}
+			if name != ReleaseCatalogConfigurationVariable || !memql.FreshReadFromContext(ctx) {
+				t.Fatal("history detail requested non-catalog or cached configuration")
+			}
+			catalogCalls++
+			return catalogRaw, catalogError
+		},
+		systemSecret: func(context.Context, string) (string, error) {
+			t.Fatal("history read requested secrets")
+			return "", nil
+		},
+	})
 	i.candidateDB = func() *sql.DB { return db }
 	nodes, err := i.handleCandidateList(ctx, map[string]any{"cursor": page.NextCursor, "limit": float64(2)}, 0)
 	if err != nil || len(nodes) != 1 {
 		t.Fatal("history without object storage", err)
 	}
 	var tail candidatePage
-	if err := json.Unmarshal(nodes[0].Payload, &tail); err != nil || len(tail.Candidates) != 1 || tail.Candidates[0].ID != keys[2] || tail.Candidates[0].State != "approved" || tail.NextCursor != "" {
-		t.Fatal("continuation duplicated, omitted or crossed owner scope", tail, err)
+	if err := json.Unmarshal(nodes[0].Payload, &tail); err != nil || len(tail.Candidates) != 1 || tail.Candidates[0].ID != keys[2] || tail.Candidates[0].State != "approved" || tail.NextCursor != "" || catalogCalls != 0 {
+		t.Fatal("continuation duplicated, omitted, crossed owner scope or read configuration", tail, err)
 	}
-	nodes, err = i.handleCandidateGet(ctx, map[string]any{"candidateId": keys[2]}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var recovered candidateRecord
-	if err := json.Unmarshal(nodes[0].Payload, &recovered); err != nil || recovered.ApprovalID != approval.ApprovalID {
-		t.Fatal("review did not recover the durable approval", err)
-	}
-	if _, err := i.handleCandidateGet(ctx, map[string]any{"candidateId": foreign.ID}, 0); err == nil {
-		t.Fatal("owner read another owner's candidate")
+	catalogAllowed = true
+	for _, tc := range []struct {
+		name, raw, state string
+		err              error
+	}{
+		{name: "resolver_unavailable", err: errors.New("catalog unavailable"), state: "unavailable"},
+		{name: "missing_configuration", state: "unavailable"},
+		{name: "malformed_configuration", raw: `{`, state: "unavailable"},
+		{name: "invalid_trust", raw: `{"formatVersion":1,"publisher":"fixture","publicKeys":{"fixture-key":"invalid"}}`, state: "unavailable"},
+		{name: "verified_lookup_absent", raw: `{"formatVersion":1,"publisher":"fixture","publicKeys":{"fixture-key":"` + base64.StdEncoding.EncodeToString(make([]byte, 32)) + `"}}`, state: "absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			catalogRaw, catalogError = tc.raw, tc.err
+			before := catalogCalls
+			nodes, err := i.handleCandidateGet(ctx, map[string]any{"candidateId": keys[2]}, 0)
+			if err != nil || len(nodes) != 1 {
+				t.Fatal("catalog availability hid owner history", err)
+			}
+			var recovered struct {
+				candidateRecord
+				Catalog candidateCatalogStatus `json:"catalog"`
+			}
+			if err := json.Unmarshal(nodes[0].Payload, &recovered); err != nil || !reflect.DeepEqual(recovered.candidateRecord, approval) || recovered.Catalog != (candidateCatalogStatus{State: tc.state}) || catalogCalls != before+1 {
+				t.Fatal("history changed immutable identity, approval or honest catalog status", recovered, err)
+			}
+			before = catalogCalls
+			if _, err := i.handleCandidateGet(ctx, map[string]any{"candidateId": foreign.ID}, 0); err == nil || catalogCalls != before {
+				t.Fatal("foreign history reached catalog configuration or crossed owner scope", err)
+			}
+		})
 	}
 	if _, err := db.Exec(`UPDATE release_candidates SET manifest=jsonb_set(manifest,'{components,0,version}','"99.0.0"'::jsonb) WHERE candidate_id=$1`, keys[2]); err != nil {
 		t.Fatal(err)

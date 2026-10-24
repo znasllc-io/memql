@@ -169,7 +169,7 @@ or an explicitly configured `MEMQL_GITHUB_RELEASE_TOKEN`. Owner authority is
 checked before provider calls. Its dry run reads the repository without creating
 a tag or Release:
 
-```memql
+```memql fragment
 builtin releaseCut(bump: "patch", dryRun: true)
 ```
 
@@ -184,3 +184,27 @@ The legacy cut records its own `v1:cluster:releaseCut` history and audit. Neithe
 that history nor the presence of a tag replaces candidate publication receipts
 or the signed release catalog. Protect immutable release tags with repository
 rules and keep write credentials restricted to the configured repository.
+
+### What each legacy refusal means
+
+These codes belong to `releaseCut` and `releaseCutStatus`. They are not a list
+of the saved build flow's reason codes. Read the operation's recorded outcome
+before acting; a failed provider response alone does not prove that a write
+never reached GitHub.
+
+| Code | What happened and what to do |
+| --- | --- |
+| `release_candidate_required` | The legacy workflow has no checked candidate, or the real cut is missing `expectedRepository`, `expectedSha` or `expectedVersion`. Review a successful dry run and pass its exact values to the public cut operation; do not call private workflow steps out of order. |
+| `release_candidate_changed` | The repository, main commit or next version differs from the reviewed dry run. Read and review a new dry run before authorizing a cut. This mismatch refuses before tag creation. |
+| `release_repo_unconfigured` | `MEMQL_RELEASE_REPO` is missing or malformed, or GitHub returned 404 for a repository the credential cannot see. Have the operator verify the `owner/name` setting and the configured credential's access; a 404 does not distinguish a wrong name from hidden private content. |
+| `credential_unavailable` | No usable repository credential resolved, the GitHub App could not obtain access, or GitHub returned 401/403. Have the operator verify the existing App installation and Contents read/write grant, or the explicitly configured `MEMQL_GITHUB_RELEASE_TOKEN` secret. Do not expose credential values in diagnostics. |
+| `github_unreachable` | A request, response read or provider status failed. Inspect the named operation and current provider state. If a write may have been sent, establish the existing tag and Release outcome before another cut; do not infer absence from a timeout. |
+| `ref_exists` | GitHub refused reference creation, normally because the tag already exists; another validation failure can also return 422. Inspect the existing reference and the bounded provider explanation, then refresh the plan. Do not overwrite or move a release tag. |
+| `already_released_at_head` | The current main commit already carries a release tag. Use that release, or merge a reviewed source/version change before selecting another release commit. |
+| `version_file_stale` | Root `VERSION` is absent or differs from the version the chosen bump would cut. Merge the ordinary version-preparation PR with the exact unprefixed version, or choose the correct bump, then review a fresh dry run. |
+| `tag_created_release_failed` | Tag creation succeeded, but Release publication was not confirmed. Keep the recorded tag and source identity, inspect whether the Release exists, and have the operator reconcile that same tag. Do not start another cut or claim that the build was dispatched. |
+| `no_release_tags` | The legacy bump algorithm found no `vX.Y.Z` history from which to compute a version. The owner must choose and establish the first release through a reviewed bootstrap procedure; this API does not invent a starting version. |
+| `invalid_bump` | A cut received something other than `major`, `minor` or `patch`, or a status call received a malformed version. Use the declared bump enum or a status version such as `v1.2.3`. The DSL enum rejects invalid cut choices before the native handler. |
+| `not_owner` | The call has no resolved cluster-owner identity. Use the authorized owner account; the native gate refuses before provider calls. A UI control cannot grant this role. |
+| `version_not_cut` | This installation has no legacy cut record for the requested version. Inspect the correct installation or the candidate's publication history. Do not recut it or infer missing images merely to create a local history row. |
+| `registry_check_failed` | The registry availability check failed. The response retains the previous status with `checkError`; it does not establish that images are present or absent. Resolve the reported registry access problem, then explicitly check again. |

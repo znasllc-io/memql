@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -106,6 +107,46 @@ func TestCatalogOCIReplicaSealHistoryAndRoleBoundary(t *testing.T) {
 		},
 	})
 	reader.candidateDB = func() *sql.DB { return db }
+	stored, err := p.ledger.get(ownerCtx(), request.CandidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHistory := func(t *testing.T, state string) {
+		t.Helper()
+		nodes, err := reader.handleCandidateGet(ownerCtx(), map[string]any{"candidateId": request.CandidateID}, 0)
+		if err != nil || len(nodes) != 1 {
+			t.Fatal("catalog trust hid historical candidate", err)
+		}
+		var recovered struct {
+			candidateRecord
+			Catalog candidateCatalogStatus `json:"catalog"`
+		}
+		want := candidateCatalogStatus{State: state}
+		if state == "sealed" {
+			verified, err := pl.VerifyPublishedRelease(first, "fixture", trust)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want.ApprovalID, want.Digest = request.ApprovalID, verified.Digest()
+		}
+		if err := json.Unmarshal(nodes[0].Payload, &recovered); err != nil || !reflect.DeepEqual(recovered.candidateRecord, stored) || recovered.Catalog != want {
+			t.Fatal("history changed immutable approval or claimed unverified catalog status", recovered, err)
+		}
+	}
+	t.Run("history_reports_verified_seal", func(t *testing.T) { assertHistory(t, "sealed") })
+	t.Run("untrusted_signature_preserves_history", func(t *testing.T) {
+		validConfig := cfgBytes
+		defer func() { cfgBytes = validConfig }()
+		otherKey, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfgBytes, err = json.Marshal(catalogConfiguration{FormatVersion: 1, Publisher: "fixture", PublicKeys: map[string]string{"fixture-key": base64.StdEncoding.EncodeToString(otherKey)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertHistory(t, "unavailable")
+	})
 	if _, err := reader.handleCatalogGet(actorContext(auth.RoleDeveloper), map[string]any{"candidateId": request.CandidateID}, 0); err != nil {
 		t.Fatal("public catalog handler required private dependencies", err)
 	}
@@ -167,6 +208,7 @@ func TestCatalogOCIReplicaSealHistoryAndRoleBoundary(t *testing.T) {
 	if _, err := PublishedCatalog(actorContext(auth.RoleDeveloper), db, request.CandidateID, "fixture", trust); err == nil {
 		t.Fatal("corrupted signed catalog accepted")
 	}
+	t.Run("corrupted_catalog_preserves_history", func(t *testing.T) { assertHistory(t, "unavailable") })
 }
 
 func TestCatalogFileRequiresPublishedNativeRelease(t *testing.T) {

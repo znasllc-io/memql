@@ -1,0 +1,47 @@
+{
+  "automation": "pipelines/automations.memql pipelineIndependentReviewPolicy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ownerUserId": "s-ownerUserId",
+            "pipelineId": "s-pipelineId",
+            "repository": "s-repository"
+          },
+          "topic": "automation.invocation.pipelineIndependentReviewPolicy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ownerUserId": "s-ownerUserId",
+            "pipelineId": "s-pipelineId",
+            "repository": "s-repository"
+          },
+          "topic": "automation.invocation.pipelineIndependentReviewPolicy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
