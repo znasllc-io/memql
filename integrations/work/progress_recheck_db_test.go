@@ -11,6 +11,14 @@ import (
 )
 
 func TestProgressStopRecheckDBAcrossReplicas(t *testing.T) {
+	testProgressStopRecheckDBAcrossReplicas(t, workstate.CeilingModelCalls)
+}
+
+func TestUnevaluatedStopRecheckDBAcrossReplicas(t *testing.T) {
+	testProgressStopRecheckDBAcrossReplicas(t, workstate.CeilingUnevaluated)
+}
+
+func testProgressStopRecheckDBAcrossReplicas(t *testing.T, ceiling string) {
 	a, b := freshActsDBPair(t, openActsDB(t), openActsDB(t))
 	for _, peer := range []actsDB{a, b} {
 		require.NoError(t, peer.eng.RegisterIntegration(peer.i))
@@ -26,7 +34,7 @@ func TestProgressStopRecheckDBAcrossReplicas(t *testing.T) {
 	a.writeVersion(t, runID, runID, "draft", 0, 1, nil, "", map[string]any{"status": "waiting"})
 	limits := map[string]any{"maxModelCalls": 96, "wallClockMs": 7200000}
 	a.write(t, "updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": limits})
-	request := workstate.ProgressFeedback(runID, "draft", workstate.CeilingBreach{Ceiling: workstate.CeilingModelCalls, Limit: "96 calls", Actual: "317 made"}, time.Now(), time.Hour)
+	request := workstate.ProgressFeedback(runID, "draft", workstate.CeilingBreach{Ceiling: ceiling, Reason: "admission unavailable"}, time.Now(), time.Hour)
 	workstate.StopProgressFeedback(&request)
 	request.Subject["resumeKind"], request.Subject["resumeReason"] = waitKindReplan, "Reuse the finished candidate and hold its merge."
 	approvalID := newRowId(approvalConcept)
