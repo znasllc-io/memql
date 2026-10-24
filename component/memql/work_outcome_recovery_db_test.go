@@ -2,11 +2,13 @@ package memql
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -42,6 +44,20 @@ func TestLegacyOutcomeRecoveryReadsExactOwnedSessionSourcesOnPeer(t *testing.T) 
 	encoded, err := json.Marshal(got)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "Private App prompt")
+	// Run-level reporting errors survive while the executor moves to later
+	// steps. A complete empty scan permits only a step with no prior production.
+	next := run
+	next.StepKey = "next-step"
+	got, err = b.ReadLegacyWorkOutcome(common.ContextWithRun(runtime, next))
+	require.NoError(t, err)
+	require.Nil(t, got)
+	write("updateWorkRun", map[string]any{"runId": runID, "errorMessage": work.OutcomeRecoveryError(fmt.Errorf("retained reporting stage")).Error()})
+	got, err = b.ReadLegacyWorkOutcome(common.ContextWithRun(runtime, next))
+	require.NoError(t, err)
+	require.Nil(t, got)
+	_, err = b.ReadLegacyWorkOutcome(runtime)
+	require.ErrorContains(t, err, "checkpoint missing", "a completed operational App still prevents production without its stage")
+	write("updateWorkRun", map[string]any{"runId": runID, "errorMessage": `function "runAgentTurn" execution failed: runAgentTurn: invalid delegated work outcome: use respondToUser`})
 	foreign := common.ContextWithRun(auth.ContextWithUserActor(ctx, "stranger"), run)
 	_, err = b.ReadLegacyWorkOutcome(foreign)
 	require.Error(t, err)

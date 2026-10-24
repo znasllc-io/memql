@@ -35,12 +35,10 @@ func (e *MemQLEngine) ReadLegacyWorkOutcome(ctx context.Context) (*WorkDelegated
 		return nil, fmt.Errorf("outcome recovery run unavailable: %v", err)
 	}
 	message := stringArg(rows[0], "errorMessage")
-	if work.IsOutcomeRecoveryFailure(message) && !work.IsLegacyOutcomeFailure(message) {
-		return nil, fmt.Errorf("outcome recovery checkpoint missing; production remains stopped")
-	}
-	if !work.IsLegacyOutcomeFailure(message) {
+	if !work.IsOutcomeRecoveryFailure(message) {
 		return nil, nil
 	}
+	legacy := work.IsLegacyOutcomeFailure(message)
 	call, err := parser.RenderCall("appSessionsForStep", map[string]any{"stepId": run.StepKey})
 	if err != nil {
 		return nil, err
@@ -63,6 +61,9 @@ func (e *MemQLEngine) ReadLegacyWorkOutcome(ctx context.Context) (*WorkDelegated
 			if len(scope.Tools) == 0 {
 				continue
 			} // Inference helpers are not production.
+			if !legacy {
+				return nil, fmt.Errorf("outcome recovery checkpoint missing; production remains stopped")
+			}
 			if row["status"] != "ended" || row["exitCode"] != float64(0) ||
 				BareShortId(scope.Run.RunId) != BareShortId(run.RunId) || BareShortId(scope.Run.GoalId) != BareShortId(run.GoalId) ||
 				BareShortId(scope.Run.OwnerUserId) != BareShortId(run.OwnerUserId) || scope.Run.StepKey != run.StepKey ||
@@ -102,7 +103,10 @@ func (e *MemQLEngine) ReadLegacyWorkOutcome(ctx context.Context) (*WorkDelegated
 			cursor = meta.Cursor
 		}
 		if cursor == "" {
-			break
+			// A run-level error can survive completion of its recovered step.
+			// An exhaustive owned-step scan with no operational App proves this
+			// step has nothing to replay; it must not inherit another step's stop.
+			return nil, nil
 		}
 	}
 	return nil, fmt.Errorf("outcome recovery completed App missing within scan bound; production remains stopped")

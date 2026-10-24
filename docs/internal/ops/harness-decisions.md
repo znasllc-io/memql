@@ -58,6 +58,11 @@ checks the actual owner-scoped journal and refusal cases on another engine.
 `TestWorkDBAppReplySourceSurvivesReplicaChange` changes recorded guidance during
 conversion in both provider lanes and verifies peer recovery through the real
 adapter with one production call and one conversion.
+Run-level reporting errors may outlive the recovered step. Before refusing an
+otherwise empty stage, recovery scans the current owned step's App receipts.
+An exhaustive scan with no operational App allows that new step to start; a
+completed App without its checkpoint still stops, as does an incomplete scan.
+The legacy recovery DB test and both adapter lanes cover this step boundary.
 The exact pre-upgrade native `invalid delegated work outcome` failure can be
 upgraded from the latest owned operational App's native handover and public
 receipts. Its owner/run/goal/step/rerun/override and ended-success interval must
