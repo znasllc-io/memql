@@ -21,6 +21,12 @@ saved context and new human answer. Completed tool results stay in order and
 the original checkpoint remains unchanged. Retaining the instructions does not
 grant new access or prove that the model followed them.
 
+An approval resume reuses the saved history and adds the current decision. It
+does not reload every older answered question after those bodies have already
+been summarized. A fresh execution still receives historical answers, and late
+optional answers or later corrections continue to arrive through the guidance
+journal. The original answers remain available for exact recall.
+
 A correction sent instead of granting an approval remains guidance for the
 unfinished work after another approval, retry or worker restart. The executing
 worker recovers that correction from the owner's decision journal and orders it

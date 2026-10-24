@@ -133,6 +133,16 @@ func workTurnHistory(ctx context.Context, engine interface {
 		return nil, fmt.Errorf("work context: reading recorded answers: %w", err)
 	}
 	for _, question := range memql.MaterializeRows(questions) {
+		// A validated native continuation restores its compacted history below.
+		// Re-inserting every old answer here makes archived question bodies look
+		// new to the exact-message deduper and repeatedly expands that history.
+		// Keep only this wait's answer; fresh executions still load all answers.
+		// Late optional answers and later corrections arrive independently via
+		// ReadWorkGuidance at model/tool boundaries. No permission is inferred
+		// from this selection, and missing/changed checkpoints still fail closed.
+		if run.Continuation != nil && memql.BareShortId(asString(question["id"])) != memql.BareShortId(run.Continuation.ApprovalID) {
+			continue
+		}
 		if contract, _, optional := work.OptionalFeedback(question); optional &&
 			(contract["templateFingerprint"] != rows[0]["templateFingerprint"] || asString(contract["rerunRequestId"]) != run.RerunRequestId) {
 			continue
