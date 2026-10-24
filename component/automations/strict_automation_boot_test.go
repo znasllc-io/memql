@@ -252,7 +252,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // maintenance and evidence reuse), installationCompletionWorkflow, and the
 // installation overlay proposal/observation templates. Measured by the strict
 // loader after the delivery redesign; seven added, none removed.
-const shippedAutomationCount = 192
+// 192 -> 193: agentWorkOutcomeRecovery, the bounded inference-only reporting
+// conversion policy; measured by the strict loader.
+const shippedAutomationCount = 193
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -526,7 +526,7 @@ BackgroundLoop:
 				// A completed app session must not be repeated to repair a
 				// terminal envelope; its operational effects already happened.
 				if isDelegatedWorkSession(provider) {
-					return nil, fmt.Errorf("invalid delegated work outcome: %w", outcomeErr)
+					return nil, delegatedOutcomeFailure(ctx, provider, messages, turnText, turnCalls, turnCtx, outcomeErr)
 				}
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)

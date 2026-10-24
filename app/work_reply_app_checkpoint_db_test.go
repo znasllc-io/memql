@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/router"
 	"github.com/znasllc-io/memql/core/common"
@@ -25,7 +26,11 @@ import (
 	work "github.com/znasllc-io/memql/integrations/work"
 )
 
-type replyAppCheckpointFixture struct{ calls int }
+type replyAppCheckpointFixture struct {
+	calls, formats int
+	invalid        bool
+	engine         *memql.MemQLEngine
+}
 
 func (*replyAppCheckpointFixture) Doors(context.Context, string) ([]memql.AppDoor, error) {
 	return []memql.AppDoor{{AppId: "codex", Machines: []memql.AppMachine{{RegistrationId: "fixture", Online: true, LocalStream: true, StructuredResult: true, FollowUps: true}}}}, nil
@@ -33,11 +38,40 @@ func (*replyAppCheckpointFixture) Doors(context.Context, string) ([]memql.AppDoo
 func (*replyAppCheckpointFixture) AppOrder(context.Context, string) ([]string, error) {
 	return nil, nil
 }
-func (*replyAppCheckpointFixture) Call(context.Context, memql.AppCallRequest) (memql.AppCallResult, error) {
+func (f *replyAppCheckpointFixture) Call(_ context.Context, req memql.AppCallRequest) (memql.AppCallResult, error) {
+	if req.Schema != nil && req.Schema.Name == "work_reply_review" && len(req.Images) == 0 && len(req.Inputs) == 0 {
+		return memql.AppCallResult{Content: `{"reply":"Hello from the saved App","missingEvidence":"","completion":{"kind":"information","disposition":"satisfied","gap":"","sourceRefs":[]}}`}, nil
+	}
+	if f.invalid && req.Schema != nil && req.Schema.Name == "work_outcome_format" && len(req.Images) == 0 && len(req.Inputs) == 0 {
+		if req.Model != "gpt-6-astra" || req.Effort != "xhigh" {
+			return memql.AppCallResult{}, fmt.Errorf("format helper lost the explicit model or effort: %s/%s", req.Model, req.Effort)
+		}
+		f.formats++
+		return memql.AppCallResult{Content: `{"status":"complete","response":"Hello from the saved App","question":null}`}, nil
+	}
 	return memql.AppCallResult{}, fmt.Errorf("greeting must use the session door")
 }
-func (f *replyAppCheckpointFixture) RunStep(context.Context, memql.AppSessionHandover) (memql.AppSessionOutcome, error) {
+func (f *replyAppCheckpointFixture) RunStep(ctx context.Context, h memql.AppSessionHandover) (memql.AppSessionOutcome, error) {
 	f.calls++
+	if f.invalid {
+		session := id.NewShortId()
+		for _, mutation := range []struct {
+			name string
+			args map[string]any
+		}{
+			{"createAppSession", map[string]any{"sessionId": session, "workerId": "fixture-worker", "app": "codex", "kind": "run", "runId": h.RunId, "stepId": h.StepId, "workspace": "/fixture", "prompt": "private operational prompt", "toolScope": h.ToolScope, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
+			{"endAppSession", map[string]any{"sessionId": session, "status": "ended", "exitCode": 0, "endedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
+		} {
+			call, err := parser.RenderCall(mutation.name, mutation.args)
+			if err != nil {
+				return memql.AppSessionOutcome{}, err
+			}
+			if _, err = f.engine.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
+				return memql.AppSessionOutcome{}, err
+			}
+		}
+		return memql.AppSessionOutcome{SessionId: session, Content: "Hello from the saved App", ExecutionSurface: "cockpit-app:codex"}, nil
+	}
 	return memql.AppSessionOutcome{Content: "Hello from the saved App", Result: []byte(`{"terminalTool":"respondToUser","arguments":{"status":"complete","response":"Hello from the saved App"}}`), ExecutionSurface: "cockpit-app:codex"}, nil
 }
 
@@ -52,7 +86,7 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 	gates, err := database.NewGatePool(dbtest.DSN(), 0)
 	require.NoError(t, err)
 	defer gates.Close()
-	fixture := &replyAppCheckpointFixture{}
+	fixture := &replyAppCheckpointFixture{engine: writer}
 	var repliers []*agent.Replier
 	for _, e := range []*memql.MemQLEngine{writer, reader} {
 		e.SetScopedWorkflowRunner(func(ctx context.Context, name string, args map[string]any, ops map[string]memql.WorkflowOperation) (any, error) {
@@ -83,54 +117,63 @@ func TestWorkDBAppReplySourceSurvivesReplicaChange(t *testing.T) {
 		repliers = append(repliers, replier)
 	}
 	for _, background := range []bool{false, true} {
-		t.Run(fmt.Sprintf("background=%v", background), func(t *testing.T) {
-			key := id.NewShortId()
-			owner, goalID, runID := key+"owner", key+"goal", key+"run"
-			person := auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
-			write := func(name string, args map[string]any) {
-				templateMutation(t, writer, auth.ContextWithInternalOrigin(person), name, args)
-			}
-			write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Say hello", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 10, "wallClockMs": 600000}})
-			write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "fixture", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
-			write("createWorkStep", map[string]any{"stepId": key + "reason", "runId": runID, "key": "reason", "seq": 0, "stepType": "builtin", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
-			ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: "reason", Mode: common.RunModeLive})
-			msg := &memqlv1.AgentGenerateTurnMsg{RequestId: key, AgentId: "fixture", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "fixture", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "hello"}}}
-			if background {
-				msg.Hints = map[string]string{agent.ExecutionLaneHintKey: agent.ExecutionLaneBackground}
-			}
-			before := fixture.calls
-			for _, replier := range repliers {
-				result, err := replier.Handle(ctx, msg, knowledgeTurnSink{})
-				require.NoError(t, err)
-				require.Equal(t, "Hello from the saved App", result.FinalText)
-			}
-			require.Equal(t, before+1, fixture.calls, "peer delivery must reuse completed production")
-			source, err := reader.RestoreWorkContinuation(ctx, nil)
-			require.NoError(t, err)
-			state, err := reader.ReadWorkReplyReview(ctx)
-			require.NoError(t, err)
-			var pending struct {
-				Messages []common.ChatMessage `json:"messages"`
-			}
-			require.NoError(t, json.Unmarshal(state.Pending, &pending))
-			require.Equal(t, source, pending.Messages)
-			completed := 0
-			for _, message := range source {
-				if message.Role != "assistant" {
-					continue
+		for _, invalid := range []bool{false, true} {
+			t.Run(fmt.Sprintf("background=%v/invalid=%v", background, invalid), func(t *testing.T) {
+				fixture.invalid = invalid
+				key := id.NewShortId()
+				owner, goalID, runID := key+"owner", key+"goal", key+"run"
+				person := auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
+				write := func(name string, args map[string]any) {
+					templateMutation(t, writer, auth.ContextWithInternalOrigin(person), name, args)
 				}
-				for _, call := range message.ToolCalls {
-					if call.Name != "respondToUser" {
+				write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Say hello", "origin": "user", "ceilings": map[string]any{"maxModelCalls": 10, "wallClockMs": 600000}})
+				write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "fixture", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				write("createWorkStep", map[string]any{"stepId": key + "reason", "runId": runID, "key": "reason", "seq": 0, "stepType": "builtin", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+				ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: "reason", Mode: common.RunModeLive, Override: &common.StepOverride{Model: "app:codex:gpt-6-astra", Effort: "xhigh"}})
+				msg := &memqlv1.AgentGenerateTurnMsg{RequestId: key, AgentId: "fixture", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "fixture", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "hello"}}}
+				if background {
+					msg.Hints = map[string]string{agent.ExecutionLaneHintKey: agent.ExecutionLaneBackground}
+				}
+				before := fixture.calls
+				formatsBefore := fixture.formats
+				for _, replier := range repliers {
+					result, err := replier.Handle(ctx, msg, knowledgeTurnSink{})
+					require.NoError(t, err)
+					require.Equal(t, "Hello from the saved App", result.FinalText)
+				}
+				require.Equal(t, before+1, fixture.calls, "peer delivery must reuse completed production")
+				if invalid {
+					require.Equal(t, formatsBefore+1, fixture.formats, "format recovery cannot repeat on a peer")
+				} else {
+					require.Equal(t, formatsBefore, fixture.formats)
+				}
+				source, err := reader.RestoreWorkContinuation(ctx, nil)
+				require.NoError(t, err)
+				state, err := reader.ReadWorkReplyReview(ctx)
+				require.NoError(t, err)
+				var pending struct {
+					Messages []common.ChatMessage `json:"messages"`
+				}
+				require.NoError(t, json.Unmarshal(state.Pending, &pending))
+				require.Equal(t, source, pending.Messages)
+				completed := 0
+				for _, message := range source {
+					if message.Role != "assistant" {
 						continue
 					}
-					envelope, err := agent.ParseEnvelope(call.Arguments)
-					require.NoError(t, err)
-					if envelope.Response == "Hello from the saved App" {
-						completed++
+					for _, call := range message.ToolCalls {
+						if call.Name != "respondToUser" {
+							continue
+						}
+						envelope, err := agent.ParseEnvelope(call.Arguments)
+						require.NoError(t, err)
+						if envelope.Response == "Hello from the saved App" {
+							completed++
+						}
 					}
 				}
-			}
-			require.Equal(t, 1, completed, "durable source must include the completed response once")
-		})
+				require.Equal(t, 1, completed, "durable source must include the completed response once")
+			})
+		}
 	}
 }

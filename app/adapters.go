@@ -442,6 +442,16 @@ func (a *CognitionEngineAdapter) SaveWorkReplyReview(ctx context.Context, bindin
 	return a.Engine.SaveWorkReplyReview(ctx, binding, value)
 }
 
+func (a *CognitionEngineAdapter) ReadLegacyWorkOutcome(ctx context.Context) (*memql.WorkDelegatedOutcome, error) {
+	return a.Engine.ReadLegacyWorkOutcome(ctx)
+}
+func (a *CognitionEngineAdapter) WorkDelegatedOutcomeSource(ctx context.Context, id string, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	return a.Engine.WorkDelegatedOutcomeSource(ctx, id, messages)
+}
+func (a *CognitionEngineAdapter) FormatWorkOutcome(ctx context.Context, input memql.WorkDelegatedOutcome, schema json.RawMessage) (string, error) {
+	return a.Engine.FormatWorkOutcome(ctx, input, schema)
+}
+
 // InvokeAIStructured keeps model routing and strict output validation at the engine seam.
 func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
 	return a.Engine.InvokeAIStructured(ctx, templateID, data, schemaName, schema, strict)

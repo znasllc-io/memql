@@ -19,17 +19,21 @@ type workReplyReviewStore interface {
 // completed result and terminal envelope remain withheld, with their exact
 // source checkpoint, until review succeeds under current owner instructions.
 type pendingWorkReply struct {
-	Version           int                  `json:"version"`
-	Result            *TurnResult          `json:"result"`
-	TerminalID        string               `json:"terminalId"`
-	TerminalArguments string               `json:"terminalArguments"`
-	Messages          []common.ChatMessage `json:"messages"`
+	Version           int                   `json:"version"`
+	Result            *TurnResult           `json:"result"`
+	TerminalID        string                `json:"terminalId"`
+	TerminalArguments string                `json:"terminalArguments"`
+	Messages          []common.ChatMessage  `json:"messages"`
+	OutcomeFormat     *pendingOutcomeFormat `json:"outcomeFormat,omitempty"`
 }
 
 func decodePendingWorkReply(raw json.RawMessage) (*pendingWorkReply, error) {
 	var pending pendingWorkReply
-	if json.Unmarshal(raw, &pending) != nil || pending.Version != 1 || pending.Result == nil || pending.Result.Paused || strings.TrimSpace(pending.Result.FinalText) == "" || len(pending.Messages) == 0 || (pending.TerminalID != "" && !json.Valid([]byte(pending.TerminalArguments))) {
+	if json.Unmarshal(raw, &pending) != nil || pending.Version != 1 || pending.Result == nil || pending.Result.Paused || (strings.TrimSpace(pending.Result.FinalText) == "" && pending.OutcomeFormat == nil) || len(pending.Messages) == 0 || (pending.TerminalID != "" && !json.Valid([]byte(pending.TerminalArguments))) {
 		return nil, fmt.Errorf("unreadable pending reply review; completed production cannot be replayed")
+	}
+	if f := pending.OutcomeFormat; f != nil && (f.Attempts < 0 || f.Attempts > 1 || f.Input.SessionID == "" || len(f.Input.Messages) == 0 || (f.Done && f.Attempts != 1)) {
+		return nil, fmt.Errorf("unreadable outcome-format checkpoint; production cannot be replayed")
 	}
 	if _, _, err := recoveryState(pending.Messages); err != nil {
 		return nil, err
