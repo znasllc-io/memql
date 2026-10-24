@@ -422,13 +422,6 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 			t.Fatalf("missing deterministic receipt or unnecessary model calls: %s / %d", receipt, bridge.calls)
 		}
 	})
-	// A fork belongs to a real open goal. Compilation alone only persists the
-	// draft; the fork guard must still verify its owner's goal on the receiver.
-	if _, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkGoal("+encodeArgs(map[string]any{
-		"goalId": "v1:work:goal:draft-goal", "statement": "Create and save the requested deliverable", "origin": "user",
-	})+")"); err != nil {
-		t.Fatal(err)
-	}
 	for _, sectionable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("sectionable=%t", sectionable), func(t *testing.T) {
 			triage := map[string]any{"complexity": "trivial", "requiresFile": false}
@@ -436,8 +429,17 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 				triage = map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "first section", "outputs": []string{"first"}}, {"label": "two", "instruction": "second section", "outputs": []string{"second"}}}}
 			}
 			bridge := &draftDBCompiler{engine: plannerEngine, triage: triage}
-			req := CompileRequest{GoalId: "v1:work:goal:draft-goal", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
+			req := CompileRequest{GoalId: "v1:work:goal:" + id.NewShortId(), RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
 			req.Spine, err = workintegration.CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fork admission validates the owning goal under its lifecycle gate.
+			// Each subcase owns a fresh goal, as native goal creation does, so
+			// the receiver cannot reuse the sibling's lifecycle state.
+			_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkGoal("+encodeArgs(map[string]any{
+				"goalId": req.GoalId, "statement": req.Statement, "origin": "user", "requestedVia": "nexus", "input": req.Input,
+			})+")")
 			if err != nil {
 				t.Fatal(err)
 			}

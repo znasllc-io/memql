@@ -261,7 +261,9 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 			approval := query(reader, "workApprovalForOwner", map[string]any{"approvalId": wait.ApprovalID})[0]
 			subject := approval["subject"].(map[string]any)
 			require.NotContains(t, subject, "computerPermission")
+			require.NotContains(t, subject, "scope")
 			require.Equal(t, "desktop", subject["sessionKind"], "the feedback question uses an explicit session request, never an omitted operation")
+			require.Equal(t, "full", subject["sessionScope"])
 			require.Contains(t, subject, "nativeScopeCheckpoint")
 			witness := subject["nativeScopeCheckpoint"].(map[string]any)
 			require.Equal(t, "scope-call", witness["toolCallId"])
@@ -317,7 +319,7 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 				require.NoError(t, prepErr, code)
 				return prepared, options
 			}
-			for _, mode := range []string{"missing-proof", "forged-checkpoint", "wrong-call", "changed-request", "changed-summary", "foreign-owner", "wrong-run", "wrong-step", "mixed-answer", "wrong-rerun", "changed-child-parent", "changed-child-owner", "changed-checkpoint"} {
+			for _, mode := range []string{"missing-proof", "forged-checkpoint", "wrong-call", "changed-request", "changed-summary", "changed-session-kind", "foreign-owner", "wrong-run", "wrong-step", "mixed-answer", "wrong-rerun", "changed-child-parent", "changed-child-owner", "changed-checkpoint"} {
 				t.Run(mode, func(t *testing.T) {
 					rowID, concept := "v1:work:approval:"+memql.BareShortId(wait.ApprovalID), "v1:work:approval"
 					if mode == "wrong-rerun" {
@@ -346,6 +348,8 @@ func TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall(t *testing.T) {
 						s["nativeScopeCheckpoint"].(map[string]any)["requestHash"] = "forged"
 					case "changed-summary":
 						s["summary"] = "A different request"
+					case "changed-session-kind":
+						s["sessionKind"] = "http"
 					case "foreign-owner", "changed-child-owner":
 						changed["ownerUserId"] = "v1:identity:user:other"
 					case "wrong-run":
