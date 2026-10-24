@@ -38,6 +38,39 @@ func (e *MemQLEngine) ReadLegacyWorkOutcome(ctx context.Context) (*WorkDelegated
 	if !work.IsOutcomeRecoveryFailure(message) {
 		return nil, nil
 	}
+	if approvalID := stringArg(rows[0], "humanResumeId"); approvalID != "" {
+		approval, _, err := e.approvalRows(ctx, approvalID)
+		if err != nil {
+			return nil, err
+		}
+		subject, _ := approval["subject"].(map[string]any)
+		origin := stringArg(approval, "stepKey")
+		if BareShortId(stringArg(approval, "runId")) != BareShortId(run.RunId) || origin == "" {
+			return nil, fmt.Errorf("outcome recovery decision binding unavailable")
+		}
+		if approval["kind"] == "feedback" && work.IsOutcomeRecoveryFailure(stringArg(subject, "errorMessage")) && origin != run.StepKey {
+			answer, _ := approval["answer"].(map[string]any)
+			if approval["decision"] != "answered" || stringArg(answer, "value") != work.FailureAnswerRetry || BareShortId(stringArg(approval, "decidedBy")) != BareShortId(run.OwnerUserId) {
+				return nil, fmt.Errorf("outcome recovery origin decision is not an owned Retry")
+			}
+			call, err := parser.RenderCall("workStepForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": origin})
+			if err != nil {
+				return nil, err
+			}
+			result, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
+			if err != nil {
+				return nil, err
+			}
+			steps := MaterializeRows(result.OutputPayload())
+			if len(steps) != 1 || steps[0]["status"] != "done" {
+				return nil, fmt.Errorf("outcome recovery origin has not completed")
+			}
+			// The retained error belongs to the recovered origin, even when this
+			// later plan step has older App receipts of its own. Its ordinary
+			// continuation/checkpoint gates still govern any new production.
+			return nil, nil
+		}
+	}
 	legacy := work.IsLegacyOutcomeFailure(message)
 	call, err := parser.RenderCall("appSessionsForStep", map[string]any{"stepId": run.StepKey})
 	if err != nil {
