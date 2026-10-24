@@ -671,6 +671,29 @@ old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
+A stale serving replica can still write a hard call/time stop using the retired
+lifetime policy. Refresh every role that serves the affected path: the BFF's
+interactive approval, the agent's execution and the planner's replan/remedy
+each need their actual runtime build identity verified. A fresh agent pod alone
+does not establish planner compatibility. Read startup build-identity logs;
+do not launch the engine with an assumed `--version` flag (older binaries ignore
+it and start another server). Local repairs use the supported role-scoped dev
+build and must preserve unrelated release candidates and active CI.
+
+After such a repair, the existing discussion action can reconsider a saved
+hard replan call/time stop only if fresh owned state proves its versioned, already
+renewed window covers recorded spend. The original approval remains unchanged;
+guidance neither adds a window nor clears spend, credits or the evidence epoch.
+The answer and release still use the ordinary receipt gate and exact wait, and
+recovery after a partial write repeats the same fresh check. Genuine monetary
+limits, exhausted windows, missing/malformed state, closed goals, cancellation,
+foreign ownership and result reviews refuse. The saved replan reason survives
+before the latest correction; inference still reconciles receipts and passes
+explicit provider caps at admission. `TestStaleProgressStopRechecksExistingWindowWithoutRenewal`
+and `TestProgressStopRecheckDBAcrossReplicas` cover this boundary, including a
+lost release, a newly tightened monetary cap, idempotent recovery and a provider
+hard cap that still refuses after recovery.
+
 Recovery observes that same current cumulative window. `ModelCallBudget`
 previously reloaded the original goal estimate after calculating the renewed
 allowance, so a run beyond its first window appeared permanently exhausted to

@@ -219,6 +219,15 @@ func (i *Integration) continueFromProgressFeedback(ctx context.Context, approval
 	if err := i.validateProgressCheckpoint(ctx, approval); err != nil {
 		return err
 	}
+	if rowMap(approval, "subject")["continuationAllowed"] == false {
+		// Recheck under the workload gate. A stale lifetime-policy stop may
+		// use an already-granted window, never buy another one or clear its
+		// evidence epoch. The ordinary decision/resume receipt is idempotent.
+		if i.progressStopWithinCurrentWindow(ctx, approval, run) {
+			return nil
+		}
+		return errProgressLimit
+	}
 	goal, err := i.store().goalForOwner(ctx, rowString(run, "goalId"))
 	if err != nil || goal == nil {
 		return fmt.Errorf("saved goal is unavailable: %v", err)
