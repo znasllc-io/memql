@@ -120,18 +120,29 @@ installation, and an accepted write is not a confirmed outcome.
 
 Native Mac checks read GOOS and GOARCH in one successful command before their
 Go build or test starts. The selected Go launcher retains checksum verification;
-only this preparation command may retry, at most three times with a 120-second
-limit per attempt and two seconds between failures. A wrong or malformed
+only this preparation command may retry, at most three times within one
+600-second deadline, including two seconds between failures and up to five
+seconds for launcher cleanup. Each attempt receives only the remaining budget;
+neither backoff nor another attempt resets it. A wrong or malformed
 platform refuses immediately. Timeout is terminal, and every child stays in the
 native worker's process group for its existing cancellation and cleanup. The
 actual test command still runs once, and its failure remains a failure.
+
+The 30-minute native check reserves ten minutes for preparation, ten minutes for
+the test command, and ten minutes for checkout, CSS and compilation overhead.
+The earlier 120-second preparation limit stopped a verified toolchain download
+before tests. An isolated cold Go 1.27.3 download on the same machine completed
+in 86 seconds, while a separate public archive sample transferred at a rate
+requiring roughly 219 seconds for the full archive. The shared deadline allows
+for that observed variability without multiplying the lane budget by retries.
 
 Toolchain and build caches remain inside the exact attempt checkout. The
 managed reusable cache supports containers only; sharing an attempt-writable
 native toolchain directory across repositories or installations would cross
 that boundary. The fixtures in `native_go_platform_test.py` and
 `TestNativeMacLanePreparesToolchainBeforeRunningTestsOnce` cover transient and
-permanent preparation failures, platform refusal and once-only tests. They do
+permanent preparation failures, a shrinking shared deadline, platform refusal
+and once-only tests. They do
 not establish live network availability; the required native check must still
 pass on the repaired head.
 
