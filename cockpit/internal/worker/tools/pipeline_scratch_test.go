@@ -15,7 +15,10 @@ func TestNativeScratchIsOwnedAndRemovedOnEveryCommandOutcome(t *testing.T) {
 	fx := newPipelineFixture(t)
 	for _, outcome := range []string{"success", "failure", "timeout", "cancel"} {
 		t.Run(outcome, func(t *testing.T) {
-			policy, root := pipelineTestPolicy(t, "  max_timeout_sec: 1\n")
+			// Checkout shares the command deadline. Keep the fixture's normal
+			// setup budget so a busy host cannot turn an ordinary exit into a
+			// timeout before this test reaches the scratch it needs to inspect.
+			policy, root := pipelineTestPolicy(t, "")
 			inherited := t.TempDir()
 			for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
 				t.Setenv(name, inherited)
@@ -39,13 +42,19 @@ echo partial > "$made/artifact"
 test -z "$(git status --porcelain)"
 printf 'scratch=%s\nscratch-ready\n' "$TMPDIR"
 `
+			var extra map[string]any
 			switch outcome {
 			case "failure":
 				command += "exit 9\n"
-			case "timeout", "cancel":
-				command += "sleep 30\n"
+			case "timeout":
+				// Exercise a real deadline with headroom for checkout. Policy
+				// clamping has its own wall-clock test in pipeline_step_test.go.
+				extra = map[string]any{"timeoutSec": 10}
+				command += "sleep 60\n"
+			case "cancel":
+				command += "sleep 60\n"
 			}
-			result, failed := runPipelineStep(ctx, "", stepArgs(t, fx, command, nil), policy, out.emit, out.artifact)
+			result, failed := runPipelineStep(ctx, "", stepArgs(t, fx, command, extra), policy, out.emit, out.artifact)
 			if outcome == "success" || outcome == "failure" {
 				got := decoded(t)(result, failed)
 				want := 0
@@ -55,8 +64,14 @@ printf 'scratch=%s\nscratch-ready\n' "$TMPDIR"
 				if got.ExitCode != want {
 					t.Fatalf("exit=%d want=%d: %s", got.ExitCode, want, out.all())
 				}
-			} else if result != nil || failed == nil {
-				t.Fatalf("interrupted work reported success: %v %v", result, failed)
+			} else {
+				want := "timeout"
+				if outcome == "cancel" {
+					want = "cancelled"
+				}
+				if result != nil || failed == nil || failed.GetErrorCode() != want {
+					t.Fatalf("interrupted work must report %s: %v %v", want, result, failed)
+				}
 			}
 			var scratch string
 			for _, line := range strings.Split(out.text(false), "\n") {
