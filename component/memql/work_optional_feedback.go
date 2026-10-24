@@ -18,6 +18,12 @@ import (
 // Late optional answers have a bound of their own beside the routed guidance's
 // (maxWorkGuidanceMessages), so neither can make the other's read fail.
 func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, error) {
+	return e.readWorkGuidance(ctx, false)
+}
+
+// Final review has no restored instruction message. Include its whole-prompt
+// override in the same dated sequence, without changing ordinary resume input.
+func (e *MemQLEngine) readWorkGuidance(ctx context.Context, includeWholePrompt bool) ([]WorkGuidance, error) {
 	dates := map[string]time.Time{}
 	out, root, err := e.readAskWorkGuidance(ctx, dates)
 	if err != nil {
@@ -97,12 +103,16 @@ func (e *MemQLEngine) ReadWorkGuidance(ctx context.Context) ([]WorkGuidance, err
 	// Apps seam would then append them again AFTER newer guidance. Keep their
 	// exact rendering in this bounded chronological batch so that seam finds
 	// them already present and cannot accidentally renew their priority.
-	// WholePrompt is a separate explicit replacement contract, not an additive
-	// instruction; its existing session semantics are unchanged here.
-	if rc.Override != nil && !rc.Override.WholePrompt {
+	// WholePrompt stays separate for execution, which already has its active
+	// instruction. Final review includes it here because it has no such message.
+	if rc.Override != nil && (!rc.Override.WholePrompt || includeWholePrompt) {
 		extra := StepOverrideMessages(ctx)
 		if len(extra) > 0 {
-			at, valid := askTimestamp(rerun["requestedAt"])
+			instructionAt := rerun["requestedAt"]
+			if inherited, exists := rerun["overrideRequestedAt"]; exists {
+				instructionAt = inherited
+			}
+			at, valid := askTimestamp(instructionAt)
 			if !valid {
 				return nil, fmt.Errorf("step override guidance timestamp is unavailable")
 			}

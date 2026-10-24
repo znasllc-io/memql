@@ -166,7 +166,14 @@ If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
 further replanning attempt for the unfinished work. It preserves the completed
 prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
-failed step. Either decision is persisted for the cluster to resume safely.
+failed step. The new attempt keeps that failed version's authored instructions,
+inputs, model and effort, including a whole-prompt replacement. It does not
+restore an earlier workspace snapshot or borrow another step's settings.
+Inherited instructions retain their original date, so a later owner correction
+does not lose priority merely because Retry created a new execution request.
+If that original time cannot be established, recovery stops and asks for current
+instructions through **Run again**; it does not treat the old instruction as new.
+Either decision is persisted for the cluster to resume safely.
 
 Clarifications can be optional when useful authorized work can proceed without
 the answer. The pinned Spine policy allows 60 seconds to answer; the durable
@@ -624,6 +631,13 @@ for skill preparation, so a later approval cannot restore the obsolete compiled
 section. Additive instructions and later human corrections retain their existing
 ordering. Retained context
 does not extend permissions or bypass the operation's execution checks.
+
+The final reply reviewer also reads current owner instructions, including the
+step's replacement and later corrections in their recorded order. It keeps the
+original goal as historical context instead of restoring superseded directions.
+Unavailable or oversized instruction context stops review explicitly. This does
+not authorize another operation, retry interrupted input, or make a completed
+execution count as the owner's acceptance of its results.
 
 Useful documents, scripts, patches, screenshots and verification receipts can
 be retained as bounded artifacts with provenance. File metadata alone does not
