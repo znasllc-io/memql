@@ -28,7 +28,7 @@ func queuePriorityClass(cfg Config, run StepRun) (string, error) {
 		}
 		return false
 	}
-	if !validEvent(run.Env[eventVar]) {
+	if !validEvent(string(run.Event)) {
 		return "", errors.New("priority selection requires the trusted pipeline event")
 	}
 	d := json.NewDecoder(strings.NewReader(raw))
@@ -52,7 +52,7 @@ func queuePriorityClass(cfg Config, run StepRun) (string, error) {
 	if tok, err = d.Token(); err != nil || tok != json.Delim('}') || d.Decode(new(any)) != io.EOF {
 		return "", errors.New("priority classes contain trailing data")
 	}
-	return classes[run.Env[eventVar]], nil
+	return classes[string(run.Event)], nil
 }
 
 // Memory and disk are hard reservations, including native service sidecars

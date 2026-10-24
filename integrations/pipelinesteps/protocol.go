@@ -49,6 +49,10 @@ type StepRun struct {
 	OwnerUserID string        `json:"ownerUserId"`
 	Repository  pl.Repository `json:"repository"`
 	SHA         string        `json:"sha"`
+	// Event is the driver's trusted admission metadata, independent of the
+	// command environment. Verification deliberately omits MEMQL_EVENT there;
+	// its admission class must not change its command or cache trust.
+	Event pl.Event `json:"event,omitempty"`
 	// InstallationID is the GitHub App installation the clone token is minted
 	// under; 0 is an anonymous clone of a public repository.
 	InstallationID int64  `json:"installationId,omitempty"`
