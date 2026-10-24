@@ -113,6 +113,16 @@ func workTurnHistory(ctx context.Context, engine interface {
 		destination = "auto"
 	}
 	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Execution destination selected by the person for this goal: " + destination + ". This choice does not grant computer access.]"})
+	// A whole-prompt rerun replaces the compiled section contract before the
+	// first native checkpoint, not just at the final Apps launch boundary.
+	// Otherwise the first App sees the replacement while every permission
+	// resume restores the obsolete compiled prompt as its active instruction.
+	// Read only the executing step's override; checkpoint/decision admission
+	// still binds it to the same owner, generation and exact override hash.
+	wholePrompt := run.Override != nil && run.Override.WholePrompt && strings.TrimSpace(run.Override.Prompt) != ""
+	if wholePrompt {
+		prompt = run.Override.Prompt
+	}
 	// Conversation history can precede this prompt, and approvals/guidance can
 	// follow it. Mark the active contract independently of first/last human
 	// messages so compaction cannot turn it into an optional historical summary.
@@ -123,6 +133,16 @@ func workTurnHistory(ctx context.Context, engine interface {
 		return nil, fmt.Errorf("work context: reading recorded answers: %w", err)
 	}
 	for _, question := range memql.MaterializeRows(questions) {
+		// A validated native continuation restores its compacted history below.
+		// Re-inserting every old answer here makes archived question bodies look
+		// new to the exact-message deduper and repeatedly expands that history.
+		// Keep only this wait's answer; fresh executions still load all answers.
+		// Late optional answers and later corrections arrive independently via
+		// ReadWorkGuidance at model/tool boundaries. No permission is inferred
+		// from this selection, and missing/changed checkpoints still fail closed.
+		if run.Continuation != nil && memql.BareShortId(asString(question["id"])) != memql.BareShortId(run.Continuation.ApprovalID) {
+			continue
+		}
 		if contract, _, optional := work.OptionalFeedback(question); optional &&
 			(contract["templateFingerprint"] != rows[0]["templateFingerprint"] || asString(contract["rerunRequestId"]) != run.RerunRequestId) {
 			continue
@@ -145,6 +165,9 @@ func workTurnHistory(ctx context.Context, engine interface {
 		history = append(history, decision)
 	}
 	for _, m := range memql.StepOverrideMessages(ctx) {
+		if wholePrompt && m.Content == memql.StepOverrideInstructions(run.Override) {
+			continue // Already retained verbatim as the active contract above.
+		}
 		history = append(history, &memqlv1.AgentTurnMessage{Role: m.Role, Content: m.Content})
 	}
 	// Keep the bounded reference with the active request or latest correction.

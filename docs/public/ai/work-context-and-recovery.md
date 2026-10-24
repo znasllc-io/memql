@@ -21,6 +21,12 @@ saved context and new human answer. Completed tool results stay in order and
 the original checkpoint remains unchanged. Retaining the instructions does not
 grant new access or prove that the model followed them.
 
+An approval resume reuses the saved history and adds the current decision. It
+does not reload every older answered question after those bodies have already
+been summarized. A fresh execution still receives historical answers, and late
+optional answers or later corrections continue to arrive through the guidance
+journal. The original answers remain available for exact recall.
+
 A correction sent instead of granting an approval remains guidance for the
 unfinished work after another approval, retry or worker restart. The executing
 worker recovers that correction from the owner's decision journal and orders it
@@ -141,7 +147,15 @@ still require the existing explicit recovery controls; no links are inferred.
 
 The same checkpoint suspension applies when bounded context compaction cannot
 fit the active request, or a model still rejects its context after recovery.
+When older history consists entirely of derived checkpoints, bounded exact
+archival can consolidate their envelopes without another model summary. Their
+original sources remain available, and required instructions, current decisions
+and pending operations remain exact. Archival must reduce the active context;
+it does not raise the model window or grant permission.
 There is no extra automatic retry with identical input. The question retains
+the existing execution generation and model override when answered, just as a
+provider-call ceiling pause does. It does not create an ordinary failure rerun.
+The saved question retains
 the exact prepared tool calls and completed receipts; Retry or guidance resumes
 that suspended execution after the capacity problem is addressed. It does not
 restart the stage or discard its working context. Storage and authorization
@@ -604,7 +618,11 @@ handoff. If the original rerun replaced the whole prompt, that old replacement
 is not applied again over completed results, a prepared operation or the latest
 recorded decision. The delegate checks the continuation's owner, run, step and
 override binding before launch. Model and effort choices still apply, and a
-fresh explicit rerun still honors whole-prompt replacement. Retained context
+fresh explicit rerun still honors whole-prompt replacement. That replacement is
+also retained as the active instruction before the first checkpoint and used
+for skill preparation, so a later approval cannot restore the obsolete compiled
+section. Additive instructions and later human corrections retain their existing
+ordering. Retained context
 does not extend permissions or bypass the operation's execution checks.
 
 Useful documents, scripts, patches, screenshots and verification receipts can
@@ -642,9 +660,15 @@ definition, arguments and exact suspended tool receipt across replicas.
 Completed parent and child steps stay complete; the approval grants no blanket
 permission to repeat their effects. If an answer arrives before the waiting
 receipt is saved, dispatch waits briefly without consuming its claim. The
-recovery sweep can deliver the saved answer later under the same claim identity.
-The existing stale-executor abandonment policy still applies after a claimant
-stops responding.
+settling executor re-offers that exact answer once its waiting receipt is saved,
+using the same answer claim and execution generation. This does not depend on
+the scheduled recovery sweep running on an agent: an identity or BFF leader has
+no step dispatcher. Duplicate decision and settlement events cannot start the
+answer twice. A later answer uses its normal decision event; a stale answer,
+changed generation, cancelled run or active step cannot be adopted by settlement.
+An executing recovery sweep can still recover a lost claimant under the existing
+lease and stale-executor policy; settlement does not extend that lease or grant
+permission to repeat effects.
 
 On resumption, the model receives the recorded permission decision or feedback
 alongside its saved exchanges. Permission context includes the approved scope

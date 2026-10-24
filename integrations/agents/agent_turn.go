@@ -183,6 +183,14 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 		}
 		if len(history) > 0 {
 			msg.History = history
+			for _, message := range history {
+				if message.Role == "user" && message.Name == common.WorkInstructionMessageName {
+					// Skill preparation must use the same effective section that
+					// the native history retains, including a whole-prompt rerun.
+					msg.Hints["work_section_prompt"] = message.Content
+					break
+				}
+			}
 		}
 	}
 	reply, err := runner.RunTurn(ctx, msg)

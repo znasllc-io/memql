@@ -14,9 +14,59 @@ import (
 )
 
 type decisionContextReader struct {
-	run      map[string]any
-	decision map[string]any
-	fail     bool
+	run       map[string]any
+	decision  map[string]any
+	questions []map[string]any
+	fail      bool
+}
+
+type instructionContextReader struct {
+	memql.IntegrationEngineAccess
+	*decisionContextReader
+}
+
+func (r *instructionContextReader) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	return r.decisionContextReader.Execute(ctx, query)
+}
+
+func TestWholePromptInstructionIsRetainedBeforeNativeCheckpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		override *common.StepOverride
+		want     string
+	}{
+		{"ordinary", nil, "Compiled section"},
+		{"additive", &common.StepOverride{Prompt: "Add a table"}, "Compiled section"},
+		{"whole", &common.StepOverride{WholePrompt: true, Prompt: "  Current replacement\n"}, "  Current replacement\n"},
+		{"empty-whole", &common.StepOverride{WholePrompt: true, Prompt: " "}, "Compiled section"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{
+				RunId: "run", OwnerUserId: "owner", StepKey: "section", Mode: common.RunModeLive, Override: tc.override,
+			})
+			reader := &instructionContextReader{decisionContextReader: &decisionContextReader{run: map[string]any{}}}
+			runner := &fakeTurnRunner{reply: "saved"}
+			integration := &Integration{engine: reader}
+			integration.SetAgentTurnRunner(runner)
+			_, err := integration.handleRunAgentTurn(ctx, map[string]any{"prompt": "Compiled section"}, 0)
+			require.NoError(t, err)
+			require.Len(t, runner.saw, 1)
+			msg := runner.saw[0]
+			require.Equal(t, tc.want, msg.Hints["work_section_prompt"])
+			var marked []string
+			for _, m := range msg.History {
+				if m.Name == common.WorkInstructionMessageName {
+					marked = append(marked, m.Content)
+				}
+			}
+			require.Equal(t, []string{tc.want}, marked)
+			if tc.name == "additive" {
+				require.Contains(t, msg.History[len(msg.History)-1].Content, "Add a table")
+			} else {
+				require.Len(t, msg.History, 2, "whole replacement must not be duplicated as late additive guidance")
+			}
+		})
+	}
 }
 
 func (r *decisionContextReader) Execute(_ context.Context, q string) (*memql.ExecuteResult, error) {
@@ -24,7 +74,7 @@ func (r *decisionContextReader) Execute(_ context.Context, q string) (*memql.Exe
 	case strings.HasPrefix(q, "query workRunForOwner("):
 		return memql.NewResultWithOutput([]map[string]any{r.run}), nil
 	case strings.HasPrefix(q, "query workQuestionsForOwnerRun("):
-		return memql.NewResultWithOutput([]map[string]any{}), nil
+		return memql.NewResultWithOutput(r.questions), nil
 	case strings.HasPrefix(q, "query workApprovalForOwner("):
 		if r.fail {
 			return nil, errors.New("decision read failed")
@@ -35,6 +85,37 @@ func (r *decisionContextReader) Execute(_ context.Context, q string) (*memql.Exe
 		return memql.NewResultWithOutput([]map[string]any{r.decision}), nil
 	default:
 		return nil, errors.New("unexpected query: " + q)
+	}
+}
+
+func TestNativeContinuationDoesNotReinjectArchivedAnswers(t *testing.T) {
+	for _, kind := range []string{"scopeElevation", "feedback"} {
+		t.Run(kind, func(t *testing.T) {
+			run := common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "section", Mode: common.RunModeLive,
+				Continuation: &common.StepContinuation{ApprovalID: "current", StepKey: "section", ObservationID: "checkpoint"}}
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), run)
+			old := map[string]any{"id": "old", "decision": "answered", "question": strings.Repeat("archived old question ", 1500), "answer": map[string]any{"text": "Prior answer"}}
+			current := map[string]any{"id": "v1:work:approval:current", "runId": "run", "stepKey": "section", "kind": kind, "decision": "approved", "question": "Current question", "answer": map[string]any{"permissionMode": "once"}}
+			reader := &decisionContextReader{run: map[string]any{"humanResumeId": "current"}, decision: current, questions: []map[string]any{old}}
+			if kind == "feedback" {
+				current["decision"] = "answered"
+				current["answer"] = map[string]any{"text": "Current answer"}
+				reader.questions = append(reader.questions, current)
+			}
+			history, err := workTurnHistory(ctx, reader, "Current section")
+			require.NoError(t, err)
+			require.Equal(t, 3, len(history), "archived answer bodies must not be inserted again")
+			require.Contains(t, history[2].Content, "Current question")
+			for _, message := range history {
+				require.NotContains(t, message.Content, "archived old question")
+			}
+			// Fresh executions still need the historical answers. A suspended
+			// execution obtains those from its required immutable checkpoint.
+			run.Continuation = nil
+			history, err = workTurnHistory(common.ContextWithRun(ctx, run), reader, "Current section")
+			require.NoError(t, err)
+			require.Contains(t, history[2].Content, "archived old question")
+		})
 	}
 }
 

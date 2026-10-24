@@ -79,6 +79,49 @@ launch, and retains the fresh-rerun control. The existing database continuation
 test covers cross-replica checkpoint/decision validation upstream. These checks
 do not establish model adherence or completion of the downstream task.
 
+Whole-prompt replacement must also reach checkpoint creation upstream. A live
+rerun stored the current replacement correctly and launched its first App with
+it, but the native context builder marked the older compiled section as active.
+Every resumed App then recovered that obsolete instruction. The builder now
+selects the executing step's nonempty whole-prompt override before assigning the
+retention marker and skill-preparation hint. It does not append a duplicate
+replacement after later human answers. Additive overrides keep their existing
+chronological guidance path; an empty replacement retains the compiled section.
+The final delegate still preserves the complete restored handover on native
+resume. No checkpoint is rewritten, permission extended, effect replayed, or
+owner/step/generation/override binding relaxed.
+
+`TestWholePromptInstructionIsRetainedBeforeNativeCheckpoint` exercises the
+installed context-builder entry with ordinary, additive, whole and empty
+replacements. `TestWorkDBWholePromptSurvivesNestedPermissionResumes` reproduces
+the old compiled instruction on the first checkpoint, then covers a fresh rerun
+and two nested permission waits across engines, exact completed effects, later
+human correction, unchanged source checkpoint and one-use permission consumption.
+The model boundary is controlled; these tests do not prove downstream adherence.
+
+Native approval resumes must not reinsert already archived question bodies.
+The history builder previously loaded every answered feedback question, then the
+checkpoint restorer deduplicated only exact messages still in active context.
+Once a question had been compacted, the next approval made its original body
+look new again. A live checkpoint grew by roughly 28 KB without any new tool
+results. A validated continuation now projects only its current wait's recorded
+answer from that query; its required checkpoint supplies the earlier history.
+Fresh executions still load all answered questions. Late optional answers,
+routed corrections and approval guidance keep their independent owner-scoped,
+chronologically ordered reads at model/tool boundaries. Missing or changed
+checkpoints still refuse; no immutable source or completed effect is rewritten.
+
+`TestNativeContinuationDoesNotReinjectArchivedAnswers` reproduces reinsertion
+and checks both permission and feedback waits plus fresh-execution controls.
+The `archived-history` database case in
+`TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica` runs the
+installed context builder against stored historical answers and a compacted
+checkpoint on another engine; it retains the memory, active instruction, exact
+completed tools and current permission receipt without expanding those answers.
+Existing late-answer and additive-correction ordering tests cover the separate
+guidance paths. These checks prove context selection, not model adherence or a
+measured latency improvement.
+
 The proactive context target includes exact current call arguments as required
 input, including a prepared operation followed by a human approval. The
 compactor cannot retire that call, so omitting it from the target caused an
@@ -424,6 +467,34 @@ evidence. A screenshot of an old running build cannot close that evidence gap.
 
 ## Context pressure and optional work
 
+### An answer received before the App stops
+
+An approved invocation can take longer to unwind than the two-second dispatch
+readiness wait. The decision event then leaves its answer claim unspent. The
+local Ask trial exposed a missing wakeup: the App stopped seven seconds after
+the answer, but the cron leader was an identity node with no dispatcher, so its
+sweep abandoned the approved run instead of resuming it. The previous regression
+explicitly invoked an agent's recovery entry and did not cover that topology.
+
+After the executor saves its suspended receipt, `workRunDispatcher.report`
+freshly checks the same answer, owner-readable run, execution generation,
+cancellation and absence of running steps, then re-offers the ordinary run
+event. The existing same-answer claim and execution fences remain authoritative;
+there is no new permission, generation, replay rule, lease or polling interval.
+An unanswered wait remains parked, a later answer follows its usual event, and
+a stale settlement cannot adopt a newer rerun. The stopped invocation's cancelled
+context is detached only for this bounded metadata read, retaining its actor;
+dispatch independently restores persisted owner authority again.
+
+`TestWorkDBHumanSettlementWakesWithoutExecutingSweepLeader` reproduces abandonment
+with two peer engines, an early real permission decision, a delayed nested
+receipt and an actual non-executing sweep integration. It checks same-answer
+dispatch without a manual agent sweep, stale-answer/generation refusal and
+duplicate event/settlement suppression. Existing recovery tests retain coverage
+for claimant death, lease takeover, cancellation and uncertain effects. This
+repair does not rewrite the trial's already-abandoned execution or make its
+manual recovery an uninterrupted run.
+
 Prerequisite recovery preserves prepared work. The shared execution prompt
 distinguishes an operation that could not start from a produced result that
 failed validation. It asks for the specific missing setup information, input
@@ -467,6 +538,34 @@ the existing bounded path. `work_context_large_calls_db_test.go` reproduces
 unnecessary inference before this ordering change and verifies zero summary
 calls plus exact cross-replica readback afterward. Ordinary small receipts,
 instructions and the fresh tail remain verbatim in that regression.
+
+Capacity pauses and provider-call ceilings share the native checkpoint decision
+path. The pause writer emitted `context_capacity`, but its classifier recognized
+only `model_call_ceiling`; Retry consequently created an ordinary rerun with a
+new generation and empty override, and exact checkpoint validation refused it.
+The classifier now recognizes both exact failure kinds. Owner/receipt checks,
+override equality and execution lineage remain enforced; capacity decisions do
+not renew progress limits or grant operation permission. The required-database
+`TestContextCapacityDecisionPreservesCheckpointGenerationAcrossReplicas` follows
+the actual pause writer through Retry and guidance on another engine, retaining
+the Astra/xhigh override, generation, spent budget and exact completed exchange.
+This prevents new invalid reruns; it does not rewrite a previously failed run's
+history or prove that its downstream work has resumed.
+
+Memory-only history can remain over budget after the last fresh exchange has
+been summarized. Semantic selection deliberately refuses to re-summarize those
+derived claims, but sharing that restriction with exact archival stranded an
+otherwise shrinkable context. The storage selector now accepts eligible
+memory-only spans, including at the semantic pass's no-candidate exit. It keeps
+the same pinned authority, original/current requests, newest decision, pending
+calls and fresh exchange. The existing eight-storage-attempt bound and strict
+size-reduction check remain; each exact source is durable before its reference
+is published. There is no new model call, enlarged window, permission or effect
+replay. `TestWorkContextArchivesMemoryOnlyHistoryWithoutAnotherSummary` reproduces
+the capacity refusal and verifies both retained archive layers on a second
+database-backed engine, immutable continuation bytes and refusal at a hard
+target that cannot fit required inputs. This is a synthetic reproduction, not
+proof that the live continuation has completed its downstream verification.
 
 [Context management](../../../component/memql/work_context.go) first archives
 bulky completed results, then uses a bounded semantic pass over complete older

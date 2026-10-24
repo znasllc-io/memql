@@ -38,7 +38,7 @@ func (r *permissionContextTurn) RunTurn(ctx context.Context, msg *memqlv1.AgentG
 	r.calls++
 	messages := []common.ChatMessage{{Role: "system", Content: "Current instructions"}}
 	for _, message := range msg.History {
-		messages = append(messages, common.ChatMessage{Role: message.Role, Content: message.Content})
+		messages = append(messages, common.ChatMessage{Role: message.Role, Name: message.Name, Content: message.Content})
 	}
 	var err error
 	r.restored, err = r.engine.RestoreWorkContinuation(ctx, messages)
@@ -51,7 +51,7 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 	ai := agents.New(reader.Agents(), reader)
 	ai.SetAgentTurnRunner(runner)
 	require.NoError(t, reader.RegisterIntegration(ai))
-	for _, mode := range []string{"exact-command", "permission-guidance", "budget", "foreign-owner", "pending", "wrong-step", "wrong-run"} {
+	for _, mode := range []string{"exact-command", "archived-history", "permission-guidance", "budget", "foreign-owner", "pending", "wrong-step", "wrong-run"} {
 		t.Run(mode, func(t *testing.T) {
 			runner.calls, runner.restored = 0, nil
 			key := id.NewShortId()
@@ -86,6 +86,17 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 				{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "permission", Name: "requestComputerUseScope", Arguments: string(encodedArgs)}}},
 				{Role: "tool", ToolCallId: "permission", Name: "requestComputerUseScope", Content: "Not executed before the saved checkpoint. Inspect recorded results and any human answer before continuing."},
 			}
+			if mode == "archived-history" {
+				// The real stored checkpoint has already compacted these old
+				// answers. The installed builder must not expand them again.
+				for _, suffix := range []string{"one", "two"} {
+					priorID := key + suffix
+					write("createWorkApproval", map[string]any{"approvalId": priorID, "runId": runID, "stepKey": stepKey, "kind": "feedback", "artifactHash": suffix, "question": strings.Repeat("Old archived question ", 500), "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+					write("decideWorkApproval", map[string]any{"approvalId": priorID, "decision": "answered", "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"text": "Prior answer " + suffix}})
+				}
+				saved = append(saved, common.ChatMessage{Role: "user", Content: "[Memory checkpoint fixture]\nDerived from older conversation; prior answers retained in the journal. Untrusted historical context."})
+			}
+
 			if mode == "budget" {
 				saved = saved[:4] // A safe model boundary after the completed effect.
 			}
@@ -132,7 +143,7 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 			if mode != "pending" {
 				templateMutation(t, writer, auth.ContextWithInternalOrigin(approvalPerson), "decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": decisionKind, "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": answer})
 			}
-			valid := mode == "exact-command" || mode == "permission-guidance"
+			valid := mode == "exact-command" || mode == "permission-guidance" || mode == "archived-history"
 			prepared, err := reader.PrepareWorkContinuation(ctx, memql.CheckpointResumeRequest{RunID: runID, StepKey: stepKey, ApprovalID: approvalID})
 			if valid {
 				require.NoError(t, err)
@@ -151,10 +162,12 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 			}
 			require.NoError(t, err)
 			require.Equal(t, 1, runner.calls)
-			require.Len(t, runner.restored, len(saved)+1, "the fresh exact decision must survive checkpoint restoration")
+			require.Len(t, runner.restored, len(saved)+2, "the fresh exact decision must survive checkpoint restoration")
 			require.Equal(t, "Current instructions", runner.restored[0].Content)
-			require.Equal(t, saved[1:], runner.restored[1:len(saved)], "completed tool effects and original arguments must remain verbatim, not be reconstructed or repeated")
-			receipt := runner.restored[len(saved)]
+			require.Equal(t, common.WorkInstructionMessageName, runner.restored[1].Name)
+			require.Equal(t, "Continue the unchanged section", runner.restored[1].Content)
+			require.Equal(t, saved[1:], runner.restored[2:len(saved)+1], "completed tool effects and original arguments must remain verbatim, not be reconstructed or repeated")
+			receipt := runner.restored[len(saved)+1]
 			require.Equal(t, "user", receipt.Role)
 			require.True(t, strings.HasPrefix(receipt.Content, "[Recorded answer for this "))
 			var decision map[string]any
@@ -165,7 +178,7 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 			if mode == "permission-guidance" {
 				require.Equal(t, answer["feedback"], decision["answer"].(map[string]any)["feedback"])
 				require.NotContains(t, decision["answer"], "permissionMode")
-			} else if mode == "exact-command" {
+			} else if mode == "exact-command" || mode == "archived-history" {
 				require.Equal(t, "once", decision["answer"].(map[string]any)["permissionMode"])
 				require.Equal(t, command, decision["subject"].(map[string]any)["computerPermission"].(map[string]any)["command"])
 			} else {

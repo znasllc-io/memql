@@ -316,6 +316,7 @@ func (d *workRunDispatcher) report(ctx context.Context, req workspine.DispatchRe
 	var waiting *workstate.HumanWait
 	if errors.As(err, &waiting) {
 		log.Info("work run dispatch: waiting for human input", "component", "work.dispatch", "run", req.RunId, "approval", waiting.ApprovalID)
+		d.wakeSettledHumanWait(ctx, req, waiting.ApprovalID)
 		return
 	}
 	if err != nil {
