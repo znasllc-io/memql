@@ -1,3 +1,4 @@
+import { isReportingFailure } from "./outcomeRecovery";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -206,13 +207,14 @@ export function ApprovalsSection({
   const savedRun = savedApprovalResume ? runsById.get(idTail(savedApprovalResume.runId)) : undefined;
   // A release on another replica, cancellation or a different gate makes a
   // locally held retry obsolete as soon as its run summary arrives.
-  const approvalResume = savedApprovalResume && (!savedRun || runWaitsForApproval(savedRun, savedApprovalResume.approvalId)) ? savedApprovalResume : undefined;
+  const approvalResume = savedApprovalResume && (!savedRun || runWaitsForApproval(savedRun, savedApprovalResume.approvalId) || savedApprovalResume.outcomeRecovery && abandonedReportingRun(savedRun, savedApprovalResume.approvalId)) ? savedApprovalResume : undefined;
   const permissionReview = decide.permissionReviews[idTail(selectedApprovalId)];
   const canDecide = selected !== null && selected.decision === "" && !lapsed && !savedApprovalResume && !permissionReview;
 
   // A decided approval leaves the pending feed, but a run whose release failed
   // still names it. Recover its exact receipt after reopening the app, too.
   const recoveryIds = snapshot.state === "live" ? [...new Set([
+    ...runs.filter(run => run.status === "abandoned" && run.errorCode === "run_abandoned" && !run.cancelRequested && run.humanResumeId).map(run => run.humanResumeId!),
     ...runs.filter(run => run.status === "waiting" && !run.cancelRequested && run.waitingOnKind === "approval")
       .map(run => run.waitingOnSubject)
       .filter(id => id && !snapshot.rows.some(row => {
@@ -221,7 +223,7 @@ export function ApprovalsSection({
       })),
     ...(selectedApprovalId && (!selected
       || (selected.kind === "scopeElevation" && selected.decision === "approved")
-      || (selected.kind === "feedback" && selected.subject?.progressLimit === true && selected.decision === "answered")) ? [selectedApprovalId] : []),
+      || (selected.kind === "feedback" && (selected.subject?.progressLimit === true || isReportingFailure(selected.subject)) && selected.decision === "answered")) ? [selectedApprovalId] : []),
   ])].sort().join("\n") : "";
   useEffect(() => {
     if (!recoveryIds) return;
@@ -341,7 +343,7 @@ export function ApprovalsSection({
   const back = () => onSelectApproval("");
   const resumable = Object.values(decide.approvalResumes).filter(receipt => {
     const run = runsById.get(idTail(receipt.runId));
-    if (run && !runWaitsForApproval(run, receipt.approvalId)) return false;
+    if (run && !runWaitsForApproval(run, receipt.approvalId) && !(receipt.outcomeRecovery && abandonedReportingRun(run, receipt.approvalId))) return false;
     const title = run ? runTitle(run) : "Approved request";
     return search.trim() === "" || title.toLowerCase().includes(search.trim().toLowerCase());
   });
@@ -426,6 +428,10 @@ export function ApprovalsSection({
       )}
     </div>
   );
+}
+
+function abandonedReportingRun(run: RunRow, approvalId: string): boolean {
+  return run.status === "abandoned" && run.errorCode === "run_abandoned" && !run.cancelRequested && idTail(run.humanResumeId ?? "") === idTail(approvalId);
 }
 
 function runWaitsForApproval(run: RunRow, approvalId: string): boolean {

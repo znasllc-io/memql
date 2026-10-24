@@ -49,7 +49,22 @@ permission to redo operations. Budget and context ceilings still take precedence
 `TestFormatFailureRetryPreservesCompletedExecutionBinding` verifies the approval
 write leaves model overrides, request, head and spend intact; the executing
 replica then performs the source and stage checks above. An inconclusive final
-completion review also stops without an operational continuation or replan.
+completion review also stops without an operational continuation or replan. The
+native dispatcher also recognizes the saved reporting failure as ready after
+its Retry, without requiring the new version that an operational retry needs.
+The answer claim still arbitrates replicas; the agent still enforces retained
+source, generation and attempt checks. `TestWorkDBFailureRetryDispatchesOnceAndKeepsCompletedPrefix`
+exercises the actual decision, readiness, claim and executor path for both kinds.
+
+If dispatch never starts and the watchdog abandons the run, Nexus restores the
+existing Resume work control from the exact saved Retry. The native gate permits
+this only for watchdog abandonment, the same answered failure, an unchanged
+failed step written before that answer, and an open, unaccepted goal. It restores
+the reporting error for the agent's durable recovery, preserving request, model,
+head and spend. Newer execution, cancellation, changed decisions or accepted
+results refuse recovery. Reading the control never resumes work automatically.
+The database test covers a lost dispatch; the UI recovery tests cover reload and
+stale/cancelled controls.
 
 `work_outcome_recovery_test.go` covers both lanes, failed conversion, failed
 review, restored attempt bounds, newer sources and substantive questions.

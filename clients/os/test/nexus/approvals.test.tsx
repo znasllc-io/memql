@@ -876,3 +876,21 @@ it("approves a destination-only move to Workbench without suggesting computer ac
  await waitFor(()=>expect(conn.query.decideApproval).toHaveBeenCalled());
  expect(conn.query.decideApproval.mock.calls[0]?.[0]).toMatchObject({approvalId:"destination",decision:"approved"});
 });
+
+it("restores an abandoned reporting retry in the existing action bar after reopening Nexus", async () => {
+  const run = runRow({ id: "saved-report-run", status: "abandoned", errorCode: "run_abandoned", humanResumeId: "saved-report", workTitle: "Saved report" });
+  const approval = approvalRow({ id: "saved-report", runId: "saved-report-run", kind: "feedback", decision: "answered", answer: { value: "retry" }, subject: { errorMessage: "work_outcome_recovery_v1: saved result" } });
+  const conn = fakeConnection({ runs: [run] });
+  Object.assign(conn.query, {
+    workApprovalForOwner: vi.fn(async () => rowsResult([approval])),
+    workRunForOwner: vi.fn(async () => rowsResult([run])),
+  });
+  mount(conn);
+  const ready = await screen.findByLabelText("Work ready to resume");
+  expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  fireEvent.click(within(ready).getByRole("button"));
+  const resume = await screen.findByRole("button", { name: "Resume work" });
+  await readTheBar();
+  fireEvent.click(resume);
+  await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "saved-report", decision: "answered", answer: { value: "retry" } }));
+});

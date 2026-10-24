@@ -785,3 +785,7 @@ The practical target is enough active context to choose the next correct
 action, with exact evidence available when needed. Reducing token count alone
 is not a quality measure: verification must also check instruction retention,
 source recovery, action receipts, final result quality and bounded recovery.
+
+If a saved reporting retry was recorded but never started, Nexus can offer
+**Resume work** on that same decision. This restores the saved result for review;
+it does not repeat the completed actions or renew expired permissions.
