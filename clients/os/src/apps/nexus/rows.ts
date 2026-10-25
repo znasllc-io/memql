@@ -285,7 +285,8 @@ export function goalFromRow(row: Row): GoalRow {
 }
 
 /**
- * What to call a goal with no statement.
+ * A short excerpt for navigation, never a replacement for the saved request.
+ * The goal detail retains the complete statement behind Request when shortened.
  *
  * `statement` is `string!` so this should not happen from a create -- but a
  * folded CDC event carries only what the write touched, so a goal updated by
@@ -294,8 +295,14 @@ export function goalFromRow(row: Row): GoalRow {
  * failed to render.
  */
 export function goalTitle(goal: GoalRow): string {
-  const trimmed = goal.statement.trim();
-  if (trimmed !== "") return trimmed;
+  const trimmed = goal.statement.trim().replace(/\s+/g, " ");
+  if (trimmed !== "") {
+    const characters = Array.from(trimmed);
+    if (characters.length <= 80) return trimmed;
+    const prefix = characters.slice(0, 80).join("");
+    const boundary = prefix.lastIndexOf(" ");
+    return `${boundary > 0 ? prefix.slice(0, boundary) : prefix}…`;
+  }
   const tail = idTail(goal.id);
   return tail === "" ? "Untitled goal" : `Untitled goal (${tail})`;
 }
@@ -652,7 +659,12 @@ export function kindBreakdownLabel(breakdown: KindBreakdown): string {
   if (breakdown.empty) return "No steps yet.";
   const parts = breakdown.segments
     .filter((s) => s.count > 0)
-    .map((s) => `${s.count} ${s.label.toLowerCase()}`);
+    .map((s) => {
+      const label = s.kind === "deterministic" ? `workflow step${s.count === 1 ? "" : "s"}`
+        : s.kind === "reasoning" ? `model-backed step${s.count === 1 ? "" : "s"}`
+        : s.kind === "" ? "with model use not reported" : s.label.toLowerCase();
+      return `${s.count} ${label}`;
+    });
   return `${breakdown.total} steps: ${parts.join(", ")}.`;
 }
 

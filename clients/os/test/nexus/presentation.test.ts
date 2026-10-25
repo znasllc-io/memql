@@ -15,3 +15,10 @@ describe("readable activity", () => {
     expect(stepTitle({ ...step, callName: "readInvoiceTotals" })).toBe("Read invoice totals");
   });
 });
+
+
+it("names agent work and structural coordination without inventing an outcome", () => {
+  expect(stepTitle({ ...step, callName: "runAgentTurn", kind: "", stepType: "function", status: "pending" })).toBe("Work on the request");
+  expect(stepOutcome({ ...step, status: "pending" })).toBe("This action has not started.");
+  expect(stepTitle({ ...step, callName: "", stepType: "block" })).toBe("Coordinate the work");
+});

@@ -4,7 +4,7 @@ import type { ModelUsageState } from "./useModelUsage";
 import { stepTitle, stepOutcome } from "../../nexus/presentation";
 import { StepSummary } from "./StepSummary";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GitBranch, History, RotateCcw } from "lucide-react";
 import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -15,7 +15,6 @@ import {
   Fact,
   Facts,
   Head,
-  Input,
   Notice,
   Panel,
   formatFreshness,
@@ -36,6 +35,7 @@ import {
   formatTokens,
   RUN_TERMINAL,
   idTail,
+  goalTitle,
   kindBreakdown,
   runFromRow,
   runSpend,
@@ -123,7 +123,9 @@ export function GoalView({
   const [expandedColumns, setExpandedColumns] = useState<ReadonlySet<number>>(new Set());
   const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<number>>(new Set());
   const [at, setAt] = useState(openAt);
-  const [confirm, setConfirm] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  const page = useRef<HTMLDivElement>(null);
+  const returnCloseFocus = useRef(false);
   // "Branch from here" opens the same composer the run page does, and its
   // drafts are kept the same way: Escape keeps what was typed.
   const [composer, setComposer] = useState<ComposerRequest | null>(null);
@@ -174,6 +176,13 @@ export function GoalView({
   // Reset the step when the run changes rather than carrying a key that names
   // a step in a different run.
   useEffect(() => setSelectedStepKey(""), [openRunId]);
+  useEffect(() => { setConfirm(false); returnCloseFocus.current = false; }, [goal.id]);
+  useEffect(() => {
+    if (!confirm && returnCloseFocus.current) {
+      returnCloseFocus.current = false;
+      page.current?.querySelector<HTMLButtonElement>('button[aria-label="Close goal"]')?.focus();
+    }
+  }, [confirm]);
 
   // The scene library's run row, not the app's, so the shared TERMINAL list is
   // read directly rather than through `runIsTerminal` -- a cast between two
@@ -192,20 +201,6 @@ export function GoalView({
       tone: "primary",
       ariaLabel: `Answer the ${parked.kind === "" ? "approval" : parked.kind} this run is parked on`,
       onAct: () => onOpenApproval(parked.id),
-    });
-  }
-  // MORE THAN ONE MOMENT, not more than zero. A goal with no runs still dates
-  // its own creation, so `count > 0` offered Rewind on a goal there is nothing
-  // to scrub through -- an act that redraws the picture it is already showing.
-  // An illegal act is ABSENT (rule 12), and "does nothing" is illegal.
-  if (bounds.count > 1) {
-    acts.push({
-      label: rewound ? "Back to now" : "Rewind",
-      icon: <History size={13} aria-hidden />,
-      ariaLabel: rewound
-        ? "Leave rewind and draw the goal as it is now"
-        : "Rewind: draw this goal as it stood at an earlier moment. Nothing runs and nothing is spent.",
-      onAct: () => setAt(rewound ? "" : (bounds.to || "")),
     });
   }
   if (run !== null && terminal) {
@@ -240,24 +235,25 @@ export function GoalView({
   // page about one of its runs -- the shape the Deployables recomposition
   // removed. It is absent once the goal is closed, not disabled.
   const closable = goal.status !== "closed";
-  // The statement may have paragraphs, but this confirmation is one line.
-  // Match its words without relaxing case, punctuation or their order.
-  const goalWords = goal.statement.trim().replace(/\s+/g, " ");
-  const confirmed = goalWords !== "" && confirm.trim().replace(/\s+/g, " ") === goalWords;
-  if (closable && (confirmed || cancel.busy)) {
-    acts.push({
-      label: "Close this goal",
-      tone: "danger",
-      busy: cancel.busy,
-      ariaLabel:
-        "Close this goal and ask every run of it to stop. A run notices at its next step boundary.",
-      onAct: () => {
-        if (!confirmed) return;
-        void cancel.cancel(goal.id, "Closed from MemQL OS").then((ok) => {
-          if (ok) setConfirm("");
-        });
-      },
-    });
+  if (closable) {
+    if (confirm) {
+      // Only the explicit question's actions remain. The shared bar holds
+      // presses after the question appears, including keyboard presses.
+      acts.splice(0, acts.length,
+        { label: "Keep open", text: true, busy: cancel.busy, onAct: () => {
+          if (cancel.busy) return;
+          returnCloseFocus.current = true;
+          setConfirm(false);
+        } },
+        { label: "Close goal", tone: "danger", busy: cancel.busy,
+          ariaLabel: "Confirm closing this goal and ask all its runs to stop",
+          onAct: () => { void cancel.cancel(goal.id, "Closed from MemQL OS").then(ok => {
+            if (ok) setConfirm(false);
+          }); } },
+      );
+    } else {
+      acts.push({ label: "Close goal", ariaLabel: "Close goal", tone: "danger", onAct: () => setConfirm(true) });
+    }
   }
 
   // The APP's projection of the drawn run, for what the scene library does not
@@ -295,17 +291,21 @@ export function GoalView({
             : "none";
 
   return (
-    <div className="os-nexus-goalview">
+    <div className="os-nexus-goalview" ref={page}>
       {/* THE KIT'S HEAD, which publishes the trail to the window's one trail
           row rather than drawing a back button of its own (DESIGN.md, "One
           trail row"). */}
       <Head
-        title={goal.statement}
+        title={goalTitle(goal)}
+        navigationKey={goal.id}
         meta={<Chip tone={goal.status === "closed" ? "muted" : "accent"}>{goal.status === "active" ? "Active goal" : goalStatusWord(goal.status)}</Chip>}
         back={{ label: "Goals", onSelect: onBack }}
       />
 
       <div className="os-nexus-goalview-body">
+        {goal.statement.trim() !== "" && goalTitle(goal) !== goal.statement.trim() ? (
+          <details className="nexus-technical"><summary>Request</summary><p style={{ whiteSpace: "pre-wrap" }}>{goal.statement}</p></details>
+        ) : null}
         <Facts>
           <Fact label="Asked by" value={originWord(goal.origin)} />
           <Fact
@@ -353,6 +353,11 @@ export function GoalView({
               {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : stepsState === "live" ? <Caption>{progress.compiling ? "The steps appear as the work is planned." : "This run recorded no steps."}</Caption> : null) : null}
             </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite"><StepSummary step={openStep} usage={usage ? summarizeUsage(usage.calls.filter(call => call.stepKey === openStep.key), usage.complete) : undefined} /></aside> : null}</div>
 
+            {/* Rewind is read-only view navigation beside its time control.
+                Lifecycle actions stay together in the three-action footer. */}
+            {bounds.count > 1 && !rewound ? <button type="button" className="os-nexus-link"
+              aria-label="Rewind: draw this goal as it stood at an earlier moment. Nothing runs and nothing is spent."
+              onClick={() => setAt(bounds.to || "")}><History size={13} aria-hidden /> Rewind</button> : null}
             {rewound ? (
               <Scrubber moments={moments} at={at} onScrub={setAt} onLive={() => setAt("")} />
             ) : null}
@@ -376,7 +381,7 @@ export function GoalView({
         )}
 
         {cancel.error === "" ? null : (
-          <Notice tone="error" sentence="The goal was not closed." detail={cancel.error} />
+          <Notice tone="error" sentence="Closing the goal needs attention." detail={cancel.error} />
         )}
       </div>
 
@@ -404,22 +409,9 @@ export function GoalView({
         }
         tone={tone}
         acts={acts}
+        scope={goal.id}
       >
-        {/* THE CONFIRMATION IS THE GOAL'S OWN WORDS. Closing asks every run of
-            it to stop, so this is the one place on this page that asks somebody
-            to type something -- and what it asks for is the statement, because
-            that is what they would call it. */}
-        {closable ? (
-          <details className="os-nexus-confirm"><summary>Close goal</summary>
-            <Input
-              id="nexus-close-confirm"
-              label={`Type the goal's own words to close it: ${goal.statement}`}
-              placeholder="Type the goal to close it"
-              value={confirm}
-              onChange={setConfirm}
-            />
-          </details>
-        ) : null}
+        {closable && confirm ? <span>Close this goal and ask all its runs to stop? A step already running may finish first.</span> : null}
         {derive.error === "" ? null : (
           <span className="os-nexus-act-error os-mono" role="alert">
             {derive.error}

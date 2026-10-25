@@ -1,3 +1,4 @@
+import { summarizeUsage, usageLabel } from "./modelUsage";
 import type { ModelUsageState } from "./useModelUsage";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -34,6 +35,7 @@ import {
   decisionsByStep,
   formatSpend,
   idTail,
+  goalTitle,
   kindBreakdown,
   runIsTerminal,
   runSpend,
@@ -202,6 +204,7 @@ export function RunPage({
 
   const breakdown = useMemo(() => kindBreakdown(steps), [steps]);
   const spend = useMemo(() => runSpend(run), [run]);
+  const usageSummary = usage ? summarizeUsage(usage.calls, usage.complete) : null;
   // A journal page is not the entire run. Never present partial model-call
   // totals as a step's complete receipt; its durable step totals remain above.
   const decisions = useMemo(() => decisionsByStep(journal.modelCallsComplete ? journal.modelCalls : []), [journal.modelCalls, journal.modelCallsComplete]);
@@ -476,12 +479,13 @@ export function RunPage({
       ? null
       : newestVerdict(verdicts.feedback, { stepKey: composer.stepKey, version: composerVersions.current });
 
-  const title = run.workTitle?.trim() || goal?.statement.trim() || runTitle(run);
+  const title = run.workTitle?.trim() || (goal ? goalTitle(goal) : runTitle(run));
 
   return (
     <div className="os-nexus-run">
       <Head
         title={title}
+        navigationKey={run.id}
         meta={
           <Chip tone={run.mode === "replay" ? "accent" : "muted"} title={runModeDetail(run.mode)}>
             {runModeWord(run.mode)}
@@ -510,11 +514,15 @@ export function RunPage({
             <>
               For{" "}
               <button type="button" className="os-nexus-link" onClick={() => onOpenGoal(goal.id)}>
-                {goal.statement}
+                {goalTitle(goal)}
               </button>
             </>
           )}
         </p>
+
+        {goal && goal.statement.trim() !== "" && goalTitle(goal) !== goal.statement.trim() ? (
+          <details className="nexus-technical"><summary>Request</summary><p style={{ whiteSpace: "pre-wrap" }}>{goal.statement}</p></details>
+        ) : null}
 
         {/* A DIVERGED REPLAY IS NOT A FAILED RUN, and it took its own notice
             to stop reading as one (memql#4999). Nothing broke: the compile
@@ -652,18 +660,11 @@ export function RunPage({
         ) : null}
 
         <section aria-label="Run usage" className="os-app-stack">
-          {/* THE SPEND IS THE BAND'S LEGEND LINE, not four stat cards beside
-              it: it is the same question the band asks, answered in figures.
-              Every value can be ABSENT and renders as an em dash -- epic A1
-              writes none of them, and "0 model calls" on a run that made three
-              is the single most damaging thing this surface could say. */}
+          {/* The same owner-scoped receipts as the Usage panel. A partial
+              page remains partial; run budget accounting is separate below. */}
           <ul className="os-nexus-spend" aria-label="What this run spent">
-            {spend.map((figure) => (
-              <li key={figure.many} className="os-nexus-spend-item">
-                <span className="os-nexus-spend-value os-mono">{formatSpend(figure)}</span>
-                <span className="os-nexus-spend-label">{spendLabel(figure)}</span>
-              </li>
-            ))}
+            <li className="os-nexus-spend-item"><span className="os-nexus-spend-value os-mono">{usageSummary ? usageLabel(usageSummary) : "Usage not reported"}</span><span className="os-nexus-spend-label">token usage</span></li>
+            <li className="os-nexus-spend-item"><span className="os-nexus-spend-value os-mono">{usageSummary && usageSummary.calls > 0 ? String(usageSummary.calls) : "Not reported"}</span><span className="os-nexus-spend-label">model calls shown</span></li>
             <li className="os-nexus-spend-item">
               <span className="os-nexus-spend-value os-mono">
                 {run.startedAt === "" ? "--" : formatFreshness(run.startedAt, now)}
@@ -671,11 +672,14 @@ export function RunPage({
               <span className="os-nexus-spend-label">started</span>
             </li>
           </ul>
-          <details className="nexus-technical"><summary>Execution details</summary><KindBand breakdown={breakdown} runStatus={run.status} stepsKnown={steps.length > 0 || stepsState === "live"} />
+          {usage?.error ? <Caption>{usage.calls.length > 0 ? "Usage could not be refreshed. Showing the last receipts received." : "Usage could not be refreshed."}</Caption> : null}
+          <details className="nexus-technical"><summary>Execution details</summary>
+          <p>Recorded run accounting</p><ul className="os-nexus-spend" aria-label="Recorded run accounting">{spend.map(figure => <li key={figure.many} className="os-nexus-spend-item"><span className="os-nexus-spend-value os-mono">{figure.value === null ? "Not reported" : formatSpend(figure)}</span><span className="os-nexus-spend-label">{spendLabel(figure)}</span></li>)}</ul>
+          <KindBand breakdown={breakdown} runStatus={run.status} stepsKnown={steps.length > 0 || stepsState === "live"} />
           {breakdown.unclassified > 0 ? (
             <Caption>
               {breakdown.unclassified} of these steps{" "}
-              {breakdown.unclassified === 1 ? "is" : "are"} unclassified: this build cannot yet say
+              {breakdown.unclassified === 1 ? "is" : "are"} missing a model-use classification: this build cannot say
               whether they called a model, so they are counted separately rather than assumed free.
             </Caption>
           ) : null}
@@ -733,6 +737,7 @@ export function RunPage({
                   {isOpen ? (
                     <StepDetail
                       step={step}
+                      usage={usage ? summarizeUsage(usage.calls.filter(call => call.stepKey === step.key), usage.complete) : undefined}
                       versions={info.versions}
                       versionsLoading={versionsRead.state === "loading" && info.count > 1}
                       current={info.current}

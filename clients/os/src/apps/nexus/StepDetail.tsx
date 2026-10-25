@@ -1,3 +1,4 @@
+import type { UsageSummary } from "./modelUsage";
 import { StepSummary } from "./StepSummary";
 import type { ReactNode } from "react";
 import {
@@ -39,6 +40,7 @@ import { kindCalledAModel, stepKindMeaning, stepKindWord, stepStatusWord, sympto
 
 export function StepDetail({
   step,
+  usage,
   versions,
   versionsLoading,
   current,
@@ -54,6 +56,7 @@ export function StepDetail({
 }: {
   /** The live row: what the step IS, whichever version is picked. */
   step: StepRow;
+  usage?: UsageSummary;
   versions: readonly StepVersion[];
   /** The versions read has not answered, and there is more than one version to pick from. */
   versionsLoading: boolean;
@@ -81,7 +84,8 @@ export function StepDetail({
 
   return (
     <div className="os-nexus-step-detail" data-continues={continues || undefined}>
-      <StepSummary step={step} />
+      <StepSummary step={step} usage={usage} />
+      {usage && usage.calls > 0 ? <p className="os-caption">Usage includes recorded calls across this action’s attempts.</p> : null}
       <details className="nexus-technical"><summary>Execution evidence and versions</summary>
       <p className="os-nexus-step-meaning">
         <strong>{stepKindWord(step.kind)}</strong> -- {stepKindMeaning(step.kind)}

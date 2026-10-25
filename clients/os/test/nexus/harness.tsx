@@ -251,7 +251,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // a test that asserts WHICH arguments a write received cannot do it
       // through a `vi.fn(async () => ...)` whose parameter list is empty.
       createGoal: write(seed.createReply),
-      cancelGoal: write(),
+      cancelGoal: builtinWrite("cancelGoal", args => ({ goalId: args.goalId, goalClosed: true, runsAsked: 0 })),
       // Nexus no longer calls `forkRun` (epic memql#5414), and it is
       // deliberately still answered here, so a test can assert NOTHING in the
       // app calls it -- a method the fake did not have would fail the call

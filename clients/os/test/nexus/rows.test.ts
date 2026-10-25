@@ -168,7 +168,7 @@ describe("which steps thought", () => {
     // have called one -- which is the exact claim this surface is here to
     // make, made without evidence.
     expect(kindCalledAModel("")).toBeNull();
-    expect(stepKindWord("")).toBe("Unclassified");
+    expect(stepKindWord("")).toBe("Model use not reported");
     expect(stepThought(stepFromRow({ id: "s", key: "k", seq: 0, kind: "" }))).toBe(false);
   });
 });
@@ -227,7 +227,7 @@ describe("the kind band", () => {
     // A bar a screen reader cannot read is a bar that excluded somebody, and
     // the picture's whole content is proportion.
     expect(kindBreakdownLabel(kindBreakdown(steps))).toBe(
-      "5 steps: 2 deterministic, 1 reasoning, 1 human, 1 unclassified.",
+      "5 steps: 2 workflow steps, 1 model-backed step, 1 human, 1 with model use not reported.",
     );
     expect(kindBreakdownLabel(kindBreakdown([]))).toBe("No steps yet.");
   });
@@ -525,4 +525,14 @@ describe("which door answered a step", () => {
 it("includes local and subscription tokens in the run's displayed total", () => {
   const run = runFromRow({ id: "run", spent: { tokens: 0, tokensLocal: 1200, tokensSubscription: 300 } });
   expect(runSpend(run).find(figure => figure.many === "tokens")?.value).toBe(1500);
+});
+
+
+it("uses an excerpt without changing the full saved request", () => {
+  const statement = "Please review the repository delivery and keep all existing records intact before proposing the next clearly scoped change.";
+  const goal = goalFromRow({ id: "g1", statement });
+  expect(goalTitle(goal).length).toBeLessThanOrEqual(81);
+  expect(goalTitle(goal).endsWith("…")).toBe(true);
+  expect(goal.statement).toBe(statement);
+  expect(goalTitle(goalFromRow({ id: "g2", statement: "Check the result" }))).toBe("Check the result");
 });

@@ -93,11 +93,11 @@ describe("the timeline", () => {
     const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     const timeline = await openRun(conn);
     expect(
-      within(timeline).getByLabelText("Step 3, Classify, Reasoning, called a model, Done"),
+      within(timeline).getByLabelText("Step 3, Classify, Model work, recorded as model-backed work, Done"),
     ).toBeTruthy();
     expect(
       within(timeline).getByLabelText(
-        "Step 1, Fetch ledger, Deterministic, ran without calling a model, Done",
+        "Step 1, Fetch ledger, Workflow step, recorded workflow activity; nested work may include model calls, Done",
       ),
     ).toBeTruthy();
   });
@@ -133,7 +133,7 @@ describe("the timeline", () => {
     });
     await openRun(conn);
     expect(
-      await screen.findByText(/this build cannot yet say whether they called a model/),
+      await screen.findByText(/this build cannot say whether they called a model/),
     ).toBeTruthy();
   });
 });
@@ -144,7 +144,7 @@ describe("the kind band", () => {
     await openRun(conn);
     expect(
       await screen.findByLabelText(
-        "5 steps: 3 deterministic, 1 reasoning, 1 human.",
+        "5 steps: 3 workflow steps, 1 model-backed step, 1 human.",
       ),
     ).toBeTruthy();
   });
@@ -732,12 +732,12 @@ describe("each step's decision", () => {
     const timeline = await openRunAndReadJournal(conn);
     expect(
       within(timeline).getByLabelText(
-        "Step 2, Classify, Reasoning, called a model, Done, anthropic · claude-sonnet-4 · $0.0041",
+        "Step 2, Classify, Model work, recorded as model-backed work, Done, anthropic · claude-sonnet-4 · $0.0041",
       ),
     ).toBeTruthy();
     expect(
       within(timeline).getByLabelText(
-        "Step 4, Draft, Reasoning, called a model, Done, replayed · claude-haiku, no call made",
+        "Step 4, Draft, Model work, recorded as model-backed work, Done, replayed · claude-haiku, no call made",
       ),
     ).toBeTruthy();
   });
@@ -777,4 +777,30 @@ it("keeps the goal readable after a terminal outcome replaces compile metadata",
   mount(conn);
   fireEvent.click(await screen.findByText("nightlyReconcile"));
   expect(await screen.findByRole("heading", { name: "Find the saved contact" })).toBeTruthy();
+});
+
+
+describe("consistent run usage", () => {
+  it("uses the same estimated receipts in the summary and details when run accounting is absent", async () => {
+    const conn = fakeConnection({ runs: [runRow({ id: "run-1", spent: undefined, status: "succeeded" })], steps: fiveSteps(), modelUsage: [
+      { id: "call-1", runId: "run-1", stepKey: "classify", inputTokens: 1000, outputTokens: 250, tokensEstimated: true, pricingConfigured: false },
+    ] });
+    await openRun(conn);
+    const summary = screen.getByRole("list", { name: "What this run spent" });
+    expect(await within(summary).findByText("1.3k estimated tokens")).toBeTruthy();
+    expect(within(summary).getByText("1")).toBeTruthy();
+    const detail = screen.getByRole("region", { name: "Recorded token usage" });
+    expect(within(detail).getByText("1.3k estimated tokens")).toBeTruthy();
+    expect(within(summary).queryByText("--")).toBeNull();
+    expect(screen.getByLabelText("Recorded run accounting")).toBeTruthy();
+  });
+  it("keeps partial usage qualified and never turns absent measurement into zero", async () => {
+    const conn = fakeConnection({ runs: [runRow({ id: "run-1", spent: undefined, status: "running", finishedAt: "" })], steps: fiveSteps() });
+    conn.query.workModelUsageForOwnerRun.mockResolvedValue(rowsResult([{ id: "call-1", runId: "run-1", stepKey: "classify", inputTokens: 0, outputTokens: 0, tokensEstimated: false }], "more"));
+    await openRun(conn);
+    const summary = screen.getByRole("list", { name: "What this run spent" });
+    expect(await within(summary).findByText("0 reported tokens shown")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Recorded token usage" }).textContent).toContain("0 reported tokens shown");
+    expect(within(summary).getByText("1")).toBeTruthy();
+  });
 });

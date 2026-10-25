@@ -25,7 +25,7 @@ const actions: Record<string, string> = {
   appSession: "Work on the request", session: "Work on the request",
   workViewerContext: "Check your profile context", workReviewReply: "Prepare the final answer",
   workConversationReply: "Write the answer", workQuickReply: "Write the answer",
-  ai: "Work on the request",
+  ai: "Work on the request", runAgentTurn: "Work on the request",
 };
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -50,6 +50,7 @@ export function stepTitle(step: PresentableStep): string {
   const prompt = resultValues(step).map(result => recordedText(result, ["prompt"])).find(Boolean);
   if (prompt && actions[prompt]) return actions[prompt];
   if (step.key === "goalInput" && step.stepType === "expression") return "Read the request details";
+  if (!step.callName && ["block", "parallel", "forEach"].includes(step.stepType)) return "Coordinate the work";
   const call = (step.callName || step.key).split(/[.:/]/).filter(Boolean).at(-1) ?? "";
   if (actions[call]) return actions[call];
   const words = call.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();

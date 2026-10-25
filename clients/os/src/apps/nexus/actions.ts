@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
-import { idTail } from "./rows";
+import { idTail, sameRow } from "./rows";
 
 // Every write the Nexus app makes, and the busy/error pair each one owns.
 //
@@ -179,7 +179,13 @@ export function useCancelGoal(): CancelGoalState {
       setError("");
       try {
         const trimmed = reason.trim();
-        await query.cancelGoal({ goalId, ...(trimmed === "" ? {} : { reason: trimmed }) });
+        const result = await query.cancelGoal({ goalId, ...(trimmed === "" ? {} : { reason: trimmed }) });
+        const rows = result.rows(), reply = rows[0];
+        if (rows.length !== 1 || typeof reply?.goalId !== "string" || !sameRow(reply.goalId, goalId) || typeof reply.goalClosed !== "boolean") {
+          throw new Error("The cluster did not confirm whether this goal closed. Check its current state before trying again.");
+        }
+        if (!reply.goalClosed) throw new Error("Some runs may have been asked to stop, but the goal did not close. Check its current state.");
+        if (Array.isArray(reply.runsRefused) && reply.runsRefused.length > 0) throw new Error("The goal closed, but some runs could not be asked to stop. Check their current activity.");
         return true;
       } catch (err: unknown) {
         setError(describe(err));

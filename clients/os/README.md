@@ -1962,35 +1962,21 @@ Twelve things about it are new rules rather than repetitions of the nine apps
 before it. The first five came with sub-project A and hold unchanged; the last
 three came with epic memql#5414 (versions, verdicts and the reuse ratio).
 
-- **THE SPINE'S WEIGHT IS THE PRODUCT'S CLAIM, AND IT IS DRAWN IN INK RATHER
-  THAN IN HUE.** The system works a goal out once and replays it afterwards
-  without a model unless reasoning is genuinely needed. Nobody can check that
-  from a table of forty-seven rows that all look alike -- they would have to
-  read every row to find the three that cost something. So a run has a thread
-  down its left edge: a deterministic step is a hollow node on a hairline (a
-  hundred of them read as TEXTURE, not as a hundred things to read) and a
-  reasoning step is a filled node on a segment of solid ink, with the cost
-  readout on that row and nowhere else. The eye finds where the machine thought
-  before a word is read.
+- **RECORDED CLASSIFICATION IS NOT A COMPLETE ACCOUNT OF MODEL USE.** The
+  spine retains its weight and text cues, but the automation journal can mark
+  a structural parent deterministic while nested work calls a model. Function
+  steps can also lack a classification. Present these as workflow activity or
+  model use not reported; preserve raw kinds in technical details. Do not turn
+  either into a claim that the work was free or reached no model.
 
-  Hue was the wrong axis and the reason is this shell's own vocabulary: amber
-  is `warn`, red is `error`, and the accent is live/primary/yes-here, so a
-  colour-per-kind legend would put status hues on a partition that has nothing
-  to do with status and a reasoning step in accent would read as "this step is
-  fine". A weight axis survives greyscale, survives every theme pack, and is a
-  SECOND channel rather than the only one -- the kind is also a word on the row
-  and in its accessible name.
-
-- **ABSENT IS NOT ZERO, AND HERE THAT IS THE HEADLINE RATHER THAN A DETAIL.**
-  The SDK's `rowNumber` answers `0` for a missing key, which is right for a
-  count and wrong for every figure on a run's `spent`. Epic A1 writes none of
-  them, so `runSpend` reports each as `null` and the panel renders an em dash:
-  "0 model calls" on a run that made three is the single most damaging thing
-  this surface could say, because *it reached no model* is the claim the
-  product makes. The same rule governs `kind == ""` -- A1 leaves `function`
-  steps unclassified, and reading a blank as `deterministic` would put "no
-  model was called" on a step that may well have called one. Unclassified is
-  its own band slice and its own count, never folded into the free half.
+- **ABSENT IS NOT ZERO.** The owner-scoped model-call receipts supply the same
+  token and call readings in the run summary and Usage panel. Estimated and
+  incomplete readings keep those qualifiers; a page of receipts is not a full
+  run total. Unknown values say “Not reported”. Run budget accounting remains
+  separately available in execution details. A goal heading is a short excerpt
+  with its complete request available, and closing it asks for a brief explicit
+  confirmation in the action bar rather than retyping that request. The native
+  interactive authorization and cancellation-at-step-boundary semantics remain.
 
 - **A HEARTBEAT IS NOT NEWS, AND THIS IS THE SHARPEST CASE IN THE SHELL SO
   FAR.** Fleet's heartbeat moves every fifteen seconds and the Domains sweep
