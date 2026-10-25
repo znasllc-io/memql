@@ -216,6 +216,10 @@ bin/tools/
 docker/nginx/certs/*.crt
 docker/nginx/certs/*.key
 
+# Generated source topology (not an embedded or committed input)
+/build/architecture/
+/topology.model.json
+
 # Generated docs reference (produced by cmd/docs-gen at bundle/release time)
 docs/public/reference/_generated/*
 !docs/public/reference/_generated/.gitkeep

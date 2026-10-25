@@ -199,12 +199,13 @@ Release asset; the site replaces its set with the newest one.
    after contract v2; the transitional `nav` below keeps only the sidebar
    working.
 
-Two generated facts are committed rather than bundled: `make arch-model`
-writes the code's architecture model and `make platform-graph` the platform
-graph (roles, deployment, gRPC services, front door, routing, concepts,
-automations, OS navigation) into `component/architecture/embedded/`, each
-held to the tree by a drift gate. The diagrams the docs are drawn from read
-them.
+The source topology is generated during verification by `make arch-model`
+into the ignored `build/architecture/topology.model.json`. It is not bundled
+or embedded, and the current docs generator does not read it. An author may
+inspect that output when preparing a diagram. `make platform-graph` remains
+separate: its `component/architecture/embedded/platform.graph.json` stays
+committed, embedded and checked by its existing drift gate. Neither workflow
+permits hand-edited generated output to stand in for successful generation.
 
 ### The manifest (schema 2)
 

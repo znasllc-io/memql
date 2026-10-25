@@ -1,7 +1,7 @@
 // Package extract reads a Go workspace (or a single module) and
 // produces a model.Model describing its architecture. It is the
 // "compiler frontend" of the architecture framework -- the model is
-// the IR, and renderers (cockpit TUI, exporters) are the backends.
+// the IR, and optional renderers/exporters are consumers.
 //
 // The package is split by concern:
 //   - workspace.go : discovering modules from go.work / go.mod
@@ -49,9 +49,9 @@ type Options struct {
 }
 
 // Run executes the extractor and returns a fully populated model.
-// Errors are returned at the first hard failure (workspace not found,
-// unparseable go.work, packages.Load fatal); per-package problems are
-// logged to stdout but do not abort the run.
+// Every selected pass must load all roots and dependencies successfully.
+// Package/type errors return no model, including errors packages.Load reports
+// on individual packages rather than as its top-level error.
 func Run(opts Options) (*model.Model, error) {
 	if opts.WorkspaceRoot == "" {
 		return nil, fmt.Errorf("WorkspaceRoot is required")
@@ -65,6 +65,9 @@ func Run(opts Options) (*model.Model, error) {
 		return nil, err
 	}
 
+	if len(plans) == 0 {
+		return nil, fmt.Errorf("workspace has no architecture plans")
+	}
 	m := model.NewModel(ws.Root)
 
 	if err := ExtractPackages(m, plans, ws.Root); err != nil {

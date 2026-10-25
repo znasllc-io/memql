@@ -139,7 +139,7 @@ concept nodeType {
   image         string  @description("Container image reference for this node type (e.g. gcr.io/project/memql-agent:latest).")
   capabilities  []string  @description("Expected capability FQNs that nodes of this type should expose.")
   defaultLabels object  @description("Default labels applied to spawned instances of this type.")
-  codeReference string  @description("Optional architecture-model node id (model.Node.ID) linking this node type to its code-side identity: the role's service, 'service:<type>' (e.g. 'service:agent'), which both the architecture model and the platform graph in component/architecture/embedded carry. The join from a live node type to the static graphs.")
+  codeReference string  @description("Optional architecture-model node id (model.Node.ID) linking this node type to its code-side identity: the role's service, 'service:<type>' (e.g. 'service:agent'), which both the generated source topology and the committed platform graph carry. The join from a live node type to the static graphs.")
 }
 
 /// Lifecycle event recording node state transitions (started, stopped, failed). Used for audit

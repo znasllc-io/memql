@@ -26,6 +26,22 @@ integration wiring that goes with it.
 the binary meaningfully smaller. See [Binary size](#binary-size) for the measured
 numbers and why.
 
+## Source architecture verification
+
+`make build` and the native pipeline's Go checks generate the source topology
+with the repository-pinned toolchain and complete package/type loading.
+`make arch-model` writes `build/architecture/topology.model.json`;
+`make arch-model-check` validates a fresh generation. The output is ignored
+and is not part of engine images, Fleet payloads, SDKs or the docs bundle.
+Direct role and public Go builds do not require this file. The separately
+committed `platform.graph.json` and its existing checks remain unchanged.
+
+The pre-release Go exports `embedded.ModelJSON` and `embedded.Load` are
+removed. Tools that need the source topology use `model.ReadJSON` on generated
+output or `extract.Run`. The platform loader and both graph schemas are
+unchanged. Extraction now refuses package or type errors instead of returning
+a partial graph. This does not change a DSL construct or client wire contract.
+
 ## Node Types
 
 | Type | Tag | Purpose |

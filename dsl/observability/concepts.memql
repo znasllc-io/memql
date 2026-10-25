@@ -13,7 +13,7 @@ use identity.concepts.{ user }
 /// codeProfile row when someone wanted to set a non-default level on it (incident response, hot
 /// path under investigation, etc.). Resolution at call time is codeProfile -> MEMQL_OBSERVE_LEVEL
 /// default -> off. Keyed by codeReference, which matches the model.Node.ID for the Method or Func
-/// node in the architecture model (component/architecture/embedded/topology.model.json, e.g.
+/// node in the architecture model (build/architecture/topology.model.json, e.g.
 /// 'method:github.com/znasllc-io/memql/component/auth.(*Handler).Login'). The observe runtime reads
 /// them through a CDC-driven cache.
 @displayCard(primary="codeReference", secondary="reason", tertiary="setBy", status="level")

@@ -30,8 +30,8 @@ import (
 // PlatformSchemaVersion identifies the platform graph's on-disk format.
 const PlatformSchemaVersion = "1"
 
-// PlatformGraphFilename is the committed artifact's name, beside
-// topology.model.json in component/architecture/embedded.
+// PlatformGraphFilename is the committed platform artifact in
+// component/architecture/embedded. Source topology is generated separately.
 const PlatformGraphFilename = "platform.graph.json"
 
 // PlatformNodeKind names what a platform-graph node is. Closed: a reader may

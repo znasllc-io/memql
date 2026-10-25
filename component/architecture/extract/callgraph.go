@@ -63,10 +63,13 @@ func ExtractCalls(m *model.Model, plans []ServicePlan) error {
 		if err != nil {
 			return fmt.Errorf("load packages (calls) for %s: %w", plan.Arch.Service, err)
 		}
+		if err := requireCompleteLoad(pkgs, true); err != nil {
+			return fmt.Errorf("incomplete call graph load for %s: %w", plan.Arch.Service, err)
+		}
 		initial = append(initial, pkgs...)
 	}
 	if len(initial) == 0 {
-		return nil
+		return fmt.Errorf("call graph has no packages")
 	}
 
 	// Build SSA. InstantiateGenerics expands generic functions per

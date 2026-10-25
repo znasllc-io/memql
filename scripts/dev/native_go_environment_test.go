@@ -191,3 +191,43 @@ func TestNativeGoPreparationContract(t *testing.T) {
 		t.Fatalf("native preparation contract: %v\n%s", err, out)
 	}
 }
+
+// The actual native command must generate before compilation, and generation
+// failure must stop the lane. Recording executables avoid network/build effects.
+func TestNativeGoChecksRequireCompleteArchitectureGeneration(t *testing.T) {
+	_, step := nativeStep(t, "go-checks")
+	for _, fails := range []bool{false, true} {
+		t.Run(fmt.Sprint(fails), func(t *testing.T) {
+			root := t.TempDir()
+			for _, name := range []string{"bash", "go", "make"} {
+				body := "#!/bin/sh\nprintf '%s:%s\\n' '" + name + "' \"$*\"\n"
+				if name == "make" {
+					body += "if [ \"$1\" = arch-model ] && [ \"$FAIL_ARCH\" = 1 ]; then exit 17; fi\n"
+				}
+				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fail := "0"
+			if fails {
+				fail = "1"
+			}
+			cmd := exec.Command("/bin/sh", "-c", step.Run)
+			cmd.Dir = root
+			cmd.Env = []string{"PATH=" + root, "MEMQL_BASE_SHA=fixture", "FAIL_ARCH=" + fail}
+			output, err := cmd.CombinedOutput()
+			text := string(output)
+			if strings.Count(text, "make:arch-model ") != 1 {
+				t.Fatalf("canonical generation did not run exactly once: %s", text)
+			}
+			generated, built := strings.Index(text, "make:arch-model "), strings.Index(text, "go:build ")
+			if fails {
+				if err == nil || built >= 0 {
+					t.Fatalf("generation failure did not stop compilation: %v %s", err, text)
+				}
+			} else if err != nil || built < generated {
+				t.Fatalf("build order: %v %s", err, text)
+			}
+		})
+	}
+}

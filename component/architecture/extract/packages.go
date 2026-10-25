@@ -154,19 +154,8 @@ func ExtractPackages(m *model.Model, plans []ServicePlan, workspaceRoot string) 
 		if err != nil {
 			return fmt.Errorf("load packages for %s: %w", plan.Arch.Service, err)
 		}
-		// packages.Load surfaces per-package errors via pkg.Errors.
-		// We collect a representative sample but don't abort the run
-		// on isolated breakage -- a service still produces useful
-		// output even if one subpackage doesn't compile.
-		var firstErr error
-		packages.Visit(pkgs, nil, func(p *packages.Package) {
-			if len(p.Errors) == 0 || firstErr != nil {
-				return
-			}
-			firstErr = fmt.Errorf("%s: %s", p.PkgPath, p.Errors[0])
-		})
-		if firstErr != nil {
-			fmt.Printf("memql-arch: warning: %v\n", firstErr)
+		if err := requireCompleteLoad(pkgs, false); err != nil {
+			return fmt.Errorf("incomplete packages load for %s: %w", plan.Arch.Service, err)
 		}
 
 		seen := make(map[string]bool)

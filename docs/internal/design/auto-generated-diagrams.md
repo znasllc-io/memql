@@ -10,6 +10,14 @@ owner: znas
 # Auto-Generated Architecture Diagrams
 
 > Historical: shipped in 0.9.0; kept for rationale.
+>
+> Current contract: the owner selected source topology generation during
+> verified builds. `make arch-model` writes ignored build output; the unused
+> `embedded.ModelJSON` and `embedded.Load` exports are removed. No current
+> engine, OS, Cockpit or docs-bundle runtime consumes this topology. The
+> embedding and TUI flow below records the original design, not a current
+> consumer promise. The separate platform graph remains committed and
+> embedded. See `component/architecture/CLAUDE.md` for the generation contract.
 
 **Status:** Shipped 2026-05-15 on `feature/auto-generated-diagrams`.
 

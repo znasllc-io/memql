@@ -2,8 +2,8 @@
 # `memql-arch` (cmd/memql-arch) when it walks the workspace. Adoption
 # is opt-in: every field below has a default, so a missing or empty
 # file would still produce a usable model. Filling fields in promotes
-# the labels and metadata the committed model
-# (component/architecture/embedded/topology.model.json) carries.
+# the labels and metadata the generated model
+# (build/architecture/topology.model.json) carries.
 #
 # Authoritative schema:  component/architecture/extract/archyaml.go
 
