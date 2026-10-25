@@ -50,6 +50,69 @@ builtin releaseCutStatus {
 @executor("integration.release.candidateConfiguration")
 builtin releaseCandidateConfiguration { }
 
+/// Read installed opt-in release profiles, immutable configuration digests and source inputs.
+@sdk
+@executor("integration.release.candidateProfiles")
+builtin releaseCandidateProfiles { }
+
+/// Retain a verified selected source and installed recipes. No tag, build, approval or publication effect.
+@sdk
+@executor("integration.release.prepareBuild")
+builtin releasePrepareBuild { profileName string! pipelineId string! expectedConfiguration string! }
+
+/// Read this owner's saved release journeys, including interrupted attempts.
+@sdk
+@executor("integration.release.builds")
+builtin releaseBuilds { limit integer }
+
+/// Read a saved release's current candidate approval and available actions without remote effects.
+@sdk
+@executor("integration.release.getBuild")
+builtin releaseGetBuild { intentId string! }
+
+/// Explicitly start the selected immutable tag and exact full release build through the captured product recipe.
+@sdk
+@executor("integration.release.startBuild")
+builtin releaseStartBuild { intentId string! }
+
+/// Observe the exact saved tag and build; never dispatch work or assemble a candidate.
+@sdk
+@executor("integration.release.observeBuild")
+builtin releaseObserveBuild { intentId string! }
+
+/// Resume a saved recipe using native effect fences; unknown requests are reconciled, never replaced.
+@sdk
+@executor("integration.release.resumeBuild")
+builtin releaseResumeBuild { intentId string! }
+
+/// Publish only the saved candidate's separate approval using its captured, scoped product recipe.
+@sdk
+@executor("integration.release.publishBuild")
+builtin releasePublishBuild { intentId string! approvalId string! }
+
+// Private ports require the native original-owner release scope; direct calls refuse.
+@executor("integration.release.releaseBuildFacts")
+builtin releaseBuildFacts { }
+@executor("integration.release.releaseBuildEnsureTag")
+builtin releaseBuildEnsureTag { }
+@executor("integration.release.releaseBuildRun")
+builtin releaseBuildRun { }
+@executor("integration.release.releaseBuildObserve")
+builtin releaseBuildObserve { }
+@executor("integration.release.releaseBuildAssemble")
+builtin releaseBuildAssemble { }
+
+/// Resolve an installed product profile against native completed-run facts. Never approves or publishes.
+@sdk
+@executor("integration.release.assembleProfileCandidate")
+@args(profile="object")
+builtin releaseAssembleProfileCandidate { profileName string! runs object! expectedConfiguration string! }
+
+/// Read current authorized destinations for exactly one caller-owned candidate.
+@sdk
+@executor("integration.release.candidateTargets")
+builtin releaseCandidateTargets { candidateId string! }
+
 /// Page through caller-owned review history, including interrupted preparations.
 @sdk
 @executor("integration.release.listCandidates")

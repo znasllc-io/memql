@@ -21,8 +21,8 @@ describe("the pipelines vocabulary", () => {
       .toMatchObject({ word: "Passed", detail: "1 stage, 7m 40s", mark: "done" });
     expect(runOutcome(run({ status: "queued", conclusion: "", durationMs: 0 }))).toMatchObject({ word: "Queued", detail: "", mark: "waiting" });
     expect(runOutcome(run({ status: "in_progress", conclusion: "", stages: [{ name: "checks", status: "passed" }, { name: "tests", status: "waiting" }] })))
-      .toMatchObject({ word: "Running", detail: "at tests", mark: "current" });
-    expect(runOutcome(run({ status: "in_progress", conclusion: "", cancelRequested: true, stages: [] }))).toMatchObject({ word: "Cancelling" });
+      .toMatchObject({ word: "In progress", detail: "at tests", mark: "current" });
+    expect(runOutcome(run({ status: "in_progress", conclusion: "", cancelRequested: true, stages: [] }))).toMatchObject({ word: "Cancel requested" });
     expect(runOutcome(run({ conclusion: "cancelled", stages: [{ name: "tests", status: "cancelled" }] }))).toMatchObject({ word: "Cancelled", detail: "at tests, 7m 40s" });
   });
 
@@ -65,6 +65,7 @@ describe("the pipelines vocabulary", () => {
     expect(stepWord(step("deploy.verify", { status: "skipped", errorCode: "pipeline_stage_blocked" }))).toBe("Not run");
     expect(stepWord(step("tests.os", { status: "skipped", errorCode: "pipeline_not_affected" }))).toBe("Skipped");
     expect(stepWord(step("tests.unit", { status: "pending" }))).toBe("Waiting");
+    expect(stepWord(step("tests.unit", { status: "running" }))).toBe("In progress");
     expect(stepLabel(step("tests.go#2"), 4)).toBe("go 2 of 4");
     expect(stepLabel(step("tests.unit"), 0)).toBe("unit");
     expect(whereWords(step("tests.unit"))).toBe("Cluster");

@@ -364,11 +364,6 @@ target = "../../superpowers/specs/2026-09-02-deployables-program-design.md"
 rule   = "leaves-public"
 
 [[allow]]
-file   = "docs/public/operate/release-cutting.md"
-target = "../../superpowers/specs/2026-08-23-release-cut-automation-design.md"
-rule   = "leaves-public"
-
-[[allow]]
 file   = "docs/public/operate/shopify-connector.md"
 target = "../../superpowers/specs/2026-08-22-shopify-connector-complete-mirror-design.md"
 rule   = "leaves-public"

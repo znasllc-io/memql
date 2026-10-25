@@ -1,7 +1,7 @@
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { FakeSeed } from "../test/deployables/harness";
-import { SHA_A, SHA_B, VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow } from "../test/deployables/pipelines/fixtures";
+import { SHA_A, SHA_B, VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow, uncertainRunRow, uncertainStepRows } from "../test/deployables/pipelines/fixtures";
 
 // THE PIPELINES QA SEEDS (epic memql#5479): one cluster's worth of runs, shaped
 // as the engine answers them, so the Runs tab, a run page, a source's Checks
@@ -22,6 +22,7 @@ function finishedAfter(minutes: number, durationMs: number) {
 }
 
 const RUNS: Row[] = [
+  uncertainRunRow(),
   runRow({
     id: "r-9", ownerUserId: VIEWER, pullRequest: 45, headBranch: "webhook-retry", title: "Retry failed webhook deliveries",
     sha: "9e1d7c3b5a4f2e0d1c9b8a7f6e5d4c3b2a1f0e9d", status: "queued", conclusion: "", stages: [], workRunId: "",
@@ -180,7 +181,7 @@ export const PIPELINES_SEED: FakeSeed = {
   packages: PACKAGES,
   pipelines: PIPELINES,
   pipelineRuns: RUNS,
-  workSteps: { "wr-7": FAILED_STEPS, "wr-8": RUNNING_STEPS },
+  workSteps: { "wr-7": FAILED_STEPS, "wr-8": RUNNING_STEPS, "wr-uncertain": uncertainStepRows() },
   runArtifacts: { "wr-7": FAILED_FILES },
 };
 

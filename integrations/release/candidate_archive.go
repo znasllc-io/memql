@@ -140,7 +140,7 @@ func (p *candidatePreparer) verifyPublishedInputs(ctx context.Context, snapshot 
 }
 
 func (i *Integration) handleCandidateArchive(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	p, err := i.configuredCandidate(ctx)
+	p, err := i.configuredCandidateFor(ctx, asString(args["candidateId"]))
 	if err != nil {
 		return nil, err
 	}

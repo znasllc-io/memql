@@ -251,6 +251,7 @@ function DeployablesAppContent({
   // Ask -- and a source to open on the Sources tab -- the map's Checks node, a
   // run page's trail. Each is consumed once by revision.
   const [runOpenRequest, setRunOpenRequest] = useState<{ runId: string; revision: number } | undefined>();
+  const [releaseOpenRequest, setReleaseOpenRequest] = useState<{ intentId: string; revision: number } | undefined>();
   const [runsFilterRequest, setRunsFilterRequest] = useState<{ pipelineId: string; revision: number } | undefined>();
   const [sourceOpenRequest, setSourceOpenRequest] = useState<{ packageId: string; revision: number; repositoryView?: "settings" } | undefined>();
   function openSource(packageId: string, repositoryView?: "settings") {
@@ -344,6 +345,11 @@ function DeployablesAppContent({
     if (typeof requestedRun === "string" && requestedRun) {
       if (!isPipelines) pipelineReach.open("runs", { runId: requestedRun });
       else { setRunOpenRequest(held => ({ runId: requestedRun, revision: (held?.revision ?? 0) + 1 })); navigate("runs"); }
+    }
+    const requestedRelease = intent.payload.releaseIntentId;
+    if (typeof requestedRelease === "string" && requestedRelease) {
+      if (!isPipelines) pipelineReach.open("releases", { releaseIntentId: requestedRelease });
+      else { setReleaseOpenRequest(held => ({ intentId: requestedRelease, revision: (held?.revision ?? 0) + 1 })); navigate("releases"); }
     }
     // A source named by a link: its page, on the Sources tab -- the same
     // request the map's Checks node and a run page's trail make.
@@ -518,7 +524,7 @@ function DeployablesAppContent({
     <RetainedSection active={sectionId === "sources"}><ConnectReturnNotice result={connectResult?.section === "sources" || connectResult?.section === "repositories" ? connectResult : null} />{addingRepository ? <AddRepository back={() => setAddingRepository(false)} onAdded={id => { setAddingRepository(false); reseedPackages(); openSource(id); }} onSettings={() => { setSettingsTab("connections"); navigate("settings", { fromContent: true }); }} /> : sourcesContent}</RetainedSection>
     <RetainedSection active={sectionId === "changes"}><ChangesSection runs={runs?.snapshot.rows ?? []} ready={pipelinesSettled} error={pipelinesError} onOpenRun={openRun} /></RetainedSection>
     <RetainedSection active={sectionId === "runs"}>{runsContent}</RetainedSection>
-    <RetainedSection active={sectionId === "releases"}><ReleasesSection visible={windowVisible && sectionId === "releases"} /></RetainedSection>
+    <RetainedSection active={sectionId === "releases"}><ReleasesSection visible={windowVisible && sectionId === "releases"} openRequest={releaseOpenRequest} runs={runs?.snapshot.rows ?? []} runsFresh={runs?.snapshot.state === "live" && !runs.snapshot.error} onOpenRun={runsReachable ? openRun : undefined} onOpenRepository={pipelineReach.sections.includes("repositories") ? openSource : undefined} /></RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
     <RetainedSection active={sectionId === "settings"}><div className="os-app-stack"><Head title="Settings" /><LocalTabs label="Pipeline settings" value={settingsTab} onChange={setSettingsTab} options={[["infrastructure", "Infrastructure"], ["connections", "Connections"]]} />{settingsTab === "infrastructure" ? <PipelinesSection heading={false} intent={intent} consumeIntent={consumeIntent} /> : settingsContent}</div></RetainedSection>
   </ActivePane>;

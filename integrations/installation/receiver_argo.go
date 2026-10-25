@@ -131,7 +131,16 @@ func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads, ac
 	if err != nil {
 		return err
 	}
-	repositoryProject, err := r.repositoryProject(ctx, cfg.Application.Namespace, project, repository)
+	var repositoryProject string
+	if cfg.RepositoryScope == nil {
+		repositoryProject, err = r.repositoryProject(ctx, cfg.Application.Namespace, project, repository)
+	} else {
+		var secret receiverNamed
+		secret, err = cfg.RepositoryScope.secretFor(cfg.Application)
+		if err == nil {
+			repositoryProject, err = r.namedRepositoryProject(ctx, secret, project, repository)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -148,6 +157,37 @@ func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads, ac
 	}
 	_, err = argocd.PlanRevision(s.application, "configuration-observation", revision, false)
 	return err
+}
+
+// Argo 2.13.3 getRepositorySecret returns a matching nonempty project before
+// considering its global fallback (util/db/repository_secrets.go). A positive
+// binding therefore proves the project/cache-scope value even if another
+// registration matches that same project: either choice returns that project.
+// It proves neither unique credential selection nor a global binding's absence.
+// Native rendering uses its independently minted repository-scoped CloneToken;
+// no credential field from this Secret is used or returned by this observation.
+// The existing read set binds the named Secret's UID/RV, checks it again before
+// admission, and invalidates recovery on rotation or replacement.
+// Pinned resolver: https://github.com/argoproj/argo-cd/blob/v2.13.3/util/db/repository_secrets.go#L430-L460
+func (r *receiverReads) namedRepositoryProject(ctx context.Context, ref receiverNamed, project, repository string) (string, error) {
+	if !receiverDNS.MatchString(project) || len(project) > 63 {
+		return "", errors.New("installation named repository requires a nonempty application project")
+	}
+	secret, err := r.object(ctx, "v1", "Secret", "secrets", ref.Namespace, ref.Name)
+	if err != nil {
+		return "", err
+	}
+	if resourceText(resourceMap(resourceMap(secret, "metadata"), "labels"), "argocd.argoproj.io/secret-type") != "repository" {
+		return "", errors.New("installation named repository label is invalid")
+	}
+	data := resourceMap(secret, "data")
+	repo, repoErr := base64.StdEncoding.Strict().DecodeString(resourceText(data, "url"))
+	scope, scopeErr := base64.StdEncoding.Strict().DecodeString(resourceText(data, "project"))
+	if repoErr != nil || scopeErr != nil || len(repo) == 0 || len(repo) > 8192 ||
+		strings.TrimSuffix(strings.ToLower(strings.TrimSpace(string(repo))), ".git") != strings.TrimSuffix(strings.ToLower(repository), ".git") || string(scope) != project {
+		return "", errors.New("installation named repository does not match the application's repository and project")
+	}
+	return project, nil
 }
 func (r *receiverReads) discovery(ctx context.Context) (string, []string, error) {
 	version, err := r.get(ctx, "version")

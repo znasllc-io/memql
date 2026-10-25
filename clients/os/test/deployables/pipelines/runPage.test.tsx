@@ -13,7 +13,7 @@ import { useOs } from "../../../src/chrome/state";
 import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/settings";
 import { LIBRARY_ARTIFACT_CONCEPT, WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { click, emit, fakeConnection, withSession, type FakeConnection, type FakeSeed } from "../harness";
-import { VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow } from "./fixtures";
+import { UNCERTAIN_MESSAGE, VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow, uncertainRunRow, uncertainStepRows } from "./fixtures";
 
 // The run page, layout A (epic memql#5479, issue memql#5500), opened the way a
 // check run's details link opens it: an intent naming the run.
@@ -191,6 +191,7 @@ describe("the run page", () => {
     await readTheBar();
     await click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Cancel this run?")).toBeTruthy();
+    expect(screen.getByText("Request cancellation. Finished steps keep their results.")).toBeTruthy();
     expect(connection.calls.some((c) => c.startsWith("builtin pipelinesCancel("))).toBe(false);
     await readTheBar();
     await click(screen.getByRole("button", { name: "Cancel the run" }));
@@ -202,7 +203,57 @@ describe("the run page", () => {
     mount(fakeConnection(seed({ pipelineRuns: [runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(10) }), newer] })));
     await screen.findByLabelText("The last lines of tests.unit's log");
     expect(barActs()).toEqual(["Open on GitHub"]);
-    expect(screen.getByText(/attempt 2 is running/)).toBeTruthy();
+    expect(screen.getByText(/attempt 2 is in progress/)).toBeTruthy();
+  });
+
+  it("keeps a dispatch in progress without inferring executor admission", async () => {
+    const dispatched = runRow({ id: "r-1", ownerUserId: VIEWER, status: "in_progress", conclusion: "", finishedAt: "", durationMs: 0,
+      stages: [{ name: "checks", status: "running", durationMs: 0, steps: 1, failed: 0 }] });
+    mount(fakeConnection(seed({ pipelineRuns: [dispatched], runArtifacts: {}, workSteps: { "wr-1": [
+      stepRow("checks.vet", { runId: "wr-1", status: "running", durationMs: 0, logFileId: "", binding: { surface: "cluster", jobName: "suspended-job" } }),
+    ] } })));
+    await screen.findByText("vet");
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("In progress");
+    expect(within(screen.getByRole("tabpanel")).getByText("In progress")).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
+    expect(screen.queryByText(/waiting for capacity/i)).toBeNull();
+    expect(barActs()).toEqual(["Open on GitHub", "Cancel"]);
+  });
+
+  it("keeps an uncertain receipt visible outside the selected stage without confirming cancellation or offering a re-run", async () => {
+    const connection = fakeConnection(seed({ pipelineRuns: [uncertainRunRow()], workSteps: { "wr-uncertain": uncertainStepRows() }, runArtifacts: {} }));
+    mount(connection, "r-uncertain");
+    const warning = await screen.findByText("The previous step’s outcome is unknown");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[2]?.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "deploy Waiting , current stage" })).toBeTruthy();
+    expect(screen.getByRole("tabpanel").contains(warning)).toBe(false);
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Cancel requested");
+    expect(barActs()).toEqual(["Open on GitHub"]);
+    expect(screen.queryByText("Cancelled")).toBeNull();
+    const details = screen.getByText("Details for tests / os-image").closest("details")!;
+    expect(details.open).toBe(false);
+    await click(within(details).getByText("Details for tests / os-image"));
+    expect(details.open).toBe(true);
+    expect(within(details).getByText(UNCERTAIN_MESSAGE)).toBeTruthy();
+    await click(tabs[1]!);
+    expect(screen.getAllByText("The previous step’s outcome is unknown")).toHaveLength(1);
+    expect(screen.getByText("os-image")).toBeTruthy();
+    expect(connection.calls.some((c) => c.startsWith("builtin pipelinesRerun(") || c.startsWith("builtin pipelinesCancel("))).toBe(false);
+  });
+
+  it("uses the typed receipt on the owning live feed, not error-message text or another run", async () => {
+    const steps = uncertainStepRows();
+    const ordinary = { ...steps[1]!, errorCode: "pipeline_executor_error" };
+    const connection = fakeConnection(seed({ pipelineRuns: [uncertainRunRow()], workSteps: { "wr-uncertain": [steps[0]!, ordinary, steps[2]!] }, runArtifacts: {} }));
+    mount(connection, "r-uncertain");
+    await screen.findByText("verify");
+    expect(screen.queryByText("The previous step’s outcome is unknown")).toBeNull();
+    await emit(connection, WORK_STEP_CONCEPT, { ...steps[1]!, id: "foreign-step", runId: "wr-other" }, "NODE_CREATED");
+    expect(screen.queryByText("The previous step’s outcome is unknown")).toBeNull();
+    await emit(connection, WORK_STEP_CONCEPT, steps[1]!, "NODE_UPDATED");
+    expect(await screen.findByText("The previous step’s outcome is unknown")).toBeTruthy();
+    expect(barActs()).toEqual(["Open on GitHub"]);
   });
 
   it("keeps another run's steps out of this run's stages", async () => {

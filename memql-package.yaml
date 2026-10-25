@@ -204,6 +204,7 @@ pipeline:
         # ci.yml path-routing: the path-routing and CI-configuration guards, on
         # every change.
         - name: path-routing
+          verification: true
           placement: cluster
           run: |
             set -eu
@@ -213,6 +214,7 @@ pipeline:
             python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py
             python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
         - name: build-identity
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -222,6 +224,7 @@ pipeline:
             go build -tags identity github.com/znasllc-io/memql/...
             go vet -tags identity github.com/znasllc-io/memql/...
         - name: build-mcp
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -231,6 +234,7 @@ pipeline:
             go build -tags mcp github.com/znasllc-io/memql/...
             go vet -tags mcp github.com/znasllc-io/memql/...
         - name: build-agent
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -240,6 +244,7 @@ pipeline:
             go build -tags agent github.com/znasllc-io/memql/...
             go vet -tags agent github.com/znasllc-io/memql/...
         - name: build-planner
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -249,6 +254,7 @@ pipeline:
             go build -tags planner github.com/znasllc-io/memql/...
             go vet -tags planner github.com/znasllc-io/memql/...
         - name: build-workbench
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -258,6 +264,7 @@ pipeline:
             go build -tags workbench github.com/znasllc-io/memql/...
             go vet -tags workbench github.com/znasllc-io/memql/...
         - name: build-clustere2e
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -270,6 +277,7 @@ pipeline:
             go vet -tags clustere2e,agent ./test/clustere2e/
             go test -tags clustere2e,agent -c -o /dev/null ./test/clustere2e/
         - name: module-boundaries
+          verification: true
           placement: cluster
           timeout: 60m
           run: |
@@ -278,6 +286,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             bash scripts/ci/module-integrity.sh
         - name: bash32-smoke
+          verification: true
           placement: cluster
           timeout: 10m
           image: docker.io/library/bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89
@@ -286,11 +295,12 @@ pipeline:
             set -eu
             bash ./scripts/ci/bash32-smoke.sh
     # Generic Go lanes cover Cockpit unit tests/build/vet. This lane adds only
-    # Docker and macOS computer-use behavior. During bootstrap these native
-    # lanes run all Cockpit packages; the installed parser predates packageRoots.
+    # Docker and macOS computer-use behavior for affected Cockpit packages and dependencies.
     - name: cockpit
       steps:
         - name: docker-integration
+          packages: affected
+          packageRoots: [cockpit]
           placement: fleet
           execution: native
           caches: []
@@ -306,8 +316,10 @@ pipeline:
             export MEMQL_TEST_PIPELINE_POSTGRES_IMAGE=postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
             export MEMQL_FLEET_DOCKER_TEST=1
             bash scripts/identity/build-css.sh
-            go test -race -count=1 -timeout=600s ./cockpit/...
+            go test -race -count=1 -timeout=600s $MEMQL_PACKAGES
         - name: computeruse
+          packages: affected
+          packageRoots: [cockpit]
           placement: fleet
           execution: native
           caches: []
@@ -320,10 +332,12 @@ pipeline:
             export GOFLAGS=-p=2 GOMAXPROCS=2 GOWORK="$PWD/go.work" GOTOOLCHAIN=auto
             native_go_platform darwin arm64
             bash scripts/identity/build-css.sh
-            go test -race -tags computeruse -count=1 -timeout=600s ./cockpit/...
+            go test -race -tags computeruse -count=1 -timeout=600s $MEMQL_PACKAGES
     - name: delivery-artifacts
       steps:
         - name: provider-qualification
+          packages: affected
+          packageRoots: [app, integrations/release, integrations/ociregistry, integrations/azureblob, integrations/pipelinesteps, integrations/installation, component/pipelinerun, component/pipelines, component/workjournal, component/database, component/memql]
           placement: fleet
           execution: native
           caches: []
@@ -401,6 +415,7 @@ pipeline:
         # package: a step cannot give that package a flag of its own, and its
         # gates read `git ls-files`, a set no test cache sees.
         - name: go-tests
+          verification: true
           placement: cluster
           packages: affected
           only: not-db-gated
@@ -415,6 +430,7 @@ pipeline:
         # timeout class a fresh database, preserving CI's suite isolation and
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
+          verification: true
           placement: cluster
           # Keep three Go execution threads after the heap-budget fix, with
           # a quarter-core of admission headroom per shard. Including Postgres,
@@ -597,6 +613,7 @@ pipeline:
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: sdk-ts-typecheck
+          verification: true
           placement: cluster
           run: |
             set -eu
@@ -604,6 +621,7 @@ pipeline:
             make sdk-ts-typecheck
             make sdk-ts-test
         - name: viewkit-checks
+          verification: true
           placement: cluster
           run: |
             set -eu
@@ -659,6 +677,7 @@ pipeline:
             go run ./cmd/memql-bench --do=scorecard --check > .memql-proving/scorecard.json
             jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
         - name: test-agent
+          verification: true
           placement: cluster
           # Agent-tagged persistence cases are absent from untagged DB shards.
           # A dedicated service and required DB mode prevent a skipped green.
@@ -683,6 +702,7 @@ pipeline:
             go test -tags agent -count=1 -timeout=900s -v ./app/
             go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
         - name: test-bff
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -691,6 +711,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-edge
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -699,6 +720,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-identity
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -707,6 +729,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags identity -timeout=300s ./app/ ./component/node/
         - name: test-mcp
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -715,6 +738,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
         - name: test-planner
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -723,6 +747,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags planner -timeout=300s ./app/ ./component/node/
         - name: test-workbench
+          verification: true
           placement: cluster
           timeout: 30m
           run: |
@@ -982,9 +1007,149 @@ pipeline:
             export GOFLAGS=-p=2 GOMEMLIMIT=1GiB GOGC=75
             go run ./cmd/ocisnapshot --pin deploy/ci-fixtures/timescaledb.json --out .memql-fixture
 
-    # Separate Cockpit releases require the installed component-tag policy.
-    # See docs/internal/ops/delivery-qualification.md before restoring the
-    # reviewed follow-up manifest and its affected-selection metadata.
+    - name: cockpit-release
+      'on':
+      - release
+      steps:
+      - name: headless
+        placement: cluster
+        caches: [go]
+        timeout: 60m
+        artifacts:
+        - cockpit/dist
+        - cockpit/bin
+        - cockpit/sbom
+        run: |
+          set -eu
+          export GOFLAGS=-p=2 GOMAXPROCS=2
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          env -u GOFLAGS make dist
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+      - name: computeruse-darwin-arm64
+        placement: fleet
+        timeout: 60m
+        execution: native
+        caches: []
+        platform: darwin/arm64
+        needs:
+          macos_tooling: true
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          . ./cockpit/scripts/ci/native-env.sh
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          native_go_platform darwin arm64
+          env -u GOFLAGS make cockpit-computeruse-host
+          ./scripts/macos/package-menubar.sh --arch=arm64
+          python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-arm64.tar.gz
+          ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-arm64" --arch=arm64
+          python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-arm64.tar.gz
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py darwin-arm64
+      - name: computeruse-darwin-amd64
+        placement: fleet
+        timeout: 60m
+        execution: native
+        caches: []
+        platform: darwin/arm64
+        needs:
+          macos_tooling: true
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          . ./cockpit/scripts/ci/native-env.sh
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          native_go_platform darwin arm64
+          pkgutil --pkg-info com.apple.pkg.RosettaUpdateAuto >/dev/null
+          env -u GOFLAGS make cockpit-computeruse-darwin-amd64
+          ./bin/memql-computeruse-darwin-amd64 --version
+          ./scripts/macos/package-menubar.sh --arch=amd64
+          python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-amd64.tar.gz
+          ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-amd64" --arch=amd64
+          python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-amd64.tar.gz
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py darwin-amd64
+      - name: computeruse-linux-arm64
+        placement: cluster
+        timeout: 60m
+        caches: [go]
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          export GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+          CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ env -u GOFLAGS make cockpit-computeruse-linux-arm64
+          timeout --signal=KILL 60s qemu-aarch64 -L / ./bin/memql-computeruse-linux-arm64 --version
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py linux-arm64
+      - name: computeruse-linux-amd64
+        placement: cluster
+        timeout: 60m
+        caches: [go]
+        artifacts:
+        - cockpit/bin
+        - cockpit/dist
+        - cockpit/sbom
+        run: |
+          set -eu
+          export GOFLAGS=-p=2 GOMAXPROCS=2 GOMEMLIMIT=1GiB
+          bash scripts/identity/build-css.sh
+          cd cockpit
+          test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+          env -u GOFLAGS make cockpit-computeruse-linux-amd64
+          ./bin/memql-computeruse-linux-amd64 --version
+          mkdir -p sbom
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          for asset in bin/memql-*; do
+            name=$(basename "$asset")
+            cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+            cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+          done
+          python3 scripts/ci/release-checksum.py linux-amd64
+
     - name: release-files
       on: [release]
       steps:

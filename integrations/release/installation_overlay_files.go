@@ -21,6 +21,7 @@ type overlayFile struct {
 	Images        []overlayImage        `json:"images,omitempty"`
 	GitReferences []overlayGitReference `json:"gitReferences,omitempty"`
 	Env           *overlayEnvValue      `json:"env,omitempty"`
+	JSONScalars   []overlayJSONScalar   `json:"jsonScalars,omitempty"`
 }
 type overlayGitReference struct {
 	Field      string `json:"field"`
@@ -73,16 +74,24 @@ func validateOverlayConfiguration(c overlayConfiguration) error {
 	}
 	switch c.FormatVersion {
 	case 1:
-		if len(c.Files) != 0 || !overlayKustomizationPath(c.Path) {
+		if c.NativeEvidence != nil || len(c.Files) != 0 || !overlayKustomizationPath(c.Path) {
 			return errors.New("legacy installation overlay requires one image file")
 		}
 		return validateOverlayImages(c.Images)
 	case 2:
+		if c.NativeEvidence != nil {
+			return errors.New("native evidence requires installation overlay v3")
+		}
+		fallthrough
+	case 3:
 		if c.Path != "" || len(c.Images) != 0 || len(c.Files) == 0 || len(c.Files) > 32 {
-			return errors.New("installation overlay v2 requires only a bounded explicit file set")
+			return errors.New("installation overlay requires only a bounded explicit file set")
 		}
 	default:
 		return errors.New("installation overlay format is unsupported")
+	}
+	if c.FormatVersion == 3 && (c.NativeEvidence == nil || c.NativeEvidence.validate() != nil) {
+		return errors.New("installation overlay v3 requires explicit native component and companion bindings")
 	}
 	previous := ""
 	slots := 0
@@ -91,6 +100,12 @@ func validateOverlayConfiguration(c overlayConfiguration) error {
 			return errors.New("installation overlay files must be unique and sorted by path")
 		}
 		previous = file.Path
+		if file.Codec != "nativeManifest" && strings.ContainsAny(file.Path, "{}") {
+			return errors.New("only the native manifest permits a versioned path")
+		}
+		if file.Codec != "jsonScalars" && len(file.JSONScalars) != 0 {
+			return errors.New("installation overlay file has conflicting JSON bindings")
+		}
 		switch file.Codec {
 		case "kustomizeImages":
 			if !overlayKustomizationPath(file.Path) || len(file.GitReferences) != 0 || file.Env != nil {
@@ -116,6 +131,16 @@ func validateOverlayConfiguration(c overlayConfiguration) error {
 		case "envValue":
 			if file.Path != "product.env" || len(file.Images) != 0 || len(file.GitReferences) != 0 || file.Env == nil || file.Env.Key != "ENGINE_REF" || file.Env.Component == "" || len(file.Env.Component) > 200 || (file.Env.Value != "componentCommit" && file.Env.Value != "componentVersion") {
 				return errors.New("installation environment codec permits only an explicit product.env ENGINE_REF binding")
+			}
+			slots++
+		case "jsonScalars":
+			if c.FormatVersion != 3 || !strings.HasSuffix(file.Path, ".json") || len(file.Images) != 0 || len(file.GitReferences) != 0 || file.Env != nil || validateOverlayJSONScalars(file.JSONScalars) != nil {
+				return errors.New("installation JSON file requires explicit v3 scalar fact bindings")
+			}
+			slots += len(file.JSONScalars)
+		case "nativeManifest":
+			if c.FormatVersion != 3 || len(file.Images) != 0 || len(file.GitReferences) != 0 || file.Env != nil || strings.Count(file.Path, "{version}") != 1 || strings.ContainsAny(strings.ReplaceAll(file.Path, "{version}", ""), "{}") || !strings.HasSuffix(file.Path, ".json") {
+				return errors.New("native manifest requires one explicit version placeholder and no content bindings")
 			}
 			slots++
 		default:
@@ -145,9 +170,9 @@ func validateOverlaySource(c overlayConfiguration, source installation.Publicati
 		return errors.New("installation overlay requires bounded receiving source paths")
 	}
 	for _, file := range c.files() {
-		if file.Codec == "envValue" {
+		if file.Codec == "envValue" || (c.FormatVersion == 3 && (file.Codec == "jsonScalars" || file.Codec == "nativeManifest")) {
 			continue
-		} // Only product.env/ENGINE_REF passes configuration validation.
+		} // Only explicitly bound non-executable codecs may name auxiliary files.
 		admitted := false
 		for _, root := range roots {
 			if c.FormatVersion == 1 {
@@ -174,8 +199,14 @@ func validateOverlayRecordFiles(r overlayRecord) error {
 	if r.Owner != r.Configuration.OwnerUserID || r.Request.InstallationID != r.Configuration.InstallationID || !installationIdentifier.MatchString(r.Request.RequestID) || !stringsHasDigest(r.Request.CandidateID) || !stringsHasDigest(r.Request.CatalogDigest) || !installationCommit.MatchString(r.Request.ExpectedBaseRevision) {
 		return errors.New("stored installation overlay identity is invalid")
 	}
-	if (r.Configuration.FormatVersion == 1 && len(r.Replacements) != 0) || (r.Configuration.FormatVersion == 2 && r.Replacement != (githubapp.BranchReplacement{})) {
+	if (r.Configuration.FormatVersion == 1 && len(r.Replacements) != 0) || (r.Configuration.FormatVersion >= 2 && r.Replacement != (githubapp.BranchReplacement{})) {
 		return errors.New("stored installation overlay mixes file formats")
+	}
+	if r.Configuration.FormatVersion != 3 && (r.NativeEvidence != nil || len(r.FilePreconditions) != 0) {
+		return errors.New("legacy overlay cannot contain native evidence or absence states")
+	}
+	if r.Configuration.FormatVersion == 3 && (r.NativeEvidence == nil || len(r.FilePreconditions) != len(r.files()) || validateOverlayNativeEvidence(r.Configuration, r.Request, *r.NativeEvidence) != nil) {
+		return errors.New("stored native overlay evidence is incomplete")
 	}
 	files := r.files()
 	bindings := r.Configuration.files()
@@ -185,7 +216,17 @@ func validateOverlayRecordFiles(r overlayRecord) error {
 	total := 0
 	for index, file := range files {
 		total += len(file.Content)
-		if file.Path != bindings[index].Path || !overlayBeforeDigest.MatchString(file.BeforeSHA256) || len(file.Content) == 0 || len(file.Content) > 1<<20 || total > 1<<20 || !utf8.ValidString(file.Content) || strings.ContainsRune(file.Content, 0) {
+		wantPath, err := overlayResolvedPath(bindings[index], r.NativeEvidence)
+		validBefore := overlayBeforeDigest.MatchString(file.BeforeSHA256)
+		if r.Configuration.FormatVersion == 3 {
+			condition := r.FilePreconditions[index]
+			validBefore = condition.Path == file.Path && condition.BeforeSHA256 == file.BeforeSHA256 && condition.State == "present" && validBefore
+			if bindings[index].Codec == "nativeManifest" {
+				content, buildErr := buildOverlayNativeManifest(*r.NativeEvidence)
+				validBefore = condition.Path == file.Path && condition.State == "absent" && condition.BeforeSHA256 == "" && file.BeforeSHA256 == "" && buildErr == nil && file.Content == string(content)
+			}
+		}
+		if err != nil || file.Path != wantPath || !validBefore || len(file.Content) == 0 || len(file.Content) > 1<<20 || total > 1<<20 || !utf8.ValidString(file.Content) || strings.ContainsRune(file.Content, 0) {
 			return errors.New("stored installation overlay file intent is invalid")
 		}
 	}

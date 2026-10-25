@@ -39,6 +39,9 @@ func (p *candidatePreparer) approve(ctx context.Context, key string) (candidateR
 	if _, err := p.prepareWithExpectedIdentity(ctx, record.Manifest, definition, key, nil); err != nil {
 		return candidateRecord{}, err
 	}
+	if err := p.checkProfileAuthority(ctx); err != nil {
+		return candidateRecord{}, err
+	}
 	return p.ledger.approve(ctx, key)
 }
 
@@ -127,7 +130,7 @@ type candidatePublishScope struct {
 }
 
 func (s *candidatePublishScope) operations() map[string]workflowhost.Operation {
-	return map[string]workflowhost.Operation{
+	ops := map[string]workflowhost.Operation{
 		"releasePublicationCheckCandidate": s.check,
 		"releasePublicationBegin":          s.begin,
 		"releasePublicationVerifyImage":    s.verifyImage,
@@ -136,6 +139,7 @@ func (s *candidatePublishScope) operations() map[string]workflowhost.Operation {
 		"releasePublicationWriteFile":      s.writeFile,
 		"releasePublicationRecordReceipt":  s.complete,
 	}
+	return profileOperations(s.p, ops)
 }
 
 func (s *candidatePublishScope) check(ctx context.Context, _ map[string]any) (any, error) {

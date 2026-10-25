@@ -132,6 +132,7 @@ import {
 } from "../test/fleet/routingFixtures";
 import { ReleaseBrowser } from "../src/apps/cluster/releases/ReleasesSection";
 import { fileReleaseFixture, releaseFixture } from "../test/cluster/releaseFixtures";
+import { releaseJourneyFixture, intentId as releaseIntentId } from "../test/cluster/releaseJourneyFixtures";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
 import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
@@ -985,6 +986,7 @@ const VIEWS: Record<
     render: () => <RunsWindow runId="r-7" />,
   },
   "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },
+  "pipeline-run-uncertain": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-uncertain" /> },
   "pipeline-run-expired": {
     seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFiles: { "r-7": [
       { fileId: "file-log-go2", name: "tests.go-tests#2.log" },
@@ -1236,6 +1238,16 @@ const VIEWS: Record<
   "releases-file": { render: () => <ReleasePreview file /> },
   "releases-draft-pending": { render: () => <ReleasePreview file pendingDraft /> },
   "releases-publication-pending": { render: () => <ReleasePreview file pendingPromotion /> },
+  "releases-profile": { render: () => <ReleasePreview profile /> },
+  "releases-catalog": { render: () => <ReleasePreview catalog /> },
+  "releases-catalog-error": { render: () => <ReleasePreview catalog failedSeal /> },
+  "release-cut": { render: () => <ReleaseJourneyPreview phase="new" /> },
+  "release-cut-version": { render: () => <ReleaseJourneyPreview phase="prepared" /> },
+  "release-cut-building": { render: () => <ReleaseJourneyPreview phase="building" /> },
+  "release-cut-review": { render: () => <ReleaseJourneyPreview phase="ready" /> },
+  "release-cut-uncertain": { render: () => <ReleaseJourneyPreview phase="uncertain" /> },
+  "release-cut-published": { render: () => <ReleaseJourneyPreview phase="published" /> },
+  "release-cut-error": { render: () => <ReleaseJourneyPreview phase="prepared" unavailable /> },
   "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
@@ -2050,14 +2062,30 @@ function AddRulePreview() {
   return <RoutingTabFrame><RuleWizard actions={actions} rules={rules.rules} routes={catalog.policies} facts={facts} onCancel={() => {}} onDescribe={() => {}} onAdded={() => {}} /></RoutingTabFrame>;
 }
 
-function ReleasePreview({ empty = false, fail = false, pending = false, file = false, pendingDraft = false, pendingPromotion = false }: { empty?: boolean; fail?: boolean; pending?: boolean; file?: boolean; pendingDraft?: boolean; pendingPromotion?: boolean }) {
+function ReleasePreview({ empty = false, fail = false, pending = false, file = false, pendingDraft = false, pendingPromotion = false, profile = false, catalog = false, failedSeal = false }: { empty?: boolean; fail?: boolean; pending?: boolean; file?: boolean; pendingDraft?: boolean; pendingPromotion?: boolean; profile?: boolean; catalog?: boolean; failedSeal?: boolean }) {
   const [fixture] = useState(() => {
-    const f = file ? fileReleaseFixture("ready") : releaseFixture(pending ? "approved" : "ready");
+    const f = file ? fileReleaseFixture("ready") : releaseFixture(pending || catalog ? "approved" : "ready");
     f.state.empty = empty; f.state.failedRead = fail; f.state.lostPublishReply = pending;
     f.state.lostDraftReply = pendingDraft; f.state.lostPromotionReply = pendingPromotion;
+    if (profile) {
+      f.state.empty = true; f.state.assemblies = [];
+      f.state.profiles = [{ name: "engine", configuration: `sha256:${"4".repeat(64)}`, components: [{ name: "engine", repository: "example/memql", runs: ["release"] }] }];
+    }
+    if (catalog) f.state.publications = [{ candidateId: f.state.record.candidateId, approvalId: "approval-exact", effectId: "verified-fixture-publication", state: "complete", target: f.state.targets[0]!, artifact: f.state.record.manifest.components[0]!.artifacts[0]! }];
+    f.state.failedSeal = failedSeal;
     return f;
   });
   return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected /></div>;
+}
+
+function ReleaseJourneyPreview({ phase, unavailable = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean }) {
+  const [fixture] = useState(() => {
+    const f = releaseJourneyFixture(phase);
+    f.journey.failedGet = unavailable;
+    if (phase === "uncertain") { f.journey.build.reason = "The build start response was lost. Its recorded attempt must be checked before continuing."; f.journey.build.pipelineRunId = ""; f.journey.build.workRunId = ""; }
+    return f;
+  });
+  return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected openRequest={phase === "new" ? undefined : { intentId: releaseIntentId, revision: 1 }} /></div>;
 }
 
 function App() {

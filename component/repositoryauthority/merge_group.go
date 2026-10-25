@@ -148,40 +148,17 @@ func (i *Integration) mergeGroupIntent(ctx context.Context, source Source, evide
 			return out, errors.New("merge-group membership is incomplete or duplicated")
 		}
 		seen[member.HeadSHA] = true
-		r, e := i.reviewedGroupMember(ctx, evidence.RepositoryID, member.HeadSHA)
+		proof, present, e := i.InspectNativeReviewMember(ctx, source, evidence.RepositoryID, member)
 		if e != nil {
 			return out, e
 		}
-		c, e := d.DeliveryContext(ctx, r.Maintainer.OwnerUserID, r.GoalID, r.RunID)
-		if e != nil {
-			return out, e
+		if !present {
+			return out, errNativeReviewAbsent
 		}
-		observed, e := i.observe(c, r)
-		if e != nil {
-			return out, e
-		}
-		if observed.State != "approved" {
-			return out, fmt.Errorf("merge-group member approval is %s", observed.State)
-		}
-		if _, e = i.currentAuthority(c, r); e != nil {
-			return out, e
-		}
-		if r.Request.Operation != OperationDeliver || r.Proposal == nil || r.ProposalReceipt == nil || r.ReviewReceipt == nil || r.ReviewInput == nil || len(r.Route.ReviewPrompt) == 0 || !r.ReviewReceipt.Approved || r.ProposalHash != digest(*r.Proposal) || r.ReviewHash != r.ProposalHash || r.ReviewReceipt.ProposalHash != r.ProposalHash || digest(r.ReviewInput.Proposal) != r.ProposalHash || r.ProposalReceipt.State != "complete" || r.ProposalReceipt.Commit != member.HeadSHA || r.Proposal.BaseBranch != member.BaseBranch || !strings.EqualFold(r.Source.Repository, evidence.Repository) {
-			return out, errors.New("merge-group member has no exact accepted independent review")
-		}
-		expectedURL := fmt.Sprintf("https://github.com/%s/pull/%d", evidence.Repository, member.Number)
-		if !strings.EqualFold(r.ProposalReceipt.PullRequestURL, expectedURL) {
-			return out, errors.New("merge-group member names a different pull request")
-		}
-		report := reviewReportIntent(r)
-		if r.ReviewReportIntent == nil || digest(*r.ReviewReportIntent) != digest(report) || !matchingReviewReport(report, r.ReviewReportReceipt) {
-			return out, errors.New("merge-group member has no exact app-owned review report")
-		}
-		rr := r.ReviewReportReceipt
-		if len(out.Members) > 0 && rr.AppID != out.Members[0].AppID {
+		if len(out.Members) > 0 && proof.Review.AppID != out.Members[0].AppID {
 			return out, errors.New("merge-group members were reviewed by different GitHub Apps")
 		}
-		out.Members = append(out.Members, MergeGroupReviewMember{RequestID: r.ID, ProposalHash: r.ProposalHash, ReviewDigest: rr.ReviewDigest, ExternalID: rr.ExternalID, CheckRunID: rr.CheckRunID, AppID: rr.AppID})
+		out.Members = append(out.Members, proof.Review)
 	}
 	out.ReviewDigest = digest(struct {
 		Domain   string
@@ -193,7 +170,7 @@ func (i *Integration) mergeGroupIntent(ctx context.Context, source Source, evide
 	return out, nil
 }
 
-func (i *Integration) reviewedGroupMember(ctx context.Context, repositoryID int64, head string) (record, error) {
+func (i *Integration) reviewedGroupMember(ctx context.Context, repositoryID int64, head, pullRequestURL string) (record, error) {
 	var out record
 	db, err := i.database()
 	if err != nil {
@@ -202,7 +179,7 @@ func (i *Integration) reviewedGroupMember(ctx context.Context, repositoryID int6
 	// This native-only lookup is keyed by provider identity and immutable commit,
 	// never by a requester-selected maintainer. Ambiguity refuses rather than
 	// selecting whichever grant happens to be easiest to exercise.
-	rows, err := db.QueryContext(ctx, `SELECT body FROM repository_change_requests WHERE body->>'RepositoryID'=$1 AND body->'ProposalReceipt'->>'commit'=$2 LIMIT 2`, fmt.Sprint(repositoryID), head)
+	rows, err := db.QueryContext(ctx, `SELECT body FROM repository_change_requests WHERE body->>'RepositoryID'=$1 AND (body->'ProposalReceipt'->>'commit'=$2 OR lower(body->'ProposalReceipt'->>'pullRequestUrl')=lower($3) OR lower(body->'ReviewReportIntent'->'Proposal'->>'pullRequestUrl')=lower($3)) LIMIT 2`, fmt.Sprint(repositoryID), head, pullRequestURL)
 	if err != nil {
 		return out, err
 	}
@@ -221,8 +198,75 @@ func (i *Integration) reviewedGroupMember(ctx context.Context, repositoryID int6
 	if err = rows.Err(); err != nil {
 		return out, err
 	}
+	if count == 0 {
+		return out, errNativeReviewAbsent
+	}
 	if count != 1 {
 		return out, errors.New("merge-group member has missing or ambiguous native review evidence")
 	}
 	return out, nil
+}
+
+// NativeReviewMember is an exact current journal proof, never an ordinary PR
+// verdict. Present=true with an error forbids falling back to another reviewer.
+type NativeReviewMember struct {
+	Review  MergeGroupReviewMember
+	BaseSHA string
+}
+
+var errNativeReviewAbsent = errors.New("native repository review evidence is absent")
+
+func (i *Integration) InspectNativeReviewMember(ctx context.Context, source Source, repositoryID int64, member githubapp.MergeGroupMember) (NativeReviewMember, bool, error) {
+	d := i.deps()
+	if d.Source == nil || d.DeliveryContext == nil || repositoryID <= 0 || member.Number <= 0 || !commit.MatchString(member.HeadSHA) || member.BaseBranch == "" {
+		return NativeReviewMember{}, true, errors.New("native member review identity is incomplete")
+	}
+	fresh, err := d.Source(ctx, source.ID, true)
+	if err != nil {
+		return NativeReviewMember{}, true, err
+	}
+	if fresh != source {
+		return NativeReviewMember{}, true, errors.New("native member source changed")
+	}
+	access, err := i.access(ctx, fresh)
+	if err != nil {
+		return NativeReviewMember{}, true, err
+	}
+	if !access.CanWrite || access.RepositoryID != repositoryID {
+		return NativeReviewMember{}, true, errors.New("native member repository authority changed")
+	}
+	r, e := i.reviewedGroupMember(ctx, repositoryID, member.HeadSHA, fmt.Sprintf("https://github.com/%s/pull/%d", source.Repository, member.Number))
+	if errors.Is(e, errNativeReviewAbsent) {
+		return NativeReviewMember{}, false, nil
+	}
+	if e != nil {
+		return NativeReviewMember{}, true, e
+	}
+	c, e := d.DeliveryContext(ctx, r.Maintainer.OwnerUserID, r.GoalID, r.RunID)
+	if e != nil {
+		return NativeReviewMember{}, true, e
+	}
+	observed, e := i.observe(c, r)
+	if e != nil {
+		return NativeReviewMember{}, true, e
+	}
+	if observed.State != "approved" {
+		return NativeReviewMember{}, true, fmt.Errorf("merge-group member approval is %s", observed.State)
+	}
+	if _, e = i.currentAuthority(c, r); e != nil {
+		return NativeReviewMember{}, true, e
+	}
+	if r.Request.Operation != OperationDeliver || r.Proposal == nil || r.ProposalReceipt == nil || r.ReviewReceipt == nil || r.ReviewInput == nil || len(r.Route.ReviewPrompt) == 0 || !r.ReviewReceipt.Approved || r.ProposalHash != digest(*r.Proposal) || r.ReviewHash != r.ProposalHash || r.ReviewReceipt.ProposalHash != r.ProposalHash || digest(r.ReviewInput.Proposal) != r.ProposalHash || r.ProposalReceipt.State != "complete" || r.ProposalReceipt.Commit != member.HeadSHA || r.Proposal.BaseBranch != member.BaseBranch || !strings.EqualFold(r.Source.Repository, source.Repository) {
+		return NativeReviewMember{}, true, errors.New("merge-group member has no exact accepted independent review")
+	}
+	expectedURL := fmt.Sprintf("https://github.com/%s/pull/%d", source.Repository, member.Number)
+	if !strings.EqualFold(r.ProposalReceipt.PullRequestURL, expectedURL) {
+		return NativeReviewMember{}, true, errors.New("merge-group member names a different pull request")
+	}
+	report := reviewReportIntent(r)
+	if r.ReviewReportIntent == nil || digest(*r.ReviewReportIntent) != digest(report) || !matchingReviewReport(report, r.ReviewReportReceipt) {
+		return NativeReviewMember{}, true, errors.New("merge-group member has no exact app-owned review report")
+	}
+	rr := r.ReviewReportReceipt
+	return NativeReviewMember{BaseSHA: r.Proposal.ExpectedHead, Review: MergeGroupReviewMember{RequestID: r.ID, ProposalHash: r.ProposalHash, ReviewDigest: rr.ReviewDigest, ExternalID: rr.ExternalID, CheckRunID: rr.CheckRunID, AppID: rr.AppID}}, true, nil
 }

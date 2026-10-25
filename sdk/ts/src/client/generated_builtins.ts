@@ -4492,6 +4492,52 @@ QueryClient.prototype.releaseAssembleCandidate = function (this: QueryClient, ar
   return this.executeNamed("releaseAssembleCandidate", buildReleaseAssembleCandidate(args), opts);
 };
 
+/** Resolve an installed product profile against native completed-run facts. Never approves or publishes. */
+export interface ReleaseAssembleProfileCandidateArgs {
+  profileName: string;
+  runs: Record<string, unknown>;
+  expectedConfiguration: string;
+}
+
+export function buildReleaseAssembleProfileCandidate(args: ReleaseAssembleProfileCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("profileName: " + renderMemQLValue(args.profileName));
+  parts.push("runs: " + renderMemQLValue(args.runs));
+  parts.push("expectedConfiguration: " + renderMemQLValue(args.expectedConfiguration));
+  return "builtin releaseAssembleProfileCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseAssembleProfileCandidate(args: ReleaseAssembleProfileCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseAssembleProfileCandidate = function (this: QueryClient, args: ReleaseAssembleProfileCandidateArgs = {} as ReleaseAssembleProfileCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseAssembleProfileCandidate", buildReleaseAssembleProfileCandidate(args), opts);
+};
+
+/** Read this owner's saved release journeys, including interrupted attempts. */
+export interface ReleaseBuildsArgs {
+  limit?: number;
+}
+
+export function buildReleaseBuilds(args: ReleaseBuildsArgs): string {
+  const parts: string[] = [];
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  return "builtin releaseBuilds(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseBuilds(args: ReleaseBuildsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseBuilds = function (this: QueryClient, args: ReleaseBuildsArgs = {} as ReleaseBuildsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseBuilds", buildReleaseBuilds(args), opts);
+};
+
 /** Cancel the original operator's current plan only before application begins. */
 export interface ReleaseCancelInstallationArgs {
   installationId: string;
@@ -4555,6 +4601,25 @@ QueryClient.prototype.releaseCandidateDrafts = function (this: QueryClient, args
   return this.executeNamed("releaseCandidateDrafts", buildReleaseCandidateDrafts(args), opts);
 };
 
+/** Read installed opt-in release profiles, immutable configuration digests and source inputs. */
+export interface ReleaseCandidateProfilesArgs {
+}
+
+export function buildReleaseCandidateProfiles(args: ReleaseCandidateProfilesArgs): string {
+  void args;
+  return "builtin releaseCandidateProfiles()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCandidateProfiles(args?: ReleaseCandidateProfilesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCandidateProfiles = function (this: QueryClient, args: ReleaseCandidateProfilesArgs = {} as ReleaseCandidateProfilesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCandidateProfiles", buildReleaseCandidateProfiles(args), opts);
+};
+
 /** Read durable publication intents and verified completion for one candidate. */
 export interface ReleaseCandidatePublicationsArgs {
   candidateId: string;
@@ -4574,6 +4639,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseCandidatePublications = function (this: QueryClient, args: ReleaseCandidatePublicationsArgs = {} as ReleaseCandidatePublicationsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseCandidatePublications", buildReleaseCandidatePublications(args), opts);
+};
+
+/** Read current authorized destinations for exactly one caller-owned candidate. */
+export interface ReleaseCandidateTargetsArgs {
+  candidateId: string;
+}
+
+export function buildReleaseCandidateTargets(args: ReleaseCandidateTargetsArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseCandidateTargets(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCandidateTargets(args: ReleaseCandidateTargetsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCandidateTargets = function (this: QueryClient, args: ReleaseCandidateTargetsArgs = {} as ReleaseCandidateTargetsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCandidateTargets", buildReleaseCandidateTargets(args), opts);
 };
 
 /** Page through caller-owned review history, including interrupted preparations. */
@@ -4712,6 +4798,27 @@ QueryClient.prototype.releaseDiscoverPublishedCandidates = function (this: Query
   return this.executeNamed("releaseDiscoverPublishedCandidates", buildReleaseDiscoverPublishedCandidates(args), opts);
 };
 
+/** Read a saved release's current candidate approval and available actions without remote effects. */
+export interface ReleaseGetBuildArgs {
+  intentId: string;
+}
+
+export function buildReleaseGetBuild(args: ReleaseGetBuildArgs): string {
+  const parts: string[] = [];
+  parts.push("intentId: " + renderMemQLValue(args.intentId));
+  return "builtin releaseGetBuild(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseGetBuild(args: ReleaseGetBuildArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseGetBuild = function (this: QueryClient, args: ReleaseGetBuildArgs = {} as ReleaseGetBuildArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseGetBuild", buildReleaseGetBuild(args), opts);
+};
+
 /** Read one exact release candidate owned by the caller. */
 export interface ReleaseGetCandidateArgs {
   candidateId: string;
@@ -4817,6 +4924,27 @@ QueryClient.prototype.releaseListPublishedCandidates = function (this: QueryClie
   return this.executeNamed("releaseListPublishedCandidates", buildReleaseListPublishedCandidates(args), opts);
 };
 
+/** Observe the exact saved tag and build; never dispatch work or assemble a candidate. */
+export interface ReleaseObserveBuildArgs {
+  intentId: string;
+}
+
+export function buildReleaseObserveBuild(args: ReleaseObserveBuildArgs): string {
+  const parts: string[] = [];
+  parts.push("intentId: " + renderMemQLValue(args.intentId));
+  return "builtin releaseObserveBuild(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseObserveBuild(args: ReleaseObserveBuildArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseObserveBuild = function (this: QueryClient, args: ReleaseObserveBuildArgs = {} as ReleaseObserveBuildArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseObserveBuild", buildReleaseObserveBuild(args), opts);
+};
+
 /** Observe the selected installation; controller health is not a completion receipt. */
 export interface ReleaseObserveInstallationArgs {
   installationId: string;
@@ -4838,6 +4966,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseObserveInstallation = function (this: QueryClient, args: ReleaseObserveInstallationArgs = {} as ReleaseObserveInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseObserveInstallation", buildReleaseObserveInstallation(args), opts);
+};
+
+/** Retain a verified selected source and installed recipes. No tag, build, approval or publication effect. */
+export interface ReleasePrepareBuildArgs {
+  profileName: string;
+  pipelineId: string;
+  expectedConfiguration: string;
+}
+
+export function buildReleasePrepareBuild(args: ReleasePrepareBuildArgs): string {
+  const parts: string[] = [];
+  parts.push("profileName: " + renderMemQLValue(args.profileName));
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  parts.push("expectedConfiguration: " + renderMemQLValue(args.expectedConfiguration));
+  return "builtin releasePrepareBuild(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releasePrepareBuild(args: ReleasePrepareBuildArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releasePrepareBuild = function (this: QueryClient, args: ReleasePrepareBuildArgs = {} as ReleasePrepareBuildArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releasePrepareBuild", buildReleasePrepareBuild(args), opts);
 };
 
 /** Verify an immutable candidate using complete work evidence and operator configuration. This retains artifacts for review and does not approve or publish them. */
@@ -4917,6 +5070,29 @@ QueryClient.prototype.releasePromoteCandidateDraft = function (this: QueryClient
   return this.executeNamed("releasePromoteCandidateDraft", buildReleasePromoteCandidateDraft(args), opts);
 };
 
+/** Publish only the saved candidate's separate approval using its captured, scoped product recipe. */
+export interface ReleasePublishBuildArgs {
+  intentId: string;
+  approvalId: string;
+}
+
+export function buildReleasePublishBuild(args: ReleasePublishBuildArgs): string {
+  const parts: string[] = [];
+  parts.push("intentId: " + renderMemQLValue(args.intentId));
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin releasePublishBuild(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releasePublishBuild(args: ReleasePublishBuildArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releasePublishBuild = function (this: QueryClient, args: ReleasePublishBuildArgs = {} as ReleasePublishBuildArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releasePublishBuild", buildReleasePublishBuild(args), opts);
+};
+
 /** Publish one artifact only under its exact durable candidate approval. */
 export interface ReleasePublishCandidateArgs {
   candidateId: string;
@@ -4969,6 +5145,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseReadDiscoveredCandidate = function (this: QueryClient, args: ReleaseReadDiscoveredCandidateArgs = {} as ReleaseReadDiscoveredCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseReadDiscoveredCandidate", buildReleaseReadDiscoveredCandidate(args), opts);
+};
+
+/** Resume a saved recipe using native effect fences; unknown requests are reconciled, never replaced. */
+export interface ReleaseResumeBuildArgs {
+  intentId: string;
+}
+
+export function buildReleaseResumeBuild(args: ReleaseResumeBuildArgs): string {
+  const parts: string[] = [];
+  parts.push("intentId: " + renderMemQLValue(args.intentId));
+  return "builtin releaseResumeBuild(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseResumeBuild(args: ReleaseResumeBuildArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseResumeBuild = function (this: QueryClient, args: ReleaseResumeBuildArgs = {} as ReleaseResumeBuildArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseResumeBuild", buildReleaseResumeBuild(args), opts);
 };
 
 /** Resume the original saved preparation after interruption; applies nothing. */
@@ -5099,6 +5296,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseSources = function (this: QueryClient, args: ReleaseSourcesArgs = {} as ReleaseSourcesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseSources", buildReleaseSources(args), opts);
+};
+
+/** Explicitly start the selected immutable tag and exact full release build through the captured product recipe. */
+export interface ReleaseStartBuildArgs {
+  intentId: string;
+}
+
+export function buildReleaseStartBuild(args: ReleaseStartBuildArgs): string {
+  const parts: string[] = [];
+  parts.push("intentId: " + renderMemQLValue(args.intentId));
+  return "builtin releaseStartBuild(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseStartBuild(args: ReleaseStartBuildArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseStartBuild = function (this: QueryClient, args: ReleaseStartBuildArgs = {} as ReleaseStartBuildArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseStartBuild", buildReleaseStartBuild(args), opts);
 };
 
 /** Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}. */

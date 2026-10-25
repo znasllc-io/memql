@@ -19,6 +19,11 @@ func (a *App) wireReleaseCandidates(uploader server.FileUploader, bucket string)
 	if !ok {
 		return
 	}
+	if pipelines := a.lookupPipelinesIntegration(); pipelines != nil {
+		if err := provider.ConfigureReleaseBuilds(pipelines); err != nil {
+			a.Logger.Error("release build host could not be configured", "error", err)
+		}
+	}
 	if err := provider.ConfigureInstallationHealth(a.installationMigrationHealth); err != nil {
 		a.Logger.Error("installation serving health could not be configured", "error", err)
 	}

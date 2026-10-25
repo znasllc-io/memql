@@ -93,6 +93,7 @@ func TestStepRequestBecomesAStepRun(t *testing.T) {
 		OwnerUserID:    req.OwnerUserID,
 		Repository:     req.Repository,
 		SHA:            req.SHA,
+		Event:          req.Event,
 		InstallationID: 42,
 		Execution:      req.Step.Execution,
 		Needs:          req.Step.Needs,

@@ -254,3 +254,54 @@ func TestMergeGroupReportRechecksRevocationInsideProviderEffect(t *testing.T) {
 	require.Error(t, err)
 	require.Zero(t, g.creates)
 }
+
+func TestNativeMemberClassificationNeverHidesInvalidJournalAsOrdinary(t *testing.T) {
+	for _, kind := range []string{"accepted", "absent", "rejected", "missing receipt", "partial proposal receipt", "ambiguous", "revoked"} {
+		t.Run(kind, func(t *testing.T) {
+			g := newGroupFixture(t)
+			member := g.evidence.Members[0]
+			switch kind {
+			case "absent":
+				member.HeadSHA = strings.Repeat("9", 40)
+				member.Number = 999
+			case "rejected":
+				_, e := g.i.update(context.Background(), g.requests[0].ID, func(r *record) error { r.ReviewReceipt.Approved = false; return nil })
+				require.NoError(t, e)
+			case "missing receipt":
+				_, e := g.i.update(context.Background(), g.requests[0].ID, func(r *record) error { r.ReviewReportReceipt = nil; return nil })
+				require.NoError(t, e)
+			case "partial proposal receipt":
+				_, e := g.i.update(context.Background(), g.requests[0].ID, func(r *record) error { r.ProposalReceipt.Commit = ""; return nil })
+				require.NoError(t, e)
+			case "ambiguous":
+				r, e := g.i.get(context.Background(), g.requests[0].ID, g.maintainer)
+				require.NoError(t, e)
+				r.ID += "-duplicate"
+				_, e = g.i.create(context.Background(), r)
+				require.NoError(t, e)
+			case "revoked":
+				g.mu.Lock()
+				d := g.decisions[g.requests[0].ApprovalID]
+				d.State = "revoked"
+				g.decisions[g.requests[0].ApprovalID] = d
+				g.mu.Unlock()
+			}
+			proof, present, e := g.i.InspectNativeReviewMember(context.Background(), g.source, g.evidence.RepositoryID, member)
+			switch kind {
+			case "absent":
+				require.NoError(t, e)
+				require.False(t, present)
+			case "accepted":
+				require.NoError(t, e)
+				require.True(t, present)
+				require.Equal(t, g.requests[0].ID, proof.Review.RequestID)
+				require.NotEmpty(t, proof.BaseSHA)
+			default:
+				require.Error(t, e)
+				require.True(t, present, "invalid native proof must never select an ordinary fallback")
+			}
+			require.Zero(t, g.creates)
+			require.Zero(t, g.queues)
+		})
+	}
+}

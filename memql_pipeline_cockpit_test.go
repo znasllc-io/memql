@@ -26,15 +26,15 @@ func checkCockpitHost(t *testing.T, step pipelines.Step) {
 	}
 }
 
-func TestCockpitManifestBootstrapRunsEveryNativePackageWithoutDuplicateUnitLane(t *testing.T) {
+func TestCockpitManifestUsesAffectedGraphWithoutDuplicateUnitLane(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	step, ok := engineDeclaredStep(spec, "docker-integration")
-	if !ok || step.Packages != "" || len(step.PackageRoots) != 0 || !strings.Contains(step.Run, "go test -race -count=1 -timeout=600s ./cockpit/...") || strings.Contains(step.Run, "$MEMQL_PACKAGES") {
-		t.Fatalf("bootstrap Docker lane must run every Cockpit package: %+v", step)
+	if !ok || step.Packages != pipelines.PackagesAffected || !slices.Equal(step.PackageRoots, []string{"cockpit"}) || !strings.Contains(step.Run, "go test -race -count=1 -timeout=600s $MEMQL_PACKAGES") {
+		t.Fatalf("Docker lane must intersect the affected graph with Cockpit: %+v", step)
 	}
 	mac, ok := engineDeclaredStep(spec, "computeruse")
-	if !ok || mac.Packages != "" || len(mac.PackageRoots) != 0 || mac.Platform != "darwin/arm64" || !strings.Contains(mac.Run, "go test -race -tags computeruse -count=1 -timeout=600s ./cockpit/...") || !strings.Contains(mac.Run, `GOWORK="$PWD/go.work"`) || strings.Contains(mac.Run, "$MEMQL_PACKAGES") {
-		t.Fatalf("bootstrap Mac lane must execute all Cockpit packages in the checked-out workspace: %+v", mac)
+	if !ok || mac.Packages != pipelines.PackagesAffected || !slices.Equal(mac.PackageRoots, []string{"cockpit"}) || mac.Platform != "darwin/arm64" || !strings.Contains(mac.Run, "go test -race -tags computeruse -count=1 -timeout=600s $MEMQL_PACKAGES") || !strings.Contains(mac.Run, `GOWORK="$PWD/go.work"`) {
+		t.Fatalf("Mac lane must execute affected Cockpit packages in the checked-out workspace: %+v", mac)
 	}
 	for _, stage := range spec.Stages {
 		if stage.Name == "cockpit" && len(stage.Steps) != 2 {
@@ -50,7 +50,7 @@ func TestCockpitManifestBootstrapRunsEveryNativePackageWithoutDuplicateUnitLane(
 	}{
 		// Documentation is embedded into engine libraries consumed by Cockpit.
 		{"docs/public/overview/quickstart.md", true},
-		{"component/pipelines/compile.go", true},
+		{"component/pipelines/compile.go", false},
 		{"cockpit/internal/access/cmd.go", true},
 		{"core/id/id.go", true},
 		{"memql-package.yaml", true},
@@ -63,7 +63,6 @@ func TestCockpitManifestBootstrapRunsEveryNativePackageWithoutDuplicateUnitLane(
 			if compiled.Stage != "cockpit" {
 				continue
 			}
-			checkCockpitHost(t, compiled)
 			if (compiled.Skip == nil) != tc.want {
 				t.Errorf("%s: Docker lane skip = %v, packages = %v", tc.path, compiled.Skip, compiled.Packages)
 			}

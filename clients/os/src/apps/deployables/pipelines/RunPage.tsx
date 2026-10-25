@@ -12,7 +12,7 @@ import { useMachines } from "../../../live/machines";
 import { useOsConnection } from "../../../live/connection";
 import { machineFromRow, machineName } from "../../fleet/rows";
 import { ProblemNotice } from "../packages/ReportView";
-import { toneFor } from "../packages/refusals";
+import { copyFor, toneFor } from "../packages/refusals";
 import type { PartsHeld } from "../parts";
 import { runBarFor, type RunActName } from "./acts";
 import { cancelRun, problemFrom, rerunRun, type Problem } from "./calls";
@@ -111,6 +111,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
   const files = useRunFiles(run.workRunId);
   const expiry = useExpiredRunFiles(run.id, steps, files.byFileId, files.state === "live" && stepsState === "live");
   const stops = useMemo(() => stopsForRun(run, steps), [run, steps]);
+  const uncertainSteps = stops.flatMap((stop) => stop.steps.filter(executionUncertain).map((step) => ({ step, label: `${stop.name} / ${stepLabel(step, shardsOf(step, stop))}` })));
 
   // THE OPEN STOP FOLLOWS THE RUN until somebody picks one, and a pick holds
   // only until the run moves: a stage finishing re-asks where the question is
@@ -159,7 +160,7 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
 
   const acts: Act[] = confirmCancel
     ? [
-        { label: "Keep running", text: true, onAct: () => setConfirmCancel(false) },
+        { label: "Keep this run", text: true, onAct: () => setConfirmCancel(false) },
         { label: "Cancel the run", tone: "danger", busy: busy === "Cancel", onAct: () => void act("Cancel") },
       ]
     : bar.acts.map((spec) => ({
@@ -196,6 +197,9 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
           {run.maintenanceState && run.maintenanceState !== "none" ? <Notice tone={run.maintenanceState === "human" ? "warn" : "info"} sentence={run.maintenanceState === "analysis" ? "A follow-up is investigating this failure." : run.maintenanceState === "human" ? "This failure needs a person’s attention." : "A follow-up is being prepared."} detail={run.maintenanceMessage || undefined}>{run.maintenanceGoalId && nexus.sections.includes("goals") ? <Button tone="quiet" onClick={() => nexus.open("goals", { goalId: run.maintenanceGoalId })}>Open follow-up goal</Button> : null}</Notice> : null}
           {run.notes.map((note) => (
             <ProblemNotice key={note.code} problem={{ code: note.code, message: note.message }} tone="warn" />
+          ))}
+          {uncertainSteps.map(({ step, label }) => (
+            <UncertainStepNotice key={step.key} step={step} label={label} />
           ))}
 
           {refused ? (
@@ -242,8 +246,26 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
           ) : null}
         </section>
       </div>
-      <ActionBar state={confirmCancel ? "Cancel this run?" : bar.state} detail={confirmCancel ? "Steps that are running stop now. Finished steps keep their results." : bar.detail} tone={bar.tone} live acts={acts} />
+      <ActionBar state={confirmCancel ? "Cancel this run?" : bar.state} detail={confirmCancel ? "Request cancellation. Finished steps keep their results." : bar.detail} tone={bar.tone} live acts={acts} />
     </div>
+  );
+}
+
+function executionUncertain(step: StepRow): boolean {
+  return step.status === "failed" && step.errorCode === "pipeline_execution_uncertain";
+}
+
+/** This typed receipt matters even when another stage is selected. It is not a cleanup receipt. */
+function UncertainStepNotice({ step, label }: { step: StepRow; label: string }) {
+  const copy = copyFor(step.errorCode)!;
+  return (
+    <Notice tone="warn" sentence={copy.title} next={copy.next}>
+      <Caption>{label}</Caption>
+      {step.errorMessage !== "" ? <details className="os-report-log">
+        <summary>Details for {label}</summary>
+        <pre>{step.errorMessage}</pre>
+      </details> : null}
+    </Notice>
   );
 }
 
@@ -331,7 +353,7 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
   const coded = step.errorCode !== "" && step.errorCode !== "pipeline_executor_error";
   return (
     <div className="pipeline-step-failure">
-      {coded ? (
+      {executionUncertain(step) ? null : coded ? (
         <ProblemNotice problem={{ code: step.errorCode, message: step.errorMessage }} tone={toneFor(step.errorCode)} />
       ) : step.errorMessage !== "" ? <p className="pipeline-step-message">{step.errorMessage}</p> : null}
       {log === null ? null : tail === null && tailError === "" ? (

@@ -10,6 +10,15 @@ import (
 
 func (h *pipelineWorkflowHost) reportMergeGroupReview(ctx context.Context, args map[string]any) (any, error) {
 	dr := h.dr
+	if len(args) == 0 && dr.run.Event == pipelines.EventMergeGroup && dr.run.Mode == pipelines.ModeFull {
+		name, err := dr.independentReviewer(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if name != "" {
+			return dr.independentReview(ctx)
+		}
+	}
 	if len(args) != 0 || dr.d.ReportMergeGroupReview == nil || dr.workflow == nil || dr.workflow.snapshot == nil || dr.run.Event != pipelines.EventMergeGroup || dr.run.Mode != pipelines.ModeFull {
 		return nil, fmt.Errorf("merge-group review reporting requires an operator-bound full merge-group run and accepts no arguments")
 	}

@@ -59,7 +59,7 @@ describe("the Runs list's readings", () => {
     expect(upstreamChecks([passed], pipeline, SHA_A, "")).toBe("checks passed, not yet deployed");
     expect(upstreamChecks([passed], pipeline, SHA_A.slice(0, 7), SHA_A)).toBe("checks passed");
     expect(upstreamChecks([run({ sha: SHA_A, conclusion: "failure" })], pipeline, SHA_A, "")).toBe("checks failed");
-    expect(upstreamChecks([run({ sha: SHA_A, status: "in_progress", conclusion: "" })], pipeline, SHA_A, "")).toBe("checks running");
+    expect(upstreamChecks([run({ sha: SHA_A, status: "in_progress", conclusion: "" })], pipeline, SHA_A, "")).toBe("checks in progress");
     expect(upstreamChecks([passed], pipeline, SHA_B, "")).toBe("");
     expect(upstreamChecks([passed], null, SHA_A, "")).toBe("");
   });
@@ -99,7 +99,7 @@ describe("a run's stops", () => {
       step("deploy.verify", { seq: 3, status: "pending", durationMs: 0 }),
     ]);
     expect(stops.map((s) => [s.name, s.word, s.took])).toEqual([
-      ["checks", "Passed", "29s"], ["tests", "Running", ""], ["deploy", "Waiting", ""],
+      ["checks", "Passed", "29s"], ["tests", "In progress", ""], ["deploy", "Waiting", ""],
     ]);
   });
 
@@ -141,7 +141,7 @@ describe("the run page's bar", () => {
   it("offers no re-run while a newer attempt of the key is running, and says why", () => {
     const bar = runBarFor({ run: run(), steps: failedSteps, newer: run({ id: "r2", attempt: 2, status: "in_progress", conclusion: "" }), pipelineActive: true, can: ALL, onGithub: true });
     expect(bar.acts.map((a) => a.name)).toEqual(["Open on GitHub"]);
-    expect(bar.detail).toContain("attempt 2 is running");
+    expect(bar.detail).toContain("attempt 2 is in progress");
   });
 });
 

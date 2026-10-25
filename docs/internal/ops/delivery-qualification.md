@@ -146,67 +146,22 @@ and once-only tests. They do
 not establish live network availability; the required native check must still
 pass on the repaired head.
 
-## Bootstrap with the current engine
+## Active delivery contract
 
-The bootstrap and activation manifests both require the agent-tagged tests to
-use their own pinned PostgreSQL service. The app suite gets a 900-second test
-budget; each of the four remaining packages keeps 300 seconds. With serial
-package execution, the outer 45-minute limit covers their combined 35-minute
-maximum plus database setup and compilation. Untagged DB shards cannot replace
-these persistence cases. This incorporates the published CI repair in
-[PR #6280](https://github.com/znasllc-io/memql/pull/6280), with the larger app
-budget retained from its reported run; it does not rely on unpublished commits.
-
-The first integration PR must be executable by the currently installed engine.
-That compiler strictly rejects `verification` and `packageRoots`; reconnecting a
-source cannot teach it those fields. The bootstrap manifest therefore omits
-reuse opt-in and executes the Cockpit Docker/macOS and real-provider lanes in
-full. Every command, required test, database shard, credential boundary and
-artifact contract remains in place. Native lanes still require the matching
-consented Fleet host; a healthy cluster Workbench is not a Linux Docker worker.
-
-The exact reviewed post-bootstrap manifest is retained in
+The active [`memql-package.yaml`](../../../memql-package.yaml) includes affected
+component selection, verification reuse and independent Cockpit release builds.
+The complete reviewed contract is retained in
 [`delivery-after-bootstrap.yaml`](../../../test/fixtures/pipelines/delivery-after-bootstrap.yaml).
-The comparison regression permits only the three full-lane substitutions,
-reuse metadata omission and deferral of `cockpit-release`. Cockpit's release
-artifact contract continues to test that deferred stage. Its publication is
-held because the old event policy cannot separate `cockpit/vX.Y.Z` from engine
-release tags. Ordinary Cockpit build, vet, unit and native tests continue.
+`TestActivatedDeliveryManifestMatchesReviewedContract` compares the entire
+parsed manifest with that fixture; any intentional pipeline change must update
+both through review. The Cockpit release regression exercises the active
+manifest's platform, isolation and retained-artifact requirements.
 
-1. Reconnect only the engine source through its actual owner, preserving webhook
-   delivery and compute/secret settings. Verify the required App identity,
-   signed webhook delivery and both native host platforms before opening work.
-2. Push the reviewed integration branch and open a draft PR against current
-   `main`. Wait for **MemQL / memql** from the App required by the existing
-   ruleset on that exact head. A manual run has a different context. Keep other
-   sources paused and avoid merging an overlapping harness PR independently.
-3. Resolve failures and review findings. Mark ready when reviewed, run
-   `scripts/dev/merge-as-owner.sh --pr=<number> --check`, inspect every required
-   result and the measured base drift, then use the existing authorized owner
-   procedure. The check command is a report and exits zero even for an absent
-   check; its exit code alone is not readiness. Do not weaken protection or add
-   the new review context before the native-review producer is installed.
-4. Build the immutable engine candidate through the supported build server.
-   The owner explicitly selects its installation; merging this PR does not
-   authorize automatic cloud deployment. Install the matching reviewed ZNAS
-   bundle and actual operator resolver/source bindings. Verify every consumer
-   loaded them, the required App grants and queue events are effective, and
-   the native review checks pass the controlled qualification below.
-5. Apply the checked-in [activation patch](delivery-bootstrap-followup.patch)
-   in a new branch, inspect it and open a separate PR. It restores affected
-   selectors, reuse opt-in and the independent Cockpit release stage, together
-   with their original factual regressions, and removes the temporary fixture.
-   Run the affected manifest tests and canonical generated-output checks.
-   This patch is not a deployment command and must not be applied early.
-
-```bash
-git apply --check docs/internal/ops/delivery-bootstrap-followup.patch
-git apply docs/internal/ops/delivery-bootstrap-followup.patch
-```
-
-If intervening source changes prevent a clean application, reconcile and review
-the patch; do not force it or replace the current manifest from an old snapshot.
-The patch does not change GitHub rulesets, install a release or enable sources.
+The agent-tagged suite still requires its own pinned PostgreSQL service and
+`MEMQL_REQUIRE_DB=1`. Its app test budget remains 900 seconds, each of the four
+other packages retains 300 seconds, and the outer 45-minute limit covers the
+combined 35-minute maximum plus setup. Activation does not change repository
+protection, install a release, enable a source or grant publication credentials.
 
 ## Production cutover
 

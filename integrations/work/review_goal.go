@@ -9,6 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // ReviewGoalReceipt identifies one request, including after an interrupted
@@ -42,6 +43,10 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	if i == nil || owner == "" || memql.BareShortId(callerUserId(ctx)) != memql.BareShortId(owner) || requestKey == "" || len(requestKey) > 200 || strings.TrimSpace(g.Statement) == "" || strings.TrimSpace(g.AutomationName) == "" || (!analyze && (question == "" || len(subject) == 0)) {
 		return receipt, fmt.Errorf("work: a reviewed request needs its authenticated owner, stable key, proposal and template")
 	}
+	routing, err := goalRouting(ctx, owner)
+	if err != nil {
+		return receipt, err
+	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
 	identity := receipt.GoalID
 	gates, err := i.gatePool()
@@ -70,19 +75,38 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	if g.ParentRunID != "" {
 		fingerprintInput["parentRunId"] = g.ParentRunID
 	}
-	fingerprint := workstate.ArtifactHash(fingerprintInput)
 	scoped := ownerActor(ctx, owner)
 	st := i.store()
 	goal, err := st.goalForOwner(scoped, receipt.GoalID)
 	if err != nil {
 		return receipt, err
 	}
+	if goal != nil {
+		// A receiving replica may recover without the original Ask context.
+		// Retain the choice already accepted on the goal; a repeated request
+		// cannot replace it or borrow another person's computer consent.
+		stored := common.RouteChoiceFrom(goal["routing"])
+		if !stored.IsZero() && memql.BareShortId(stored.By) != memql.BareShortId(owner) {
+			return receipt, fmt.Errorf("work: the review goal's route belongs to another owner")
+		}
+		if !routing.IsZero() && routing != stored {
+			return receipt, fmt.Errorf("work: this review request already has a different routing choice")
+		}
+		routing = stored
+	}
+	if !routing.IsZero() {
+		fingerprintInput["routing"] = routing.Map()
+	}
+	fingerprint := workstate.ArtifactHash(fingerprintInput)
 	if goal != nil && rowString(goal, "requestFingerprint") != fingerprint {
 		return receipt, fmt.Errorf("work: this review request was already used for a different proposal")
 	}
 	run, err := st.runForOwner(scoped, receipt.RunID)
 	if err != nil {
 		return receipt, err
+	}
+	if run != nil && common.RouteChoiceFrom(run["routing"]) != routing {
+		return receipt, fmt.Errorf("work: the review run no longer matches its goal's routing choice")
 	}
 	var spine map[string]any
 	if run == nil {
@@ -94,7 +118,7 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	if goal == nil {
 		if err = commit(func(c context.Context) error {
 			return st.createGoalRow(ownerActor(c, owner), goalSeed{GoalId: receipt.GoalID, Statement: g.Statement, Origin: "user", Input: g.Input,
-				AccountIds: g.AccountIds, Ceilings: g.Ceilings, RequestedVia: g.RequestedVia, RequestFingerprint: fingerprint})
+				AccountIds: g.AccountIds, Ceilings: g.Ceilings, RequestedVia: g.RequestedVia, Routing: routing, RequestFingerprint: fingerprint})
 		}); err != nil {
 			return receipt, err
 		}
@@ -127,7 +151,7 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 			return st.createRunRow(ownerActor(c, owner), runSeed{Spine: spine, RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName, ParentRunID: g.ParentRunID,
 				Input: g.Input, Variables: g.Input, Mode: modeLive, Status: status, NodeId: selfNodeId(), StartedAt: now,
 				OwnerUserId: owner, TriggeredBy: g.TriggeredBy, ExecutionAuthority: authority,
-				WaitingOn: waiting})
+				WaitingOn: waiting, Routing: routing})
 		}); err != nil {
 			return receipt, err
 		}

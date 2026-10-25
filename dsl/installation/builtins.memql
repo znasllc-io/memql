@@ -76,6 +76,18 @@ builtin installationContinuityBaseline { }
 
 @executor("integration.release.releaseOverlayRead")
 builtin releaseOverlayRead {}
+
+/// Read same-owner native publication evidence and bounded matching companions.
+@executor("integration.release.releaseOverlayNativeEvidence")
+builtin releaseOverlayNativeEvidence {}
+
+/// Bind one exact verified companion to this proposal's native scope.
+@executor("integration.release.releaseOverlayBindPublication")
+@args(profile="object")
+builtin releaseOverlayBindPublication {
+  candidateId string!
+  catalogDigest string!
+}
 @executor("integration.release.releaseOverlayBuild")
 builtin releaseOverlayBuild {}
 @executor("integration.release.releaseOverlayReserve")

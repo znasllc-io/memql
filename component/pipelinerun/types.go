@@ -222,6 +222,7 @@ type Run struct {
 	PolicySnapshot map[string]any
 	// SelectionFacts is the immutable, source-bound provider observation used
 	// by an opted-in stage resolver. It grants no repository write authority.
+	ReviewEvidence     map[string]any
 	SelectionFacts     map[string]any
 	MaintenanceState   string
 	MaintenanceGoalID  string
@@ -373,6 +374,7 @@ type PipelinePatch struct {
 // RunPatch is a read-merge write to a run, on PipelinePatch's rule: nil is
 // not written, non-nil is written as given. Notes and Stages are sent whole.
 type RunPatch struct {
+	ReviewEvidence     *map[string]any
 	SelectionFacts     *map[string]any
 	MaintenanceState   *string
 	MaintenanceGoalID  *string

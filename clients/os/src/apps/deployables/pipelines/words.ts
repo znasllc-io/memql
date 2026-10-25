@@ -4,9 +4,9 @@ import type { Compute, Delivery, RunRow, StageRow, StageStatus, StepRow } from "
 // `../words.ts` is the one vocabulary for a deployable. The Runs list, the run
 // page's stops and bar, the source page's Checks and its Pipeline fact all read
 // their words from here, so the word a person learns on one surface is the word
-// they meet on the next -- and it is the word the check run on GitHub uses for
-// the same state (component/pipelines/summary.go): Passed, Failed, Cancelled,
-// Running, Waiting, Not run, Skipped. A run that says "Failed at tests" here
+// they meet on the next: Passed, Failed, Cancelled, In progress, Waiting,
+// Not run, Skipped. Dispatch does not establish executor admission, and a
+// cancellation request does not confirm that work stopped. A run that says "Failed at tests" here
 // and "Failed at tests: tests.unit" on GitHub is one reading in two places.
 //
 // NO CODE IS A WORD. A `pipeline_*` code never reaches a person as text; a
@@ -19,7 +19,7 @@ export type RunTone = "accent" | "warn" | "muted";
 export type RunMark = "done" | "stopped" | "current" | "waiting" | "ahead" | "skipped" | "pending";
 
 export interface Outcome {
-  /** One word: Passed, Failed, Running, Queued, Cancelling, Cancelled, Refused. */
+  /** Short state: Passed, Failed, In progress, Queued, Cancel requested, Cancelled, Refused. */
   word: string;
   /** Where and how long, in words: "at tests, 7m 40s". Empty when nothing is known. */
   detail: string;
@@ -96,13 +96,13 @@ export function runOutcome(run: RunRow): Outcome {
   const took = durationWords(run.durationMs);
   if (run.status === "queued") {
     return run.cancelRequested
-      ? { word: "Cancelling", detail: "", tone: "muted", mark: "current" }
+      ? { word: "Cancel requested", detail: "", tone: "muted", mark: "current" }
       : { word: "Queued", detail: "", tone: "muted", mark: "waiting" };
   }
   if (run.status === "in_progress") {
     const at = currentStage(run.stages);
-    if (run.cancelRequested) return { word: "Cancelling", detail: at ? `at ${at.name}` : "", tone: "muted", mark: "current" };
-    return { word: "Running", detail: at ? `at ${at.name}` : "", tone: "accent", mark: "current" };
+    if (run.cancelRequested) return { word: "Cancel requested", detail: at ? `at ${at.name}` : "", tone: "muted", mark: "current" };
+    return { word: "In progress", detail: at ? `at ${at.name}` : "", tone: "accent", mark: "current" };
   }
   switch (run.conclusion) {
     case "success": {
@@ -180,7 +180,7 @@ export function branchWords(run: RunRow): string {
 
 const STAGE_WORDS: Record<StageStatus, string> = {
   waiting: "Waiting",
-  running: "Running",
+  running: "In progress",
   passed: "Passed",
   failed: "Failed",
   cancelled: "Cancelled",
@@ -202,7 +202,7 @@ export function stepWord(step: StepRow): string {
     case "cancelled":
       return "Cancelled";
     case "running":
-      return "Running";
+      return "In progress";
     case "skipped":
       if (step.errorCode === "pipeline_passed_earlier") return "Passed earlier";
       if (step.errorCode === "pipeline_stage_blocked") return "Not run";

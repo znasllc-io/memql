@@ -30,9 +30,11 @@ type candidateEvidence interface {
 // handles or authority flags. The configured source/target adapters must prove
 // exact values; absence refuses before any durable preparation or artifact pin.
 type candidatePreparer struct {
-	ledger   *candidateLedger
-	evidence candidateEvidence
-	library  interface {
+	profileBinding *candidateProfileBinding
+	authority      func(context.Context) error
+	ledger         *candidateLedger
+	evidence       candidateEvidence
+	library        interface {
 		pipelinesteps.LibraryArtifactLifecycle
 		pipelinesteps.LibraryReceiptOpener
 	}
@@ -92,6 +94,9 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 	if err != nil || !publication.Trusted {
 		return candidateRecord{}, errors.New("candidate publication recipe must be installed and immutable")
 	}
+	if err := p.checkProfileAuthority(ctx); err != nil {
+		return candidateRecord{}, err
+	}
 	versions, sources, err := p.versionReader.freezeFor(input.Components)
 	if err != nil {
 		return candidateRecord{}, err
@@ -141,6 +146,9 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 		}
 		policy["assemblyWorkflow"], policy["assemblyPlans"] = assembly, p.assemblyPlans
 	}
+	if p.profileBinding != nil {
+		policy["profileBinding"] = p.profileBinding.Digest
+	}
 	fingerprint, err := workjournal.DefinitionFingerprint("release-candidate-preparation-v1", []workjournal.StepDecl{{
 		Key: "prepare", Kind: workjournal.KindDeterministic, StepType: "exec", Call: policy,
 	}})
@@ -157,6 +165,9 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 	}
 	var candidate pl.ReleaseCandidate
 	if err := json.Unmarshal(body, &candidate); err != nil {
+		return candidateRecord{}, err
+	}
+	if err := p.bindProfileCandidate(ctx, candidate, key); err != nil {
 		return candidateRecord{}, err
 	}
 	scope := &candidatePrepareScope{p: p, candidate: candidate, key: key, versionReader: versions}
@@ -194,7 +205,7 @@ type candidatePrepareScope struct {
 }
 
 func (s *candidatePrepareScope) operations() map[string]workflowhost.Operation {
-	return map[string]workflowhost.Operation{
+	ops := map[string]workflowhost.Operation{
 		"releaseCandidateEvidence": s.inspectEvidence,
 		"releaseCandidateRefuse": func(context.Context, map[string]any) (any, error) {
 			return nil, errors.New("candidate does not satisfy the installed release policy")
@@ -206,6 +217,7 @@ func (s *candidatePrepareScope) operations() map[string]workflowhost.Operation {
 		"releaseCandidateVerifyArtifacts": s.verifyBytes,
 		"releaseCandidateMarkReady":       s.ready,
 	}
+	return profileOperations(s.p, ops)
 }
 
 func (s *candidatePrepareScope) inspectEvidence(ctx context.Context, _ map[string]any) (any, error) {

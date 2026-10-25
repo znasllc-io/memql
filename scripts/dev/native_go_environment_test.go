@@ -160,7 +160,9 @@ printf 'css\n' > css-ran
 `)
 			cmd := exec.Command("/bin/sh", "-c", step.Run)
 			cmd.Dir = root
-			cmd.Env = []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin", "MODE=" + tc.mode}
+			// The affected-package lane receives this selection from StepRequest.Environment.
+			// Supply the same input when executing its real command outside the runner.
+			cmd.Env = []string{"HOME=" + home, "PATH=" + bin + ":/usr/bin:/bin", "MODE=" + tc.mode, "MEMQL_PACKAGES=./cockpit/..."}
 			out, runErr := cmd.CombinedOutput()
 			if (runErr == nil) != tc.ok {
 				t.Fatalf("lane result = %v, want success=%v\n%s", runErr, tc.ok, out)

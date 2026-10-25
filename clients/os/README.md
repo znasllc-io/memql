@@ -2475,9 +2475,19 @@ and artifact storage failures do not hide durable candidate/publication history.
 Navigation carries the owner-only `app:cluster/releases` resource; native owner and
 candidate ownership gates remain authoritative.
 
-This surface reviews already-prepared candidates. Candidate assembly, release-tag
-creation/promotion and installed cluster update control are separate delivery work;
-a publication receipt alone does not mean this cluster has updated.
+Preparation accepts either a configured assembly plan or an opt-in release profile.
+Profiles bind their current configuration identity and completed source runs; the
+installed recipe resolves artifact names and versions before the owner reviews the
+candidate. Either listing can fail without hiding the other. Destinations are read
+from the selected candidate's native binding, including profiles whose source
+differs from a retained legacy assembly.
+
+Approval, draft creation, artifact publication and release promotion remain separate
+explicit actions. Once every publication and file promotion is verified, “Add to
+release catalog” records the signed publication evidence after confirmation. Its
+completion comes from a fresh candidate read, including recovery from a lost reply.
+Unavailable catalog metadata does not hide candidate history or imply an absent
+record. Installation is a separate choice; publication alone does not update it.
 
 ### Mesh (epic memql#5338)
 

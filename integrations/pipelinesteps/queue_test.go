@@ -16,6 +16,7 @@ func TestAdmissionPriorityUsesOperatorPolicyAcrossSerializedHop(t *testing.T) {
 	cfg.QueuePriorityClasses = `{"merge_group":"merge-gates","pull_request":"pull-requests","schedule":"audits"}`
 	run.RunDeadline = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	for event, want := range map[string]string{"merge_group": "merge-gates", "pull_request": "pull-requests", "schedule": "audits", "manual": ""} {
+		run.Event = pl.Event(event)
 		run.Env = map[string]string{eventVar: event}
 		wire, err := json.Marshal(run)
 		require.NoError(t, err)
@@ -30,6 +31,7 @@ func TestAdmissionPriorityUsesOperatorPolicyAcrossSerializedHop(t *testing.T) {
 	// The reserved event cannot be overridden by a repository's secret name.
 	req := pl.StepRequest{Event: pl.EventPullRequest, Secrets: map[string]string{eventVar: "merge_group"}}
 	forwarded := stepRunFor(req, 60, "")
+	require.Equal(t, pl.EventPullRequest, forwarded.Event)
 	require.Equal(t, "pull_request", forwarded.Env[eventVar])
 	got, err := queuePriorityClass(cfg, forwarded)
 	require.NoError(t, err)
@@ -41,6 +43,7 @@ func TestAdmissionPriorityRefusesAmbiguousOperatorConfiguration(t *testing.T) {
 	cfg.QueueName, cfg.NodePool = "background", "builds"
 	run.RunDeadline = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	run.Env = map[string]string{eventVar: "merge_group"}
+	run.Event = pl.EventMergeGroup
 	for _, raw := range []string{`null`, `[]`, `{"unknown":"gates"}`, `{"merge_group":"a","merge_group":"b"}`, `{"merge_group":""}`, `{"merge_group":"../other"}`, `{"merge_group":12}`, `{} {}`} {
 		cfg.QueuePriorityClasses = raw
 		_, err := BuildJob(cfg, run, testJobName)
@@ -51,7 +54,7 @@ func TestAdmissionPriorityRefusesAmbiguousOperatorConfiguration(t *testing.T) {
 	_, err := BuildJob(cfg, run, testJobName)
 	require.ErrorContains(t, err, "require a queue")
 	cfg.QueueName = "background"
-	run.Env = nil
+	run.Event = ""
 	_, err = BuildJob(cfg, run, testJobName)
 	require.ErrorContains(t, err, "trusted pipeline event")
 	got := ConfigFromEnv(func(key string) string {

@@ -43,6 +43,7 @@ import (
 // Deps are the integration's ports. New takes them, and Configure sets the
 // ones only app/ can build after every plug-in has materialized.
 type Deps struct {
+	IndependentReview *IndependentReviewDependencies
 	// ReportMergeGroupReview is available only to a captured, claimed pipeline
 	// workflow. The callback must recheck the supplied lease fence at effects.
 	ReportMergeGroupReview func(context.Context, Pipeline, Run, func(context.Context) error) (map[string]any, error)

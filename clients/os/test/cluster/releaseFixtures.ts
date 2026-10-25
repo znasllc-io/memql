@@ -1,4 +1,4 @@
-import { Result } from "@znasllc-io/memql-sdk-core/client";
+import { QueryClient, Result } from "@znasllc-io/memql-sdk-core/client";
 import type { Draft, Target } from "../../src/apps/cluster/releases/model";
 import type { ReleaseQueries } from "../../src/apps/cluster/releases/ReleasesSection";
 
@@ -6,7 +6,7 @@ export const releaseId = `sha256:${"a".repeat(64)}`;
 export const targetDigest = `sha256:${"b".repeat(64)}`;
 export const releaseTarget = { targetId: "rehearsal", targetDigest, component: "engine", artifact: "bff", operation: "publish" as const, origin: "https://registry.example.test", repository: "memql/bff", kind: "oci" as const };
 export function candidateRecord(state = "ready") {
-  return { candidateId: releaseId, state, ...(state === "approved" ? { approvalId: "approval-exact" } : {}), manifest: {
+  return { candidateId: releaseId, state, catalog: { state: "absent" } as { state: string; approvalId?: string; catalogDigest?: string }, ...(state === "approved" || state === "archived" ? { approvalId: "approval-exact" } : {}), manifest: {
     formatVersion: 1, ownerUserId: "owner", workflowDigest: `sha256:${"f".repeat(64)}`,
     components: [{ name: "engine", version: "0.25.0", repository: "example/memql", commit: "d".repeat(40), artifacts: [{ name: "bff", kind: "oci", platform: "linux/arm64", digest: `sha256:${"c".repeat(64)}`, imageDigest: `sha256:${"e".repeat(64)}`, size: 1853440 }] }],
     compatibility: [], destinations: [releaseTarget],
@@ -14,20 +14,35 @@ export function candidateRecord(state = "ready") {
   } };
 }
 export function releaseResult(value: object) { return new Result({ data: [value] } as never); }
-export const buildRun = { id: "pipeline-1", status: "completed", conclusion: "success", mode: "full", workRunId: "work-build-1", repository: "example/memql", sha: "d".repeat(40), title: "Build engine 0.25.0", finishedAt: "2026-10-06T18:00:00Z" };
+export const buildRun = { id: "pipeline-1", status: "completed", conclusion: "success", mode: "full", event: "release", releaseTag: "v0.25.0", workRunId: "work-build-1", repository: "example/memql", sha: "d".repeat(40), title: "Build engine 0.25.0", finishedAt: "2026-10-06T18:00:00Z" };
 export function releaseFixture(initial = "ready") {
   let configurationRead = 0;
-  const state = { record: candidateRecord(initial), publications: [] as object[], targets: [releaseTarget] as Target[], drafts: [] as Draft[], empty: false, failedRead: false, failedDraftRead: false, lostPublishReply: false, lostDraftReply: false, lostPromotionReply: false, lostAssemblyReply: false,
+  const state = { record: candidateRecord(initial), publications: [] as object[], targets: [releaseTarget] as Target[], drafts: [] as Draft[], empty: false, failedRead: false, failedDraftRead: false, lostPublishReply: false, lostDraftReply: false, lostPromotionReply: false, lostAssemblyReply: false, lostSealReply: false, failedSeal: false,
     sources: [{ component: "engine", repository: "example/memql", path: "VERSION" }],
+    profiles: [] as { name: string; configuration: string; components: { name: string; repository: string; runs: string[] }[]; build?: { component: string; run: string; branch: string } }[],
     assemblies: [{ name: "engine-release", components: [{ name: "engine", runs: ["build"], artifacts: [{ name: "bff", run: "build", stepKey: "build.bff", path: "bff.tar", kind: "oci", platform: "linux/arm64" }] }], targets: ["rehearsal"], compatibility: [] }],
     runs: [buildRun], calls: [] as { kind: string; args: unknown }[] };
-  const query: ReleaseQueries = {
+  const query: ReleaseQueries & Pick<QueryClient, "executeNamed"> = {
+    // Exercise the generated serializers through the fixture's recorded transport.
+    releasePrepareBuild: QueryClient.prototype.releasePrepareBuild,
+    releaseBuilds: QueryClient.prototype.releaseBuilds,
+    releaseGetBuild: QueryClient.prototype.releaseGetBuild,
+    releaseStartBuild: QueryClient.prototype.releaseStartBuild,
+    releaseObserveBuild: QueryClient.prototype.releaseObserveBuild,
+    releaseResumeBuild: QueryClient.prototype.releaseResumeBuild,
+    releasePublishBuild: QueryClient.prototype.releasePublishBuild,
+    executeNamed: async name => { if (name === "releaseBuilds") return releaseResult({ intents: [] }); throw new Error(`Unexpected release operation: ${name}`); },
+    pipelinesForOwner: async () => new Result({ data: [] } as never),
+    pipelineForOwner: async () => new Result({ data: [] } as never),
+    pipelineRunForOwner: async () => new Result({ data: [] } as never),
     releaseCandidates: async (args) => { state.calls.push({ kind: "list", args }); if (state.failedRead) throw new Error("Release journal unavailable"); return releaseResult({ candidates: state.empty ? [] : [{ candidateId: releaseId, state: state.record.state, components: state.record.manifest.components, createdAt: "2026-10-06T18:00:00Z", evidenceCount: 1 }] }); },
     releaseGetCandidate: async (args) => { state.calls.push({ kind: "get", args }); if (state.failedRead) throw new Error("Release journal unavailable"); return releaseResult(state.record); },
     releaseCandidateConfiguration: async () => {
       const id = `configuration-${++configurationRead}`;
       return releaseResult({ [id]: { id, concept: "v1:release:candidate-configuration", createdAt: `2026-10-06T18:00:${String(configurationRead).padStart(2, "0")}Z`, payload: { targets: state.targets, sources: state.sources, assemblies: state.assemblies } } });
     },
+    releaseCandidateProfiles: async () => releaseResult({ profiles: state.profiles }),
+    releaseCandidateTargets: async () => releaseResult({ candidateId: releaseId, targets: state.targets }),
     releaseCandidatePublications: async () => releaseResult({ candidateId: releaseId, publications: state.publications }),
     releaseApproveCandidate: async (args) => { state.calls.push({ kind: "approve", args }); Object.assign(state.record, { state: "approved", approvalId: "approval-exact" }); return releaseResult(state.record); },
     releaseRetireCandidate: async (args) => { state.calls.push({ kind: "retire", args }); state.record.state = "retired"; return releaseResult(state.record); },
@@ -45,7 +60,15 @@ export function releaseFixture(initial = "ready") {
       if (state.lostPromotionReply) throw new Error("Public publication reply was lost");
       return releaseResult(state.drafts[0]!);
     },
+    releaseSealPublishedCandidate: async (args) => {
+      state.calls.push({ kind: "seal", args });
+      if (state.failedSeal) throw new Error("Catalog signing is unavailable");
+      state.record.catalog = { state: "sealed", approvalId: "approval-exact", catalogDigest: `sha256:${"7".repeat(64)}` };
+      if (state.lostSealReply) throw new Error("Catalog reply was lost");
+      return releaseResult({ candidateId: releaseId, catalogDigest: state.record.catalog.catalogDigest });
+    },
     releaseAssembleCandidate: async (args) => { state.calls.push({ kind: "assemble", args }); state.empty = false; if (state.lostAssemblyReply) throw new Error("Preparation reply was lost"); return releaseResult(state.record); },
+    releaseAssembleProfileCandidate: async (args) => { state.calls.push({ kind: "profile", args }); state.empty = false; if (state.lostAssemblyReply) throw new Error("Preparation reply was lost"); return releaseResult(state.record); },
     pipelineRunsForOwner: async (args) => { state.calls.push({ kind: "runs", args }); return new Result({ data: state.runs } as never); },
     releasePublishCandidate: async (args) => {
       state.calls.push({ kind: "publish", args });
