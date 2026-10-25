@@ -249,6 +249,54 @@ describe("one selection, shared by the map and the rail", () => {
   });
 });
 
+describe("reading a selected action", () => {
+  it.each([
+    { position: "above", top: 60, expectedScroll: 460 },
+    { position: "below", top: 430, expectedScroll: 554 },
+    { position: "visible", top: 180, expectedScroll: 500 },
+  ])("reveals a heading $position the body without moving focus or following live updates", ({ top, expectedScroll }) => {
+    const rawGoal = goalRow({ id: "g1" });
+    const props = {
+      goal: goalFromRow(rawGoal), goalRow: rawGoal,
+      runRows: [runRow({ id: "r1", goalId: "g1", status: "running" })],
+      stepRows: [...CHAIN, stepRow({ id: "s4", key: "final", seq: 3, runId: "r1", callName: "workReviewReply" })],
+      artifactRows: [], approvalRows: [], openRunId: "r1",
+      onPickRun: vi.fn(), onBack: vi.fn(), onOpenRun: vi.fn(), onOpenApproval: vi.fn(),
+      cancel: { busy: false, error: "", reset: vi.fn(), cancel: vi.fn(async () => true) },
+      derive: { busy: false, error: "", reset: vi.fn(), derivedRunId: "", replay: vi.fn(async () => "") },
+    };
+    const draw = (stepsState: LiveState) => withSession(<GoalView {...props} stepsState={stepsState} />);
+    const view = render(draw("live"));
+    const body = view.container.querySelector<HTMLElement>(".os-nexus-goalview-body")!;
+    const outer = view.container.querySelector<HTMLElement>(".os-nexus-goalview")!;
+    const bodyRect = vi.spyOn(body, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 600, 300));
+    const headingRect = vi.spyOn(HTMLHeadingElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, top, 200, 24));
+    try {
+      body.scrollTop = 500;
+      outer.scrollTop = 30;
+      const action = screen.getByRole("button", { name: /^Final,/ });
+      action.focus();
+      fireEvent.click(action);
+      expect(within(screen.getByRole("region", { name: "Selected action" })).getByRole("heading", { name: "Final" })).toBeTruthy();
+      expect(body.scrollTop).toBe(expectedScroll);
+      expect(outer.scrollTop).toBe(30);
+      expect(document.activeElement).toBe(action);
+      body.scrollTop = 250;
+      view.rerender(draw("degraded"));
+      expect(body.scrollTop).toBe(250);
+      expect(document.activeElement).toBe(action);
+      fireEvent.click(action);
+      expect(screen.queryByRole("region", { name: "Selected action" })).toBeNull();
+      expect(body.scrollTop).toBe(250);
+      expect(props.cancel.cancel).not.toHaveBeenCalled();
+      expect(props.derive.replay).not.toHaveBeenCalled();
+    } finally {
+      bodyRect.mockRestore();
+      headingRect.mockRestore();
+    }
+  });
+});
+
 describe("density: a finished stretch folds and says how much it stands for", () => {
   it("folds, and opens again when the fold is clicked", async () => {
     const long: Row[] = [];
@@ -495,6 +543,29 @@ describe("the acts legal from the run's state", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close goal" }));
   });
 
+  it("dismisses only the open close confirmation with Escape and restores its trigger", async () => {
+    const conn = seeded();
+    const escaped = vi.fn();
+    h.connection = conn;
+    render(<div onKeyDown={escaped}>{withSession(<NexusApp sectionId="goals" navigate={vi.fn()} askContext={vi.fn()} consumeIntent={vi.fn()} store={memoryStore()} />)}</div>);
+    await openGoal();
+    const close = screen.getByRole("button", { name: "Close goal" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(escaped).toHaveBeenCalledTimes(1);
+    escaped.mockClear();
+    fireEvent.click(close);
+    await readTheBar();
+    const keep = screen.getByRole("button", { name: "Keep open" });
+    keep.focus();
+    fireEvent.keyDown(keep, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Keep open" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Confirm closing this goal/ })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close goal" }));
+    expect(escaped).not.toHaveBeenCalled();
+    expect(conn.query.cancelGoal).not.toHaveBeenCalled();
+  });
+
   it("preserves pending and refused closing without asking for the request text", async () => {
     const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement: "Reconcile the ledger.\n\nReport all differences." })] });
     let refuse!: (error: Error) => void;
@@ -506,6 +577,8 @@ describe("the acts legal from the run's state", () => {
     expect(conn.query.cancelGoal).toHaveBeenCalledExactlyOnceWith({ goalId: "g1", reason: "Closed from MemQL OS" });
     const pending = screen.getByRole("button", { name: /Confirm closing this goal/ }) as HTMLButtonElement;
     expect(pending.disabled).toBe(true);
+    fireEvent.keyDown(pending, { key: "Escape" });
+    expect(screen.getByRole("button", { name: /Confirm closing this goal/ })).toBe(pending);
     fireEvent.click(pending);
     expect(conn.query.cancelGoal).toHaveBeenCalledTimes(1);
     await act(async () => refuse(new Error("The cluster refused this request.")));

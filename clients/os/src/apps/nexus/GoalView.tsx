@@ -4,7 +4,7 @@ import type { ModelUsageState } from "./useModelUsage";
 import { stepTitle, stepOutcome } from "../../nexus/presentation";
 import { StepSummary } from "./StepSummary";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GitBranch, History, RotateCcw } from "lucide-react";
 import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -125,6 +125,9 @@ export function GoalView({
   const [at, setAt] = useState(openAt);
   const [confirm, setConfirm] = useState(false);
   const page = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const inspector = useRef<HTMLElement>(null);
+  const revealSelection = useRef(false);
   const returnCloseFocus = useRef(false);
   // "Branch from here" opens the same composer the run page does, and its
   // drafts are kept the same way: Escape keeps what was typed.
@@ -175,7 +178,7 @@ export function GoalView({
   // A run this window cannot draw is a selection the person did not make.
   // Reset the step when the run changes rather than carrying a key that names
   // a step in a different run.
-  useEffect(() => setSelectedStepKey(""), [openRunId]);
+  useEffect(() => { setSelectedStepKey(""); revealSelection.current = false; }, [openRunId]);
   useEffect(() => { setConfirm(false); returnCloseFocus.current = false; }, [goal.id]);
   useEffect(() => {
     if (!confirm && returnCloseFocus.current) {
@@ -183,6 +186,30 @@ export function GoalView({
       page.current?.querySelector<HTMLButtonElement>('button[aria-label="Close goal"]')?.focus();
     }
   }, [confirm]);
+
+  const selectStep = (key: string) => {
+    revealSelection.current = key !== "";
+    setSelectedStepKey(key);
+  };
+  useLayoutEffect(() => {
+    if (!revealSelection.current) return;
+    revealSelection.current = false;
+    const scroller = body.current;
+    const heading = inspector.current?.querySelector<HTMLElement>(".os-subhead");
+    if (!scroller || !heading) return;
+    // Reveal the chosen heading inside this page only. Keep keyboard focus on
+    // the action, and leave scrolling alone when live evidence changes.
+    const view = scroller.getBoundingClientRect();
+    const target = heading.getBoundingClientRect();
+    if (target.top < view.top) scroller.scrollTop += target.top - view.top;
+    else if (target.bottom > view.bottom) scroller.scrollTop += target.bottom - view.bottom;
+  }, [selectedStepKey]);
+
+  const keepOpen = () => {
+    if (cancel.busy) return;
+    returnCloseFocus.current = true;
+    setConfirm(false);
+  };
 
   // The scene library's run row, not the app's, so the shared TERMINAL list is
   // read directly rather than through `runIsTerminal` -- a cast between two
@@ -240,11 +267,7 @@ export function GoalView({
       // Only the explicit question's actions remain. The shared bar holds
       // presses after the question appears, including keyboard presses.
       acts.splice(0, acts.length,
-        { label: "Keep open", text: true, busy: cancel.busy, onAct: () => {
-          if (cancel.busy) return;
-          returnCloseFocus.current = true;
-          setConfirm(false);
-        } },
+        { label: "Keep open", text: true, busy: cancel.busy, onAct: keepOpen },
         { label: "Close goal", tone: "danger", busy: cancel.busy,
           ariaLabel: "Confirm closing this goal and ask all its runs to stop",
           onAct: () => { void cancel.cancel(goal.id, "Closed from MemQL OS").then(ok => {
@@ -291,7 +314,12 @@ export function GoalView({
             : "none";
 
   return (
-    <div className="os-nexus-goalview" ref={page}>
+    <div className="os-nexus-goalview" ref={page} onKeyDown={event => {
+      if (event.key !== "Escape" || event.defaultPrevented || !confirm) return;
+      event.preventDefault();
+      event.stopPropagation();
+      keepOpen();
+    }}>
       {/* THE KIT'S HEAD, which publishes the trail to the window's one trail
           row rather than drawing a back button of its own (DESIGN.md, "One
           trail row"). */}
@@ -302,7 +330,7 @@ export function GoalView({
         back={{ label: "Goals", onSelect: onBack }}
       />
 
-      <div className="os-nexus-goalview-body">
+      <div className="os-nexus-goalview-body" ref={body}>
         {goal.statement.trim() !== "" && goalTitle(goal) !== goal.statement.trim() ? (
           <details className="nexus-technical"><summary>Request</summary><p style={{ whiteSpace: "pre-wrap" }}>{goal.statement}</p></details>
         ) : null}
@@ -349,9 +377,9 @@ export function GoalView({
           <>
             <section className="nexus-now" aria-label="Current progress"><div><p className="nexus-now-title">{waitingOnYou ? "Waiting for your decision" : currentStep ? stepTitle(currentStep) : runStatusWord(run.status)}</p><Caption>{waitingOnYou ? parked?.question || "Review the request to continue." : currentStep ? stepOutcome(currentStep) : emptySummary}</Caption></div><span className="nexus-usage" title={usageSummary?.total !== null && usageSummary?.total !== undefined ? `${usageSummary.total.toLocaleString()} tokens${usageSummary.estimated ? " (includes estimates)" : " reported"}` : "Token usage has not been reported"}>{usageSummary && usageSummary.calls > 0 ? usageLabel(usageSummary) : tokenUsage === null ? "Usage not reported" : `${formatTokens(tokenUsage)} tokens reported`}</span></section>
             <div className="nexus-workspace"><div className="nexus-workspace-spine">
-              <GoalJourney key={run.id} steps={railSteps} selected={selectedStepKey} onSelect={setSelectedStepKey} completed={progress.completed} total={progress.total} emptyLabel={emptyJourneyLabel} stale={stepsState === "degraded" || stepsState === "disconnected"} />
+              <GoalJourney key={run.id} steps={railSteps} selected={selectedStepKey} onSelect={selectStep} completed={progress.completed} total={progress.total} emptyLabel={emptyJourneyLabel} stale={stepsState === "degraded" || stepsState === "disconnected"} />
               {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : stepsState === "live" ? <Caption>{progress.compiling ? "The steps appear as the work is planned." : "This run recorded no steps."}</Caption> : null) : null}
-            </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite"><StepSummary step={openStep} usage={usage ? summarizeUsage(usage.calls.filter(call => call.stepKey === openStep.key), usage.complete) : undefined} /></aside> : null}</div>
+            </div>{openStep ? <aside className="nexus-workspace-inspector" aria-live="polite" ref={inspector}><StepSummary step={openStep} usage={usage ? summarizeUsage(usage.calls.filter(call => call.stepKey === openStep.key), usage.complete) : undefined} /></aside> : null}</div>
 
             {/* Rewind is read-only view navigation beside its time control.
                 Lifecycle actions stay together in the three-action footer. */}
@@ -368,7 +396,7 @@ export function GoalView({
             </details>
 
             <details className="nexus-technical"><summary>Dependencies and execution map</summary>{actionsUnavailable ? <Caption>The execution map is unavailable until recorded actions are read.</Caption> : <BeaconMap
-              world={world} state={stepsState} selectedStepKey={selectedStepKey} onSelectStep={setSelectedStepKey}
+              world={world} state={stepsState} selectedStepKey={selectedStepKey} onSelectStep={selectStep}
               onOpenApproval={onOpenApproval} expandedColumns={expandedColumns} expandedFolds={expandedFolds}
               onToggleColumn={depth => setExpandedColumns(held => toggled(held, depth))}
               onToggleFold={depth => setExpandedFolds(held => toggled(held, depth))} at={at} />}
@@ -493,10 +521,6 @@ function Scrubber({
           Back to now
         </button>
       </div>
-      <Caption>
-        Every tick is a moment a row recorded. A moment nothing dated has no tick -- this is read
-        out of the rows, not out of a recording.
-      </Caption>
     </div>
   );
 }
