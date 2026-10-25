@@ -429,6 +429,28 @@ re-reads the snapshot it already stored (memql#4954, memql#4955). One row per
 attempt is what makes the timeline readable, and it is what makes a Retry's
 promise survive the click that acts on it.
 
+### If the connection closes after confirmation
+
+In `0.31.2`, background Analyze can finish after the browser disconnects, but
+confirmation still runs under the confirming request. A saved review gate does
+not make that execution independent of the connection. Losing the browser
+stream can cancel the build; its last visible stage may remain until the
+heartbeat sweep records `abandoned`.
+
+Read the exact deployment attempt before acting again. A closed stream does
+not establish whether anything was published. Never resend confirmation while
+its outcome is unknown, or confirm an attempt that is no longer
+`awaiting_confirm`.
+
+For a reviewed operational recovery on this version, an operator can use the
+normal authenticated Go SDK over native gRPC to confirm a newly analyzed,
+parked attempt. Retain its source revision, snapshot, report and site choices,
+check them immediately before the single call, and keep a durable record that
+prevents replay after a lost reply. This uses the existing owner checks; it
+adds no permissions. Native gRPC avoids the browser connection dependency, but
+still requires checking the final deployment, serving sites and restarted DSL
+consumers. It does not make node loss recover automatically.
+
 ## Private sources
 
 A source fetches under a personal credential its **owner** holds:
