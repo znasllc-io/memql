@@ -860,3 +860,32 @@ disposable test database; a skipped test is not validation. Report the exact
 commit and test result separately from live workflow evidence. These tests do
 not establish complete UI delivery, arbitrary cross-goal freshness, all worker
 artifact formats, or a completed login handoff.
+
+## Package confirmation and connection loss (2026-10-25)
+
+A production `0.31.2` confirmation was cancelled when its browser WebSocket
+closed after a missed ping response. The BFF recorded `context canceled`
+while closing the deployment and writing its audit; the heartbeat sweep later
+recorded `deployment_abandoned`. The saved report and source snapshot survived.
+This establishes request-lifetime coupling, not a proven WebSocket dispatch
+concurrency defect. Background analysis already detached from the request;
+confirmed execution did not.
+
+The temporary bootstrap uses the existing Go SDK over native gRPC, under the
+normal owner session, with a reviewed fresh parked-attempt receipt and one
+exclusive durable confirmation intent. A lost response remains uncertain:
+observe the exact deployment and never replay the call. The original temporary
+operator's 8 top-level / 30 offline cases passed, including the actual SDK/protobuf result
+boundary. That proof does not establish a successful live deployment or DSL
+loading on every consumer.
+
+The isolated correction is a **candidate, not released behavior**. It claims
+the existing parked row under the package's database gate before acknowledging
+background confirmation; concurrent synchronous confirmation shares that gate.
+Repository confirmation requires the saved report and snapshot and refuses a
+redirect to another attempt. Execution keeps the caller's authority, detaches
+transport cancellation under a plan-derived time budget, and retains durable
+Cancel, heartbeat and bounded terminal bookkeeping. Cancel and abandonment
+checks re-read under the same gate. This is not a persistent job executor:
+process loss, including during the DSL restart, can still abandon the attempt
+before publication. No automatic continuation or effect replay is promised.

@@ -64,11 +64,11 @@ new release or authorize installation.
 
 ```mermaid
 flowchart TD
-    CHANGE["PR opened or updated"] --> CHECK["Check the exact proposed change"]
-    CHECK --> REVIEW["Required tests and independent review"]
+    CHANGE["PR opened or updated"] --> CHECK["Scoped checks on the exact head; full coverage when uncertain"]
+    CHECK --> REVIEW["Required tests and configured independent review"]
     REVIEW --> QUEUE["Protected merge queue checks the combined change"]
     QUEUE --> MAIN["Merge to main and verify"]
-    MAIN -. "Operator chooses a source and version" .-> BUILD["Build the selected release"]
+    MAIN -. "Operator chooses verified source and version" .-> BUILD["Cut and build the selected release"]
     BUILD --> CANDIDATE["Review retained artifacts and publication destinations"]
     CANDIDATE --> PUBLISH["Approve and publish the exact candidate"]
     PUBLISH --> CATALOG["Published release is available"]
@@ -80,9 +80,13 @@ The dotted arrows are explicit operator decisions. The solid arrows remain
 subject to their configured checks, permissions and failure handling; they are
 not a promise that every repository has enabled automatic merge or publication.
 In `0.31.0`, native review requires a governed `deliver_change` proposal.
-Version `0.31.1` adds an optional [ordinary PR review route](#independent-review-for-ordinary-pull-requests).
-An installation must enable and qualify its review workflow for ordinary PRs,
-native proposals and mixed queue groups before making the review check required.
+Version `0.31.2` includes an optional [ordinary PR review route](#independent-review-for-ordinary-pull-requests).
+An installation must qualify real ordinary-PR and native-proposal reviews before
+changing required review policy. If an existing code-owner requirement prevents
+queue admission, replace it only through the reviewed, atomic transition
+described [below](#independent-review-for-ordinary-pull-requests), then qualify
+the first live mixed queue group under the new required checks. An unqualified
+or failing group stays blocked.
 An existing automatic GitOps or package feed can reconcile changes to the source
 it watches. Check that feed's settings before merging an installation update;
 the separation above does not disable independently configured automation.
@@ -104,6 +108,15 @@ and attention needed. **Deployables** describes the applications a source
 produces and links to their delivery information. The detailed controls and
 requirements are documented in [Release cutting](release-cutting.md) and
 [Release candidates](release-candidates.md).
+
+These permissions do not transfer between stages:
+
+| Decision | What it permits | What it does not permit |
+|---|---|---|
+| Authorize a repository change | The captured source, paths and requested operation; `deliver_change` includes its independent review and ordinary queue recipe | Release publication, installation or changed repository protections |
+| Accept an independent AI review | Evidence for the exact reviewed bytes and App-owned check | A permission grant or a substitute for required tests |
+| Approve a release candidate | Publication of its exact verified artifacts to its declared destinations | Selecting or updating an installation |
+| Apply an installation plan | The selected source and saved plan under current installation authority | Choosing a newer release or broadening the plan |
 
 ### Automated repair is an installed policy
 
@@ -139,6 +152,14 @@ explain a diagnosis and propose changes, but cannot grant permission, replace
 test evidence or declare that a deployment is healthy. The journal records
 these decisions and their evidence in readable terms; it is not an unfiltered
 record of model reasoning.
+
+Infrastructure, credential or capacity failures do not grant the repair recipe
+permission to change those systems. The installed DSL must name its repair
+limits and escalation path; a model cannot expand them. Likewise, repository
+delivery recovery does not recover every other external operation. A lost
+package confirmation may have reached publication or restarted its own node.
+In `0.31.2`, observe that exact attempt before another action; automatic
+continuation across package self-roll is not provided. See [Packages](packages.md).
 
 Owners and developers on another host may request changes to their own
 deployables. If the request also needs a core-engine change, that part needs
@@ -316,10 +337,17 @@ the combined tree remain separate.
 
 Evidence is bounded to 256 changed files, 1 MiB per file and 4 MiB of changed
 content. Incomplete trees, unsupported binary/link/submodule changes or
-ambiguous history refuse review. Before changing GitHub's required review
-policy, qualify ordinary PRs, governed proposals and a mixed queue group with
-the actual installed App, including moved-head and changed-membership refusal.
-Installing the engine does not enable this role or change GitHub protections.
+ambiguous history refuse review. First prove actual exact-head reviews and
+required tests for an ordinary PR and a governed proposal with the installed
+App, keeping current protections. If those protections prevent the first mixed
+queue qualification, an operator may then apply a reviewed atomic replacement:
+require both the test and review contexts from their exact App IDs while
+replacing the superseded review requirement, preserving the queue and all
+other protections. Never leave both review gates absent. Qualify the first
+actual mixed group only after that transition; missing, moved-head,
+changed-membership or unconfirmed evidence must block it. Offline group tests
+are not a live queue proof. Installing the engine does not enable this role or
+change GitHub protections.
 
 ## Connecting a pipeline
 
