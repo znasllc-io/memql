@@ -889,3 +889,31 @@ Cancel, heartbeat and bounded terminal bookkeeping. Cancel and abandonment
 checks re-read under the same gate. This is not a persistent job executor:
 process loss, including during the DSL restart, can still abandon the attempt
 before publication. No automatic continuation or effect replay is promised.
+
+## Repository requests in owned Work (source candidate, 2026-10-25)
+
+An owned goal can need a repository change while ordinary capability discovery
+exposes functions without enumerating their assistant-tool aliases. The owned
+Work scope therefore offers the already installed `inspectRepositoryAuthority`,
+`requestRepositoryChange`, `repositoryChangeRequestStatus` and
+`listRepositoryChangeRequests` tools. It adds each name once, only when its
+actual tool contract is installed and the current actor matches the persisted
+run owner with a goal. Ordinary chat, a foreign actor and a missing goal keep
+their existing tool surface; an absent contract is not advertised.
+
+This changes discoverability, not repository authority. The tools retain their
+declared assistant/specialist role gates, and native requests still resolve
+current source ownership, provider access and any required maintainer decision.
+A host's owner or developer role alone cannot approve a foreign core repository. A
+refused request follows the existing refusal/feedback path; adding its tool
+name cannot manufacture an approval, replay an uncertain effect or reopen a
+cancelled run. Restored owned Work reconstructs this scope from its persisted
+identity on the execution replica, without borrowing an originating session.
+Progress renewal, spending limits and explicit owner acceptance of goal results
+remain unchanged.
+
+`TestOwnedWorkOffersShippedRepositoryToolsWithTheirRoleGates` checks the actual
+shipped contracts; `TestRepositoryWorkToolsRequireOwnedRunAndInstalledContracts`
+checks the missing/foreign contexts. Existing persisted-owner and Fleet-lane
+context tests cover the restored execution boundary. The live Ask-to-PR and
+merge-queue journeys require separate verification against the installed release.
