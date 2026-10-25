@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scenarios": [
     {
       "id": "investigate-reproduce",
@@ -729,6 +729,266 @@
           "id": "preservation",
           "claim": "Unrelated tracked and untracked work is unchanged.",
           "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "accessible-message-menu",
+      "version": "1.0.0",
+      "title": "Implement and inspect an accessible message menu",
+      "domain": "software-ui",
+      "plannedLength": "medium",
+      "goal": "Implement the menu described in README.md; independently verify keyboard, copy, details and narrow/desktop rendering.",
+      "fixture": {
+        "id": "accessible-menu",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "index.html": "18525c3b7d5f39a2de621881034a7a71d2c8b818b740d1faecbc9014daa82c07",
+          "README.md": "d99d4651296aa5779d3d3254fa9f923317da144088021978acaf63835681ef31",
+          "NOTES.txt": "16d53b81f64929b71e0122811756514e0b795ba65991eb7e713ba3cd16bd2e6c",
+          ".memql-evaluation.json": "7029c319be3133dc7adfa1b1c3d6e5248f09e4053bbc55066667fdc5002489a4"
+        }
+      },
+      "constraints": [
+        "Work only in the supplied isolated evaluation checkout. Preserve unrelated work.",
+        "MemQL authors outputs and runs its own tools and computer-use checks; outside implementation is an intervention.",
+        "No publishing, purchases, messages, shared runtime changes or whole-repository archives.",
+        "Retain bounded evidence and report unknown measurements honestly. These planned scenarios have no measured result or default scheduled execution."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "ui-behavior",
+          "claim": "Message actions work with keyboard and pointer.",
+          "oracle": "Exercise Escape, arrow keys, Enter, focus return, clipboard, and Details content in a real browser; retain interaction receipts.",
+          "required": true
+        },
+        {
+          "id": "ui-layout",
+          "claim": "Before/after views are readable without overflow.",
+          "oracle": "Open captured exact revision at desktop and 390px in light/dark; retain rendered screenshots and visual findings, not model assertions.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "pdf-document-report",
+      "version": "1.0.0",
+      "title": "Create a concise PDF and editable document",
+      "domain": "pdf-documents",
+      "plannedLength": "short",
+      "goal": "Create the two-page PDF and editable document described in brief.txt.",
+      "fixture": {
+        "id": "report-brief",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "brief.txt": "83946fb7b44885c033bdc22d180cbcd0a68dd89a54e57cae79fb45026cd1ee6c",
+          "source.csv": "a5e254282a5fa5d9c61931c0ce45c18518b1ca87cb778623c6b72488b231c19a",
+          "NOTES.txt": "16d53b81f64929b71e0122811756514e0b795ba65991eb7e713ba3cd16bd2e6c",
+          ".memql-evaluation.json": "7029c319be3133dc7adfa1b1c3d6e5248f09e4053bbc55066667fdc5002489a4"
+        }
+      },
+      "constraints": [
+        "Work only in the supplied isolated evaluation checkout. Preserve unrelated work.",
+        "MemQL authors outputs and runs its own tools and computer-use checks; outside implementation is an intervention.",
+        "No publishing, purchases, messages, shared runtime changes or whole-repository archives.",
+        "Retain bounded evidence and report unknown measurements honestly. These planned scenarios have no measured result or default scheduled execution."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "document-content",
+          "claim": "Both outputs include the brief and preserve missing values.",
+          "oracle": "Open both artifacts, extract contents, compare every numeric claim to source.csv and check required sections.",
+          "required": true
+        },
+        {
+          "id": "document-layout",
+          "claim": "The PDF and editable document render correctly.",
+          "oracle": "Render every page with a real renderer; inspect clipping, table wrapping, page count, readable type and accessibility text. Retain rendered evidence.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "spreadsheet-presentation",
+      "version": "1.0.0",
+      "title": "Analyze tabular input and explain it in slides",
+      "domain": "other-files",
+      "plannedLength": "medium",
+      "goal": "Create the workbook and slide deck described in brief.txt; retain raw data and verification evidence.",
+      "fixture": {
+        "id": "file-analysis",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "orders.csv": "7278b090669d76548670bbceb8df91282982d36471cea3a197a5f060d0668dbf",
+          "brief.txt": "61c98c86d1d50a519847a67d9e6b4aea7b3404aab0a519ad3e328c7640f9708e",
+          "NOTES.txt": "16d53b81f64929b71e0122811756514e0b795ba65991eb7e713ba3cd16bd2e6c",
+          ".memql-evaluation.json": "7029c319be3133dc7adfa1b1c3d6e5248f09e4053bbc55066667fdc5002489a4"
+        }
+      },
+      "constraints": [
+        "Work only in the supplied isolated evaluation checkout. Preserve unrelated work.",
+        "MemQL authors outputs and runs its own tools and computer-use checks; outside implementation is an intervention.",
+        "No publishing, purchases, messages, shared runtime changes or whole-repository archives.",
+        "Retain bounded evidence and report unknown measurements honestly. These planned scenarios have no measured result or default scheduled execution."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "workbook-calculation",
+          "claim": "Workbook formulas preserve unknown quantity and remove the exact duplicate once.",
+          "oracle": "Open/recalculate with an independent reader. Verified known total is USD 27.00; A4 remains unknown; inspect formulas and raw/cleaned separation.",
+          "required": true
+        },
+        {
+          "id": "presentation-render",
+          "claim": "Five slides explain the evidence and uncertainty legibly.",
+          "oracle": "Open and render each slide, verify numbers against recalculated workbook, inspect overflow and missing-data labels.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "sourced-brief",
+      "version": "1.0.0",
+      "title": "Write a short sourced comparison",
+      "domain": "research",
+      "plannedLength": "short",
+      "goal": "Answer question.txt in a concise source-backed report.",
+      "fixture": {
+        "id": "research-evidence",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "question.txt": "0d2abfe0496aa19ff9ec29728100cfe11b48e317ec9a5cba9fef54db1ca188ec",
+          "sources.md": "e8914b213bab11499f7f9c3c59199acbcb5f4684e3de57883aba4a12bf16eb13",
+          "NOTES.txt": "16d53b81f64929b71e0122811756514e0b795ba65991eb7e713ba3cd16bd2e6c",
+          ".memql-evaluation.json": "7029c319be3133dc7adfa1b1c3d6e5248f09e4053bbc55066667fdc5002489a4"
+        }
+      },
+      "constraints": [
+        "Work only in the supplied isolated evaluation checkout. Preserve unrelated work.",
+        "MemQL authors outputs and runs its own tools and computer-use checks; outside implementation is an intervention.",
+        "No publishing, purchases, messages, shared runtime changes or whole-repository archives.",
+        "Retain bounded evidence and report unknown measurements honestly. These planned scenarios have no measured result or default scheduled execution."
+      ],
+      "injections": [],
+      "criteria": [
+        {
+          "id": "research-grounding",
+          "claim": "Material claims cite supporting source sections.",
+          "oracle": "Independently map claims to sources.md, check the revised A estimate and excluded remediation; missing C cost and methodology must stay unknown.",
+          "required": true
+        },
+        {
+          "id": "research-recommendation",
+          "claim": "Recommendation separates evidence from assumptions.",
+          "oracle": "Review the rationale against stated priorities and require unresolved verification needs, with no invented precision.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "research-revision",
+      "version": "1.0.0",
+      "title": "Revise a source-based report after new evidence",
+      "domain": "research",
+      "plannedLength": "long",
+      "goal": "Produce a sourced comparison, retain a checkpoint, then incorporate the injected update with a visible change log.",
+      "fixture": {
+        "id": "research-evidence",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "question.txt": "0d2abfe0496aa19ff9ec29728100cfe11b48e317ec9a5cba9fef54db1ca188ec",
+          "sources.md": "e8914b213bab11499f7f9c3c59199acbcb5f4684e3de57883aba4a12bf16eb13",
+          "NOTES.txt": "16d53b81f64929b71e0122811756514e0b795ba65991eb7e713ba3cd16bd2e6c",
+          ".memql-evaluation.json": "7029c319be3133dc7adfa1b1c3d6e5248f09e4053bbc55066667fdc5002489a4"
+        }
+      },
+      "constraints": [
+        "Work only in the supplied isolated evaluation checkout. Preserve unrelated work.",
+        "MemQL authors outputs and runs its own tools and computer-use checks; outside implementation is an intervention.",
+        "No publishing, purchases, messages, shared runtime changes or whole-repository archives.",
+        "Retain bounded evidence and report unknown measurements honestly. These planned scenarios have no measured result or default scheduled execution."
+      ],
+      "injections": [
+        {
+          "id": "new-evidence",
+          "boundary": "after-first-report",
+          "kind": "feedback",
+          "content": "New official fictional meeting note dated 2026-03-01: B now targets June 2027; capital estimate unchanged. Keep the first report and revise the comparison with this source."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "research-versioning",
+          "claim": "The later report uses changed evidence without deleting the earlier result.",
+          "oracle": "Compare retained versions and claim/source mappings; update B schedule and preserve the prior version and timestamp.",
+          "required": true
+        },
+        {
+          "id": "research-grounding",
+          "claim": "All final material claims remain supported.",
+          "oracle": "Check supplied and injected sources independently; do not infer unknown cost, staffing or survey methods.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "checkpointed-report-package",
+      "version": "1.0.0",
+      "title": "Complete a multi-artifact project with recovery",
+      "domain": "extended-workflow",
+      "plannedLength": "long",
+      "goal": "Create the review package in brief.txt, recover from the injected interruption, and retain an evidence ZIP.",
+      "fixture": {
+        "id": "extended-delivery",
+        "version": "1.0.0",
+        "kind": "local",
+        "files": {
+          "brief.txt": "ed68d97110ba3511be38e5bd40765fa4551e1c122bd28fa7722327975454c12c",
+          "sources.md": "b63e0eda895698bab71ba7f2cdb5b1205d55bbfa957489fbf591d96d993a1b40",
+          "NOTES.txt": "16d53b81f64929b71e0122811756514e0b795ba65991eb7e713ba3cd16bd2e6c",
+          ".memql-evaluation.json": "7029c319be3133dc7adfa1b1c3d6e5248f09e4053bbc55066667fdc5002489a4"
+        }
+      },
+      "constraints": [
+        "Work only in the supplied isolated evaluation checkout. Preserve unrelated work.",
+        "MemQL authors outputs and runs its own tools and computer-use checks; outside implementation is an intervention.",
+        "No publishing, purchases, messages, shared runtime changes or whole-repository archives.",
+        "Retain bounded evidence and report unknown measurements honestly. These planned scenarios have no measured result or default scheduled execution."
+      ],
+      "injections": [
+        {
+          "id": "resume-boundary",
+          "boundary": "after-research-checkpoint",
+          "kind": "checkpoint",
+          "content": "Pause after saving the first report. Resume from retained state, verify its source versions and continue the remaining outputs without claiming unperformed checks."
+        }
+      ],
+      "criteria": [
+        {
+          "id": "package-consistency",
+          "claim": "Report, workbook and slides agree and expose unknowns.",
+          "oracle": "Open and independently verify all final outputs against sources.md, including ratios only for known capital and capacity values.",
+          "required": true
+        },
+        {
+          "id": "package-recovery",
+          "claim": "Work resumes from verified checkpoint state.",
+          "oracle": "Inspect pre/post interruption receipts, revalidate source and output hashes, distinguish reused output from fresh checks.",
+          "required": true
+        },
+        {
+          "id": "package-archive",
+          "claim": "A bounded archive contains final deliverables and useful evidence.",
+          "oracle": "Verify safe extraction, complete inventory, SHA-256 and sizes; refuse credentials, addresses, dependencies and whole checkouts.",
           "required": true
         }
       ]

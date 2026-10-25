@@ -372,3 +372,18 @@ concept activity {
   expiresAt datetime!
   detail string
 }
+
+/// Owner-only location and electricity settings. The precise address is sealed;
+/// neither shared registrations nor public evidence exports carry it.
+// @no-displayCard: private settings have no public identity; use the identifier fallback without exposing location fields.
+@rowAuthz(owner="ownerUserId")
+concept energyProfile {
+  ownerUserId string! @serverSet
+  registrationId string!
+  encryptedAddress string @secret
+  settings object
+  research object
+  tariff object
+  revision string!
+  locationRevision string!
+}

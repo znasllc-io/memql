@@ -2267,6 +2267,65 @@ func FleetCapacityBuild(args FleetCapacityArgs) string {
 	return "builtin fleetCapacity()"
 }
 
+// FleetEnergySettings -- Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup.
+type FleetEnergySettingsArgs struct {
+	RegistrationId string
+	// Enum: read | save | confirm
+	Action         string
+	Revision       string
+	SecretSettings map[string]any
+	Provider       string
+	TariffName     string
+}
+
+// FleetEnergySettings calls the engine builtin fleetEnergySettings.
+func (qc *QueryClient) FleetEnergySettings(ctx context.Context, args FleetEnergySettingsArgs) (*Result, error) {
+	call := FleetEnergySettingsBuild(args)
+	return qc.executeNamed(ctx, "fleetEnergySettings", call)
+}
+
+func FleetEnergySettingsBuild(args FleetEnergySettingsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetEnergySettings(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.Revision != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("revision: ")
+		b.WriteString(quoteMemQL(args.Revision))
+	}
+	if args.SecretSettings != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("secretSettings: ")
+		b.WriteString(renderMemQLValue(args.SecretSettings))
+	}
+	if args.Provider != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(quoteMemQL(args.Provider))
+	}
+	if args.TariffName != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tariffName: ")
+		b.WriteString(quoteMemQL(args.TariffName))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
 type FleetModelProbeArgs struct {
 	// v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.

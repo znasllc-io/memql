@@ -20,6 +20,11 @@ mutation call recordRouterCall {
     vendor              string!
     model               string!
     providerName        string!
+    /// Dated API-equivalent estimate with source, cache/context assumptions and freshness.
+    apiEquivalent object
+    electricityEstimate object
+    /// Independent billing evidence; zero subscription cost is not free work.
+    actualBilling object
     inputTokens         int
     outputTokens        int
     cachedInputTokens   int
@@ -71,7 +76,7 @@ mutation call recordRouterCall {
     route               string
   }
   insert {
-    accept { requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId, route }
+    accept { electricityEstimate, apiEquivalent, actualBilling, requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId, route }
     stamp {
       id: args.callId
       // NOT in accept{}: a concept-level @default is documentation and is

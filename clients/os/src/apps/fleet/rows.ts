@@ -1,3 +1,4 @@
+import { costEstimateFrom, type CostEstimateData } from "../../kit/CostEstimate";
 import { bareShortId, rowArray, rowNumber, rowObject, rowString, versionOrder, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../kit/measure";
@@ -1003,6 +1004,9 @@ export function delegationPolicyFromRow(raw: Row): DelegationPolicyRow {
  * mistake this whole reading exists to avoid (src/kit/measure.ts).
  */
 export interface AppSessionUsage {
+  apiEquivalent?: CostEstimateData;
+  servedModel?: string;
+  servedEffort?: string;
   known: boolean;
   inputTokens: Figure;
   outputTokens: Figure;
@@ -1082,6 +1086,9 @@ function usageFrom(row: Row): AppSessionUsage {
     inputTokens: known ? figureFrom(usage, "inputTokens") : absent("unmeasured"),
     outputTokens: known ? figureFrom(usage, "outputTokens") : absent("unmeasured"),
     costUSD: known ? figureFrom(usage, "costUSD") : absent("unmeasured"),
+    apiEquivalent: costEstimateFrom(usage["apiEquivalent"]),
+    servedModel: typeof usage["servedModel"] === "string" ? usage["servedModel"] : undefined,
+    servedEffort: typeof usage["servedEffort"] === "string" ? usage["servedEffort"] : undefined,
   };
 }
 

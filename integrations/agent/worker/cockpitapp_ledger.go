@@ -13,6 +13,7 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/costestimate"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -39,19 +40,19 @@ type LedgerWriter struct {
 // RecordAppSession writes one v1:router:call row for a finished
 // session.
 //
-// COST IS DELIBERATELY NOT SYNTHESISED. MemQL knows the app's
-// per-token prices for its own providers, not for a run inside
-// somebody's subscription -- so totalCost carries what the app
-// REPORTED (Claude Code's --output-format json gives total_cost_usd)
-// and nothing when it reported nothing. Pricing a subscription run
-// off MemQL's own table would produce a confident number for money
-// nobody was charged.
+// The app's cost report is preserved separately from the official API-equivalent
+// estimate. Neither establishes actual subscription billing. Aggregate usage has
+// no per-request cache/context split; the calculator retains that uncertainty.
 func (w *LedgerWriter) RecordAppSession(ctx context.Context, result workerservice.RunResult, spec workerservice.RunSpec) error {
 	if w == nil || w.Engine == nil {
 		return nil
 	}
 	args := map[string]any{
 		"callId":            id.NewShortId(),
+		"servedModel":       result.Model,
+		"servedEffort":      result.Effort,
+		"apiEquivalent":     costestimate.EstimateTokens(appVendor(spec.App), result.Model, costestimate.Usage{Input: result.Usage.InputTokens, Output: result.Usage.OutputTokens, Known: result.Usage.Known, Aggregate: true}, time.Now()),
+		"actualBilling":     map[string]any{"status": "unavailable", "reason": "App-reported cost is not a billing receipt."},
 		"requestId":         result.SessionId,
 		"agentId":           "",
 		"userId":            spec.OwnerUserId,
@@ -71,7 +72,7 @@ func (w *LedgerWriter) RecordAppSession(ctx context.Context, result workerservic
 		"outputCost":         0.0,
 		"cachedInputCost":    0.0,
 		"totalCost":          result.Usage.CostUSD,
-		"pricingConfigured":  result.Usage.Known,
+		"pricingConfigured":  false,
 		"timeToFirstTokenMs": 0,
 		"totalDurationMs":    1,
 		"tokensPerSec":       0.0,

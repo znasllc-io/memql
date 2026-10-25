@@ -239,3 +239,16 @@ shape appSession workerAppRoutingEvidence {
   usage
   errorMessage
 }
+
+@row
+shape energyProfile workerEnergyProfileFull {
+  row.id
+  ownerUserId
+  registrationId
+  encryptedAddress
+  settings
+  research
+  tariff
+  revision
+  locationRevision
+}

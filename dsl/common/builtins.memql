@@ -1056,3 +1056,23 @@ builtin fleetRetryAppAvailability {
   registrationId string!
   app enum("claude-code", "codex")!
 }
+
+@sdk
+@executor("fleetEnergySettings")
+@description("Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup.")
+builtin fleetEnergySettings {
+  registrationId string!
+  action enum("read", "save", "confirm")!
+  revision string
+  secretSettings object
+  provider string
+  tariffName string
+}
+
+@executor("fleetRecordElectricityResearch")
+@description("Retain cited utility candidates and tariff evidence for the owner's authorized location revision. Does not confirm a provider or tariff. Never include a street address.")
+builtin fleetRecordElectricityResearch {
+  registrationId string!
+  locationRevision string!
+  research object!
+}

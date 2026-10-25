@@ -14581,6 +14581,28 @@ func WorkerByIdentityIdBuild(args WorkerByIdentityIdArgs) string {
 	return b.String()
 }
 
+// WorkerEnergyProfile -- Explicit owner predicate also restricts operator reads. No public projection.
+//
+// Bound concept: v1:worker:energyProfile (machine-readable: BoundConcepts["workerEnergyProfile"] in generated_concepts.go).
+type WorkerEnergyProfileArgs struct {
+	ProfileId string
+}
+
+// WorkerEnergyProfile calls the engine query workerEnergyProfile.
+func (qc *QueryClient) WorkerEnergyProfile(ctx context.Context, args WorkerEnergyProfileArgs) (*Result, error) {
+	call := WorkerEnergyProfileBuild(args)
+	return qc.executeNamed(ctx, "workerEnergyProfile", call)
+}
+
+func WorkerEnergyProfileBuild(args WorkerEnergyProfileArgs) string {
+	var b strings.Builder
+	b.WriteString("query workerEnergyProfile(")
+	b.WriteString("profileId: ")
+	b.WriteString(quoteMemQL(args.ProfileId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkerInvocationById wraps the query named "workerInvocationById".
 //
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["workerInvocationById"] in generated_concepts.go).

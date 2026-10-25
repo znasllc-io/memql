@@ -29,6 +29,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // builtinDeclToFunction converts a langparser BuiltinDecl into the
@@ -154,7 +155,10 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			if ref := annotations.CheckAll(annotations.BuiltinField, languageParser.AnnotationUses(field.Attributes)); ref != nil {
 				return nil, fmt.Errorf("%s: builtin %q field %q: %w", origin, decl.Name, field.Name, ref)
 			}
-			metadata := &FunctionArgsField{Name: field.Name, Type: field.Type, Optional: !field.Required}
+			// Builtins have no bound concept from which to inherit @secret. Use
+			// the shared logging classifier so secret-bearing native inputs retain
+			// validation diagnostics without echoing their private values.
+			metadata := &FunctionArgsField{Name: field.Name, Type: field.Type, Optional: !field.Required, Secret: logger.ShouldRedact(field.Name)}
 			for _, attr := range field.Attributes {
 				switch attr.Name {
 				case "description":

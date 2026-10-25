@@ -295,7 +295,12 @@ by Fleet and Cluster; avoid app-specific copies of the same grid.
 For a machine, Details follows Equipment and holds what the machine reported:
 connection advisories, System, Hardware, Connection, Features, Registration and
 Reported labels. Settings is the last tab, after Activity, and holds only what
-its owner can change: General, Owner-only features and Sharing. Sharing uses
+its owner can change: General, Electricity, Owner-only features and Sharing. Electricity uses the same
+responsive settings grid: private service location, explicit verification and
+lookup, cited utility/tariff choice, and separately sourced power estimates.
+Keep precision and uncertainty visible; a zero subscription charge never
+means zero inference cost. The street address is private owner input and must
+not enter research goals or evaluation exports. Sharing uses
 the same section grid, with a divider between the models and fleet workbench
 groups and each users/groups collection shown only while its sharing is on; keep
 write errors beside the section that caused them. There is no separate Sharing

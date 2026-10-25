@@ -561,3 +561,8 @@ laptop to open and the model to pull.
 - [The MemQL language](../language/memql.md) -- the `rule` construct and `@level`
 - [Workers runbook](workers-runbook.md) -- machine routing, which happens *after* a
   model is chosen and is a separate decision
+
+Fleet History displays [inference cost estimates](inference-cost-estimates.md)
+with model/source evidence separately from billing. Local calls need an
+owner-confirmed tariff and measured or explicitly estimated energy; unavailable
+electricity evidence is not interpreted as zero cost.

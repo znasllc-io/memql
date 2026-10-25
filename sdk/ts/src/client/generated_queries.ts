@@ -13938,6 +13938,28 @@ QueryClient.prototype.workerByIdentityId = function (this: QueryClient, args: Wo
   return this.executeNamed("workerByIdentityId", buildWorkerByIdentityId(args), opts);
 };
 
+/** Explicit owner predicate also restricts operator reads. No public projection. */
+// Bound concept: v1:worker:energyProfile (machine-readable: BoundConcepts["workerEnergyProfile"] in generated_concepts.ts).
+export interface WorkerEnergyProfileArgs {
+  profileId: string;
+}
+
+export function buildWorkerEnergyProfile(args: WorkerEnergyProfileArgs): string {
+  const parts: string[] = [];
+  parts.push("profileId: " + renderMemQLValue(args.profileId));
+  return "query workerEnergyProfile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workerEnergyProfile(args: WorkerEnergyProfileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workerEnergyProfile = function (this: QueryClient, args: WorkerEnergyProfileArgs = {} as WorkerEnergyProfileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workerEnergyProfile", buildWorkerEnergyProfile(args), opts);
+};
+
 /** workerInvocationById wraps the query named "workerInvocationById". */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["workerInvocationById"] in generated_concepts.ts).
 export interface WorkerInvocationByIdArgs {
