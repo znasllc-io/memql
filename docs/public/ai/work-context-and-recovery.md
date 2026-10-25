@@ -32,8 +32,11 @@ unfinished work after another approval, retry or worker restart. The executing
 worker recovers that correction from the owner's decision journal and orders it
 with other human guidance by time. Permission receipts do not replace earlier
 instructions, and restoring instructions does not grant access or repeat a
-completed operation. The active guidance sources have explicit context bounds;
-overflow is reported rather than silently losing a correction.
+completed operation. Instructions arrive in bounded chronological pages. Exact
+originals stay in the journal when older pages become checkpoint memory. A saved
+cursor lets another worker continue reading without treating old guidance as new
+progress. A changed earlier source causes rereading, and a storage or context
+failure stops delivery rather than silently losing a correction.
 
 ## From changed inputs to a verified result
 
@@ -221,10 +224,11 @@ the limit. A request that takes no messages, such as a plan review, does not
 receive it; open the request to answer it.
 
 Each message is at most 4,000 characters. A longer message, or one with
-attachments, goes through normal intake instead. Routed guidance has its own
-budget of 16 messages and 16,000 characters per run, and the late answers to
-optional questions described above have a separate budget of the same size. A
-message past its budget is not delivered. Guidance does not grant permissions,
+attachments, goes through normal intake instead. Guidance is delivered in pages
+of up to 16 messages and 16,000 characters, keeping one indivisible instruction
+whole. The durable history has no message-count lifetime ceiling. Before another
+operation, the agent reads the remaining pages through its normal context recovery.
+Guidance does not grant permissions,
 raise budgets, reset retries, or approve a waiting request; those stay with the
 request's own decision controls. If a send is uncertain, retrying it recovers
 the original outcome and delivers nothing twice.
@@ -279,6 +283,11 @@ only when its complete definition matches the run's recorded fingerprint.
 Missing or changed source stops recovery before inference; journal previews
 are never a substitute for the original program. Generated edits retain the
 normal caller trust and approval gates.
+
+Replan instructions include the current call syntax and show how to assemble a
+new object after the completed steps before converting it to text. Invalid
+generated syntax still stops at compilation; instructions do not bypass that
+gate or grant another automatic generation attempt.
 
 The Spine also declares invocation substitutions that recovery must refuse.
 For example, replacing `runAgentTurn` with `ai` for the same research prompt
@@ -632,12 +641,51 @@ section. Additive instructions and later human corrections retain their existing
 ordering. Retained context
 does not extend permissions or bypass the operation's execution checks.
 
+If a completed turn's final review is interrupted, its proposed reply and source
+checkpoint are saved separately. Retrying review can reuse that completed turn
+without starting its operations again. New instructions still apply, and newer
+progress is preserved. If saved sources cannot be reconciled, continuation stops
+instead of guessing which operations to repeat. Review and delivery still require
+the current owned execution, normal model admission and spending gates. A crash
+around final delivery can repeat the reviewed answer; it does not imply a new
+operation permission or owner acceptance.
+
+If a delegated app completed its operations but omitted the required reporting
+format, MemQL can make one separate conversion from the saved result and public
+receipts. That conversion has no operational tools and does not repeat the work.
+Its attempt is saved before inference, so a restart cannot reset the allowance.
+If instructions change before that conversion is committed, recovery can retain
+the completed conversion and review it under the current instructions. A missing
+stage result can only be recovered from one matching completed native receipt;
+missing or ambiguous receipts do not authorize another attempt.
+For old checkpoints without a saved conversion, this receipt recovery requires
+an attempt originating in the step's first execution. Reporting retries retain
+that origin; a new later-version attempt remains stopped without exact proof.
+A recovered step's reporting error does not block a later step that has no
+operational App receipt. MemQL must finish that receipt check before starting it.
+The converted answer still needs the normal evidence and completion review.
+If that review cannot verify completion, the run records a stopped step and
+waits explicitly with the saved report; it must not remain shown as running.
+Missing or changed recovery context stops delivery; it does not permit another
+operational run. A reporting-format defect does not ask you to teach the app an
+answer format, and recovery never accepts the goal on your behalf.
+
 The final reply reviewer also reads current owner instructions, including the
 step's replacement and later corrections in their recorded order. It keeps the
 original goal as historical context instead of restoring superseded directions.
 Unavailable or oversized instruction context stops review explicitly. This does
 not authorize another operation, retry interrupted input, or make a completed
 execution count as the owner's acceptance of its results.
+
+A step assigned an operation must establish its outcome; honestly saying it was
+not performed does not complete that step. The same bounded check applies to
+specialist results without a user-facing reply. Information requests and explicit
+owner deferrals retain their scope. After one saved continuation, an unfinished
+operation enters ordinary replanning under the remaining retry budget. Retained
+tool receipts reach both the planner and the resumed step, including successful
+effects inside a failed step. Missing or omitted proof requires reconciliation
+before an uncertain write. This check does not guarantee model compliance or
+exactly-once effects, and never extends permissions or spending limits.
 
 Useful documents, scripts, patches, screenshots and verification receipts can
 be retained as bounded artifacts with provenance. File metadata alone does not
@@ -767,3 +815,7 @@ The practical target is enough active context to choose the next correct
 action, with exact evidence available when needed. Reducing token count alone
 is not a quality measure: verification must also check instruction retention,
 source recovery, action receipts, final result quality and bounded recovery.
+
+If a saved reporting retry was recorded but never started, Nexus can offer
+**Resume work** on that same decision. This restores the saved result for review;
+it does not repeat the completed actions or renew expired permissions.

@@ -258,6 +258,21 @@ query run workRunsForGoal {
   shape   workRunFull
 }
 
+/// Existence check for a conflicting goal result: newest or still unfinished, even when
+/// an older active run lies beyond a page of terminal history. No execution payloads.
+@actor
+query run workContinuationConflictsForOwnerGoal {
+  args {
+    goalId string!
+    runVersion datetime!
+  }
+  filter row => row.goalId == args.goalId && row.ownerUserId == actor.userId &&
+    (row.createdAt > args.runVersion || row.status == nil || (row.status != "succeeded" &&
+      row.status != "failed" && row.status != "cancelled" && row.status != "abandoned"))
+  paginate 1
+  shape workContinuationConflict
+}
+
 /// The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read
 /// (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds
 /// them: pushed down on the signature rather than paging the owner's whole run history and folding
@@ -346,6 +361,19 @@ query modelCall workModelCallsForOwnerStep {
   args { runId string! stepKey string! }
   filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId
   shape workModelCallSummary
+}
+
+/// Reconcile one consumed formatting attempt, never authorize another inference.
+/// Two rows expose ambiguity instead of silently selecting a later answer.
+@actor
+query modelCall workOutcomeFormatReceiptsForOwnerStep {
+ args { runId string! stepKey string! attemptedAt datetime! }
+ filter row => row.runId == args.runId && row.stepKey == args.stepKey &&
+   row.ownerUserId == actor.userId && row.promptRef == "workOutcomeFormat" &&
+   row.createdAt >= args.attemptedAt
+ sort "row.createdAt", "asc"
+ paginate 2
+ shape workModelCallFull
 }
 
 /// Every observation of one of the caller's runs. On-demand, like the model calls.
@@ -507,12 +535,14 @@ query approval workQuestionsForOwnerRun {
 }
 
 /// Human corrections remain instructions after later permission decisions.
-/// One extra row makes the bounded reader refuse overflow, not lose history.
+/// The native reader follows storage pages; the journal has no lifetime count ceiling.
 @actor
 query approval workApprovalGuidanceForOwnerRun {
  args { runId string! }
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.decidedBy == actor.userId && row.decision == "answered" && row.?answer.feedback != nil
- sort "decidedAt", "asc"
+ // Use the storage keyset for complete paging; the reader restores human
+ // decidedAt order after joining routed and optional-answer instructions.
+ sort "row.createdAt", "asc"
  paginate 17
  shape workApprovalFull
 }
@@ -523,6 +553,17 @@ query approval workApprovalGuidanceForOwnerRun {
 query observation workContinuationForOwnerRun {
  args { runId string! stepKey string! }
  filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId && row.?data.continuation == true
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}
+
+/// The latest private reply-review checkpoint of this owner's step. A completed
+/// operational result survives a failed helper without rerunning its effects.
+@actor
+query observation workReplyReviewForOwnerStep {
+ args { runId string! stepKey string! }
+ filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId && row.?data.replyReviewStage != nil
  sort "row.createdAt", "desc"
  paginate 1
  shape workObservationFull
@@ -781,5 +822,25 @@ query observation workProgressCreditsForOwnerRun {
  args { runId string! receiptIds []string! }
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.id in args.receiptIds
  paginate 100
+ shape workObservationFull
+}
+
+/// One stable owner-feedback receipt, including a not-yet-committed intent.
+@actor
+query observation workResultFeedbackForOwnerRequest {
+ args { runId string! observationId string! }
+ filter row => row.runId == args.runId && row.id == args.observationId && row.ownerUserId == actor.userId && row.?data.resultFeedback.schemaVersion == 1
+ paginate 1
+ shape workObservationFull
+}
+
+/// All accepted result feedback. The consumer follows every page and restores
+/// requestedAt order; a later continuation never erases an older direction.
+@actor
+query observation workResultFeedbackForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.resultFeedback.schemaVersion == 1 && row.?data.resultFeedback.accepted == true
+ sort "row.createdAt", "asc"
+ paginate 17
  shape workObservationFull
 }

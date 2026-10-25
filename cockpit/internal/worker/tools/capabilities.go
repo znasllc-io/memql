@@ -47,9 +47,8 @@ var buildAgnosticComputerActions = []string{computerWaitAction}
 // self-description (memql-cockpit#162). Computed from the build tag
 // (computeruse vs headless) plus the host environment at call time.
 //
-// Actions lists the workerComputer actions this build can dispatch:
-// the computer-use-backed set (derived from the same table the computer-use action
-// router uses, so it can never drift from reality) plus the
+// Actions lists supported workerComputer actions, filtering legacy refused
+// inputs and platforms without a target-addressed backend, plus the
 // build-agnostic set (`wait`, memql-cockpit#166) that works on every
 // variant -- so a headless build advertises ["wait"], not []. The
 // `capabilities` action itself is deliberately NOT listed -- it is
@@ -77,6 +76,8 @@ type CapabilityDescriptor struct {
 	Actions              []string            `json:"actions"`
 	Displays             int                 `json:"displays"`
 
+	InputTargetPolicy map[string]any `json:"inputTargetPolicy,omitempty"`
+
 	SchemaVersion int `json:"schemaVersion"`
 }
 
@@ -85,7 +86,7 @@ type CapabilityDescriptor struct {
 // supportedComputerActions) come from capabilities_headless.go /
 // capabilities_computeruse.go.
 func ComputeCapabilities() CapabilityDescriptor {
-	desc := computeCapabilities(runtime.GOOS, os.Getenv)
+	desc := computeCapabilitiesForRuntime(runtime.GOOS, os.Getenv, !desktopRuntimeDisabled.Load())
 	// Scoped reads refuse symlink components. Advertise the physical home path
 	// used by this worker account, without granting access or listing its files.
 	if home, err := filepath.EvalSymlinks(homeDir()); err == nil && permission.CleanAbsolute(home) {
@@ -98,18 +99,26 @@ func ComputeCapabilities() CapabilityDescriptor {
 // ComputeCapabilities so tests can table-drive the display-server
 // detection without mutating the process environment.
 func computeCapabilities(goos string, getenv func(string) string) CapabilityDescriptor {
+	return computeCapabilitiesForRuntime(goos, getenv, true)
+}
+
+func computeCapabilitiesForRuntime(goos string, getenv func(string) string, desktopReady bool) CapabilityDescriptor {
+	hasDesktop := buildHasComputerUse && desktopReady
 	// Dispatchable actions = the per-build computer-use router table plus the
 	// build-agnostic set (`wait`). Merged + sorted for a stable wire
 	// shape; the slices never overlap (the router table is computeruse-only,
 	// the agnostic set is routed before the router).
-	actions := append(supportedComputerActions(), buildAgnosticComputerActions...)
+	actions := append(availableComputerActions(supportedComputerActions(), goos), buildAgnosticComputerActions...)
+	if !hasDesktop {
+		actions = append([]string{}, buildAgnosticComputerActions...)
+	}
 	sort.Strings(actions)
 	if actions == nil {
 		// Keep the JSON shape stable: "actions": [] -- never null.
 		actions = []string{}
 	}
 	displayServer := "none"
-	if buildHasComputerUse {
+	if hasDesktop {
 		displayServer = detectDisplayServer(goos, getenv)
 	}
 	// Probe the display count only when a RobotGo-drivable display
@@ -124,12 +133,39 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 	if goos == "darwin" || goos == "linux" {
 		contracts["workerHost.computer_permission"] = 1
 	}
+	var targetPolicy map[string]any
+	if hasDesktop {
+		contracts["workerComputer.input_target"] = 1
+		supported := []string{}
+		if goos == "darwin" {
+			supported = []string{"key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll"}
+			contracts["workerComputer.window_selection"] = 1
+		}
+		targetPolicy = map[string]any{
+			"supportedInputActions":      supported,
+			"acquisition":                "screenshot with explicit windowId of the already focused window",
+			"receipt":                    "inputTarget.id, required on one action in the same run, expires after 60 seconds",
+			"coordinates":                "explicit x/y from that exact screenshot for every pointer action",
+			"focusActivation":            goos == "darwin",
+			"postEventAccess":            desktopInputGuard.postingAccess(),
+			"pointerCoordinateAccessors": desktopInputGuard.pointerCoordinateAccessors(),
+			"pointerCompatibility":       "macOS move/click packets require private coordinate accessors; each packet verifies its exact window and global/window-local points before posting; no global fallback",
+			"windowSelection":            "macOS initial selection only: window_list with windowId and pid returns a single-use focusTarget; window_focus requires all three. Never clears or replaces an anchor/latch. A fresh screenshot is required afterward.",
+			"key_combo":                  "keys is a string array: primary key first, then modifiers; for example [r,cmd] or [enter]",
+			"key_type":                   "text is 1..4096 printable UTF-8 bytes; newline/tab refused; use a fresh screenshot before a separate key_combo",
+			"mouse_click":                "explicit x/y, optional left/right/middle button and cmd/ctrl/alt/shift modifiers; single click only",
+			"interruption":               "latched until operator review and worker restart; no automatic retry or reacquisition",
+			"withinWindowObservation":    "On macOS a completed click/key gesture consumes its receipt. With unchanged HID counters and activation generation, a fresh stable screenshot may observe a replaced field in the identical retained window within 60 seconds. No input is allowed before that new receipt. Focus-query errors and target changes still latch.",
+			"limitation":                 "process-addressed delivery; AX window/field checks are sampled, not atomic; delayed effects may stop input",
+		}
+	}
 	return CapabilityDescriptor{
 		Architecture:         runtime.GOARCH,
+		InputTargetPolicy:    targetPolicy,
 		ActionContracts:      contracts,
 		Platform:             goos,
 		DisplayServer:        displayServer,
-		ComputerUseAvailable: buildHasComputerUse,
+		ComputerUseAvailable: hasDesktop,
 		Actions:              actions,
 		Displays:             displays,
 		SchemaVersion:        capabilitySchemaVersion,
@@ -199,6 +235,7 @@ func runComputerCapabilities() (*memqlv1.Success, *memqlv1.Failure) {
 		desc.Platform, desc.DisplayServer, desc.ComputerUseAvailable, len(desc.Actions), desc.Displays)
 	return successComputerJSON(map[string]any{
 		"actionContracts":      desc.ActionContracts,
+		"inputTargetPolicy":    desc.InputTargetPolicy,
 		"platform":             desc.Platform,
 		"homeDirectory":        desc.HomeDirectory,
 		"displayServer":        desc.DisplayServer,
@@ -220,4 +257,22 @@ func successComputerJSON(payload map[string]any, preview string, bytesOut int) *
 		BytesOut:      uint64(bytesOut),
 		OutputPreview: clampPreview(preview),
 	}
+}
+
+// The vocabulary may include legacy handlers which now always refuse. Do not
+// advertise those, or input on platforms without a target-addressed backend.
+func availableComputerActions(vocabulary []string, goos string) []string {
+	result := make([]string, 0, len(vocabulary))
+	for _, action := range vocabulary {
+		switch action {
+		case "key_hold", "mouse_down", "mouse_up", "mouse_drag":
+			continue
+		case "window_focus", "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll":
+			if goos != "darwin" {
+				continue
+			}
+		}
+		result = append(result, action)
+	}
+	return result
 }

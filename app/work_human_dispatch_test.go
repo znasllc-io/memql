@@ -32,3 +32,14 @@ func TestHumanResumeReceiptRequiresTheAuthorizedGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestOutcomeRecoveryDispatchRequiresFailedReceiptAndSavedAnswer(t *testing.T) {
+	for _, status := range []string{"failed", "running", "done"} {
+		for _, answer := range []string{"", "recorded-retry"} {
+			j := &automations.RunJournal{FailedStep: "finish", OutcomeRecovery: true, HumanResumeId: answer, StepStates: map[string]automations.StepState{"finish": {Status: status}}}
+			if got := humanResumeReceiptReady(j); got != (status == "failed" && answer != "") {
+				t.Fatalf("%s answer=%q ready=%v", status, answer, got)
+			}
+		}
+	}
+}

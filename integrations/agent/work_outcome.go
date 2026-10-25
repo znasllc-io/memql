@@ -60,9 +60,8 @@ func requiresWorkOutcome(ctx context.Context, tools []common.ToolDefinition) boo
 	return false // Specialists do not have a human-facing response tool.
 }
 
-// A delegated app owns operational execution of the step. The parent still
-// validates its terminal response and persists human feedback, but must never
-// run a second app session to repair that completed session's result.
+// A delegated app owns operational execution. Terminal repair must use the
+// separate inference-only path, never repeat this operational provider call.
 func isDelegatedWorkSession(provider any) bool {
 	reporter, ok := provider.(interface {
 		LastSession() (memql.AppSessionOutcome, bool)
@@ -72,6 +71,24 @@ func isDelegatedWorkSession(provider any) bool {
 	}
 	_, completed := reporter.LastSession()
 	return completed
+}
+
+type delegatedOutcomeError struct {
+	input memql.WorkDelegatedOutcome
+	cause error
+}
+
+func (e *delegatedOutcomeError) Error() string {
+	return "invalid delegated work outcome: " + e.cause.Error()
+}
+func (e *delegatedOutcomeError) Unwrap() error { return e.cause }
+
+func delegatedOutcomeFailure(ctx context.Context, provider any, messages []common.ChatMessage, text string, calls []common.ToolCall, turn turnContext, cause error) error {
+	reporter := provider.(interface {
+		LastSession() (memql.AppSessionOutcome, bool)
+	})
+	session, _ := reporter.LastSession()
+	return &delegatedOutcomeError{input: memql.WorkDelegatedOutcome{SessionID: session.SessionId, Draft: text, Calls: calls, Messages: messages, AgentID: turn.AgentId, AgentRole: memql.ActingAgentRoleFromContext(ctx)}, cause: cause}
 }
 
 func normalizeWorkOutcome(calls []common.ToolCall, turnText string) ([]common.ToolCall, error) {

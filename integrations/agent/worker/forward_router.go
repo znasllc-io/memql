@@ -316,6 +316,7 @@ func (r *ForwardRouter) ForwardDispatch(
 		// it, a pipeline step held by a sibling would be refused there.
 		Purpose:              req.Purpose,
 		ComputerPermissionId: computerPermissionID(req),
+		WorkbenchGeneration:  req.workbenchGeneration,
 	}
 	if !r.sender.Send(nodeId, &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),

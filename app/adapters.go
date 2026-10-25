@@ -431,6 +431,29 @@ func (a *CognitionEngineAdapter) DelegatedWorkHumanWait(ctx context.Context, ses
 func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	return a.Engine.RestoreWorkContinuation(ctx, messages)
 }
+func (a *CognitionEngineAdapter) ReadWorkReplanSources(ctx context.Context) (string, error) {
+	return a.Engine.ReadWorkReplanSources(ctx)
+}
+
+func (a *CognitionEngineAdapter) ReadWorkReplyReview(ctx context.Context) (memql.WorkReplyReviewCheckpoint, error) {
+	return a.Engine.ReadWorkReplyReview(ctx)
+}
+func (a *CognitionEngineAdapter) SaveWorkReplyReview(ctx context.Context, binding memql.WorkReplyReviewBinding, value json.RawMessage) error {
+	return a.Engine.SaveWorkReplyReview(ctx, binding, value)
+}
+
+func (a *CognitionEngineAdapter) ReadLegacyWorkOutcome(ctx context.Context) (*memql.WorkDelegatedOutcome, error) {
+	return a.Engine.ReadLegacyWorkOutcome(ctx)
+}
+func (a *CognitionEngineAdapter) WorkDelegatedOutcomeSource(ctx context.Context, id string, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	return a.Engine.WorkDelegatedOutcomeSource(ctx, id, messages)
+}
+func (a *CognitionEngineAdapter) FormatWorkOutcome(ctx context.Context, input memql.WorkDelegatedOutcome, schema json.RawMessage) (string, error) {
+	return a.Engine.FormatWorkOutcome(ctx, input, schema)
+}
+func (a *CognitionEngineAdapter) ReadCompletedWorkOutcomeFormat(ctx context.Context, input memql.WorkDelegatedOutcome) (string, error) {
+	return a.Engine.ReadCompletedWorkOutcomeFormat(ctx, input)
+}
 
 // InvokeAIStructured keeps model routing and strict output validation at the engine seam.
 func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
@@ -439,6 +462,12 @@ func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templat
 
 func (a *CognitionEngineAdapter) ReadWorkGuidance(ctx context.Context) ([]memql.WorkGuidance, error) {
 	return a.Engine.ReadWorkGuidance(ctx)
+}
+func (a *CognitionEngineAdapter) ReadWorkGuidancePage(ctx context.Context, after memql.WorkGuidanceCursor) (memql.WorkGuidancePage, error) {
+	return a.Engine.ReadWorkGuidancePage(ctx, after)
+}
+func (a *CognitionEngineAdapter) AcknowledgeWorkGuidancePage(ctx context.Context, through memql.WorkGuidanceCursor) error {
+	return a.Engine.AcknowledgeWorkGuidancePage(ctx, through)
 }
 func (a *CognitionEngineAdapter) AcknowledgeWorkGuidance(ctx context.Context, ids []string) error {
 	return a.Engine.AcknowledgeWorkGuidance(ctx, ids)

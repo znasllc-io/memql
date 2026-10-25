@@ -107,8 +107,9 @@ func TestAnAskTurnNamesItsStepForTheSessionDoor(t *testing.T) {
 					if actor == nil || actor.UserId != owner {
 						return nil, fmt.Errorf("reply review lost the session owner")
 					}
-					// No retrieved sources in this greeting; the engine skips inference.
-					return []map[string]any{{"reply": "Hello from Claude Code", "evidenceReviewed": false}}, nil
+					// This unclassified legacy agent turn supplies an informational verdict.
+					// Known quick replies bypass this agent path in the compiled recipe.
+					return []map[string]any{{"reply": "Hello from Claude Code", "evidenceReviewed": false, "completion": map[string]any{"kind": "information", "disposition": "satisfied", "gap": "", "sourceRefs": []string{}}}}, nil
 				}
 				return nil, nil
 			}
@@ -125,6 +126,32 @@ func TestAnAskTurnNamesItsStepForTheSessionDoor(t *testing.T) {
 			}
 			if delegate.runs != 1 {
 				t.Fatalf("the delegate ran %d times, want exactly one session", delegate.runs)
+			}
+			if len(engine.savedContinuation) == 0 || len(engine.replyCheckpoint.Pending) == 0 {
+				t.Fatal("direct App completion did not save its exact source and pending review")
+			}
+			pending, err := decodePendingWorkReply(engine.replyCheckpoint.Pending)
+			if err != nil || recoveryDigest(pending.Messages) != recoveryDigest(engine.savedContinuation) {
+				t.Fatalf("review source differs from the completed App checkpoint: %v", err)
+			}
+			completedMessages := 0
+			for _, message := range engine.savedContinuation {
+				if message.Role != "assistant" {
+					continue
+				}
+				completed := message.Content == "Hello from Claude Code"
+				for _, call := range message.ToolCalls {
+					if call.Name == RespondToUserToolName {
+						envelope, err := ParseEnvelope(call.Arguments)
+						completed = completed || (err == nil && envelope.Response == "Hello from Claude Code")
+					}
+				}
+				if completed {
+					completedMessages++
+				}
+			}
+			if completedMessages != 1 {
+				t.Fatalf("saved source contains %d completed App responses, want exactly one", completedMessages)
 			}
 			// THE STEP KEY, not the step row's id: the delegate derives the row
 			// from the run and the key, and a row id here would name a step

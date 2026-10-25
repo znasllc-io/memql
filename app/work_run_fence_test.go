@@ -25,6 +25,11 @@ func TestExecutionHopFencesLiveStepAfterClaimLeaseExpires(t *testing.T) {
 	if !workRunCanStart(req, j, now) {
 		t.Fatal("stale crashed step cannot be recovered")
 	}
+	j.CancelRequested = true
+	if workRunCanStart(req, j, now) {
+		t.Fatal("cancellation after the claim must fence recovery")
+	}
+	j.CancelRequested = false
 	j.Status = "succeeded"
 	if workRunCanStart(req, j, now) {
 		t.Fatal("terminal run admitted a stale event")

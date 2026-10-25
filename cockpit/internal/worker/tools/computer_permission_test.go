@@ -310,3 +310,29 @@ func TestComputerPermissionRequiresLocalConsentAndExactCommandInputs(t *testing.
 		t.Fatalf("saved command overrode local shell deny: %v", fail)
 	}
 }
+
+// A no-argument first command followed by a newline is a normal reviewed
+// shell script. Classification must not join it to the next command, and
+// execution must retain newlines inside quoted content byte-for-byte.
+func TestComputerPermissionMultilineCommandPreservesBytesAndPolicy(t *testing.T) {
+	root := realPermissionDirectory(t)
+	d := NewDispatcher(quietLogger(), DefaultPolicy(), &fakeGate{decision: consent.Decision{Allowed: true}})
+	args := map[string]any{"cmd": "pwd\nprintf 'first\nsecond\n'", "cwd": root, "timeoutSec": 5}
+	ok, fail := d.Dispatch(context.Background(), permissionDispatch(t, "exact_command", "", "exec", args))
+	if fail != nil || ok == nil || ok.GetExitCode() != 0 {
+		t.Fatalf("reviewed multiline command failed: success=%v failure=%v", ok, fail)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(ok.GetResultJson(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["stdout"] != root+"\nfirst\nsecond\n" {
+		t.Fatalf("reviewed command bytes changed: %q", result["stdout"])
+	}
+	for _, command := range []string{"sudo\npwd", "not-allowed\npwd"} {
+		args["cmd"] = command
+		if _, fail := d.Dispatch(context.Background(), permissionDispatch(t, "exact_command", "", "exec", args)); fail == nil || fail.GetErrorCode() != "denied_by_policy" {
+			t.Fatalf("multiline command escaped shell policy: command=%q failure=%v", command, fail)
+		}
+	}
+}

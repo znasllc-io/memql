@@ -183,7 +183,7 @@ while [ $i -lt 40 ]; do
 done
 printf '%%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_w","name":"Write","input":{"file_path":"'"$PWD"'/out.txt","content":"goodbye"}}]},"parent_tool_use_id":null,"session_id":"app-rec"}'
 printf '%%s\n' '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_w","type":"tool_result","content":"File created successfully"}]},"parent_tool_use_id":null,"session_id":"app-rec"}'
-printf '%%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_cfg","name":"Read","input":{"file_path":"'"$PWD"'/.mcp.json"}}]},"parent_tool_use_id":null,"session_id":"app-rec"}'
+printf '%%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_cfg","name":"Read","input":{"file_path":"'"$memql_test_config"'"}}]},"parent_tool_use_id":null,"session_id":"app-rec"}'
 printf '%%s\n' '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_cfg","type":"tool_result","content":"(the configuration)"}]},"parent_tool_use_id":null,"session_id":"app-rec"}'
 printf '%%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_out","name":"Read","input":{"file_path":"%s"}}]},"parent_tool_use_id":null,"session_id":"app-rec"}'
 printf '%%s\n' '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_out","type":"tool_result","content":"(elsewhere)"}]},"parent_tool_use_id":null,"session_id":"app-rec"}'

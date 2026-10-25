@@ -52,9 +52,9 @@ concept workspace {
 }
 
 
-// @no-displayCard: immutable routing lease; the parent goal is its human-facing identity.
-/// Server-owned choice of execution resource for a run. It never changes after
-/// admission: a lost machine must not silently give the run an empty workspace.
+// @no-displayCard: execution lease; the parent goal is its human-facing identity.
+/// Server-owned placement stays fixed. Active work renews its bounded lease;
+/// explicit recovery advances the ephemeral generation after reported loss.
 @serverWritten
 @rowAuthz(owner="ownerUserId")
 concept executionBinding {
@@ -64,6 +64,8 @@ concept executionBinding {
   machineId string!
   machineOwnerUserId string!
   expiresAt datetime!
+  generation int
+  stateLost bool
   ownerUserId string! @serverSet
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
