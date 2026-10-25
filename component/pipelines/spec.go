@@ -46,6 +46,10 @@ type Select struct {
 	// Full are path globs whose change selects everything, on top of the
 	// built-in ones (go.mod, go.sum, go.work, go.work.sum, the manifest).
 	Full []string `yaml:"full,omitempty" json:"full,omitempty"`
+	// TestInputs declares non-Go files consumed by package tests. The pinned
+	// policy may select their direct owners without importer fanout only when
+	// the current source proves they are not Go build or embedded inputs.
+	TestInputs []string `yaml:"testInputs,omitempty" json:"testInputs,omitempty"`
 	// Buckets are named path globs a non-Go step gates on with
 	// `when: { bucket: <name> }`.
 	Buckets map[string][]string `yaml:"buckets,omitempty" json:"buckets,omitempty"`

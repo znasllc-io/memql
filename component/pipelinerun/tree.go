@@ -126,13 +126,14 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 			return pipelines.Plan{}, pipelines.Refuse(packages.CodeSourceUnreadable, "",
 				"The Go sources of %s at %s could not be read: %v.", p.Repository, shortSHA(run.SHA), err)
 		}
-		var full []string
+		var full, testInputs []string
 		if spec.Select != nil {
 			full = spec.Select.Full
+			testInputs = spec.Select.TestInputs
 		}
-		facts, err := pipelines.AnalyzeSelection(graph, changed, changedKnown, full)
+		facts, err := pipelines.AnalyzeSelectionWithTestInputs(graph, changed, changedKnown, full, testInputs)
 		if err != nil {
-			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "select/full", "%v", err)
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "select", "%v", err)
 		}
 		decision, err := dr.selectPackageCoverage(ctx, facts, run.Mode)
 		if err != nil {

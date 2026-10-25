@@ -1089,6 +1089,7 @@ cannot satisfy the required PR or merge-queue check.
 | `go` | `import-graph`, the one Go selection there is | Any other value: `pipeline_select_invalid`. Absent while a step names `packages`: `pipeline_select_missing` |
 | `dbGated` | Repository directories whose Go packages need a database, such as `component/memql`. `.` is the root package alone | An entry that is empty, absolute, holds `..` or a glob character, or names a directory starting with `.` or `_`: `pipeline_select_invalid` |
 | `full` | Globs whose change selects every package, beside the built-in ones ([Which packages a step tests](#which-packages-a-step-tests)) | A glob that cannot be read, or a list of only `!` globs: `pipeline_select_invalid` |
+| `testInputs` | Explicit non-Go test-input globs. The pinned policy may test their direct package owners without importer fanout only after source eligibility checks | Requires `go: import-graph` and valid globs. Missing, unreadable or unowned matched inputs require full coverage; an unsafe narrowing is refused |
 | `buckets` | Named lists of globs a step gates on with `when: { bucket: <name> }` | A name that breaks the rule, an empty list, a glob that cannot be read, or a list of only `!` globs: `pipeline_select_invalid` |
 
 ### A stage's keys
@@ -1135,7 +1136,7 @@ what the machine running it must offer.
 
 ### Globs
 
-A bucket's globs and `select.full`'s are anchored at the repository root:
+A bucket's globs, `select.full` and `select.testInputs` are anchored at the repository root:
 
 - `**`, as a whole path segment, matches zero or more directories. `dsl/**`
   matches `dsl` itself and everything under it; `**/*.md` matches `README.md`
@@ -1348,6 +1349,23 @@ every input they inspect, including `.go` and `_test.go` files; omit `when` or
 use `["**"]` when that input set is not narrower. The example's
 `source-contracts` step covers these reads even when a changed child integration
 does not import the parent package containing its source-scanning tests.
+
+`select.testInputs` is an explicit declaration for files read by tests, such
+as selected prose or fixtures. The pinned package-selection policy may return
+their exact changed paths in `testInputs` to select direct test owners without
+following their importers. Omission keeps the existing conservative traversal.
+The engine checks the same immutable source tree before accepting that answer:
+the file must exist, be regular and have a known package owner. Go source,
+native compiler inputs and runtime embeds keep importer coverage; embed and
+test-embed owners are read from Go directives across build tags and targets.
+A mixed change still follows every Go or runtime-input dependency, including
+test imports. Missing or unproven declared inputs require full coverage.
+
+This declaration does not remove stages, security checks, database requirements
+or source-contract gates. Tests that read other packages' files still need the
+explicit gate coverage above. There is no automatic documentation exception:
+the repository declares its inputs and the captured policy opts into the
+mechanically verified selection.
 
 It selects **every package** instead whenever the graph cannot say: the change
 could not be read (the compare failed, or listed 300 files, where GitHub stops

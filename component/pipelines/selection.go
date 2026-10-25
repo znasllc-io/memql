@@ -4,11 +4,16 @@ package pipelines
 // The pipeline DSL decides whether these facts require a full run; Go only
 // reports what the import graph and manifest matcher can prove.
 type ChangedPathFacts struct {
-	Path           string `json:"path"`
-	BaseName       string `json:"baseName"`
-	RepositoryPath bool   `json:"repositoryPath"`
-	Vendored       bool   `json:"vendored"`
-	ConfiguredFull bool   `json:"configuredFull"`
+	Path               string `json:"path"`
+	BaseName           string `json:"baseName"`
+	RepositoryPath     bool   `json:"repositoryPath"`
+	Vendored           bool   `json:"vendored"`
+	ConfiguredFull     bool   `json:"configuredFull"`
+	DeclaredTestInput  bool   `json:"declaredTestInput"`
+	TestInputEligible  bool   `json:"testInputEligible"`
+	TestInputUncertain bool   `json:"testInputUncertain"`
+	// Owners are native source facts, never supplied by the DSL response.
+	owners []string
 }
 
 // SelectionFacts are observations from the source tree, not a selection.
@@ -31,6 +36,10 @@ type SelectionFacts struct {
 type SelectionDecision struct {
 	Full   bool   `json:"full"`
 	Reason string `json:"reason"`
+	// TestInputs names exact changed paths whose direct package owners the
+	// policy chooses to test without propagating to their importers. Omission
+	// preserves the conservative import traversal for every changed path.
+	TestInputs []string `json:"testInputs,omitempty"`
 }
 
 // PackagePolicy is the per-step package coverage and filter decision returned

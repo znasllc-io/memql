@@ -277,6 +277,8 @@ func (dr *runDriver) selectPackageCoverage(ctx context.Context, facts pipelines.
 		changed = append(changed, map[string]any{
 			"path": path.Path, "baseName": path.BaseName, "repositoryPath": path.RepositoryPath,
 			"vendored": path.Vendored, "configuredFull": path.ConfiguredFull,
+			"declaredTestInput": path.DeclaredTestInput, "testInputEligible": path.TestInputEligible,
+			"testInputUncertain": path.TestInputUncertain,
 		})
 	}
 	value, err := dr.runPinnedWorkflow(ctx, "pipelinePackageSelection", map[string]any{
@@ -285,6 +287,10 @@ func (dr *runDriver) selectPackageCoverage(ctx context.Context, facts pipelines.
 	if err != nil {
 		return pipelines.SelectionDecision{}, err
 	}
+	return packageSelectionDecision(value)
+}
+
+func packageSelectionDecision(value any) (pipelines.SelectionDecision, error) {
 	result, ok := value.(map[string]any)
 	if !ok {
 		return pipelines.SelectionDecision{}, fmt.Errorf("pipeline package policy returned %T, want object", value)
@@ -294,7 +300,21 @@ func (dr *runDriver) selectPackageCoverage(ctx context.Context, facts pipelines.
 		return pipelines.SelectionDecision{}, fmt.Errorf("pipeline package policy returned %T for full, want bool", result["full"])
 	}
 	reason, _ := result["reason"].(string)
-	return pipelines.SelectionDecision{Full: full, Reason: reason}, nil
+	decision := pipelines.SelectionDecision{Full: full, Reason: reason}
+	if raw, present := result["testInputs"]; present {
+		list, ok := raw.([]any)
+		if !ok {
+			return pipelines.SelectionDecision{}, fmt.Errorf("pipeline package policy returned %T for testInputs, want array", raw)
+		}
+		for _, rawPath := range list {
+			p, ok := rawPath.(string)
+			if !ok {
+				return pipelines.SelectionDecision{}, fmt.Errorf("pipeline package policy returned %T for test input, want string", rawPath)
+			}
+			decision.TestInputs = append(decision.TestInputs, p)
+		}
+	}
+	return decision, nil
 }
 
 func (dr *runDriver) selectPackagePolicies(ctx context.Context, spec *pipelines.Spec, mode pipelines.Mode, affected pipelines.Selection) (map[string]pipelines.PackagePolicy, error) {

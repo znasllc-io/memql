@@ -31,6 +31,8 @@ type Package struct {
 // the step that tests them, in that step's image, and nowhere before. Source
 // is enough for selection, because an import is a line in a file.
 type Graph struct {
+	source  fs.FS               // the same immutable tree whose imports were scanned
+	goFiles map[string][]string // source files, including every build tag and tests
 	pkgs    map[string]*Package // import path -> package
 	byDir   map[string]string   // package directory -> import path
 	modules map[string]string   // module root directory -> module path, "" when its go.mod names none
@@ -103,6 +105,8 @@ func ScanGoTree(fsys fs.FS) (*Graph, error) {
 	}
 
 	g := &Graph{
+		source:    fsys,
+		goFiles:   goFiles,
 		pkgs:      map[string]*Package{},
 		byDir:     map[string]string{},
 		modules:   modules,

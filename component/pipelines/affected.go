@@ -15,6 +15,13 @@ const ManifestPath = "memql-package.yaml"
 // package coverage. Path normalization, glob matching and graph lookups are
 // mechanics; no fallback decision is made here.
 func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string) (SelectionFacts, error) {
+	return AnalyzeSelectionWithTestInputs(g, changed, known, fullGlobs, nil)
+}
+
+// AnalyzeSelectionWithTestInputs adds observations for explicitly declared
+// test inputs. Unknown, missing or unreadable matched inputs are uncertainty,
+// not permission to remove an import-graph edge.
+func AnalyzeSelectionWithTestInputs(g *Graph, changed []string, known bool, fullGlobs, testInputGlobs []string) (SelectionFacts, error) {
 	if g == nil {
 		return SelectionFacts{}, errors.New("there is no import graph to analyze")
 	}
@@ -25,6 +32,14 @@ func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string
 	facts.GraphComplete = len(g.incomplete) == 0
 	facts.Incomplete = g.Incomplete()
 	facts.AllPackages = g.importPaths()
+	var declared func(string) bool
+	if len(testInputGlobs) > 0 {
+		declared, err = PathSet(testInputGlobs)
+		if err != nil {
+			return SelectionFacts{}, fmt.Errorf("select.testInputs: %w", err)
+		}
+	}
+	inputs := map[string]packageInputs{}
 	seeds := map[string]bool{}
 	missing := map[string]bool{} // import paths a changed directory would have, imported where no package is
 	for i := range facts.Paths {
@@ -34,13 +49,22 @@ func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string
 		}
 		pathFacts.Vendored = g.isVendoredPath(pathFacts.Path)
 		if importPath, ok := g.PackageAt(pathFacts.Path); ok {
-			seeds[importPath] = true
+			pathFacts.owners = append(pathFacts.owners, importPath)
 		}
 		if importPath, importers := g.orphans(pathFacts.Path); len(importers) > 0 {
 			missing[importPath] = true
 			for _, importer := range importers {
-				seeds[importer] = true
+				pathFacts.owners = append(pathFacts.owners, importer)
 			}
+		}
+		if declared != nil && declared(pathFacts.Path) {
+			pathFacts.DeclaredTestInput = true
+			g.classifyTestInput(pathFacts, inputs)
+		}
+		slices.Sort(pathFacts.owners)
+		pathFacts.owners = slices.Compact(pathFacts.owners)
+		for _, owner := range pathFacts.owners {
+			seeds[owner] = true
 		}
 	}
 	facts.Seeds = sortedMapKeys(seeds)
@@ -109,6 +133,9 @@ func ResolveSelection(g *Graph, facts SelectionFacts, decision SelectionDecision
 			if !p.RepositoryPath {
 				return Selection{}, fmt.Errorf("pipeline DSL selected affected packages for non-repository path %q", clip(p.Path))
 			}
+			if p.TestInputUncertain {
+				return Selection{}, fmt.Errorf("pipeline DSL selected affected packages for uncertain declared test input %q", clip(p.Path))
+			}
 		}
 	}
 	if decision.Full {
@@ -121,13 +148,47 @@ func ResolveSelection(g *Graph, facts SelectionFacts, decision SelectionDecision
 
 	selected := map[string]bool{}
 	queue := slices.Clone(facts.Seeds)
+	if len(decision.TestInputs) > 0 {
+		local := map[string]bool{}
+		for _, p := range decision.TestInputs {
+			if local[p] {
+				return Selection{}, fmt.Errorf("pipeline DSL selected test input %q twice", clip(p))
+			}
+			local[p] = true
+		}
+		queue = nil
+		matched := map[string]bool{}
+		for _, p := range facts.Paths {
+			if fullSelectionPath(p) {
+				return Selection{}, fmt.Errorf("pipeline DSL narrowed test inputs alongside full-selection path %q", clip(p.Path))
+			}
+			if !local[p.Path] {
+				queue = append(queue, p.owners...)
+				continue
+			}
+			if !p.DeclaredTestInput || !p.TestInputEligible || len(p.owners) == 0 {
+				return Selection{}, fmt.Errorf("pipeline DSL selected ineligible test input %q", clip(p.Path))
+			}
+			matched[p.Path] = true
+			for _, owner := range p.owners {
+				selected[owner] = true
+			}
+		}
+		if len(matched) != len(local) {
+			return Selection{}, errors.New("pipeline DSL selected a test input outside the changed paths")
+		}
+	}
+	// Track traversal separately: an owner selected by a test input must still
+	// propagate when another changed Go/build input also reaches that owner.
+	traversed := map[string]bool{}
 	for len(queue) > 0 {
 		next := queue[0]
 		queue = queue[1:]
-		if selected[next] {
+		if traversed[next] {
 			continue
 		}
 		selected[next] = true
+		traversed[next] = true
 		queue = append(queue, g.importers[next]...)
 	}
 	sel := Selection{Seeds: slices.Clone(facts.Seeds), Packages: sortedMapKeys(selected)}
@@ -142,6 +203,9 @@ func ResolveSelection(g *Graph, facts SelectionFacts, decision SelectionDecision
 	}
 	sel.Reason = fmt.Sprintf("%s %s %s; with their importers, %d of %d are selected",
 		paths, verb, count(len(sel.Seeds), "package", "packages"), len(sel.Packages), len(facts.AllPackages))
+	if len(decision.TestInputs) > 0 {
+		sel.Reason += fmt.Sprintf("; %s use direct test owners", count(len(decision.TestInputs), "declared input", "declared inputs"))
+	}
 	if len(facts.Missing) > 0 {
 		it := "it"
 		if len(facts.Missing) > 1 {

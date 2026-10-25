@@ -175,7 +175,7 @@ automation pipelinePackageSelection {
   full := args.mode != "affected" || !args.known || args.changed.count() == 0 ||
     !args.graphComplete || args.changed.any(path => !path.repositoryPath) ||
     args.changed.any(path => path.path == "memql-package.yaml") || moduleGraphChanged ||
-    args.changed.any(path => path.vendored || path.configuredFull)
+    args.changed.any(path => path.vendored || path.configuredFull || path.?testInputUncertain == true)
   reason := args.mode != "affected" ? "full run mode" :
     !args.known ? "the changed-file comparison is unavailable" :
     args.changed.count() == 0 ? "the change list is empty" :
@@ -184,8 +184,10 @@ automation pipelinePackageSelection {
     args.changed.any(path => path.path == "memql-package.yaml") ? "the pipeline manifest changed" :
     moduleGraphChanged ? "a Go module graph file changed" :
     args.changed.any(path => path.vendored) ? "vendored code changed" :
-    args.changed.any(path => path.configuredFull) ? "a configured full-selection path changed" : ""
-  return {full: full, reason: reason}
+    args.changed.any(path => path.configuredFull) ? "a configured full-selection path changed" :
+    args.changed.any(path => path.?testInputUncertain == true) ? "a declared test input is missing or unproven" : ""
+  testInputs := full ? [] : args.changed.where(path => path.?testInputEligible == true).select(path => path.path)
+  return {full: full, reason: reason, testInputs: testInputs}
 }
 
 /// Each packages step's source and db-gated filter are pipeline policy. The

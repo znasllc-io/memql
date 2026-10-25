@@ -1,0 +1,22 @@
+# Exact opt-in proposed after the engine can parse select.testInputs.
+# The source manifest remains compatible with the currently installed engine.
+formatVersion: 1
+name: declared-test-input-fixture
+pipeline:
+  image: example.test/toolchain@sha256:0
+  select:
+    go: import-graph
+    testInputs:
+      # Actual PR 6291.
+      - docs/public/operate/pipelines.md
+      - docs/public/operate/packages.md
+      - docs/internal/ops/harness-decisions.md
+      # Separate native documentation qualification.
+      - clients/os/README.md
+      - docs/public/operate/pipelines-substrate.md
+  stages:
+    - name: tests
+      steps:
+        - name: go
+          packages: affected
+          run: go test $MEMQL_PACKAGES
