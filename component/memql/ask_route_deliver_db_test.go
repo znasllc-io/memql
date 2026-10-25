@@ -341,10 +341,9 @@ func TestDeliverApprovalTargetsLeavesTheRestToTheLockedPhase(t *testing.T) {
 	require.Equal(t, goals, rest)
 }
 
-// The Review Focus case end to end over the stored conversation: a goal at its
-// guidance cap gets Not delivered (limit), and once that is recorded the
-// agent's read on another replica still succeeds with what it held before.
-func TestDeliverRouteAtTheCapLeavesTheAgentsReadWorking(t *testing.T) {
+// A later message remains durable beyond the former lifetime cap and another
+// replica can recover the full journal, including the newly routed guidance.
+func TestDeliverRouteBeyondFormerCapKeepsAgentReadWorking(t *testing.T) {
 	a, b, ctx, conversation, run, _ := guidanceFixture(t)
 	for n := range 16 {
 		routeTurn(t, a, ctx, conversation, AskTurn{ID: fmt.Sprintf("note-%d", n), Prompt: "Note.", Routed: &AskRouting{Targets: []AskRouteTarget{
@@ -369,10 +368,12 @@ func TestDeliverRouteAtTheCapLeavesTheAgentsReadWorking(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	targets := guidanceTargetsLocked(conversation, transcript, rest, map[string]map[string]any{BareShortId(run): runs[0]}, "Use Celsius.")
-	require.Equal(t, []AskRouteTarget{{GoalID: "fixture-goal", RunID: BareShortId(run), Title: "Synthetic work", Status: routeNotDelivered, Reason: routeReasonLimit, Text: "Use Celsius."}}, targets)
+	require.Equal(t, []AskRouteTarget{{GoalID: "fixture-goal", RunID: BareShortId(run), Title: "Synthetic work", Status: routeQueued, Text: "Use Celsius."}}, targets)
 	routeTurn(t, a, ctx, conversation, AskTurn{ID: "celsius", Prompt: "Use Celsius.", Routed: &AskRouting{Targets: targets}})
 
 	after, err := b.ReadWorkGuidance(runtime)
 	require.NoError(t, err)
-	require.Equal(t, before, after)
+	require.Len(t, after, 17)
+	require.Equal(t, before, after[:16])
+	require.Equal(t, "Use Celsius.", after[16].Prompt)
 }

@@ -181,7 +181,7 @@ Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
 <tool-field-annotation> ::= ( "@autoInjected" | "@default" | "@description" | "@enum"
                         | "@required" ) [ <annotation-args> ]
 <prompt-field-annotation> ::= ( "@default" | "@description" | "@enum" | "@required" ) [ <annotation-args> ]
-<builtin-field-annotation> ::= ( "@description" | "@enum" | "@required" ) [ <annotation-args> ]
+<builtin-field-annotation> ::= ( "@description" | "@enum" | "@required" | "@secret" ) [ <annotation-args> ]
 <annotation-args>     ::= "(" [ <annotation-arg> { "," <annotation-arg> } ] ")"
 <annotation-arg>      ::= <string> | <number> | "true" | "false" | <object> | <lambda>
                         | <name> [ "=" <annotation-value> ] | "!" <string>

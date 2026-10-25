@@ -112,11 +112,26 @@ func TestCapabilitySearchRanksPurposeAboveIncidentalImplementationWords(t *testi
 }
 
 func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *testing.T) {
-	e, _, _ := readMergeTestEngine(t)
+	// Discovery needs the shipped catalog and caller authority, not stored rows.
+	e := newQuietEngine(t)
+	t.Cleanup(e.cache.close)
+	require.NoError(t, e.Init(loadedConceptRegistry(t)))
+	for _, name := range []string{"fleetEnergySettings", "routerSetApiKey", "platform.sourceCredentialCreate", "integrations.integrationConfigure"} {
+		private, ok := e.lookupBuiltinFunction(name)
+		require.True(t, ok, name)
+		require.False(t, e.workCapabilityAllowed(askTestActor(), private), "private input must stay out of discovery: %s", name)
+		secret := false
+		for _, field := range workCapabilityFields(private) {
+			secret = secret || workCapabilitySecret(field)
+		}
+		require.True(t, secret, "private inputs must be declared, not hidden only by another gate: %s", name)
+		_, err := e.workExecuteBuiltin(askTestActor(), map[string]any{"name": private.Name, "arguments": map[string]any{}}, 0)
+		require.ErrorContains(t, err, "capability is unavailable for this person", name)
+	}
 	fn, lookupErr := e.functions.Get("compose.composeMaterialize")
 	require.NoError(t, lookupErr)
 	require.Contains(t, fn.Description, "Create a saved document file")
-	require.True(t, e.workCapabilityAllowed(askTestActor(), fn))
+	require.True(t, e.workCapabilityAllowed(askTestActor(), fn), "document materialization remains discoverable")
 	for _, tc := range []struct{ search, name string }{
 		{"library file read content", "library.libraryReadFile"},
 		{"Read file to identify first bird", "library.libraryReadFile"},

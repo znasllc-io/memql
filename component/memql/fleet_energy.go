@@ -144,6 +144,13 @@ func (e *MemQLEngine) evaluateFleetEnergySettings(ctx context.Context, args map[
 		if err != nil {
 			return nil, err
 		}
+		// The registration fence protects enrollment; the profile fence makes
+		// the revision checked below single-use across replicas, including
+		// concurrent first saves of an absent profile.
+		ctx, err = e.fenceWriteTarget(ctx, energyProfileConcept, energyProfileID(actingUserFromContext(ctx), registration))
+		if err != nil {
+			return nil, err
+		}
 	}
 	row, pid, err := e.energyProfile(ctx, registration)
 	if err != nil {
@@ -278,6 +285,12 @@ func (e *MemQLEngine) evaluateFleetRecordElectricityResearch(ctx context.Context
 		return nil, err
 	}
 	ctx, err := e.fenceWriteTarget(ctx, WorkerRegistrationConcept, registration)
+	if err != nil {
+		return nil, err
+	}
+	// A location change or another research write must invalidate this
+	// decision even when the enrolled machine itself did not change.
+	ctx, err = e.fenceWriteTarget(ctx, energyProfileConcept, energyProfileID(actingUserFromContext(ctx), registration))
 	if err != nil {
 		return nil, err
 	}

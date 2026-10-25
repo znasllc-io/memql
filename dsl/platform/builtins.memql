@@ -373,7 +373,7 @@ builtin packageSetAutoDeploy {
 builtin sourceCredentialCreate {
   host   string!  @description("The host the token authenticates against. github.com is the only value admitted today.")
   label  string!  @description("The person's own name for it, e.g. 'work laptop'. Display only.")
-  token  string!  @description("The access token itself. Read once, sealed, and discarded; never stored or echoed in the clear.")
+  token  string!  @secret @description("The access token itself. Read once, sealed, and discarded; never stored or echoed in the clear.")
 }
 
 @sdk

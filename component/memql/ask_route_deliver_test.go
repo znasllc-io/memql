@@ -200,36 +200,44 @@ func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
 
 }
 
-// A goal at its guidance cap is Not delivered (limit) through the whole
-// delivery: the request phase leaves a goal that waits on no request alone,
-// and the locked phase refuses it. Recording the refusal leaves the agent's
-// read exactly as it was, so nothing written can make that read fail.
-func TestDeliverRouteRefusesPastTheGuidanceCap(t *testing.T) {
+// Lifetime history is paged, so another bounded message remains deliverable.
+// The per-message limit still rejects oversized guidance without changing what
+// the agent can read from the retained journal.
+func TestDeliverRouteBeyondFormerLifetimeCapsKeepsGuidanceReadable(t *testing.T) {
 	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Request: "What's the weather in Tucson?", Run: run}}
 	for _, c := range []struct {
-		name    string
-		earlier []string
-		text    string
+		name      string
+		earlier   []string
+		text      string
+		oversized bool
 	}{
-		{"sixteen messages already", repeatedText("Note.", 16), "Use Celsius."},
-		{"15,990 runes and a 20-rune message", []string{strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 3990)}, strings.Repeat("ü", 20)},
+		{"sixteen messages already", repeatedText("Note.", 16), "Use Celsius.", false},
+		{"15,990 runes and a 20-rune message", []string{strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 3990)}, strings.Repeat("ü", 20), false},
+		{"one oversized message", repeatedText("Note.", 16), strings.Repeat("é", 4001), true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			transcript := askTranscript{Turns: guidanceTurns("run", c.earlier...)}
 			beforeMessages, beforeRunes := readerLoad(transcript, run)
 			kind, _, _ := routeDeliveryFor(run, nil)
 			require.Equal(t, deliverGuidance, kind)
-			// A zero engine: the request phase must not read or call anything
-			// for a goal that waits on no request.
+			// No request is pending, so the request phase must not call anything.
 			delivered, rest := (&MemQLEngine{}).deliverApprovalTargets(context.Background(), goals, c.text)
 			require.Empty(t, delivered)
 			require.Equal(t, goals, rest)
 			targets := guidanceTargetsLocked(thisConversation, transcript, rest, map[string]map[string]any{"run": run}, c.text)
-			require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeNotDelivered, Reason: routeReasonLimit, Text: c.text}}, targets)
-			transcript.Turns = append(transcript.Turns, AskTurn{ID: "over", Prompt: c.text, Routed: &AskRouting{Targets: targets}})
+			want := AskRouteTarget{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeQueued, Text: c.text}
+			if c.oversized {
+				want.Status, want.Reason = routeNotDelivered, routeReasonLimit
+			}
+			require.Equal(t, []AskRouteTarget{want}, targets)
+			transcript.Turns = append(transcript.Turns, AskTurn{ID: "later", Prompt: c.text, Routed: &AskRouting{Targets: targets}})
 			messages, runes := readerLoad(transcript, run)
-			require.Equal(t, []int{beforeMessages, beforeRunes}, []int{messages, runes})
+			if c.oversized {
+				require.Equal(t, []int{beforeMessages, beforeRunes}, []int{messages, runes})
+			} else {
+				require.Equal(t, []int{beforeMessages + 1, beforeRunes + len([]rune(c.text))}, []int{messages, runes})
+			}
 		})
 	}
 }

@@ -155,12 +155,14 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			if ref := annotations.CheckAll(annotations.BuiltinField, languageParser.AnnotationUses(field.Attributes)); ref != nil {
 				return nil, fmt.Errorf("%s: builtin %q field %q: %w", origin, decl.Name, field.Name, ref)
 			}
-			// Builtins have no bound concept from which to inherit @secret. Use
-			// the shared logging classifier so secret-bearing native inputs retain
-			// validation diagnostics without echoing their private values.
-			metadata := &FunctionArgsField{Name: field.Name, Type: field.Type, Optional: !field.Required, Secret: logger.ShouldRedact(field.Name)}
+			// Diagnostic redaction is deliberately broader than credential secrecy.
+			// A prompt or sectionKeys must remain usable in capability discovery,
+			// while explicit @secret inputs are never advertised to the model.
+			metadata := &FunctionArgsField{Name: field.Name, Type: field.Type, Optional: !field.Required, Redact: logger.ShouldRedact(field.Name)}
 			for _, attr := range field.Attributes {
 				switch attr.Name {
+				case "secret":
+					metadata.Secret = true
 				case "description":
 					metadata.Description, _ = attr.Value.(string)
 				case "enum":

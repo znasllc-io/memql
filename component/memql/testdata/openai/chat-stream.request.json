@@ -7,7 +7,10 @@
       }
     ],
     "model": "gpt-5.4-mini",
-    "stream": true
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    }
   },
   "method": "POST",
   "path": "/v1/chat/completions"

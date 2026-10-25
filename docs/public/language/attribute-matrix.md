@@ -135,7 +135,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@pattern`](#pattern) | string | string |  |  |  |
 | [`@pii`](#pii) | flag |  |  |  |  |
 | [`@required`](#required) | flag | flag | flag | flag | flag |
-| [`@secret`](#secret) | flag |  |  |  |  |
+| [`@secret`](#secret) | flag |  |  |  | flag |
 | [`@serverSet`](#serverset) | flag |  |  |  |  |
 | [`@variant`](#variant) | keywords |  |  |  |  |
 
@@ -419,6 +419,7 @@ Written after a field's type in the body of a `builtin`.
 | [`@description`](#description) | one string | `@description("The campaign to send.")` |
 | [`@enum`](#enum) | one or more strings | `@enum("patch", "minor")` |
 | [`@required`](#required) | no arguments | `@required` |
+| [`@secret`](#secret) | no arguments | `@secret` |
 
 ## Annotations
 
@@ -1121,29 +1122,30 @@ Generator marker (sdk/gen reads from source); no engine effect.
 
 | On | Written as | Example |
 |---|---|---|
-| [concept field](#concept-field) | no arguments | `@secret` |
+| [concept field](#concept-field), [builtin field](#builtin-field) | no arguments | `@secret` |
 
-The field holds a secret. It is emitted as `x-secret`, and every validation surface that quotes a rejected value replaces the value with `<redacted>` while the argument name and the declared constraint (enum members, bounds, pattern) survive, so the diagnostic stays usable.
+- On a concept field: The field holds a secret. It is emitted as `x-secret`, and every validation surface that quotes a rejected value replaces the value with `<redacted>` while the argument name and the declared constraint (enum members, bounds, pattern) survive, so the diagnostic stays usable.
 
-The covered surfaces come from an exhaustive enumeration of validators -- every jsonschema `.Validate(` call site and every value-quoting rejection message in the engine -- not from adding one entry at a time. Three incremental passes each shipped a scope statement that walked past a surface the next pass found, so extend the list by re-running the enumeration, never by appending to it.
+  The covered surfaces come from an exhaustive enumeration of validators -- every jsonschema `.Validate(` call site and every value-quoting rejection message in the engine -- not from adding one entry at a time. Three incremental passes each shipped a scope statement that walked past a surface the next pass found, so extend the list by re-running the enumeration, never by appending to it.
 
-- The **function-args validator** (`component/memql/function_validator.go`): enum, minimum, maximum, pattern and date-time (memql#3036).
-- The **tool-args validator** (`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`), compiled from the same args schema and running before the function-args validator on the agent path, so it is the surface a rejected secret reaches first. Both of its exits redact (memql#3182): the message returned to the model, and the WARN, which redacts per key from the args schema instead of serializing the whole args map, and falls back to a values-free `argKeys` list when the tool's arguments cannot be classified.
-- The **automation args binder** (`component/automations/args_binding.go`), which applies the same rules to event payloads: a `graph.node.created` event carries the concept row's fields flattened into its payload. The loader stamps the secret flag from the trigger topic's concept, so the enum and pattern refusals, and the WARN log they are written to, all print `<redacted>`, closing the one path by which a row value could reach a structured log (memql#3183).
-- **Concept payload validation** (`Concept.validate`, so `Create` and `Delete`), where `@minimum`, `@maximum` and `@format` declared on the concept are enforced. The six jsonschema keywords that interpolate the instance value (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `format`) all redact, and every other message stays byte-identical to an unannotated field's (memql#3184).
-- The DSL-callable `validate` and `preflight` builtins (`component/memql/executor_builtin.go`), which compile the same concept schema and return every leaf message to the caller in a result payload.
+  - The **function-args validator** (`component/memql/function_validator.go`): enum, minimum, maximum, pattern and date-time (memql#3036).
+  - The **tool-args validator** (`MemQLEngine.validateToolArgs`, `component/memql/tool_execution.go`), compiled from the same args schema and running before the function-args validator on the agent path, so it is the surface a rejected secret reaches first. Both of its exits redact (memql#3182): the message returned to the model, and the WARN, which redacts per key from the args schema instead of serializing the whole args map, and falls back to a values-free `argKeys` list when the tool's arguments cannot be classified.
+  - The **automation args binder** (`component/automations/args_binding.go`), which applies the same rules to event payloads: a `graph.node.created` event carries the concept row's fields flattened into its payload. The loader stamps the secret flag from the trigger topic's concept, so the enum and pattern refusals, and the WARN log they are written to, all print `<redacted>`, closing the one path by which a row value could reach a structured log (memql#3183).
+  - **Concept payload validation** (`Concept.validate`, so `Create` and `Delete`), where `@minimum`, `@maximum` and `@format` declared on the concept are enforced. The six jsonschema keywords that interpolate the instance value (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `format`) all redact, and every other message stays byte-identical to an unannotated field's (memql#3184).
+  - The DSL-callable `validate` and `preflight` builtins (`component/memql/executor_builtin.go`), which compile the same concept schema and return every leaf message to the caller in a result payload.
 
-The last two resolve secrecy through the schema at the failing instance location, so they cover `@secret` at any nesting depth and inherit it onto array elements, unlike `Concept.SecretFields()`, which is top-level only and is not the accessor those paths use.
+  The last two resolve secrecy through the schema at the failing instance location, so they cover `@secret` at any nesting depth and inherit it onto array elements, unlike `Concept.SecretFields()`, which is top-level only and is not the accessor those paths use.
 
-On the two args-validator surfaces, **matching is by argument NAME, not by write target**: an args field is redacted when its name appears among the bound concept's `@secret` fields. A mutation writing `apiKey: args.credential` into a `@secret` `apiKey` leaves `credential` unredacted, and renaming between argument and field is common, so do not rely on the write target. The concept-payload and builtin surfaces resolve through the schema and are not subject to this rule.
+  On the two args-validator surfaces, **matching is by argument NAME, not by write target**: an args field is redacted when its name appears among the bound concept's `@secret` fields. A mutation writing `apiKey: args.credential` into a `@secret` `apiKey` leaves `credential` unredacted, and renaming between argument and field is common, so do not rely on the write target. The concept-payload and builtin surfaces resolve through the schema and are not subject to this rule.
 
-A `@secret` value is **not** redacted from **query results**: any query that projects it returns it in full. That is an authorization decision, which needs a definition of "elevated" and depends on the per-row authorization model (memql#2803).
+  A `@secret` value is **not** redacted from **query results**: any query that projects it returns it in full. That is an authorization decision, which needs a definition of "elevated" and depends on the per-row authorization model (memql#2803).
 
-**Length is never redacted anywhere**, deliberately and uniformly: `value too long (N runes, max M)` and the jsonschema `minLength` and `maxLength` messages report a rune count for a secret field too. They quote no value, but a length is a disclosure; redacting it on one surface would make that surface the only one that differs while withholding nothing the others already print.
+  **Length is never redacted anywhere**, deliberately and uniformly: `value too long (N runes, max M)` and the jsonschema `minLength` and `maxLength` messages report a rune count for a secret field too. They quote no value, but a length is a disclosure; redacting it on one surface would make that surface the only one that differs while withholding nothing the others already print.
 
-Prompt input-schema validation (`PromptTemplate.ValidateData`, `component/memql/ai_prompts.go`) is unclassified: it runs a jsonschema over caller data and interpolates the instance the same way, but its schema is built from the prompt's own field list rather than from a concept, so there is no `x-secret` in it to read. Nothing is redacted there; treat it as uncovered, not as safe.
+  Prompt input-schema validation (`PromptTemplate.ValidateData`, `component/memql/ai_prompts.go`) is unclassified: it runs a jsonschema over caller data and interpolates the instance the same way, but its schema is built from the prompt's own field list rather than from a concept, so there is no `x-secret` in it to read. Nothing is redacted there; treat it as uncovered, not as safe.
 
-So `@secret` stops a credential leaking through a validation diagnostic. It is not a general secrecy guarantee, and not a reason to treat a credential in the graph as protected.
+  So `@secret` stops a credential leaking through a validation diagnostic. It is not a general secrecy guarantee, and not a reason to treat a credential in the graph as protected.
+- On a builtin field: The native input carries a credential or private settings: redact its diagnostic values and exclude the callable from general agent capability discovery. This does not replace authorization at execution.
 
 ### @serverOnly
 
