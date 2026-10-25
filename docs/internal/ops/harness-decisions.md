@@ -1240,6 +1240,16 @@ data: only recognized receipt/transport status is checked mechanically. The mode
 still judges relevance and sufficiency, including reuse of a previously retained
 artifact. This is a bounded semantic check, not transactional certification.
 
+The native feedback, scope, model-ceiling, Training and knowledge fixtures route
+reply review through the installed resolver and supply the strict completion
+contract. They retain review-call and saved-receipt assertions; a missing provider
+field must not be hidden by bypassing review or accepting a failed child step.
+`TestWorkDBHumanDispatchPreservesScheduledRecovery` obtains the inference wait
+identity from the installed event/timer path and retires its durable run after
+each case. This keeps the subsequent all-owner startup recovery test meaningful:
+it still rejects unexpected or duplicate deliveries instead of filtering them.
+These fixtures compile locally without a database; execution requires native CI.
+
 An unfinished disposition first uses the existing single durable checkpoint
 continuation. Its attempt count, completed exchanges and pending reply survive a
 replica change. If the operation remains unfinished, an encoded native control
