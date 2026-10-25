@@ -1439,6 +1439,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// an established filesystem. Native dispatch reads consent and takes
 		// an absence fence before creating the immutable binding.
 		{Path: "workbench/mutations.memql", Name: "bindWorkbenchExecution"}: true,
+		// Row ownership cannot establish current machine consent or authorize
+		// a filesystem generation transition. The native lifecycle rechecks
+		// run authority and, for renewal/recovery, machine consent; it validates
+		// the transition and fences the exact row version before this write.
+		{Path: "workbench/mutations.memql", Name: "advanceWorkbenchExecution"}: true,
 		// Activity is measured by the stream holder. Owner scoping alone would
 		// let a browser forge live counts without holding that stream.
 		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,

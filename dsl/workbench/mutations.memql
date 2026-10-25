@@ -99,6 +99,11 @@ mutation executionBinding bindWorkbenchExecution {
 
 /// Native lifecycle only, with a row-version fence and fresh run/machine authority.
 /// Placement and owner cannot change; recovery never executes the prior operation.
+/// actor.userId scoping proves row ownership, but cannot authorize renewal after
+/// machine consent is revoked or prove that the expected filesystem generation
+/// was lost. The native lifecycle rechecks run authority and, for renewal or
+/// recovery, machine consent; it validates the transition and fences the exact
+/// row version before advancing the binding.
 @serverOnly
 @actor
 mutation executionBinding advanceWorkbenchExecution {
@@ -110,10 +115,10 @@ mutation executionBinding advanceWorkbenchExecution {
     versionTime datetime!
   }
   update {
-    id: args.bindingId
-    expiresAt: args.expiresAt
-    generation: args.generation
-    stateLost: args.stateLost
-    createdAt: args.versionTime
+    accept { expiresAt, generation, stateLost }
+    stamp {
+      id: args.bindingId
+      createdAt: args.versionTime
+    }
   }
 }
