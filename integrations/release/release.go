@@ -159,7 +159,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateAssemblyScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidateDraftScope{}).operations())...)
-	out = append(out, workflowhost.ScopedCapabilities((&overlayScope{}).operations())...)
+	// Register every declared overlay port for boot audit. These are refusing
+	// stubs; admitted workflows still select operations by their actual format.
+	out = append(out, workflowhost.ScopedCapabilities((&overlayScope{configuration: overlayConfiguration{FormatVersion: 3}}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities(buildCaptureOperations(false))...)
 	out = append(out, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"releaseRetentionArchiveInputs": nil})...)
 	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)

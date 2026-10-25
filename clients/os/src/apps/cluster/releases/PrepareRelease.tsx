@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PackageCheck } from "lucide-react";
+import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
 import { Button, Caption, ContentSkeleton, Fact, Facts, Notice, Panel, RecordList, RecordRow, Subhead } from "../../../kit";
 import { Wizard } from "../../../kit/Wizard";
 import type { Stop } from "../../../kit/Rail";
@@ -13,6 +14,7 @@ import type { ReleaseQueries } from "./ReleasesSection";
 export function PrepareRelease({ query, connected, visible, back, prepared }: { query: ReleaseQueries | null; connected: boolean; visible: boolean; back: () => void; prepared: (id: string) => void }) {
   const available = query !== null && connected;
   const config = useReleaseRead("assembly", available ? async (signal) => readAssemblies(await query.releaseCandidateConfiguration({}, { signal })) : null, visible, query);
+  const configNeedsAttention = refusalSentence(config.error, "releaseCandidateConfiguration") === "release candidates require explicit operator configuration";
   const profiles = useReleaseRead("profiles", available ? async (signal) => readProfiles(await query.releaseCandidateProfiles({}, { signal })) : null, visible, query);
   const [plan, setPlan] = useState<AssemblyPlan | null>(null);
   const [selections, select] = useState<Record<string, BuildRun>>({});
@@ -70,7 +72,10 @@ export function PrepareRelease({ query, connected, visible, back, prepared }: { 
   if (open === "review" && complete && current && !busy && available) acts.push({ label: "Prepare release", tone: "primary", onAct: () => void prepare() });
   return <Wizard icon={<PackageCheck size={26} />} title="Prepare release" label="Prepare release steps" back={{ label: "Releases", onSelect: back }} steps={steps} open={open} onOpen={(step) => { if (!busy) setOpen(step); }} acts={acts}
     status={{ word: busy ? "Verifying release inputs" : !available ? "Disconnected" : plan && !selectedConfig.fresh ? "Release plan unavailable" : plan && !current ? "Release plan changed" : complete ? "Ready to prepare" : "Choose release inputs", tone: busy ? "busy" : "none", detail: busy ? "The cluster is checking run evidence and artifact bytes." : undefined }}
-    notices={<>{!available ? <Notice sentence="Disconnected. Your selections are kept until the cluster reconnects." /> : null}{config.error ? <Notice tone="error" sentence={config.error}><Button onClick={config.retry}>Read assembly plans again</Button></Notice> : null}{profiles.error ? <Notice tone="error" sentence={profiles.error}><Button onClick={profiles.retry}>Read release profiles again</Button></Notice> : null}{plan && selectedConfig.fresh && !current ? <Notice tone="warn" sentence="This release plan changed. Choose the plan again to review its current inputs and destinations." /> : null}{error ? <Notice tone="error" sentence={error} next="The cluster may have prepared a candidate before the reply was lost. Check Releases before preparing again." /> : null}</>}
+    notices={<>{!available ? <Notice sentence="Disconnected. Your selections are kept until the cluster reconnects." /> : null}{config.error ? <Notice tone={configNeedsAttention ? "warn" : "error"} sentence={configNeedsAttention ? "Release setup needs attention." : config.error} detail={configNeedsAttention ? "A cluster operator needs to check the release plans for this cluster." : undefined}>
+      {configNeedsAttention ? <details className="nexus-technical"><summary>Technical details</summary><Caption>{config.error}</Caption></details> : null}
+      <Button onClick={config.retry}>{configNeedsAttention ? "Check again" : "Read assembly plans again"}</Button>
+    </Notice> : null}{profiles.error ? <Notice tone="error" sentence={profiles.error}><Button onClick={profiles.retry}>Read release profiles again</Button></Notice> : null}{plan && selectedConfig.fresh && !current ? <Notice tone="warn" sentence="This release plan changed. Choose the plan again to review its current inputs and destinations." /> : null}{error ? <Notice tone="error" sentence={error} next="The cluster may have prepared a candidate before the reply was lost. Check Releases before preparing again." /> : null}</>}
   />;
 }
 

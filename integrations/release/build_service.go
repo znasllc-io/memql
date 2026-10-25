@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"time"
@@ -120,9 +121,10 @@ func (i *Integration) handleBuildGet(ctx context.Context, args map[string]any, _
 }
 func (i *Integration) handleBuildList(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	limit := 20
-	if value, ok := args["limit"]; ok && value != nil {
-		if err := profileDecode(value, &limit); err != nil {
-			return nil, err
+	if value, ok := args["limit"]; ok {
+		encoded, err := json.Marshal(value)
+		if value == nil || err != nil || json.Unmarshal(encoded, &limit) != nil {
+			return nil, errors.New("release history limit must be an integer")
 		}
 	}
 	p, err := i.candidateStorage(ctx)

@@ -5,6 +5,8 @@ import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection"
 import { readTheBar } from "../readTheBar";
 import { buildRun, releaseFixture, releaseId, releaseResult } from "./releaseFixtures";
 
+const setupRefusal = "releaseCandidateConfiguration: MemQL engine failed to execute query. Details: release candidates require explicit operator configuration";
+
 // A fake Date, so reading a bar costs nothing: the release reads poll on real timers.
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -92,13 +94,51 @@ describe("release preparation", () => {
     expect(f.state.calls.filter((c) => c.kind === "assemble")).toEqual([{ kind: "assemble", args: { planName: "engine-release", runs: { build: "work-push" } } }]);
     expect(f.state.calls.some((c) => c.kind === "profile")).toBe(false);
   });
+  it("explains the exact setup refusal, keeps technical details optional and retries only the read", async () => {
+    const f = releaseFixture();
+    const readConfig = f.query.releaseCandidateConfiguration;
+    let failure: string | null = setupRefusal;
+    let reads = 0;
+    f.query.releaseCandidateConfiguration = async (args, options) => {
+      reads++;
+      if (failure) throw new Error(failure);
+      return readConfig(args, options);
+    };
+    render(<ReleaseBrowser query={f.query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+    await screen.findByText("Release setup needs attention.");
+    expect(screen.getByText("A cluster operator needs to check the release plans for this cluster.")).toBeTruthy();
+    const details = screen.getByText(setupRefusal).closest("details")!;
+    expect(details.open).toBe(false);
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(details.open).toBe(true);
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(details.open).toBe(false);
+    expect(screen.queryByText(/No release plans are configured/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare release" })).toBeNull();
+
+    // A different refusal must remain visible, not be classified by substring.
+    failure = `${setupRefusal}: unexpected response`;
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await screen.findByText(failure);
+    expect(screen.queryByText("Release setup needs attention.")).toBeNull();
+    expect(screen.getByText(failure).closest("details")).toBeNull();
+
+    failure = null;
+    fireEvent.click(screen.getByRole("button", { name: "Read assembly plans again" }));
+    await screen.findByRole("button", { name: "Choose plan engine-release" });
+    expect(reads).toBe(3);
+    expect(screen.queryByRole("button", { name: "Prepare release" })).toBeNull();
+    expect(f.state.calls.some((c) => ["assemble", "profile", "approve", "publish", "seal", "draft", "promote", "retire"].includes(c.kind))).toBe(false);
+  });
   it("prepares a stable profile with its reviewed digest while legacy configuration is unavailable", async () => {
     const f = releaseFixture();
     const configuration = `sha256:${"4".repeat(64)}`;
     f.state.profiles = [{ name: "engine", configuration, components: [{ name: "engine", repository: "example/memql", runs: ["release"] }] }];
-    f.query.releaseCandidateConfiguration = async () => { throw new Error("Legacy plans unavailable"); };
+    f.query.releaseCandidateConfiguration = async () => { throw new Error(setupRefusal); };
     render(<ReleaseBrowser query={f.query} connected />);
     fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+    await screen.findByText("Release setup needs attention.");
     fireEvent.click(await screen.findByRole("button", { name: "Choose profile engine" }));
     await choose();
     expect(screen.getByText(/review the exact result before approving/)).toBeTruthy();
