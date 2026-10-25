@@ -1,0 +1,66 @@
+{
+  "formatVersion": 1,
+  "source": "Read-only GitHub native check receipts; no CI was started",
+  "checks": [
+    {
+      "id": 121173885074,
+      "name": "MemQL / memql",
+      "head_sha": "9a0815892aecbf09c8b4eb0d9885572784e3c7ae",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-25T12:52:06Z",
+      "completed_at": "2026-10-25T13:19:59Z",
+      "html_url": "https://github.com/znasllc-io/memql/runs/121173885074",
+      "details_url": "https://os.memql.znas.io/?pipelineRun=f739ab0d50ca33e253a66ff2dde23770",
+      "attempt": "module-attempt",
+      "app_id": 4822538,
+      "public_api_url": "https://api.github.com/repos/znasllc-io/memql/check-runs/121173885074",
+      "summary": "Mode affected \u00b7 Pull request #6290 \u00b7 Commit 9a08158\n\n| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n| checks | Failed | 9 passed, 1 failed | 11m 18s |\n| cockpit | Not run: an earlier stage failed | 2 not run | - |\n| delivery-artifacts | Not run: an earlier stage failed | 1 not run | - |\n| vulnerabilities | Passed | 2 passed | 1m 06s |\n| secrets-current | Passed | 1 passed | 5m 05s |\n| tests | Not run: an earlier stage failed | 35 not run | - |\n| gates | Not run: an earlier stage failed | 1 not run | - |\n| installer-smoke | Not run: an earlier stage failed | 1 not run | - |\n| dependency-proposal | Passed | 1 passed | 40s |\n| dependency-proposal-write | Passed | 1 passed | <1s |\n\n### Failed steps\n\n- `checks.module-boundaries`: The step's command exited with status 1.\n"
+    },
+    {
+      "id": 121180756354,
+      "name": "MemQL / memql",
+      "head_sha": "0b3bf16c94c7ea1baf72da128580ce13ccc9630d",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-25T13:22:08Z",
+      "completed_at": "2026-10-25T15:04:30Z",
+      "html_url": "https://github.com/znasllc-io/memql/runs/121180756354",
+      "details_url": "https://os.memql.znas.io/?pipelineRun=d8a9682b2bfdb3f3cd4e2b8e271bbba9",
+      "attempt": "combined-attempt",
+      "app_id": 4822538,
+      "public_api_url": "https://api.github.com/repos/znasllc-io/memql/check-runs/121180756354",
+      "summary": "Mode affected \u00b7 Pull request #6290 \u00b7 Commit 0b3bf16\n\n| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n| checks | Passed | 10 passed | 2m 08s |\n| cockpit | Passed | 2 passed | 6m 58s |\n| delivery-artifacts | Passed | 1 passed | 5m 06s |\n| vulnerabilities | Passed | 2 passed | 1m 19s |\n| secrets-current | Passed | 1 passed | 4m 41s |\n| tests | Failed | 27 passed, 8 failed | 18m 46s |\n| gates | Not run: an earlier stage failed | 1 not run | - |\n| installer-smoke | Not run: an earlier stage failed | 1 not run | - |\n| dependency-proposal | Passed | 1 passed | 18s |\n| dependency-proposal-write | Passed | 1 passed | <1s |\n\n### Failed steps\n\n- `tests.go-tests#2`: The step's command exited with status 1.\n- `tests.go-tests#3`: The step's command exited with status 1.\n- `tests.db-tests#3`: The step's command exited with status 1.\n- `tests.db-tests#4`: The step's command exited with status 1.\n- `tests.os-checks`: required artifacts were not captured: context deadline exceeded (`pipeline_artifact_unavailable`)\n- `tests.editor-packages`: required artifacts were not captured: context deadline exceeded (`pipeline_artifact_unavailable`)\n- `tests.vscode-desktop-linux-1-91-0`: required artifacts were not captured: context deadline exceeded (`pipeline_artifact_unavailable`)\n- `tests.test-agent`: The step's command exited with status 1.\n"
+    },
+    {
+      "id": 121204915531,
+      "name": "MemQL / memql",
+      "head_sha": "aeee127803bd42cd79a2d03bbcda8292eadd5423",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "started_at": "2026-10-25T15:06:02Z",
+      "completed_at": "2026-10-25T15:10:36Z",
+      "html_url": "https://github.com/znasllc-io/memql/runs/121204915531",
+      "details_url": "https://os.memql.znas.io/?pipelineRun=5f792de5c01231e97e26b2a45a3c8fbf",
+      "attempt": "cancelled-repaired-attempt",
+      "app_id": 4822538,
+      "public_api_url": "https://api.github.com/repos/znasllc-io/memql/check-runs/121204915531",
+      "summary": "Mode affected \u00b7 Pull request #6290 \u00b7 Commit aeee127\n\n| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n| checks | Cancelled | 1 passed, 9 cancelled | - |\n| cockpit | Cancelled | 2 cancelled | - |\n| delivery-artifacts | Cancelled | 1 cancelled | - |\n| vulnerabilities | Cancelled | 2 cancelled | - |\n| secrets-current | Cancelled | 1 cancelled | - |\n| tests | Cancelled | 35 cancelled | - |\n| gates | Cancelled | 1 cancelled | - |\n| installer-smoke | Cancelled | 1 cancelled | - |\n| dependency-proposal | Cancelled | 1 cancelled | - |\n| dependency-proposal-write | Cancelled | 1 cancelled | - |\n"
+    },
+    {
+      "id": 120769306397,
+      "name": "MemQL / memql-cockpit",
+      "head_sha": "d8b399e88c78e2114eda9f535bf1cc80edc174da",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-24T03:41:57Z",
+      "completed_at": "2026-10-24T05:22:21Z",
+      "html_url": "https://github.com/znasllc-io/memql-cockpit/runs/120769306397",
+      "details_url": "https://os.memql.znas.io/?pipelineRun=44dc9980cfc43fc07a75457a479215cb",
+      "attempt": "cockpit",
+      "app_id": 4822538,
+      "public_api_url": "https://api.github.com/repos/znasllc-io/memql-cockpit/commits/d8b399e88c78e2114eda9f535bf1cc80edc174da/check-runs",
+      "summary": "Mode affected \u00b7 Pull request #562 \u00b7 Commit d8b399e\n\n| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n| checks | Passed | 11 passed | 45m 10s |\n| vulnerabilities | Passed | 1 passed | 27s |\n| secrets-current | Passed | 1 passed | 7s |\n"
+    }
+  ]
+}

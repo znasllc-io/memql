@@ -1,0 +1,47 @@
+{
+  "formatVersion": 1,
+  "handoffBranch": "handoff/combined-readiness-20261025",
+  "repository": "https://github.com/znasllc-io/memql",
+  "sourceSnapshot": "aeee127803bd42cd79a2d03bbcda8292eadd5423",
+  "sourceBase": "50f2ea9bf32d47f6a391f1623a2784e4f4211a1a",
+  "inputs": {
+    "harness": "14f260a158c7cbd24135e58edee28ac45a196874",
+    "ask": "81eb6833b540bff0294fe0c9c9a2005fd3b110b2",
+    "pricingAndEvaluations": "482b6eb0c8a80c9cfe08de1f4e4218920f5765a7"
+  },
+  "sourcePullRequests": [
+    6283,
+    6286,
+    6287,
+    6290
+  ],
+  "ciPaused": true,
+  "nativeQualificationPassed": false,
+  "productionDeploymentAuthorized": false,
+  "cockpitRecovery": {
+    "repository": "https://github.com/znasllc-io/memql-cockpit",
+    "pullRequest": 562,
+    "base": "55cc83443ace058c7121c6edc76d8297dc4597c9",
+    "baseTree": "75bee2ef7a6103c51c5eb9fbddc4a2f447242277",
+    "head": "d8b399e88c78e2114eda9f535bf1cc80edc174da",
+    "headTree": "30dc97355a3efd20c6fa4062299a4031cbb0ba99",
+    "patch": "cockpit-pr-562.patch.gz",
+    "changedPaths": 60,
+    "patchAppliedToBaseReproducesHeadTree": true,
+    "canonicalRuntime": "cockpit/",
+    "canonicalComparison": "All runtime changes are present in cockpit/. Six Go files retain additional monorepo hardening; standalone repository guidance and engine pin are intentionally not applied to the monorepo. The exact standalone delta is preserved as the patch.",
+    "compression": "gzip",
+    "uncompressedBytes": 296342,
+    "uncompressedSha256": "db20693cee72d1f30d43ed34ba75779f01a1624e0c24c274e1a9d640542a98fc",
+    "bytes": 87325,
+    "sha256": "66fba9c4cb868629ddb28fe9531e3fb62085b18e54145ea4298d1304fe8366ef"
+  },
+  "privacy": {
+    "publicSafeSummary": true,
+    "rawPrivateTranscriptsIncluded": false,
+    "privateEvaluationCasesIncluded": false,
+    "screenshotsIncluded": false,
+    "credentialsIncluded": false,
+    "localFilesystemRequiredForSourceOrHandoff": false
+  }
+}

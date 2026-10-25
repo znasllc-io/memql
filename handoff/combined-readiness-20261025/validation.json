@@ -1,0 +1,162 @@
+{
+  "formatVersion": 1,
+  "scope": "Sanitized supervised integration validation summary; not a new MemQL Apps benchmark and not a final native pass",
+  "sourceSnapshot": "aeee127803bd42cd79a2d03bbcda8292eadd5423",
+  "localChecks": [
+    {
+      "scope": "Combined source9a0815892",
+      "uiTests": 184,
+      "pureWorkTests": 43,
+      "checks": [
+        "OS typecheck after SDK build",
+        "SDK generation",
+        "architecture/platform gates",
+        "strict loader194",
+        "pricing/evaluation checks",
+        "archive checks"
+      ],
+      "databaseExecution": false,
+      "agentAndWorker": "compile-only"
+    },
+    {
+      "commit": "0b3bf16c94c7ea1baf72da128580ce13ccc9630d",
+      "workModuleTests": 278,
+      "checks": [
+        "GOWORK=off standalone tests",
+        "vet",
+        "tidy"
+      ],
+      "skips": 0
+    },
+    {
+      "commit": "3785be31984ba2980426963ed5e3352fa9bd32fe",
+      "dslConformance": {
+        "topLevel": 181,
+        "subtests": 107,
+        "failed": 0,
+        "skipped": 0
+      },
+      "checks": [
+        "SDK generation",
+        "platform graph",
+        "strict automation loader"
+      ]
+    },
+    {
+      "commit": "d26d4beb63dd9e4f9d84dd027b4e08b0a8967fdd",
+      "groups": [
+        {
+          "name": "runtime repair pure",
+          "passed": 53,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "name": "catalog overlay and private direct execution",
+          "passed": 9,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "name": "nested tool diagnostics",
+          "passed": 5,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "checks": [
+        "annotation/parser/DSL specification",
+        "generated language documentation",
+        "SDK/architecture generation",
+        "measured embedded-file inventory"
+      ],
+      "newDatabaseCases": "compile-only locally; final native execution pending"
+    },
+    {
+      "commit": "aeee127803bd42cd79a2d03bbcda8292eadd5423",
+      "groups": [
+        {
+          "name": "completion and reply review",
+          "passed": 28,
+          "failed": 0,
+          "skipped": 0
+        },
+        {
+          "name": "inference fences",
+          "passed": 16,
+          "failed": 0,
+          "skipped": 0
+        }
+      ],
+      "agentDatabaseCases": "compile-only locally; final native execution pending"
+    }
+  ],
+  "countingNote": "Groups may overlap. Do not sum them into a unique suite count or treat compilation as database execution.",
+  "priorFullNativeAttempt": {
+    "head": "0b3bf16c94c7ea1baf72da128580ce13ccc9630d",
+    "checkId": 121180756354,
+    "run": "d8a9682b2bfdb3f3cd4e2b8e271bbba9",
+    "conclusion": "failure",
+    "testSteps": {
+      "passed": 27,
+      "sourceFailures": 5,
+      "requiredArtifactFailures": 3
+    },
+    "sourceFailures": {
+      "tests.go-tests#2": [
+        "TestNoBareMirrorRuns",
+        "TestEveryCorpusPromptIsInTheAssignment",
+        "TestServerOnlyConstructsAreDocumented",
+        "TestServerOnlyParsedSetMatchesTheTree"
+      ],
+      "tests.go-tests#3": [
+        "TestEmbeddedFileCountsAreStable"
+      ],
+      "tests.db-tests#3": [
+        "TestHonestRouteReply",
+        "TestDeliverRouteAtTheCapLeavesTheAgentsReadWorking",
+        "TestDeliverRouteRefusesPastTheGuidanceCap",
+        "TestEnergyProfileDBPrivacyRevisionAndResearch",
+        "TestOpenAIWireChatStream",
+        "TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist",
+        "TestCapabilityPrefetchEvidenceSurvivesAnotherReplicaWithoutReplacingContinuation"
+      ],
+      "tests.db-tests#4": [
+        "TestGenerateImageOwnedRunRecoveryAcrossReplicas"
+      ],
+      "tests.test-agent": [
+        "TestWorkDBFeedbackAnswerPreservesExecutionLineage",
+        "TestWorkDBOptionalTimeoutPreservesExecutionLineage",
+        "TestWorkDBHumanDispatchPreservesScheduledRecovery",
+        "TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix",
+        "TestWorkDBRequiredKnowledgeReachesPromptOnAnotherReplica",
+        "TestWorkDBModelCeilingKeepsExactNestedProgress",
+        "TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica",
+        "TestWorkDBUntypedScopeFeedbackContinuesExactPendingCall"
+      ]
+    },
+    "requiredArtifactFailures": [
+      "tests.os-checks",
+      "tests.editor-packages",
+      "tests.vscode-desktop-linux-1-91-0"
+    ],
+    "artifactCause": "Library/context/connection timeouts; passing commands did not satisfy required artifact retention.",
+    "recovery": "Unconfirmed resource cleanup left six lanes unexecuted; coordinator recovery launched them later and their saved output passed."
+  },
+  "pendingNativeProof": [
+    "TestEnergyProfileDBFencesPreparedDecisions: first-create, save, research-location, research-consent",
+    "Repaired original energy-profile privacy/research concurrency case",
+    "Cross-replica image and capability-prefetch recovery",
+    "Repaired full agent continuation, Training, knowledge and scope fixtures",
+    "Workbench renewal/recovery/generation-fence database suite",
+    "All required artifact captures and remaining pipeline gates on the final exact head"
+  ],
+  "benchmarkLimits": [
+    "Apps Astra with extra-high effort is the comparison setting, not proof of served provider identity",
+    "Warm handoff is not a fresh feature reproduction or speed-improvement measurement",
+    "Private case phases and overlapping token counters must remain distinct",
+    "No benchmark was started during consolidation",
+    "Live utility verification and six evaluation scenario contracts remain unrun",
+    "No goal was manually accepted on behalf of the user"
+  ]
+}
