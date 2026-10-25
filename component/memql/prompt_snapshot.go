@@ -184,11 +184,166 @@ func restoreCapturedPrompt(snapshot map[string]any) (*PromptTemplate, error) {
 	return p, nil
 }
 
+// RenderCapturedPromptBounded validates and renders a captured template without
+// a model/provider call. The writer stops before retaining an oversized result;
+// callers can preflight immutable input before recording a model attempt.
+func RenderCapturedPromptBounded(snapshot map[string]any, data map[string]any, maxBytes int) (string, error) {
+	if maxBytes <= 0 || maxBytes > 1<<20 {
+		return "", errors.New("invalid captured prompt render bound")
+	}
+	p, err := restoreCapturedPrompt(snapshot)
+	if err != nil {
+		return "", err
+	}
+	if err = p.ValidateData(data); err != nil {
+		return "", err
+	}
+	return renderCapturedPromptBounded(p, data, maxBytes)
+}
+
+type capturedPromptBoundedWriter struct {
+	bytes.Buffer
+	remaining int
+}
+
+func (w *capturedPromptBoundedWriter) Write(b []byte) (int, error) {
+	if len(b) > w.remaining {
+		return 0, errors.New("captured prompt exceeds its model-input shape bound")
+	}
+	n, err := w.Buffer.Write(b)
+	w.remaining -= n
+	return n, err
+}
+func renderCapturedPromptBounded(p *PromptTemplate, data map[string]any, maxBytes int) (string, error) {
+	// Bound intermediate template work as well as bytes reaching the writer.
+	// The projected-review contract is a small string map, not executable data.
+	if len(data) > 16 {
+		return "", errors.New("bounded prompt input has too many fields")
+	}
+	total := 0
+	for k, v := range data {
+		text, ok := v.(string)
+		if !ok {
+			return "", errors.New("bounded prompt input requires strings")
+		}
+		total += len(k) + len(text)
+		if total > 1<<20 {
+			return "", errors.New("bounded prompt input exceeds byte bound")
+		}
+	}
+	if err := validateBoundedPromptTemplate(p.tmpl); err != nil {
+		return "", err
+	}
+	w := &capturedPromptBoundedWriter{remaining: maxBytes}
+	if err := p.tmpl.Execute(w, data); err != nil {
+		return "", err
+	}
+	return w.String(), nil
+}
+
+// The opted-in bounded path supports text/field lookups, conditionals, with
+// and acyclic captured partials. It deliberately refuses loops, assignments and
+// functions (e.g. an enormous printf width) before evaluation. Legacy prompts
+// still use their unchanged full template language and rendering path.
+func validateBoundedPromptTemplate(entry *template.Template) error {
+	nodes := 0
+	active := map[string]bool{}
+	simple := func(p *parse.PipeNode) bool {
+		if p == nil || len(p.Decl) != 0 || len(p.Cmds) != 1 || len(p.Cmds[0].Args) != 1 {
+			return false
+		}
+		switch n := p.Cmds[0].Args[0].(type) {
+		case *parse.DotNode:
+			return true
+		case *parse.FieldNode:
+			return len(n.Ident) == 1
+		default:
+			return false
+		}
+	}
+	var walk func(parse.Node, int) error
+	var partial func(string, int) error
+	partial = func(name string, depth int) error {
+		if depth > 32 || active[name] {
+			return errors.New("bounded prompt partial cycle or depth exceeded")
+		}
+		t := entry.Lookup(name)
+		if t == nil || t.Tree == nil {
+			return errors.New("bounded prompt partial is missing")
+		}
+		active[name] = true
+		err := walk(t.Tree.Root, depth+1)
+		delete(active, name)
+		return err
+	}
+	walk = func(n parse.Node, depth int) error {
+		if n == nil {
+			return nil
+		}
+		nodes++
+		if nodes > 4096 || depth > 32 {
+			return errors.New("bounded prompt template work limit exceeded")
+		}
+		switch n := n.(type) {
+		case *parse.ListNode:
+			if n != nil {
+				for _, child := range n.Nodes {
+					if err := walk(child, depth+1); err != nil {
+						return err
+					}
+				}
+			}
+		case *parse.TextNode:
+		case *parse.ActionNode:
+			if !simple(n.Pipe) {
+				return errors.New("bounded prompt action is not a simple field lookup")
+			}
+		case *parse.IfNode:
+			if !simple(n.Pipe) {
+				return errors.New("bounded prompt condition is not a simple field lookup")
+			}
+			if err := walk(n.List, depth+1); err != nil {
+				return err
+			}
+			return walk(n.ElseList, depth+1)
+		case *parse.WithNode:
+			if !simple(n.Pipe) {
+				return errors.New("bounded prompt with is not a simple field lookup")
+			}
+			if err := walk(n.List, depth+1); err != nil {
+				return err
+			}
+			return walk(n.ElseList, depth+1)
+		case *parse.TemplateNode:
+			if !simple(n.Pipe) {
+				return errors.New("bounded prompt partial input is not a simple field lookup")
+			}
+			return partial(n.Name, depth+1)
+		default:
+			return errors.New("bounded prompt construct is unsupported")
+		}
+		return nil
+	}
+	return partial(entry.Name(), 0)
+}
+
 // InvokeCapturedPromptStructured executes one tool-free call from trusted saved
 // execution data. It never resolves a prompt or partial from the current
 // installation. Routing, context ceilings, attribution and journaling remain on
 // the ordinary model seam; no response cache can substitute another run's review.
 func (e *MemQLEngine) InvokeCapturedPromptStructured(ctx context.Context, snapshot map[string]any, data map[string]any, schemaName, schema string, strict bool) (StructuredAIResult, error) {
+	return e.invokeCapturedPromptStructured(ctx, snapshot, data, schemaName, schema, strict, 0)
+}
+
+// InvokeCapturedPromptStructuredBounded uses the same ordinary routing and spend
+// seam with a native render-size refusal. A byte bound is not provider capacity.
+func (e *MemQLEngine) InvokeCapturedPromptStructuredBounded(ctx context.Context, snapshot map[string]any, data map[string]any, schemaName, schema string, strict bool, maxBytes int) (StructuredAIResult, error) {
+	if maxBytes <= 0 || maxBytes > 1<<20 {
+		return StructuredAIResult{}, errors.New("invalid captured prompt render bound")
+	}
+	return e.invokeCapturedPromptStructured(ctx, snapshot, data, schemaName, schema, strict, maxBytes)
+}
+func (e *MemQLEngine) invokeCapturedPromptStructured(ctx context.Context, snapshot map[string]any, data map[string]any, schemaName, schema string, strict bool, maxBytes int) (StructuredAIResult, error) {
 	if e == nil || e.modelSeam == nil {
 		return StructuredAIResult{}, errors.New("AI runtime is not configured")
 	}
@@ -202,7 +357,12 @@ func (e *MemQLEngine) InvokeCapturedPromptStructured(ctx context.Context, snapsh
 	if err = p.ValidateData(data); err != nil {
 		return StructuredAIResult{}, err
 	}
-	rendered, err := p.Render(data)
+	var rendered string
+	if maxBytes > 0 {
+		rendered, err = renderCapturedPromptBounded(p, data, maxBytes)
+	} else {
+		rendered, err = p.Render(data)
+	}
 	if err != nil {
 		return StructuredAIResult{}, err
 	}

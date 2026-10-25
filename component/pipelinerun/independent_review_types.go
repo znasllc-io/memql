@@ -27,8 +27,11 @@ type IndependentReviewInput struct {
 	Prompt                    map[string]any
 	PullRequest               *githubapp.PullRequestObservation
 	Diff                      *githubapp.ReviewDiff
-	Group                     *githubapp.MergeGroupEvidence
-	Members                   []ReviewMember
+	// Omitted for legacy full-file records: their JSON and digest stay exact.
+	Projection       *githubapp.ReviewProjection `json:",omitempty"`
+	ProjectionDigest string                      `json:",omitempty"`
+	Group            *githubapp.MergeGroupEvidence
+	Members          []ReviewMember
 }
 type IndependentReviewVerdict struct {
 	Approved bool   `json:"approved"`
@@ -76,6 +79,9 @@ func readIndependentReview(value map[string]any) (IndependentReviewRecord, error
 	var r IndependentReviewRecord
 	if err := decodeSelectionObject(value, &r); err != nil || r.Version != 1 || r.RunID == "" || r.InputDigest == "" || r.InputDigest != reviewDigest(r.Input) {
 		return r, errors.New("independent review evidence is missing or changed")
+	}
+	if (r.Input.Projection == nil && r.Input.ProjectionDigest != "") || (r.Input.Projection != nil && r.Input.ProjectionDigest != r.Input.Projection.Digest()) {
+		return r, errors.New("independent review projection digest is missing or changed")
 	}
 	if r.Verdict != nil && !plainSelectionText(r.Verdict.Reason, 4000) {
 		return r, errors.New("independent review reason is malformed")

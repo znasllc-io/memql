@@ -232,6 +232,19 @@ func capturePipelineIndependentReview(ctx context.Context, p pipelinerun.Pipelin
 	} else {
 		return input, errors.New("independent review is only defined for claimed PR and full merge-group runs")
 	}
+	// Format selection is explicit in the captured prompt, never a product name
+	// or provider patch. Legacy unmarked prompts continue receiving full bytes.
+	if input.Kind == "ordinary" && pipelineReviewUsesProjection(input.Prompt) {
+		projection, e := githubapp.ProjectReviewDiff(ctx, *input.Diff)
+		if e != nil {
+			return input, e
+		}
+		input.Projection = &projection
+		input.ProjectionDigest = projection.Digest()
+		if _, e = pipelineReviewModelData(ctx, input); e != nil {
+			return input, e
+		}
+	}
 	if err = fence(ctx); err != nil {
 		return input, err
 	}
@@ -295,20 +308,73 @@ func samePipelineIndependentReview(ctx context.Context, saved, fresh pipelinerun
 	}
 	return gh.VerifyReviewTargetAdvance(ctx, reader, parts[0], parts[1], priorBase, currentBase, *saved.Diff)
 }
+
+const pipelineReviewRenderedLimit = 1 << 20
+
+func pipelineReviewUsesProjection(prompt map[string]any) bool {
+	source, _ := prompt["source"].(string)
+	first, _, _ := strings.Cut(source, "\n")
+	return first == githubapp.ReviewProjectionPromptMarker
+}
+
+// Native capture calls this before saving or marking ModelAttempted. Validation
+// calls capture again; invocation verifies the same immutable bytes once more.
+func pipelineReviewModelData(ctx context.Context, input pipelinerun.IndependentReviewInput) (map[string]any, error) {
+	if input.Kind != "ordinary" || input.Diff == nil || input.PullRequest == nil {
+		return nil, errors.New("independent review has no ordinary source")
+	}
+	var changes any = input.Diff
+	if input.Projection != nil {
+		if input.ProjectionDigest != input.Projection.Digest() {
+			return nil, errors.New("review projection digest mismatch")
+		}
+		if !pipelineReviewUsesProjection(input.Prompt) {
+			return nil, errors.New("review prompt does not declare the projection format")
+		}
+		if err := githubapp.ValidateReviewProjection(ctx, *input.Diff, *input.Projection); err != nil {
+			return nil, err
+		}
+		changes = input.Projection
+	} else if input.ProjectionDigest != "" || pipelineReviewUsesProjection(input.Prompt) {
+		return nil, errors.New("review prompt requires a captured complete-hunk projection")
+	}
+	diff, err := json.Marshal(changes)
+	if err != nil {
+		return nil, err
+	}
+	pr, err := json.Marshal(input.PullRequest)
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{"repository": input.Source.Repository, "pullRequest": string(pr), "changes": string(diff)}
+	if input.Projection != nil {
+		rendered, e := memql.RenderCapturedPromptBounded(input.Prompt, data, pipelineReviewRenderedLimit)
+		if e != nil {
+			return nil, e
+		}
+		if !strings.HasPrefix(rendered, githubapp.ReviewProjectionPromptMarker+"\n") {
+			return nil, errors.New("compiled review prompt does not declare its input format")
+		}
+	}
+	return data, nil
+}
+
 func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelinerun.IndependentReviewInput) (pipelinerun.IndependentReviewVerdict, error) {
 	var out pipelinerun.IndependentReviewVerdict
 	if input.Kind != "ordinary" || input.Diff == nil || input.PullRequest == nil || len(input.Prompt) == 0 {
 		return out, errors.New("independent model review has no exact read-only input")
 	}
-	diff, err := json.Marshal(input.Diff)
+	data, err := pipelineReviewModelData(ctx, input)
 	if err != nil {
 		return out, err
 	}
-	pr, err := json.Marshal(input.PullRequest)
-	if err != nil {
-		return out, err
+	const schema = `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`
+	var result memql.StructuredAIResult
+	if input.Projection != nil {
+		result, err = a.engine.InvokeCapturedPromptStructuredBounded(repositoryIndependentReviewContext(ctx), input.Prompt, data, "pipeline_independent_review", schema, true, pipelineReviewRenderedLimit)
+	} else {
+		result, err = a.engine.InvokeCapturedPromptStructured(repositoryIndependentReviewContext(ctx), input.Prompt, data, "pipeline_independent_review", schema, true)
 	}
-	result, err := a.engine.InvokeCapturedPromptStructured(repositoryIndependentReviewContext(ctx), input.Prompt, map[string]any{"repository": input.Source.Repository, "pullRequest": string(pr), "changes": string(diff)}, "pipeline_independent_review", `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`, true)
 	if err != nil {
 		return out, err
 	}
