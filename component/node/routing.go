@@ -302,6 +302,7 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.created.v1:work:run", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:run", TargetType: ""},
+		{Pattern: events.TopicWorkRunRecovery, TargetType: "agent"},
 		{Pattern: "graph.node.deleted.v1:work:run", TargetType: ""},
 		{Pattern: "graph.node.created.v1:work:step", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:step", TargetType: ""},

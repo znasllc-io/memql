@@ -109,6 +109,30 @@ permissions and tool restrictions apply, and cancellation stops the supervised
 process group even while the prompt is being sent. This is a finite prompt
 transfer, not remote interactive access to the App's input.
 
+## Choosing the execution replica for Apps
+
+When you select Apps, a task or retry first checks which agent is connected to
+an eligible computer you own. An agent without that connection lets the
+connected agent claim the task. The claim is shared across the cluster, so
+receiving the same event on two agents does not authorize two executions.
+The check does not choose an App on your behalf, consume your selection order,
+or grant access to native computer tools. Current ownership, App settings and
+execution permissions still apply when the session opens.
+
+Recovery retains the same run, answer and retry identity. If the maintenance
+node cannot execute work itself, it can notify the agents and check whether one
+actually claimed the run. Sending a notification alone is not reported as
+progress, and an old claim cannot keep a silent run alive indefinitely. No
+artificial heartbeat or goal completion is recorded. A cancelled or newer
+execution cannot be revived by a delayed recovery notification.
+
+If no eligible computer is available, the task keeps its normal visible
+unavailable-model outcome. This placement check does not change provider policy,
+move an already-running App session, repair an unavailable service, or cover a
+replay that mixes historical source overrides. Losing a connection after the
+check still follows the existing recovery controls, with completed effects and
+permission boundaries preserved.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:
