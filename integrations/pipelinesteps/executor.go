@@ -24,16 +24,19 @@ import (
 // node, for every step of every pipeline run (epic memql#5478; #5493, #5494,
 // #5496).
 //
-// A step that names no need is forwarded to a workbench replica, whose runner
-// creates or adopts the step's Kubernetes Job (cluster.go). A step naming a
-// need runs on one of its owner's machines through the agent's dispatcher
-// (fleet.go). Either way the executor decides first what the step may be
+// Dedicated cluster steps go to a workbench replica, whose runner creates or
+// adopts their Kubernetes Job (cluster.go). Dedicated Fleet steps use the
+// owner's opted-in machines (fleet.go). An explicit pool step tries Fleet
+// first; only confirmed pre-start capacity refusal can reach cloud fallback,
+// under its captured installed policy and the runner's live spending gate.
+// In every case the executor decides first what the step may be
 // given: it refuses what it must not route, and it bounds the step by the
 // lesser of its own timeout and what is left of its run's wall-clock ceiling,
 // and names the moment that ceiling is reached (StepRun.RunDeadline). A
-// machine starts a step at once; a cluster step may first wait for a free
-// slot under the ceiling, bounded by its run's ceiling alone, and its own
-// timeout runs from its Job's creation (ruling R31b).
+// step may wait for host or cluster capacity within its original run ceiling.
+// A Fleet preference deadline never cancels a started command or permits a
+// second copy after an uncertain reply. A cluster command's own timeout runs
+// from its Job's creation (ruling R31b).
 
 // Forwarder is the agent's road to a workbench replica: integrations/
 // workbench's ForwardRouter on an agent node, a fake mesh in a test. A step is
@@ -47,7 +50,7 @@ type Forwarder interface {
 	SelfNodeType() string
 }
 
-// FleetRouter runs a step that names a need on one of its owner's machines.
+// FleetRouter runs a Fleet or pool step on one of its owner's opted-in machines.
 type FleetRouter interface {
 	RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (pl.StepResult, error)
 }
@@ -194,6 +197,9 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 	stepCtx, release := e.track(ctx, req.RunID)
 	defer release()
 
+	if req.Step.Placement == pl.PlacementPool {
+		return e.runPool(stepCtx, req, run, timeout, runDeadline)
+	}
 	if req.Step.RequiresFleet() && req.RecoverOnly {
 		return failedResult(pl.CodeExecutionUncertain, "A previous driver may have started this fleet command, and no durable result was recorded. Reconcile its outcome before authorizing new work; no replacement command was sent."), nil
 	}
@@ -214,10 +220,10 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 // never routes on a name it does not know), and a need on a pipeline whose
 // owner did not consent to the fleet.
 func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
-	if err := pl.CheckCPUMilli(req.Step.CPUMilli, req.Step.RequiresFleet()); err != nil {
+	if err := pl.CheckCPUMilli(req.Step.CPUMilli, req.Step.Execution == pl.ExecutionNative); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), true
 	}
-	if err := pl.CheckMemoryMiB(req.Step.MemoryMiB, req.Step.RequiresFleet()); err != nil {
+	if err := pl.CheckMemoryMiB(req.Step.MemoryMiB, req.Step.Execution == pl.ExecutionNative); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), true
 	}
 	if req.Step.ImagePullSecret != "" && req.Step.RequiresFleet() {
@@ -241,12 +247,48 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 	if err := pl.CheckExecutionNeeds(req.Step.Execution, req.Step.Needs); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), true
 	}
-	if req.Step.RequiresFleet() && req.Compute != pl.ComputeClusterAndFleet {
+	if (req.Step.RequiresFleet() || req.Step.Placement == pl.PlacementPool) && req.Compute != pl.ComputeClusterAndFleet {
 		return refusedResult(pl.CodeFleetNotConsented, fmt.Sprintf(
 			"The step needs %s, which only one of the owner's machines can meet, and the pipeline does not declare "+
 				"compute: %s. Nothing was sent to a machine.", strings.Join(req.Step.Needs, ", "), pl.ComputeClusterAndFleet)), true
 	}
+	if req.Step.Placement == pl.PlacementPool {
+		if err := pl.CheckPoolStep(req.Step); err != nil {
+			return refusedResult(pl.CodeStepInvalid, err.Error()), true
+		}
+		if req.ComputePlacement == nil || req.ComputePlacement.FleetWaitSeconds < 0 || req.ComputePlacement.FleetWaitSeconds > 3600 {
+			return refusedResult(pl.CodeStepInvalid, "Pool placement requires a captured installation compute policy with a bounded Fleet preference."), true
+		}
+	}
 	return pl.StepResult{}, false
+}
+
+// runPool changes location only after a positive pre-start refusal. A lost
+// reply, cancellation or failed command is not spare-capacity evidence: trying
+// the cloud then could execute the same command twice. Recovery may adopt the
+// stable cluster job identity but can never replace an uncertain Fleet effect.
+func (e *Executor) runPool(ctx context.Context, req pl.StepRequest, run StepRun, timeout time.Duration, runDeadline time.Time) (pl.StepResult, error) {
+	if req.RecoverOnly {
+		return e.runCluster(ctx, run, timeout, runDeadline), nil
+	}
+	if e.fleet == nil {
+		return failedResult(pl.CodeRunnerUnavailable, "Pool placement requires a configured Fleet dispatcher. Nothing ran."), nil
+	}
+	res, err := e.fleet.RunStep(ctx, req, run)
+	if err != nil || ctx.Err() != nil || !req.ComputePlacement.CloudFallback || res.Status != pl.OutcomeRefused || res.Failure == nil || res.Failure.Code != pl.CodeNoMachineForNeed {
+		return res, err
+	}
+	// Queue waiting does not consume the command's execution timeout, but it
+	// cannot extend the original run deadline. The receiving workbench also
+	// checks fresh cloud admission before each new Job effect.
+	timeout, deadlineCode, runDeadline, ceiling := e.deadlineFor(req, e.now())
+	if ceiling != nil {
+		return *ceiling, nil
+	}
+	run.TimeoutSeconds = int(timeout / time.Second)
+	run.DeadlineCode = deadlineCode
+	run.RunDeadline = runDeadline.UTC().Format(time.RFC3339Nano)
+	return e.runCluster(ctx, run, timeout, runDeadline), nil
 }
 
 // deadlineFor is the step's effective timeout -- the lesser of its own

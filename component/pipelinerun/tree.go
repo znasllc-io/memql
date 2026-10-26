@@ -180,7 +180,22 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		}
 		in.BucketSelection = &buckets
 	}
-	return pipelines.Compile(spec, in)
+	plan, refusal := pipelines.Compile(spec, in)
+	if refusal != nil {
+		return plan, refusal
+	}
+	for _, step := range plan.Steps() {
+		if step.Placement != pipelines.PlacementPool {
+			continue
+		}
+		placement, err := dr.selectComputePlacement(ctx)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "computePlacement", "The installed pipeline compute policy could not select capacity: %v", err)
+		}
+		dr.computePlacement = placement
+		break
+	}
+	return plan, nil
 }
 
 // changes is what this run changed: GitHub's compare of its base with its

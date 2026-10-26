@@ -98,19 +98,21 @@ type StepSpec struct {
 	CheckoutHistory  string            `yaml:"checkoutHistory,omitempty" json:"checkoutHistory,omitempty"`
 	RepositoryChange *RepositoryChange `yaml:"repositoryChange,omitempty" json:"repositoryChange,omitempty"`
 	SARIF            *SARIFReport      `yaml:"sarif,omitempty" json:"sarif,omitempty"`
-	// CPUMilli requests a bounded CPU reservation for the cluster command.
+	// CPUMilli requests a bounded CPU reservation for the container command.
 	// Zero uses the operator's namespace default; 1000 means one CPU.
 	CPUMilli int `yaml:"cpuMilli,omitempty" json:"cpuMilli,omitempty"`
 
 	// ImageBuild asks the cluster's fixed rootless builder for an OCI archive.
 	// It cannot carry a shell command, services, caches or publication secrets.
 	ImageBuild *ImageBuild `yaml:"imageBuild,omitempty" json:"imageBuild,omitempty"`
-	// MemoryMiB requests a bounded memory reservation for the cluster command.
+	// MemoryMiB requests a bounded memory reservation for the container command.
 	// Zero uses the operator's namespace default; services retain their defaults.
 	MemoryMiB int `yaml:"memoryMiB,omitempty" json:"memoryMiB,omitempty"`
 	// Image overrides the pipeline's container image for this step only.
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
-	// Placement selects cluster or fleet; omitted follows native execution or host needs.
+	// Placement selects cluster, fleet or pool; pool keeps container semantics
+	// and lets the installed policy prefer compatible Fleet capacity.
+	// Omitted follows native execution or host needs.
 	Placement string `yaml:"placement,omitempty" json:"placement,omitempty"`
 	// Execution defaults to container. Native explicitly requests a host toolchain.
 	Execution string `yaml:"execution,omitempty" json:"execution,omitempty"`

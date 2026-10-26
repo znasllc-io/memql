@@ -578,7 +578,7 @@ func stepNeeds(declared StepSpec) []string {
 // stepConsent refuses a step whose needs the owner has not consented to send
 // to the fleet, or whose secrets the owner has not allowed.
 func stepConsent(scope string, declared StepSpec, compute Compute, allowedSecrets []string) *Refusal {
-	if PlacementOf(declared) == PlacementFleet && compute != ComputeClusterAndFleet {
+	if (PlacementOf(declared) == PlacementFleet || PlacementOf(declared) == PlacementPool) && compute != ComputeClusterAndFleet {
 		if compute == "" {
 			compute = ComputeCluster
 		}

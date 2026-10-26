@@ -947,3 +947,52 @@ independent instructions and cancellation. The existing driver regression
 `TestIndependentReviewRefusesLateAuthorityBeforePersistenceAndEffects` covers
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
+
+## Pipeline capacity selection and spending holds
+
+Only an explicit manifest `placement: pool` asks for shared capacity preference.
+The driver's optional `computePlacement` role comes from the captured installed
+delivery policy, evaluated with immutable run identity and no native operations.
+The bounded result is copied into each step request and included in its existing
+execution-definition fingerprint. If an authored clock expression changes that
+answer on recovery, the journal refuses divergence before effects. An old snapshot or portable
+default grants no cloud fallback; repository code cannot widen the operator's
+policy. Dedicated native, image-build and privileged checkout paths keep their
+own contracts. Current machine consent and resources remain independent gates.
+
+Version 2 of the operator admission file separates a global new-run pause from
+cloud spending. Cost holds can therefore leave eligible Fleet work running.
+Workbench reads the live cloud decision again before each command or isolation
+probe Job, including a later step in an already-started run. A held attempt saves
+its exact queued definition before waiting; a new replica can recover that
+positive evidence, while an uncertain dispatch remains uncertain. Existing Job
+adoption, settlement and cancellation do not allocate and remain available.
+Global waits precede the run clock; capacity and cloud waits after admission use
+the existing run ceiling, without spending a command timeout before creation.
+
+`TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate` covers the versioned and
+legacy admission boundary. `TestComputePlacementUsesCapturedPolicyAcrossReplicas`
+and `TestComputePlacementRejectsUnboundedOrAmbiguousPolicy` cover captured source
+and strict output bounds; `TestComputePlacementDecisionIsPartOfPoolRecoveryDefinition`
+checks the recovery binding. `TestCloudAdmissionWaitSurvivesReplicaAndLateHold`,
+`TestCloudAdmissionDoesNotBlockAdoptionOrCancellation` and
+`TestCloudAdmissionRechecksIsolationProbeAllocation` cover the cloud effects.
+These source regressions do not establish live Fleet availability, installed
+policy activation or a completed Fleet-to-cloud CI journey; those require
+separate verification against the selected deployment.
+
+Fleet CI owns the host build lock exclusively. Local model calls share that
+lock with persistent workspaces, serialize inference separately, and reserve
+every workspace slot's full RAM cap. This keeps a goal's model/tool/model cycle
+working without treating a live workspace as abandoned or charging host RAM
+against a discrete GPU's VRAM. Unlocked retained workspace records still refuse
+inference. `TestModelToolModelKeepsSameWorkbench` exercises both managers and
+retained files; `TestInferenceReservesEveryWorkbenchSlotWithoutChargingVRAM`
+covers the resource boundary.
+
+A runtime's terminal response is separate from answer validity and delivery.
+The activity witness clears after confirmed completion even when schema
+validation or delivery fails, preserving that original error. Cancellation,
+truncation and a reply lost before completion leave the witness fenced.
+`TestManagerReleasesOnlyCompletedRuntimeErrors` exercises real runtime responses
+and a second manager against the durable witness.

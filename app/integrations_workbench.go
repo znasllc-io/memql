@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
@@ -33,8 +34,10 @@ func (a *App) integrationsWorkbench() {
 	// with no clone image or no in-cluster API server leaves it unset and
 	// says why once; every pipeline forward to it then answers
 	// pipelines_not_configured, having run nothing.
+	cfg := pipelinesteps.ConfigFromEnv(os.Getenv)
+	cfg.AdmitCloud = pipelinerun.FileCloudAdmission(os.Getenv("MEMQL_PIPELINES_ADMISSION_FILE"))
 	a.pipelineRunner = a.workbenchPipelineRunner(
-		pipelinesteps.ConfigFromEnv(os.Getenv),
+		cfg,
 		deploycontrol.InClusterAvailable(),
 		deploycontrol.NewClusterAPI,
 		a.resolveBlobStore,

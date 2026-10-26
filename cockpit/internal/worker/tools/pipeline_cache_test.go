@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -127,6 +128,8 @@ func TestPipelineCachesRealDocker(t *testing.T) {
 	fx := newPipelineFixture(t)
 	allowLocalClones(t)
 	policy, _ := pipelineTestPolicy(t, "")
+	pipelineHostMemory = capacity.ReadSystemHeadroom
+	pipelineHostCPUs = runtime.NumCPU
 	extra := map[string]any{"execution": "container", "platform": "linux/" + runtime.GOARCH, "image": image, "caches": []any{"go", "npm"}, "cacheScope": strings.Repeat("a", 64)}
 	ctx := context.WithValue(context.Background(), pipelineCacheHomeKey{}, "first-cluster")
 	var output recordedOutput

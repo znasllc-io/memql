@@ -153,25 +153,28 @@ type artifactEmitter func(data []byte) error
 
 // pipelineStepRequest is one decoded and validated pipeline_step.
 type pipelineStepRequest struct {
-	cloneURL   string
-	sha        string
-	token      string
-	repository string
-	command    string
-	env        map[string]string
-	secrets    map[string]string
-	artifacts  []string
-	timeoutSec int
-	execution  string
-	platform   string
-	image      string
-	dockerID   string
-	needs      []string
-	services   []pipelineService
-	caches     []string
-	cacheScope string
-	cacheHome  string
-	cacheDir   string
+	cloneURL       string
+	sha            string
+	token          string
+	repository     string
+	command        string
+	env            map[string]string
+	secrets        map[string]string
+	artifacts      []string
+	timeoutSec     int
+	execution      string
+	platform       string
+	image          string
+	cpuMilli       int
+	memoryMiB      int
+	dockerID       string
+	dockerEndpoint string
+	needs          []string
+	services       []pipelineService
+	caches         []string
+	cacheScope     string
+	cacheHome      string
+	cacheDir       string
 }
 
 // runPipelineStep implements workerHost.pipeline_step. agentID is the
@@ -204,6 +207,9 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	req, err := parsePipelineStep(args)
 	if err != nil {
 		return refuse("bad_request", err)
+	}
+	if err := admitPipelineResourceLimits(&req, settings); err != nil {
+		return refuse("denied_by_policy", err)
 	}
 	if len(req.caches) > 0 {
 		req.cacheHome, _ = ctx.Value(pipelineCacheHomeKey{}).(string)
@@ -240,6 +246,12 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	if err := checkPipelineRuntime(stepCtx, &req); err != nil {
 		return refuse("pipeline_runtime_unavailable", err)
 	}
+	if req.dockerEndpoint != "" {
+		stepCtx = withPipelineDockerEndpoint(stepCtx, req.dockerEndpoint)
+	}
+	if err := checkPipelineHeadroom(stepCtx, req); err != nil {
+		return refuse("pipeline_capacity_busy", err)
+	}
 	if len(req.caches) > 0 {
 		if err := preparePipelineCache(&req); err != nil {
 			return refuse("pipeline_cache_unavailable", err)
@@ -270,7 +282,7 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	}()
 
 	run := &pipelineRun{req: req, dir: dir, mask: mask, emit: emit, started: started, reservation: reservation,
-		containerMemoryMiB: settings.ContainerMemoryMiB}
+		containerMemoryMiB: req.memoryMiB, containerCPUMilli: req.cpuMilli}
 	if fail := run.fetch(stepCtx); fail != nil {
 		return nil, fail
 	}
@@ -278,6 +290,9 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	// reroute: the pipeline command has never started, and the deferred cleanup
 	// must confirm removal before returning a retryable capacity response.
 	if err := checkPipelineDisk(dir, settings.MinFreeDiskMiB); err != nil {
+		return refuse("pipeline_capacity_busy", err)
+	}
+	if err := checkPipelineHeadroom(stepCtx, req); err != nil {
 		return refuse("pipeline_capacity_busy", err)
 	}
 	exitCode, fail := run.command(stepCtx)
@@ -596,6 +611,7 @@ type pipelineRun struct {
 	reservation *pipelineReservation
 	// Local policy snapshot, never populated from cluster request arguments.
 	containerMemoryMiB int
+	containerCPUMilli  int
 	// bytes is the output the step produced, before masking.
 	bytes atomic.Int64
 }
@@ -670,6 +686,9 @@ func (r *pipelineRun) command(ctx context.Context) (int, *memqlv1.Failure) {
 	cmd.Dir = r.dir
 	cmd.Env = stepEnvironment(os.Environ(), r.req.env, r.req.secrets)
 	cmd.Env = stepEnvironment(cmd.Env, map[string]string{"TMPDIR": scratch, "TMP": scratch, "TEMP": scratch}, nil)
+	if r.req.dockerEndpoint != "" {
+		cmd.Env = pipelineDockerEnvironment(cmd.Env, r.req.dockerEndpoint)
+	}
 	res, err := runGroup(ctx, cmd, r.mask, r.emit)
 	r.bytes.Add(res.bytes)
 	if err := r.reservation.cleanupReady(r.dir); err != nil {

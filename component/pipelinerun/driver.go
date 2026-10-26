@@ -247,9 +247,10 @@ type runDriver struct {
 	cleanupFailed atomic.Bool
 	facts         requestFacts
 
-	workflow *workflowProgram
-	stages   []stageTracks
-	tracks   []*stepTrack
+	workflow         *workflowProgram
+	computePlacement *pipelines.ComputePlacementPolicy
+	stages           []stageTracks
+	tracks           []*stepTrack
 	// abandonedInFlight: this drive ends steps a previous driver handed to
 	// the runner without re-sending them, so the runner must be told to stop
 	// them (reopenFromRows, conclude). The drive's goroutine only.
@@ -1293,27 +1294,35 @@ func (dr *runDriver) setFacts() {
 // secrets are this step's resolved values and exist nowhere else.
 func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.StepRequest {
 	f := dr.facts
+	// A step receives its own value: an executor cannot mutate the captured
+	// placement decision observed by a sibling step or a resumed driver.
+	var placement *pipelines.ComputePlacementPolicy
+	if dr.computePlacement != nil && t.step.Placement == pipelines.PlacementPool {
+		copy := *dr.computePlacement
+		placement = &copy
+	}
 	return pipelines.StepRequest{
-		RecoverOnly:    t.sent,
-		RunID:          f.runID,
-		WorkRunID:      f.workRunID,
-		StepKey:        t.step.Key,
-		Attempt:        t.attempt,
-		RunAttempt:     f.attempt,
-		RunStartedAt:   f.startedAt,
-		PipelineID:     f.pipelineID,
-		OwnerUserID:    f.owner,
-		Repository:     f.repository,
-		SHA:            f.sha,
-		BaseSHA:        f.baseSHA,
-		Mode:           f.mode,
-		Event:          f.event,
-		Version:        f.version,
-		Domain:         f.domain,
-		InstallationID: f.installation,
-		Compute:        f.compute,
-		Step:           t.step,
-		Secrets:        secrets,
+		ComputePlacement: placement,
+		RecoverOnly:      t.sent,
+		RunID:            f.runID,
+		WorkRunID:        f.workRunID,
+		StepKey:          t.step.Key,
+		Attempt:          t.attempt,
+		RunAttempt:       f.attempt,
+		RunStartedAt:     f.startedAt,
+		PipelineID:       f.pipelineID,
+		OwnerUserID:      f.owner,
+		Repository:       f.repository,
+		SHA:              f.sha,
+		BaseSHA:          f.baseSHA,
+		Mode:             f.mode,
+		Event:            f.event,
+		Version:          f.version,
+		Domain:           f.domain,
+		InstallationID:   f.installation,
+		Compute:          f.compute,
+		Step:             t.step,
+		Secrets:          secrets,
 	}
 }
 
