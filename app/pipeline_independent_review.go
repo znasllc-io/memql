@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelinerun"
@@ -359,6 +360,34 @@ func pipelineReviewModelData(ctx context.Context, input pipelinerun.IndependentR
 	return data, nil
 }
 
+// The driver has fenced the captured source and its current provider grant.
+// Scheduled execution has no originating user session, so restore the source's
+// actual local owner before model attribution instead of borrowing the scheduler
+// or another incoming actor. Re-read the binding before using it as authority;
+// persisted evidence alone must not revive a removed or reassigned source.
+func (a *App) pipelineIndependentReviewContext(ctx context.Context, source pipelinerun.ReviewSource) (context.Context, error) {
+	if a.engine == nil || auth.NamesNoPerson(source.OwnerUserID) || source.SourceID == "" {
+		return nil, errors.New("independent review source owner is unavailable")
+	}
+	current, err := a.repositoryAuthoritySource(ctx, source.SourceID, true)
+	if err != nil {
+		return nil, err
+	}
+	if current.OwnerUserID != memql.BareShortId(source.OwnerUserID) || current.CredentialID != source.CredentialID || current.Repository != source.Repository {
+		return nil, errors.New("independent review source owner or connection changed")
+	}
+	bound, err := a.repositoryMaintainerContext(ctx, current.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	// Restoring a forwarded person resets DSL origin to client. Preserve only
+	// the origin this native call already held, not a new server-side grant.
+	if auth.OriginFromContext(ctx).IsInternal() {
+		bound = auth.ContextWithInternalOrigin(bound)
+	}
+	return repositoryIndependentReviewContext(bound), nil
+}
+
 func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelinerun.IndependentReviewInput) (pipelinerun.IndependentReviewVerdict, error) {
 	var out pipelinerun.IndependentReviewVerdict
 	if input.Kind != "ordinary" || input.Diff == nil || input.PullRequest == nil || len(input.Prompt) == 0 {
@@ -368,12 +397,16 @@ func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelin
 	if err != nil {
 		return out, err
 	}
+	ctx, err = a.pipelineIndependentReviewContext(ctx, input.Source)
+	if err != nil {
+		return out, err
+	}
 	const schema = `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`
 	var result memql.StructuredAIResult
 	if input.Projection != nil {
-		result, err = a.engine.InvokeCapturedPromptStructuredBounded(repositoryIndependentReviewContext(ctx), input.Prompt, data, "pipeline_independent_review", schema, true, pipelineReviewRenderedLimit)
+		result, err = a.engine.InvokeCapturedPromptStructuredBounded(ctx, input.Prompt, data, "pipeline_independent_review", schema, true, pipelineReviewRenderedLimit)
 	} else {
-		result, err = a.engine.InvokeCapturedPromptStructured(repositoryIndependentReviewContext(ctx), input.Prompt, data, "pipeline_independent_review", schema, true)
+		result, err = a.engine.InvokeCapturedPromptStructured(ctx, input.Prompt, data, "pipeline_independent_review", schema, true)
 	}
 	if err != nil {
 		return out, err

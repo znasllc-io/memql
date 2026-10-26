@@ -917,3 +917,33 @@ shipped contracts; `TestRepositoryWorkToolsRequireOwnedRunAndInstalledContracts`
 checks the missing/foreign contexts. Existing persisted-owner and Fleet-lane
 context tests cover the restored execution boundary. The live Ask-to-PR and
 merge-queue journeys require separate verification against the installed release.
+
+## Independent pipeline review restores its source owner
+
+A scheduled PR review has no originating user session. Passing its synthetic
+scheduler actor into the captured prompt leaves App routing with no person,
+even though the review journal already names the authorized source owner.
+`pipelineIndependentReviewContext` therefore rereads the active source binding
+and matches its owner, repository and connection against the captured evidence,
+then uses the existing persisted-owner resolver to load the actual local user
+and current role. It preserves the call's existing origin, cancellation and run
+accounting, carries verified forwarding authority to another replica, and clears
+draft overrides through `repositoryIndependentReviewContext`. A prompt argument,
+repository manifest or incoming actor cannot select that owner.
+
+The driver still verifies the exact source, current provider grant, captured
+policy and lease before the attempt and before recording/reporting its result.
+An absent identity or removed/reassigned source stops before inference; a
+provider failure leaves the ordinary attempt unresolved rather than replaying
+it or inventing a verdict. Both full-file and complete-hunk prompts use the
+same tool-free model seam and its existing admission, consent and spending
+gates. No application permission or shared subscription session is created.
+
+`TestPipelineIndependentReviewRestoresCurrentSourceOwner` exercises the real
+captured-prompt seam with fake model output, separate database-backed engines,
+no originating session, a scheduler and a foreign incoming actor. It checks
+forwarded identity, fresh role changes, missing/changed source authority,
+independent instructions and cancellation. The existing driver regression
+`TestIndependentReviewRefusesLateAuthorityBeforePersistenceAndEffects` covers
+late provider/policy refusal. These tests do not qualify a live App session or
+a deployed PR review; those require installed-path verification.

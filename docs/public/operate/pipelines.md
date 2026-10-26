@@ -321,6 +321,16 @@ release or deploy. A governed proposal reuses its original valid review journal;
 a rejected, partial or changed native journal cannot fall back to the ordinary
 route.
 
+Scheduled review restores the registered source owner's current local identity
+before model routing; the scheduler's identity is not a person and cannot open
+an App session. The adapter rechecks the active source binding, resolves the
+owner's current role, and carries verified owner authority across replicas.
+Missing identities and changed or removed source bindings refuse before the
+model call. Existing current-provider, lease and policy checks still fence the
+review and its report. Restoring identity does not enable an App or bypass its
+consent, capacity, model-admission or spending checks. The call stays tool-free
+and cannot inherit the draft author's prompt or model override.
+
 An ordinary-review prompt whose first line is
 `Input representation: memql.complete-review-hunks.v1` explicitly selects the
 versioned complete-hunk format. Native evidence still retains the complete
