@@ -144,6 +144,8 @@ func TestDispatchDB_SweepRecoversDueTimersAndInferenceWaits(t *testing.T) {
 		if kind == "inferenceUnavailable" {
 			waiting["kind"] = "approval"
 			waiting["approvalKind"] = kind
+			waiting["subject"] = "approval-1"
+			waiting["since"] = rfc(now.Add(-6 * time.Minute))
 		}
 		owner := actorCtx("recovery-owner")
 		if err := i.store().createRunRow(owner, runSeed{RunId: runConcept + ":" + kind, AutomationName: "probe", TemplateFingerprint: "probe", Status: "waiting", Mode: "live", ReplayPolicy: "strict", StartedAt: now.Add(-time.Hour)}); err != nil {

@@ -95,8 +95,8 @@ or client-visible session authority.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
   title bar open the same streaming surface. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening. Each turn uses the same durable
-  work engine as Nexus. Its goals remain visible in Nexus; Ask has no
-  per-message work menu. Explicit Stop cancels the durable goal; closing a viewer
+  work engine as Nexus. Its goals remain visible in Nexus; message menus offer
+  copying and activity inspection. Explicit Stop cancels the durable goal; closing a viewer
   only detaches and never resubmits work. Conversation checkpoints and execution progress belong
   to the shared engine.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
@@ -1728,6 +1728,16 @@ The sheet and desk widget use `AskSurface`, backed by a shared conversation
 session. History, draft, selected conversation, live voice and Activity stay
 consistent across both surfaces. `SdkAskTransport` calls the server's
 permission-scoped MemQL agent; test transports live under `test/ask`.
+
+Message actions live in each message's upper-right menu: Copy message, Copy
+details and View activity. Hover and keyboard focus use the same quiet wash as
+Fleet Details, and touch keeps the menu button visible. The header has no
+Activity action. Returning from activity restores the message's focus and the
+conversation's draft and scroll position. Events are recorded on request turns;
+a request, its acknowledgment and its result share that turn's activity. Copy
+details identifies the selected message and explicitly records that scope.
+Unrelated turns and unassociated dictation are excluded. Behavior is covered by
+`test/ask/messageInteractions.test.tsx` and `test/ask/activityPanel.test.tsx`.
 
 Quick replies stay inline. Longer requests return a durable queue receipt, free
 the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to

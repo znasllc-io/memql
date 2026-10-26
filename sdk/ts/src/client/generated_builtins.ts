@@ -1215,6 +1215,33 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
   return this.executeNamed("composeRunRecipe", buildComposeRunRecipe(args), opts);
 };
 
+/** Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation. */
+export interface ContinueRunArgs {
+  runId: string;
+  runVersion: string;
+  requestId: string;
+  feedback: string;
+}
+
+export function buildContinueRun(args: ContinueRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("runVersion: " + renderMemQLValue(args.runVersion));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("feedback: " + renderMemQLValue(args.feedback));
+  return "builtin continueRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    continueRun(args: ContinueRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.continueRun = function (this: QueryClient, args: ContinueRunArgs = {} as ContinueRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("continueRun", buildContinueRun(args), opts);
+};
+
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
   /** Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice. */
@@ -1647,6 +1674,38 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetCapacity = function (this: QueryClient, args: FleetCapacityArgs = {} as FleetCapacityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetCapacity", buildFleetCapacity(args), opts);
+};
+
+/** Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup. */
+export interface FleetEnergySettingsArgs {
+  registrationId: string;
+  // Enum: read | save | confirm
+  action: string;
+  revision?: string;
+  secretSettings?: Record<string, unknown>;
+  provider?: string;
+  tariffName?: string;
+}
+
+export function buildFleetEnergySettings(args: FleetEnergySettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.revision !== undefined) parts.push("revision: " + renderMemQLValue(args.revision));
+  if (args.secretSettings !== undefined) parts.push("secretSettings: " + renderMemQLValue(args.secretSettings));
+  if (args.provider !== undefined) parts.push("provider: " + renderMemQLValue(args.provider));
+  if (args.tariffName !== undefined) parts.push("tariffName: " + renderMemQLValue(args.tariffName));
+  return "builtin fleetEnergySettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetEnergySettings(args: FleetEnergySettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetEnergySettings = function (this: QueryClient, args: FleetEnergySettingsArgs = {} as FleetEnergySettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetEnergySettings", buildFleetEnergySettings(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */

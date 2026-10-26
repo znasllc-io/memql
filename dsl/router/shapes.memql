@@ -28,6 +28,9 @@ shape budget budgetFull {
 /// something a reader of this list should not see.
 @row
 shape call routerDecision {
+  apiEquivalent
+  electricityEstimate
+  actualBilling
   row.id
   row.createdAt
   requestId

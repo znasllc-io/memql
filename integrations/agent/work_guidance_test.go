@@ -17,13 +17,23 @@ type guidanceLoopEngine struct {
 	workPromptEngine
 	messages     []memql.WorkGuidance
 	acknowledged []string
+	onSave       func([]common.ChatMessage)
 }
 
-func (e *guidanceLoopEngine) ReadWorkGuidance(context.Context) ([]memql.WorkGuidance, error) {
-	return append([]memql.WorkGuidance(nil), e.messages...), nil
+func (e *guidanceLoopEngine) SaveWorkContinuation(ctx context.Context, messages []common.ChatMessage) error {
+	if e.onSave != nil {
+		e.onSave(messages)
+	}
+	return e.workPromptEngine.SaveWorkContinuation(ctx, messages)
 }
-func (e *guidanceLoopEngine) AcknowledgeWorkGuidance(_ context.Context, ids []string) error {
-	e.acknowledged = append(e.acknowledged, ids...)
+
+func (e *guidanceLoopEngine) ReadWorkGuidancePage(_ context.Context, after memql.WorkGuidanceCursor) (memql.WorkGuidancePage, error) {
+	return memql.WorkGuidancePageAfter(e.messages, after), nil
+}
+func (e *guidanceLoopEngine) AcknowledgeWorkGuidancePage(_ context.Context, through memql.WorkGuidanceCursor) error {
+	for _, row := range e.messages[:through.Count] {
+		e.acknowledged = append(e.acknowledged, row.ID)
+	}
 	return nil
 }
 
@@ -79,7 +89,7 @@ func TestRunningWorkGuidancePreemptsOnlyUnstartedCallsInBothLanes(t *testing.T) 
 						return
 					}
 					require.Empty(t, engine.acknowledged, "cannot claim received before model responds")
-					require.Contains(t, messages[len(messages)-1].Content, "Stop the remaining action")
+					require.Contains(t, lastGuidanceUser(messages), "Stop the remaining action")
 					if arrival == "between-tools" {
 						require.Contains(t, fmt.Sprint(messages), "completed-effect")
 						paired := map[string]string{}
@@ -126,7 +136,7 @@ func TestWorkGuidanceRemainsQueuedWhenReasoningFails(t *testing.T) {
 			r.engine = engine
 			p := &guidanceLoopProvider{}
 			p.before = func(_ int, messages []common.ChatMessage) {
-				require.Contains(t, messages[len(messages)-1].Content, "Preserve the prior result")
+				require.Contains(t, lastGuidanceUser(messages), "Preserve the prior result")
 			}
 			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "root", GoalId: "goal", OwnerUserId: "owner", StepKey: "section"})
 			var err error
@@ -139,4 +149,79 @@ func TestWorkGuidanceRemainsQueuedWhenReasoningFails(t *testing.T) {
 			require.Empty(t, engine.acknowledged)
 		})
 	}
+}
+
+func lastGuidanceUser(messages []common.ChatMessage) string {
+	for n := len(messages) - 1; n >= 0; n-- {
+		if messages[n].Role == "user" {
+			return messages[n].Content
+		}
+	}
+	return ""
+}
+
+func TestWorkGuidancePagesResumeSavedCursorBeforeAnotherOperation(t *testing.T) {
+	engine := &guidanceLoopEngine{}
+	for n := range 80 {
+		engine.messages = append(engine.messages, memql.WorkGuidance{ID: fmt.Sprintf("note-%03d", n), Prompt: fmt.Sprintf("Instruction %d: %s", n, strings.Repeat("retain receipts; ", 50))})
+	}
+	r := testReplier()
+	r.engine = engine
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "section"})
+	messages := []common.ChatMessage{{Role: "system", Content: "Current instructions"}, {Role: "user", Content: "Prepare the draft."}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "done", Name: "saveDraft", Arguments: `{}`}, {ID: "pending", Name: "publishDraft", Arguments: `{}`}}}, {Role: "tool", ToolCallId: "done", Name: "saveDraft", Content: "saved exactly once"}}
+	cursor := workGuidanceCursor{}
+	out, changed, err := r.receiveWorkGuidance(ctx, &cursor, messages, []common.ToolCall{{ID: "pending", Name: "publishDraft", Arguments: `{}`}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Contains(t, fmt.Sprint(out), "saved exactly once")
+	require.Contains(t, fmt.Sprint(out), "not_started")
+	require.Contains(t, lastGuidanceUser(out), "Instruction 79:")
+	state, _, err := recoveryState(engine.savedContinuation)
+	require.NoError(t, err)
+	require.Equal(t, 80, state.GuidanceCursor.Count)
+	require.Empty(t, engine.acknowledged, "saving a page is not a model acknowledgment")
+	// A fresh worker reconstructs its cursor from the owned saved exchange.
+	peer := testReplier()
+	other := &guidanceLoopEngine{messages: engine.messages}
+	peer.engine = other
+	restored, changed, err := peer.receiveWorkGuidance(ctx, &workGuidanceCursor{}, engine.savedContinuation, nil)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, engine.savedContinuation, restored)
+	other.messages = append(other.messages, memql.WorkGuidance{ID: "new-correction", Prompt: "Leave the draft unpublished."})
+	restored, changed, err = peer.receiveWorkGuidance(ctx, &workGuidanceCursor{}, restored, nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Contains(t, lastGuidanceUser(restored), "Leave the draft unpublished.")
+	require.NotContains(t, lastGuidanceUser(restored), "Instruction 0:", "old instructions are not redelivered as fresh guidance")
+}
+
+func TestWorkGuidanceMigrationDoesNotRearmKnownLaterPages(t *testing.T) {
+	e := &guidanceLoopEngine{}
+	state := workRecoveryState{Version: 1, ReviewActive: true, DiscoveryRounds: 3}
+	for n := range 40 {
+		id := fmt.Sprintf("old-%02d", n)
+		e.messages = append(e.messages, memql.WorkGuidance{ID: id, Prompt: "Keep the completed receipt."})
+		state.GuidanceIDs = append(state.GuidanceIDs, id)
+	}
+	saves := 0
+	e.onSave = func(messages []common.ChatMessage) {
+		saves++
+		s, _, err := recoveryState(messages)
+		require.NoError(t, err)
+		require.True(t, s.ReviewActive, "regrouping historical guidance is not new progress")
+		require.Equal(t, 3, s.DiscoveryRounds)
+		if s.GuidanceCursor.Count < 40 {
+			require.Len(t, s.GuidanceIDs, 40, "a peer needs the remaining migration identities")
+		} else {
+			require.Empty(t, s.GuidanceIDs)
+		}
+	}
+	r := testReplier()
+	r.engine = e
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "section"})
+	_, changed, err := r.receiveWorkGuidance(ctx, &workGuidanceCursor{}, recoveryMessages(t, state), nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, 3, saves)
 }

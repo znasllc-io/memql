@@ -173,9 +173,9 @@ func (v *functionValidator) validateFunctionArgs(fn *Function, args map[string]a
 const redactedArgValue = "<redacted>"
 
 // argValueForMessage returns what to interpolate for a rejected value: the
-// value itself, or the redaction placeholder when the field is @secret.
+// value itself, or a placeholder for declared secret or diagnostic-private fields.
 func argValueForMessage(field *FunctionArgsField, value any) any {
-	if field != nil && field.Secret {
+	if field != nil && (field.Secret || field.Redact) {
 		return redactedArgValue
 	}
 	return value
@@ -187,7 +187,7 @@ func argValueForMessage(field *FunctionArgsField, value any) any {
 // non-secret message is unchanged, while the placeholder stays unquoted and
 // therefore unmistakable for a real value that happens to read "<redacted>".
 func quotedArgValueForMessage(field *FunctionArgsField, value string) string {
-	if field != nil && field.Secret {
+	if field != nil && (field.Secret || field.Redact) {
 		return redactedArgValue
 	}
 	return strconv.Quote(value)
@@ -231,7 +231,7 @@ func validateArgsField(args map[string]any, field *FunctionArgsField, prefix str
 		}
 	}
 	if strings.TrimSpace(field.Format) != "" {
-		if err := validateFieldFormat(fieldPath, value, field.Format, field.Secret); err != nil {
+		if err := validateFieldFormat(fieldPath, value, field.Format, field.Secret || field.Redact); err != nil {
 			return err
 		}
 	}

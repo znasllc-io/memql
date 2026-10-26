@@ -80,7 +80,11 @@ func (i *Integration) continueWorkProgressLocked(ctx context.Context, rc common.
 	if err != nil {
 		return false, err
 	}
-	if run == nil || run["cancelRequested"] == true || rowString(run, "status") != runStatusRunning || memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
+	// Compilation and remedies have the same progress contract as execution,
+	// but only their still-current native claim may renew. A matching status
+	// alone is not authority, and terminal answer checks cannot extend work.
+	status := rowString(run, "status")
+	if (status != runStatusRunning && status != runStatusCompiling && status != runStatusWaiting) || i.admitProviderPhase(ctx, rc, run) != nil {
 		return false, nil
 	}
 	goal, err := i.store().goalForOwner(ctx, rc.GoalId)
@@ -218,6 +222,15 @@ func (i *Integration) continueFromProgressFeedback(ctx context.Context, approval
 	}
 	if err := i.validateProgressCheckpoint(ctx, approval); err != nil {
 		return err
+	}
+	if rowMap(approval, "subject")["continuationAllowed"] == false {
+		// Recheck under the workload gate. A stale lifetime-policy stop may
+		// use an already-granted window, never buy another one or clear its
+		// evidence epoch. The ordinary decision/resume receipt is idempotent.
+		if i.progressStopWithinCurrentWindow(ctx, approval, run) {
+			return nil
+		}
+		return errProgressLimit
 	}
 	goal, err := i.store().goalForOwner(ctx, rowString(run, "goalId"))
 	if err != nil || goal == nil {

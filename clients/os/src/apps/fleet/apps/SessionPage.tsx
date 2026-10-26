@@ -1,3 +1,4 @@
+import { CostEstimate } from "../../../kit/CostEstimate";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { feedIsBehind } from "../../../live/useLiveCollection";
@@ -121,7 +122,7 @@ function SessionBody({
           <Fact label="Tokens out" value={<Measure figure={session.usage.outputTokens} />} copyValue={figureText(session.usage.outputTokens)} />
           <Fact label="Tokens" value={<Measure figure={totalTokens(session)} />} copyValue={figureText(totalTokens(session))} />
           <Fact
-            label="Reported cost"
+            label="App cost report (billing unverified)"
             value={<Measure figure={session.usage.costUSD} format={costText} />}
             copyValue={figureText(session.usage.costUSD, costText)}
           />
@@ -135,6 +136,7 @@ function SessionBody({
           {session.runId === "" ? null : <Fact label="Run" value={session.runId} mono copyValue={session.runId} />}
           {session.stepId === "" ? null : <Fact label="Step" value={session.stepId} mono copyValue={session.stepId} />}
         </Facts>
+        <CostEstimate estimate={session.usage.apiEquivalent} />
 
         {session.usage.known ? null : (
           <p className="os-caption">

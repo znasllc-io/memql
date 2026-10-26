@@ -167,6 +167,14 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 		return false
 	}
 
+	// Decode explanatory model text only after native control classification.
+	// Quoted vendor errors in a gap must not become a new terminal/limit code.
+	if evidence.RuleId == "plan.unfinishedStep" {
+		if gap, valid := work.UnfinishedStepGap(sig.ErrorMessage); valid {
+			evidence.Reason += " Remaining current-step work: " + gap
+		}
+	}
+
 	// THE RUN-WIDE RETRY BUDGET IS READ ONLY WHEN THE ACT COULD SPEND IT: the
 	// three symptoms whose act runs the work again. Every other failure costs
 	// no read. A budget that cannot be read is a budget of nothing, so the run

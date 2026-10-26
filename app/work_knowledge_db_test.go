@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -82,6 +83,7 @@ func TestWorkDBRequiredKnowledgeReachesPromptOnAnotherReplica(t *testing.T) {
 	require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 	require.NoError(t, rules.Finalize())
 	rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, reader.Logger)
+	reader.SetAIResolver(rtr)
 	adapter := &CognitionEngineAdapter{Engine: reader}
 	replier, err := agent.NewReplier(adapter, rtr, reader.Logger)
 	require.NoError(t, err)
@@ -142,8 +144,11 @@ func TestWorkDBRequiredKnowledgeReachesPromptOnAnotherReplica(t *testing.T) {
 		// normal runAgentTurn execution records before selecting skills.
 		write("createWorkStep", map[string]any{"stepId": key + step, "runId": runID, "key": step, "seq": 0, "stepType": "automation", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 		ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: step, Mode: common.RunModeLive})
+		beforeReviews := len(provider.reviews)
 		result, err := replier.Handle(ctx, &memqlv1.AgentGenerateTurnMsg{RequestId: key + step, AgentId: "synthetic", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "synthetic", Role: "assistant"}, Hints: map[string]string{agent.ExecutionLaneHintKey: lane}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Read the current manual"}}}, knowledgeTurnSink{})
 		require.NoError(t, err)
+		require.Len(t, provider.reviews, beforeReviews+1, "knowledge retrieval cannot bypass reply review")
+		require.Contains(t, fmt.Sprint(provider.reviews[beforeReviews]), "Synthetic evidence recorded")
 		return result
 	}
 	for _, lane := range []string{"background", "interactive"} {

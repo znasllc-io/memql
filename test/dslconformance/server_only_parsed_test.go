@@ -173,6 +173,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// actor.userId alone cannot enforce private credential admission, sealed
+		// address values, revision fencing or separation of research/attestation.
+		{Path: "worker/mutations.memql", Name: "storeWorkerEnergyProfile"}: true,
 		// Capacity and revision admission cannot be replaced by actor.userId scoping.
 		{Path: "worker/mutations.memql", Name: "setWorkerModelSetup"}: true,
 		// Reports require a bounded harness turn; the singleton is seeded without an actor.
@@ -1436,6 +1439,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// an established filesystem. Native dispatch reads consent and takes
 		// an absence fence before creating the immutable binding.
 		{Path: "workbench/mutations.memql", Name: "bindWorkbenchExecution"}: true,
+		// Row ownership cannot establish current machine consent or authorize
+		// a filesystem generation transition. The native lifecycle rechecks
+		// run authority and, for renewal/recovery, machine consent; it validates
+		// the transition and fences the exact row version before this write.
+		{Path: "workbench/mutations.memql", Name: "advanceWorkbenchExecution"}: true,
 		// Activity is measured by the stream holder. Owner scoping alone would
 		// let a browser forge live counts without holding that stream.
 		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,

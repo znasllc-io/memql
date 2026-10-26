@@ -418,6 +418,8 @@ func (i *Integration) nudgeWait(ctx context.Context, run map[string]any, runId, 
 	}
 	read, fresh := rowMap(run, "waitingOn"), rowMap(current, "waitingOn")
 	if rowString(fresh, "kind") != rowString(read, "kind") || rowString(fresh, "since") != rowString(read, "since") ||
+		rowString(fresh, "subject") != rowString(read, "subject") || rowString(fresh, "approvalKind") != rowString(read, "approvalKind") ||
+		rowString(fresh, "resumeAt") != rowString(read, "resumeAt") ||
 		rowString(current, "heartbeatAt") != rowString(run, "heartbeatAt") {
 		return false
 	}
@@ -542,10 +544,7 @@ func (i *Integration) serveRemedy(ctx context.Context, remedy Remedy, kind, runI
 	}
 	ctx = common.ContextWithRun(ctx, rc)
 	ctx = memql.ContextWithBudgetScope(ctx, memql.BudgetScopeId("run", runId), memql.BudgetScopeId("goal", rc.GoalId))
-	ctx = context.WithValue(ctx, providerPhaseKey{}, providerPhase{
-		runID: rc.RunId, goalID: rc.GoalId, ownerID: rc.OwnerUserId,
-		status: runStatusWaiting, waitKind: kind, since: since, stepKey: stepKey, expiresAt: expiresAt,
-	})
+	ctx = context.WithValue(ctx, providerPhaseKey{}, bindProviderPhase(rc, providerPhase{status: runStatusWaiting, waitKind: kind, since: since, stepKey: stepKey, expiresAt: expiresAt}))
 
 	took := false
 	if kind == waitKindReplan {
@@ -910,6 +909,34 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 				out.FailedStep = entry
 			}
 		}
+	}
+	// A failed top-level agent step may already have effects. Give the planner
+	// retained, owner-scoped source receipts before replacing that step; its
+	// failure status is not evidence that every tool call failed. Missing access
+	// refuses replanning rather than silently treating prior effects as absent.
+	if out.FailedStep != nil {
+		if gap, unfinished := work.UnfinishedStepGap(rowString(out.FailedStep, "errorMessage")); unfinished {
+			reader, supported := i.engine.(interface {
+				ReadWorkStepSources(context.Context, string, string) (map[string]any, error)
+			})
+			if !supported {
+				return ReplanContext{}, fmt.Errorf("unfinished operation source reader unavailable")
+			}
+			sources, sourceErr := reader.ReadWorkStepSources(actorCtx, runId, rowString(out.FailedStep, "key"))
+			if sourceErr != nil {
+				return ReplanContext{}, sourceErr
+			}
+			out.FailedStep["unfinishedOperation"] = gap
+			out.FailedStep["partialOperationSources"] = sources
+		}
+	}
+	// A finished plan can still leave the owner's goal unmet. Its completed
+	// receipts remain fixed; this synthetic planning target is not a failed
+	// step receipt and never authorizes replay of the completed suffix.
+	feedback := rowMap(run, "feedbackContinuation")
+	if guidedTarget && rowString(feedback, "requestId") != "" &&
+		rowString(rowMap(run, "waitingOn"), "feedbackRequestId") == rowString(feedback, "requestId") {
+		out.FailedStep = map[string]any{"key": stepKey, "errorMessage": reason, "symptom": work.SymptomPlan, "finishedResultFeedback": true}
 	}
 	return out, nil
 }

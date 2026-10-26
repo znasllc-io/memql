@@ -33,11 +33,16 @@ const chunkRetryDelay = 200 * time.Millisecond
 // somebody's laptop. It lives inside the session scaffolding, so it is
 // excluded from the produced-file sweep and removed with the session.
 func (s *session) openTranscript(workspace string) error {
-	path := filepath.Join(workspace, transcriptRel)
-	if err := os.MkdirAll(filepath.Dir(path), configDirMode); err != nil {
+	dir := filepath.Join(workspace, sessionScaffoldDir)
+	if err := os.MkdirAll(dir, configDirMode); err != nil {
 		return fmt.Errorf("app session: transcript: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	// Sessions of one run share their working files, but may overlap during
+	// recovery or helper inference. A fixed name truncates another transcript
+	// and lets its cleanup unlink this session's still-open file. Allocate an
+	// exclusive private file; its actual path stays bound to this handle until
+	// successful retention. A failed push keeps these exact bytes for recovery.
+	f, err := os.CreateTemp(dir, "transcript-*.log")
 	if err != nil {
 		return fmt.Errorf("app session: transcript: %w", err)
 	}
@@ -275,7 +280,7 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 
 	var ids []string
 	var failures []string
-	manifest := outputManifest{Version: 1, SessionID: s.id}
+	manifest := outputManifest{Version: 2, SessionID: s.id}
 
 	// The RESOLVED workspace, not the start's: a start that named none ran
 	// in a directory this machine chose, and what the app made there is
@@ -292,32 +297,9 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 			s.logger.Warn("app session output not pushed", "file", note)
 			_ = s.emitChunk(StreamStderr, []byte("[memql] not pushed to the Library: "+note+"\n"))
 		}
-		for _, f := range produced {
-			// A file holding this session's credential is not output: the
-			// app copied the bearer out of its configuration, and a Library
-			// artifact would keep a credential nothing can revoke long after
-			// the session that held it. A file that cannot be checked is not
-			// pushed either, and counts as a failed push.
-			held, err := s.redact.holdsFile(f.path)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s could not be read: %v", f.rel, err))
-				continue
-			}
-			if held {
-				note := f.rel + " (it holds this session's credential)"
-				s.logger.Warn("app session output not pushed", "file", note)
-				_ = s.emitChunk(StreamStderr, []byte("[memql] not pushed to the Library: "+note+"\n"))
-				manifest.Omitted = append(manifest.Omitted, note)
-				continue
-			}
-			id, err := library.Push(pushCtx, f.path, artifactName(f.rel))
-			if err != nil {
-				failures = append(failures, err.Error())
-				continue
-			}
-			ids = append(ids, id)
-			manifest.Files = append(manifest.Files, outputArtifact{Path: filepath.ToSlash(f.rel), Bytes: f.size, ArtifactID: id})
-		}
+		producedIDs, pushFailures := s.pushProduced(pushCtx, library, produced, &manifest)
+		ids = append(ids, producedIDs...)
+		failures = append(failures, pushFailures...)
 	}
 
 	if transcriptPath != "" {
@@ -359,14 +341,22 @@ type outputManifest struct {
 	Version      int              `json:"version"`
 	SessionID    string           `json:"sessionId"`
 	TranscriptID string           `json:"transcriptArtifactId,omitempty"`
+	Archives     []outputArchive  `json:"archives,omitempty"`
 	Files        []outputArtifact `json:"files,omitempty"`
 	Omitted      []string         `json:"omitted,omitempty"`
 	Failures     []string         `json:"failures,omitempty"`
 }
 type outputArtifact struct {
-	Path       string `json:"path"`
-	Bytes      int64  `json:"bytes"`
+	Path         string `json:"path"`
+	Bytes        int64  `json:"bytes"`
+	ArtifactID   string `json:"artifactId"`
+	SHA256       string `json:"sha256"`
+	ArchiveEntry string `json:"archiveEntry,omitempty"`
+}
+type outputArchive struct {
 	ArtifactID string `json:"artifactId"`
+	Bytes      int64  `json:"bytes"`
+	SHA256     string `json:"sha256"`
 }
 
 // sendEnd closes the session on the wire, exactly once.
