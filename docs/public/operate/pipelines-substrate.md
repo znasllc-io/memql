@@ -735,7 +735,7 @@ because there is none. Three other things must hold instead.
    capability descriptor. The router requires an explicit scope accepting the
    requested repository before dispatch. Missing scope metadata is unknown
    consent: upgrade and reconnect older workers before using them for builds.
-   It must also report `workerHost.pipeline_step` action contract **3**. An older,
+   It must also report `workerHost.pipeline_step` action contract **5**. An older,
    missing or unknown contract refuses before dispatch; operator labels cannot
    override it. Native OS/architecture comes from the binary descriptor and is
    rechecked on the receiving replica.
@@ -846,8 +846,8 @@ until upgraded; there is no fallback to an inline archive.
 clone script, over `https` only), the command in the machine's own environment,
 its output streamed back masked, the artifacts packed, the checkout removed --
 is the Cockpit's, and
-[Pipeline steps on this machine](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/pipelines.md)
-(`docs/pipelines.md` in the memql-cockpit repository) says it. On the engine's
+[Pipeline steps on this machine](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/pipelines.md)
+(`cockpit/docs/pipelines.md` in this repository) says it. On the engine's
 side:
 
 - The agent mints the clone token (one repository, contents read). The dispatch
