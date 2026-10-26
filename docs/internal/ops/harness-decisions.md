@@ -263,6 +263,19 @@ that requires held-out goals, interaction evidence and measured interventions.
 
 ## Execution decision map
 
+Explicit invocation is a supported automation entry path. The authoring emission
+prompt previously described only event and cron triggers, causing a manual Work
+request to return no constructs even though the loader accepts `@template`.
+The prompt now distinguishes a caller-invoked template from an event/scheduled
+automation: a template declares its args and carries no trigger; adding one
+would introduce an unintended second execution path. Compilation still uses
+Gate 1, and execution retains the caller's current authority, captured routing
+and normal run lifecycle. This guidance creates no route grant and does not
+bypass App delegation when the resulting automation actually calls an agent.
+`TestTemplateIsAThirdWayToBeReachable`, `TestTemplateMayNotAlsoBeTriggered` and
+`TestTheWorkTemplatesLoadAndAreCallable` cover the native loader contract. They
+do not prove that a model will emit the requested automation correctly.
+
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
 | Select a model and execution route | Use the current policy and requested reasoning level. An Apps route does not grant tools, host access or ownership. Missing app-session wiring is a platform fault, not permission to open another machine. | [App session provider](../../../component/memql/app_session_provider.go) |
