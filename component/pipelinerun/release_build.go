@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
 
@@ -18,6 +17,7 @@ import (
 // adapters cannot accidentally advertise a proof they do not implement.
 type releaseBuildGitHub interface {
 	ObserveReleaseSource(context.Context, string, string, string, string) (githubapp.ReleaseSourceEvidence, error)
+	ObserveReleaseTag(context.Context, string, string, string, string) (string, bool, error)
 }
 
 func (g *packagesGitHub) ObserveReleaseSource(ctx context.Context, token, repository, branch, selected string) (githubapp.ReleaseSourceEvidence, error) {
@@ -26,6 +26,14 @@ func (g *packagesGitHub) ObserveReleaseSource(ctx context.Context, token, reposi
 		return githubapp.ReleaseSourceEvidence{}, err
 	}
 	return c.ObserveReleaseSource(ctx, token, owner, repo, branch, selected)
+}
+
+func (g *packagesGitHub) ObserveReleaseTag(ctx context.Context, token, repository, tag, selected string) (string, bool, error) {
+	c, owner, repo, err := g.target(repository)
+	if err != nil {
+		return "", false, err
+	}
+	return c.ObserveReleaseTag(ctx, token, owner, repo, tag, selected)
 }
 
 func validReleaseCommit(sha string) bool {
@@ -142,15 +150,19 @@ func (i *Integration) inspectReleaseBuild(ctx context.Context, r pipelines.Relea
 		out.Checks = append(out.Checks, pipelines.ReleaseBuildCheck{Context: check.Context, AppID: check.AppID, SHA: check.SHA, Status: check.Status, Conclusion: check.Conclusion})
 	}
 	if r.Tag != "" {
-		sha, _, readErr := d.GitHub.CommitForRef(ctx, token, p.Repository, "refs/tags/"+r.Tag)
-		if readErr != nil && githubapp.StatusOf(readErr) != http.StatusNotFound {
+		// Tag absence is a Git-reference observation, not a failed commit
+		// resolution: GitHub uses 422 for both missing refs and invalid input.
+		sha, exists, readErr := provider.ObserveReleaseTag(ctx, token, p.Repository, r.Tag, proof.SHA)
+		if readErr != nil {
 			return empty, p, "", readErr
 		}
-		if readErr == nil {
+		if exists {
 			if !validReleaseCommit(sha) {
 				return empty, p, "", errors.New("release tag does not name a valid commit")
 			}
 			out.TagExists, out.TagSHA = true, sha
+		} else if sha != "" {
+			return empty, p, "", errors.New("absent release tag returned a commit")
 		}
 	}
 	selected := r

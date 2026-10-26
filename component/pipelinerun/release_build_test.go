@@ -30,6 +30,17 @@ func (g *releaseBuildRemote) ObserveReleaseSource(ctx context.Context, token, re
 	return g.proof, g.proofErr
 }
 
+func (g *releaseBuildRemote) ObserveReleaseTag(ctx context.Context, token, repository, tag, selected string) (string, bool, error) {
+	if selected != g.proof.SHA {
+		return "", false, errors.New("unbound tag observation")
+	}
+	sha, _, err := g.CommitForRef(ctx, token, repository, "refs/tags/"+tag)
+	if githubapp.StatusOf(err) == 404 {
+		return "", false, nil
+	}
+	return sha, err == nil, err
+}
+
 func configureReleaseBuild(t *testing.T, h *harness) (pipelines.ReleaseBuildRequest, *releaseBuildRemote) {
 	t.Helper()
 	p := testPipeline(DeliveryWebhook)

@@ -29,6 +29,15 @@ verified commits. For example, publish the engine release first, then merge a
 separate Cockpit version change and release its later commit. Keep each tag
 pinned to its reviewed source; a rerun cannot change the recorded version.
 
+Release preparation distinguishes a new tag from a failed source lookup. It
+checks the exact Git tag reference, and accepts a missing reference only while
+the selected source commit remains readable through the same connection.
+Authentication, permission, transport and validation errors stop preparation.
+An existing lightweight or annotated tag is resolved through its captured
+immutable Git objects and checked again for movement; its conflicting source remains visible rather than being
+reclassified as a new tag. Inspection creates nothing. The native release
+operations retain their normal source checks and separate publication approval.
+
 ## Reuse a release profile
 
 An operator can opt in to `MEMQL_RELEASE_PROFILES` instead of adding a new

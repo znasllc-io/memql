@@ -1104,3 +1104,38 @@ validation or delivery fails, preserving that original error. Cancellation,
 truncation and a reply lost before completion leave the witness fenced.
 `TestManagerReleasesOnlyCompletedRuntimeErrors` exercises real runtime responses
 and a second manager against the durable witness.
+
+
+## Release preparation observes tag absence through Git references
+
+A new release can have no tag yet. GitHub answers that absence differently at
+its two read endpoints: `/git/ref/tags/<tag>` returns 404, while resolving the
+same `refs/tags/<tag>` through `/commits/` returns 422. The latter status also
+covers invalid requests, so treating every 422 as absence would hide failures.
+`githubapp.ObserveReleaseTag` now uses the exact reference endpoint. A 404 is
+accepted only after the same connection reads the exact selected source commit;
+a hidden repository or revoked contents grant therefore cannot become an
+available tag. Other provider errors stop the operation without a fallback.
+
+For an existing lightweight or annotated tag, the adapter validates the exact
+reference and object, follows at most eight annotated tag objects with cycle
+and identity checks, verifies the exact resolved commit through the same grant,
+and re-reads the reference. Resolving by the mutable tag name would allow an
+ABA movement: the name could temporarily resolve another commit and return to
+the initial object before the final read. Captured immutable object SHAs avoid
+that ambiguity, matching the publication check's bounded peeling contract.
+Movement, deletion, malformed evidence or failed resolution refuses. Inspection retains
+an existing tag's conflicting commit for the native release gate. It writes no
+tag, run, check or approval. Existing current-owner, source and grant checks
+still run after observation, and native release creation/publication remains
+the concurrency and authority boundary; this read is not a reservation.
+
+`TestReleaseBuildTagObservationUsesExactGitReference` crosses the production
+pipeline adapter and HTTP codec. It reproduces the real 404/422 split, covers
+both tag types, annotated ABA movement, bounded chains and names containing
+slashes, and refuses changed references,
+masked repository errors, revoked permissions, invalid data and transport
+failure. Existing `TestReleaseBuildRefusesChangedAuthorityBeforeOpening` and
+`TestReleaseBuildRechecksSourceInsideTheOpeningGate` retain the effect fences.
+These deterministic tests do not establish live GitHub or release qualification
+for a newly deployed controller. No provider retry or exception is added.
