@@ -12,6 +12,11 @@ import (
 	"github.com/znasllc-io/memql/core/component"
 )
 
+// RunDelivery also retains work.run.recovery scheduling hints. They are not
+// graph writes: the consumer must re-read the exact owned stale run before
+// claiming, and the producer observes a real claim rather than treating delivery
+// as progress. This reuses the lifecycle cursor; it transfers no live session.
+//
 // RunDelivery routes the run-lifecycle graph events (graph.node.created /
 // graph.node.updated for v1:work:run) through the durable DeliverySubstrate
 // (memql#1264, the #1263 outbox + cursor backbone), giving run dispatch a real
@@ -165,9 +170,13 @@ func (d *RunDelivery) run(ctx context.Context, markStarted func()) error {
 	d.ctx = ctx
 	d.mu.Unlock()
 
-	d.unsubscribe = d.localBus.Subscribe("graph.node.#", func(event events.Event) {
+	stopGraph := d.localBus.Subscribe("graph.node.#", func(event events.Event) {
 		d.onLocalEvent(ctx, event)
 	}, events.WithSubscriberName("nodeRunDelivery"))
+	stopRecovery := d.localBus.Subscribe(events.TopicWorkRunRecovery, func(event events.Event) {
+		d.onLocalEvent(ctx, event)
+	}, events.WithSubscriberName("nodeRunRecoveryDelivery"))
+	d.unsubscribe = func() { stopGraph(); stopRecovery() }
 
 	// Consumer side (executing replica): subscribe the run-lifecycle key once. An
 	// existing cursor row resumes exactly; a brand-new consumer (fresh replica
@@ -355,10 +364,11 @@ func (d *RunDelivery) warn(msg string, args ...any) {
 
 // --- pure helpers (no receiver state; unit-testable directly) ----------------
 
-// isRunTopic reports whether a topic is a run-lifecycle graph event
-// (created / updated for v1:work:run). Deleted events are not part of the
+// isRunTopic admits run lifecycle creation/updates and the explicitly typed
+// recovery hint. Deleted events are not part of the
 // dispatch stream the executing replica reacts to.
 func isRunTopic(topic string) bool {
-	return topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptRun) ||
+	return topic == events.TopicWorkRunRecovery ||
+		topic == events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptRun) ||
 		topic == events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, conceptRun)
 }

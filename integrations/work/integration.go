@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/events"
 	"log/slog"
 	"strings"
 	"sync"
@@ -116,6 +117,9 @@ type Integration struct {
 	// nil seam in this struct, a nil one REFUSES rather than degrades --
 	// see SetRunClaimer.
 	runClaimer RunClaimer
+	// appRecoveryPublisher re-offers an existing stale Apps run over the mesh.
+	// It never changes the journal or grants an execution destination.
+	appRecoveryPublisher func(events.Event)
 
 	// answerChecks says whether THIS node serves the answer validator's check
 	// and, when it does, the claim that makes one answer version one check

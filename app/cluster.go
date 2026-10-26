@@ -270,6 +270,10 @@ func (a *App) cluster() {
 		// a run nobody will compile.
 		if work := a.lookupWorkIntegration(); work != nil {
 			work.EnableCompileViaEvent()
+			if a.clusterGuard != nil {
+				work.SetRunClaimer(a.clusterGuard.StrictClaimer())
+			}
+			work.SetAppRecoveryPublisher(a.eventBus.Publish)
 		}
 	}
 

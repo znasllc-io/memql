@@ -507,6 +507,65 @@ owned-turn prompt and delegation checks validate delivery of the instructions;
 the supervised goal must still supply observed target identity and outcome
 evidence. A screenshot of an old running build cannot close that evidence gap.
 
+## Apps placement before the execution claim
+
+A whole-step App session belongs to the agent that holds its computer's stream.
+A single inference call can be forwarded, but the running session and its tool
+conversation cannot. A retry previously let either agent win the shared run
+claim; the streamless winner then reported no available App while another agent
+held every eligible computer. Changing provider or granting computer access
+would not repair that placement error.
+
+For a persisted owner-selected `route:apps` or explicit `app:` source, the agent
+reads the owned journal and current App doors before claiming. A local eligible
+stream competes normally. An agent that sees only eligible peer streams yields
+without consuming the claim. The probe restores the current persisted owner and
+uses existing allow, sign-in, heartbeat, routing and quota filtering. It never
+opens a session, changes the selection cursor, supplies an owner choice or grants
+native computer tools. A read failure is unknown, not an empty fleet. With no
+eligible door anywhere, normal execution can report its existing NoModel result;
+placement neither silently falls back to paid inference nor waits indefinitely.
+The actual execution gate still checks authority, cancellation and stream state.
+
+Human settlement preparation remains first. A targeted model override keeps its
+requested App; an override to another source and mixed-source replay histories
+keep their existing placement. Auto and policy-chain routes retain ordinary
+arbitration. This change does not migrate an active session or solve a later step
+that changes sources, a stream that moves after preparation, or an unavailable
+MCP service. Those remain execution-time refusals with the existing journal and
+recovery controls.
+
+A stale Apps run can be recovered even when the maintenance leader executes no
+steps. `work.run.recovery` is a scheduling hint on the existing durable run
+lifecycle channel, not a graph write. It carries only run/owner identifiers and a
+hash of the stored generation, routing and real heartbeat. Receivers re-read that
+exact owned state, require it still to be stale and eligible, and use the same
+run/answer claim. Delayed hints cannot adopt a newer answer or rerun.
+
+The sweep waits at most two seconds for an actual recent shared claim, measured
+on the same database clock that timestamps arbitration. A message
+being sent is not execution or progress. Claim acquisition and the sweep's final
+fresh-read/abandon decision share one run-specific Work decision gate, so neither
+can invalidate the other's admission between read and write. Canonical and bare
+run identifiers retain their historical claim spellings; the shared gate and
+exact alias reads honor either existing claim with its unchanged lease rules.
+A recent real claim
+protects the claimant's first-heartbeat gap for only the existing heartbeat
+window. An old claim never renews that protection; an unclaimed or dead run
+still reaches its normal abandoned state. Unknown storage/delivery state is
+reported and left undecided. No heartbeat, goal acceptance, result, permission,
+new generation or separate execution lease is manufactured.
+
+Regression coverage is split at the actual seams:
+`TestWorkDBAppsRetryIsClaimedOnlyWhereTheComputerStreamLives` uses independent
+engine caches, the production dispatcher preparation and real shared claims;
+`TestAppDispatchDBClaimAndAbandonArbitrateAcrossReplicas` forces both decision-lock
+orderings against PostgreSQL; the companion stale-state test covers old claims,
+changed answers, cancellation and reruns. `TestRunRecoveryHintSurvivesRouteGapWithoutBecomingAGraphWrite`
+exercises the existing durable delivery hop. App doors and the eventual model
+invocation are fixtures in the dispatch test; these checks do not claim a live
+computer session, MCP readiness or production rollout was verified.
+
 ## Context pressure and optional work
 
 ### An answer received before the App stops

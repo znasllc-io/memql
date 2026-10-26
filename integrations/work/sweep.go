@@ -330,6 +330,19 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		// A takeover RESUMES rather than restarts: the seam loads the run's
 		// journal and resumes from the step that was in flight, so the steps
 		// that already ran are not re-executed.
+		if status == runStatusRunning && !driverOwned && appOwnedRun(run) {
+			claimed, abandoned, err := i.recoverAppRun(writeCtx, run, now, cutoff)
+			if err != nil {
+				i.log().Warn("work: Apps recovery could not be decided", "run", runId, "error", err)
+			}
+			if claimed {
+				res.Redispatched++
+			}
+			if abandoned {
+				res.Abandoned++
+			}
+			continue
+		}
 		if status != runStatusCompiling && !driverOwned && i.redispatchStale(writeCtx, run, runId, owner) {
 			res.Redispatched++
 			continue
