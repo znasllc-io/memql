@@ -468,6 +468,34 @@ still chooses which builds to run, their order and the later publication policy.
 The native runner fixes the builder image, security profile, resource bounds
 and output paths. An image build has no registry publication credential.
 
+Set `imageBuild.verificationOnly: true` when a required Dockerfile check needs
+no publishable image. The complete selected target still builds and exports;
+the runner hashes that temporary OCI archive and removes it. Only
+`.memql-image-build/verification.json` is retained (at most 512 KiB, including
+at most 64 KiB of BuildKit metadata). Its exact source, platform, target and
+public arguments are checked before storage. The durable step definition marks
+this producer as verification-only: its evidence can satisfy required checks,
+but neither release assembly nor publication coverage accepts its output as a
+release artifact. Ordinary image builds keep their existing OCI contract.
+
+Verification-only steps may explicitly select `fleet` or `pool` on
+`linux/amd64`. Selection requires both pipeline-step contract 5 and the live
+`pipelineImageVerification: 1` capability, checked again on the receiving agent.
+A label cannot grant the capability. Existing owner, repository, machine and
+compute-policy consent still apply. The worker must establish its fixed rootless
+runtime, aggregate resource limits and isolated network before source execution;
+missing prerequisites make this capability unavailable without disabling other
+worker functions. This is not permission to relax host hardening.
+
+Pool fallback remains limited to a confirmed capacity refusal before execution,
+under the captured compute policy and the current cloud spending gate. A lost
+reply or uncertain cleanup cannot start a second build elsewhere. Cloud fallback
+runs the full rootless target too and produces the same bounded verification
+receipt. Real Linux runtime/isolation qualification and exact-source checks are
+required before enabling this placement in an installation; compiler and fake
+process tests do not establish that qualification.
+
+
 ```yaml
 - name: build-edge
   platform: linux/arm64

@@ -57,8 +57,13 @@ func (s Step) RequiresFleet() bool {
 // during manifest compilation. Pool preference never changes runtime, grants
 // repository credentials, or turns a container job into a native command.
 func CheckPoolStep(step Step) error {
-	if step.Kind != StepCommand || step.Execution != ExecutionContainer || len(step.Needs) != 0 || step.ImageBuild != nil || step.GitHubReadToken || step.ImagePullSecret != "" || step.CheckoutHistory != "" {
-		return fmt.Errorf("Pool placement requires a portable container command without host needs, image builds or cluster-only credentials and checkout history.")
+	if step.Kind != StepCommand || step.Execution != ExecutionContainer || len(step.Needs) != 0 || (step.ImageBuild != nil && !step.ImageBuild.VerificationOnly) || step.GitHubReadToken || step.ImagePullSecret != "" || step.CheckoutHistory != "" {
+		return fmt.Errorf("Pool placement requires a portable container command without host needs, publishable image builds or cluster-only credentials and checkout history.")
+	}
+	if step.ImageBuild != nil {
+		if err := CheckImageVerificationStep(step); err != nil {
+			return err
+		}
 	}
 	return CheckExecution(step.Execution, step.Platform, true)
 }
@@ -85,8 +90,11 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 		}
 		if step.MemoryMiB < 512 || step.Run != "" || step.Image != "" || len(step.Services) != 0 || len(cachesFor(spec, step)) != 0 ||
 			len(step.Secrets) != 0 || step.ImagePullSecret != "" || len(step.Artifacts) != 0 || step.Packages != "" ||
-			execution != ExecutionContainer || PlacementOf(step) != PlacementCluster || len(stepNeeds(step)) != 0 {
-			return Refuse(CodeStepInvalid, scope, "imageBuild requires at least 512 MiB and cluster container execution without run, image, services, caches, secrets, artifacts or package selection.")
+			execution != ExecutionContainer || (!step.ImageBuild.VerificationOnly && PlacementOf(step) != PlacementCluster) || len(stepNeeds(step)) != 0 {
+			return Refuse(CodeStepInvalid, scope, "imageBuild requires at least 512 MiB and container execution without run, image, services, caches, secrets, artifacts or package selection; publishable builds require cluster placement.")
+		}
+		if step.ImageBuild.VerificationOnly && (step.GitHubReadToken || step.CheckoutHistory != "" || (PlacementOf(step) != PlacementCluster && platform != "linux/amd64")) {
+			return Refuse(CodeStepInvalid, scope, "Image verification admits no checkout credentials/history and requires native Linux amd64 for Fleet placement.")
 		}
 	}
 	if step.Image != "" && (execution == ExecutionNative || strings.ContainsFunc(step.Image, isSpaceOrControl)) {
@@ -113,8 +121,8 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	if placement != PlacementCluster && placement != PlacementFleet && placement != PlacementPool {
 		return Refuse(CodeStepInvalid, scope, "placement must be cluster, fleet or pool.")
 	}
-	if placement == PlacementPool && (execution != ExecutionContainer || len(stepNeeds(step)) != 0 || step.ImageBuild != nil || step.CheckoutHistory != "" || step.GitHubReadToken || step.ImagePullSecret != "") {
-		return Refuse(CodeStepInvalid, scope, "Pool placement requires a portable container command without host needs, image builds or cluster-only credentials and checkout history.")
+	if placement == PlacementPool && (execution != ExecutionContainer || len(stepNeeds(step)) != 0 || (step.ImageBuild != nil && !step.ImageBuild.VerificationOnly) || step.CheckoutHistory != "" || step.GitHubReadToken || step.ImagePullSecret != "") {
+		return Refuse(CodeStepInvalid, scope, "Pool placement requires a portable container command without host needs, publishable image builds or cluster-only credentials and checkout history.")
 	}
 	if placement == PlacementCluster && (execution == ExecutionNative || len(stepNeeds(step)) > 0) {
 		return Refuse(CodeStepInvalid, scope, "Native execution and host needs require fleet placement.")

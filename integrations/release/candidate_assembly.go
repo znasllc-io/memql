@@ -240,6 +240,9 @@ func (s *candidateAssemblyScope) readArtifact(ctx context.Context, args map[stri
 	if selected.Name == "" {
 		return nil, errors.New("artifact is outside the declared component")
 	}
+	if s.resolvedRuns[selected.Run].VerificationOnly[selected.StepKey] {
+		return nil, errors.New("image verification evidence cannot be a release artifact")
+	}
 	var proof pl.ReleaseWorkReceipt
 	for _, receipt := range s.resolvedRuns[selected.Run].Receipts {
 		if receipt.StepKey == selected.StepKey {

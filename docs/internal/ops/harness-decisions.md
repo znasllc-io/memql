@@ -1139,3 +1139,33 @@ failure. Existing `TestReleaseBuildRefusesChangedAuthorityBeforeOpening` and
 `TestReleaseBuildRechecksSourceInsideTheOpeningGate` retain the effect fences.
 These deterministic tests do not establish live GitHub or release qualification
 for a newly deployed controller. No provider retry or exception is added.
+
+
+### Verification-only image checks preserve release authority
+
+An explicit `imageBuild.verificationOnly` check can enter the Fleet pool only
+when the compiled operation retains the fixed target, source provenance and
+receipt path, and both persisted routing metadata and the live receiving worker
+offer `pipelineImageVerification: 1` with pipeline-step contract 5. Missing
+runtime prerequisites or host hardening constraints refuse this capability;
+ordinary worker functions and consent rules do not change. The bounded pool
+policy may choose admitted cloud work only after a confirmed pre-execution
+capacity refusal. Uncertain execution keeps the existing recovery fence.
+
+The full image target is exported before its digest is recorded, then the OCI
+archive is discarded. A typed receipt is validated before durable artifact
+storage. The producer's nonpublication marker lives in the Work definition and
+its fingerprint, so a different replica reconstructing release evidence refuses
+to promote that producer through either the OCI or file publication path.
+Verification receipts remain usable as required test evidence. This avoids
+retaining large, unneeded test images without weakening Dockerfile checks or
+turning a hash of discarded bytes into publication authority.
+
+Regression boundaries are `TestImageVerificationFleetDispatchAndArtifactRoundTrip`,
+`TestImageVerificationForwardedReceiverRechecksLiveCapability`,
+`TestImageVerificationPoolFallbackRetainsFullBuildAndNoReplay`,
+`TestImageVerificationReceiptIsValidatedBeforeArtifactStorage` and
+`TestVerificationEvidenceCannotBecomePublishedArtifactAcrossFreshJournalRead`.
+The process fixture checks the real cloud command's target/export/error path,
+not BuildKit isolation. Live Linux isolation, crash recovery and exact-source
+Dockerfile execution still require separate qualification before activation.

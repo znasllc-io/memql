@@ -208,6 +208,27 @@ func (s *step) collectStepArtifacts(ctx context.Context, pod *Pod, res *pl.StepR
 // storeArtifactSnapshot files a fully validated capture through the same
 // immutable receipt contract regardless of where the producer ran.
 func (f stepFiles) storeArtifactSnapshot(ctx context.Context, snapshot *ArtifactSnapshot, res *pl.StepResult, notes *noteList) error {
+	if f.run.ImageBuild != nil && f.run.ImageBuild.VerificationOnly {
+		if len(snapshot.Files) != 1 || snapshot.Files[0].Path != pl.ImageVerificationPath || snapshot.Files[0].Size > pl.ImageVerificationMaxBytes {
+			return errors.New("image verification returned unexpected artifacts")
+		}
+		file, err := snapshot.Files[0].Open()
+		if err != nil {
+			return err
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(file, pl.ImageVerificationMaxBytes+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if err := pl.ValidateImageVerificationReceipt(raw, f.run.SHA, f.run.Platform, f.run.ImageBuild); err != nil {
+			return err
+		}
+	}
+
 	slices.SortFunc(snapshot.Files, func(a, b SnapshotFile) int { return strings.Compare(a.Path, b.Path) })
 	for _, file := range snapshot.Files {
 		stored, err := f.storeVerifiedArtifact(ctx, file, notes)

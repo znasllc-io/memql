@@ -602,3 +602,14 @@ func (p *RoutePlan) filterCandidates(reason func(Candidate) string) {
 	p.Candidates = filter(p.Candidates)
 	p.OfflineCandidates = filter(p.OfflineCandidates)
 }
+
+// RequireImageVerification narrows both online and waiting candidates; labels
+// cannot volunteer the native builder or override its qualified host platform.
+func (p *RoutePlan) RequireImageVerification() {
+	p.filterCandidates(func(candidate Candidate) string {
+		if candidate.PipelineImageVerification == 1 && candidate.NativePlatform == "linux/amd64" {
+			return ""
+		}
+		return fmt.Sprintf("%s has not reported qualified image verification", candidate.Label())
+	})
+}

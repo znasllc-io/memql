@@ -386,6 +386,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		repository, _ := req.Args["repository"].(string)
 		plan.RequireRepository(req.Tool+"."+req.Action, repository)
 		plan.RequireActionContract(req.Tool+"."+req.Action, PipelineStepContract)
+		if _, present := req.Args["imageBuild"]; present {
+			plan.RequireImageVerification()
+		}
 		if req.Args["execution"] == "native" {
 			platform, _ := req.Args["platform"].(string)
 			plan.RequireNativePlatform(platform)

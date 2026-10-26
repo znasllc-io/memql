@@ -18,15 +18,18 @@ import (
 // field: this struct serialized as JSON. Unknown JSON fields are
 // tolerated (additive evolution does not bump schemaVersion).
 type CapabilityDescriptor struct {
-	HomeDirectory        string           `json:"homeDirectory,omitempty"`
-	Architecture         string           `json:"architecture,omitempty"`
-	ActionContracts      ActionContracts  `json:"actionContracts,omitempty"`
-	RepositoryScopes     RepositoryScopes `json:"repositoryScopes,omitempty"`
-	Platform             string           `json:"platform"`
-	DisplayServer        string           `json:"displayServer"`
-	ComputerUseAvailable bool             `json:"computerUseAvailable"`
-	Actions              []string         `json:"actions"`
-	SchemaVersion        int              `json:"schemaVersion"`
+	// PipelineImageVerification is implementation/probe evidence, never a label.
+	// Its presence does not replace repository consent or live worker preflight.
+	PipelineImageVerification int              `json:"pipelineImageVerification,omitempty"`
+	HomeDirectory             string           `json:"homeDirectory,omitempty"`
+	Architecture              string           `json:"architecture,omitempty"`
+	ActionContracts           ActionContracts  `json:"actionContracts,omitempty"`
+	RepositoryScopes          RepositoryScopes `json:"repositoryScopes,omitempty"`
+	Platform                  string           `json:"platform"`
+	DisplayServer             string           `json:"displayServer"`
+	ComputerUseAvailable      bool             `json:"computerUseAvailable"`
+	Actions                   []string         `json:"actions"`
+	SchemaVersion             int              `json:"schemaVersion"`
 }
 
 const (
@@ -101,6 +104,9 @@ func ParseCapabilityDescriptor(raw string) (*CapabilityDescriptor, error) {
 		}
 		seen[a] = struct{}{}
 	}
+	if d.PipelineImageVerification != 0 && (d.PipelineImageVerification != 1 || d.Platform != "linux" || d.Architecture != "amd64" || !d.ActionContracts.Supports("workerHost.pipeline_step", 5)) {
+		return nil, fmt.Errorf("capability descriptor: unsupported image verification contract")
+	}
 	if err := d.ActionContracts.validate(); err != nil {
 		return nil, fmt.Errorf("capability descriptor: %w", err)
 	}
@@ -131,6 +137,9 @@ func (d *CapabilityDescriptor) AsMap() map[string]any {
 		"computerUseAvailable": d.ComputerUseAvailable,
 		"actions":              actions,
 		"schemaVersion":        d.SchemaVersion,
+	}
+	if d.PipelineImageVerification != 0 {
+		out["pipelineImageVerification"] = d.PipelineImageVerification
 	}
 	if d.Architecture != "" {
 		out["architecture"] = d.Architecture
@@ -207,4 +216,13 @@ func HomeDirectoryFromMap(value any) string {
 		return home
 	}
 	return ""
+}
+
+// PipelineImageVerificationFromMap validates persisted metadata before routing.
+func PipelineImageVerificationFromMap(value any) int {
+	m, _ := value.(map[string]any)
+	if d := capabilityDescriptorFromMap(m); d != nil {
+		return d.PipelineImageVerification
+	}
+	return 0
 }

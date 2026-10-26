@@ -13,13 +13,25 @@ import (
 // No registry push, daemon arguments or arbitrary mounts are exposed. The
 // step's githubReadToken flag opts into the fixed repository read secret only.
 type ImageBuild struct {
-	Context    string            `yaml:"context" json:"context"`
-	Dockerfile string            `yaml:"dockerfile" json:"dockerfile"`
-	Target     string            `yaml:"target,omitempty" json:"target,omitempty"`
-	Args       map[string]string `yaml:"args,omitempty" json:"args,omitempty"`
+	// VerificationOnly executes the complete target but returns bounded evidence,
+	// never an OCI publication input. Placement remains a separate policy choice.
+	VerificationOnly bool              `yaml:"verificationOnly,omitempty" json:"verificationOnly,omitempty"`
+	Context          string            `yaml:"context" json:"context"`
+	Dockerfile       string            `yaml:"dockerfile" json:"dockerfile"`
+	Target           string            `yaml:"target,omitempty" json:"target,omitempty"`
+	Args             map[string]string `yaml:"args,omitempty" json:"args,omitempty"`
 }
 
 const ImageBuildDirectory = ".memql-image-build"
+
+const ImageVerificationPath = ImageBuildDirectory + "/verification.json"
+
+func ImageBuildArtifactsFor(build *ImageBuild) []string {
+	if build != nil && build.VerificationOnly {
+		return []string{ImageVerificationPath}
+	}
+	return ImageBuildArtifacts()
+}
 
 func ImageBuildArtifacts() []string {
 	return []string{ImageBuildDirectory + "/image.oci.tar", ImageBuildDirectory + "/metadata.json"}

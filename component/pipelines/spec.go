@@ -102,7 +102,8 @@ type StepSpec struct {
 	// Zero uses the operator's namespace default; 1000 means one CPU.
 	CPUMilli int `yaml:"cpuMilli,omitempty" json:"cpuMilli,omitempty"`
 
-	// ImageBuild asks the cluster's fixed rootless builder for an OCI archive.
+	// ImageBuild asks a fixed rootless builder for an OCI archive or explicit
+	// non-publishable verification evidence. Only verification may use Fleet.
 	// It cannot carry a shell command, services, caches or publication secrets.
 	ImageBuild *ImageBuild `yaml:"imageBuild,omitempty" json:"imageBuild,omitempty"`
 	// MemoryMiB requests a bounded memory reservation for the container command.

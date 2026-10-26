@@ -1,6 +1,7 @@
 package pipelinesteps
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"path"
@@ -77,8 +78,11 @@ func checkImageBuildRun(cfg Config, run StepRun) error {
 	}
 	if run.Image != "" || run.Command != "" || len(run.Secrets) != 0 || run.ImagePullSecret != "" ||
 		len(run.Services) != 0 || len(run.Caches) != 0 || len(run.Needs) != 0 ||
-		!slices.Equal(run.Artifacts, pl.ImageBuildArtifacts()) || run.MemoryMiB < 512 {
+		!slices.Equal(run.Artifacts, pl.ImageBuildArtifactsFor(run.ImageBuild)) || run.MemoryMiB < 512 {
 		return fmt.Errorf("image builds require their fixed artifacts, at least 512 MiB, and no command, image, secrets, services, caches or host needs")
+	}
+	if run.ImageBuild.VerificationOnly && (run.GitHubReadToken || run.CheckoutHistory != "") {
+		return fmt.Errorf("image verification cannot receive checkout credentials or full history")
 	}
 	return nil
 }
@@ -174,5 +178,28 @@ func imageBuildCommand(build *pl.ImageBuild, platform string, githubReadToken bo
 		"for source_path in " + quote(workspacePath+"/"+build.Context) + " " + quote(workspacePath+"/"+build.Dockerfile) + "; do\n" +
 		" resolved=$(readlink -f \"$source_path\")\n case \"$resolved\" in /workspace|/workspace/*) ;; *) echo 'image build path escapes its checkout' >&2; exit 2;; esac\ndone\n" +
 		"rm -rf -- " + quote(pl.ImageBuildDirectory) + "\nmkdir -- " + quote(pl.ImageBuildDirectory) + "\n" +
-		strings.Join(words, " ")
+		strings.Join(words, " ") + imageVerificationCommand(build, platform)
+}
+
+// Preserve the full target/OCI export, including Dockerfile checks. Only after
+// the daemonless command succeeds do we replace throwaway outputs with bounded,
+// non-publishable evidence. A failed export never manufactures a success receipt.
+func imageVerificationCommand(build *pl.ImageBuild, platform string) string {
+	if !build.VerificationOnly {
+		return ""
+	}
+	prefix, _ := json.Marshal(map[string]any{
+		"schemaVersion": 1, "kind": "image-verification", "sourceSHA": build.Args["MEMQL_COMMIT"], "platform": platform,
+		"context": build.Context, "dockerfile": build.Dockerfile, "target": build.Target, "args": build.Args,
+		"successfulBuild": true, "runtimeProfile": ImageBuilderRootlessV1,
+	})
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+	dir := pl.ImageBuildDirectory
+	return "\n" +
+		"test $(wc -c < " + quote(dir+"/metadata.json") + ") -le 65536\n" +
+		"oci_hash=$(sha256sum " + quote(dir+"/image.oci.tar") + "); oci_hash=${oci_hash%% *}\n" +
+		"oci_bytes=$(wc -c < " + quote(dir+"/image.oci.tar") + "); test \"$oci_bytes\" -gt 0\n" +
+		"{ printf '%s,\"ociSHA256\":\"%s\",\"ociBytes\":%s,\"buildMetadata\":' " + quote(string(prefix[:len(prefix)-1])) + " \"$oci_hash\" \"$oci_bytes\"; cat " + quote(dir+"/metadata.json") + "; printf '}\\n'; } > " + quote(pl.ImageVerificationPath) + "\n" +
+		"test $(wc -c < " + quote(pl.ImageVerificationPath) + ") -le 524288\n" +
+		"rm -- " + quote(dir+"/image.oci.tar") + " " + quote(dir+"/metadata.json")
 }

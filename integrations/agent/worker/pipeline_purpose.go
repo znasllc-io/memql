@@ -117,6 +117,14 @@ func fallbackFor(req Request, policy Policy) string {
 // re-reads the live registration, so a machine whose policy stopped allowing
 // pipelines, or never did, is refused before anything reaches it.
 func machineAllowsPipelines(w *workerservice.Worker, args map[string]any) bool {
+	// A forwarding receiver uses its live connection, not the sender's cached
+	// candidate. Any imageBuild field requires the feature, including malformed
+	// values which the worker subsequently refuses before starting.
+	if _, present := args["imageBuild"]; present {
+		if w == nil || w.CapabilityDescriptor == nil || w.CapabilityDescriptor.PipelineImageVerification != 1 || w.CapabilityDescriptor.NativePlatform() != "linux/amd64" || args["platform"] != "linux/amd64" {
+			return false
+		}
+	}
 	if args["execution"] == "native" {
 		platform, _ := args["platform"].(string)
 		if w == nil || platform == "" || w.CapabilityDescriptor.NativePlatform() != platform {

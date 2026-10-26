@@ -14,7 +14,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -146,7 +148,12 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		return refusedResult(pl.CodeStepInvalid, "memoryMiB requires container execution."), nil
 	}
 	if run.ImageBuild != nil || req.Step.ImageBuild != nil {
-		return refusedResult(pl.CodeStepInvalid, "Image builds require cluster execution."), nil
+		if err := pl.CheckImageVerificationStep(req.Step); err != nil {
+			return refusedResult(pl.CodeStepInvalid, err.Error()), nil
+		}
+		if run.SHA != req.SHA || !reflect.DeepEqual(run.ImageBuild, imageBuildWithProvenance(req.Step.ImageBuild, run.SHA, req.Event, req.Version)) || run.Execution != pl.ExecutionContainer || run.Platform != "linux/amd64" || run.Command != "" || run.Image != "" || len(run.Needs) != 0 || len(run.Secrets) != 0 || len(run.Services) != 0 || len(run.Caches) != 0 || !slices.Equal(run.Artifacts, pl.ImageBuildArtifactsFor(run.ImageBuild)) {
+			return refusedResult(pl.CodeStepInvalid, "Image verification runtime differs from its compiled request."), nil
+		}
 	}
 	if run.ImagePullSecret != "" || req.Step.ImagePullSecret != "" {
 		return refusedResult(pl.CodeStepInvalid, "Image pull credentials require cluster execution."), nil
@@ -390,6 +397,9 @@ func fleetArgs(run StepRun, token string) map[string]any {
 		"timeoutSec": run.TimeoutSeconds,
 		"cpuMilli":   run.CPUMilli,
 		"memoryMiB":  run.MemoryMiB,
+	}
+	if run.ImageBuild != nil {
+		args["imageBuild"] = pl.CloneImageBuild(run.ImageBuild)
 	}
 	if len(run.Services) > 0 {
 		args["services"] = run.Services

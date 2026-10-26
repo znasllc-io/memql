@@ -336,7 +336,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 	if step.ImageBuild != nil {
 		step.Image = "" // the operator-approved builder image is never source configuration
-		step.Artifacts = ImageBuildArtifacts()
+		step.Artifacts = ImageBuildArtifactsFor(step.ImageBuild)
 	}
 
 	if declared.When != nil && !c.selectedBuckets[declared.When.Bucket] {

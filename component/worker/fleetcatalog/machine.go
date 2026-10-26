@@ -15,15 +15,16 @@ import (
 // -- a candidate may be held by another replica, in which case this node has
 // no handle for it at all and dispatch goes over the forward.
 type Candidate struct {
-	ModelSetup       memqlengine.ModelSetup
-	HomeDirectory    string
-	NativePlatform   string
-	ActionContracts  workerservice.ActionContracts
-	RepositoryScopes workerservice.RepositoryScopes
-	RegistrationId   string
-	MachineId        string // Raw enrollment identity; operator labels cannot replace it.
-	Name             string
-	DisplayName      string
+	PipelineImageVerification int
+	ModelSetup                memqlengine.ModelSetup
+	HomeDirectory             string
+	NativePlatform            string
+	ActionContracts           workerservice.ActionContracts
+	RepositoryScopes          workerservice.RepositoryScopes
+	RegistrationId            string
+	MachineId                 string // Raw enrollment identity; operator labels cannot replace it.
+	Name                      string
+	DisplayName               string
 	// OwnerUserId is always stamped when known: SharedInferenceWorkers reads
 	// it from the row; WorkersForOwner stamps the scoped owner so recovery in
 	// PlanUserModelWithShared can still attribute a machine if a later shared

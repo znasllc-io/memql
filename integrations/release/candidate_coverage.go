@@ -13,8 +13,9 @@ import (
 )
 
 type candidateRunPlan struct {
-	Mode     string
-	Receipts []pl.ReleaseWorkReceipt
+	VerificationOnly map[string]bool
+	Mode             string
+	Receipts         []pl.ReleaseWorkReceipt
 }
 
 type candidateSkippedStep struct {
@@ -72,7 +73,7 @@ func (r candidateEvidenceReader) completeRun(ctx context.Context, runID string) 
 		}
 		byKey[key] = row
 	}
-	plan := candidateRunPlan{Mode: run.Input.Mode}
+	plan := candidateRunPlan{Mode: run.Input.Mode, VerificationOnly: map[string]bool{}}
 	decls := make([]workjournal.StepDecl, 0, len(rows))
 	seen := map[string]bool{}
 	for n, key := range run.StepOrder {
@@ -101,6 +102,13 @@ func (r candidateEvidenceReader) completeRun(ctx context.Context, runID string) 
 		proof, err := pl.InspectReleaseStepReceipt(owner, runID, key, runs[0], row)
 		if err != nil {
 			return candidateRunPlan{}, fmt.Errorf("run step %s: %w", key, err)
+		}
+		if value, present := step.Call["imageVerificationOnly"]; present {
+			flag, ok := value.(bool)
+			if !ok || !flag {
+				return candidateRunPlan{}, errors.New("invalid image verification evidence marker")
+			}
+			plan.VerificationOnly[key] = true
 		}
 		plan.Receipts = append(plan.Receipts, proof)
 	}
@@ -138,11 +146,13 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 		}
 		selected[key][e.StepKey] = e
 	}
+	verificationOnly := map[source]map[string]bool{}
 	for key, checks := range selected {
 		plan, err := r.completeRun(ctx, key.run)
 		if err != nil {
 			return out, err
 		}
+		verificationOnly[key] = plan.VerificationOnly
 		if len(plan.Receipts) != len(checks) {
 			return out, errors.New("candidate omitted declared execution evidence")
 		}
@@ -161,6 +171,9 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 	}
 	for _, component := range c.Components {
 		for _, a := range component.Artifacts {
+			if verificationOnly[source{component.Name, a.Receipt.WorkRunID}][a.Receipt.StepKey] {
+				return out, errors.New("image verification evidence cannot be published as an artifact")
+			}
 			if _, ok := selected[source{component.Name, a.Receipt.WorkRunID}][a.Receipt.StepKey]; !ok {
 				return out, errors.New("artifact producer is outside complete candidate evidence")
 			}

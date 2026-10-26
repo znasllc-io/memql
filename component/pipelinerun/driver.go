@@ -709,6 +709,9 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 	for _, t := range dr.tracks {
 		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage, "pipelineKind": string(t.step.Kind)}
 		call["definitionFingerprint"] = t.definition
+		if t.step.ImageBuild != nil && t.step.ImageBuild.VerificationOnly {
+			call["imageVerificationOnly"] = true
+		}
 		call["displayTitle"] = strings.ReplaceAll(t.step.Stage+" / "+t.step.Name, "-", " ")
 		call["summary"] = string(t.step.Kind)
 		if t.verification != "" {
