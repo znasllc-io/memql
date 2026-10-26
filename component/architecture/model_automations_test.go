@@ -4,15 +4,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/architecture/embedded"
 	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
-func TestCommittedModelIncludesAutomationGraph(t *testing.T) {
-	m, err := embedded.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestGeneratedModelIncludesAutomationGraph(t *testing.T) {
+	m := generatedModel(t)
 	nodes := map[model.ID]model.Node{}
 	for _, n := range m.Nodes {
 		if n.Kind != model.KindAutomation {

@@ -18,10 +18,10 @@ var gateInputs = []struct {
 	{"docs/public/concepts/events.md", ".", "TestDocsDoNotReferencePrefixedConstructNames"},
 	{"scripts/secrets/manifest.yaml", "component/envregistry", "TestEmbeddedManifestInSync"},
 	{"component/envregistry/manifest.yaml", "component/envregistry", "TestEmbeddedManifestInSync"},
-	{"component/architecture/embedded/topology.model.json", "component/architecture", "TestArchitectureModelIsNotStale"},
-	{"dsl/forge/automations.memql", "component/architecture", "TestArchitectureModelIsNotStale"},
-	{"dsl/forge/mutations.memql", "component/architecture", "TestArchitectureModelIsNotStale"},
-	{"dsl/forge/logic.memql", "component/architecture", "TestArchitectureModelIsNotStale"},
+	{"component/architecture/CLAUDE.md", "component/architecture", "TestArchitectureModelBuildsFromSource"},
+	{"dsl/forge/automations.memql", "component/architecture", "TestArchitectureModelBuildsFromSource"},
+	{"dsl/forge/mutations.memql", "component/architecture", "TestArchitectureModelBuildsFromSource"},
+	{"dsl/forge/logic.memql", "component/architecture", "TestArchitectureModelBuildsFromSource"},
 	{"scripts/make/help.sh", "scripts/make", "TestHelpScript"},
 	{"scripts/lib/capability.sh", "scripts/lib", "the capability-script contract test"},
 	// The `**/*.memql` glob had NO row at all until the memql#3060 review,
@@ -92,7 +92,7 @@ var gateInputs = []struct {
 	// lives in `component/memql`, which this step deliberately does not run.
 	// It is routed via the `go` bucket to db-tests instead -- the lane that
 	// actually runs it. A row here would assert the wrong lane.
-	{"arch.yaml", "component/architecture", "TestArchitectureModelIsNotStale"},
+	{"arch.yaml", "component/architecture", "TestArchitectureModelBuildsFromSource"},
 	// The platform graph (memql#5727). Its gate lives in the ROOT package and
 	// regenerates through cmd/platformgraph, which reads the deploy base, the
 	// engine-bff component, the generated cloud front door, the OS navigation

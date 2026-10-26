@@ -24,9 +24,8 @@ import (
 //
 // The pass is heavier than ExtractPackages because it requires
 // go/types output, so packages are reloaded with NeedTypes |
-// NeedTypesInfo. We tolerate type-check errors the same way the
-// package pass does -- a partial type universe is still useful for
-// diagrams.
+// NeedTypesInfo. Errors in any root or dependency refuse the result; a
+// partial type universe must not be represented as a complete graph.
 func ExtractTypes(m *model.Model, plans []ServicePlan, workspaceRoot string) error {
 	// Phase 1: load every plan's packages with type info. We collect
 	// interfaces globally across services so the Implements
@@ -57,15 +56,8 @@ func ExtractTypes(m *model.Model, plans []ServicePlan, workspaceRoot string) err
 		if err != nil {
 			return fmt.Errorf("load types for %s: %w", plan.Arch.Service, err)
 		}
-		var firstErr error
-		packages.Visit(pkgs, nil, func(p *packages.Package) {
-			if len(p.Errors) == 0 || firstErr != nil {
-				return
-			}
-			firstErr = fmt.Errorf("%s: %s", p.PkgPath, p.Errors[0])
-		})
-		if firstErr != nil {
-			fmt.Printf("memql-arch: warning (types): %v\n", firstErr)
+		if err := requireCompleteLoad(pkgs, true); err != nil {
+			return fmt.Errorf("incomplete types load for %s: %w", plan.Arch.Service, err)
 		}
 
 		all = append(all, loadedTypePass{plan: plan, pkgs: pkgs})

@@ -269,7 +269,7 @@ func TestMakefileRunGuard_CatchesIssue2923Verbatim(t *testing.T) {
 	}
 
 	// And the corrected recipe, which is what main carries today, must stay silent.
-	fixed := "arch-model-check:\n\t$(GO) test -count=1 -run TestArchitectureModelIsNotStale " + pkg + "\n"
+	fixed := "arch-model-check:\n\t$(GO) test -count=1 -run TestArchitectureModelBuildsFromSource " + pkg + "\n"
 	if findings, _ := scanMakefileRunPatterns(fixed, namesFor); len(findings) != 0 {
 		t.Errorf("the guard flagged the CORRECTED recipe, which is the one in the Makefile "+
 			"today.\n  findings: %+v", findings)

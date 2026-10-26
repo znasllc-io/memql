@@ -1,30 +1,7 @@
-// memql-arch walks a Go workspace and emits a topology.model.json
-// describing its architecture: cluster, services (the module and each node
-// role arch.yaml declares), packages, types, and the relationships between
-// them. The committed copy is embedded by component/architecture/embedded for
-// anything that wants to talk about the system in software-architecture terms
-// (docs generators, observability overlays, CI gates on import cycles, etc.).
-//
-// Usage:
-//
-//	memql-arch                                # run in $PWD, write topology.model.json
-//	memql-arch --root /path/to/workspace      # explicit root
-//	memql-arch --out custom.json              # alternate output path
-//	memql-arch --cluster "local"              # name the synthetic L1 root
-//	memql-arch --types                        # also include the L4 class graph
-//	memql-arch --calls                        # also include the CHA call graph
-//	memql-arch --reproducible                 # omit generated_at + workspace
-//
-// The checked-in component/architecture/embedded/topology.model.json is
-// produced by `make arch-model`, which pins the flag set. Do not regenerate it
-// by hand: the flags are load-bearing (--automations, --reproducible and
-// --cluster change the artifact) and `make arch-model-check` compares against
-// exactly that command. The committed artifact carries NO call graph
-// (memql#5727); --calls is how the drift gate builds one on demand.
-//
-// Exit codes: 0 success, 1 hard failure (workspace not found, etc.).
-// Per-package errors are printed as warnings and do not change the
-// exit code -- a partial model is more useful than no model.
+// memql-arch generates a source topology for inspection and build verification.
+// make arch-model owns the canonical flag set and writes an ignored output.
+// The topology is not embedded in engine images or consumed by the live OS.
+// Any package/dependency/type-load error fails before output is written.
 package main
 
 import (
@@ -39,6 +16,7 @@ import (
 
 func main() {
 	var (
+		canonical       = flag.Bool("canonical", false, "require the repository toolchain and fixed complete structural profile")
 		root            = flag.String("root", ".", "workspace root (directory containing go.work or go.mod)")
 		out             = flag.String("out", "", "output path (default: <root>/"+model.CanonicalFilename+")")
 		cluster         = flag.String("cluster", "", "cluster name (default: workspace folder name)")
@@ -52,6 +30,14 @@ func main() {
 	absRoot, err := filepath.Abs(*root)
 	if err != nil {
 		fail("resolve root: %v", err)
+	}
+	if *canonical {
+		if !*withType || !*withAutomations || !*repro || *cluster != "memql" {
+			fail("canonical generation requires types, automations, reproducible output and cluster memql")
+		}
+		if err := prepareCanonical(absRoot); err != nil {
+			fail("canonical environment: %v", err)
+		}
 	}
 	m, err := extract.Run(extract.Options{
 		WorkspaceRoot:    absRoot,
@@ -90,14 +76,23 @@ func main() {
 	if outPath == "" {
 		outPath = filepath.Join(absRoot, model.CanonicalFilename)
 	}
-	if err := m.WriteFile(outPath); err != nil {
+	if err := writeGeneratedModel(m, outPath); err != nil {
 		fail("write model: %v", err)
 	}
 
+	fmt.Printf("memql-arch: complete package loading (types=%t, calls=%t, automations=%t)\n", *withType, *withCalls, *withAutomations)
 	fmt.Printf("memql-arch: wrote %d nodes, %d edges -> %s\n", len(m.Nodes), len(m.Edges), outPath)
 }
 
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "memql-arch: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// The ignored output directory does not exist in a clean checkout.
+func writeGeneratedModel(m *model.Model, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return m.WriteFile(path)
 }

@@ -2,7 +2,7 @@
 
 **Purpose:** Per-invocation instrumentation surface. Captures (FQN, duration, args, result, error, trace_id) per call and writes them to TimescaleDB. Joins back to the static architecture model by FQN.
 
-**Companion static map:** `component/architecture/` -- defines the FQN format, embeds the `topology.model.json` the cockpit reads, parses the `//memql:observe` source markers that feed this runtime's per-FQN levels.
+**Companion static map:** `component/architecture/` -- defines the FQN format and generates `topology.model.json` for source inspection. The runtime does not read that output; live levels come from its own configuration and profile cache.
 
 **On-disk surface:**
 - TimescaleDB hypertable `code_invocation` (migration `20260515000000_observability_hypertable.up.sql`)
@@ -14,26 +14,14 @@
 
 ## How it composes
 
+Source markers become attributes in the generated topology for inspection.
+They are not loaded from an embedded graph by this runtime. The runtime path is:
+
 ```
-//memql:observe <level>            source marker
-   |  parsed by extract/observe_markers.go
-   v
-topology.model.json                static map (embedded)
-   Method.Attrs[observe_level, redact_args, observable]
-   |
-   v
-observe.DefaultLevel  <-- MEMQL_OBSERVE_LEVEL (.env override)
-   ^
-   +-- CodeProfileSubscriber  <-- v1:observability:codeProfile (live override,
-   |                              via graph.node.created ...codeProfile)
-   v
+MEMQL_OBSERVE_LEVEL -> observe.DefaultLevel
+v1:observability:codeProfile -> CodeProfileSubscriber -> per-FQN override
 observe.Method(ctx, fqn).Args(...).End(&err)
-   |
-   v
-TimescaleSink                      buffered, drop-on-full
-   |
-   v
-code_invocation hypertable  +  1m / 1h continuous aggregates
+  -> TimescaleSink -> code_invocation + rollups
 ```
 
 ---

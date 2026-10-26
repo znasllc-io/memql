@@ -2,255 +2,103 @@ package architecture
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/architecture/embedded"
 	"github.com/znasllc-io/memql/component/architecture/model"
 )
 
-// model_current_test.go -- memql#2844.
-//
-// component/architecture/embedded/topology.model.json is a generated artifact
-// with NO gate. It drifted silently: #2840 removed the userId argument from
-// toggleComputerUseEnabled, the Go SDK regenerated correctly and
-// `make sdk-gen-check` reported no drift, but the architecture model kept
-// ToggleComputerUseEnabledArgs.UserId in 13 places. Everything that reads the
-// embedded model -- the docs generators, the observe runtime's FQN join,
-// v1:cluster:nodeType.codeReference -- could disagree with the code
-// indefinitely.
-//
-// THE CALL GRAPH IS NOT COMMITTED (memql#5727, owner decision 7). It was 63.9
-// of the artifact's 81.3 MB and nothing read it, so `make arch-model` now
-// writes the structural model only and TestCommittedModelHasNoCallGraph pins
-// that. The gate still BUILDS the call graph, on demand, wherever the full Go
-// suite runs -- see callGraphOnDemand -- and skips it in the docs-only
-// gate-inputs lane, where it would be the most expensive thing that PR paid for.
-//
-// WHY THIS IS A GO TEST AND NOT A CI STEP. It gates inside the ordinary
-// `go test ./...` lane, so it needs no workflow edit -- which matters because
-// the same session that found this could not modify .github/workflows (see
-// #2903 for the build-tag lane with the same constraint). `make
-// arch-model-check` just runs this test.
-//
-// WHY IT COULD NOT HAVE EXISTED BEFORE. FOUR things made the artifact
-// unreproducible, and all four had to be fixed first:
-//
-//  1. generated_at was a wall clock and workspace was the generating machine's
-//     absolute path -- the checked-in file carried "/Users/znas/..." from a
-//     worktree that no longer exists. --reproducible blanks both.
-//  2. the cluster node's name came from the workspace FOLDER name, so the file
-//     recorded "cluster:wt-2724". --cluster pins it.
-//  3. edge order was Go map order: two runs over an identical tree on the same
-//     machine emitted the same 121,601 edges in a different sequence.
-//     Model.WriteJSON sorts now.
-//  4. 27 SourceRefs pointed OUTSIDE the workspace -- GOROOT and the module
-//     cache -- as `../../..` chains whose LENGTH encoded how deep the checkout
-//     sat on that disk. Two checkouts of the same commit on the same machine
-//     produced different files, and on CI the GOROOT path additionally baked
-//     in the Go PATCH VERSION. extract.workspaceRelative drops them.
-//
-// (4) was found only by regenerating from a second checkout at a different
-// depth, which is why this test's sibling below does exactly that.
-//
-// Until those landed, "regenerate and diff" produced a ~900k-line diff on an
-// unchanged tree, which is why the artifact was refreshed by hand -- and hand
-// editing is how it fell out of sync.
+// Each profile is generated once in this test process, through the canonical
+// target. Bytes live only in memory after its temporary output is removed.
+// Independent CI jobs have independent source checks; there is no cross-job
+// cache or claim that an earlier job qualified another commit.
+var generatedModels [2]struct {
+	once sync.Once
+	raw  []byte
+	err  error
+}
 
-// TestArchitectureModelIsNotStale asserts the committed model is not WRONG.
-//
-// WHY NOT BYTE-FOR-BYTE. That was the first design, and it cannot work in this
-// repo. The model describes the WHOLE tree, so any PR that merges while yours
-// is open makes yours stale -- and with a merge queue it is worse than
-// friction, it is unwinnable: the queue tests a merge commit against a moving
-// main, so any PR behind another is stale by construction. Measured: this
-// branch regenerated to 20182 nodes locally and CI's merge commit produced
-// 20191, purely because #2905 and #2907 landed in between. A gate that fails on
-// somebody else's merge blocks unrelated work, which is worse than the staleness
-// it was meant to catch.
-//
-// WHAT IT CHECKS INSTEAD. Every symbol the COMMITTED model REFERENCES must still
-// exist in the regenerated one -- as a node id, and as an edge endpoint. That is
-// exactly the defect #2844 reported -- ToggleComputerUseEnabledArgs.UserId
-// survived in the model in 13 places after #2840 removed the argument -- and it
-// is immune to concurrent merges, which only ADD symbols.
-//
-// The asymmetry is deliberate and is the whole point:
-//
-//	symbol removed from the code, still in the model  -> the model LIES. FAIL.
-//	symbol added to the code, not yet in the model    -> the model is behind. OK.
-//
-// A missing symbol makes every reader describe something that no longer exists.
-// An absent one makes them describe slightly less than exists, which is what any
-// committed snapshot does between refreshes. Run `make arch-model` to catch up.
-//
-// EDGES ARE CHECKED TOO, AND ONLY SINCE memql#3050. Until then the check built
-// its live set from `got.Nodes` alone and compared only `want.Nodes`, so it could
-// not see a deleted UNEXPORTED function: the extractor emits no node for one, so
-// deleting it removes no node and "committed nodes are a subset of live nodes" is
-// satisfied vacuously while the edge list rots. Hit for real -- PR #3033
-// (memql#2951) deleted `memqlTypeToJSONType` and left 33 `calls` edges pointing
-// at it, green through every CI run, found only by an adversarial review. The
-// live set now includes edge endpoints; see liveSymbols for why it must.
-//
-// THE EDGE SET ITSELF IS CHECKED ONLY SINCE memql#3288. #3050 checked edge
-// ENDPOINTS, which is a check about symbols, not about relationships: delete a
-// call site between two functions that both still exist and every endpoint stays
-// live, so the gate saw nothing. Measured on `main` at f9a2d046, with the gate
-// green: 15 committed `calls` edges named a call the code no longer makes, all 15
-// with both endpoints alive. staleEdges compares the (From, To, Kind) triples.
-//
-// WHAT THIS GATE STILL CANNOT SEE, deliberately, and why -- the half of memql#3288
-// that was missing from this comment block rather than from the code:
-//
-//   - ANYTHING ADDED. Every check walks `want` and asks whether `got` agrees;
-//     nothing iterates `got`. That is the add-only asymmetry above, and it is
-//     load-bearing, not an oversight.
-//
-//   - Therefore also A FACT SURGICALLY REMOVED from the committed file. Deleting
-//     one edge from the artifact leaves it a strict subset, which is the "behind"
-//     direction, which passes. This is not fixable while the asymmetry holds:
-//     "the artifact is missing edge A->B" and "a concurrent merge added a call
-//     A->B" are THE SAME OBSERVATION from here, so no rule can fail the first and
-//     pass the second. A count-equality gate "fixes" the repro precisely by giving
-//     up merge-tolerance -- measured on this same commit, the committed artifact
-//     was 552 nodes and 7,761 edge triples behind a regeneration purely from
-//     merges, so equality would have been red on an untouched `main`. What bounds
-//     this instead is the drift ceiling below: unbounded staleness fails, one
-//     merge's worth does not.
-//
-//   - NODE ATTRIBUTES on a node that still exists -- signature, doc, attrs, and
-//     source.line. Tempting, and measured before rejecting: of 1,353 shared node
-//     ids whose JSON differed from a regeneration, 1,343 differed ONLY in
-//     source.line, because editing any file shifts the line of every declaration
-//     below it. Gating that is byte-equality wearing a hat: it would go red on
-//     essentially every PR that touches Go, which is the design this file exists
-//     to replace.
-//
-//   - EDGE ATTRIBUTES, for the same reason at smaller scale. Keying the edge
-//     comparison on Attrs as well as (From, To, Kind) turned the same 15 findings
-//     into 49; the extra 34 were `call_sites` counts changing on calls that still
-//     happen. The relationship is the fact worth gating; how many times it occurs
-//     in a function body is not.
-//
-// THE CALL GRAPH, SINCE memql#5727. The committed artifact no longer carries
-// one, so none of the checks above can be failed by one: an unexported
-// package-level function has no node, and with no committed `calls` edge
-// naming it, the artifact makes no claim about it for a deletion to falsify.
-// What the three checks above catch for unexported code is the rest of it -- an
-// unexported METHOD of a modelled type is a node, so deleting one is a stale
-// node. The regeneration here still passes --calls wherever callGraphOnDemand
-// says to, for two things only a built call graph can show: that the CHA pass
-// still builds over the whole workspace, and that it and the structural pass
-// still name the same symbols the same way (callGraphIsConsistent). The drift
-// ceiling ignores `calls` edges on both sides; the committed side has none.
-//
-// Skipped under -short: it shells out to the extractor over the whole
-// workspace (~6s structural, ~8s with the call graph, warm). CI runs the suite
-// without -short, so the gate is live there.
-func TestArchitectureModelIsNotStale(t *testing.T) {
+func generatedBytes(t *testing.T, calls bool) []byte {
+	t.Helper()
 	if testing.Short() {
-		t.Skip("regenerates the whole architecture model; skipped in -short")
+		t.Skip("whole-source architecture generation is excluded by -short")
 	}
-
-	root := workspaceRoot(t)
-	checkedIn := filepath.Join(root, "component", "architecture", "embedded", model.CanonicalFilename)
-	if _, err := os.Stat(checkedIn); err != nil {
-		t.Fatalf("checked-in model not found at %s: %v", checkedIn, err)
+	index := 0
+	if calls {
+		index = 1
 	}
+	cache := &generatedModels[index]
+	cache.once.Do(func() {
+		dir, err := os.MkdirTemp("", "memql-architecture-")
+		if err != nil {
+			cache.err = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		out := filepath.Join(dir, model.CanonicalFilename)
+		args := []string{"arch-model", "ARCH_MODEL_OUT=" + out}
+		if calls {
+			args = append(args, "ARCH_MODEL_CALLS=1")
+		}
+		cmd := exec.Command("make", args...)
+		cmd.Dir = workspaceRoot(t)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			cache.err = fmt.Errorf("canonical generation: %w\n%s", err, output)
+			return
+		}
+		cache.raw, cache.err = os.ReadFile(out)
+	})
+	if cache.err != nil {
+		t.Fatal(cache.err)
+	}
+	return cache.raw
+}
 
-	regenerated := filepath.Join(t.TempDir(), model.CanonicalFilename)
-	// Through `make arch-model` ITSELF, so the flag set exists in exactly one
-	// place. A previous version duplicated the flags here and "pinned" them
-	// with a test that substring-grepped the Makefile -- which its own comment
-	// block satisfied.
-	before := sumFile(t, checkedIn)
+func generatedModel(t *testing.T) *model.Model {
+	t.Helper()
+	m, err := model.ReadJSON(bytes.NewReader(generatedBytes(t, false)))
+	if err != nil {
+		t.Fatalf("generated model failed its strict decoder: %v", err)
+	}
+	return m
+}
+
+func TestArchitectureModelBuildsFromSource(t *testing.T) {
+	m := generatedModel(t)
+	t.Logf("complete structural model: %d nodes, %d edges", len(m.Nodes), len(m.Edges))
+	seen := make(map[model.ID]bool)
+	for _, n := range m.Nodes {
+		if seen[n.ID] {
+			t.Errorf("duplicate node ID %s", n.ID)
+		}
+		seen[n.ID] = true
+	}
+	// Edges are a multiset. Equal edge records are legal and are not discarded.
 	withCalls, why := callGraphOnDemand()
 	t.Logf("call graph: %s", why)
-	args := []string{"arch-model", "ARCH_MODEL_OUT=" + regenerated}
-	if withCalls {
-		args = append(args, "ARCH_MODEL_CALLS=1")
+	if !withCalls {
+		return
 	}
-	cmd := exec.Command("make", args...)
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("regenerating the model failed: %v\n%s", err, out)
+	calls, err := model.ReadJSON(bytes.NewReader(generatedBytes(t, true)))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(regenerated); err != nil {
-		t.Fatalf("`make arch-model` exited 0 but wrote nothing to %s -- did the target lose its "+
-			"recipe, or stop honouring ARCH_MODEL_OUT? (%v)", regenerated, err)
+	if n := len(calls.Edges) - len(structuralOnly(calls).Edges); n < minCallEdges {
+		t.Errorf("call graph has %d edges, floor %d", n, minCallEdges)
 	}
-	if sumFile(t, checkedIn) != before {
-		t.Fatalf("regenerating wrote into the WORKING TREE (%s). ARCH_MODEL_OUT is not being "+
-			"honoured, so this test just modified tracked source.", checkedIn)
+	if bad, total := callGraphIsConsistent(calls); total > 0 {
+		t.Errorf("call graph disagrees with structural symbols (%d): %s", total, join(bad))
 	}
-
-	want, got := loadModel(t, checkedIn), loadModel(t, regenerated)
-	live := liveSymbols(got)
-
-	// Always reported, green or red: the numbers are the cheap signal the gate
-	// itself is too permissive to assert on, and memql#3288 asked for them
-	// specifically. A reader of a passing run can see how far behind the artifact
-	// has drifted without regenerating anything themselves. Counted over the
-	// STRUCTURAL model: the on-demand call graph is not something the artifact is
-	// behind on, it is something the artifact deliberately does not carry.
-	gotStructural := structuralOnly(got)
-	behindNodes, behindEdges := reportCounts(t, want, gotStructural)
-
-	if withCalls {
-		calls := len(got.Edges) - len(gotStructural.Edges)
-		if calls < minCallEdges {
-			t.Errorf("the on-demand call graph has %d `calls` edges, floor %d: the CHA pass ran and "+
-				"produced next to nothing, which is a broken pass rather than a small program", calls, minCallEdges)
-		}
-		if bad, total := callGraphIsConsistent(got); total > 0 {
-			t.Errorf("the call graph names %d symbol(s) the structural pass of the SAME regeneration "+
-				"models differently:\n  %s\n\nEach is an exported function, or a method of a type the "+
-				"model has, with no node -- so the two passes disagree about its id (the receiver-name "+
-				"rule in callgraph.go and types.go, a generic, a pointer) and a sequence diagram built "+
-				"from the call graph would point at nothing (memql#5727).", total, join(bad))
-		}
-	}
-
-	if gone, total := staleNodes(want, live); total > 0 {
-		t.Errorf("the committed architecture model references %d node(s) that NO LONGER EXIST "+
-			"in the code:\n  %s\n\nEverything that reads this file is describing things that are "+
-			"gone. Run `make arch-model` and commit the result (memql#2844).",
-			total, join(gone))
-	}
-
-	if gone, total := staleEdgeEndpoints(want, live); total > 0 {
-		t.Errorf("the committed architecture model has edges pointing at %d symbol(s) the "+
-			"regenerated model NO LONGER MENTIONS:\n  %s\n\nThese have no NODE in the model, "+
-			"so the node check above cannot see them -- and a dangling edge renders a call "+
-			"into a symbol the code no longer has.\n\nA node-less symbol leaves the live set "+
-			"when the extractor stops emitting an edge for it, which happens if it was "+
-			"deleted, RENAMED, or simply lost its LAST CALL SITE -- there is no "+
-			"declaration-level edge for an unexported function, only per-call-site ones. All "+
-			"three want the same thing: run `make arch-model` and commit the result "+
-			"(memql#3050).",
-			total, join(gone))
-	}
-
-	if gone, total := staleEdges(want, got); total > 0 {
-		t.Errorf("the committed architecture model asserts %d RELATIONSHIP(s) the regenerated "+
-			"model does not have:\n  %s\n\nTypically both endpoints still exist, which is why "+
-			"neither check above can see them: they are edges, not symbols. The model is claiming "+
-			"an import, containment, implements or trigger that the code no longer contains. Run "+
-			"`make arch-model` and commit the result (memql#3288).",
-			total, join(gone))
-	}
-
-	assertDriftIsBounded(t, behindNodes, len(gotStructural.Nodes), behindEdges, len(edgeTriples(gotStructural)))
 }
+
+// The pure comparison helpers retained below support historical regression
+// fixtures. They are not a subset/staleness gate over a committed topology.
 
 // minCallEdges is the floor on the on-demand call graph. Measured at 287,310
 // `calls` edges when the call graph left the artifact (memql#5727); the floor is
@@ -276,11 +124,10 @@ func callGraphOnDemand() (bool, string) {
 	if os.Getenv("RUN_GATES") == "true" {
 		return false, "skipped: RUN_GATES=true (ci.yml's docs-only gate-inputs step); the structural model is checked in full"
 	}
-	return true, "built on demand (ARCH_MODEL_CALLS=1); the committed artifact carries none"
+	return true, "built on demand (ARCH_MODEL_CALLS=1); the structural profile carries none"
 }
 
-// structuralOnly is m without its `calls` edges: what the committed artifact
-// is a snapshot of.
+// structuralOnly projects the structural profile without changing edge multiplicity.
 func structuralOnly(m *model.Model) *model.Model {
 	out := &model.Model{SchemaVersion: m.SchemaVersion, Nodes: m.Nodes, Edges: make([]model.Edge, 0, len(m.Edges))}
 	for _, e := range m.Edges {
@@ -635,29 +482,6 @@ func workspaceRoot(t *testing.T) string {
 	}
 }
 
-func sumFile(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
-func loadModel(t *testing.T, path string) *model.Model {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var m model.Model
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	return &m
-}
-
 func join(ss []string) string {
 	out := ""
 	for i, s := range ss {
@@ -669,225 +493,70 @@ func join(ss []string) string {
 	return out
 }
 
-// TestNoSourceRefEscapesTheWorkspace is the cheap, permanent stand-in for the
-// two-worktree check.
-//
-// That check -- regenerate from a copy at a different directory DEPTH and
-// compare -- is the only thing that catches an escaping path, and it is how the
-// #2910 review found 27 of them. It is far too heavy to run here. But its
-// INVARIANT is a millisecond scan of the committed artifact: no source path may
-// be absolute or start with "..", because such a path encodes how deep the
-// checkout sits on the generating machine's disk and makes the whole gate
-// unsatisfiable everywhere else.
-//
-// Requires no regeneration, so it also runs under -short.
 func TestNoSourceRefEscapesTheWorkspace(t *testing.T) {
-	root := workspaceRoot(t)
-	m := loadModel(t, filepath.Join(root, "component", "architecture", "embedded", model.CanonicalFilename))
-
-	bad := 0
-	for _, n := range m.Nodes {
+	for _, n := range generatedModel(t).Nodes {
 		if n.Source == nil {
 			continue
 		}
 		f := n.Source.File
 		if filepath.IsAbs(f) || f == ".." || strings.HasPrefix(f, ".."+string(filepath.Separator)) {
-			if bad < 5 {
-				t.Errorf("node %s has a source path outside the workspace: %q", n.ID, f)
-			}
-			bad++
+			t.Errorf("node %s has escaping source %q", n.ID, f)
 		}
 	}
-	if bad > 0 {
-		t.Errorf("%d source path(s) escape the workspace.\n\nSuch a path is a `../../..` chain "+
-			"whose LENGTH encodes the generating machine's directory depth, so the artifact "+
-			"differs between two checkouts of the same commit and the drift gate goes red "+
-			"everywhere but the machine that regenerated (memql#2844).", bad)
+}
+
+func TestGeneratedModelIsReproducible(t *testing.T) {
+	m := generatedModel(t)
+	if m.GeneratedAt != "" || m.Workspace != "" {
+		t.Fatal("canonical output contains a clock or absolute workspace")
+	}
+	// Strict decode/encode preserves all attributes and edge multiplicities.
+	var rewritten bytes.Buffer
+	if err := m.WriteJSON(&rewritten); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rewritten.Bytes(), generatedBytes(t, false)) {
+		t.Fatal("canonical output does not round-trip byte-for-byte")
 	}
 }
 
-// The four assertions below cover what BYTE-FOR-BYTE was silently enforcing and
-// the subset gate is not (memql#2844 follow-up).
-//
-// Replacing the byte-for-byte comparison was necessary -- it cannot hold under a
-// merge queue -- but it quietly dropped four guarantees, and the review found
-// every one by doctoring the committed artifact and watching the suite stay
-// green:
-//
-//	generated_at + a developer's home path restored  -> PASSED
-//	nodes and edges shuffled                          -> PASSED
-//	8,562 signatures corrupted, every source.file     -> PASSED
-//	Makefile drops --calls (~100k edges lost)         -> PASSED
-//
-// The first is the defect this issue OPENS by describing. The second means the
-// sort -- the single load-bearing change -- was unverified by anything.
-//
-// All four are properties of the COMMITTED FILE ALONE. That is what makes them
-// safe: they need no regeneration, so a concurrent merge can never trip them,
-// which is the exact problem that forced the subset design. They also run under
-// -short.
-
-// committedModel loads the checked-in artifact.
-func committedModel(t *testing.T) *model.Model {
-	t.Helper()
-	return loadModel(t, filepath.Join(workspaceRoot(t), "component", "architecture", "embedded",
-		model.CanonicalFilename))
-}
-
-// TestCommittedModelIsReproducible pins --reproducible.
-func TestCommittedModelIsReproducible(t *testing.T) {
-	m := committedModel(t)
-	if m.GeneratedAt != "" {
-		t.Errorf("generated_at is %q, want empty.\n\nThe committed artifact must be generated with "+
-			"--reproducible (via `make arch-model`). A wall clock makes it differ on every run, "+
-			"which is half of why this file could not be gated at all.", m.GeneratedAt)
-	}
-	if m.Workspace != "" {
-		t.Errorf("workspace is %q, want empty.\n\nThat is the generating machine's ABSOLUTE PATH -- "+
-			"the artifact used to carry /Users/znas/... from a worktree that no longer existed. "+
-			"It commits a developer's home directory and makes the file machine-specific.",
-			m.Workspace)
-	}
-}
-
-// TestCommittedModelClusterIsPinned pins --cluster. Without it the cluster
-// node's name comes from the checkout's FOLDER, so the artifact recorded
-// "cluster:wt-2724".
-func TestCommittedModelClusterIsPinned(t *testing.T) {
+func TestGeneratedModelClusterIsPinned(t *testing.T) {
 	var ids []model.ID
-	for _, n := range committedModel(t).Nodes {
-		if n.Kind == "cluster" {
+	for _, n := range generatedModel(t).Nodes {
+		if n.Kind == model.KindCluster {
 			ids = append(ids, n.ID)
 		}
 	}
 	if len(ids) != 1 || ids[0] != "cluster:memql" {
-		t.Errorf("cluster nodes = %v, want exactly [cluster:memql].\n\nWithout --cluster the name "+
-			"is taken from the workspace folder, so whoever regenerated it stamps their directory "+
-			"into the artifact.", ids)
+		t.Fatalf("cluster IDs = %v", ids)
 	}
 }
 
-// TestCommittedModelIsSorted pins the sort -- the one change everything else
-// rests on, and the one the subset gate is blindest to.
-func TestCommittedModelIsSorted(t *testing.T) {
-	if !committedModel(t).IsSortedForStableOutput() {
-		t.Error("the committed model is not in WriteJSON's order.\n\nThe sort is what makes the " +
-			"artifact reproducible at all: before it, two runs over an identical tree on the same " +
-			"machine emitted the same 121,601 edges in a different sequence. A shuffled model " +
-			"passes the drift gate, which compares node IDs and cannot see order.")
+func TestGeneratedModelIsSorted(t *testing.T) {
+	if !generatedModel(t).IsSortedForStableOutput() {
+		t.Fatal("generated model is not in canonical order")
 	}
 }
 
-// TestCommittedModelHasNoCallGraph pins owner decision 7 (memql#5727): the
-// committed artifact is the STRUCTURAL model. The call graph was 63.9 of its
-// 81.3 MB with no consumer; `make arch-model` leaves --calls off and the drift
-// gate builds it on demand instead. A regeneration by hand with --calls would
-// put 287k edges back and pass every other test here.
-func TestCommittedModelHasNoCallGraph(t *testing.T) {
-	calls := 0
-	for _, e := range committedModel(t).Edges {
+func TestGeneratedModelHasNoCallGraph(t *testing.T) {
+	for _, e := range generatedModel(t).Edges {
 		if e.Kind == model.EdgeCalls {
-			calls++
+			t.Fatal("structural profile contains call edges")
 		}
 	}
-	if calls > 0 {
-		t.Errorf("the committed model carries %d `calls` edges; it must carry none. Regenerate with "+
-			"`make arch-model`, which leaves --calls off -- ARCH_MODEL_CALLS=1 is the drift gate's "+
-			"on-demand build, never the artifact's.", calls)
+}
+
+func TestGeneratedModelIsNotGutted(t *testing.T) {
+	m := generatedModel(t)
+	if len(m.Nodes) < 15000 || len(m.Edges) < 20000 {
+		t.Fatalf("incomplete graph: %d nodes, %d edges", len(m.Nodes), len(m.Edges))
 	}
 }
 
-// TestCommittedModelIsNotGutted stops the subset gate being satisfied by
-// deletion.
-//
-// Subset is trivially true for an empty model: measured, a committed artifact
-// truncated to 3 nodes -- and one with "nodes": [] -- both PASS. Nothing would
-// stop silent rot, or a bad regeneration that dropped most of the tree, from
-// staying green forever.
-//
-// An absolute floor rather than a ratio, so it needs no regeneration and is
-// merge-immune by construction. Set well below the current size: a 4-day-old
-// model across many merges was only 0.76% behind, so this is years of slack
-// while still firing instantly on a gutted file.
-func TestCommittedModelIsNotGutted(t *testing.T) {
-	// Structural since memql#5727: measured at 34,361 nodes and 36,359 edges
-	// when the call graph left the artifact.
-	const minNodes, minEdges = 15000, 20000
-	m := committedModel(t)
-	if len(m.Nodes) < minNodes {
-		t.Errorf("the committed model has %d nodes, floor is %d. Either the tree shrank "+
-			"dramatically or a regeneration dropped most of it -- the drift gate cannot tell, "+
-			"because a subset check is trivially satisfied by deletion.", len(m.Nodes), minNodes)
-	}
-	// The edge floor stands for the structural passes: imports, containment,
-	// implements, embeds, has_field and the automation triggers. A regeneration
-	// that dropped --types or --automations would leave far fewer.
-	if len(m.Edges) < minEdges {
-		t.Errorf("the committed model has %d edges, floor is %d. The most likely cause is a "+
-			"regeneration that dropped a structural pass (--types, --automations) -- the subset "+
-			"gate cannot see that, because a smaller model is a subset of a larger one.",
-			len(m.Edges), minEdges)
-	}
-}
+func TestGeneratedModelLoadsThroughTheRealDecoder(t *testing.T) { _ = generatedModel(t) }
 
-// TestCommittedModelLoadsThroughTheRealDecoder is the FIFTH thing byte-for-byte
-// was enforcing, and the one with the worst failure mode.
-//
-// embedded.Load() is the artifact's only consumer path, and it goes through
-// model.ReadJSON, which does two things plain json.Unmarshal does not:
-// DisallowUnknownFields and a SchemaVersion check. Every other test here --
-// including the drift gate -- uses plain Unmarshal, and NOTHING in the repo
-// called embedded.Load() at all; the embedded package had no tests.
-//
-// Byte-for-byte covered this transitively: the committed file equalled the
-// generator's output, and that output is decodable by construction. Measured
-// once that guarantee went away:
-//
-//	schema_version: "0.9"   -> every committed-file test PASSES,
-//	                           embedded.Load() -> "schema version mismatch"
-//	one extra top-level key -> every committed-file test PASSES,
-//	                           embedded.Load() -> "unknown field"
-//
-// That is worse than staleness: every reader loads NOTHING and CI is green. It
-// is also the exact case ReadJSON's own doc anticipates -- "in practice that
-// only happens if someone hand-edits the generated file" -- which is how #2844
-// says the artifact drifted in the first place.
-func TestCommittedModelLoadsThroughTheRealDecoder(t *testing.T) {
-	if _, err := embedded.Load(); err != nil {
-		t.Fatalf("the committed artifact does not decode through model.ReadJSON, the strict "+
-			"decoder embedded.Load() uses: %v\n\nIt has DisallowUnknownFields and a schema-version "+
-			"check that plain json.Unmarshal does not, so every other test here can pass while "+
-			"every reader loads nothing at all (memql#2844).", err)
-	}
-}
-
-// TestCommittedModelIsCompact is the SIXTH, and it re-arms a CI failure that
-// already cost this change a full cycle.
-//
-// Pretty-printed, the artifact is ~1.26M lines, and GitHub cannot generate a
-// diff for a change that touches all of them:
-//
-//	Server Error: Sorry, this diff is taking too long to generate.
-//	{"resource":"PullRequest","field":"diff","code":"not_available"}
-//
-// dorny/paths-filter reads that diff, so `changes` fails and `ci-required`
-// fails and the PR is unmergeable -- measured on 55fae413. Byte-for-byte was
-// enforcing single-line output. Without this, re-adding SetIndent, or anyone
-// running the file through jq or a formatter, silently re-arms it and the whole
-// suite stays green; you rediscover it as an unmergeable PR rather than a test
-// failure.
-func TestCommittedModelIsCompact(t *testing.T) {
-	root := workspaceRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "component", "architecture", "embedded",
-		model.CanonicalFilename))
-	if err != nil {
-		t.Fatalf("read the committed model: %v", err)
-	}
-	// json.Encoder.Encode appends exactly one trailing newline.
-	if n := bytes.Count(raw, []byte("\n")); n > 1 {
-		t.Errorf("the committed artifact spans %d lines; it must be compact (one line).\n\n"+
-			"Pretty-printed, GitHub cannot generate its diff and the `changes` job fails, which "+
-			"fails ci-required and makes the PR unmergeable -- measured on 55fae413. Regenerate "+
-			"with `make arch-model`; do not run the file through a formatter (memql#2844).", n+1)
+func TestGeneratedModelIsCompact(t *testing.T) {
+	if n := bytes.Count(generatedBytes(t, false), []byte("\n")); n != 1 {
+		t.Fatalf("got %d newlines, want one", n)
 	}
 }

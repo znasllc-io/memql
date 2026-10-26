@@ -15,4 +15,3 @@
 # therefore ci-required. Writing the artifact compact is what actually fixed
 # it, so the marker would now be doing nothing except hiding a one-line diff
 # that is already unreadable.
-component/architecture/embedded/topology.model.json linguist-generated=true

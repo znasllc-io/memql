@@ -192,6 +192,7 @@ pipeline:
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
+            make arch-model GOFLAGS=-p=1
             go build github.com/znasllc-io/memql/...
             go vet github.com/znasllc-io/memql/...
             make env-registry-check

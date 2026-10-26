@@ -49,7 +49,7 @@ ALL_PKGS    := $(MODULE)/...
 all: build healthcheck
 
 ## Build the standalone MemQL server (all components)
-build: identity-tailwind
+build: identity-tailwind arch-model
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql .
 
 ## Build all binaries including node-type variants
@@ -486,39 +486,22 @@ sdk-gen:
 sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
 
-# ARCH_MODEL_OUT lets the drift gate regenerate to a temp file through THIS
-# target, so the flag set exists exactly once in the repo. ARCH_MODEL_CALLS=1
-# on the command line adds --calls: the gate's on-demand call graph
-# (memql#5727), never the committed artifact. `:=`, not `?=`, so an
-# ARCH_MODEL_CALLS exported in someone's shell cannot put the call graph back
-# into the file they commit. Declared above the doc block so they do not
-# separate the '## ' summary from its target, which would drop arch-model out of
-# `make help` (TestMakeHelpCompleteness).
-ARCH_MODEL_OUT ?= component/architecture/embedded/topology.model.json
+# A generated build output, not a compiler input. Tests override only its path.
+ARCH_MODEL_OUT ?= build/architecture/topology.model.json
 ARCH_MODEL_CALLS :=
+ARCH_MODEL_TOOLCHAIN := $(shell awk '$$1 == "toolchain" { print $$2 }' go.work)
 
-## Regenerate the checked-in architecture model
-## (component/architecture/embedded/topology.model.json): services, packages,
-## types and the DSL automation trigger graph.
-##
-## STRUCTURAL ONLY (memql#5727, owner decision 7). The CHA call graph was
-## 63.9 of the file's 81.3 MB and nothing read it, so --calls is off for the
-## committed artifact; TestArchitectureModelIsNotStale builds it on demand
-## (ARCH_MODEL_CALLS=1) to check it. --reproducible blanks generated_at and the
-## absolute workspace path so the output depends only on the code (memql#2844).
-arch-model:
-	$(GO) run ./cmd/memql-arch --root . --types --automations --cluster memql \
+## Generate the source topology with complete package/type loading.
+## Output is ignored. Call graph generation is optional (ARCH_MODEL_CALLS=1).
+arch-model: identity-tailwind
+	env -u GOOS -u GOARCH -u GOROOT GOENV=off GOEXPERIMENT= GOAMD64=v1 GOFIPS140=off GODEBUG= MEMQL_DSL_PATH= GOTOOLCHAIN=$(ARCH_MODEL_TOOLCHAIN) GOWORK=$(CURDIR)/go.work GOFLAGS='-mod=readonly -p=1' GOPACKAGESDRIVER=off \
+		$(GO) run ./cmd/memql-arch --canonical --root . --types --automations --cluster memql \
 		--reproducible $(if $(ARCH_MODEL_CALLS),--calls) --out $(ARCH_MODEL_OUT)
 
-## CI gate: regenerate the architecture model and check the checked-in copy
-## against it. Fails if the code changed without the model being refreshed --
-## the drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
-## places after #2840 removed it. Pair with `make arch-model` locally to fix.
-##
-## Also enforced by TestArchitectureModelIsNotStale so it runs in the ordinary
-## `go test ./...` lane, which needs no workflow change.
+## Generate and validate the current source topology once per test profile.
+## No committed topology or prior generated output is accepted as evidence.
 arch-model-check:
-	$(GO) test -count=1 -run TestArchitectureModelIsNotStale ./component/architecture/
+	$(GO) test -count=1 -run 'Test(ArchitectureModelBuildsFromSource|GeneratedModel|NoSourceRefEscapesTheWorkspace)' ./component/architecture/
 
 # PLATFORM_GRAPH_OUT lets TestPlatformGraphIsNotStale regenerate to a temp file
 # through THIS target, as ARCH_MODEL_OUT does for the model.

@@ -34,9 +34,8 @@
 //	}
 //
 // The fully-qualified name string must match the `id` of the
-// corresponding Method node in topology.model.json; the cockpit
-// joins on that key when overlaying invocation history onto the
-// rendered diagram.
+// corresponding Method node in generated topology.model.json. Offline tools
+// can join on that key; this runtime does not load the generated graph.
 package observe
 
 import (

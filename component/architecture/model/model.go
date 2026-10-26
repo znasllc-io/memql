@@ -143,24 +143,10 @@ type Edge struct {
 	Attrs map[string]string `json:"attrs,omitempty"`
 }
 
-// Model is the top-level container. Persisted as JSON
-// (topology.model.json) by the extractor and embedded by
-// component/architecture/embedded.
-//
-// SchemaVersion is checked before unmarshaling.
-//
-// GeneratedAt is RFC3339, OR EMPTY when the model was produced with
-// --reproducible -- which is how the committed
-// component/architecture/embedded/topology.model.json is generated
-// (memql#2844). Workspace is the absolute path the extractor was run from,
-// and is likewise EMPTY in that artifact; the cockpit used it only for display
-// ("topology generated from <path>").
-//
-// Consumers must treat both as "unknown" when empty and must not parse
-// GeneratedAt unconditionally. Both fields carried machine-specific data --
-// a wall clock and a developer's absolute home path -- which made the artifact
-// differ on every run and every machine, so a drift gate over it was
-// impossible. Blanking them is what makes the committed model reproducible.
+// Model is the source topology schema, persisted by the extractor as JSON.
+// It is generated during verification, not embedded or committed.
+// SchemaVersion is checked by ReadJSON. GeneratedAt and Workspace are empty
+// in reproducible output; consumers must not parse an empty timestamp.
 type Model struct {
 	SchemaVersion string `json:"schema_version"`
 	GeneratedAt   string `json:"generated_at"`

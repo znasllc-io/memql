@@ -279,6 +279,17 @@ scripts/ci/db-gated-packages.sh --trees
 MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... go test -count=1 ./component/memql/...
 ```
 
+### Source architecture output
+
+The source topology is generated during verification, not committed or
+embedded. `make build`, native `go-checks`, and the architecture test package
+invoke strict canonical generation from the current checkout. `make arch-model`
+writes ignored `build/architecture/topology.model.json`; `make arch-model-check`
+checks fresh generated output. No runtime image, SDK, Fleet payload or docs
+bundle consumes that file. Direct source builds need no topology bootstrap.
+The separate `platform.graph.json` remains committed and keeps its existing
+regeneration/check contract. See `component/architecture/CLAUDE.md`.
+
 ### Image builds: LOCAL Docker for dev, MemQL pipelines for deploys (HARD RULE)
 
 Where a container image is built depends on where it runs:
