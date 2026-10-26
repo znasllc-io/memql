@@ -158,6 +158,10 @@ type Step struct {
 // StepRequest is what the driver hands an Executor for one step. It crosses
 // NodeService as JSON, so it carries plain data only.
 type StepRequest struct {
+	// ComputePlacement comes from the installed delivery-policy snapshot, never
+	// the tested repository. It selects capacity only for a pool-placed step;
+	// machine consent, resource limits and cloud admission remain mandatory.
+	ComputePlacement *ComputePlacementPolicy `json:"computePlacement,omitempty"`
 	// RecoverOnly means a previous driver recorded an intent without a receipt.
 	// The executor may adopt existing work, but cannot start a replacement effect.
 	RecoverOnly bool `json:"recoverOnly,omitempty"`
@@ -197,6 +201,14 @@ type StepRequest struct {
 	// under the owner's allowlist on the driver's side. They are never
 	// journaled: a step row records only the names.
 	Secrets map[string]string `json:"secrets,omitempty"`
+}
+
+// ComputePlacementPolicy is the installation's choice of how long to prefer
+// compatible Fleet capacity before considering a budget-admitted cloud job.
+// A false CloudFallback keeps waiting for Fleet within the existing run bound.
+type ComputePlacementPolicy struct {
+	FleetWaitSeconds int  `json:"fleetWaitSeconds"`
+	CloudFallback    bool `json:"cloudFallback"`
 }
 
 // Outcome is how a step ended.

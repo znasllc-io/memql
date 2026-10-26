@@ -236,9 +236,14 @@ type Usage struct {
 	Model string
 }
 
-// Result is a finished call.
+// Result carries the runtime evidence available even when the call fails.
 type Result struct {
-	FinishReason string
+	// RuntimeCompleted means the runtime's terminal response was observed.
+	// It is independent of output validation and delivery: either can fail
+	// after generation has stopped. Cancellation, EOF and a finish reason
+	// without the protocol terminator do not establish completion.
+	RuntimeCompleted bool
+	FinishReason     string
 	// Embeddings is the KindEmbedding result, one vector per input, in
 	// input order.
 	Embeddings [][]float32

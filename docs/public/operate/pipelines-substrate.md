@@ -61,6 +61,11 @@ executor (`integrations/pipelinesteps`), which decides where it runs:
   offers -- and only on a pipeline connected with `compute: cluster_and_fleet`
   ([Compute](pipelines.md#compute)). The agent dispatches the step to a machine
   through its worker dispatcher ([The fleet](#the-fleet)).
+- **Through the shared pool**, for explicit `placement: pool` container steps:
+  the captured installed policy prefers eligible opted-in Fleet capacity, then
+  may permit cloud fallback after a confirmed refusal before execution. A failed
+  command, lost reply or uncertain dispatch never authorizes another execution.
+  Each new cloud Job and isolation probe still passes live spending admission.
 
 Both paths give a step the same contract environment, the same secrets and the
 same effective timeout, capture its output the same way, and file its log and
@@ -771,7 +776,7 @@ replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need and allows pipelines, the step is
 refused `pipeline_no_machine_for_need`, and nothing ran. An otherwise eligible
 worker that is offline can keep admission waiting for its connection; revoked
-workers, withdrawn repository consent and incompatible contracts cannot. Under contract 4, policy rejection, busy build capacity and an unavailable
+workers, withdrawn repository consent and incompatible contracts cannot. Under contract 5, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
 When the dispatcher confirms that shared build capacity was busy or fenced by
 a retained local-build record, an eligible worker is offline, or its connection
@@ -793,17 +798,25 @@ the work run and the step.
 **Execution is explicit.** `execution: container` uses the exact digest-pinned
 Linux image with the declared architecture, even on a Mac. It cannot inherit
 host Docker, GPU, display or file access through a `needs` label. Use native
-execution for host tools. A container on the fleet uses `placement: fleet`,
-without host needs. Docker must answer a live daemon identity/platform probe;
+execution for host tools. A container uses dedicated `placement: fleet` or
+eligible `placement: pool`, without host needs. Docker must answer a live daemon identity/platform probe;
 architecture emulation is refused. Native execution also probes Docker when
 `needs: { docker: true }` is declared. Labels alone do not prove daemon health.
 
-The current worker admits one pipeline command per OS user across all its
-cluster connections. A durable attempt record outlives process death. A new
-worker reconciles the recorded containers and network only against the same Docker daemon;
+The worker admits one pipeline command at a time per OS user across all its
+cluster connections. Its exclusive host lock also excludes Fleet workbench
+execution, local inference and guarded local builds for that user. Inference
+retains a durable activity witness when its runtime outcome is uncertain, so a
+process exit cannot make potentially active inference appear idle. These locks
+coordinate admission; they do not impose hard CPU or memory limits on native
+commands or coordinate another OS account.
+
+Pipeline attempt records also outlive process death. A replacement worker
+reconciles recorded containers and networks only against the same Docker daemon;
 unknown daemon identity, uncertain cleanup and interrupted native execution
-remain blocked for reconciliation. This reservation does not reserve agent
-work or another OS user's capacity.
+remain blocked for reconciliation. Container commands apply their declared
+CPU and memory limits after installation bounds and available host capacity are
+checked. Omitted resource values use the worker's bounded container defaults.
 
 Container steps support up to four digest-pinned services on the declared
 platform. Services share `localhost` with the command on a per-attempt bridge,
@@ -818,7 +831,7 @@ enrollments, repository hosts, architectures, images and runtime users. Pull
 request writes never enter the trusted push/release cache. Cockpit retains up
 to 10 GiB between builds, evicting oldest cache directories; this is not a hard
 disk quota while a command runs. Native steps cannot declare services or these
-managed caches. Upgrade the engine and Cockpit together for contract 4.
+managed caches. Upgrade the engine and Cockpit together for contract 5.
 
 Artifacts use the existing authenticated worker stream, in data frames of at
 most 256 KiB before the terminal result. The receiver spools to a private file
@@ -1251,7 +1264,9 @@ coverage; packaging their binaries does not exercise those hosts.
 | `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
 | `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |
 
-No step names a fleet need, so this pipeline connects with `compute: cluster`.
+The manifest includes dedicated native Fleet checks, so its connection must
+permit `compute: cluster_and_fleet`. Pool placement is a separate opt-in after
+the engine capability is deployed; adding consent alone does not reroute cluster steps.
 The daily schedule runs the stages that opt into it; the history and CodeQL
 stages declare a weekly cadence. A release retains ordinary tests and dependency
 vulnerability checks without repeating those weekly scans. PR, merge-group and

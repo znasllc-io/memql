@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/workbench"
 	"io"
 	"os"
@@ -40,7 +41,8 @@ type pipelineAttemptRecord struct {
 	Network   string   `json:"network,omitempty"`
 	// Identity of the Docker endpoint is needed before another worker may
 	// reconcile it; it must not remove a namesake on a different daemon.
-	DockerID string `json:"dockerID,omitempty"`
+	DockerID       string `json:"dockerID,omitempty"`
+	DockerEndpoint string `json:"dockerEndpoint,omitempty"`
 }
 
 var errPipelineBusy = errors.New("this machine's build capacity is occupied")
@@ -86,6 +88,10 @@ func acquirePipelineReservation() (*pipelineReservation, error) {
 		}
 		return nil, err
 	}
+	if err := capacity.CheckInferenceIdle(root); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("%w: %v", errPipelineUnreconciled, err)
+	}
 	// A local build uses this same lock but a separate durable record. Its
 	// supervisor may have died while Docker still has effects in progress.
 	// Never interpret it as a pipeline checkout or clear it based on PID age.
@@ -123,7 +129,7 @@ func (r *pipelineReservation) read() (pipelineAttemptRecord, error) {
 func (r *pipelineReservation) begin(record pipelineAttemptRecord) error {
 	if r.dirty {
 		previous, err := r.read()
-		if err != nil || previous.Execution != "cleanup" || previous.Workspace != record.Workspace || previous.Container != "" || previous.DockerID != "" || previous.Network != "" || len(previous.Services) != 0 {
+		if err != nil || previous.Execution != "cleanup" || previous.Workspace != record.Workspace || previous.Container != "" || previous.DockerID != "" || previous.DockerEndpoint != "" || previous.Network != "" || len(previous.Services) != 0 {
 			return errPipelineUnreconciled
 		}
 	}
