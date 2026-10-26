@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelinerun"
@@ -232,6 +233,19 @@ func capturePipelineIndependentReview(ctx context.Context, p pipelinerun.Pipelin
 	} else {
 		return input, errors.New("independent review is only defined for claimed PR and full merge-group runs")
 	}
+	// Format selection is explicit in the captured prompt, never a product name
+	// or provider patch. Legacy unmarked prompts continue receiving full bytes.
+	if input.Kind == "ordinary" && pipelineReviewUsesProjection(input.Prompt) {
+		projection, e := githubapp.ProjectReviewDiff(ctx, *input.Diff)
+		if e != nil {
+			return input, e
+		}
+		input.Projection = &projection
+		input.ProjectionDigest = projection.Digest()
+		if _, e = pipelineReviewModelData(ctx, input); e != nil {
+			return input, e
+		}
+	}
 	if err = fence(ctx); err != nil {
 		return input, err
 	}
@@ -295,20 +309,105 @@ func samePipelineIndependentReview(ctx context.Context, saved, fresh pipelinerun
 	}
 	return gh.VerifyReviewTargetAdvance(ctx, reader, parts[0], parts[1], priorBase, currentBase, *saved.Diff)
 }
+
+const pipelineReviewRenderedLimit = 1 << 20
+
+func pipelineReviewUsesProjection(prompt map[string]any) bool {
+	source, _ := prompt["source"].(string)
+	first, _, _ := strings.Cut(source, "\n")
+	return first == githubapp.ReviewProjectionPromptMarker
+}
+
+// Native capture calls this before saving or marking ModelAttempted. Validation
+// calls capture again; invocation verifies the same immutable bytes once more.
+func pipelineReviewModelData(ctx context.Context, input pipelinerun.IndependentReviewInput) (map[string]any, error) {
+	if input.Kind != "ordinary" || input.Diff == nil || input.PullRequest == nil {
+		return nil, errors.New("independent review has no ordinary source")
+	}
+	var changes any = input.Diff
+	if input.Projection != nil {
+		if input.ProjectionDigest != input.Projection.Digest() {
+			return nil, errors.New("review projection digest mismatch")
+		}
+		if !pipelineReviewUsesProjection(input.Prompt) {
+			return nil, errors.New("review prompt does not declare the projection format")
+		}
+		if err := githubapp.ValidateReviewProjection(ctx, *input.Diff, *input.Projection); err != nil {
+			return nil, err
+		}
+		changes = input.Projection
+	} else if input.ProjectionDigest != "" || pipelineReviewUsesProjection(input.Prompt) {
+		return nil, errors.New("review prompt requires a captured complete-hunk projection")
+	}
+	diff, err := json.Marshal(changes)
+	if err != nil {
+		return nil, err
+	}
+	pr, err := json.Marshal(input.PullRequest)
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{"repository": input.Source.Repository, "pullRequest": string(pr), "changes": string(diff)}
+	if input.Projection != nil {
+		rendered, e := memql.RenderCapturedPromptBounded(input.Prompt, data, pipelineReviewRenderedLimit)
+		if e != nil {
+			return nil, e
+		}
+		if !strings.HasPrefix(rendered, githubapp.ReviewProjectionPromptMarker+"\n") {
+			return nil, errors.New("compiled review prompt does not declare its input format")
+		}
+	}
+	return data, nil
+}
+
+// The driver has fenced the captured source and its current provider grant.
+// Scheduled execution has no originating user session, so restore the source's
+// actual local owner before model attribution instead of borrowing the scheduler
+// or another incoming actor. Re-read the binding before using it as authority;
+// persisted evidence alone must not revive a removed or reassigned source.
+func (a *App) pipelineIndependentReviewContext(ctx context.Context, source pipelinerun.ReviewSource) (context.Context, error) {
+	if a.engine == nil || auth.NamesNoPerson(source.OwnerUserID) || source.SourceID == "" {
+		return nil, errors.New("independent review source owner is unavailable")
+	}
+	current, err := a.repositoryAuthoritySource(ctx, source.SourceID, true)
+	if err != nil {
+		return nil, err
+	}
+	if current.OwnerUserID != memql.BareShortId(source.OwnerUserID) || current.CredentialID != source.CredentialID || current.Repository != source.Repository {
+		return nil, errors.New("independent review source owner or connection changed")
+	}
+	bound, err := a.repositoryMaintainerContext(ctx, current.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	// Restoring a forwarded person resets DSL origin to client. Preserve only
+	// the origin this native call already held, not a new server-side grant.
+	if auth.OriginFromContext(ctx).IsInternal() {
+		bound = auth.ContextWithInternalOrigin(bound)
+	}
+	return repositoryIndependentReviewContext(bound), nil
+}
+
 func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelinerun.IndependentReviewInput) (pipelinerun.IndependentReviewVerdict, error) {
 	var out pipelinerun.IndependentReviewVerdict
 	if input.Kind != "ordinary" || input.Diff == nil || input.PullRequest == nil || len(input.Prompt) == 0 {
 		return out, errors.New("independent model review has no exact read-only input")
 	}
-	diff, err := json.Marshal(input.Diff)
+	data, err := pipelineReviewModelData(ctx, input)
 	if err != nil {
 		return out, err
 	}
-	pr, err := json.Marshal(input.PullRequest)
+	ctx, err = a.pipelineIndependentReviewContext(ctx, input.Source)
 	if err != nil {
 		return out, err
 	}
-	result, err := a.engine.InvokeCapturedPromptStructured(repositoryIndependentReviewContext(ctx), input.Prompt, map[string]any{"repository": input.Source.Repository, "pullRequest": string(pr), "changes": string(diff)}, "pipeline_independent_review", `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`, true)
+	const schema = `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`
+	var result memql.StructuredAIResult
+	if input.Projection != nil {
+		result, err = a.engine.InvokeCapturedPromptStructuredBounded(ctx, input.Prompt, data, "pipeline_independent_review", schema, true, pipelineReviewRenderedLimit)
+	} else {
+		result, err = a.engine.InvokeCapturedPromptStructured(ctx, input.Prompt, data, "pipeline_independent_review", schema, true)
+	}
 	if err != nil {
 		return out, err
 	}

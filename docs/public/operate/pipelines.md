@@ -314,11 +314,46 @@ its claimed PR run; the caller cannot choose another repository, commit,
 owner or verdict.
 
 The native adapter verifies current repository authority and reads the complete
-changed files from immutable Git objects. An ordinary PR receives a tool-free
-review of those bytes through the normal model admission policy. This creates
-no change request and grants no authority to edit code, merge, release or deploy.
-A governed proposal reuses its original valid review journal; a rejected,
-partial or changed native journal cannot fall back to the ordinary route.
+changed files from immutable Git objects. By default, an ordinary PR receives a
+tool-free review of those full bytes through the normal model admission policy.
+This creates no change request and grants no authority to edit code, merge,
+release or deploy. A governed proposal reuses its original valid review journal;
+a rejected, partial or changed native journal cannot fall back to the ordinary
+route.
+
+Scheduled review restores the registered source owner's current local identity
+before model routing; the scheduler's identity is not a person and cannot open
+an App session. The adapter rechecks the active source binding, resolves the
+owner's current role, and carries verified owner authority across replicas.
+Missing identities and changed or removed source bindings refuse before the
+model call. Existing current-provider, lease and policy checks still fence the
+review and its report. Restoring identity does not enable an App or bypass its
+consent, capacity, model-admission or spending checks. The call stays tool-free
+and cannot inherit the draft author's prompt or model override.
+
+An ordinary-review prompt whose first line is
+`Input representation: memql.complete-review-hunks.v1` explicitly selects the
+versioned complete-hunk format. Native evidence still retains the complete
+before/after blobs and their commit, tree, path and mode identities. The engine
+includes every changed path and line, including empty files and mode-only
+changes, and verifies that the hunks and omitted equal regions reconstruct the
+exact source bytes. The model receives the hunks with eight lines of adjacent
+unchanged context; overlapping context windows are combined. Line endings and
+missing final newlines are preserved.
+
+The paired prompt must state that other unchanged context is omitted. The
+reviewer has no tools to retrieve it and must refuse approval when that context
+or a dependency is needed to assess the change. This is not a claim that the
+model reviewed every unchanged byte. Native capture refuses incomplete,
+unsupported or oversized evidence before recording a model attempt. The full
+source limits below still apply; the hunk representation is additionally limited
+to 512 KiB and its rendered prompt to 1 MiB. Normal model admission and budget
+checks remain separate requirements.
+
+Deploy the engine capability before installing its paired marked product
+prompt, then qualify fresh reviews under that captured prompt. Unmarked prompts
+keep the full-file behavior. Neither deployment automatically changes the
+installed review policy, provider selection, authority or GitHub protections.
 
 The run saves its evidence and model attempt before review. Rejection or an
 unconfirmed result requires attention, rather than another automatic model call.

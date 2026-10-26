@@ -45,7 +45,9 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 	if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{"composeFile"})) > 0 {
 		out = append(out, "composeFile")
 	}
-	for _, name := range []string{"discoverCapabilities", "executeCapability", "consultWorkKnowledge", "artifactSearch", "recallMemory", "recallWorkHistory", "navigateOS", "requestUserFeedback", "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer", "workbenchHost"} {
+	// Repository requests use the installed bounded tools and their existing
+	// role/authority gates. Function discovery does not enumerate tool aliases.
+	for _, name := range []string{"discoverCapabilities", "executeCapability", "consultWorkKnowledge", "artifactSearch", "recallMemory", "recallWorkHistory", "navigateOS", "requestUserFeedback", "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer", "workbenchHost", "inspectRepositoryAuthority", "requestRepositoryChange", "repositoryChangeRequestStatus", "listRepositoryChangeRequests"} {
 		if r.engine != nil && !slices.Contains(out, name) && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
 			out = append(out, name)
 		}
