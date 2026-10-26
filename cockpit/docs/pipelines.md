@@ -39,7 +39,9 @@ commands it chooses, as you, for the repositories it names. The command is
 whatever the cluster sends -- this machine cannot see the pipeline it came
 from -- and it runs as the user the worker runs as, with that user's
 environment and files for an explicitly native step. A container step uses
-its declared image, checkout, declared caches and supplied environment. Native execution
+its declared image, checkout, declared caches and supplied environment. The
+explicit image-verification contract below instead uses a separately installed
+fixed rootless builder; it accepts no repository command, service or credential. Native execution
 is not a sandbox. `pipelines.repos` narrows which
 repositories; the clone URL must name the same repository, so the list filters
 what is actually cloned rather than a name the request states.
@@ -350,3 +352,156 @@ workers. Verify current registrations and their local resource ceilings before
 resuming Fleet work. Enable pool placements and the installed placement policy
 only after that coordinated upgrade; publishing the source alone does not
 activate them.
+
+
+## Isolated image verification on Linux
+
+`imageBuild.verificationOnly: true` requests a real Dockerfile build and OCI
+export for verification, then retains only the bounded
+`.memql-image-build/verification.json` receipt. It does not publish an image or
+produce a release artifact. The installation's pipeline selects source,
+Dockerfile, context, target, platform and build arguments; the engine contains
+no product-specific target list. Ordinary release image builds keep their
+existing OCI artifact contract.
+
+This path requires `linux/amd64`, pipeline action contract 5 and the separately
+advertised `pipelineImageVerification: 1`. Existing pipeline/repository consent
+still applies. Missing runtime tools or missing qualification suppress only this
+feature, rather than preventing the worker's ordinary model or native work.
+The controller checks the feature both when choosing a worker and on the agent
+that actually holds its stream. A label is not evidence of this implementation.
+
+The worker's existing service hardening remains unchanged. A separately
+provisioned system socket starts one fixed non-root helper (`cockpit/cmd/memql-imageverify`), with root-owned
+immutable helper, tool binaries, configuration and unit files. The service may
+use subordinate UID/GID helpers; this is an explicit operator installation
+choice, not a user-manager or policy bypass by the worker. It exposes only the
+closed image-verification protocol to the configured Unix account. No manager
+mutation, arbitrary command, shell script, Docker socket, host credential or
+publication credential is accepted. Read-only systemd metadata binds the
+actual helper PID, invocation, cgroup and fixed unit before any build can start.
+
+CPU, memory, swap and process limits are read back from a delegated child
+cgroup containing the helper, BuildKit, exporter and all build descendants.
+The fixed outer service also has resource ceilings, an independent runtime
+limit and control-group termination. The existing pipeline CPU/RAM settings are
+still maxima. Private checkout/state usage and filesystem headroom are sampled
+once per second; the selected state ceiling is at most 15 GiB. This is a
+measured stop condition and can overshoot between samples, not a hard filesystem
+quota. The builder has no shared cache. Its OCI export and build metadata stay
+in private attempt storage and are removed after hashing; the evidence receipt
+is the only declared artifact.
+
+RootlessKit supplies separate PID, mount and network namespaces. A fixed filter
+inside that network namespace permits public IPv4 and the isolated DNS relay,
+and denies private/link-local/metadata ranges and IPv6. No host firewall is
+changed. BuildKit keeps its normal per-build process sandbox and refuses
+insecure entitlements. Qualification must show that source-controlled builds
+cannot read the account's home, use host Unix sockets, or alter the outer
+filter/cgroup. RootlessKit's loopback restriction alone is not that proof.
+
+Before PREPARE, the worker retains the original request/source binding and the
+actual service invocation in its existing account-wide capacity record. START
+is permitted only after the service reports preparation and the worker verifies
+its exact identity and effective child limits again. Disconnect, cancellation
+or timeout stops the operation. The helper bounds graceful shutdown before
+killing its original process group; systemd covers detached descendants. The
+worker releases capacity only after the exact invocation is stopped, its cgroup
+is empty, and private state is absent. An unloaded unit by itself is not proof.
+An ambiguous START or failed cleanup stays fenced; another worker or cloud
+fallback must not replay it.
+
+A replacement worker may use the same fixed service solely to clean the retained
+attempt, after proving the previous invocation cannot still run. Cleanup changes
+its invocation identity but retains the original marker/source identity. A
+crash during a second cleanup therefore remains recoverable. Partial preparation
+is accepted only for an empty private directory or the exact expected marker
+prefix; unknown state remains fenced for review. The marker survives mapped-ID
+cleanup until the outer helper removes the final directory. Evidence paths are
+reserved before source execution and written through retained directory
+handles: a repository-provided directory, symlink or later replacement is
+refused.
+
+Availability additionally requires a root-owned qualification receipt binding
+this installed helper/tool/config/unit set and current host runtime facts.
+The installation also pins the operator-resolved immutable ELF loader/library
+closure and `ld.so.cache`; changing a dependency invalidates the same proof.
+Global `ld.so.preload` configuration refuses this optional builder rather than
+being removed or ignored. Advertisement checks file identities through the
+existing cache; admitted work hashes every selected dependency again.
+Configuration, startup and portable tests cannot create that evidence. The
+required real Linux fixtures cover target/export fidelity, aggregate resource
+limits, namespace and network isolation, cancellation/timeout, worker restart,
+ambiguous start/cleanup, and mapped state accounting/removal. Updating a tool,
+unit, host namespace policy or relevant runtime invalidates the proof; an
+unrelated DSL or controller revision does not. Per-request consent/source checks
+remain fresh and separate.
+
+On an AppArmor-enabled host, qualification also binds the existing distro
+`/usr/bin/rootlesskit` profile's exact loaded attachment, mode and kernel policy
+hash, plus its immutable source-file hash. The bounded per-profile read refuses
+missing, ambiguous or inaccessible evidence; sysctls and an on-disk profile alone
+do not prove what the kernel loaded. No new profile or system-wide relaxation is
+installed. The distro's named user-namespace exception is not a claim that
+AppArmor confines build instructions; the real service fixtures must still
+establish the separate namespace, network and resource boundaries. See
+`imageverify/service_apparmor_test.go` and the
+[RootlessKit AppArmor requirements](https://rootlesscontaine.rs/getting-started/common/apparmor/).
+
+Current source validation includes protocol bounds, original-marker recovery,
+evidence symlink/swap refusal, resource evidence, actual exported-byte hashing,
+and a Linux child that ignores termination while retaining output. Those tests
+are in `imageverify/contract_test.go`, `protocol_test.go` and
+`runtime_linux_test.go`; tool admission and lease tests are in
+`tools/pipeline_image_verification_test.go`. These portable/container fixtures
+are not real installed Linux/systemd/BuildKit qualification. Until the actual host fixtures
+and all selected exact-source image checks pass, the feature must remain
+unadvertised and the verification-only manifest changes unselected.
+
+The service/fixture are reproducibly built from an exact reviewed source commit
+for the operator's installation. This optional helper is not an extra Cockpit
+release asset and does not alter the existing publication catalog. Its
+`--render-image-verification-installation` port only renders the closed
+configuration and fixed unit texts; it installs nothing. Its fixed read-only
+`--check-image-verification-installation` port verifies immutable installed
+code/dependencies and collects current host policy plus loaded socket metadata
+before the short worker pause. It calls no build service, reads no credentials,
+and cannot create or substitute for an attestation. The normal worker
+binary has no setup or qualification bypass. An owner-run fixture may exercise
+the same typed service before an attestation exists, while normal Run and
+advertisement still require that attestation. Early qualification on older
+workers requires a reviewed, temporary stop of the existing worker while idle:
+older inference paths do not honor the newer durable build fence. Keep the
+worker stopped after interrupted or uncertain cleanup; preserve its registrations
+and settings, and restore it only after the exact service/cgroup/state check.
+
+Runtime dependency identity includes the exact operator-resolved loader and
+shared-library files, loader cache, and root-owned directory/SONAME alias chain.
+Admission hashes the regular targets and compares every declared link; a cache
+hit also checks link identity without rerunning an ELF resolver. A retargeted
+link cannot borrow the unchanged old file's qualification. Global loader preload
+refuses this optional capability. The operator captures this closed dependency
+map during setup; `service_runtime_files_test.go` and
+`service_runtime_aliases_test.go` cover file, cache and alias drift.
+
+The explicit `TestInstalledImageVerificationQualification` in
+`imageverify/installed_qualification_linux_test.go` records eight real-host
+results, their evidence hashes, and a candidate `qualification.json`. It uses
+the reviewed worker unit and inherited host reservation, and distinguishes the
+installed runtime source from generated fixture commits. Portable controls
+cannot produce that attestation. A failed or uncertain case preserves a failed
+result and the worker stop; only complete evidence and confirmed cleanup permit
+operator review and installation of the candidate. The network evidence uses a
+known listening host endpoint and a DNS positive control; it does not claim live
+nft readback.
+
+The fixed `--validate-image-verification-attestation` setup port accepts only a
+bounded candidate on stdin. As the configured nonroot owner, it rechecks the
+immutable installation and fresh host/socket facts, applies the same closed
+attestation validator as pipeline admission, and returns the exact candidate
+byte hash. It does not write a file or independently prove the supplied fixture
+hashes. The explicit root setup phase first joins all eight genuine evidence
+files and cleanup results, then writes those same validated bytes only if the
+fixed attestation path is absent. Normal worker admission still performs its
+own fresh qualification checks; a successful validation response alone cannot
+enable the capability.

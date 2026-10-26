@@ -229,7 +229,7 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 		// platform permission, so it routes alongside `capabilities`,
 		// before the per-build router AND before the preflights.
 		if action == computerCapabilitiesAction {
-			success, failure = runComputerCapabilities()
+			success, failure = runComputerCapabilities(d.policy.Pipelines())
 		} else if action == computerWaitAction {
 			success, failure = runComputerWait(ctx, args)
 		} else if fail := preflightComputerAction(action); fail != nil {

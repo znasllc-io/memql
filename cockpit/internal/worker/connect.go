@@ -226,7 +226,7 @@ func buildRegister(cfg Config, inventory []apps.Info, modelInv models.Inventory,
 	// proto field is optional -- on the (never-expected) marshal
 	// failure we register without it rather than fail the handshake;
 	// the server treats omission as valid.
-	if descJSON, err := tools.CapabilityDescriptorJSONFor(pipelines.RepositoryScopes()); err == nil {
+	if descJSON, err := tools.CapabilityDescriptorJSONForPipelines(pipelines); err == nil {
 		register.CapabilityDescriptorJson = descJSON
 	}
 	applyWorkbenchAdvertisement(register, cfg.workbenchReady)

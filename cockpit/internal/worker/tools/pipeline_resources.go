@@ -202,7 +202,7 @@ func checkPipelineHeadroom(ctx context.Context, req pipelineStepRequest) error {
 	cpu := req.cpuMilli + len(req.services)*pipelineServiceCPUMilli
 	memory := uint64(req.memoryMiB+len(req.services)*pipelineServiceMemoryMiB) << 20
 	var docker dockerResourceHeadroom
-	usesDocker := req.execution == "container" || slices.Contains(req.needs, "docker")
+	usesDocker := (req.execution == "container" && req.imageBuild == nil) || slices.Contains(req.needs, "docker")
 	if usesDocker {
 		var err error
 		docker, err = pipelineDockerResources(ctx)

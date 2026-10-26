@@ -2,6 +2,9 @@ package tools
 
 import (
 	"encoding/json"
+	"context"
+	"time"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/imageverify"
 	"fmt"
 	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"os"
@@ -65,6 +68,7 @@ var buildAgnosticComputerActions = []string{computerWaitAction}
 // server is reachable, at least 1 otherwise. An additive field --
 // schemaVersion stays 1.
 type CapabilityDescriptor struct {
+	PipelineImageVerification int `json:"pipelineImageVerification,omitempty"`
 	Architecture  string `json:"architecture"`
 	HomeDirectory string `json:"homeDirectory,omitempty"`
 	// ActionContracts comes from the implementation, never operator labels.
@@ -193,11 +197,13 @@ func CapabilityDescriptorJSONFor(scopes map[string][]string) (string, error) {
 // every build variant. Routed by the dispatcher BEFORE the per-build
 // dispatchComputer so the headless build answers instead of
 // rejecting with computeruse_unavailable.
-func runComputerCapabilities() (*memqlv1.Success, *memqlv1.Failure) {
+func runComputerCapabilities(policies ...PipelinesPolicy) (*memqlv1.Success, *memqlv1.Failure) {
 	desc := ComputeCapabilities()
+	if len(policies) == 1 { applyImageVerificationCapability(&desc, policies[0]) }
 	preview := fmt.Sprintf("platform=%s displayServer=%s computerUseAvailable=%t actions=%d displays=%d",
 		desc.Platform, desc.DisplayServer, desc.ComputerUseAvailable, len(desc.Actions), desc.Displays)
 	return successComputerJSON(map[string]any{
+		"pipelineImageVerification": desc.PipelineImageVerification,
 		"actionContracts":      desc.ActionContracts,
 		"platform":             desc.Platform,
 		"homeDirectory":        desc.HomeDirectory,
@@ -220,4 +226,17 @@ func successComputerJSON(payload map[string]any, preview string, bytesOut int) *
 		BytesOut:      uint64(bytesOut),
 		OutputPreview: clampPreview(preview),
 	}
+}
+
+// The feature is available only with the existing pipeline consent and live
+// runtime prerequisites. Per-attempt resource/filter verification still runs
+// before source execution; this advertisement is never an authority grant.
+func applyImageVerificationCapability(desc *CapabilityDescriptor, policy PipelinesPolicy) {
+ if !policy.Allow { return }; ctx,cancel:=context.WithTimeout(context.Background(), 3*time.Second); defer cancel()
+ if imageverify.Available(ctx) { desc.PipelineImageVerification=1 }
+}
+
+func CapabilityDescriptorJSONForPipelines(policy PipelinesPolicy)(string,error) {
+ desc:=ComputeCapabilities();desc.RepositoryScopes=policy.RepositoryScopes();applyImageVerificationCapability(&desc,policy)
+ data,err:=json.Marshal(desc);return string(data),err
 }

@@ -188,7 +188,7 @@ func waitPipelineService(ctx context.Context, name string, probe bool) error {
 }
 
 func validPipelineAttempt(record pipelineAttemptRecord) bool {
-	if record.Execution != "container" || record.DockerID == "" || !validPipelineDockerEndpoint(record.DockerEndpoint) || !regexp.MustCompile(`^memql-step-[0-9a-f]{32}$`).MatchString(record.Container) || len(record.Services) > maxPipelineServices {
+	if record.ImageVerification != nil || record.Execution != "container" || record.DockerID == "" || !validPipelineDockerEndpoint(record.DockerEndpoint) || !regexp.MustCompile(`^memql-step-[0-9a-f]{32}$`).MatchString(record.Container) || len(record.Services) > maxPipelineServices {
 		return false
 	}
 	if len(record.Services) == 0 {

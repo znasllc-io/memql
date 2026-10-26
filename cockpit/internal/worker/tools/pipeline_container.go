@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/cockpit/internal/worker/imageverify"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
@@ -73,6 +74,12 @@ func parsePipelineExecution(args map[string]any, req *pipelineStepRequest) error
 }
 
 func checkPipelineRuntime(ctx context.Context, req *pipelineStepRequest) error {
+	if req.imageBuild != nil {
+		if !imageverify.Available(ctx) {
+			return imageverify.ErrUnavailable
+		}
+		return nil
+	}
 	if req.execution == "native" {
 		if host := runtime.GOOS + "/" + runtime.GOARCH; req.platform != host {
 			return fmt.Errorf("pipeline_step: native step requires %s; this host is %s", req.platform, host)
@@ -324,7 +331,22 @@ func reconcilePipelineReservation(ctx context.Context, reservation *pipelineRese
 	if err != nil {
 		return err
 	}
+	if record.Execution == "image-verification" {
+		if record.ImageVerification == nil || record.ImageVerification.Workspace != record.Workspace || record.Container != "" || record.DockerID != "" || record.DockerEndpoint != "" || len(record.Services) != 0 || record.Network != "" {
+			return errPipelineUnreconciled
+		}
+		if err := imageverify.Reconcile(ctx, *record.ImageVerification, reservation.updateImageVerification); err != nil {
+			return err
+		}
+		if err := reservation.cleanupReady(record.Workspace); err != nil {
+			return err
+		}
+		return finishPipelineWorkspace(reservation, record.Workspace)
+	}
 	if record.Execution == "cleanup" {
+		if record.ImageVerification != nil {
+			return errPipelineUnreconciled
+		}
 		if !filepath.IsAbs(record.Workspace) || !strings.HasPrefix(filepath.Base(record.Workspace), "step-") || record.Container != "" || record.DockerID != "" || record.DockerEndpoint != "" || record.Network != "" || len(record.Services) != 0 {
 			return errPipelineUnreconciled
 		}

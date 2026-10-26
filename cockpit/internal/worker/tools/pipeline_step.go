@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/znasllc-io/memql/cockpit/internal/worker/imageverify"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
@@ -153,28 +154,30 @@ type artifactEmitter func(data []byte) error
 
 // pipelineStepRequest is one decoded and validated pipeline_step.
 type pipelineStepRequest struct {
-	cloneURL       string
-	sha            string
-	token          string
-	repository     string
-	command        string
-	env            map[string]string
-	secrets        map[string]string
-	artifacts      []string
-	timeoutSec     int
-	execution      string
-	platform       string
-	image          string
-	cpuMilli       int
-	memoryMiB      int
-	dockerID       string
-	dockerEndpoint string
-	needs          []string
-	services       []pipelineService
-	caches         []string
-	cacheScope     string
-	cacheHome      string
-	cacheDir       string
+	cloneURL          string
+	sha               string
+	token             string
+	repository        string
+	command           string
+	env               map[string]string
+	secrets           map[string]string
+	artifacts         []string
+	timeoutSec        int
+	execution         string
+	platform          string
+	image             string
+	cpuMilli          int
+	memoryMiB         int
+	dockerID          string
+	dockerEndpoint    string
+	needs             []string
+	services          []pipelineService
+	caches            []string
+	cacheScope        string
+	cacheHome         string
+	cacheDir          string
+	imageBuild        *imageverify.Request
+	imageMinFreeBytes uint64
 }
 
 // runPipelineStep implements workerHost.pipeline_step. agentID is the
@@ -208,6 +211,11 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	if err != nil {
 		return refuse("bad_request", err)
 	}
+	imageFreeMiB := settings.MinFreeDiskMiB
+	if imageFreeMiB == 0 {
+		imageFreeMiB = DefaultPipelineMinFreeDiskMiB
+	}
+	req.imageMinFreeBytes = uint64(imageFreeMiB) << 20
 	if err := admitPipelineResourceLimits(&req, settings); err != nil {
 		return refuse("denied_by_policy", err)
 	}
@@ -400,6 +408,9 @@ func parsePipelineStep(args map[string]any) (pipelineStepRequest, error) {
 	}
 	if !shaPattern.MatchString(req.sha) {
 		return req, errors.New("pipeline_step: sha must be a full 40-character commit id")
+	}
+	if _, exists := args["imageBuild"]; exists {
+		return parsePipelineImageVerification(args, req)
 	}
 	if strings.TrimSpace(req.command) == "" {
 		return req, errors.New("pipeline_step: command required")
@@ -668,6 +679,9 @@ func (r *pipelineRun) fetch(ctx context.Context) (failed *memqlv1.Failure) {
 // command runs the step's command in the checkout and reports its exit
 // status: its own code, or 128 plus the signal that ended it.
 func (r *pipelineRun) command(ctx context.Context) (int, *memqlv1.Failure) {
+	if r.req.imageBuild != nil {
+		return r.imageVerification(ctx)
+	}
 	if r.req.execution == "container" {
 		return r.containerCommand(ctx)
 	}

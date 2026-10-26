@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "downloads": [
+    {
+      "name": "buildkit",
+      "version": "0.34.1",
+      "url": "https://github.com/moby/buildkit/releases/download/v0.34.1/buildkit-v0.34.1.linux-amd64.tar.gz",
+      "size": 92218962,
+      "sha256": "a59539daf547fe0958efe2d07e41c0a6944e1112a66d7e519ec1cf5b673ef15b",
+      "selectedMembers": [
+        "bin/buildkitd",
+        "bin/buildctl"
+      ],
+      "selectedMemberIdentities": {
+        "bin/buildctl": {
+          "sha256": "8e64362dceba989827b23af567915feda10426ebd40611772318662e33bf2bfd",
+          "bytes": 34819330,
+          "mode": "0o755"
+        },
+        "bin/buildkitd": {
+          "sha256": "ca3c5d4fe1defc5df56631e179824f17ddd555f1fcf5057d14dfb87496baa8c3",
+          "bytes": 80918593,
+          "mode": "0o755"
+        }
+      }
+    },
+    {
+      "name": "slirp4netns",
+      "version": "1.3.6",
+      "url": "https://github.com/rootless-containers/slirp4netns/releases/download/v1.3.6/slirp4netns-x86_64",
+      "size": 2387320,
+      "sha256": "411167abceff1fc8a7c562f53ed9f26d3ec8a17df4e2fe6eaa3bd53f1c1e1d48"
+    },
+    {
+      "name": "go",
+      "version": "1.27.3",
+      "url": "https://go.dev/dl/go1.27.3.linux-amd64.tar.gz",
+      "size": 70588678,
+      "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
+    }
+  ],
+  "ubuntuPackages": [
+    {
+      "Package": "uidmap",
+      "Version": "1:4.13+dfsg1-4ubuntu3.2",
+      "Architecture": "amd64",
+      "Filename": "pool/main/s/shadow/uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb",
+      "Size": "26006",
+      "SHA256": "a80cb7f72dd18c73cbb0b07b7fbe855504f26bfafae072a9b3d125c89d499b9e",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/s/shadow/uidmap_4.13+dfsg1-4ubuntu3.2_amd64.deb",
+      "Depends": "libaudit1 (>= 1:2.2.1), libc6 (>= 2.38), libselinux1 (>= 3.1~), libsubid4 (>= 1:4.11.1)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libsubid4",
+      "Version": "1:4.13+dfsg1-4ubuntu3.2",
+      "Architecture": "amd64",
+      "Filename": "pool/main/s/shadow/libsubid4_4.13+dfsg1-4ubuntu3.2_amd64.deb",
+      "Size": "23442",
+      "SHA256": "ba97fd28c53560a8d2a2261e8f75a7ab4112535b12f9fe1d50970c30051da0da",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/s/shadow/libsubid4_4.13+dfsg1-4ubuntu3.2_amd64.deb",
+      "Depends": "libaudit1 (>= 1:2.2.1), libc6 (>= 2.38), libselinux1 (>= 3.1~)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "nftables",
+      "Version": "1.0.9-1ubuntu0.1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/n/nftables/nftables_1.0.9-1ubuntu0.1_amd64.deb",
+      "Size": "69842",
+      "SHA256": "d648859fccde3c17b8b9b89993427564f91f394a39306db1f67bd5ea3ac42c6e",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/nftables/nftables_1.0.9-1ubuntu0.1_amd64.deb",
+      "Depends": "libnftables1 (= 1.0.9-1ubuntu0.1), libc6 (>= 2.34), libedit2 (>= 3.1-20130611-0)",
+      "operation": "extract-only-nft-executable",
+      "maintainerScriptsSHA256": "b76e84ec23e634959e79652e5c602cbb3150099df7047b532a2ac72925175fb7",
+      "hasMaintainerScriptsBeyondTriggers": true,
+      "selectedMemberIdentities": {
+        "usr/sbin/nft": {
+          "sha256": "3f1c21553e62716ef1abfcf31f51ff94eb73ff4234a6653bac754a42f936d1c7",
+          "bytes": 26856,
+          "mode": "0o755"
+        }
+      }
+    },
+    {
+      "Package": "libnftables1",
+      "Version": "1.0.9-1ubuntu0.1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/n/nftables/libnftables1_1.0.9-1ubuntu0.1_amd64.deb",
+      "Size": "358574",
+      "SHA256": "fcaee001747a6adaa0cd9337fef437b3aa7a7a6d5246b62fbd4784d3d6a5009e",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/nftables/libnftables1_1.0.9-1ubuntu0.1_amd64.deb",
+      "Depends": "libc6 (>= 2.38), libgmp10 (>= 2:6.3.0+dfsg), libjansson4 (>= 2.14), libmnl0 (>= 1.0.3-4~), libnftnl11 (>= 1.2.6), libxtables12 (>= 1.6.0+snapshot20161117)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libnftnl11",
+      "Version": "1.2.6-2build1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/libn/libnftnl/libnftnl11_1.2.6-2build1_amd64.deb",
+      "Size": "65986",
+      "SHA256": "e5bde5c9cbb95082700011f0b7ef2c0a41900b0a9fd7434f6e90448e2a7b4e50",
+      "pocket": "noble",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libn/libnftnl/libnftnl11_1.2.6-2build1_amd64.deb",
+      "Depends": "libc6 (>= 2.34), libmnl0 (>= 1.0.3-4~)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libmnl0",
+      "Version": "1.0.5-2build1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/libm/libmnl/libmnl0_1.0.5-2build1_amd64.deb",
+      "Size": "12272",
+      "SHA256": "5170658bf0eaf54a8c7d53061ca6b47a6cf33a83543a75fa521de7046cb7197a",
+      "pocket": "noble",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libm/libmnl/libmnl0_1.0.5-2build1_amd64.deb",
+      "Depends": "libc6 (>= 2.14)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libgmp10",
+      "Version": "2:6.3.0+dfsg-2ubuntu6.1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/g/gmp/libgmp10_6.3.0+dfsg-2ubuntu6.1_amd64.deb",
+      "Size": "253460",
+      "SHA256": "285f8a505dfa8e1b33f357a9d8d3477ad35bf18c0b34771a6df4c25923f3ae0d",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/g/gmp/libgmp10_6.3.0+dfsg-2ubuntu6.1_amd64.deb",
+      "Depends": "libc6 (>= 2.38)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libjansson4",
+      "Version": "2.14-2build2",
+      "Architecture": "amd64",
+      "Filename": "pool/main/j/jansson/libjansson4_2.14-2build2_amd64.deb",
+      "Size": "32830",
+      "SHA256": "0cf79113f5d193ce9af2be2ff4b2c3b30dd4e55a0b6c47f7d28f6c849ff3aa60",
+      "pocket": "noble",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/j/jansson/libjansson4_2.14-2build2_amd64.deb",
+      "Depends": "libc6 (>= 2.38)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libxtables12",
+      "Version": "1.8.10-3ubuntu2",
+      "Architecture": "amd64",
+      "Filename": "pool/main/i/iptables/libxtables12_1.8.10-3ubuntu2_amd64.deb",
+      "Size": "35704",
+      "SHA256": "c94063499d1b0b336f39607107efb7de95d52a5d4e7e6a9368a5f7308f05b714",
+      "pocket": "noble",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/i/iptables/libxtables12_1.8.10-3ubuntu2_amd64.deb",
+      "Depends": "libc6 (>= 2.34)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libedit2",
+      "Version": "3.1-20230828-1build1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/libe/libedit/libedit2_3.1-20230828-1build1_amd64.deb",
+      "Size": "97586",
+      "SHA256": "3afbc8ddf835049dd4d88275b9d13680e4c4cdd59e191cbd63424152cc08e00e",
+      "pocket": "noble",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libe/libedit/libedit2_3.1-20230828-1build1_amd64.deb",
+      "Depends": "libbsd0 (>= 0.1.3), libc6 (>= 2.38), libtinfo6 (>= 6)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libbsd0",
+      "Version": "0.12.1-1build1.1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/libb/libbsd/libbsd0_0.12.1-1build1.1_amd64.deb",
+      "Size": "41238",
+      "SHA256": "f3857b0863ac5cfd4263e9bf6cfb1d4be88d5321e4070d5bc2b62b0949e6c86f",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libb/libbsd/libbsd0_0.12.1-1build1.1_amd64.deb",
+      "Depends": "libc6 (>= 2.38), libmd0 (>= 1.0.3-2)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libmd0",
+      "Version": "1.1.0-2build1.1",
+      "Architecture": "amd64",
+      "Filename": "pool/main/libm/libmd/libmd0_1.1.0-2build1.1_amd64.deb",
+      "Size": "26976",
+      "SHA256": "e5ba01d3c41f256aaf57ec59aa0554857162e3e7f97cdfbff1ed2c0e8d720ee7",
+      "pocket": "noble-updates",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/libm/libmd/libmd0_1.1.0-2build1.1_amd64.deb",
+      "Depends": "libc6 (>= 2.33)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    },
+    {
+      "Package": "libtinfo6",
+      "Version": "6.4+20240113-1ubuntu2.2",
+      "Architecture": "amd64",
+      "Filename": "pool/main/n/ncurses/libtinfo6_6.4+20240113-1ubuntu2.2_amd64.deb",
+      "Size": "108086",
+      "SHA256": "b67a6df2bdab61d273eabebd208bb6a3fb12618a390a067e1ee305a409ff03d9",
+      "pocket": "noble-security",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo6_6.4+20240113-1ubuntu2.2_amd64.deb",
+      "Depends": "libc6 (>= 2.34)",
+      "operation": "install-only-if-absent",
+      "maintainerScriptsSHA256": "e0fe47eb44668c831329a4971492a2808b363bf1fadaab7ff5c1a07fa5370d6b",
+      "hasMaintainerScriptsBeyondTriggers": false
+    }
+  ],
+  "existingDistroTools": [
+    "/usr/bin/rootlesskit",
+    "runc",
+    "git",
+    "systemctl",
+    "ip"
+  ],
+  "expectedBuiltBinaries": {
+    "memql-imageverify": "f409c47c840e7fe412ec715cf194eedfb5560f5a4dcc14a5955ef7a10f51f8c3",
+    "imageverify.test": "e9ccfadf91fe0d85d533bc067bb526c051d52f3b94aa3f3ad582de202ecd971c"
+  },
+  "buildIdentity": {
+    "goVersion": "1.27.3",
+    "GOENV": "off",
+    "GOOS": "linux",
+    "GOARCH": "amd64",
+    "CGO_ENABLED": "0",
+    "flags": [
+      "-trimpath",
+      "-buildvcs=false",
+      "-ldflags=-buildid="
+    ],
+    "scope": "Exact reviewed Go source closure; expected binaries are compile evidence, not real-host qualification."
+  },
+  "baseDistribution": {
+    "id": "ubuntu",
+    "version": "24.04",
+    "architecture": "amd64"
+  }
+}

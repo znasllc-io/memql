@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/imageverify"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/workbench"
 	"io"
 	"os"
@@ -34,11 +35,12 @@ type pipelineReservation struct {
 	dirty bool
 }
 type pipelineAttemptRecord struct {
-	Workspace string   `json:"workspace"`
-	Execution string   `json:"execution"`
-	Container string   `json:"container,omitempty"`
-	Services  []string `json:"services,omitempty"`
-	Network   string   `json:"network,omitempty"`
+	ImageVerification *imageverify.Record `json:"imageVerification,omitempty"`
+	Workspace         string              `json:"workspace"`
+	Execution         string              `json:"execution"`
+	Container         string              `json:"container,omitempty"`
+	Services          []string            `json:"services,omitempty"`
+	Network           string              `json:"network,omitempty"`
 	// Identity of the Docker endpoint is needed before another worker may
 	// reconcile it; it must not remove a namesake on a different daemon.
 	DockerID       string `json:"dockerID,omitempty"`
@@ -120,7 +122,7 @@ func (r *pipelineReservation) read() (pipelineAttemptRecord, error) {
 	if err != nil {
 		return record, err
 	}
-	err = json.NewDecoder(io.LimitReader(r.file, 4096)).Decode(&record)
+	err = json.NewDecoder(io.LimitReader(r.file, 16385)).Decode(&record)
 	if err != nil {
 		return record, fmt.Errorf("read interrupted build record: %w", err)
 	}
@@ -129,7 +131,7 @@ func (r *pipelineReservation) read() (pipelineAttemptRecord, error) {
 func (r *pipelineReservation) begin(record pipelineAttemptRecord) error {
 	if r.dirty {
 		previous, err := r.read()
-		if err != nil || previous.Execution != "cleanup" || previous.Workspace != record.Workspace || previous.Container != "" || previous.DockerID != "" || previous.DockerEndpoint != "" || previous.Network != "" || len(previous.Services) != 0 {
+		if err != nil || previous.Execution != "cleanup" || previous.ImageVerification != nil || previous.Workspace != record.Workspace || previous.Container != "" || previous.DockerID != "" || previous.DockerEndpoint != "" || previous.Network != "" || len(previous.Services) != 0 {
 			return errPipelineUnreconciled
 		}
 	}
@@ -138,6 +140,32 @@ func (r *pipelineReservation) begin(record pipelineAttemptRecord) error {
 		return err
 	}
 	r.dirty = true
+	if _, err = r.file.WriteAt(data, 0); err != nil {
+		return err
+	}
+	if err = r.file.Truncate(int64(len(data))); err != nil {
+		return err
+	}
+	return r.file.Sync()
+}
+
+// updateImageVerification retains the original source/marker binding while a
+// stopped invocation is replaced by the typed cleanup service. The caller owns
+// this same account-wide file lock and has proved the previous group empty.
+func (r *pipelineReservation) updateImageVerification(next imageverify.Record) error {
+	previous, err := r.read()
+	if err != nil || previous.Execution != "image-verification" || previous.ImageVerification == nil {
+		return errPipelineUnreconciled
+	}
+	old := previous.ImageVerification
+	if old.ID != next.ID || old.Workspace != next.Workspace || old.Root != next.Root || old.AttemptSHA256 != next.AttemptSHA256 || old.SourceSHA != next.SourceSHA {
+		return errPipelineUnreconciled
+	}
+	previous.ImageVerification = &next
+	data, err := json.Marshal(previous)
+	if err != nil || len(data) > 16384 {
+		return errPipelineUnreconciled
+	}
 	if _, err = r.file.WriteAt(data, 0); err != nil {
 		return err
 	}
