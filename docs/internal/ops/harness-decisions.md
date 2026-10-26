@@ -460,6 +460,42 @@ duplicating its original image text. Mixed/already-image content passes through.
 Live delivery and task-specific visual verification require
 their own recorded observations.
 
+## Claude print-mode prompt transport
+
+The worker hands Claude Code one complete text prompt through a private stdin
+pipe, closes it, and drains stdout/stderr concurrently. A large retained review
+can exceed the host's per-argument `exec` limit before the CLI starts; text stdin
+avoids that transport limit without truncating evidence or changing model context
+limits. Claude's [input-error reference](https://code.claude.com/docs/en/errors)
+documents stdin as an alternative to a positional prompt. Its
+[print-mode guide](https://code.claude.com/docs/en/headless) documents a 10 MB
+stdin cap; an upstream refusal remains a failed turn, not permission to shorten
+the input or fall back to an incomplete argv prompt.
+
+Only the harness owns this finite pipe. The engine cannot write interactive
+input into a running App. Follow-ups are still separate authorized turns,
+resuming the recorded session ID. Model/effort, response schema, tool grants,
+workspace and MCP boundaries stay in their existing flags. A missing pipe,
+short write, write error or failed close terminates the supervised process group
+and fails the turn even if a result event claims success. Cancellation stops the
+same group, unblocking a pending writer; the process is reaped and no prompt is
+automatically replayed. There is no new durable transport state to restore on a
+replica change; the existing recorded session reference remains the continuation
+boundary.
+
+`claudeinput_test.go` exercises large exact input, EOF, output backpressure,
+transport failures and cancellation without a real model. Existing Claude grant,
+schema and resume cases preserve those contracts; app-session tests check stdin
+through the actual supervisor and whole-process-group cancellation.
+`TestClaudePromptLeaderExitClosesInputAndStopsDescendant` covers a CLI leader
+exiting while a descendant keeps stdin open but redirects both outputs. The
+supervisor's `Cmd.Wait` closes its `StdinPipe` writer before returning, which
+unblocks input delivery; its failure then stops the remaining process group.
+Group signaling uses the original spawned PID assigned by `Setpgid`, because
+looking up the group after the leader has been reaped misses surviving children.
+These tests prove byte delivery and lifecycle behavior, not a particular
+installed Claude version's model response or successful review of a live PR.
+
 ## Evidence and reuse
 
 | Decision | Reason and resulting path | Implementation |

@@ -124,6 +124,10 @@ func fakeApp(t *testing.T, binary, body string) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, binary)
+	if binary == "claude" {
+		// Print mode consumes the finite stdin prompt before answering.
+		body = "cat > '" + path + ".stdin'\n" + body
+	}
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatalf("write fake %s: %v", binary, err)
 	}
@@ -856,11 +860,10 @@ func TestSession_AttachRequiresARef(t *testing.T) {
 // Without `--resume <ref>` the "resume" is a brand new conversation that
 // looks identical from the outside. Without `--mcp-config <path>` the
 // app starts perfectly and cannot reach a single MemQL tool. And the
-// prompt has to come after `--`: `--mcp-config` is VARIADIC, so a prompt
-// following it directly is swallowed as a second config path.
+// prompt arrives intact on stdin, outside the variadic option parser.
 func TestSession_AttachResumesByRef(t *testing.T) {
 	argvFile := filepath.Join(t.TempDir(), "argv")
-	fakeApp(t, "claude", fmt.Sprintf(`
+	binary := fakeApp(t, "claude", fmt.Sprintf(`
 printf '%%s\n' "$@" > %q
 echo '{"type":"result","total_cost_usd":0.1,"session_id":"app-earlier-run"}'
 exit 0
@@ -885,8 +888,11 @@ exit 0
 	if got := argvValue(argv, "--mcp-config"); got != filepath.Join(h.workspace, ".mcp.json") {
 		t.Errorf("--mcp-config = %q, want the config this session wrote; argv: %v", got, argv)
 	}
-	if got := argvValue(argv, "--"); got != "do the thing" {
-		t.Errorf("the prompt after -- = %q, want it a positional the option parser cannot eat; argv: %v", got, argv)
+	if got := argvValue(argv, "--"); got != "" {
+		t.Errorf("unexpected positional prompt: %q", got)
+	}
+	if got, err := os.ReadFile(binary + ".stdin"); err != nil || string(got) != "do the thing" {
+		t.Fatalf("resumed stdin prompt = %q: %v", got, err)
 	}
 }
 
@@ -1076,6 +1082,7 @@ n=$(cat "$d/count" 2>/dev/null || echo 0)
 n=$((n+1))
 printf '%%s' "$n" > "$d/count"
 printf '%%s\n' "$@" > "$d/argv.$n"
+cp "$0.stdin" "$d/prompt.$n"
 cat .mcp.json > "$d/config.$n" 2>/dev/null
 if [ "$n" = "1" ]; then
   echo '{"type":"system","subtype":"init","session_id":"app-turn-1"}'
@@ -1145,8 +1152,8 @@ func TestSession_FollowUpRunsAsTheNextTurn(t *testing.T) {
 	if got := argvValue(second, "--resume"); got != "app-turn-1" {
 		t.Errorf("second turn --resume = %q, want the app's own session id; argv: %v", got, second)
 	}
-	if got := argvValue(second, "--"); got != "and now the follow-up" {
-		t.Errorf("second turn prompt = %q, want the follow-up's text; argv: %v", got, second)
+	if got, err := os.ReadFile(filepath.Join(dir, "prompt.2")); err != nil || string(got) != "and now the follow-up" {
+		t.Fatalf("second turn prompt = %q: %v", got, err)
 	}
 	first := readArgv(t, filepath.Join(dir, "argv.1"))
 	if got := argvValue(first, "--resume"); got != "" {

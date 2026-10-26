@@ -84,7 +84,9 @@ func startChild(dir string, argv []string, extraEnv []string) (*child, error) {
 // it opened is not that: it is the protocol. `codex app-server` and
 // `codex mcp-server` speak JSON-RPC 2.0 over the child's stdio, so for
 // them a closed stdin is not a safety property -- it is a client with no
-// way to say anything, and the session dies at the handshake.
+// way to say anything, and the session dies at the handshake. Claude print
+// turns also opt in to send one finite text prompt followed by EOF; the
+// harness owns that write, without forwarding interactive engine input.
 //
 // So the pipe is OPT-IN and the default stays closed, because the
 // default's failure mode is the useful one: a prompt-on-stdin app whose

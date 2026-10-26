@@ -116,8 +116,8 @@ func TestClaudeHeadlessArgvCarriesTheSessionGrant(t *testing.T) {
 		}
 	}
 	// And every one of those flags is an option, not a prompt.
-	if got := argv[separatorAt(t, argv)+1:]; len(got) != 1 || got[0] != "say pong" {
-		t.Errorf("the prompt must be the only thing after --, got %v", got)
+	if got := argv[separatorAt(t, argv)+1:]; len(got) != 0 {
+		t.Errorf("text stdin supplies the prompt; no positional is allowed, got %v", got)
 	}
 }
 
