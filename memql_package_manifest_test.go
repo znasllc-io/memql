@@ -493,8 +493,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					}
 					continue
 				}
-				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
-					t.Errorf("step %s must use a Linux amd64 Workbench container: %+v", step.Key, step)
+				if (step.Placement != pipelines.PlacementCluster && step.Placement != pipelines.PlacementPool) || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
+					t.Errorf("step %s must use an isolated Linux amd64 cluster or pool container", step.Key)
 				}
 				if len(step.Needs) > 0 {
 					t.Errorf("container step %s asks for host needs %v", step.Key, step.Needs)
@@ -797,13 +797,13 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// Mac editor hosts, Linux installer fixtures and the external public-site
-// probe require fleet consent. Other portable checks stay in cluster containers.
-func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
+// Dedicated hosts, the public-site probe and portable pool steps require Fleet
+// consent. Pool commands preserve their container boundary without host needs.
+func TestEngineManifestRequiresFleetConsentForHostsAndPool(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
 	if refusal == nil || refusal.Code != pipelines.CodeFleetNotConsented {
-		t.Fatalf("Mac hosts must refuse without fleet consent: %v", refusal)
+		t.Fatalf("Fleet and pool work must refuse without fleet consent: %v", refusal)
 	}
 	if refusal := pipelines.Consent(spec, pipelines.ComputeClusterAndFleet, nil); refusal != nil {
 		t.Fatal(refusal)
@@ -830,8 +830,9 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 				}
 				continue
 			}
-			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
-				t.Errorf("portable check %s requires a host", step.Name)
+			placement := pipelines.PlacementOf(step)
+			if (placement != pipelines.PlacementCluster && placement != pipelines.PlacementPool) || len(step.Needs) != 0 || pipelines.ExecutionOf(step.Execution) != pipelines.ExecutionContainer {
+				t.Errorf("portable check %s lost its cluster/pool container boundary", step.Name)
 			}
 		}
 	}

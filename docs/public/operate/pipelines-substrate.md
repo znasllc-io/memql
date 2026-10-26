@@ -1267,6 +1267,11 @@ coverage; packaging their binaries does not exercise those hosts.
 The manifest includes dedicated native Fleet checks, so its connection must
 permit `compute: cluster_and_fleet`. Pool placement is a separate opt-in after
 the engine capability is deployed; adding consent alone does not reroute cluster steps.
+The activated manifest assigns 48 portable container steps to the pool with
+explicit resource bounds. Their commands and coverage remain unchanged. Pool
+steps execute afresh: reusable verification receipts currently require dedicated
+cluster placement, so the activation removes those reuse flags rather than
+allowing a receipt from a different execution surface to skip a required check.
 The daily schedule runs the stages that opt into it; the history and CodeQL
 stages declare a weekly cadence. A release retains ordinary tests and dependency
 vulnerability checks without repeating those weekly scans. PR, merge-group and

@@ -51,7 +51,7 @@ func TestDeliveryCockpitReleaseKeepsItsIsolationAndArtifacts(t *testing.T) {
 		}
 		if engineCockpitHost(step.Stage, step.Name) {
 			checkCockpitHost(t, step)
-		} else if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Image != spec.Image || !slices.Equal(step.Caches, []string{"go"}) {
+		} else if step.Placement != pipelines.PlacementPool || step.Execution != pipelines.ExecutionContainer || step.Image != spec.Image || !slices.Equal(step.Caches, []string{"go"}) {
 			t.Errorf("Cockpit release changed its isolated build contract: %+v", step)
 		}
 		artifacts := slices.Clone(step.Artifacts)

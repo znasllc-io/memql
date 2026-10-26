@@ -4,8 +4,10 @@
 # This repository is a source like any other: a pipeline and no apps (design
 # record D12). A run reads this file at its own commit; the seam
 # (component/pipelines, component/pipelinerun) compiles the pipeline: block into
-# steps. Portable steps use isolated Workbench Jobs; native host work is declared
-# explicitly in separate steps. The package targets linux/amd64, the
+# steps. Portable container checks use the installed shared-pool policy, which
+# can prefer compatible opted-in Fleet machines before budget-admitted cloud
+# Workbench Jobs. CPU/memory limits travel with the step; native host work is
+# declared explicitly in separate steps. The package targets linux/amd64, the
 # architecture of the local build node and of AKS (design record
 # 2026-10-11-pipelines-local-green-and-fast, D9).
 #
@@ -186,7 +188,9 @@ pipeline:
         # The saved event base survives the replica hop and supplies the
         # authoring-surface comparison; a first push has no predecessor.
         - name: go-checks
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -205,8 +209,9 @@ pipeline:
         # ci.yml path-routing: the path-routing and CI-configuration guards, on
         # every change.
         - name: path-routing
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -215,8 +220,9 @@ pipeline:
             python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py
             python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
         - name: build-identity
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -225,8 +231,9 @@ pipeline:
             go build -tags identity github.com/znasllc-io/memql/...
             go vet -tags identity github.com/znasllc-io/memql/...
         - name: build-mcp
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -235,8 +242,9 @@ pipeline:
             go build -tags mcp github.com/znasllc-io/memql/...
             go vet -tags mcp github.com/znasllc-io/memql/...
         - name: build-agent
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -245,8 +253,9 @@ pipeline:
             go build -tags agent github.com/znasllc-io/memql/...
             go vet -tags agent github.com/znasllc-io/memql/...
         - name: build-planner
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -255,8 +264,9 @@ pipeline:
             go build -tags planner github.com/znasllc-io/memql/...
             go vet -tags planner github.com/znasllc-io/memql/...
         - name: build-workbench
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -265,8 +275,9 @@ pipeline:
             go build -tags workbench github.com/znasllc-io/memql/...
             go vet -tags workbench github.com/znasllc-io/memql/...
         - name: build-clustere2e
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -278,8 +289,9 @@ pipeline:
             go vet -tags clustere2e,agent ./test/clustere2e/
             go test -tags clustere2e,agent -c -o /dev/null ./test/clustere2e/
         - name: module-boundaries
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 60m
           run: |
             set -eu
@@ -287,8 +299,9 @@ pipeline:
             bash scripts/identity/build-css.sh
             bash scripts/ci/module-integrity.sh
         - name: bash32-smoke
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 10m
           image: docker.io/library/bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89
           caches: []
@@ -361,7 +374,8 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: go-vulnerabilities
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
           timeout: 30m
           # govulncheck over every module holds the whole program in memory:
           # at the namespace default (4 GiB) the kernel killed it at 4.2 GB
@@ -381,7 +395,9 @@ pipeline:
             cat .memql-security/go/findings.txt .memql-security/go/errors.txt
             test "$status" -eq 0
         - name: npm-vulnerabilities
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           artifacts: [.memql-security/npm]
           run: |
@@ -396,7 +412,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: cluster
+          placement: pool
           timeout: 30m
           cpuMilli: 3000
           memoryMiB: 6144
@@ -416,8 +432,9 @@ pipeline:
         # package: a step cannot give that package a flag of its own, and its
         # gates read `git ls-files`, a set no test cache sees.
         - name: go-tests
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           packages: affected
           only: not-db-gated
           shards: 4
@@ -431,8 +448,8 @@ pipeline:
         # timeout class a fresh database, preserving CI's suite isolation and
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
-          verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           # Keep three Go execution threads after the heap-budget fix, with
           # a quarter-core of admission headroom per shard. Including Postgres,
           # each shard reserves three cores; two leave room in a 6.5-core pool
@@ -458,7 +475,9 @@ pipeline:
         # holds no test behind it. None of the three packages imports
         # component/identity/web, so it needs no stylesheet.
         - name: fuzz
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -469,7 +488,9 @@ pipeline:
             go test ./test/conformance -run '^FuzzParse$' -fuzz '^FuzzParse$' -fuzztime=40s
         # ci.yml os-checks. Network setup may retry; tests run once.
         - name: os-checks
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           # The full UI suite can exceed the default 20-minute deadline on
           # shared runners; retain time for its typecheck and production build.
           timeout: 30m
@@ -522,7 +543,7 @@ pipeline:
             dockerfile: deploy/db-image/Dockerfile
             target: verified
         - name: editor-site
-          placement: cluster
+          placement: pool
           when: { bucket: editor-site }
           # Native-published toolchain includes Chromium's system libraries.
           image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
@@ -533,7 +554,9 @@ pipeline:
           artifacts: [editors/vscode/site/dist, editors/vscode/site/artifacts]
           run: bash scripts/ci/editor-site.sh
         - name: editor-packages
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           when: { bucket: editors }
           timeout: 30m
           artifacts: [.memql-editor]
@@ -556,31 +579,41 @@ pipeline:
         - name: vscode-desktop-linux-1-91-0
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh vscode-desktop 1.91.0
         - name: vscode-desktop-linux-stable
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh vscode-desktop stable
         - name: productivity-web-linux-stable
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-web stable
         - name: productivity-desktop-linux-1-91-0
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
         - name: productivity-desktop-linux-stable
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: productivity-web-darwin-stable
@@ -614,23 +647,27 @@ pipeline:
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: sdk-ts-typecheck
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           run: |
             set -eu
             scripts/ci/retry.sh -- make sdk-ts-install
             make sdk-ts-typecheck
             make sdk-ts-test
         - name: viewkit-checks
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           run: |
             set -eu
             scripts/ci/retry.sh -- make viewkit-install
             make viewkit-typecheck
             make viewkit-test
         - name: mcp-conformance
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           services: [postgres]
           timeout: 30m
           run: |
@@ -649,7 +686,9 @@ pipeline:
             go test -count=1 -timeout=600s -v ./test/conformance/...
             go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
         - name: proving
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           services: [postgres]
           timeout: 30m
           artifacts: [.memql-proving]
@@ -678,8 +717,8 @@ pipeline:
             go run ./cmd/memql-bench --do=scorecard --check > .memql-proving/scorecard.json
             jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
         - name: test-agent
-          verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           # Agent-tagged persistence cases are absent from untagged DB shards.
           # A dedicated service and required DB mode prevent a skipped green.
           services: [postgres]
@@ -703,8 +742,9 @@ pipeline:
             go test -tags agent -count=1 -timeout=900s -v ./app/
             go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
         - name: test-bff
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -712,8 +752,9 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-edge
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -721,8 +762,9 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-identity
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -730,8 +772,9 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags identity -timeout=300s ./app/ ./component/node/
         - name: test-mcp
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -739,8 +782,9 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
         - name: test-planner
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -748,8 +792,9 @@ pipeline:
             bash scripts/identity/build-css.sh
             go test -tags planner -timeout=300s ./app/ ./component/node/
         - name: test-workbench
-          verification: true
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -767,7 +812,9 @@ pipeline:
       on: [pull_request, manual]
       steps:
         - name: gate-inputs
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           when: { bucket: gates }
           run: |
             set -eu
@@ -851,7 +898,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: ruleset-drift
-          placement: cluster
+          placement: pool
           caches: []
           cpuMilli: 250
           memoryMiB: 256
@@ -860,7 +907,7 @@ pipeline:
             set -eu
             RULESET_DRIFT_PUBLIC_API=1 bash scripts/ci/ruleset-drift.sh
         - name: ruleset-enforcement-copilot
-          placement: cluster
+          placement: pool
           caches: []
           cpuMilli: 250
           memoryMiB: 256
@@ -896,7 +943,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: cluster
+          placement: pool
           # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
           # Restart scanners after each commit: large historical patches
@@ -923,7 +970,8 @@ pipeline:
             set -eu
             python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
         - name: codeql-go
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
           memoryMiB: 6144
           # Measured ARM64 security-extended analysis takes over two hours,
           # including SARIF paths. The operator's run ceiling must also cover it.
@@ -933,7 +981,8 @@ pipeline:
             set -eu
             python3 scripts/ci/codeql-scan.py --language=go --ram=3072 --output-dir=.memql-security/codeql-go
         - name: codeql-javascript
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
           memoryMiB: 6144
           timeout: 45m
           artifacts: [.memql-security/codeql-javascript]
@@ -941,7 +990,9 @@ pipeline:
             set -eu
             python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=5120 --threads=1 --output-dir=.memql-security/codeql-javascript
         - name: codeql-python
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 45m
           artifacts: [.memql-security/codeql-python]
           run: |
@@ -955,7 +1006,9 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: sbom
-          placement: cluster
+          placement: pool
+          cpuMilli: 1000
+          memoryMiB: 4096
           timeout: 60m
           artifacts: [.memql-security/sbom]
           run: |
@@ -998,7 +1051,7 @@ pipeline:
       on: [manual]
       steps:
         - name: timescaledb
-          placement: cluster
+          placement: pool
           cpuMilli: 1000
           memoryMiB: 2048
           timeout: 20m
@@ -1013,7 +1066,9 @@ pipeline:
       - release
       steps:
       - name: headless
-        placement: cluster
+        placement: pool
+        cpuMilli: 1000
+        memoryMiB: 4096
         caches: [go]
         timeout: 60m
         artifacts:
@@ -1101,7 +1156,9 @@ pipeline:
           done
           python3 scripts/ci/release-checksum.py darwin-amd64
       - name: computeruse-linux-arm64
-        placement: cluster
+        placement: pool
+        cpuMilli: 1000
+        memoryMiB: 4096
         timeout: 60m
         caches: [go]
         artifacts:
@@ -1126,7 +1183,9 @@ pipeline:
           done
           python3 scripts/ci/release-checksum.py linux-arm64
       - name: computeruse-linux-amd64
-        placement: cluster
+        placement: pool
+        cpuMilli: 1000
+        memoryMiB: 4096
         timeout: 60m
         caches: [go]
         artifacts:
@@ -1155,7 +1214,7 @@ pipeline:
       on: [release]
       steps:
         - name: packages
-          placement: cluster
+          placement: pool
           cpuMilli: 3000
           memoryMiB: 6144
           timeout: 60m
