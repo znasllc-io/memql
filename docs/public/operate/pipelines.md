@@ -768,6 +768,8 @@ production and publication always retain their own receipts; a reused test does
 not stand in for either. Equal trees with different commit hashes are currently
 checked separately.
 
+A verification declaration makes a check eligible for evidence reuse; it does not guarantee a cache hit. The runner requires the exact compiled definition, including its dependency keys, and the same selected packages. A release can select a different preceding stage than a main-branch run, which changes those dependency keys. Successful full runs also update package timings, so a later run can rebalance Go test shards and change their membership. Either difference causes fresh execution, even for the same commit within the allowed evidence age. Inspect the recorded evidence run and skip reason for the actual reuse count.
+
 ### Recovery and maintenance
 
 Recovery reads GitHub's current queue ref before cancelling work whose merge
