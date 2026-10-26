@@ -47,7 +47,7 @@ func TestInferenceOnlyHarnessUsesSmallInstructionsAndNoToolGrant(t *testing.T) {
 	if params["baseInstructions"] == nil || config["features.shell_tool"] != false || config["web_search"] != "disabled" {
 		t.Fatalf("coding context inherited: %v", params)
 	}
-	argv := claudeArgv(Spec{Binary: "claude", InferenceOnly: true}, Knobs{}, "hello", "")
+	argv := claudeArgv(Spec{Binary: "claude", InferenceOnly: true}, Knobs{}, "")
 	joined := strings.Join(argv, "|")
 	if !strings.Contains(joined, "--tools||") || strings.Contains(joined, "--allowedTools") || !strings.Contains(joined, "--include-partial-messages") {
 		t.Fatalf("tools granted or streaming disabled: %v", argv)

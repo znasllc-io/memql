@@ -119,6 +119,20 @@ replay that mixes historical source overrides. Losing a connection after the
 check still follows the existing recovery controls, with completed effects and
 permission boundaries preserved.
 
+## Sending retained context to Claude Code
+
+The worker sends each complete Claude Code prompt through a private input pipe
+and closes it before waiting for the final answer. This lets large retained
+context reach the App without depending on the operating system's command-line
+argument limit. It does not increase the model's context window or Claude's own
+input limits. An incomplete transfer fails explicitly and is not silently
+shortened or retried as another turn.
+
+Follow-ups still resume the recorded App session as separate turns. Existing
+permissions and tool restrictions apply, and cancellation stops the supervised
+process group even while the prompt is being sent. This is a finite prompt
+transfer, not remote interactive access to the App's input.
+
 ## Task failures and platform defects
 
 These have different owners and recovery paths:

@@ -263,7 +263,9 @@ type Spec struct {
 // and each harness opts in for itself: the engine's stream never reaches
 // an app's stdin (an app that can be typed at by a remote caller is a
 // different and much larger trust question), but a JSON-RPC client that
-// owns both ends of a pipe it opened is not that -- it is the protocol.
+// owns both ends of a pipe it opened is not that -- it is the protocol. A
+// print-mode harness may also send one complete prompt and close the pipe;
+// follow-ups remain separately authorized turns, never writes to that pipe.
 type LaunchFunc func(ctx context.Context, dir string, argv []string, env []string, stdin bool) (Process, error)
 
 // Process is a running app process, as a harness needs it.

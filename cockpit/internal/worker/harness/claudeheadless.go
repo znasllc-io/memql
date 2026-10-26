@@ -208,8 +208,8 @@ func (h *claudeHeadless) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 	}()
 	rec.startTurn()
 
-	argv := claudeArgv(spec, knobs, prompt, ref)
-	proc, err := spec.Launch(ctx, spec.Workspace, argv, claudeEnv(spec.Env), false)
+	argv := claudeArgv(spec, knobs, ref)
+	proc, err := spec.Launch(ctx, spec.Workspace, argv, claudeEnv(spec.Env), true)
 	if err != nil {
 		return TurnResult{ExitCode: -1, AppSessionRef: ref},
 			fmt.Errorf("harness: could not start %s: %w", spec.Binary, err)
@@ -237,6 +237,21 @@ func (h *claudeHeadless) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 		}
 	}()
 
+	// Text stdin carries one complete prompt, then EOF. Putting the prompt in
+	// argv can exceed the host's per-argument exec limit before Claude starts.
+	// This private pipe is not an interactive engine-input channel. Drain both
+	// outputs while writing so a child that prints before reading cannot
+	// deadlock on full pipes. A failed delivery stops the supervised group;
+	// never retry a partial prompt as a second turn or accept its answer.
+	inputDone := make(chan error, 1)
+	go func() {
+		err := writeClaudePrompt(proc.Stdin(), prompt)
+		if err != nil {
+			proc.Terminate()
+		}
+		inputDone <- err
+	}()
+
 	var pumps sync.WaitGroup
 	pumps.Add(1)
 	go func() {
@@ -254,6 +269,7 @@ func (h *claudeHeadless) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 	}
 
 	waitErr := proc.Wait()
+	inputErr := <-inputDone
 	close(watchDone)
 
 	code := proc.ExitCode()
@@ -290,11 +306,18 @@ func (h *claudeHeadless) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 	// apart from the error precisely so the one readable part of such a run
 	// survives. structured() accepts only a JSON object or array, so an
 	// error message in `result` is never mistaken for one.
-	if code != 0 || waitErr != nil || (ev != nil && ev.IsError) {
+	ctxErr := ctx.Err()
+	if inputErr != nil || ctxErr != nil || code != 0 || waitErr != nil || (ev != nil && ev.IsError) {
 		if ev != nil && strings.TrimSpace(spec.ResponseSchema) != "" {
 			if structured, ok := ev.structured(); ok {
 				res.ResultJSON = structured
 			}
+		}
+		if ctxErr != nil {
+			return res, fmt.Errorf("harness: claude-headless turn stopped: %w", ctxErr)
+		}
+		if inputErr != nil {
+			return res, fmt.Errorf("harness: could not deliver the complete Claude prompt: %w", inputErr)
 		}
 		return res, turn.failure(spec, code, waitErr)
 	}
@@ -323,24 +346,25 @@ func (h *claudeHeadless) rememberRef(ref string) {
 	h.mu.Unlock()
 }
 
-// claudeArgv builds one turn's command line.
-//
-// THE ORDER IS LOAD-BEARING, and the design record's spelling of it was
-// wrong. Two properties of Claude Code's own parser decide it, both
-// verified against claude 2.1.263 on 2026-09-07:
-//
-//   - `--mcp-config <configs...>` is VARIADIC. It consumes every
-//     following argument that does not begin with a dash, so a prompt
-//     placed after it is swallowed as a second config path. The app then
-//     dies with "MCP config file not found: <the whole prompt>", an
-//     error that names the prompt as a filename and this client not at
-//     all.
-//   - `-p` is a boolean and the prompt is a trailing positional, so a
-//     prompt that begins with a dash is read as an unknown option.
-//
-// `--` ends option parsing: it stops the variadic and makes the prompt
-// a positional whatever it starts with. Every flag therefore goes
-// before it, and the prompt is the only thing after it.
+// writeClaudePrompt owns this turn's finite input. Closing even on failure
+// makes EOF explicit; a short write or failed close is not a delivered prompt.
+// The supervisor's group termination unblocks a write during cancellation.
+func writeClaudePrompt(stdin io.WriteCloser, prompt string) error {
+	if stdin == nil {
+		return errors.New("the supervised process has no prompt pipe")
+	}
+	n, err := io.WriteString(stdin, prompt)
+	if err == nil && n != len(prompt) {
+		err = io.ErrShortWrite
+	}
+	return errors.Join(err, stdin.Close())
+}
+
+// claudeArgv builds the options for one print-mode turn. The complete prompt
+// travels separately over text stdin, which Claude documents as an alternative
+// to an argument (https://code.claude.com/docs/en/errors). This avoids both
+// exec's argument-size ceiling and interpreting a leading dash as an option.
+// `--` still terminates the variadic options; nothing follows it.
 //
 // `--verbose` is not decoration either. Under `--print`,
 // `--output-format=stream-json` is REFUSED without it ("When using
@@ -355,8 +379,8 @@ func (h *claudeHeadless) rememberRef(ref string) {
 //
 // Then the session's GRANT (claudeGrantArgs), which is the machine
 // owner's decision and not the user's settings file.
-func claudeArgv(spec Spec, knobs Knobs, prompt, ref string) []string {
-	argv := []string{spec.Binary, "-p", "--output-format", "stream-json", "--verbose"}
+func claudeArgv(spec Spec, knobs Knobs, ref string) []string {
+	argv := []string{spec.Binary, "-p", "--input-format", "text", "--output-format", "stream-json", "--verbose"}
 	if knobs.Model != "" {
 		argv = append(argv, "--model", knobs.Model)
 	}
@@ -379,7 +403,7 @@ func claudeArgv(spec Spec, knobs Knobs, prompt, ref string) []string {
 	if schema := strings.TrimSpace(spec.ResponseSchema); schema != "" {
 		argv = append(argv, "--json-schema", schema)
 	}
-	return append(argv, "--", prompt)
+	return append(argv, "--")
 }
 
 // claudeGrantArgs is what a session's Claude Code may do, as flags.

@@ -259,8 +259,9 @@ func IsKnownID(id string) bool {
 // straight after `-p`, and Claude Code's `--mcp-config` is VARIADIC, so
 // a prompt following it was swallowed as a second config path; and `-p`
 // is a boolean with the prompt as a trailing positional, so a prompt
-// that began with a dash was read as an unknown option. claudeArgv ends
-// its flags with `--` for exactly that reason. Leaving these behind "in
+// that began with a dash was read as an unknown option. Claude turns now
+// send the complete prompt over text stdin, with only options in argv.
+// Leaving these behind "in
 // case something calls them" would have left both bugs behind with them,
 // in the copy nobody was maintaining.
 //
