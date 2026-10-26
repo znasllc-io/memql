@@ -20,8 +20,9 @@ Dependencies to REUSE (reference by name, do NOT author):
 # What to emit
 
 1. ONE automation named exactly {{ .automationName }} -- the headline
-   behavior that fulfills the Responsibility. Trigger it on the right
-   event or schedule and call its dependencies.
+   behavior that fulfills the Responsibility. For explicit invocation or a
+   Work-run template, mark it `@template` with no event or schedule. Otherwise
+   trigger it on the requested event or schedule. Call its dependencies.
 2. ONE compiling construct for each AUTHORED dependency. Refine its
    candidate sketch into valid, bindable `.memql` -- real concept
    fields, real shapes, correct grammar.
@@ -83,7 +84,11 @@ in the order written. There is no `body { }` wrapper and no `step` block.
   `retry(n)`, `on error continue`.
 - A logic ends with `return <expr>` and calls only queries, other logic and
   read-only builtins: no mutation, action, automation or publish.
-- An automation carries exactly one `@trigger(event="node.created",
+- An explicitly invoked automation or Work-run template carries `@template`
+  and NO event or cron trigger. Its caller supplies the declared args; do not
+  invent a trigger to make a manual template reachable. A template must never
+  also carry a trigger, which would introduce another execution path.
+- A non-template automation carries exactly one `@trigger(event="node.created",
   concept="v1:<ns>:<concept>")` or `@trigger(schedule="<6-field cron>")` --
   no `partition=`, no `@schedule`. The triggering row's payload binds into
   its `args { ... }` block: declare every field the body reads and read it
