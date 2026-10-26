@@ -697,9 +697,10 @@ verified webhook has no check, inspect its intake journal before redelivering
 it; a settings failure is different from a failed test run.
 
 Optional roles are `supersession`, `reconciliation`, `maintenance`,
-`evidenceReuse` and, since `0.31.1`, `independentReview`. Their default behavior
+`evidenceReuse`, `independentReview` (since `0.31.1`) and `computePlacement`.
+Their default behavior
 preserves affected-PR supersession, cancels an invalidated queue ref, and performs
-no repair, evidence reuse or ordinary-PR AI review.
+no repair, evidence reuse, ordinary-PR AI review or pool-to-cloud fallback.
 A resolver cannot change merge-group coverage mode away from `full` or grant
 repository write access.
 Source manifests declare commands and artifacts; they cannot replace this binding.
@@ -819,10 +820,10 @@ cannot satisfy the required PR or merge-queue check.
 | `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
 | `githubReadToken` | Give a command `MEMQL_GITHUB_READ_TOKEN`, or an image build the BuildKit secret `github_read_token`, for this repository only | false | Cluster container commands and image builds with an installed source repository. Fixed permissions: contents, checks and pull requests read. It cannot write or reach other installation repositories; queued grants refresh before admission and logs redact them |
 | `checkoutHistory` | Set `full` to fetch complete commit ancestry, tags and the comparison base during the trusted checkout | shallow | Cluster container steps only. The command receives history without the installation token; it should scan that local history without fetching again. The existing run deadline and workspace limits bound checkout |
-| `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
-| `cpuMilli` | Explicit CPU request and limit for the cluster command or image-build container, in millicores; 1000 means one CPU. Zero keeps namespace defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (4000 by default) before creating a Job. Scheduling accounts for the whole request; it does not silently fall back to a smaller allocation |
+| `memoryMiB` | Explicit memory reservation and container limit, in MiB, on cluster or Fleet; zero retains the selected runner's defaults | `0` | Nonzero values below 128, above 1048576, or on native steps are invalid. Both runners refuse values above the installation's configured maximum (8192 MiB by default). Fleet additionally requires current shared host capacity |
+| `cpuMilli` | Explicit CPU reservation and container limit on cluster or Fleet, in millicores; 1000 means one CPU. Zero retains runner defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on native steps are invalid. Both runners refuse values above the installation's configured maximum (4000 by default). Scheduling accounts for the full reservation; it does not silently reduce the requested allocation |
 | `image` | Container image for this step; pin by digest when reproducibility matters | pipeline image | Explicit image on a native step: `pipeline_step_invalid` |
-| `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
+| `placement` | `cluster`, `fleet` or explicit `pool`; pool prefers eligible Fleet containers and permits cloud fallback only through captured installed policy | fleet for native execution or host needs, otherwise cluster | Fleet and pool require consent. Pool requires a declared Linux architecture and a portable container command, without host needs, image builds, repository tokens, private pull credentials or full checkout history |
 | `platform` | Step OS/architecture; overrides the pipeline platform | pipeline platform | Fleet requires an explicit platform; containers require Linux |
 | `imageBuild` | One rootless Dockerfile build: `{ context, dockerfile, target?, args? }`; produces an OCI archive and metadata | none | Requires explicit Linux architecture, cluster placement, memory at least 512 MiB and the operator profile. No command, image override, services, caches, secrets, pull credential, package selection or artifact override; see [Image builds](pipelines-substrate.md#image-builds) |
 | `run` | A shell command, run in a fresh working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required unless `imageBuild` is present | Blank without `imageBuild`: `pipeline_step_invalid` |
@@ -830,13 +831,13 @@ cannot satisfy the required PR or merge-queue check.
 | `only` | `db-gated` or `not-db-gated`: keep the selected packages under a `select.dbGated` tree, or the rest | none | Another value, or set without `packages`: `pipeline_step_invalid`. No `select.dbGated`: `pipeline_select_invalid` |
 | `shards` | Split the packages over up to this many steps, at most 8. 0 and 1 mean one step | one step | Below 0 or above 8, or above 1 without `packages`: `pipeline_step_invalid` |
 | `when` | `{ bucket: <name> }`: skip the step on a pull request that touches nothing in the bucket | always runs | A bucket `select.buckets` does not declare: `pipeline_bucket_unknown` |
-| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` to request an ordinary Docker container on a worker. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
+| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` or an eligible `pool` step for a container on a worker. A need set `false` is the same as none | declared placement, otherwise cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `caches` | Overrides the pipeline's cache list; `[]` disables inherited caches, including for a native image build beside container test steps | pipeline caches | Native steps with nonempty effective caches: `pipeline_step_invalid` |
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 6 hours. The run ceiling remains an independent bound. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `6h`: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
 | `secrets` | Names of secrets the step's environment receives, each under its own name ([Secrets](#secrets)) | none | A name that is not upper-case letters, digits and underscores starting with a letter (at most 128 characters), or that begins `MEMQL_`: `pipeline_secret_invalid`. A name the pipeline does not allow: `pipeline_secret_not_allowed` |
-| `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using fleet/native execution is refused |
+| `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using Fleet, pool or native execution is refused |
 
 Two keys share the word `needs`: a stage's names earlier stages, a step's names
 what the machine running it must offer.
@@ -1262,13 +1263,16 @@ secrets explicitly as environment secrets in a different step.
 
 `compute` is set when the pipeline is connected:
 
-- **`cluster`**, the default: every step runs on the cluster. A step naming a
-  need fails the run's compile with `pipeline_fleet_not_consented`, scoped to
-  the step -- nothing about somebody's laptop is a default.
-- **`cluster_and_fleet`**: a step naming a need may run on a machine in the
-  owner's fleet that offers it; every other step stays on the cluster. How the
-  step reaches a machine, and what the machine must allow, is
-  [the fleet](pipelines-substrate.md#the-fleet).
+- **`cluster`**, the default: steps use cluster execution. Native execution,
+  host needs, `placement: fleet` and `placement: pool` require additional consent
+  and fail compilation with `pipeline_fleet_not_consented`.
+- **`cluster_and_fleet`**: dedicated Fleet steps may use an opted-in machine
+  matching their declared platform, runtime and needs. Explicit `pool` steps
+  prefer eligible Fleet container capacity and consult the captured installed
+  policy before any cloud fallback. Undeclared placement still defaults to the
+  cluster, except for native execution or host needs. Current machine consent
+  and capacity checks remain mandatory; see [the fleet](pipelines-substrate.md#the-fleet)
+  and [operator admission](#operator-run-admission).
 
 A need outside the closed set is refused (`pipeline_need_unknown`), never routed
 by guesswork.
@@ -1326,54 +1330,85 @@ alone, and Nexus's re-run and branch refuse it. Re-run a pipeline run with
 
 ## Operator run admission
 
-An installation can hold new CI/CD runs before they acquire a driver lease or
-start their execution deadline. Set `MEMQL_PIPELINES_ADMISSION_FILE` on **every
-agent replica** to an operator-owned JSON file:
+An installation can pause all new CI/CD runs before they acquire a driver lease
+or start their execution deadline, or hold only new cloud spending while Fleet
+work continues. Set `MEMQL_PIPELINES_ADMISSION_FILE` on **every agent and
+workbench replica** to the same operator-owned JSON file. Version 2 separates the
+two decisions:
 
 ```json
-{"allowNewRuns":false,"validUntil":"2026-10-21T23:00:00Z","reason":"Monthly development allowance reserved"}
+{"version":2,"allowNewRuns":true,"allowCloud":false,"validUntil":"2026-10-21T23:00:00Z","reason":"Cloud allowance reserved; Fleet remains available"}
 ```
 
-The file contains one object, at most 4 KiB. `allowNewRuns` is a required boolean;
-`validUntil` is a required RFC3339 timestamp, strictly in the future and no more
-than two hours away. `reason` is optional explanatory text. Unknown fields,
-unreadable files, invalid values and expired decisions hold new runs. Unset
-configuration preserves ordinary admission. A writer must refresh an allowance
-before it expires; stopping the writer cannot leave admission open indefinitely.
+The file contains one object, at most 4 KiB. Both allowances are required
+booleans. `validUntil` is a required RFC3339 timestamp, strictly in the future
+and no more than two hours away; the example timestamp must be replaced with a
+fresh expiry. `reason` is optional explanatory text. Unknown versions or fields,
+unreadable files, invalid values and expired decisions fail closed. A legacy
+object containing only `allowNewRuns`, `validUntil` and optional `reason` retains
+its global meaning: the same allowance gates new runs and new cloud Jobs. Unset
+configuration preserves ordinary admission. A stopped writer cannot leave an
+allowance open indefinitely.
 
 ```mermaid
 flowchart LR
     S[Webhook, poll or manual request] --> Q[Durable queued pipeline run]
-    P[Operator decision file on every agent] --> G{Admission allowed?}
-    Q --> G
+    Q --> G{Global admission open?}
     G -->|Hold or unavailable| Q
-    G -->|Allow| C[Claim lease, then start execution clock]
-    C --> K[Existing step execution and resource queue]
-    R[Recovery of an already-started run] --> K
+    G -->|Allow| C[Claim lease and start run clock]
+    C --> F[Eligible opted-in Fleet capacity]
+    C --> B{New cloud work allowed?}
+    B -->|Hold or unavailable| W[Durable bounded wait]
+    W --> B
+    B -->|Allow| K[Cloud Job resource queue]
+    R[Recovery of existing cloud Job] --> K
 ```
 
-The claim reads the file afresh inside the existing cross-replica run gate.
-A Kubernetes installation should project the same ConfigMap as a **directory**
-on all agents, read-only and without `subPath`; environment values and subPath
-mounts do not follow runtime updates. Projection is eventually consistent, so
-allow for propagation delay in the spending reserve. No Azure credential or
-Azure-specific cost policy is required in the engine. An external observer may
-publish this decision using its own narrowly scoped credentials.
+The agent reads global admission afresh inside the cross-replica run gate. The
+workbench separately reads both allowances before every new command Job and
+isolation-probe Job, including later steps of an already-started run. A hold
+does not prevent adoption, settlement or cancellation of work already created.
+Before waiting, the runner preserves its existing durable queued marker, so a
+new replica can prove that no command was sent. An unknown previous dispatch
+still requires reconciliation; absence of a Job is not permission to repeat it.
 
-The gate covers new pipeline runs on both cluster and fleet compute, including
-release and manual pipeline runs. It does not gate application requests, agent
-goals, backups, database work or already-started pipelines. Those pipelines
-continue their later steps and can recover on a different replica while new
-admission is held. Cancellation remains available, and a held run stays queued
-without consuming `MEMQL_PIPELINES_RUN_MAX_MINUTES`. The usual poll retries
-admission after an allowance appears; existing deduplication and supersession
-rules still apply, so an obsolete PR run may be cancelled by a newer commit.
+Project the ConfigMap as a read-only **directory**, without `subPath`, on every
+agent and workbench. Environment values and subPath mounts do not follow
+runtime updates. Projection is eventually consistent, so spending reserves must
+allow for propagation delay. The engine needs no cloud billing credentials or
+provider-specific budget policy; an external observer publishes the decision.
+Deploy an engine that understands version 2 before changing the writer.
 
-Kueue capacity and operator pauses are separate controls. Holding individual
-Jobs after a run starts still consumes the run deadline. Use run admission for
-long budget waits; do not describe a Kueue Job hold as an indefinite pipeline
-pause. The unfinished-run recovery page prioritizes started runs before queued
-ones, so a backlog of budget-held runs does not hide running work from recovery.
+A global hold covers new runs on both cluster and Fleet compute, including
+release and manual runs. It does not stop application requests, agent goals,
+backups or database work. A globally held run stays queued without consuming
+`MEMQL_PIPELINES_RUN_MAX_MINUTES`; the usual poll, deduplication and supersession
+rules still apply. A cloud-only hold allows the run to start and use Fleet.
+Waiting for Fleet, cloud admission or Kueue capacity then consumes the existing
+run deadline; it does not consume the command's own execution timeout before a
+Job starts. These waits are bounded, not an indefinite pause. Started-run
+recovery remains prioritized over queued runs.
+
+For explicit `placement: pool` steps, the optional installed delivery role
+`computePlacement` selects `pipelineComputePlacementPolicy`. Its captured
+template receives `repository`, `pipelineId`, `ownerUserId` and `event`, and
+returns exactly `{fleetWaitSeconds: 60, cloudFallback: true}` (wait seconds must
+be an integer from 0 through 3600). The portable default and older snapshots
+allow no cloud fallback. A repository cannot replace this installed policy.
+The immutable policy source survives retries and replica changes. Its validated
+answer also enters the step's recovery definition: a changed answer, such as one
+derived from the clock, refuses recovery instead of changing a pending effect.
+Current machine consent, resource limits and cloud admission still govern each effect. Dedicated
+placements retain their declared execution contract. A policy decision is not
+proof that any eligible machine is connected or that the live path is qualified.
+
+Activate pool placement in two steps: first deploy and verify the engine's
+capability, leaving repository manifests on their supported dedicated placements.
+Then select the matching installed policy and change eligible manifest steps to
+`placement: pool` through a separate verified change. Older runners cannot parse
+`pool`, so the capability release must not depend on a manifest they cannot run.
+Version-2 admission writing likewise follows deployment of its readers on every
+agent and workbench; a partial upgrade is not permission to bypass either gate.
 
 ## The check run
 

@@ -117,6 +117,10 @@ func (c *ollamaClient) readChat(ctx context.Context, req ChatRequest, resp *http
 		if err := json.Unmarshal(line, &chunk); err != nil {
 			return out, fmt.Errorf("ollama: invalid stream frame: %w", err)
 		}
+		// The final frame may carry content whose delivery fails, or an
+		// answer that fails local validation. Record the runtime's stop
+		// before either path so a completed call cannot strand capacity.
+		out.RuntimeCompleted = chunk.Done
 		if chunk.Error != "" {
 			// Ollama can fail after HTTP 200, notably when its tool parser
 			// rejects model output or generation exhausts the context. Keep
@@ -243,8 +247,9 @@ func (c *ollamaClient) Embed(ctx context.Context, req EmbedRequest) (Result, err
 		return Result{}, err
 	}
 	return Result{
-		FinishReason: FinishStop,
-		Embeddings:   parsed.Embeddings,
+		RuntimeCompleted: true,
+		FinishReason:     FinishStop,
+		Embeddings:       parsed.Embeddings,
 		Usage: Usage{
 			InputTokens: parsed.PromptEvalCount,
 			Known:       parsed.PromptEvalCount > 0,

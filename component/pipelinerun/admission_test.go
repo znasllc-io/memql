@@ -114,3 +114,52 @@ func TestAdmissionDoesNotPreventCancellingAnUnstartedClaim(t *testing.T) {
 		t.Fatalf("cancel recovery blocked: %v, %v", ok, err)
 	}
 }
+
+func TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission.json")
+	runs, cloud := FileRunAdmission(path), FileCloudAdmission(path)
+	if FileCloudAdmission(" ") != nil {
+		t.Fatal("unset cloud admission must preserve existing installations")
+	}
+	for _, tc := range []struct {
+		name        string
+		decision    map[string]any
+		runs, cloud bool
+		invalid     bool
+	}{
+		{"legacy allow", map[string]any{"allowNewRuns": true}, true, true, false},
+		{"legacy hold", map[string]any{"allowNewRuns": false}, false, false, false},
+		{"cost hold", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": false}, true, false, false},
+		{"operator hold", map[string]any{"version": 2, "allowNewRuns": false, "allowCloud": true}, false, false, false},
+		{"allow both", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": true}, true, true, false},
+		{"missing cloud", map[string]any{"version": 2, "allowNewRuns": true}, false, false, true},
+		{"missing version", map[string]any{"allowNewRuns": true, "allowCloud": true}, false, false, true},
+		{"unknown version", map[string]any{"version": 3, "allowNewRuns": true, "allowCloud": true}, false, false, true},
+		{"null version", map[string]any{"version": nil, "allowNewRuns": true}, false, false, true},
+		{"unknown field", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": true, "bypass": true}, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.decision["validUntil"] = testNow.Add(time.Hour)
+			data, err := json.Marshal(tc.decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for name, gate := range map[string]func(time.Time) (bool, error){"runs": runs, "cloud": cloud} {
+				want := tc.runs
+				if name == "cloud" {
+					want = tc.cloud
+				}
+				got, err := gate(testNow)
+				if got != want || (err != nil) != tc.invalid {
+					t.Fatalf("%s: got %v/%v", name, got, err)
+				}
+				if got, err := gate(testNow.Add(time.Hour)); got || err == nil {
+					t.Fatalf("%s accepted expired decision", name)
+				}
+			}
+		})
+	}
+}

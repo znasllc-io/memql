@@ -76,7 +76,7 @@ class HostBuildGuardTests(unittest.TestCase):
         self.assertEqual("keep", target.read_text())
 
     def test_interrupted_local_and_workbench_records_are_retained(self):
-        for name in ("local-build.json", "workbench-0.lock"):
+        for name in ("local-build.json", "workbench-0.lock", "inference-active.json"):
             with self.subTest(name=name):
                 path = self.root / name
                 path.write_text("unknown retained operation")
@@ -84,6 +84,20 @@ class HostBuildGuardTests(unittest.TestCase):
                     with guard.host_build_guard():
                         pass
                 self.assertEqual("unknown retained operation", path.read_text())
+                path.unlink()
+
+    def test_empty_or_symlinked_inference_witness_is_not_completion(self):
+        path = self.root / "inference-active.json"
+        for symlink in (False, True):
+            with self.subTest(symlink=symlink):
+                if symlink:
+                    path.symlink_to(self.root / "missing-operation")
+                else:
+                    path.touch()
+                with self.assertRaises(guard.GuardError):
+                    with guard.host_build_guard():
+                        self.fail("uncertain inference admitted a local build")
+                self.assertTrue(path.is_symlink() if symlink else path.exists())
                 path.unlink()
 
     def test_non_object_or_unknown_marker_cannot_admit_cleanup(self):

@@ -21,6 +21,11 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 	deadline, deadlineErr := time.Parse(time.RFC3339Nano, run.RunDeadline)
 	ownTimeout := run.TimeoutSeconds
 	tokenAt := f.now()
+	pool := req.Step.Placement == pl.PlacementPool
+	preferenceEnds := tokenAt
+	if pool && req.ComputePlacement != nil {
+		preferenceEnds = tokenAt.Add(time.Duration(req.ComputePlacement.FleetWaitSeconds) * time.Second)
+	}
 	delay := f.capacityRetry
 	if delay <= 0 {
 		delay = 5 * time.Second
@@ -45,6 +50,10 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 				run.DeadlineCode = pl.CodeRunCeiling
 			}
 		}
+		if queued && pool && req.ComputePlacement != nil && req.ComputePlacement.CloudFallback && !f.now().Before(preferenceEnds) {
+			res := refusedResult(pl.CodeNoMachineForNeed, "Fleet preference wait elapsed after confirmed pre-start capacity refusal. No Fleet command was started.")
+			return worker.Result{}, &res, nil
+		}
 		// A long queue must not hand a new worker a stale installation token.
 		// Keep every minted token masked, including an older queued refusal.
 		if queued && run.InstallationID != 0 && f.now().Sub(tokenAt) >= tokenRefreshAge {
@@ -56,8 +65,28 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			capture.AddSecrets(secretValues(*run, token)...)
 		}
 		result, err := f.dispatchStep(ctx, req, *run, token, chunk)
-		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate || !fleetMayWait(result) {
+		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate {
 			return result, nil, err
+		}
+		if pool {
+			if ctx.Err() != nil {
+				res := stoppedResult(ctx)
+				return worker.Result{}, &res, nil
+			}
+			if deadlineErr == nil && !f.now().Before(deadline) {
+				res := failedResult(pl.CodeRunCeiling, "The run reached its ceiling while waiting for fleet capacity. No command was started.")
+				return worker.Result{}, &res, nil
+			}
+			if !fleetPoolCapacityRefusal(result) {
+				res := refusedResult(pl.CodeExecutorError, "Fleet refused this request for a reason other than confirmed pre-start capacity. No cloud replacement was started.")
+				return worker.Result{}, &res, nil
+			}
+			if req.ComputePlacement != nil && req.ComputePlacement.CloudFallback && !f.now().Before(preferenceEnds) {
+				res := refusedResult(pl.CodeNoMachineForNeed, "Fleet preference wait elapsed after confirmed pre-start capacity refusal. No Fleet command was started.")
+				return worker.Result{}, &res, nil
+			}
+		} else if !fleetMayWait(result) {
+			return result, nil, nil
 		}
 		if deadlineErr != nil {
 			res := failedResult(pl.CodeExecutorError, "Fleet capacity is unavailable and the run has no readable ceiling; no unbounded wait or replacement command was started.")
@@ -83,6 +112,11 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 		wait := delay
 		if remaining := deadline.Sub(f.now()); remaining < wait {
 			wait = remaining
+		}
+		if pool && req.ComputePlacement != nil && req.ComputePlacement.CloudFallback {
+			if remaining := preferenceEnds.Sub(f.now()); remaining < wait {
+				wait = remaining
+			}
 		}
 		if wait < 0 {
 			wait = 0
@@ -110,6 +144,18 @@ func fleetMayWait(result worker.Result) bool {
 		return true
 	case "no_worker_available":
 		return result.WaitForConnection
+	default:
+		return false
+	}
+}
+
+// The pool deadline applies only between positively refused dispatch attempts.
+// It never cancels a worker that has started, or converts uncertainty/authority
+// failure into permission to run a second copy elsewhere.
+func fleetPoolCapacityRefusal(r worker.Result) bool {
+	switch r.ErrorCode {
+	case "pipeline_capacity_busy", "pipeline_capacity_fenced", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "worker_disconnected", "worker_unreachable", "no_worker_available":
+		return true
 	default:
 		return false
 	}

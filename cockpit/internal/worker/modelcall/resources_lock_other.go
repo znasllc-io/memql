@@ -18,6 +18,12 @@ func acquireInferenceLease(context.Context, string, time.Duration) (*inferenceLe
 	return nil, errors.New("local inference admission is unsupported on this platform")
 }
 func (*inferenceLease) close() {}
+func (*inferenceLease) beginActive() error {
+	return errors.New("local inference admission is unsupported on this platform")
+}
+func (*inferenceLease) completeActive() error {
+	return errors.New("local inference admission is unsupported on this platform")
+}
 func (*inferenceLease) readOwned() (map[string]models.Info, error) {
 	return nil, errors.New("local inference admission is unsupported on this platform")
 }
