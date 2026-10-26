@@ -64,9 +64,9 @@ func TestTheNormalizationLeavesEveryOtherRowAlone(t *testing.T) {
 		t.Fatalf("a client row was normalized: %v", client)
 	}
 	// The operator's own name OUTSIDE cluster space is a real reservation.
-	own := map[string]any{"memqlDomain": "workspace.znas.io", "memqlReservedAt": "2026-01-01T00:00:00Z"}
+	own := map[string]any{"memqlDomain": "workspace.operator-5792.example", "memqlReservedAt": "2026-01-01T00:00:00Z"}
 	normalizeSelfAccountReservation(selfAccountId, own, nil, false)
-	if own["memqlDomain"] != "workspace.znas.io" || own["memqlReservedAt"] != "2026-01-01T00:00:00Z" {
+	if own["memqlDomain"] != "workspace.operator-5792.example" || own["memqlReservedAt"] != "2026-01-01T00:00:00Z" {
 		t.Fatalf("the operator's real reservation was cleared: %v", own)
 	}
 	normalizeSelfAccountReservation(selfAccountId, nil, nil, false)
