@@ -254,7 +254,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // loader after the delivery redesign; seven added, none removed.
 // 192 -> 193: pipelineIndependentReviewPolicy, the opt-in review template;
 // measured by the strict loader in PR #6288 CI on 2026-10-24.
-const shippedAutomationCount = 193
+// 193 -> 194: pipelineComputePlacementPolicy, the optional Fleet/cloud
+// placement policy template added by the Fleet-first delivery change.
+const shippedAutomationCount = 194
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
