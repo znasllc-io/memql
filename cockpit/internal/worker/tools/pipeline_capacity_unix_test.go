@@ -75,7 +75,7 @@ func TestPipelineCapacityReconcilesOnlyItsOwnDaemonAndContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	container := "memql-step-" + strings.Repeat("a", 32)
-	if err = reservation.begin(pipelineAttemptRecord{Execution: "container", DockerID: "daemon-original", Container: container, Workspace: dir}); err != nil {
+	if err = reservation.begin(pipelineAttemptRecord{Execution: "container", DockerID: "daemon-original", DockerEndpoint: "unix:///tmp/memql-pipeline-test.sock", Container: container, Workspace: dir}); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "removed")

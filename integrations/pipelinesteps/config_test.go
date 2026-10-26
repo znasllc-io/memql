@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestConfigFromEnvDefaultsAndClamps(t *testing.T) {
 			NodeID:             "workbench-1",
 			WorkspaceLimit:     "20Gi",
 		}
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ConfigFromEnv(empty) =\n  %+v\nwant\n  %+v", got, want)
 		}
 	})

@@ -290,3 +290,12 @@ automation pipelineIndependentReviewPolicy {
   args { repository string! pipelineId string! ownerUserId string! }
   return ""
 }
+
+/// Only an installed policy may permit a pool step to fall back from opted-in
+/// Fleet capacity to cloud Jobs. The portable default spends no cloud budget;
+/// live machine consent and the operator's cloud admission still apply.
+@template
+automation pipelineComputePlacementPolicy {
+  args { repository string! pipelineId string! ownerUserId string! event string! }
+  return {fleetWaitSeconds: 0, cloudFallback: false}
+}

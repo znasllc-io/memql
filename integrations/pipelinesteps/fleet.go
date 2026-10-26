@@ -139,14 +139,45 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	if run.CheckoutHistory != "" || req.Step.CheckoutHistory != "" {
 		return refusedResult(pl.CodeStepInvalid, "checkoutHistory requires cluster container execution."), nil
 	}
-	if run.CPUMilli != 0 || req.Step.CPUMilli != 0 {
-		return refusedResult(pl.CodeStepInvalid, "cpuMilli requires cluster container execution."), nil
+	if run.Execution == pl.ExecutionNative && (run.CPUMilli != 0 || req.Step.CPUMilli != 0) {
+		return refusedResult(pl.CodeStepInvalid, "cpuMilli requires container execution."), nil
 	}
-	if run.MemoryMiB != 0 || req.Step.MemoryMiB != 0 {
-		return refusedResult(pl.CodeStepInvalid, "memoryMiB requires cluster container execution."), nil
+	if run.Execution == pl.ExecutionNative && (run.MemoryMiB != 0 || req.Step.MemoryMiB != 0) {
+		return refusedResult(pl.CodeStepInvalid, "memoryMiB requires container execution."), nil
+	}
+	if run.ImageBuild != nil || req.Step.ImageBuild != nil {
+		return refusedResult(pl.CodeStepInvalid, "Image builds require cluster execution."), nil
 	}
 	if run.ImagePullSecret != "" || req.Step.ImagePullSecret != "" {
 		return refusedResult(pl.CodeStepInvalid, "Image pull credentials require cluster execution."), nil
+	}
+	for _, resources := range [][2]int{{run.CPUMilli, run.MemoryMiB}, {req.Step.CPUMilli, req.Step.MemoryMiB}} {
+		if err := pl.CheckCPUMilli(resources[0], run.Execution == pl.ExecutionNative); err != nil {
+			return refusedResult(pl.CodeStepInvalid, err.Error()), nil
+		}
+		if err := pl.CheckMemoryMiB(resources[1], run.Execution == pl.ExecutionNative); err != nil {
+			return refusedResult(pl.CodeStepInvalid, err.Error()), nil
+		}
+	}
+	if req.Step.Placement == pl.PlacementPool && (req.ComputePlacement == nil || req.ComputePlacement.FleetWaitSeconds < 0 || req.ComputePlacement.FleetWaitSeconds > 3600) {
+		return refusedResult(pl.CodeStepInvalid, "Pool execution requires a bounded installed compute placement policy."), nil
+	}
+	cpuMaximum, memoryMaximum := defaultStepCPUMaxMilli, defaultStepMemoryMaxMiB
+	if f != nil {
+		if f.cfg.StepCPUMaxMilli != 0 {
+			cpuMaximum = f.cfg.StepCPUMaxMilli
+		}
+		if f.cfg.StepMemoryMaxMiB != 0 {
+			memoryMaximum = f.cfg.StepMemoryMaxMiB
+		}
+	}
+	for _, resources := range [][2]int{{run.CPUMilli, run.MemoryMiB}, {req.Step.CPUMilli, req.Step.MemoryMiB}} {
+		if resources[0] > cpuMaximum || resources[1] > memoryMaximum {
+			return refusedResult(pl.CodeStepInvalid, "Declared resources exceed this installation's command limit."), nil
+		}
+	}
+	if req.Step.Placement == pl.PlacementPool && (run.Execution != pl.ExecutionContainer || len(run.Needs) != 0 || len(req.Step.Needs) != 0) {
+		return refusedResult(pl.CodeStepInvalid, "Pool execution requires a portable container command without host needs."), nil
 	}
 	if f == nil || f.dispatch == nil {
 		return failedResult(pl.CodeRunnerUnavailable,
@@ -357,6 +388,8 @@ func fleetArgs(run StepRun, token string) map[string]any {
 		"secrets":    secrets,
 		"artifacts":  artifacts,
 		"timeoutSec": run.TimeoutSeconds,
+		"cpuMilli":   run.CPUMilli,
+		"memoryMiB":  run.MemoryMiB,
 	}
 	if len(run.Services) > 0 {
 		args["services"] = run.Services

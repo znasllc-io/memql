@@ -1,7 +1,7 @@
 # Pipeline steps on this machine
 
-Let the cluster run one of its CI pipeline steps here, when the step names a
-need the cluster's own runners cannot meet -- a macOS toolchain, a GPU, Docker.
+Let the cluster run eligible CI steps here, either as dedicated Fleet work or
+through an installed policy that prefers this machine's available capacity.
 
 The arrangement is made in two places: the repository's pipeline says a step
 may run on the fleet, and this machine's `policy.yaml` says this machine will
@@ -10,8 +10,8 @@ memql#5494). This half: the `pipeline_step` action, the `pipelines` policy and
 the `pipelines=allowed` registration label and the action's reported repository
 scope. A machine that does not report a scope is not eligible for a pipeline
 step; upgrade and reconnect it first. The runtime also reports
-`actionContracts["workerHost.pipeline_step"] = 4`. The engine requires this
-contract before sending an explicit native/container request; operator labels
+`actionContracts["workerHost.pipeline_step"] = 5`. The engine requires this
+contract before sending a native/container request with the current resource rules; operator labels
 are not evidence of an implemented action contract.
 
 ---
@@ -70,7 +70,8 @@ pipelines:
 | `repos` | empty: any repository | When it lists any, only these repositories' steps run here. `owner/name`, compared without regard to case or a `.git` suffix -- and the clone URL must name the same repository. |
 | `workspace_root` | `fs.workspace_root/pipelines`, else `~/.memql/pipelines` | Where each step's fresh checkout is made, and removed again. |
 | `max_timeout_sec` | `3600` | The longest a step may run, whatever it asks for. A step that names no timeout gets the cluster's own default, 1200 seconds, under this cap. |
-| `container_memory_mib` | `2048` | Command container memory in MiB, from 256 through 32768. Docker's total memory-plus-swap limit is the same value, so no additional swap is available. Services keep separate 2 GiB limits; native commands are unaffected. |
+| `container_memory_mib` | `2048` | Maximum command-container memory in MiB, from 256 through 32768. A request may use less. Docker memory-plus-swap equals that limit. Each service has a separate 2 GiB limit. Native commands have no hard RAM quota. |
+| `container_cpu_milli` | `2000` | Maximum command-container CPU in milliCPU, from 1 through 256000. Each service has a separate two-CPU limit. Native commands have no hard CPU quota. |
 | `min_free_disk_mib` | `20480` | Available space required on the workspace filesystem before checkout and again before the pipeline command. Set 1024 through 1048576 MiB for this machine; omitted or zero uses the default. The cluster cannot lower it. |
 
 For a test or build that needs more than 2 GiB, set `container_memory_mib: 4096`
@@ -171,8 +172,8 @@ here on the old answer in the meantime is refused by the new one.
    Container work
    uses `/bin/sh` in the declared image with the checkout and any declared cache mounted, as the
    worker's UID/GID, and no Docker socket, privileged mode, host ports or host
-   network. Its bounds are two CPUs, 512 processes and the local
-   `container_memory_mib` setting (2 GiB by default).
+   network. Its bounds are 512 processes and the admitted `cpuMilli` /
+   `memoryMiB` request, capped by local policy (two CPUs / 2 GiB by default).
    Request environment and multiline secrets travel to the container shell
    over stdin, never to the host Docker client's environment or arguments.
    The worker checks Docker's terminal container state before accepting an
@@ -302,3 +303,50 @@ credential/mount boundaries, cancellation and complete resource cleanup.
 Separate process tests verify that cluster-specific workers cannot
 reserve the same build slot and cannot discard an interrupted attempt record.
 No test upgrades the installed worker or enables its pipeline policy.
+
+
+## Shared host admission
+
+Pipeline contract 5 carries container `cpuMilli` and `memoryMiB` through the
+worker. An older worker is not eligible. Zero or absent values use the owner's
+local defaults; a request above either local ceiling refuses before checkout.
+The worker accounts for the command and every service together, keeping one CPU
+and host RAM headroom outside that total. It reads host RAM and Docker metadata
+before checkout and again before starting services or the command. Missing or
+inconsistent evidence refuses. Docker admission subtracts current container RAM
+usage and keeps at least 2 GiB or one quarter of its pool for runtime overhead;
+this is conservative admission, not a reservation against unrelated applications.
+
+Every enrollment under the same operating-system account shares one host build
+lock with local builds, workbenches and local model calls. Inference shares that
+lock with retained workspaces while excluding CI builds. Its admission accounts
+for the workspaces' bounded memory so a goal can use a model, use its workspace,
+then use the model again without discarding that workspace. A retained
+`inference-active.json` witness contains only a version and random
+attempt identity; interruption, cancellation or an uncertain runtime reply keeps
+that fence. Its age or an exited PID does not prove completion. Only the original
+call's confirmed terminal response clears its exact witness, even if the answer
+then fails validation or cannot be delivered; otherwise operator
+reconciliation is required. Existing resident-model and pressure rules remain.
+
+Native macOS commands use this same shared admission and conservative CPU/RAM
+headroom, but do not gain container hard limits. They remain an explicitly
+trusted host capability. A Linux container lane requires the exact Linux Docker
+architecture, digest-pinned image and current container contract; macOS native
+execution is not interchangeable with Linux container execution.
+
+Container attempts record the selected local Docker Unix socket and daemon
+identity before creating resources. Measurements, execution and recovery stay
+on that socket even if the current Docker context changes. Cleanup checks daemon
+identity before and after removal. Retained older attempts without a recorded
+socket remain fenced for operator reconciliation. Native commands declaring
+`needs: [docker]` inherit that socket, but trusted native commands can explicitly
+choose another endpoint; they do not receive the container isolation guarantee.
+
+Upgrade the controller and opted-in workers together during an idle pipeline
+window. Contract 4 and contract 5 do not substitute for each other: an older
+controller cannot qualify the new worker, and the new controller refuses older
+workers. Verify current registrations and their local resource ceilings before
+resuming Fleet work. Enable pool placements and the installed placement policy
+only after that coordinated upgrade; publishing the source alone does not
+activate them.
