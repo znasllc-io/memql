@@ -843,8 +843,9 @@ Output logs remain separate and secret-masked. Older workers are ineligible
 until upgraded; there is no fallback to an inline archive.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
-clone script, over `https` only), the command in the machine's own environment,
-its output streamed back masked, the artifacts packed, the checkout removed --
+clone script, over `https` only), the command using its declared native or
+container execution, its output streamed back masked, the artifacts packed,
+the checkout removed --
 is the Cockpit's, and
 [Pipeline steps on this machine](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/pipelines.md)
 (`cockpit/docs/pipelines.md` in this repository) says it. On the engine's
@@ -853,9 +854,9 @@ side:
 - The agent mints the clone token (one repository, contents read). The dispatch
   carries it with the clone URL, the commit, the command, the contract
   environment, the secrets, the artifact paths and the effective timeout.
-- The pipeline's `image`, its services and its caches are the cluster's. A fleet
-  step runs its command in the machine's own environment, with no service and
-  no cluster cache.
+- A container step uses its declared image, services and worker-local scoped
+  caches. A native step uses the machine's own environment and cannot declare
+  services or managed caches. Neither shares the cluster's cache volume.
 - The dispatch's own deadline is the step's effective timeout plus 5 minutes,
   for the clone before the command and the packing after it.
 - The output becomes the step's log through the same capture a cluster step's
@@ -975,7 +976,7 @@ a clone token. Fleet execution currently has no durable remote receipt lookup;
 an interrupted fleet intent is also uncertain and is not dispatched again.
 Inspect the original attempt before authorizing new work.
 
-The workbench action is `pipelineStepV6` and its receipt acknowledgement is
+The workbench action is `pipelineStepV10` and its receipt acknowledgement is
 `pipelineReceiptAckV3`. Older replicas reject these actions instead of ignoring
 new execution, recovery or cleanup guarantees. Upgrade the coordinated engine
 set and drain old drivers before enabling the new protocol.
