@@ -896,6 +896,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// stamped", and an update whose delta never mentioned the owner stamped
 	// nothing. See the pipeline case in site_owner_stamp_pipeline_update_test.go.
 	_, deltaNamedOwner := payload["ownerUserId"]
+	// WHETHER THIS WRITE ASKED FOR A RESERVED NAME, captured here for the same
+	// reason: after the read-merge a stored `memqlDomain` and a requested one
+	// are one map entry, and the operator normalization (memql#5792) clears
+	// only a name nobody asked for.
+	deltaMemqlDomain, deltaNamedMemqlDomain := payload["memqlDomain"]
 	// THE STORED OWNER of the row this write lands on, captured before the
 	// read-merge for the same reason as deltaNamedOwner: afterwards the
 	// stored owner and a freshly stamped `ownerUserId: actor.userId` are one
@@ -1511,6 +1516,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// and leaves joinOnDomain on would be refused for a verification
 		// this very write is discarding.
 		resetAccountDomainOnChange(payload, meta.priorAccountDomain, meta.priorExisted)
+		// The operator's cluster address is not a client reservation
+		// (memql#5792). After the reset, because the reset's default fill is
+		// one of the two writers that put it there; before the guards, which
+		// would otherwise refuse every edit of the operator's profile. See
+		// normalizeSelfAccountReservation.
+		normalizeSelfAccountReservation(mutation.ID, payload, deltaMemqlDomain, deltaNamedMemqlDomain)
 		// The domain walk's two guards (epic memql#5165, D9 and D10), beside
 		// the one above and for the same reason: neither is expressible in a
 		// mutation body -- one judges a COMBINATION of two fields and the
