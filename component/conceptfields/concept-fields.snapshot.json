@@ -4050,6 +4050,8 @@
         "driverNodeId",
         "durationMs",
         "event",
+        "failureCode",
+        "failureMessage",
         "finishedAt",
         "headBranch",
         "inboundRequestId",

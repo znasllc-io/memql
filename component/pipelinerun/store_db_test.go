@@ -393,6 +393,26 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 		t.Errorf("and not a run concluded before it: %v", err)
 	}
 
+	// ---- a run that failed for a reason no step reported: the conclusion
+	// writes that reason, and the row reads it back as the run's own, not as
+	// a refusal (the check run and the run page state it from the row) ----
+	outside := run
+	outside.ID, outside.RunKey, outside.PullRequest, outside.CheckRunID = "outside-steps-"+suffix, key+"-outside-steps", 0, 0
+	if err := store.CreateRun(ctx, outside); err != nil {
+		t.Fatalf("create the run that fails outside its steps: %v", err)
+	}
+	reason := "Pipeline workflow failed: every_door_shut: no door to a model is open for this call (asked as ***)"
+	if err := store.UpdateRun(ctx, r.OwnerUserID, outside.ID, RunPatch{
+		Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionFailure), FinishedAt: ptr(finished),
+		FailureCode: ptr(pipelines.CodeExecutorError), FailureMessage: ptr(reason),
+	}); err != nil {
+		t.Fatalf("conclude with the run's own reason: %v", err)
+	}
+	failed := mustRun(t, store, outside.ID)
+	if f := failed.Failure(); f == nil || f.Code != pipelines.CodeExecutorError || f.Message != reason || failed.Refusal() != nil {
+		t.Errorf("the run's own reason is read back as itself: failure %+v refusal %+v", f, failed.Refusal())
+	}
+
 	// ---- a reconnect of a source no longer tied to an organization unties
 	// its pipeline: createPipeline is a read-merge insert, and the account is
 	// written as it is now, empty included ----

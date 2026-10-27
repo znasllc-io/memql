@@ -149,7 +149,8 @@ func everyStoreCall(s Store, value string) []struct {
 		{"UpdateRun (every field)", func() error {
 			return s.UpdateRun(ctx, value, value, RunPatch{
 				Status: ptr(value), Conclusion: ptr(value), RefusalCode: ptr(value), RefusalMessage: ptr(value),
-				RefusalScope: ptr(value), CheckRunID: ptr(int64(30431907812)), CheckRunState: ptr(value),
+				RefusalScope: ptr(value), FailureCode: ptr(value), FailureMessage: ptr(value),
+				CheckRunID: ptr(int64(30431907812)), CheckRunState: ptr(value),
 				Notes: ptr([]Note{{Code: value, Message: value}}), WorkRunID: ptr(value), WorkGoalID: ptr(value),
 				DriverNodeID: ptr(value), DriverHeartbeatAt: ptr(now), CancelRequested: ptr(true), CancelledBy: ptr(value),
 				Stages: ptr(stages), StartedAt: ptr(now), FinishedAt: ptr(now), DurationMs: ptr(int64(5)),
@@ -413,6 +414,30 @@ func TestTheRenderedCallsSayWhatTheRowsAre(t *testing.T) {
 	}
 }
 
+// A run's own reason for failing is written with its conclusion, by name: the
+// check run's republish and the OS run page have only the row to state it from.
+func TestARunsOwnReasonIsWrittenWithItsConclusion(t *testing.T) {
+	engine := newRecordingEngine()
+	store := NewDSLStore(engine)
+	if err := store.UpdateRun(context.Background(), "v1:identity:user:u1", "r1", RunPatch{
+		Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionFailure),
+		FailureCode: ptr(pipelines.CodeExecutorError), FailureMessage: ptr("Pipeline workflow failed: every_door_shut (asked as ***)"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var update string
+	for _, c := range engine.recorded() {
+		if strings.HasPrefix(c.query, "mutation "+mUpdatePipelineRun+"(") {
+			update = c.query
+		}
+	}
+	want := `mutation updatePipelineRun(conclusion: "failure", failureCode: "pipeline_executor_error", ` +
+		`failureMessage: "Pipeline workflow failed: every_door_shut (asked as ***)", runId: "r1", status: "completed")`
+	if update != want {
+		t.Errorf("the conclusion's write:\n got %s\nwant %s", update, want)
+	}
+}
+
 func TestRowsAreReadBackBareAndTyped(t *testing.T) {
 	engine := newRecordingEngine()
 	engine.answers[qPipelineRunByID] = []any{map[string]any{
@@ -436,6 +461,8 @@ func TestRowsAreReadBackBareAndTyped(t *testing.T) {
 		"driverHeartbeatAt": "2026-10-03T12:00:30Z",
 		"queuedAt":          "2026-10-03T12:00:00.5Z",
 		"durationMs":        float64(1500),
+		"failureCode":       "pipeline_executor_error",
+		"failureMessage":    "Pipeline workflow failed: every_door_shut",
 		"notes":             []any{map[string]any{"code": "c", "message": "m"}},
 		"stages":            []any{map[string]any{"name": "checks", "status": "Passed", "durationMs": float64(9), "steps": float64(2), "failed": float64(0)}},
 	}}
@@ -475,6 +502,9 @@ func TestRowsAreReadBackBareAndTyped(t *testing.T) {
 	}
 	if len(r.Notes) != 1 || r.Notes[0].Code != "c" || len(r.Stages) != 1 || r.Stages[0].Steps != 2 {
 		t.Errorf("notes %+v stages %+v", r.Notes, r.Stages)
+	}
+	if r.FailureCode != pipelines.CodeExecutorError || r.FailureMessage != "Pipeline workflow failed: every_door_shut" {
+		t.Errorf("the run's own reason is read back: %q %q", r.FailureCode, r.FailureMessage)
 	}
 
 	p, err := store.PipelineByID(context.Background(), "p1")

@@ -130,6 +130,9 @@ export interface RunRow {
   refusalCode: string;
   refusalMessage: string;
   refusalScope: string;
+  /** The run's own reason for failing, when no step reported it: read through `runFailureOf`. */
+  failureCode: string;
+  failureMessage: string;
   checkRunId: string;
   checkRunState: "" | "written" | "refused" | "unavailable";
   notes: RunNote[];
@@ -188,6 +191,8 @@ export function runFromRow(raw: Row): RunRow {
     refusalCode: rowString(row, "refusalCode"),
     refusalMessage: rowString(row, "refusalMessage"),
     refusalScope: rowString(row, "refusalScope"),
+    failureCode: rowString(row, "failureCode"),
+    failureMessage: rowString(row, "failureMessage"),
     checkRunId: rowString(row, "checkRunId"),
     checkRunState: (["written", "refused", "unavailable"].includes(checkRunState) ? checkRunState : "") as RunRow["checkRunState"],
     notes: notesOf(objectsOf(row, "notes")),
@@ -238,6 +243,19 @@ export function runRingFingerprint(run: RunRow): string {
 
 export function isFinished(run: RunRow): boolean {
   return run.status === "completed";
+}
+
+/**
+ * Why a run failed when no step's report says it -- its workflow erred after
+ * every stage passed, a required step was blocked or never reported -- or
+ * null. The driver writes it with the conclusion, masked
+ * (component/pipelinerun's Run.Failure), and it is read only off a run that
+ * completed failed, as the check run reads it. A refusal is not one: it keeps
+ * its own fields and ended the run before any step ran.
+ */
+export function runFailureOf(run: RunRow): RunNote | null {
+  if (run.status !== "completed" || run.conclusion !== "failure" || run.failureMessage.trim() === "") return null;
+  return { code: run.failureCode, message: run.failureMessage };
 }
 
 // ---------------------------------------------------------------------------

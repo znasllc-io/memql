@@ -1540,6 +1540,10 @@ func TestAResumedRunWhosePlanChangedFailsNodeLost(t *testing.T) {
 	if len(lint) != 1 || argString(lint[0].Args, "errorCode") != pipelines.CodeNodeLost {
 		t.Errorf("the unfinished step the plan lost fails pipeline_node_lost: %+v", lint)
 	}
+	// The failed steps carry the reason; the row does not restate it.
+	if got.FailureCode != "" || got.FailureMessage != "" {
+		t.Errorf("a reason a failed step reports is not the run's own: %q %q", got.FailureCode, got.FailureMessage)
+	}
 	if slices.Contains(dh.exec.sentKeys(), "tests.lint2") {
 		t.Errorf("nothing of the changed plan runs")
 	}

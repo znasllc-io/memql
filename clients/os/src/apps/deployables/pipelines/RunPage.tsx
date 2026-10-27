@@ -20,7 +20,7 @@ import { useRunFiles, useRunSteps } from "./feeds";
 import { useExpiredRunFiles } from "./expiry";
 import { runGithubUrl } from "./github";
 import { fetchLogTail, type LogTail } from "./logTail";
-import { artifactDisplayName, isFinished, type PipelineRow, type RunFileRow, type RunRow, type StepRow } from "./rows";
+import { artifactDisplayName, isFinished, runFailureOf, type PipelineRow, type RunFileRow, type RunRow, type StepRow } from "./rows";
 import { newerAttemptOf, runById } from "./runs";
 import { Mark } from "./Mark";
 import { StopsAcross } from "./StopsAcross";
@@ -35,7 +35,10 @@ import "./pipelines.css";
 //                   back follows where the person came from
 //   the Head        the commit's message as the title
 //   the meta line   what opened it, the commit, the mode, how long, the attempt
-//   the stops       the stages across the top, read from the step rows
+//   the stops       the stages across the top, read from the step rows; above
+//                   them, a refusal, or the run's own reason for failing when
+//                   no step reported one (its workflow erred after every
+//                   stage passed), read off the run row
 //   the open stop   its steps: where each ran and for how long; a failed one
 //                   with its last lines and the way to the whole log; a
 //                   skipped one with its reason in words
@@ -171,6 +174,12 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
       }));
 
   const refused = stops.length === 0 && run.refusalCode !== "";
+  // A RUN CAN FAIL WITH EVERY STAGE PASSED, its workflow erring after them
+  // (memql pull requests 6312, 6313 and 6318): "Failed" in the bar over stops
+  // that all read done says nothing, so the row's own reason is said here, in
+  // the server's words. The headline is true of every such reason.
+  const failure = runFailureOf(run);
+  const failureNotice = failure ? <Notice tone={toneFor(failure.code)} sentence="The run failed outside its steps." detail={failure.message} /> : null;
   const artifacts = steps.flatMap((step) => step.artifactFileIds.map((id) => ({ step, id, file: files.byFileId.get(id) ?? null })));
   const panelId = `pipeline-run-${run.id}-stage`;
   const title = runTitle(run);
@@ -205,12 +214,13 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
           {refused ? (
             <ProblemNotice problem={{ code: run.refusalCode, message: run.refusalMessage, scope: run.refusalScope }} tone={toneFor(run.refusalCode)} />
           ) : stops.length === 0 ? (
-            isFinished(run) ? <Caption>This run had nothing to run.</Caption> : <ContentSkeleton kind="detail" label="Loading the run's stages" />
+            failureNotice ?? (isFinished(run) ? <Caption>This run had nothing to run.</Caption> : <ContentSkeleton kind="detail" label="Loading the run's stages" />)
           ) : (
             <>
               {run.refusalCode !== "" ? (
                 <ProblemNotice problem={{ code: run.refusalCode, message: run.refusalMessage, scope: run.refusalScope }} tone={toneFor(run.refusalCode)} />
               ) : null}
+              {failureNotice}
               <div className="pipeline-run-workspace"><StopsAcross stops={stops} open={open} onOpen={(id) => setChosen({ at: movement, stop: id })} label="Stages" panelId={panelId} />
               <section className="pipeline-stage-panel" role="tabpanel" id={panelId} aria-labelledby={openStop ? `${panelId}-tab-${openStop.id}` : undefined}>
                 {openStop === null ? null : openStop.steps.length === 0 ? (

@@ -152,6 +152,94 @@ func TestCheckOutputOfAManifestThatCannotCompile(t *testing.T) {
 	assertOutput(t, title, summary, text, "Refused: unknown need (tests/os-checks)", wantSummary, "")
 }
 
+// A run can fail with every step passed: its workflow erred after them, as an
+// independent review that reached no model did on memql pull requests 6312,
+// 6313 and 6318. "Failed" over a table of Passed left the reason in the work
+// run's journal alone, so the title and the summary state it.
+func TestCheckOutputOfARunThatFailedOutsideItsSteps(t *testing.T) {
+	r := RunReport{
+		Pipeline: "storefront", Mode: ModeAffected, Event: EventPullRequest, PullRequest: 42, SHA: goldenPRHead,
+		Status: "completed", Conclusion: "failure",
+		Failure: &RunFailure{Code: CodeExecutorError,
+			Message: "Pipeline workflow failed: every_door_shut: no door to a model is open for this call"},
+		Steps: []StepReport{
+			{Key: "checks.build-vet", Stage: "checks", Status: "succeeded", DurationMs: 62_000},
+			{Key: "tests.go-tests#1", Stage: "tests", Status: "succeeded", DurationMs: 251_000},
+			{Key: "tests.os-checks", Stage: "tests", Status: "skipped", Code: CodeNotAffected, Message: "No change under bucket os."},
+		},
+	}
+	title, summary, text := CheckOutput(r)
+	wantSummary := "Mode affected · Pull request #42 · Commit c5fa05f\n" +
+		"\n" +
+		"| Stage | Status | Steps | Time |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| checks | Passed | 1 passed | 1m 02s |\n" +
+		"| tests | Passed | 1 passed, 1 skipped | 4m 11s |\n" +
+		"\n" +
+		"### Run failure\n" +
+		"\n" +
+		"Pipeline workflow failed: every\\_door\\_shut: no door to a model is open for this call (`pipeline_executor_error`)\n"
+	assertOutput(t, title, summary, text,
+		"Failed: Pipeline workflow failed: every_door_shut: no door to a model is open for this call", wantSummary, "")
+}
+
+// The same reason when no stage ran at all: a resumed run whose pipeline DSL
+// now selects no stage fails rather than pass the checks it began.
+func TestCheckOutputOfARunThatFailedWithNoStage(t *testing.T) {
+	r := RunReport{
+		Mode: ModeFull, Event: EventMergeGroup, SHA: goldenMerged, Status: "completed", Conclusion: "failure",
+		Failure: &RunFailure{Code: CodeNodeLost,
+			Message: "The pipeline DSL selected no stages for a run with an existing work plan. Re-run the pipeline."},
+	}
+	title, summary, text := CheckOutput(r)
+	wantSummary := "Mode full · Merge queue · Commit a944ae3\n" +
+		"\n" +
+		"No step ran.\n" +
+		"\n" +
+		"### Run failure\n" +
+		"\n" +
+		"The pipeline DSL selected no stages for a run with an existing work plan. Re-run the pipeline (`pipeline_node_lost`).\n"
+	assertOutput(t, title, summary, text,
+		"Failed: The pipeline DSL selected no stages for a run with an existing work plan. Re-run the pipeline.", wantSummary, "")
+}
+
+// A failed step keeps the title, which names where the run broke; the run's
+// own reason is the summary's, listed before the failed steps so neither is
+// left out.
+func TestCheckOutputOfARunThatFailedInAStepAndOutsideIt(t *testing.T) {
+	r := failedPushRun()
+	r.Failure = &RunFailure{Code: CodeExecutorError, Message: "Pipeline workflow failed: the review could not be reported."}
+	title, summary, _ := CheckOutput(r)
+	if title != "Failed at tests: tests.go-tests#2" {
+		t.Errorf("title %q, want the failed step's", title)
+	}
+	want := "| deploy | Not run: an earlier stage failed | 1 not run | - |\n" +
+		"\n" +
+		"### Run failure\n" +
+		"\n" +
+		"Pipeline workflow failed: the review could not be reported (`pipeline_executor_error`).\n" +
+		"\n" +
+		"### Failed steps\n" +
+		"\n" +
+		"- `tests.go-tests#2`: The command exited with status 1.\n"
+	if !strings.HasSuffix(summary, want) {
+		t.Errorf("summary:\n--- got ---\n%s\n--- want it to end ---\n%s", summary, want)
+	}
+}
+
+// A reason is read only off a run that failed: a report that carries one on a
+// run that passed or was cancelled, however it got there, says nothing of it.
+func TestCheckOutputReadsNoReasonOffARunThatDidNotFail(t *testing.T) {
+	for _, conclusion := range []string{"success", "cancelled"} {
+		title, summary, _ := CheckOutput(RunReport{Status: "completed", Conclusion: conclusion,
+			Failure: &RunFailure{Code: CodeExecutorError, Message: "not a failure"},
+			Steps:   []StepReport{{Key: "checks.vet", Stage: "checks", Status: "succeeded", DurationMs: 45_000}}})
+		if strings.Contains(title, "not a failure") || strings.Contains(summary, "Run failure") || strings.Contains(summary, "not a failure") {
+			t.Errorf("%s: the reason is rendered:\n%s\n%s", conclusion, title, summary)
+		}
+	}
+}
+
 func TestCheckOutputBeforeAnyStepExists(t *testing.T) {
 	queued := RunReport{Mode: ModeAffected, Event: EventPullRequest, PullRequest: 42, SHA: goldenPRHead, Status: "queued"}
 	title, summary, text := CheckOutput(queued)
@@ -189,6 +277,13 @@ func TestCheckOutputTitles(t *testing.T) {
 				step("tests.go#1", "failed", 1_000), step("tests.go#2", "refused", 0), step("tests.go#3", "failed", 2_000),
 			}}, "Failed at tests: tests.go#1 and 2 more"},
 		{"failed with no step to name", RunReport{Status: "completed", Conclusion: "failure"}, "Failed"},
+		// No step failed: the run's own reason is the title, on one line.
+		{"failed outside its steps", RunReport{Status: "completed", Conclusion: "failure",
+			Failure: &RunFailure{Code: CodeStageBlocked, Message: "Required step deploy.verify was blocked.\nIt never ran."},
+			Steps:   []StepReport{step("checks.vet", "succeeded", 1_000)}}, "Failed: Required step deploy.verify was blocked."},
+		{"a reason with only a code", RunReport{Status: "completed", Conclusion: "failure",
+			Failure: &RunFailure{Code: CodeNodeLost}}, "Failed: pipeline_node_lost"},
+		{"a reason with neither", RunReport{Status: "completed", Conclusion: "failure", Failure: &RunFailure{}}, "Failed"},
 		{"cancelled", RunReport{Status: "completed", Conclusion: "cancelled",
 			Steps: []StepReport{step("tests.go", "cancelled", 3_000)}}, "Cancelled"},
 		// No conclusion yet but every step done: the steps decide.
@@ -266,13 +361,35 @@ func TestCheckOutputKeepsReportedTextLiteral(t *testing.T) {
 			t.Errorf("refusal %q renders as\n%s\nwant it to begin %q", detail, summary, want)
 		}
 	}
+
+	// So does the run's own reason, which is an error's text: it cannot open
+	// markup either, and the title keeps it as the plain line GitHub shows.
+	for _, c := range []struct{ reason, summary, title string }{
+		{"# not a heading\n- nor a list", "\\# not a heading - nor a list", "Failed: # not a heading"},
+		{"1. not a numbered list", "1\\. not a numbered list", "Failed: 1. not a numbered list"},
+		{`exit 1 <img src="https://tracker.example.test/p.gif">`, `exit 1 \<img src="https://tracker.example.test/p.gif"\>`,
+			`Failed: exit 1 <img src="https://tracker.example.test/p.gif">`},
+		{"[click](https://x.example.test) | *bold*", "\\[click\\](https://x.example.test) \\| \\*bold\\*",
+			"Failed: [click](https://x.example.test) | *bold*"},
+	} {
+		title, summary, _ := CheckOutput(RunReport{Status: "completed", Conclusion: "failure", Failure: &RunFailure{Message: c.reason}})
+		if !strings.HasSuffix(summary, "### Run failure\n\n"+c.summary+"\n") {
+			t.Errorf("reason %q renders as\n%s\nwant it to end in %q", c.reason, summary, c.summary)
+		}
+		if title != c.title {
+			t.Errorf("reason %q titles as %q, want %q", c.reason, title, c.title)
+		}
+	}
 }
 
 // GitHub refuses an output field over 65535 bytes. A run with more failures
 // than fit keeps every field under the limit, as valid text, ending in a
 // count of what was left out rather than a silent cut.
 func TestCheckOutputFitsGitHubsLimit(t *testing.T) {
-	r := RunReport{Mode: ModeFull, Event: EventPush, SHA: goldenMerged, Status: "completed", Conclusion: "failure"}
+	r := RunReport{Mode: ModeFull, Event: EventPush, SHA: goldenMerged, Status: "completed", Conclusion: "failure",
+		// A run's own reason far over the limit, listed before the failed
+		// steps: it is cut, and still leaves them their closing count.
+		Failure: &RunFailure{Code: CodeExecutorError, Message: strings.Repeat("Pipeline workflow failed é. ", 10_000)}}
 	tail := strings.Repeat("panic: an error that repeats é\n", 200) // about 6 KB, with a multi-byte rune
 	for i := 1; i <= 400; i++ {
 		r.Steps = append(r.Steps, StepReport{
@@ -298,6 +415,16 @@ func TestCheckOutputFitsGitHubsLimit(t *testing.T) {
 	if strings.Count(text, "```")%2 != 0 {
 		t.Error("the text leaves a code block open")
 	}
+	if !strings.Contains(summary, "### Run failure\n\nPipeline workflow failed é. ") || !strings.Contains(summary, "... (`pipeline_executor_error`)\n") {
+		t.Errorf("the run's own reason is cut, marked, and still names its code:\n%.600s", summary)
+	}
+
+	// Alone, the same reason is the title: one line, cut and marked.
+	title, _, _ = CheckOutput(RunReport{Status: "completed", Conclusion: "failure", Failure: r.Failure})
+	if !strings.HasPrefix(title, "Failed: Pipeline workflow failed é. ") || !strings.HasSuffix(title, "...") ||
+		utf8.RuneCountInString(title) > 300 || !utf8.ValidString(title) {
+		t.Errorf("a long reason's title is one short, marked line: %d runes %q", utf8.RuneCountInString(title), title)
+	}
 
 	// One tail longer than the limit keeps its LAST lines: the end of a
 	// failing log is where the failure is.
@@ -321,6 +448,8 @@ func TestCheckOutputUsesNoEmoji(t *testing.T) {
 		{Status: "completed", Conclusion: "refused", Refusal: &Refusal{Code: CodeForkRefused, Detail: "A fork."}},
 		{Status: "completed", Conclusion: "success", Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "succeeded", DurationMs: 1}}},
 		{Status: "completed", Conclusion: "cancelled", Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "cancelled"}}},
+		{Status: "completed", Conclusion: "failure", Failure: &RunFailure{Code: CodeExecutorError, Message: "m"},
+			Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "succeeded", DurationMs: 1}}},
 	}
 	for code := range codeClasses {
 		reports = append(reports, RunReport{Status: "completed", Conclusion: "failure", Refusal: &Refusal{Code: code, Detail: "d"}})

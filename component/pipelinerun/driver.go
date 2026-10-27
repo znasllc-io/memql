@@ -277,10 +277,25 @@ type verdict struct {
 	refusal *pipelines.Refusal
 	// workCode and workMessage close the work run.
 	workCode, workMessage string
+	// outsideSteps: the run failed for a reason no step reported, so
+	// workCode and workMessage are ALSO the run's own reason, written on the
+	// row (Run.Failure) for the check run and the run page to state. Unset
+	// where they only restate a failed step's report, which the step's own
+	// row carries.
+	outsideSteps bool
 }
 
 func refusedWith(r *pipelines.Refusal) verdict {
 	return verdict{conclusion: ConclusionFailure, refusal: r, workCode: r.Code, workMessage: r.Detail}
+}
+
+// failedOutsideSteps is a failure no step's report explains: a workflow that
+// erred after its steps, a required step blocked or never reported, a resumed
+// plan that changed with nothing left to fail. Without it on the row, the
+// check run read "Failed" over a stage table of Passed, and only the work
+// run's journal said why (memql pull requests 6312, 6313 and 6318).
+func failedOutsideSteps(code, message string) verdict {
+	return verdict{conclusion: ConclusionFailure, workCode: code, workMessage: message, outsideSteps: true}
 }
 
 // drive takes the run from claimed to concluded. The heartbeat renews the
@@ -457,18 +472,18 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		return verdict{}, false
 	}
 	if workflowErr != nil && !dr.lease.isCancelled() {
-		return verdict{conclusion: ConclusionFailure, workCode: pipelines.CodeExecutorError, workMessage: "Pipeline workflow failed: " + dr.mask(workflowErr.Error())}, true
+		// Whatever the steps did: an independent review that reached no
+		// model, an operation the workflow called wrongly. Every step may
+		// have passed, so the reason is the run's own.
+		return failedOutsideSteps(pipelines.CodeExecutorError, "Pipeline workflow failed: "+dr.mask(workflowErr.Error())), true
 	}
 	return dr.verdictOfSteps(), true
 }
 
 func (dr *runDriver) emptyPlanVerdict() verdict {
 	if strings.TrimSpace(dr.run.WorkRunID) != "" || dr.run.RerunFailedOnly {
-		return verdict{
-			conclusion:  ConclusionFailure,
-			workCode:    pipelines.CodeNodeLost,
-			workMessage: "The pipeline DSL selected no stages for a run with an existing work plan, so its original checks cannot be proven. Re-run the pipeline.",
-		}
+		return failedOutsideSteps(pipelines.CodeNodeLost,
+			"The pipeline DSL selected no stages for a run with an existing work plan, so its original checks cannot be proven. Re-run the pipeline.")
 	}
 	// No stage applies to a fresh run: success with nothing to run, and no
 	// work goal for nothing.
@@ -799,10 +814,16 @@ func (dr *runDriver) diverged(ctx context.Context, why string) verdict {
 		", so the run cannot be resumed as it was planned. Re-run it."
 	dr.log.Warn("pipelines: a resumed run's plan is not the plan its work began; its unfinished steps fail",
 		"why", why)
+	failed := 0
 	for _, t := range dr.tracks {
 		if !t.finished() {
 			dr.settle(ctx, t, failReceipt(pipelines.CodeNodeLost, message))
+			failed++
 		}
+	}
+	if failed == 0 {
+		// Every step had finished, so no step carries the message.
+		return failedOutsideSteps(pipelines.CodeNodeLost, message)
 	}
 	return verdict{conclusion: ConclusionFailure, workCode: pipelines.CodeNodeLost, workMessage: message}
 }
@@ -1512,11 +1533,11 @@ func (dr *runDriver) verdictOfSteps() verdict {
 			if s.Code == pipelines.CodeStageBlocked {
 				// DSL can block work, but an unexecuted required step is not
 				// evidence of success, even if no other step recorded failure.
-				return verdict{conclusion: ConclusionFailure, workCode: s.Code, workMessage: "Required step " + s.Key + " was blocked."}
+				return failedOutsideSteps(s.Code, "Required step "+s.Key+" was blocked.")
 			}
 		case StepPending, StepRunning:
 			// A step that never ended never passed.
-			return verdict{conclusion: ConclusionFailure, workMessage: "Step " + s.Key + " never reported how it ended."}
+			return failedOutsideSteps("", "Step "+s.Key+" never reported how it ended.")
 		}
 	}
 	return verdict{conclusion: ConclusionSuccess}
@@ -1575,6 +1596,15 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	if v.refusal != nil {
 		final.RefusalCode, final.RefusalMessage, final.RefusalScope = v.refusal.Code, v.refusal.Detail, v.refusal.Scope
 		patch.RefusalCode, patch.RefusalMessage, patch.RefusalScope = ptr(v.refusal.Code), ptr(v.refusal.Detail), ptr(v.refusal.Scope)
+	}
+	if v.outsideSteps && v.conclusion == ConclusionFailure && strings.TrimSpace(v.workMessage) != "" {
+		// The run's own reason goes on the ROW, in this same write as the
+		// conclusion: the final check run is composed from `final`, and a
+		// republish (recover.go) or another replica has only the row. Masked
+		// here, whoever built the verdict, as every reported text is.
+		message := dr.mask(v.workMessage)
+		final.FailureCode, final.FailureMessage = v.workCode, message
+		patch.FailureCode, patch.FailureMessage = ptr(v.workCode), ptr(message)
 	}
 
 	// The fence again, before the writes that take no gate: settling the
@@ -1758,6 +1788,8 @@ func applyRunPatch(r *Run, p RunPatch) {
 	set(&r.RefusalCode, p.RefusalCode)
 	set(&r.RefusalMessage, p.RefusalMessage)
 	set(&r.RefusalScope, p.RefusalScope)
+	set(&r.FailureCode, p.FailureCode)
+	set(&r.FailureMessage, p.FailureMessage)
 	set(&r.CheckRunState, p.CheckRunState)
 	set(&r.WorkRunID, p.WorkRunID)
 	set(&r.WorkGoalID, p.WorkGoalID)
