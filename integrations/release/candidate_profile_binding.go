@@ -96,7 +96,14 @@ func (l *candidateLedger) saveProfileBinding(ctx context.Context, b candidatePro
 	if err != nil {
 		return b, err
 	}
-	if !reflect.DeepEqual(b, stored) {
+	// Compare persisted forms, not in-memory structs. The JSON round trip drops
+	// an omitempty field holding an empty, non-nil value, which reads back nil,
+	// so a resolver answering `compatibility: []` refused its own first save
+	// after the row was stored. The digest covers the same marshaling as the
+	// body and profileBinding verified stored.Digest, so a different selection
+	// another replica stored under this ID still refuses. Callers continue
+	// with stored, the form a resuming replica reads.
+	if stored.Digest != b.Digest {
 		return b, errors.New("profile selection disagrees with its durable materialization")
 	}
 	return stored, nil
