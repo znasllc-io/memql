@@ -30,10 +30,11 @@ def local_source(worker, archive, version):
         assets.mkdir(parents=True)
         for source in [worker, archive, archive.with_name(archive.name + '.sha256')]:
             shutil.copy2(source, assets / source.name)
-        # The installers verify the worker against its release manifest
+        # The installers verify the worker against its release checksum
         # before running it (memql-cockpit#525), so the local release
-        # carries one too, in the release's own spelling.
-        manifest = 'memql-computeruse-SHA256SUMS' if worker.name.startswith('memql-computeruse-') else 'memql-SHA256SUMS'
+        # carries one too, in the release's own spelling: the computer-use
+        # sidecar scripts/ci/release-checksum.py writes, or memql-SHA256SUMS.
+        manifest = worker.name + '.sha256' if worker.name.startswith('memql-computeruse-') else 'memql-SHA256SUMS'
         digest = hashlib.sha256(worker.read_bytes()).hexdigest()
         (assets / manifest).write_text(digest + '  ' + worker.name + '\n')
         class QuietHandler(http.server.SimpleHTTPRequestHandler):

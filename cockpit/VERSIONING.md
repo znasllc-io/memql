@@ -75,6 +75,10 @@ changes, update that matrix in the monorepo and reference it here.
    `make -C cockpit release ARGS="--prepare"` to open the version PR. An explicit version
    uses `ARGS="--version=X.Y.Z --prepare"`. This stamps `cockpit/VERSION`,
    `cockpit/cmd/memql/main.go`, and `cockpit/internal/worker/connect.go` together.
+   The first release from this repository needs an explicit version: with no
+   `cockpit/v*` tag yet, the recommendation counts from the start of `cockpit/`,
+   and the Cockpit commits made in `znasllc-io/memql-cockpit` after its v0.20.1
+   release are not in this history.
 3. After native checks pass and that PR merges, update main, record its full
    commit SHA, and create an immutable annotated tag at that exact commit:
    `git tag -a cockpit/vX.Y.Z <reviewed-sha> -m "cockpit/vX.Y.Z"` followed by

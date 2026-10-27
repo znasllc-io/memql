@@ -103,6 +103,37 @@ else:
         self.assertEqual(self.invoke().returncode, 0)
         self.assert_no_release_effect()
 
+    def commit_file(self, path, message):
+        file = self.repo / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("package fixture\n")
+        message_file = self.root / "message.txt"
+        message_file.write_text(message)
+        self.run_git("add", path)
+        self.run_git("commit", "-q", "-F", str(message_file))
+
+    def test_recommendation_counts_only_cockpit_commits(self):
+        # The monorepo's engine commits are not Cockpit changes.
+        self.commit_file("engine/feature.go", "feat(engine): an engine feature")
+        self.commit_file("cockpit/internal/fix.go", "fix(cockpit): a Cockpit fix")
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Commits since cockpit/v1.2.3: 1\n", result.stderr)
+        self.assertIn("Recommended: v1.2.4 ", result.stderr)
+        self.commit_file("cockpit/internal/feature.go", "feat(cockpit): a Cockpit feature")
+        self.assertIn("Recommended: v1.3.0 ", self.invoke().stderr)
+
+    def test_a_long_commit_body_still_reports_its_breaking_change(self):
+        # A range larger than a pipe buffer once fell through to a patch bump:
+        # grep -q exits at its first match while echo is still writing.
+        filler = "".join("filler line %d\n" % i for i in range(60000))
+        self.commit_file("cockpit/internal/wire.go",
+                         "fix(cockpit): move the wire\n\nBREAKING CHANGE: the protocol moved\n\n" + filler)
+        result = self.invoke()
+        self.assertIn("Recommended: v2.0.0 ", result.stderr)
+        # The listing names the commit that drove the bump, body included.
+        self.assertIn("  [MAJOR] fix(cockpit): move the wire\n", result.stderr)
+
     def test_invalid_version_and_retired_cut_are_refused_before_writes(self):
         for args in [("--version=1.2.4;false", "--prepare", "--yes"),
                      ("--version=01.2.4", "--prepare", "--yes"), ("--cut", "--yes")]:
