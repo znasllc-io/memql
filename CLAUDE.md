@@ -58,7 +58,12 @@ and [work context and recovery](docs/public/ai/work-context-and-recovery.md).
 
 ## Quick Start
 
-**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
+**Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`), python3.
+`make install-deps` checks them and installs protoc, its Go plugins and PyYAML
+for the `python3` first on PATH; for Homebrew's externally managed Python it
+waits for the owner's PEP 668 opt-in (`PIP_BREAK_SYSTEM_PACKAGES=1`) or an
+activated virtualenv. Tests in `make test` that run `scripts/ci`'s Python FAIL
+without PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
 
 ```bash
 # --- k3d + ArgoCD: the ONLY supported local run path ---
@@ -75,6 +80,7 @@ make up-refresh              # clean slate: nuke + repave (fresh DB), then bring
 make down                    # tear down (PURGE=1 also removes the kubeconfig context)
 
 # Tests -- see Testing below. A bare `go test ./...` does NOT reach the engine.
+make install-deps            # first, from the same shell: PyYAML for its python3
 make test
 
 # Build. The Makefile generates the ignored identity CSS bundle before Go

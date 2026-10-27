@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/scripts/ci/pyyaml"
 )
 
 func TestEnginePipelineValidatesTheShellDockerStage(t *testing.T) {
@@ -76,6 +77,7 @@ func TestEnginePipelineRunsAndRetainsEditorPackaging(t *testing.T) {
 }
 
 func TestPipelineDatabaseBudgetsAndFailurePropagation(t *testing.T) {
+	pyyaml.Require(t)
 	output, err := exec.Command("python3", "-m", "unittest", "discover", "-s", "scripts/ci", "-p", "pipeline_db_tests_test.py").CombinedOutput()
 	if err != nil {
 		t.Fatalf("native DB budget runner: %v\n%s", err, output)

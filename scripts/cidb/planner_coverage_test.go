@@ -18,6 +18,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/scripts/ci/pyyaml"
 )
 
 func nativeSpec(t *testing.T) *pipelines.Spec {
@@ -199,6 +200,7 @@ func TestPlannerPlacesEveryProvisionedPackage(t *testing.T) {
 
 	// Ask the real native budget runner to construct every shard's commands.
 	// Assert package preservation after the final partition, not just before it.
+	pyyaml.Require(t)
 	for _, shard := range shards {
 		input, _ := json.Marshal(shard)
 		cmd := exec.Command("python3", "-c", `import importlib.util,json,sys,yaml
@@ -210,9 +212,13 @@ b=yaml.safe_load(m.BUDGETS_PATH.read_text())
 print(json.dumps([command for _,command in m.commands(json.load(sys.stdin),m.read_classes(b),m.read_parallelism(b))]))`)
 		cmd.Dir = root
 		cmd.Stdin = strings.NewReader(string(input))
+		// stdout is the JSON; the runner's error, if any, is on stderr, and a
+		// bare `exit status 1` names neither the error nor its fix.
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
 		output, err := cmd.Output()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("native budget runner could not build shard commands: %v\n%s", err, stderr.String())
 		}
 		var commands [][]string
 		if err := json.Unmarshal(output, &commands); err != nil {
