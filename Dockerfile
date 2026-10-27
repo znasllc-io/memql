@@ -212,11 +212,11 @@ RUN set -e; \
 # (BUILD_TAGS=identity) embeds them via //go:embed in component/identity/web:
 #   1. templ -> component/identity/web/templ/*_templ.go
 #   2. Tailwind -> component/identity/web/static/app.css  (gitignored, generated)
-# This MUST mirror docker/memql.Dockerfile. The root Dockerfile (used by
-# scripts/deploy/aks-deploy.sh) was missing these steps, so identity images
-# shipped WITHOUT app.css -> /static/app.css 404 -> unstyled login page.
-# Cheap (a few seconds) for non-identity node builds; kept unconditional so
-# the two Dockerfiles stay in sync.
+# This Dockerfile once lacked these steps while docker/memql.Dockerfile, since
+# retired, had them, so identity images shipped WITHOUT app.css ->
+# /static/app.css 404 -> unstyled login page. Cheap (a few seconds) for
+# non-identity node builds; kept unconditional so every node type builds the
+# same way.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/templ

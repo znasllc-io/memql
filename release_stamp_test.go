@@ -39,6 +39,8 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -61,10 +63,10 @@ const releaseBuildArg = "MEMQL_RELEASE"
 // the RUN line that links the memql binary. The healthcheck is built by a
 // second `go build` in the same stage and deliberately takes no stamp -- it is
 // a probe that never introduces itself to a client -- so the flag has to be
-// asserted on the right line rather than anywhere in the file.
+// asserted on the right line rather than anywhere in the file. The root
+// Dockerfile is the only one since docker/memql.Dockerfile was retired.
 var dockerfilesThatBuildTheEngine = map[string]string{
-	"Dockerfile":              "-o /app/bin/memql",
-	"docker/memql.Dockerfile": "-o memql",
+	"Dockerfile": "-o /app/bin/memql",
 }
 
 func TestEveryEngineImageLinksTheReleaseIntoTheBinary(t *testing.T) {
@@ -232,4 +234,64 @@ func lineContaining(body, marker string) string {
 		}
 	}
 	return ""
+}
+
+// releaseDryRunPlan runs scripts/release/release.sh --dry-run and returns the
+// arguments of the docker build it plans. A docker that fails is first on
+// PATH, so a dry run that reached docker would fail here.
+func releaseDryRunPlan(t *testing.T) []string {
+	t.Helper()
+	stub := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stub, "docker"), []byte("#!/bin/sh\necho 'a dry run called docker' >&2\nexit 97\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "scripts/release/release.sh", "--dry-run", "--version=0.0.0")
+	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("release.sh --dry-run: %v\n%s", err, out)
+	}
+	line := lineContaining(string(out), "[plan] docker build ")
+	if line == "" {
+		t.Fatalf("release.sh --dry-run planned no docker build:\n%s", out)
+	}
+	return strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "[plan] "))
+}
+
+// planValue returns the argument after the first flag in plan whose value
+// satisfies match, or "" when there is none.
+func planValue(plan []string, flag string, match func(string) bool) string {
+	for i := 0; i+1 < len(plan); i++ {
+		if plan[i] == flag && match(plan[i+1]) {
+			return plan[i+1]
+		}
+	}
+	return ""
+}
+
+// The break-glass cut is the bff image the native release build makes: the
+// root Dockerfile's runtime target with BUILD_TAGS=bff, which is what
+// memql-package.yaml's bff step builds. It used to build docker/memql.Dockerfile,
+// a second engine Dockerfile nothing else built. Passing no BUILD_TAGS, it cut
+// the untagged default binary, and from 2026-08-07 it could not build at all:
+// its `go mod download` ran before the nested modules' go.mod files were copied.
+func TestBreakGlassReleaseIsThePipelinesBffImage(t *testing.T) {
+	plan := releaseDryRunPlan(t)
+	anyValue := func(string) bool { return true }
+	root, err := os.Stat("Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := planValue(plan, "-f", anyValue); f == "" {
+		t.Errorf("the plan names no Dockerfile: %q", plan)
+	} else if got, err := os.Stat(f); err != nil || !os.SameFile(got, root) {
+		t.Errorf("the plan builds %s, not the root Dockerfile that make dev and the native release build use", f)
+	}
+	if got := planValue(plan, "--target", anyValue); got != "runtime" {
+		t.Errorf("the plan's --target is %q; want runtime, the stage the pipeline's bff image comes from", got)
+	}
+	tags := planValue(plan, "--build-arg", func(v string) bool { return strings.HasPrefix(v, "BUILD_TAGS=") })
+	if tags != "BUILD_TAGS=bff" {
+		t.Errorf("the plan passes %q; want BUILD_TAGS=bff, or the binary is the untagged default rather than the bff the pipeline builds", tags)
+	}
 }

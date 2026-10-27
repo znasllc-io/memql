@@ -7,11 +7,12 @@
 # (fix for memql#2379: build-image.sh apply mode built every node type as
 # the bff-default binary because it passed no BUILD_TAGS).
 #
-# Shared by scripts/k3d/dev.sh (make dev inner loop) and
+# Shared by scripts/k3d/dev.sh (make dev inner loop),
 # scripts/deploy/build-image.sh (the deploy.buildImage capability backend)
-# so the mapping cannot drift between the two local build paths. The
-# AUTHORITATIVE staging/prod builds run on the GitHub build server and do
-# not use this file.
+# and scripts/release/release.sh (the local and break-glass release image)
+# so the mapping cannot drift between the local build paths. The
+# AUTHORITATIVE release builds run in the native pipeline
+# (memql-package.yaml) and do not use this file.
 #
 # Contract: call engine_build_args_for_node <nodeType> <sourceDir>; it REFUSES
 # a nodeType outside ENGINE_NODE_TYPES (returns 1, message on stderr) and
@@ -50,11 +51,11 @@
 # passes it and why this file passing nothing left every `make dev` cluster
 # answering the bare word "dev" with no way to say WHICH dev (memql#4574).
 #
-# MEMQL_RELEASE is deliberately NOT set here. Neither caller is cutting a
-# release -- scripts/k3d/dev.sh builds a developer's checkout, and
-# scripts/deploy/build-image.sh is the local/replay surface whose own header
-# says the authoritative build runs on the build server -- and a binary that
-# was not cut from a release must not name one.
+# MEMQL_RELEASE is deliberately NOT set here. scripts/k3d/dev.sh builds a
+# developer's checkout, and scripts/deploy/build-image.sh is the local/replay
+# surface whose own header says the authoritative build runs on the build
+# server -- and a binary that was not cut from a release must not name one.
+# scripts/release/release.sh, the one caller that cuts a release, adds it.
 
 # engine_build_commit <sourceDir> -- the revision to stamp, or "" when git
 # cannot answer.

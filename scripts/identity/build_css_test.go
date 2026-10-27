@@ -118,9 +118,9 @@ func TestBuildCSSUsesOnlyThePinnedCompilerOnPath(t *testing.T) {
 	}
 }
 
-// A bin/tools compiler is held to the pin, like one on PATH. The Dockerfiles
-// pre-fetch it at their own ARG TAILWIND_VERSION and a checkout keeps whatever
-// an earlier build downloaded, so a copy at another version, or one that
+// A bin/tools compiler is held to the pin, like one on PATH. The root
+// Dockerfile pre-fetches it at its own ARG TAILWIND_VERSION and a checkout keeps
+// whatever an earlier build downloaded, so a copy at another version, or one that
 // cannot execute, is replaced by the pinned release before anything compiles
 // with it. uname is stubbed to one Linux host, so every host runs the same
 // cases, and PATH holds only stubs plus the real commands the script calls,
@@ -296,17 +296,17 @@ func TestBuildCSSRepairsTheMacOSCompilerSignatureBeforeRunningIt(t *testing.T) {
 }
 
 // Every Dockerfile that downloads a Tailwind release downloads the version
-// build-css.sh pins. The engine Dockerfiles pre-fetch the compiler into
+// build-css.sh pins. The root Dockerfile pre-fetches the compiler into
 // bin/tools in an early cached layer (memql#1351) and the toolchain image
 // bakes one onto PATH (memql#5816), each so a build does not download it
 // again. The script uses a copy only at exactly its pin, so a copy at another
-// version is never used. docker/memql.Dockerfile stayed at v3.4.17 after the
-// script moved to v4.1.11 (8c71f3d31), back when bin/tools was reused at any
-// version, and v3 cannot read the v4 input.css.
+// version is never used. The retired docker/memql.Dockerfile stayed at v3.4.17
+// after the script moved to v4.1.11 (8c71f3d31), back when bin/tools was
+// reused at any version, and v3 cannot read the v4 input.css.
 //
 // The walk is `git ls-files`, so a new Dockerfile is checked once it is added,
-// and it fails closed: the two Dockerfiles that pre-fetch for build-css.sh
-// must be among those it checked.
+// and it fails closed: the two Dockerfiles known to download Tailwind must be
+// among those it checked.
 func TestEveryDockerfileDownloadsTheTailwindPin(t *testing.T) {
 	pin := tailwindPin(t)
 	root := filepath.Join("..", "..")
@@ -340,9 +340,9 @@ func TestEveryDockerfileDownloadsTheTailwindPin(t *testing.T) {
 				"pin; the toolchain image's also carries a SHA-256 for each architecture.", path, args[0][1], pin)
 		}
 	}
-	for _, path := range []string{"Dockerfile", "docker/memql.Dockerfile"} {
+	for _, path := range []string{"Dockerfile", "deploy/toolchain-image/Dockerfile"} {
 		if !checked[path] {
-			t.Errorf("%s pre-fetches build-css.sh's compiler, but this scan never checked it", path)
+			t.Errorf("%s downloads build-css.sh's compiler, but this scan never checked it", path)
 		}
 	}
 }

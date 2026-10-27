@@ -148,9 +148,9 @@ function resolve_tailwind_binary() {
     log_info "downloading Tailwind ${TAILWIND_VERSION} for ${platform}"
     # Retries: a single TLS hiccup on this ~100MB pull killed entire
     # cluster builds (memql#1351). Docker builds normally never reach
-    # this path -- the Dockerfiles pre-fetch the binary into bin/tools
-    # in an early cached layer, and build_css_test.go's
-    # TestEveryDockerfileDownloadsTheTailwindPin holds their ARG
+    # this path -- the root Dockerfile pre-fetches the binary into
+    # bin/tools in an early cached layer, and build_css_test.go's
+    # TestEveryDockerfileDownloadsTheTailwindPin holds its ARG
     # TAILWIND_VERSION to the pin above -- so this download is the
     # host-side / cold-layer fallback.
     if ! curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${bin_path}" "${url}"; then
