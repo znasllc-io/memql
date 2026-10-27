@@ -20,7 +20,10 @@ package memql
 //     is a request to serve a name the platform already answers on, and the
 //     custom-domain policy refuses the same two things for the same reason
 //     (platform_custom_domain_policy.go). The cluster's domain comes from the
-//     environment, so no mutation body can ask.
+//     environment, so no mutation body can ask. The operator's OWN row is the
+//     one account whose address legitimately sits there, and a name it only
+//     inherited or was given by default is normalized away before this rule
+//     runs rather than refused (memql#5792, normalizeSelfAccountReservation).
 //
 // NO ESCAPE FOR EITHER, deliberately -- not internal origin, not the cluster
 // owner. The reconciler and the seed both write values that PASS these rules,
@@ -123,7 +126,7 @@ func validateAccountMemqlDomain(payload map[string]any) error {
 				"resolve, and admitting a name without one would admit every name",
 			name)
 	}
-	if name == frontdoor.Apex(domain) || strings.HasSuffix(name, frontdoor.DomainDerivationSuffix(domain)) {
+	if accountNameInClusterSpace(name, domain) {
 		return fmt.Errorf(
 			"v1:accounts:account: %s -- %q is under this cluster's own domain (%s), which the platform "+
 				"already routes through its one `*.%s` front-door rule. A reserved MemQL name is a "+
@@ -140,6 +143,61 @@ func validateAccountMemqlDomain(payload map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// accountNameInClusterSpace reports whether a reserved name is this cluster's
+// own domain or a name under it -- the space the platform already answers on
+// through its one `*.<domain>` front-door rule. One predicate for the guard
+// above and the operator normalization below, so the two cannot disagree about
+// what is "ours".
+func accountNameInClusterSpace(name, domain string) bool {
+	return name == frontdoor.Apex(domain) || strings.HasSuffix(name, frontdoor.DomainDerivationSuffix(domain))
+}
+
+// normalizeSelfAccountReservation keeps the operator's cluster address from
+// being judged as a client reservation (memql#5792).
+//
+// The self account is the company that OPERATES this cluster. Its front door
+// is the cluster's own -- `memql.<domain>` for an operator whose company domain
+// is the cluster's parent, which is the ordinary install -- so a reserved name
+// in cluster space is not a collision with somebody else's host. It is the
+// operator's address restated, and there is nothing for the front-door sweep
+// to open. Two writers put such a name on the row without anybody asking for
+// one: the default fill above (`memql.` + the domain an owner typed) and the
+// stored row of a cluster seeded before the installation hostname was kept
+// out of it. Judging either against the client guard refused EVERY profile
+// edit of the operator organization, naming the cluster's own domain rather
+// than anything the owner submitted.
+//
+// So an INHERITED or DERIVED name in cluster space is cleared on the self row,
+// together with the reservation stamps that described it: the row then states
+// what is true, that the operator holds no separate reservation. Clearing it
+// is also the repair for a stored legacy row -- the next write of any kind
+// stores the corrected value (the boot sweep in
+// account_self_reservation_repair.go makes that write for a row nobody edits).
+//
+// A name the caller ASKED FOR is left for the guard. `requested` and
+// `requestedNamed` are the write's own delta, captured before the read-merge,
+// and an owner who types a cluster-space name on purpose is refused exactly as
+// before. Client accounts never reach this branch: their collision guard is
+// unchanged.
+func normalizeSelfAccountReservation(id string, payload map[string]any, requested any, requestedNamed bool) {
+	if payload == nil || BareShortId(strings.TrimSpace(id)) != BareShortId(selfAccountId) {
+		return
+	}
+	name := normalizeDomainValue(stringFromAny(payload["memqlDomain"]))
+	if name == "" || !accountNameInClusterSpace(name, customDomainPolicyDomain()) {
+		return
+	}
+	if requestedNamed && normalizeDomainValue(stringFromAny(requested)) == name {
+		return
+	}
+	payload["memqlDomain"] = ""
+	payload["memqlReservedAt"] = ""
+	// The reason is the front-door sweep's answer about this name. With the
+	// name gone the sweep never reads the row again, so a stale refusal here
+	// would sit on the operator's Domain rail forever.
+	payload["memqlReservationReason"] = ""
 }
 
 // resetAccountDomainOnChange clears the ownership walk when a client's domain

@@ -372,6 +372,21 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 		}
 	}
 
+	// The operator account's reservation repair (memql#5792). A cluster
+	// seeded with its own address as the self row's reserved name refused
+	// every write to that row; the write path now clears such a name, and
+	// this makes that write for a row nobody edits. One read and no write on
+	// every boot after the first. Best-effort: a failure is logged, boot
+	// continues.
+	if repaired, err := m.repairSelfAccountReservation(ctx); err != nil {
+		if logger != nil {
+			logger.Warn("seed materializer: self account reservation repair failed", "error", err)
+		}
+	} else if repaired && logger != nil {
+		logger.Info("seed materializer: cleared the self account's cluster-space reserved name",
+			"accountId", selfAccountId)
+	}
+
 	// Materialization complete -- now refresh the AgentRegistry from
 	// the rows we just wrote (plus any user-created agents already
 	// in the DB). The materialized rows are the canonical source of
