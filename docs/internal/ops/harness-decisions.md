@@ -947,3 +947,53 @@ independent instructions and cancellation. The existing driver regression
 `TestIndependentReviewRefusesLateAuthorityBeforePersistenceAndEffects` covers
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
+
+## A pipeline run says why it failed outside its steps (2026-10-27)
+
+A pipeline's workflow can fail after every step passed. On 2026-10-27 the
+independent review above reached no model (`every_door_shut`) on memql PRs
+6312, 6313 and 6318. The driver's verdict carried that reason to the work
+run's journal only, so the required check read *Failed* over a stage table of
+*Passed* and the MemQL OS run page said nothing more. The cause was found by
+opening the Nexus work run.
+
+The driver now builds such a verdict with `failedOutsideSteps`
+(`component/pipelinerun/driver.go`). It covers a workflow error, a required
+step blocked or never reported, an empty plan for a run whose work already
+began or that re-runs only what failed, and a resumed plan that diverged after
+every step had finished. In the
+same write as the conclusion, `conclude` stores the code and the masked
+sentence on the run row (`failureCode`, `failureMessage`, read as
+`Run.Failure`). The final check run, recovery's republish on any replica and
+the run page all read the reason from that row; none depends on a drive's
+memory. A verdict that only restates a failed step (*Failed at ...*, or a
+diverged resume that failed its unfinished steps with its message) writes
+nothing, because the step rows already carry it.
+
+Two existing places were rejected. The refusal fields mean the run ended
+before any step ran: `Run.Refusal` makes the check run a refusal report with no
+stage table, and the OS run list phrases an unknown refusal code as "the
+repository could not be read". Notes, by contract, change no outcome, and the
+run page draws them as warnings with note copy. The maintenance policy's
+`failureCode` input still reads only `refusalCode`, so an installed policy
+sees what it saw before.
+
+`pipelines.CheckOutput` titles the run *Failed: \<reason\>* only when no step
+failed; a failed step keeps the title. The summary lists the reason under
+**Run failure** after the stage table, before any failed steps, within 2,000
+runes (200 in the title), with the escaping and 65,535-byte field limits that
+step messages get. The run page shows *The run failed outside its steps.* with
+the reason as the notice's detail, and in place of "This run had nothing to
+run." when no stage exists.
+
+`TestAWorkflowThatFailsAfterEveryStepPassedSaysWhy` and
+`TestARepublishedCheckRunStillSaysWhyTheRunFailed`
+(`component/pipelinerun/run_failure_test.go`) drive a merge-group run whose
+workflow fails after every step passed, through the real work journal. The
+second republishes the final check run from a replica that never drove it.
+The `TestCheckOutputOfARunThatFailed*` goldens pin the check copy;
+`TestTheDSLStoreOverRealRows` round-trips the fields through the DSL on a real
+database; the run page tests in
+`clients/os/test/deployables/pipelines/runPage.test.tsx` cover the notice. A
+live cluster run and a check run accepted by GitHub itself are not verified
+here.

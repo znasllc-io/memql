@@ -171,6 +171,51 @@ describe("the run page", () => {
     expect(barActs()).toEqual(["Open on GitHub"]);
   });
 
+  // A run can fail with every stage passed: its workflow erred after them, as
+  // the independent review that reached no model did on memql pull requests
+  // 6312, 6313 and 6318. The page states the run's own reason off its row.
+  it("says why a run failed outside its steps when every stage passed", async () => {
+    const reason = "Pipeline workflow failed: every_door_shut: no door to a model is open for this call";
+    const outside = runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(10), failureCode: "pipeline_executor_error", failureMessage: reason,
+      stages: [
+        { name: "checks", status: "passed", durationMs: 42000, steps: 1, failed: 0 },
+        { name: "tests", status: "passed", durationMs: 42000, steps: 2, failed: 0 },
+      ] });
+    const passed = [stepRow("checks.vet", { seq: 0, runId: "wr-1" }), stepRow("tests.unit", { seq: 1, runId: "wr-1" }), stepRow("tests.lint", { seq: 2, runId: "wr-1" })];
+    mount(fakeConnection(seed({ pipelineRuns: [outside], workSteps: { "wr-1": passed }, runArtifacts: { "wr-1": [] } })));
+    const notice = (await screen.findByText("The run failed outside its steps.")).closest(".os-notice") as HTMLElement;
+    expect(within(notice).getByText(reason)).toBeTruthy();
+    expect(notice.getAttribute("data-tone")).toBe("error");
+    expect((await screen.findAllByRole("tab")).map((s) => s.closest(".os-rail-stage")?.getAttribute("data-state"))).toEqual(["done", "done"]);
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Failed");
+    // Nothing failed, so there is no failed step to re-run: the whole run is.
+    await waitFor(() => expect(barActs()).toEqual(["Open on GitHub", "Re-run"]));
+  });
+
+  it("says why where no stage ran, rather than that there was nothing to run", async () => {
+    const reason = "The pipeline DSL selected no stages for a run with an existing work plan, so its original checks cannot be proven. Re-run the pipeline.";
+    const outside = runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(10), stages: [], failureCode: "pipeline_node_lost", failureMessage: reason });
+    mount(fakeConnection(seed({ pipelineRuns: [outside], workSteps: { "wr-1": [] }, runArtifacts: { "wr-1": [] } })));
+    expect(await screen.findByText("The run failed outside its steps.")).toBeTruthy();
+    expect(screen.getByText(reason)).toBeTruthy();
+    expect(screen.queryByText("This run had nothing to run.")).toBeNull();
+  });
+
+  it("states no reason of its own for a run that failed in a step, or one that did not fail", async () => {
+    const { unmount } = mount(fakeConnection(seed()));
+    await screen.findByLabelText("The last lines of tests.unit's log");
+    expect(screen.queryByText("The run failed outside its steps.")).toBeNull();
+    unmount();
+
+    // A reason is read only off a run that completed failed.
+    const passed = runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(10), conclusion: "success", failureMessage: "not a failure",
+      stages: [{ name: "checks", status: "passed", durationMs: 42000, steps: 1, failed: 0 }] });
+    mount(fakeConnection(seed({ pipelineRuns: [passed], workSteps: { "wr-1": [stepRow("checks.vet", { seq: 0, runId: "wr-1" })] }, runArtifacts: { "wr-1": [] } })));
+    await screen.findAllByRole("tab");
+    expect(screen.queryByText("The run failed outside its steps.")).toBeNull();
+    expect(screen.queryByText("not a failure")).toBeNull();
+  });
+
   it("offers Re-run failed on a failed run, and opens the attempt it starts", async () => {
     const connection = fakeConnection(seed({ pipelinesRerunResult: { runId: "r-2", attempt: 2, status: "queued" } }));
     mount(connection);

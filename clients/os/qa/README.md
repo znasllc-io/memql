@@ -61,7 +61,9 @@ procedure's Reuse panel with the evidence deciding, with a person's own label
 over evidence that disagrees, and before anything was counted; the list with
 every label on it; an authored automation's detail; the Overview's ratio),
 or `pipeline-runs`, `pipeline-runs-empty`, `pipeline-runs-none`,
-`pipeline-run-failed`, `pipeline-run-running`, `pipeline-run-queued`,
+`pipeline-run-failed`, `pipeline-run-failed-outside` (every stage passed, then
+the workflow failed: the run's own reason above the stops),
+`pipeline-run-running`, `pipeline-run-queued`,
 `pipeline-run-passed`, `pipeline-run-refused`, `pipeline-run-cancelled`,
 `pipeline-run-rerun`, `pipeline-run-developer` (Pipelines > Runs and a run
 page in each state, epic memql#5479; the seeds are `qa/pipelinesSeeds.ts`, and

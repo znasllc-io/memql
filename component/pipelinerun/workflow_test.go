@@ -778,8 +778,13 @@ func TestEmptyStageSelectionCannotEraseExistingWork(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dr := &runDriver{run: tc.run}
-			if got := dr.emptyPlanVerdict().conclusion; got != tc.want {
-				t.Fatalf("empty plan conclusion = %q, want %q", got, tc.want)
+			v := dr.emptyPlanVerdict()
+			if v.conclusion != tc.want {
+				t.Fatalf("empty plan conclusion = %q, want %q", v.conclusion, tc.want)
+			}
+			// No stage ran, so a failure is the run's own, for the row.
+			if failed := tc.want == ConclusionFailure; v.outsideSteps != failed || failed && v.workCode != pipelines.CodeNodeLost {
+				t.Errorf("a failure no step reported is the run's own: outsideSteps %v code %q", v.outsideSteps, v.workCode)
 			}
 		})
 	}
@@ -794,6 +799,13 @@ func TestPipelineWorkflowCannotReturnEarlyAndPass(t *testing.T) {
 	got, _ := dh.store.run(run.ID)
 	if got.Conclusion != ConclusionFailure || len(dh.exec.sentKeys()) != 0 {
 		t.Fatalf("unfinished workflow passed: %+v", got)
+	}
+	// No step failed, so the run's own reason is what says why.
+	if f := got.Failure(); f == nil || f.Code != "" || f.Message != "Step checks.vet never reported how it ended." {
+		t.Errorf("the run says which step never reported: %+v", f)
+	}
+	if title := dh.lastUpdate(t).Run.Output.Title; title != "Failed: Step checks.vet never reported how it ended." {
+		t.Errorf("the check run's title: %q", title)
 	}
 }
 
@@ -814,6 +826,9 @@ automation fabricatedPassingWorkflow {
 	got, _ := dh.store.run(run.ID)
 	if got.Conclusion != ConclusionFailure || len(dh.exec.sentKeys()) != 0 {
 		t.Fatalf("fabricated skips produced a passing check: %+v", got)
+	}
+	if f := got.Failure(); f == nil || f.Code != pipelines.CodeStageBlocked || f.Message != "Required step checks.vet was blocked." {
+		t.Errorf("the run says which required step was blocked: %+v", f)
 	}
 }
 

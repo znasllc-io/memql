@@ -30,8 +30,34 @@ type RunReport struct {
 	Status      string // queued|in_progress|completed
 	Conclusion  string // success|failure|cancelled|refused, when completed
 	Refusal     *Refusal
-	Steps       []StepReport
+	// Failure is the run's own reason for failing, when it failed for one no
+	// step reported (pipelinerun's Run.Failure). Nil otherwise; read only
+	// when the run failed.
+	Failure *RunFailure
+	Steps   []StepReport
 }
+
+// RunFailure is why a run failed when no step's own report says it: its
+// workflow erred after every step passed, a required step was blocked or
+// never reported. Code is a pipeline_* code, or "" when none names it; the
+// message is masked by whoever wrote it, as a step's is.
+//
+// Without it a run like that reads "Failed" over a stage table of Passed,
+// the reason left in the work run's journal (memql pull requests 6312, 6313
+// and 6318, whose independent review reached no model).
+type RunFailure struct {
+	Code, Message string
+}
+
+const (
+	// runFailureTitleRunes bounds the reason in the title. It is longer than
+	// a refusal's 120 because the reason is the whole of what this title says,
+	// and an error wrapped on its way out names its cause last.
+	runFailureTitleRunes = 200
+	// runFailureRunes bounds the reason in the summary, where the failed
+	// steps listed after it get the rest of the field.
+	runFailureRunes = 2000
+)
 
 // CheckOutput renders the check run's title, summary and text (D4: the
 // stage table as summary). Plain Markdown, no emojis; text carries the
@@ -41,10 +67,12 @@ type RunReport struct {
 // so the copy follows the OS interface language: a state that is not settled
 // never reads as a result (a stage still running says Running, not Passed,
 // and the column is Status rather than Result for that reason); a refusal
-// says what is wrong, where, and what to do; a time nobody measured is "-",
-// never a guess. Text a manifest or a runner supplied is quoted literally:
-// it cannot open a link, an image, an HTML tag or a table cell. The title is
-// plain text, which is how GitHub shows it.
+// says what is wrong, where, and what to do; a run that failed with no step
+// at fault says why (RunFailure), so "Failed" never stands over a table of
+// Passed alone; a time nobody measured is "-", never a guess. Text a manifest
+// or a runner supplied is quoted literally: it cannot open a link, an image,
+// an HTML tag or a table cell. The title is plain text, which is how GitHub
+// shows it.
 func CheckOutput(r RunReport) (title, summary, text string) {
 	stages := reportStages(r)
 	title = cutBytes(checkTitle(r, stages), checkOutputLimit)
@@ -285,9 +313,17 @@ func checkTitle(r RunReport, stages []stageRow) string {
 	case "refused":
 		return "Refused"
 	case "failure":
-		return failedTitle(r.Steps)
+		return failedTitle(r)
 	}
 	return passedTitle(stages)
+}
+
+// runFailure is r's own reason for failing, or nil when it did not fail.
+func runFailure(r RunReport) *RunFailure {
+	if r.Failure == nil || conclusionOf(r) != "failure" {
+		return nil
+	}
+	return r.Failure
 }
 
 // conclusionOf is the run's conclusion, or the one its steps imply when the
@@ -325,9 +361,20 @@ func refusalTitle(ref *Refusal) string {
 	return why
 }
 
-func failedTitle(steps []StepReport) string {
-	failed := failedSteps(steps)
+// failedTitle names where a failed run broke: its first failed step, else its
+// own reason, else nothing more than "Failed".
+func failedTitle(r RunReport) string {
+	failed := failedSteps(r.Steps)
 	if len(failed) == 0 {
+		if f := runFailure(r); f != nil {
+			why := oneLine(firstLine(f.Message), runFailureTitleRunes)
+			if why == "" {
+				why = oneLine(f.Code, 80)
+			}
+			if why != "" {
+				return "Failed: " + why
+			}
+		}
 		return "Failed"
 	}
 	first := failed[0]
@@ -378,15 +425,41 @@ func checkSummary(r RunReport, stages []stageRow) string {
 		b.WriteString("Reading `memql-package.yaml` and choosing the steps to run.\n")
 	case len(stages) == 0:
 		b.WriteString("No step ran.\n")
+		writeRunFailure(&b, r)
 	default:
 		b.WriteString("| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n")
 		for _, row := range stages {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
 				inlineText(row.name), inlineText(row.status), row.tally.words(), formatDuration(row.ms))
 		}
+		writeRunFailure(&b, r)
 		writeFailedSteps(&b, r.Steps)
 	}
 	return b.String()
+}
+
+// writeRunFailure states the run's own reason for failing, under a table that
+// may read Passed in every row. It comes before the failed steps, when there
+// are any too, and is bounded, so the steps' list keeps the room it counts on.
+func writeRunFailure(b *strings.Builder, r RunReport) {
+	f := runFailure(r)
+	if f == nil {
+		return
+	}
+	code := ""
+	if f.Code != "" {
+		code = codeSpan(f.Code)
+	}
+	reason := clipRunes(inlineText(f.Message), runFailureRunes)
+	switch {
+	case reason != "":
+		reason = withAside(reason, code)
+	case code != "":
+		reason = "The run failed (" + code + ")."
+	default:
+		return
+	}
+	b.WriteString("\n### Run failure\n\n" + reason + "\n")
 }
 
 // metaLine says which run this is: its mode, what opened it, its commit.
@@ -595,11 +668,14 @@ func formatDuration(ms int64) string {
 }
 
 // withAside puts a parenthetical before a sentence's closing period, so the
-// sentence still ends where it did.
+// sentence still ends where it did. A sentence cut short keeps its "..."
+// whole, the aside after it.
 func withAside(sentence, aside string) string {
 	switch {
 	case aside == "":
 		return sentence
+	case strings.HasSuffix(sentence, "..."):
+		return sentence + " (" + aside + ")"
 	case strings.HasSuffix(sentence, "."):
 		return strings.TrimSuffix(sentence, ".") + " (" + aside + ")."
 	}

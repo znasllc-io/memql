@@ -639,6 +639,8 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 	setNamed(args, "refusalCode", patch.RefusalCode)
 	setNamed(args, "refusalMessage", patch.RefusalMessage)
 	setNamed(args, "refusalScope", patch.RefusalScope)
+	setNamed(args, "failureCode", patch.FailureCode)
+	setNamed(args, "failureMessage", patch.FailureMessage)
 	setNamed(args, "checkRunState", patch.CheckRunState)
 	setNamed(args, "workRunId", patch.WorkRunID)
 	setNamed(args, "driverNodeId", patch.DriverNodeID)
@@ -1043,6 +1045,8 @@ func runFromRow(row map[string]any) Run {
 		RefusalCode:        rowString(row, "refusalCode"),
 		RefusalMessage:     rowString(row, "refusalMessage"),
 		RefusalScope:       rowString(row, "refusalScope"),
+		FailureCode:        rowString(row, "failureCode"),
+		FailureMessage:     rowString(row, "failureMessage"),
 		CheckRunID:         rowID(row, "checkRunId"),
 		CheckRunState:      rowString(row, "checkRunState"),
 		WorkRunID:          rowString(row, "workRunId"),
