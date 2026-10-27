@@ -69,11 +69,19 @@ kubectl, and mkcert. Docker must be running. The local TLS setup uses mkcert's
 trusted certificate authority and local hostname mappings; follow the
 [local runtime guide](../operate/reproduce-the-cloud-locally.md) if these are not
 already configured. CLI language tools use the Go toolchain declared in
-`go.mod` (including its `toolchain` directive).
+`go.mod` (including its `toolchain` directive). `make install-deps` checks
+these tools and installs the rest a checkout needs: protoc and its Go plugins,
+and PyYAML for the `python3` first on your `PATH`, which the test suite runs
+the repository's CI scripts with. Run it from the shell you will run
+`make test` in. Homebrew's Python is marked externally managed (PEP 668), so
+for it the target installs nothing until you choose: approve a user-site
+install with `PIP_BREAK_SYSTEM_PACKAGES=1 make install-deps`, or run it and
+the tests inside an activated virtualenv.
 
 ```bash
 git clone https://github.com/znasllc-io/memql.git
 cd memql
+make install-deps
 make up REVISION=main
 make status
 ```
@@ -137,7 +145,8 @@ kubectl get applications -n argocd
 
 After engine changes, `make dev` rebuilds and rolls the local services;
 `make dev NODE=bff` targets one node type. These change the running cluster.
-Run `make test` for the workspace test suite. See
+Run `make test` for the workspace test suite; a test that needs PyYAML fails
+naming the interpreter and `make install-deps` rather than skipping. See
 [CONTRIBUTING.md](../../../CONTRIBUTING.md) for focused checks and DB requirements.
 
 For teardown or reset, read the [local runtime runbook](../operate/reproduce-the-cloud-locally.md)

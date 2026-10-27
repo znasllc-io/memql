@@ -4,6 +4,7 @@ package cidb
 import (
 	"fmt"
 	"github.com/znasllc-io/memql/component/database/dbtest"
+	"github.com/znasllc-io/memql/scripts/ci/pyyaml"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -480,6 +481,7 @@ func TestDBTestsLaneMakesAnUnreachableDatabaseFail(t *testing.T) {
 // Exercise the real native runner's failure, isolation, empty-selection and
 // timeout-budget tests. These replace the retired Actions shell/matrix model.
 func TestDBTestsLaneCannotPassWithoutRunning(t *testing.T) {
+	pyyaml.Require(t)
 	cmd := exec.Command("python3", "-m", "unittest", "discover", "-s", "scripts/ci", "-p", "pipeline_db_tests_test.py")
 	cmd.Dir = repoRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
