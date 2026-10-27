@@ -239,8 +239,8 @@ custom destinations and previous app backups are kept.
 
 For development, build the worker with `make -C cockpit cockpit-computeruse-host`, then build and install
 the current user's menu companion with `make -C cockpit menubar-install`. Xcode command
-line tools and the repository's pinned `../memql` sibling are required. The
-build/install scripts use that sibling's shared capability-script runtime.
+line tools are required. The build/install scripts use the monorepo root's shared
+capability-script runtime, `scripts/lib/capability.sh`.
 
 The menu app lives at `~/Applications/MemQL Cockpit.app` and starts at login as
 `com.znasllc.memql-cockpit-menubar`. Its icon uses the canonical nine-node MemQL

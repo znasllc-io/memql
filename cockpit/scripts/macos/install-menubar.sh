@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# Release archives carry the pinned runtime; developer checkouts use the sibling.
+# Release archives carry the pinned runtime; a source checkout uses the monorepo root's.
 if [[ -f "$REPO_ROOT/scripts/lib/capability.sh" ]]; then
     source "$REPO_ROOT/scripts/lib/capability.sh"
 else
