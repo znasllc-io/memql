@@ -174,8 +174,9 @@ ARG TARGETARCH
 # scripts/k3d/up.sh's workload-wait narration reads the pod list with it
 # (TestWaitNarratesWhatItIsWaitingOn FAILS without it), and the
 # scripts/release/release-engine.sh tests and component/procedure/reference's
-# parity harness skip without it. python3-yaml is the PyYAML
-# scripts/deploy/conn-headroom-check.sh imports; its tests skip without it.
+# parity harness skip without it. python3-yaml is the PyYAML that
+# scripts/deploy/conn-headroom-check.sh and scripts/ci's Python import; the
+# tests that run them FAIL without it (scripts/ci/pyyaml).
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \

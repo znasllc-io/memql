@@ -3,8 +3,9 @@
 // #1817 connection-exhaustion spike). Function-based bash per the
 // Skills+Scripts architecture; these run from `go test ./...` so CI catches a
 // gate regression without a live cluster. Same `package deploy` as the other
-// script tests. The script needs python3 + PyYAML; cases skip when that's
-// unavailable.
+// script tests. The script needs python3 + PyYAML; every case that runs it
+// calls pyyaml.Require first, which FAILS without them rather than skipping,
+// because a skip reads as green (scripts/ci/pyyaml).
 package deploy
 
 import (
@@ -17,17 +18,12 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/database"
+	"github.com/znasllc-io/memql/scripts/ci/pyyaml"
 )
-
-func pythonYAMLAvailable() bool {
-	return exec.Command("python3", "-c", "import yaml").Run() == nil
-}
 
 // big budget -> within budget -> exit 0.
 func TestConnHeadroomWithinBudget(t *testing.T) {
-	if !pythonYAMLAvailable() {
-		t.Skip("python3 + PyYAML not available")
-	}
+	pyyaml.Require(t)
 	script := aksScript(t, "conn-headroom-check.sh")
 	cmd := exec.Command("bash", script, "--max-connections=2000", "--reserved=17")
 	out, err := cmd.CombinedOutput()
@@ -41,9 +37,7 @@ func TestConnHeadroomWithinBudget(t *testing.T) {
 
 // tiny budget -> peak exceeds -> exit 1 (gate blocks the promotion).
 func TestConnHeadroomBlocksOversubscribed(t *testing.T) {
-	if !pythonYAMLAvailable() {
-		t.Skip("python3 + PyYAML not available")
-	}
+	pyyaml.Require(t)
 	script := aksScript(t, "conn-headroom-check.sh")
 	cmd := exec.Command("bash", script, "--max-connections=30", "--reserved=17")
 	out, err := cmd.CombinedOutput()
@@ -131,9 +125,7 @@ func headroomCommand(t *testing.T, args ...string) *exec.Cmd {
 
 func headroomSteady(t *testing.T, args ...string) (int, string) {
 	t.Helper()
-	if !pythonYAMLAvailable() {
-		t.Skip("python3 + PyYAML not available")
-	}
+	pyyaml.Require(t)
 	out, err := headroomCommand(t, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("the gate failed on a small fixture: %v\n%s", err, out)
@@ -210,9 +202,7 @@ func TestConnHeadroomDefaultsAreTheCodes(t *testing.T) {
 // adds a terminating process per Deployment, which the gate does not count; see
 // docs/public/operate/db-connection-budget.md.)
 func TestConnHeadroomTheShippedBaseFitsTheSmallestPreset(t *testing.T) {
-	if !pythonYAMLAvailable() {
-		t.Skip("python3 + PyYAML not available")
-	}
+	pyyaml.Require(t)
 	out, err := headroomCommand(t, "--max-connections=200", "--reserved=10").CombinedOutput()
 	if err != nil {
 		t.Fatalf("the shipped base does not fit 190 usable connections with every pool counted: %v\n%s", err, out)

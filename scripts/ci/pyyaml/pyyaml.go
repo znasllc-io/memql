@@ -1,20 +1,22 @@
 // Package pyyaml is the preflight for Go tests that execute this repository's
 // PyYAML-importing Python: scripts/ci's pipeline-db-tests.py and codeql-scan.py,
-// and the unittest suites beside them.
+// the unittest suites beside them, and the Python inside
+// scripts/deploy/conn-headroom-check.sh, the deploy path's connection gate.
 //
 // WHY A PREFLIGHT. PyYAML is not in Python's standard library. CI's toolchain
 // image ships it as python3-yaml (deploy/toolchain-image/Dockerfile, asserted by
 // its smoke-test.sh); a developer machine gets it from `make install-deps`
-// (scripts/dev/install-deps.sh). Without it these tests failed with a raw
-// ModuleNotFoundError, or, where a test read only stdout
+// (scripts/dev/install-deps.sh). Without it the tests of scripts/ci's Python
+// failed with a raw ModuleNotFoundError, or, where a test read only stdout
 // (scripts/cidb/planner_coverage_test.go), with "exit status 1" and nothing
-// else. Neither says which interpreter answered or what to run.
+// else. Neither says which interpreter answered or what to run. The connection
+// gate's tests (scripts/deploy, deploy/k8s/overlays/local) skipped instead.
 //
 // WHY IT FAILS AND DOES NOT SKIP. A skip reads as green (CLAUDE.md, Testing): a
-// machine without PyYAML would report the database lane's budget runner and the
-// CodeQL and Scorecard protocols as passing having run none of them. CI always
-// has the module, so a skip would only ever hide a gap on a developer machine.
-// There is deliberately no opt-out.
+// machine without PyYAML would report the database lane's budget runner, the
+// CodeQL and Scorecard protocols and the connection gate as passing having run
+// none of them. CI always has the module, so a skip would only ever hide a gap
+// on a developer machine. There is deliberately no opt-out.
 package pyyaml
 
 import (
