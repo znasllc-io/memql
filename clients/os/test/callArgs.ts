@@ -8,10 +8,13 @@
 // is a small reader for it and not a MemQL parser -- anything outside it throws,
 // which is what a test wants from a call it did not expect.
 //
-// It exists because the Materializer now creates through the SDK helper, which
-// speaks only `executeNamed(name, call)`: the harness hands each named mock the
-// args parsed from here, so every assertion on `mock.calls[n][0]` keeps reading
-// an object, exactly as it did when the app called the typed method directly.
+// Two harnesses read through it. The Materializer creates through the SDK
+// helper, which speaks only `executeNamed(name, call)`: its harness hands each
+// named mock the args parsed from here, so every assertion on
+// `mock.calls[n][0]` keeps reading an object, exactly as it did when the app
+// called the typed method directly. The Fleet doubles (test/fleet/harness.tsx)
+// run every read through the SDK's own generated method and answer it at
+// `executeNamed`, from the args parsed here.
 
 export interface ParsedCall {
   /** `builtin`, `query`, `mutation` or `logic`. */
