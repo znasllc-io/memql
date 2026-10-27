@@ -182,6 +182,21 @@ describe("History: a cluster that records none", () => {
   });
 });
 
+describe("History: the read is made on its client", () => {
+  it("reaches the cluster through the generated method, called on the connection's query client", async () => {
+    // The double's routerDecisionsRecent is QueryClient.prototype's own, which
+    // calls `this.executeNamed`. Taken off `connection.query` and called bare,
+    // it throws "Cannot read properties of undefined (reading 'executeNamed')"
+    // inside the read effect, and in the shell the window's boundary replaces
+    // the whole Fleet app with "This app hit an error" -- the crash this pins.
+    await renderHistory();
+    expect(rowFor("qwen3-coder")).toBeTruthy();
+    expect(calls.executeNamed.mock.calls.map(([name, call]) => [name, call])).toEqual([
+      ["routerDecisionsRecent", "query routerDecisionsRecent()"],
+    ]);
+  });
+});
+
 describe("History: what a call cost", () => {
   it("NEVER prints a money figure for a call this cluster was not billed for", async () => {
     use([

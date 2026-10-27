@@ -1,5 +1,5 @@
 import { vi, type Mock } from "vitest";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { builtinReply, fakeConnection, machineRow } from "./harness";
 
@@ -169,6 +169,8 @@ export interface RoutingCalls {
   routingRuleRemove: Mock;
   routingRuleDescribe: Mock;
   routerDecisionsRecent: Mock;
+  /** What the generated methods send: `(name, MemQL text, options)`. */
+  executeNamed: Mock;
   routesForActor: Mock;
   routeSave: Mock;
   routeDelete: Mock;
@@ -260,7 +262,17 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
       return builtinReply("routingRuleRemove", [{ id: "removed", name: args.name as string, status: "removed" }]);
     }),
     routingRuleDescribe: vi.fn(async () => builtinReply("routingRuleDescribe", [ruleRow({ name: "planningIsLocal", when: { tag: "planning" }, policy: "localOnly", precedence: 20, problem: "" })])),
-    routerDecisionsRecent: vi.fn(async () => builtinReply("routerDecisionsRecent", state.decisions)),
+    // THE GENERATED METHOD ITSELF, answered at `executeNamed` below. Every
+    // method on QueryClient.prototype calls `this.executeNamed`, so a surface
+    // that takes one off its client and calls it bare fails here exactly as
+    // it fails in the browser ("Cannot read properties of undefined (reading
+    // 'executeNamed')"). A closure that never read `this` let the History tab
+    // ship that crash through a green suite.
+    routerDecisionsRecent: vi.fn(QueryClient.prototype.routerDecisionsRecent),
+    executeNamed: vi.fn(async (name: string) => {
+      if (name === "routerDecisionsRecent") return builtinReply("routerDecisionsRecent", state.decisions);
+      throw new Error(`the routing double does not answer ${name} at executeNamed`);
+    }),
     // ROUTES (design record 2026-10-18-routes-design.md): one object per read,
     // sharing the routing document's revision with chains and rules.
     routesForActor: vi.fn(async () => builtinReply("routesForActor", [{ id: "routesForActor", routes: state.modes, revision: state.revision }])),
