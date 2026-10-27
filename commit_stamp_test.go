@@ -38,6 +38,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -173,17 +174,18 @@ func TestBothLocalBuildPathsPassASourceDirectory(t *testing.T) {
 
 // Native image builds receive their exact source through the runner contract,
 // tested by integrations/pipelinesteps. The explicit emergency script must
-// preserve the commit too.
+// preserve the commit too: the build it plans links the checkout's full
+// revision, with -dirty when the tree is.
 func TestBreakGlassBuildSuppliesTheCommit(t *testing.T) {
-	for path, want := range map[string]string{
-
-		"scripts/release/release.sh": `--build-arg "` + commitBuildArg + `=${FULL_SHA}"`,
-	} {
-		t.Run(path, func(t *testing.T) {
-			if !strings.Contains(readRepoFile(t, path), want) {
-				t.Errorf("%s does not pass %q.\nA released image that cannot name its source commit "+
-					"leaves an incident mapping an image digest back to a build by hand.", path, want)
-			}
-		})
+	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	want := commitBuildArg + "=" + strings.TrimSpace(string(head))
+	got := planValue(releaseDryRunPlan(t), "--build-arg", func(v string) bool { return strings.HasPrefix(v, commitBuildArg+"=") })
+	if got != want && got != want+"-dirty" {
+		t.Errorf("scripts/release/release.sh plans --build-arg %q; want %q, with -dirty on a dirty tree.\n"+
+			"A released image that cannot name its source commit leaves an incident mapping an image "+
+			"digest back to a build by hand.", got, want)
 	}
 }

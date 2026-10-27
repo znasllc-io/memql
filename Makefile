@@ -109,7 +109,9 @@ identity-templ:
 
 ## Compile Tailwind input -> static/app.css for the identity web app.
 ## The script auto-downloads the standalone Tailwind CLI for the host
-## platform on first run (cached under bin/tools/).
+## platform on first run (cached under bin/tools/, and downloaded again when
+## that copy is not the pinned version) and, on macOS, re-signs it ad hoc
+## when its code signature does not verify.
 identity-tailwind:
 	bash scripts/identity/build-css.sh
 

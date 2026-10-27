@@ -128,8 +128,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # keeps the ~100MB download reusable across nodes and source edits when the
 # dependencies and tool version are unchanged. Previously source changes
 # downloaded it concurrently across builder stages; one TLS hiccup killed the
-# whole cluster build (memql#1351). Keep TAILWIND_VERSION in sync with the script's pin;
-# a missed bump degrades gracefully (the script re-downloads, with retries).
+# whole cluster build (memql#1351). TAILWIND_VERSION must equal the script's
+# pin, and scripts/identity/build_css_test.go fails when it does not. The
+# script uses a pre-fetched copy only at its pin and downloads the pin over
+# any other (with retries), so a missed bump downloads it again in every build.
 ARG TAILWIND_VERSION=v4.1.11
 RUN set -e; \
     case "$(uname -m)" in \
@@ -210,11 +212,11 @@ RUN set -e; \
 # (BUILD_TAGS=identity) embeds them via //go:embed in component/identity/web:
 #   1. templ -> component/identity/web/templ/*_templ.go
 #   2. Tailwind -> component/identity/web/static/app.css  (gitignored, generated)
-# This MUST mirror docker/memql.Dockerfile. The root Dockerfile (used by
-# scripts/deploy/aks-deploy.sh) was missing these steps, so identity images
-# shipped WITHOUT app.css -> /static/app.css 404 -> unstyled login page.
-# Cheap (a few seconds) for non-identity node builds; kept unconditional so
-# the two Dockerfiles stay in sync.
+# This Dockerfile once lacked these steps while docker/memql.Dockerfile, since
+# retired, had them, so identity images shipped WITHOUT app.css ->
+# /static/app.css 404 -> unstyled login page. Cheap (a few seconds) for
+# non-identity node builds; kept unconditional so every node type builds the
+# same way.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/templ

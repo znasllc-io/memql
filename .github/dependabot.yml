@@ -72,7 +72,6 @@ updates:
       - "/deploy/db-image"
       - "/deploy/fleet"
       - "/deploy/toolchain-image"
-      - "/docker"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
