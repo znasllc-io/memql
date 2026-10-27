@@ -71,6 +71,8 @@ and **rejects a tag it cannot parse**. Measured against the v1.30.0 webhook:
 | `dev` | rejected — `spec.imageName: Invalid value: "memql-db:dev": invalid version tag` |
 | `v16.15` | rejected, same message (the leading `v` is not tolerated) |
 | `0.1.0` | rejected — *"Unsupported PostgreSQL version"* (parsed as major 0) |
+| none, digest only (`memql-db@sha256:…`) | rejected — *"Can't use just the image sha as we can't detect upgrades"* |
+| `16.15-timescaledb-2.29.1` beside a digest (`memql-db:16.15-timescaledb-2.29.1@sha256:…`) | accepted |
 
 So the tag **must begin with the PostgreSQL major**. The local build tags
 `16-dev`. Native release candidates read `deploy/db-image/VERSION`, currently
@@ -78,7 +80,9 @@ So the tag **must begin with the PostgreSQL major**. The local build tags
 Increment the final number for a changed operand at the same PostgreSQL version;
 reset it to 1 when the PostgreSQL minor changes. TimescaleDB versions remain
 explicit Dockerfile inputs and are verified by the smoke test. Publication
-uses this exact version without a leading `v`, then deployment pins its digest.
+uses this exact version without a leading `v`, then deployment pins its digest
+beside that tag: `newTag:` and `digest:` together, which kustomize renders as
+`memql-db:<tag>@sha256:…`. A digest alone is refused, as the table shows.
 A server dry run against the installed CNPG webhook accepted `16.15.1`; this
 does not change the running database image.
 

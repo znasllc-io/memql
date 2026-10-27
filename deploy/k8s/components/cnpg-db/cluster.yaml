@@ -14,9 +14,9 @@ metadata:
 spec:
   instances: 1
 
-  # No tag, deliberately. Every overlay pins this through `images:` -- by digest
-  # in the cloud, by the locally-built tag in k3d -- so an overlay that forgets
-  # fails to pull instead of quietly running a different Postgres.
+  # No tag, deliberately. Every overlay pins this through `images:` -- by tag
+  # and digest in the cloud, by the locally-built tag in k3d -- so an overlay
+  # that forgets fails to pull instead of quietly running a different Postgres.
   #
   # THE TAG MUST BEGIN WITH THE POSTGRESQL MAJOR wherever it is pinned: CNPG's
   # webhook parses it to derive the major version and rejects what it cannot

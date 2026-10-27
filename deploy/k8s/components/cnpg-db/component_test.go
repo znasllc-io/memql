@@ -313,6 +313,11 @@ func TestNoOverlayShipsThePlaceholderBackupDestination(t *testing.T) {
 // all: the render succeeds, `imageName` comes out as a bare `memql-db` with no
 // tag, and the failure lands at apply (CNPG refuses an unparseable tag) or at
 // pull (`memql-db:latest`, which does not exist).
+//
+// A pin that reaches the field can still be one the webhook refuses. CNPG
+// reads the PostgreSQL major from the tag, so replacing `newTag:` with
+// `digest:` renders a digest-only imageName. The apply refuses it, and so does
+// the sync that carries it. cnpgImageNameRefusal holds that rule.
 func TestComponentImageIsPinnedByEveryConsumer(t *testing.T) {
 	root := repoRoot(t)
 
@@ -344,7 +349,75 @@ func TestComponentImageIsPinnedByEveryConsumer(t *testing.T) {
 			t.Errorf("the %s overlay renders imageName=%q with no tag or digest. Its `images:` entry is not "+
 				"reaching spec/imageName -- check that the cnpg-db component's configurations: block is intact.",
 				filepath.Base(dir), c.Spec.ImageName)
+			continue
 		}
+		if reason := cnpgImageNameRefusal(c.Spec.ImageName); reason != "" {
+			t.Errorf("the %s overlay renders imageName=%q: %s. CNPG's webhook refuses it at apply, and with it "+
+				"the sync that carries it. Pin the database with `newTag:` and `digest:` side by side in the "+
+				"`images:` entry; kustomize renders the pair as name:tag@digest.",
+				filepath.Base(dir), c.Spec.ImageName, reason)
+		}
+	}
+}
+
+// cnpgImageNameRefusal models the tag rule in CNPG's validateImageName
+// (internal/webhook/v1/cluster_webhook.go, v1.30.0). It returns why the
+// webhook would refuse imageName, or "" when the tag rule admits it.
+//
+// The webhook reads the PostgreSQL major from the TAG. So it refuses a name
+// with neither tag nor digest (it reads that as latest), the tag latest, and a
+// digest with no tag: "Can't use just the image sha as we can't detect
+// upgrades". A tag must also begin with the major, or it is an "invalid
+// version tag". Kustomize renders `newTag:` plus `digest:` as
+// name:tag@digest, which passes. The major's supported range is not modelled;
+// deploy/db-image/README.md has the measured table.
+func cnpgImageNameRefusal(imageName string) string {
+	name, _, digested := strings.Cut(imageName, "@")
+	tag := ""
+	// A colon before the last slash belongs to a registry port.
+	if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+		tag = name[i+1:]
+	}
+	switch {
+	case tag == "" && digested:
+		return "a digest with no tag, so CNPG cannot read the PostgreSQL major"
+	case tag == "" || tag == "latest":
+		return "no tag or latest, so CNPG cannot detect an upgrade"
+	case tag[0] < '0' || tag[0] > '9':
+		return "a tag that does not begin with the PostgreSQL major"
+	}
+	return ""
+}
+
+// TestCNPGImageNameRuleIsModelledCorrectly pins the predicate the overlay gate
+// uses. Its first row is the digest-only pin that an earlier cloud overlay
+// comment told operators to write. CNPG 1.30.0's webhook refused that form
+// when an installation used it. Without that row this file could pass while
+// modelling the rule backwards.
+func TestCNPGImageNameRuleIsModelledCorrectly(t *testing.T) {
+	digest := "@sha256:" + strings.Repeat("e", 64)
+	for _, tc := range []struct {
+		name, imageName string
+		refused         bool
+	}{
+		{"the digest-only regression", "acrmemql.azurecr.io/memql-db" + digest, true},
+		{"tag and digest, as kustomize renders newTag plus digest", "acrmemql.azurecr.io/memql-db:16.15-timescaledb-2.29.1" + digest, false},
+		{"tag only", "acrmemql.azurecr.io/memql-db:16.15-timescaledb-2.29.1", false},
+		{"the local build tag", "memql-db:16-dev", false},
+		{"a bare name", "memql-db", true},
+		{"latest", "memql-db:latest", true},
+		// Rows from deploy/db-image/README.md's measured table.
+		{"a tag without the major", "memql-db:dev", true},
+		{"a leading v", "memql-db:v16.15", true},
+		// A registry port is not a tag.
+		{"a registry port and a digest", "localhost:5000/memql-db" + digest, true},
+		{"a registry port, tag and digest", "localhost:5000/memql-db:16" + digest, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cnpgImageNameRefusal(tc.imageName) != ""; got != tc.refused {
+				t.Errorf("cnpgImageNameRefusal(%q) refuses = %v, want %v", tc.imageName, got, tc.refused)
+			}
+		})
 	}
 }
 

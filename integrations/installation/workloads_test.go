@@ -48,13 +48,28 @@ func workloadListFixture(version, kind string, items []any) map[string]any {
 // render codec. Kubernetes responses are protocol fixtures, never proof args.
 func newWorkloadFixture(t *testing.T, kinds ...string) *workloadFixture {
 	t.Helper()
+	return newTaggedWorkloadFixture(t, "", kinds...)
+}
+
+// A non-empty tag renders every image as repo:tag@digest, which is what
+// kustomize writes for an images entry carrying both newTag and digest. The
+// kubelet still reports repo@digest: containerd drops the tag of a digested
+// reference before it records the pulled image.
+func newTaggedWorkloadFixture(t *testing.T, tag string, kinds ...string) *workloadFixture {
+	t.Helper()
 	f := &workloadFixture{artifacts: newAdmissionFixture(t), api: resourceAPIFixture()}
 	old, err := f.artifacts.old.Release()
 	require.NoError(t, err)
 	next, err := f.artifacts.next.Release()
 	require.NoError(t, err)
-	oldRef := strings.TrimPrefix(f.artifacts.server.URL, "http://") + "/memql/engine@" + old.Components[0].Artifacts[0].ImageDigest
-	nextRef := strings.TrimPrefix(f.artifacts.server.URL, "http://") + "/memql/engine@" + next.Components[0].Artifacts[0].ImageDigest
+	repository := strings.TrimPrefix(f.artifacts.server.URL, "http://") + "/memql/engine"
+	pin := repository + "@"
+	if tag != "" {
+		pin = repository + ":" + tag + "@"
+	}
+	oldRef := pin + old.Components[0].Artifacts[0].ImageDigest
+	nextRef := pin + next.Components[0].Artifacts[0].ImageDigest
+	nextID := repository + "@" + next.Components[0].Artifacts[0].ImageDigest
 	before, after := []string{}, []string{}
 	pods, sets, jobs := []any{}, []any{}, []any{}
 	f.artifacts.config.Bindings = nil
@@ -111,7 +126,7 @@ func newWorkloadFixture(t *testing.T, kinds ...string) *workloadFixture {
 		require.NoError(t, err)
 		discovery[version] = append(discovery[version], map[string]any{"name": plural, "kind": kind, "namespaced": true})
 		path := base + "/namespaces/memql/" + plural + "/" + name
-		pod := map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": workloadMeta(name + "-pod"), "spec": workloadObject(t, workloadJSON(t, podSpec)), "status": map[string]any{"phase": "Running", "conditions": []any{map[string]any{"type": "Ready", "status": "True"}}, "containerStatuses": []any{map[string]any{"name": containerName, "ready": true, "imageID": nextRef, "state": map[string]any{"running": map[string]any{}}}}}}
+		pod := map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": workloadMeta(name + "-pod"), "spec": workloadObject(t, workloadJSON(t, podSpec)), "status": map[string]any{"phase": "Running", "conditions": []any{map[string]any{"type": "Ready", "status": "True"}}, "containerStatuses": []any{map[string]any{"name": containerName, "ready": true, "imageID": nextID, "state": map[string]any{"running": map[string]any{}}}}}}
 		resourceMap(pod, "spec")["nodeName"] = "worker"
 		pm := resourceMap(pod, "metadata")
 		pm["labels"] = labels
@@ -215,6 +230,51 @@ func TestWorkloadsObserveEverySupportedController(t *testing.T) {
 	require.Error(t, err, "new admission cannot inherit old observations")
 	_, err = second.seal(observeWorkloads(t, second))
 	require.NoError(t, err)
+}
+
+// CNPG refuses a digest-only imageName, because it reads the PostgreSQL major
+// from the tag, so a database is pinned as repo:tag@digest. Any container image
+// may be pinned the same way. The receiver verified the image by repository and
+// digest, and the kubelet reports it without the tag.
+func TestWorkloadsObserveTagAndDigestImages(t *testing.T) {
+	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "Pod", "Cluster"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newTaggedWorkloadFixture(t, "16.15-timescaledb-2.29.1", kind)
+			s := f.scope(t)
+			_, err := s.seal(observeWorkloads(t, s))
+			require.NoError(t, err)
+		})
+	}
+}
+
+// Accepting the tagged form must not loosen either image check. The Pod
+// carries its controller's exact image text, and the runtime still reports a
+// verified digest.
+func TestWorkloadsRefuseTaggedImageSubstitution(t *testing.T) {
+	for _, kind := range []string{"Deployment", "Cluster"} {
+		for _, fault := range []string{"retagged pod", "unverified runtime"} {
+			t.Run(kind+"/"+fault, func(t *testing.T) {
+				f := newTaggedWorkloadFixture(t, "16.15-timescaledb-2.29.1", kind)
+				s := f.scope(t)
+				p := "api/v1/namespaces/memql/pods?limit=256"
+				list := workloadObject(t, f.api.response[p])
+				pod := list["items"].([]any)[0].(map[string]any)
+				container := resourceMap(pod, "spec")["containers"].([]any)[0].(map[string]any)
+				want := "verified image and platform"
+				switch fault {
+				case "retagged pod":
+					// Same repository and digest, but not the admitted template's text.
+					container["image"] = strings.Replace(resourceText(container, "image"), ":16.15-timescaledb-2.29.1@", ":16.16@", 1)
+					want = "container identity or image differs"
+				case "unverified runtime":
+					resourceMap(pod, "status")["containerStatuses"].([]any)[0].(map[string]any)["imageID"] = oldImage
+				}
+				f.api.response[p] = workloadJSON(t, list)
+				_, err := s.check(context.Background(), s.requirements[0].Key)
+				require.ErrorContains(t, err, want)
+			})
+		}
+	}
 }
 
 func TestWorkloadsRefuseChangedOrIncompleteRuntime(t *testing.T) {
