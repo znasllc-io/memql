@@ -128,8 +128,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # keeps the ~100MB download reusable across nodes and source edits when the
 # dependencies and tool version are unchanged. Previously source changes
 # downloaded it concurrently across builder stages; one TLS hiccup killed the
-# whole cluster build (memql#1351). Keep TAILWIND_VERSION in sync with the script's pin;
-# a missed bump degrades gracefully (the script re-downloads, with retries).
+# whole cluster build (memql#1351). TAILWIND_VERSION must equal the script's
+# pin, and scripts/identity/build_css_test.go fails when it does not. The
+# script uses a pre-fetched copy only at its pin and downloads the pin over
+# any other (with retries), so a missed bump downloads it again in every build.
 ARG TAILWIND_VERSION=v4.1.11
 RUN set -e; \
     case "$(uname -m)" in \

@@ -5,8 +5,9 @@
 # Compile the Tailwind input source into the served app.css.
 #
 # Resolves the right standalone Tailwind binary for the host
-# platform, reuses the pinned version on PATH or downloads it into bin/tools/,
-# then runs it against component/identity/web/tailwind/input.css
+# platform, reuses a compiler on PATH or in bin/tools/ only at the pinned
+# version and otherwise downloads the pin into bin/tools/, then runs it
+# against component/identity/web/tailwind/input.css
 # scanning the templ sources for class names. On macOS a bin/tools binary
 # whose code signature does not verify is re-signed ad hoc before it runs:
 # the release assets ship a signature that no longer matches the file, and
@@ -40,6 +41,16 @@ OUTPUT="${REPO_ROOT}/component/identity/web/static/app.css"
 # worker's protections or change the environment of other build tools.
 function run_tailwind() {
     BUN_JSC_useJIT=0 "$@"
+}
+
+# is_pinned_tailwind <bin> → succeeds only when <bin> runs and the first line
+# of its --help is exactly "≈ tailwindcss ${TAILWIND_VERSION}". A different
+# version must not silently change the generated CSS, so a compiler on PATH or
+# in bin/tools is reused only when this holds.
+function is_pinned_tailwind() {
+    local help
+    help="$(NO_COLOR=1 run_tailwind "$1" --help 2>/dev/null)" && \
+        [[ "${help%%$'\n'*}" == "≈ tailwindcss ${TAILWIND_VERSION}" ]]
 }
 
 # detect_platform → echoes the asset suffix Tailwind's release uses
@@ -103,27 +114,34 @@ function ensure_valid_signature() {
 }
 
 # resolve_tailwind_binary → echoes the path to the Tailwind CLI for
-# the current platform; downloads it from github releases if missing,
-# and on macOS repairs a bin/tools copy's signature before it runs
-# (ensure_valid_signature).
+# the current platform at the pin; downloads it from github releases
+# when bin/tools holds no working copy at the pin, and on macOS repairs
+# a bin/tools copy's signature before it runs (ensure_valid_signature).
 function resolve_tailwind_binary() {
     # Pipeline checkouts are ephemeral; the toolchain image carries this
-    # compiler once for every step. A different host version must not silently
-    # change the generated CSS, so only reuse an exact, working pin.
-    local installed help
-    if installed="$(command -v tailwindcss)" && \
-       help="$(NO_COLOR=1 run_tailwind "${installed}" --help 2>/dev/null)" && \
-       [[ "${help%%$'\n'*}" == "≈ tailwindcss ${TAILWIND_VERSION}" ]]; then
+    # compiler once for every step.
+    local installed
+    if installed="$(command -v tailwindcss)" && is_pinned_tailwind "${installed}"; then
         echo "${installed}"
         return 0
     fi
     local platform
     platform="$(detect_platform)"
     local bin_path="${TOOLS_DIR}/tailwindcss-${platform}"
+    # bin/tools holds what a Dockerfile pre-fetched at its own ARG
+    # TAILWIND_VERSION, or what an earlier build downloaded at an earlier
+    # pin, so it is held to the pin like PATH. A copy that fails the probe
+    # is downloaded over rather than skipped, because this path is the one
+    # place the pin is downloaded to. The signature repair comes first
+    # because on macOS the version probe is itself a run. Pinned by
+    # build_css_test.go's TestBuildCSSReplacesACachedCompilerThatIsNotThePin.
     if [[ -x "${bin_path}" ]]; then
         ensure_valid_signature "${platform}" "${bin_path}"
-        echo "${bin_path}"
-        return 0
+        if is_pinned_tailwind "${bin_path}"; then
+            echo "${bin_path}"
+            return 0
+        fi
+        log_info "$(basename "${bin_path}") is not a working Tailwind ${TAILWIND_VERSION}; replacing it"
     fi
     mkdir -p "${TOOLS_DIR}"
     local url="https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-${platform}"
@@ -131,9 +149,10 @@ function resolve_tailwind_binary() {
     # Retries: a single TLS hiccup on this ~100MB pull killed entire
     # cluster builds (memql#1351). Docker builds normally never reach
     # this path -- the Dockerfiles pre-fetch the binary into bin/tools
-    # in an early cached layer (keep their ARG TAILWIND_VERSION in
-    # sync with the pin above) -- so this download is the host-side /
-    # cold-layer fallback.
+    # in an early cached layer, and build_css_test.go's
+    # TestEveryDockerfileDownloadsTheTailwindPin holds their ARG
+    # TAILWIND_VERSION to the pin above -- so this download is the
+    # host-side / cold-layer fallback.
     if ! curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${bin_path}" "${url}"; then
         log_error "failed to download ${url}"
         rm -f "${bin_path}"

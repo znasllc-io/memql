@@ -55,9 +55,11 @@ RUN go mod download
 # scripts/identity/build-css.sh probes (bin/tools is dockerignored, so the
 # source COPY below never clobbers it). Early layer = the ~100MB download
 # only re-runs on a version bump, never on source changes (memql#1351).
-# Keep TAILWIND_VERSION in sync with the script's pin; a missed bump
-# degrades gracefully (the script re-downloads, with retries).
-ARG TAILWIND_VERSION=v3.4.17
+# TAILWIND_VERSION must equal the script's pin, and
+# scripts/identity/build_css_test.go fails when it does not. The script
+# uses a pre-fetched copy only at its pin and downloads the pin over any
+# other (with retries), so a missed bump downloads it again in every build.
+ARG TAILWIND_VERSION=v4.1.11
 RUN set -e; \
     case "$(uname -m)" in \
         x86_64) platform=linux-x64 ;; \

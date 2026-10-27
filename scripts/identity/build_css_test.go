@@ -73,9 +73,9 @@ func hostTools(t *testing.T, names ...string) string {
 }
 
 // Execute the real resolver in a fresh checkout. A wrong or broken compiler
-// on PATH must use the existing local fallback; the exact pin must avoid both
-// the fallback and curl. The image smoke test additionally compiles real CSS
-// with the real binary and networking disabled.
+// on PATH must use the existing pinned local fallback; the exact pin must
+// avoid both the fallback and curl. The image smoke test additionally
+// compiles real CSS with the real binary and networking disabled.
 func TestBuildCSSUsesOnlyThePinnedCompilerOnPath(t *testing.T) {
 	pin := tailwindPin(t)
 	suffix := map[string]string{"linux/amd64": "linux-x64", "linux/arm64": "linux-arm64", "darwin/amd64": "macos-x64", "darwin/arm64": "macos-arm64"}[runtime.GOOS+"/"+runtime.GOARCH]
@@ -94,7 +94,7 @@ func TestBuildCSSUsesOnlyThePinnedCompilerOnPath(t *testing.T) {
 				return fmt.Sprintf("#!/usr/bin/env bash\nset -eu\n[[ ${BUN_JSC_useJIT:-} == 0 ]] || { echo 'Tailwind requires interpreter mode' >&2; exit 97; }\nif [[ ${1:-} == --help ]]; then\n%s\nexit 0\nfi\nprintf '%%s' '%s' > component/identity/web/static/app.css\n", help, name)
 			}
 			write("path/tailwindcss", compiler("installed", tc.help))
-			write("bin/tools/tailwindcss-"+suffix, compiler("fallback", "exit 1"))
+			write("bin/tools/tailwindcss-"+suffix, compiler("fallback", "printf '≈ tailwindcss "+pin+"\\n'"))
 			write("path/curl", "#!/bin/sh\necho unexpected download >&2\nexit 99\n")
 			// On a macOS host the fallback's signature is checked before it
 			// runs. That decision has its own test below; here every compiler
@@ -113,6 +113,74 @@ func TestBuildCSSUsesOnlyThePinnedCompilerOnPath(t *testing.T) {
 			got, err := os.ReadFile(filepath.Join(root, "component/identity/web/static/app.css"))
 			if err != nil || strings.TrimSpace(string(got)) != tc.want {
 				t.Fatalf("compiler = %q, err = %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// A bin/tools compiler is held to the pin, like one on PATH. The Dockerfiles
+// pre-fetch it at their own ARG TAILWIND_VERSION and a checkout keeps whatever
+// an earlier build downloaded, so a copy at another version, or one that
+// cannot execute, is replaced by the pinned release before anything compiles
+// with it. uname is stubbed to one Linux host, so every host runs the same
+// cases, and PATH holds only stubs plus the real commands the script calls,
+// so the host's own curl or tailwindcss can never stand in for a stub.
+func TestBuildCSSReplacesACachedCompilerThatIsNotThePin(t *testing.T) {
+	pin := tailwindPin(t)
+	tools := hostTools(t, "bash", "basename", "cat", "chmod", "cp", "dirname", "mkdir", "rm", "tr")
+	const asset = "tailwindcss-linux-x64"
+	release := "https://github.com/tailwindlabs/tailwindcss/releases/download/" + pin + "/" + asset
+	compiler := func(name, version string) string {
+		return "#!/usr/bin/env bash\n" +
+			"[[ ${BUN_JSC_useJIT:-} == 0 ]] || { echo 'Tailwind requires interpreter mode' >&2; exit 97; }\n" +
+			"[[ ${1:-} != --help ]] || { printf '≈ tailwindcss %s\\n\\nUsage:\\n' " + version + "; exit 0; }\n" +
+			"while (($#)); do [[ $1 != --output ]] || printf %s " + name + " > \"$2\"; shift; done\n"
+	}
+	for _, tc := range []struct {
+		name     string
+		cached   string // bin/tools/<asset> before the build
+		replaced bool   // the pinned release was downloaded over it
+	}{
+		{"the pin is reused", compiler("cached", pin), false},
+		{"another version is replaced", compiler("cached", "v3.4.17"), true},
+		{"a version suffix is replaced", compiler("cached", pin+"-dev"), true},
+		// The kernel refuses it the way it refuses a glibc build on a musl
+		// host: the interpreter its header names does not exist.
+		{"one that cannot execute is replaced", "#!/nonexistent/ld-linux-x86-64.so.2\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, write := buildCSSCheckout(t)
+			write("path/uname", "#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 64 ;; esac\n")
+			write("bin/tools/"+asset, tc.cached)
+			downloaded := compiler("downloaded", pin)
+			if tc.replaced {
+				write("release/"+asset, downloaded)
+				// Like curl -o, this writes over the existing file in place;
+				// any other URL is a download of something other than the pin.
+				write("path/curl", "#!/usr/bin/env bash\nout= url=\n"+
+					"while (($#)); do case $1 in -o) out=$2; shift ;; https://*) url=$1 ;; esac; shift; done\n"+
+					"[[ $url == '"+release+"' ]] || { echo \"unexpected download: $url\" >&2; exit 99; }\n"+
+					"cat '"+filepath.Join(root, "release", asset)+"' > \"$out\"\n")
+			} else {
+				write("path/curl", "#!/bin/sh\necho unexpected download >&2\nexit 99\n")
+			}
+
+			cmd := exec.Command("bash", "scripts/identity/build-css.sh")
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "path")+string(os.PathListSeparator)+tools)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("build-css: %v\n%s", err, out)
+			}
+			wantCSS, wantBinary := "cached", tc.cached
+			if tc.replaced {
+				wantCSS, wantBinary = "downloaded", downloaded
+			}
+			if css, err := os.ReadFile(filepath.Join(root, "component/identity/web/static/app.css")); err != nil || string(css) != wantCSS {
+				t.Errorf("app.css = %q, err = %v; want %q from that compiler\n%s", css, err, wantCSS, out)
+			}
+			if got, err := os.ReadFile(filepath.Join(root, "bin/tools", asset)); err != nil || string(got) != wantBinary {
+				t.Errorf("bin/tools/%s = %q, err = %v; want %q", asset, got, err, wantBinary)
 			}
 		})
 	}
@@ -224,5 +292,57 @@ func TestBuildCSSRepairsTheMacOSCompilerSignatureBeforeRunningIt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Every Dockerfile that downloads a Tailwind release downloads the version
+// build-css.sh pins. The engine Dockerfiles pre-fetch the compiler into
+// bin/tools in an early cached layer (memql#1351) and the toolchain image
+// bakes one onto PATH (memql#5816), each so a build does not download it
+// again. The script uses a copy only at exactly its pin, so a copy at another
+// version is never used. docker/memql.Dockerfile stayed at v3.4.17 after the
+// script moved to v4.1.11 (8c71f3d31), back when bin/tools was reused at any
+// version, and v3 cannot read the v4 input.css.
+//
+// The walk is `git ls-files`, so a new Dockerfile is checked once it is added,
+// and it fails closed: the two Dockerfiles that pre-fetch for build-css.sh
+// must be among those it checked.
+func TestEveryDockerfileDownloadsTheTailwindPin(t *testing.T) {
+	pin := tailwindPin(t)
+	root := filepath.Join("..", "..")
+	ls := exec.Command("git", "ls-files", "-z", "--", "*Dockerfile")
+	ls.Dir = root
+	out, err := ls.Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	arg := regexp.MustCompile(`(?m)^ARG TAILWIND_VERSION=(\S*)\s*$`)
+	checked := map[string]bool{}
+	for _, path := range strings.Split(string(out), "\x00") {
+		if base := filepath.Base(path); base != "Dockerfile" && !strings.HasSuffix(base, ".Dockerfile") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "github.com/tailwindlabs/tailwindcss/releases/download/") {
+			continue
+		}
+		checked[path] = true
+		switch args := arg.FindAllSubmatch(body, -1); {
+		case len(args) != 1:
+			t.Errorf("%s downloads a Tailwind release, so it must declare ARG TAILWIND_VERSION exactly once; found %d", path, len(args))
+		case string(args[0][1]) != pin:
+			t.Errorf("%s downloads Tailwind %s, but scripts/identity/build-css.sh pins %s.\n"+
+				"The script uses a compiler only at exactly its pin, so this copy is never used and every "+
+				"build downloads the pin again. Move every ARG TAILWIND_VERSION in the same change as the "+
+				"pin; the toolchain image's also carries a SHA-256 for each architecture.", path, args[0][1], pin)
+		}
+	}
+	for _, path := range []string{"Dockerfile", "docker/memql.Dockerfile"} {
+		if !checked[path] {
+			t.Errorf("%s pre-fetches build-css.sh's compiler, but this scan never checked it", path)
+		}
 	}
 }
