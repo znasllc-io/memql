@@ -189,11 +189,15 @@ describe("History: the read is made on its client", () => {
     // it throws "Cannot read properties of undefined (reading 'executeNamed')"
     // inside the read effect, and in the shell the window's boundary replaces
     // the whole Fleet app with "This app hit an error" -- the crash this pins.
+    // Every routing read funnels through the same executeNamed, so this picks
+    // out History's.
     await renderHistory();
     expect(rowFor("qwen3-coder")).toBeTruthy();
-    expect(calls.executeNamed.mock.calls.map(([name, call]) => [name, call])).toEqual([
-      ["routerDecisionsRecent", "query routerDecisionsRecent()"],
-    ]);
+    expect(
+      calls.executeNamed.mock.calls
+        .filter(([name]) => name === "routerDecisionsRecent")
+        .map(([name, call]) => [name, call]),
+    ).toEqual([["routerDecisionsRecent", "query routerDecisionsRecent()"]]);
   });
 });
 

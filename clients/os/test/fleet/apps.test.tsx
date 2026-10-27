@@ -141,9 +141,10 @@ describe("the delegation policy editor", () => {
   });
 
   it("keeps the edit and shows the server's own sentence when the save is refused", async () => {
-    const connection = fakeConnection({ delegationPolicyForUser: [] });
-    connection.query.setDelegationPolicy = vi.fn(async () => {
-      throw new Error("delegation_policy_refused: workspaceRoot outside allowed roots");
+    const connection = fakeConnection({ delegationPolicyForUser: [] }, {
+      setDelegationPolicy: async () => {
+        throw new Error("delegation_policy_refused: workspaceRoot outside allowed roots");
+      },
     });
     mount(connection);
     await screen.findByText(/Delegation is off/);
