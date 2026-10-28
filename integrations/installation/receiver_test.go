@@ -286,6 +286,25 @@ func TestReceiverCopyInitPermitsOnlyInheritedLiteralTimeout(t *testing.T) {
 	}
 }
 
+// Kustomize pins the repo-server by newTag plus digest as repo:tag@digest, and
+// its Deployment must carry the configured text. The kubelet reports the
+// pulled image as repo@digest, without the tag.
+func TestReceiverAcceptsATagAndDigestRenderer(t *testing.T) {
+	f := newReceiverFixture(t)
+	tagged := strings.Replace(oldImage, "@", ":v2.13.3@", 1)
+	f.config.Renderer.Image = tagged
+	f.saveConfig()
+	// The fixture's Deployment, ReplicaSet and Pod share one Pod template.
+	pod := f.objects["api/v1/namespaces/argocd/pods/renderer-pod"]
+	resourceMap(pod, "spec")["containers"].([]any)[0].(map[string]any)["image"] = tagged
+	ctx := captureOperator(auth.RoleOwner, "operator")
+	_, err := readReceiver(ctx, f, "memql", "receiver", f.factory(t))
+	require.NoError(t, err)
+	resourceMap(pod, "status")["containerStatuses"].([]any)[0].(map[string]any)["imageID"] = "docker-pullable://" + nextImage
+	_, err = readReceiver(ctx, f, "memql", "receiver", f.factory(t))
+	require.ErrorContains(t, err, "runtime image is not the configured immutable image")
+}
+
 func TestReceiverRequiresCurrentNativeOperator(t *testing.T) {
 	for _, ctx := range []context.Context{context.Background(), operator(auth.RoleOwner, "operator"), captureOperator(auth.RoleReader, "operator")} {
 		f := newReceiverFixture(t)
