@@ -6,7 +6,7 @@ import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
 import { LocalMaterializerSettingsStore } from "../../src/apps/materializer/settings";
-import { parseCall } from "./callArgs";
+import { parseCall } from "../callArgs";
 
 // The Materializer's test harness: a connection-shaped double.
 //

@@ -259,12 +259,13 @@ describe("reordering your rules", () => {
       ruleRow({ name: "c", when: { tag: "c" }, precedence: 9 }),
     ]);
     await openRules();
+    // The other saves are still the generated method, so they run on its client.
     const save = calls.routingRuleSave.getMockImplementation()!;
     let n = 0;
-    calls.routingRuleSave.mockImplementation(async (args: Record<string, unknown>) => {
+    calls.routingRuleSave.mockImplementation(async function (this: unknown, args: Record<string, unknown>) {
       n += 1;
       if (n === 2) throw new Error("persistent routing storage is unavailable");
-      return save(args);
+      return save.call(this, args);
     });
     fireEvent.keyDown(customLine(/Tagged c/), { key: "ArrowUp", altKey: true });
     await settle();
