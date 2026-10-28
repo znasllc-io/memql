@@ -379,3 +379,48 @@ func TestAReplacedTrainsPullRequestsLeaveWhenTheExpressLands(t *testing.T) {
 		t.Errorf("the new train departed at %s, want now (%s), not the next scheduled time", next.DepartedAt, th.clock)
 	}
 }
+
+// TestAnApprovalBeforeARebuildNeverLandsTheRebuiltTrain (Review Focus 2),
+// end to end: the owner approves head H1; main moves, so the train is rebuilt
+// to H2, runs again and asks again; H1's approval must not land H2, and the
+// owner's approval of H2 does.
+func TestAnApprovalBeforeARebuildNeverLandsTheRebuiltTrain(t *testing.T) {
+	th, h1 := awaitingTrain(t)
+	th.approve(h1, "ada-gh", h1.HeadSHA)
+	const moved = "4444444444444444444444444444444444444444"
+	th.github.mu.Lock()
+	th.github.heads[repoName+"@main"] = headAnswer{SHA: moved}
+	th.github.mu.Unlock()
+	th.remote.files[moved] = th.remote.files[baseSHA]
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	h2 := th.train(t)
+	if h2.State != TrainRunning || h2.HeadSHA == h1.HeadSHA {
+		t.Fatalf("state %s head %s; want rebuilt to a new head", h2.State, h2.HeadSHA)
+	}
+	th.runFor(t, h2, ConclusionSuccess)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	asked := 0
+	for _, m := range th.messages() {
+		if strings.Contains(m, "ACTION NEEDED: approve") {
+			asked++
+		}
+	}
+	if asked != 2 {
+		t.Errorf("asked for approval %d times, want twice: once per head", asked)
+	}
+	for range 3 {
+		th.clock = th.clock.Add(time.Minute)
+		th.tick(t)
+	}
+	if got := th.train(t); got.State != TrainAwaitingApproval || th.remote.trainPRs[h2.PullRequest].merged {
+		t.Fatalf("state %s merged %v; the approval of %s landed %s", got.State, th.remote.trainPRs[h2.PullRequest].merged, h1.HeadSHA, h2.HeadSHA)
+	}
+	th.approve(h2, "ada-gh", h2.HeadSHA)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainLanded {
+		t.Fatalf("state %s; the owner's approval of the current head must land it", got.State)
+	}
+}
