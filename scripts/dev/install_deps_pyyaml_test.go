@@ -5,11 +5,11 @@ package dev
 // python3 the step tells apart.
 //
 // The step exists because Go tests exec scripts/ci's PyYAML-importing Python
-// (scripts/ci/pyyaml). Its route depends on who owns the interpreter, so each
-// route is pinned here to the exact install command it must run, along with
-// the ways the step must refuse to report success. The stubs log every
-// install command they receive; "ok" is printed only after the stub python3
-// really imports yaml.
+// and the connection gate's (scripts/ci/pyyaml). Its route depends on who
+// owns the interpreter, so each route is pinned here to the exact install
+// command it must run, along with the ways the step must refuse to report
+// success. The stubs log every install command they receive; "ok" is printed
+// only after the stub python3 really imports yaml.
 
 import (
 	"os"
