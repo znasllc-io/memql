@@ -600,3 +600,67 @@ automation fixtureBuildPublication {
 		t.Fatal("sealed release offered another publication")
 	}
 }
+
+// TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun drives a saved release through
+// a running attempt it keeps, a failed attempt that blocks it, an unrelated run
+// it refuses and the re-run of its own attempt it adopts (build_adopt.go). A
+// refused observation keeps the recorded run and is saved as unconfirmed, the
+// way executeBuild records every failed operation.
+func TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun(t *testing.T) {
+	f := newBuildDBFixture(t)
+	f.pipeline.source.TagExists = true
+	f.pipeline.source.TagSHA = f.pipeline.source.SHA
+	r := f.prepare(t)
+	if v := buildAction(t, f.i, r.ID, "start"); v.Phase != "building" {
+		t.Fatal(v)
+	}
+	first := *f.pipeline.run
+	observe := func(run pl.ReleaseBuildRun) releaseBuildView {
+		f.pipeline.run = &run
+		return buildAction(t, f.i, r.ID, "observe")
+	}
+	refused := func(v releaseBuildView, why string) {
+		t.Helper()
+		if v.PipelineRunID != first.ID || v.ReasonCode != "operation_unconfirmed" {
+			t.Fatal(why, v)
+		}
+	}
+
+	early := first
+	early.ID, early.Attempt, early.RerunOf = id.NewShortId(), 2, first.ID
+	early.Chain = []pl.ReleaseBuildAttempt{{ID: first.ID, Attempt: 1, Status: "in_progress"}}
+	refused(observe(early), "a running recorded attempt was replaced")
+
+	first.Status, first.Conclusion = "completed", "failure"
+	if v := observe(first); v.Phase != "blocked" || !strings.Contains(v.Reason, "Re-run its failed steps") {
+		t.Fatal("a failed release does not say how to recover:", v)
+	}
+
+	unrelated := first
+	unrelated.ID, unrelated.Attempt, unrelated.Status, unrelated.Conclusion = id.NewShortId(), 2, "in_progress", ""
+	refused(observe(unrelated), "an attempt outside the recorded run's chain was adopted")
+
+	rerun := unrelated
+	rerun.RerunOf = first.ID
+	rerun.Chain = []pl.ReleaseBuildAttempt{{ID: first.ID, Attempt: 1, Status: "completed", Conclusion: "failure"}}
+	if v := observe(rerun); v.Phase != "building" || v.PipelineRunID != rerun.ID || v.ReasonCode != "" {
+		t.Fatal("the re-run of the recorded attempt was not adopted:", v)
+	}
+
+	// The ledger holds the same line: a replica with an older view cannot
+	// write the failed attempt back over the adopted re-run.
+	storage, err := f.i.candidateStorage(ownerCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := storage.ledger.claimBuild(ownerCtx(), r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.close(ownerCtx())
+	stale := first
+	lease.record.Run = &stale
+	if err := lease.save(ownerCtx()); err == nil {
+		t.Fatal("an earlier attempt was written back over the adopted re-run")
+	}
+}
