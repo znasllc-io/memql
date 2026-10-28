@@ -25,7 +25,7 @@ package web
 // server-side and tells the holder what it found: who invited them, what role
 // they will land with, which address it is for, and when it stops working.
 //
-// # GET RENDERS, POST CONSUMES, AND THAT IS NOT A STYLE CHOICE
+// # GET RENDERS, POST CHANGES STATE, AND THAT IS NOT A STYLE CHOICE
 //
 // Enterprise mail security (Defender Safe Links, Proofpoint, Mimecast) fetches
 // URLs out of email to scan them, from the vendor's infrastructure, before any
@@ -33,13 +33,57 @@ package web
 // a scanner, and the invitee -- the first actual human to open it -- would be
 // told the link had already been used. That failure is indistinguishable, from
 // the outside, from someone stealing the invitation, which is the worst way to
-// be wrong. So this GET is idempotent and side-effect-free apart from the
-// binding cookie, and every consuming step hangs off the POST.
+// be wrong. So this GET is idempotent and writes nothing at all -- no spend, no
+// browser binding, no cookie -- and every step that changes state hangs off
+// the POST.
 //
 // /enroll already has exactly this shape and says so; this file follows it, as
 // it follows pair.go's discipline throughout: HTTPS required (the token is a
 // bearer in a URL), per-IP rate limiting through the same abuse package, and an
 // audit event carrying SourceIP on every outcome including each refusal.
+//
+// # WHY THE BINDING WAITS FOR CONTINUE
+//
+// An invitation is accepted in one browser only: a nonce in that browser's
+// cookie, its digest on the row (bindingHash). That is what stops a forwarded
+// email from being accepted by whoever it was forwarded to. The GET used to
+// stamp the binding on FIRST TOUCH, which made it exactly the side effect the
+// paragraph above rules out: whatever fetched the link first owned the
+// invitation. A mail scanner, a link preview, an email app's in-app browser or
+// a second device got there first, and the invitee -- reported from Safari on
+// an iPhone -- was refused with "Finish in the browser that opened the
+// invitation", a browser they had never used.
+// TestScannerGetThenHumanContinueAndAccept (invitation_flow_test.go) replays it.
+//
+// So the GET only READS the binding, and the binding is made by a POST the
+// invitee sends by pressing Continue: intent=continue on the existing
+// POST /invitation/accept. Not a route of its own, because a new HTTP endpoint
+// needs the owner's approval here and the front door's generated path list
+// would change with it. Link scanners and previews fetch; they do not submit
+// forms. The page shows one step at a time, chosen by the GET:
+//
+//   - nobody has pressed Continue: Continue;
+//   - this browser pressed it: Accept;
+//   - another browser pressed it: the refusal, naming where to finish.
+//
+// Accept still requires the binding, and now also requires that one exists
+// (see invitationBindingMatches). The forwarding control is the same in kind --
+// the first person to press Continue holds the invitation, as the first to
+// open it did -- but automated fetchers are out of that race.
+//
+// FIRST TOUCH ALSO FAILED WITH NOTHING ELSE INVOLVED. The emailed link opens on
+// identity's host (adminops.invitationURL); nativeUI runs this handler and
+// then sends the browser to MemQL OS, which reads the page and posts its forms
+// through its own origin (component/edge identityUIPaths). The binding cookie
+// is host-only, so the one the link's GET set on identity's host never reached
+// the OS's Accept. Continue and Accept are posted from the same place as each
+// other, whichever host that is. TestTheLinksHostAndTheOSHostShareNoCookies
+// pins it.
+//
+// Rows the old GET bound stay bound; no migration rewrites them. A browser
+// presenting that cookie still sees Accept and any other sees the refusal, and
+// since the link's GET left its cookie on identity's host, expect the refusal,
+// whose next step is a fresh invitation.
 //
 // # What the accept hands off to
 //
@@ -89,7 +133,7 @@ const envInvitationPerHour = "MEMQL_IDENTITY_INVITATION_PER_HOUR"
 
 const defaultInvitationPerHour = 120
 
-// invitationCookieName is the first-touch binding cookie.
+// invitationCookieName is the binding cookie, set by Continue.
 //
 // A SEPARATE COOKIE FROM memql_ml, NOT A SECOND MECHANISM. The magic-link
 // binding cookie is path-scoped to /auth, which does not cover these routes, so
@@ -122,6 +166,13 @@ const (
 	// the holder of one is not making a typo and telling them to re-check the
 	// link would send them looking for a problem that is not there.
 	InvitationWrongKind InvitationState = "wrong-kind"
+
+	// InvitationBoundElsewhere and InvitationNotContinued are the page's own
+	// refusals. The resolver never returns them: they are verdicts about THIS
+	// browser, reached by comparing its cookie with the row's binding, where
+	// the five above are verdicts about the row.
+	InvitationBoundElsewhere InvitationState = "bound-elsewhere"
+	InvitationNotContinued   InvitationState = "not-continued"
 )
 
 // InvitationResolution is what the wiring layer reports back about a presented
@@ -154,9 +205,10 @@ type InvitationResolution struct {
 	// issued. Decided by the wiring layer, which owns the threshold; the page
 	// only renders the consequence.
 	StepUp bool
-	// BindingHash is the first-touch binding digest already stamped on the row,
-	// or empty when nothing has bound it yet. The accept requires a cookie
-	// hashing to this value; a GET that finds one present does not overwrite it.
+	// BindingHash is the binding digest stamped when somebody pressed
+	// Continue, or empty when nobody has. The GET compares it with this
+	// browser's cookie to pick the step it shows; the accept requires a cookie
+	// hashing to it and refuses an empty one.
 	//
 	// A DIGEST IS NOT TOKEN MATERIAL. The rule this struct states above is
 	// about the invitation credential, whose plaintext and hash both stay out
@@ -182,9 +234,10 @@ type InvitationAcceptResult struct {
 // wiring layer, which owns the store; nil leaves the routes unmounted.
 type ResolveInvitationFunc func(ctx context.Context, plainToken string) (InvitationResolution, error)
 
-// BindInvitationFunc stamps the first-touch binding digest on a pending row.
+// BindInvitationFunc stamps the binding digest on a pending row when its
+// invitee presses Continue.
 //
-// FIRST TOUCH ONLY: an implementation must not overwrite a binding already
+// FIRST WRITE ONLY: an implementation must not overwrite a binding already
 // present. Overwriting would let a second browser re-bind the row, which is the
 // exact move the control exists to stop, so the no-overwrite rule is the
 // security property and not a tidiness one.
@@ -241,8 +294,9 @@ func (s *Server) invitationLimiter() *abuse.IPRateLimiter {
 
 // handleInvitationGet renders the invitation page for a presented link.
 //
-// Side-effect-free apart from the first-touch binding cookie: see the header's
-// note on mail scanners. Nothing here spends anything.
+// It WRITES NOTHING: no spend, no binding, no cookie (see the header's notes on
+// mail scanners and on Continue). It reads the row's binding against this
+// browser's cookie to decide which step to show.
 func (s *Server) handleInvitationGet(w http.ResponseWriter, r *http.Request) {
 	sourceIP := clientIP(r)
 
@@ -294,59 +348,25 @@ func (s *Server) handleInvitationGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// FIRST TOUCH BINDS. The nonce goes to this browser and its digest to the
-	// row, so the accept can require that the browser which opened the link is
-	// the one that finishes. An invitation travels by email and can be
-	// forwarded; without this, whoever opens it first is simply whoever joins,
-	// and the invited address is decoration.
-	//
-	// A row that already carries a binding is NOT re-bound: the second opener
-	// gets the page (so a person who genuinely opened it twice sees something
-	// sensible) but their cookie will not match at accept time, and the copy
-	// there explains it. Re-binding here would hand the row to the last opener,
-	// which is the opposite of the control.
-	if strings.TrimSpace(res.BindingHash) == "" {
-		nonce := newBindingNonce()
-		if nonce != "" {
-			switch err := s.bindInvitation(r.Context(), res.InvitationId, hashBindingNonce(nonce)); {
-			case err == nil:
-				s.writeBindingCookie(w, invitationCookieName, invitationCookiePath, nonce, time.Until(res.ExpiresAt))
-
-			case errors.Is(err, identity.ErrInvitationBoundElsewhere):
-				// THE CONTROL WORKING, NOT A FAULT -- and the distinction is the
-				// whole reason this is its own branch.
-				//
-				// Somebody else opened this invitation first, between our
-				// resolve and our stamp. That is precisely the event
-				// first-touch binding exists to catch, so it is recorded as a
-				// BLOCKED outcome under its own reason rather than folded into
-				// the failure below. A run of these on one invitation is the
-				// signature of a forwarded email being opened by more than one
-				// person; a run of bind_failed is infrastructure. An operator
-				// grepping the trail must be able to tell those apart, and a
-				// single collapsed reason would make a forwarding incident look
-				// like a database wobble.
-				//
-				// No cookie is set, so this browser cannot accept. It still
-				// gets the page: somebody who genuinely opened their own link
-				// twice should see the invitation rather than an error, and the
-				// accept path has the honest message for the case where their
-				// cookie does not match.
-				s.auditInvitation(r, "invitation_binding_taken", res.InvitationId,
-					identity.AuditOutcomeBlocked, "bound_elsewhere")
-
-			default:
-				// Not fatal. The accept still checks whatever binding the row
-				// ended up with, and refusing to render the page over a failed
-				// stamp would strand an invitee whose invitation is perfectly
-				// good. Recorded so the trail shows the control was not applied
-				// to this row rather than silently implying it was.
-				s.Logger.Warn("identity-web: invitation binding stamp failed",
-					"error", err.Error(), "invitationId", res.InvitationId)
-				s.auditInvitation(r, "invitation_binding_not_stamped", res.InvitationId,
-					identity.AuditOutcomeFailure, "bind_failed")
-			}
-		}
+	// THE STEP IS READ, NEVER WRITTEN. The row's binding against this
+	// browser's cookie picks the page; stamping one here is the first-touch
+	// binding the header records the removal of.
+	var step string
+	switch {
+	case strings.TrimSpace(res.BindingHash) == "":
+		step = webtempl.InvitationStepContinue
+	case s.invitationBindingMatches(r, res):
+		step = webtempl.InvitationStepAccept
+	default:
+		// Somebody pressed Continue in another browser. This one cannot
+		// accept, so it gets the refusal and not the invitation's details:
+		// once somebody has claimed it, whom it is for and from whom are no
+		// longer for every holder of the link to read. Blocked under the same
+		// reason the Continue race uses, on the GET's own action.
+		s.auditInvitation(r, "invitation_redeem_denied", res.InvitationId,
+			identity.AuditOutcomeBlocked, "bound_elsewhere")
+		s.refuseInvitation(w, r, InvitationBoundElsewhere)
+		return
 	}
 
 	s.auditInvitation(r, "invitation_page_served", res.InvitationId, identity.AuditOutcomeSuccess, "")
@@ -359,20 +379,27 @@ func (s *Server) handleInvitationGet(w http.ResponseWriter, r *http.Request) {
 		Role:         res.Role,
 		ExpiresIn:    humanizeUntil(res.ExpiresAt, time.Now().UTC()),
 		StepUp:       res.StepUp,
+		Step:         step,
 	}
 	s.render(w, r, "invitation", webtempl.Invitation(data), data)
 }
 
-// handleInvitationAccept spends the invitation and hands off.
+// handleInvitationAccept is the POST half of the pair: Continue, which binds the
+// invitation to this browser, and Accept, which spends it and hands off.
+// Everything that changes state is here, for the reason the file header gives.
 //
-// The POST half of the pair. Everything that changes state is here, for the
-// reason the file header gives.
+// ONE ROUTE FOR BOTH, told apart by the form's intent field. Continue is a
+// write, so it needs everything Accept needs first -- HTTPS, the rate limit,
+// CSRF, a fresh resolve -- and a route of its own would be a new HTTP endpoint,
+// which this repository admits only with the owner's approval.
 func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) {
 	sourceIP := clientIP(r)
 
 	if !s.requireSecureInvitation(w, r, sourceIP) {
 		return
 	}
+	// Before the form is read, so a refused Continue is recorded under the
+	// route's action too: the bucket is spent before the intent is known.
 	if allowed, retryAfter := s.invitationLimiter().Allow(sourceIP); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 		s.auditInvitation(r, "invitation_accept_denied", "", identity.AuditOutcomeBlocked, "rate_limited")
@@ -388,9 +415,28 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// EMPTY INTENT IS ACCEPT. Every Accept form posted none before Continue
+	// existed, and a MemQL OS bundle one release behind the identity node
+	// still posts none. Any other value is refused rather than guessed at: a
+	// client that sends one is broken, and reading it as Accept is how a typo
+	// would become a spent invitation.
+	intent := strings.TrimSpace(r.PostForm.Get("intent"))
+	continuing := intent == webtempl.InvitationStepContinue
+	if !continuing && intent != "" && intent != webtempl.InvitationStepAccept {
+		s.auditInvitation(r, "invitation_accept_denied", "", identity.AuditOutcomeBlocked, "unknown_intent")
+		s.renderError(w, r, http.StatusBadRequest, "We couldn't read your form submission. Please try again.")
+		return
+	}
+	// A refused Continue is recorded as one, so the trail does not show an
+	// Accept nobody pressed.
+	denied := "invitation_accept_denied"
+	if continuing {
+		denied = "invitation_continue_denied"
+	}
+
 	code := strings.TrimSpace(r.PostForm.Get("code"))
 	if code == "" {
-		s.auditInvitation(r, "invitation_accept_denied", "", identity.AuditOutcomeBlocked, "missing_code")
+		s.auditInvitation(r, denied, "", identity.AuditOutcomeBlocked, "missing_code")
 		heading, message, nextStep := invitationCopy(InvitationInvalid)
 		w.WriteHeader(http.StatusBadRequest)
 		s.renderInvitationRejection(w, r, InvitationInvalid, heading, message, nextStep)
@@ -399,12 +445,13 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 
 	// RESOLVED AGAIN, not trusted from the GET. The two requests are separate,
 	// minutes may have passed, and the row can have been revoked or spent in
-	// between. Re-resolving is also what makes the binding check meaningful:
-	// it needs the row's current digest, not one the page remembered.
+	// between. Re-resolving is also what makes the binding check meaningful,
+	// for Continue and Accept alike: it needs the row's current digest, not
+	// one the page remembered.
 	res, err := s.resolveInvitation(r.Context(), code)
 	if err != nil {
-		s.Logger.Warn("identity-web: invitation resolve failed on accept", "error", err.Error())
-		s.auditInvitation(r, "invitation_accept_denied", "", identity.AuditOutcomeFailure, "resolve_failed")
+		s.Logger.Warn("identity-web: invitation resolve failed on accept", "error", err.Error(), "intent", intent)
+		s.auditInvitation(r, denied, "", identity.AuditOutcomeFailure, "resolve_failed")
 		w.WriteHeader(http.StatusInternalServerError)
 		s.renderInvitationRejection(w, r, InvitationInvalid,
 			"Something went wrong",
@@ -413,7 +460,7 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if res.State != InvitationValid {
-		s.auditInvitation(r, "invitation_accept_denied", res.InvitationId,
+		s.auditInvitation(r, denied, res.InvitationId,
 			identity.AuditOutcomeBlocked, "invitation_"+strings.ReplaceAll(string(res.State), "-", "_"))
 		heading, message, nextStep := invitationCopy(res.State)
 		w.WriteHeader(invitationRejectionStatus(res.State))
@@ -421,16 +468,25 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !s.invitationBindingMatches(r, res) {
+	if continuing {
+		s.continueInvitation(w, r, code, res)
+		return
+	}
+
+	// ONLY THE BROWSER THAT CONTINUED MAY ACCEPT. Two refusals, because they
+	// send the reader to different places: nobody has pressed Continue (the
+	// page always offers it first, so this is a post that skipped it), or
+	// somebody did in another browser.
+	switch {
+	case strings.TrimSpace(res.BindingHash) == "":
+		s.auditInvitation(r, "invitation_accept_denied", res.InvitationId,
+			identity.AuditOutcomeBlocked, "not_continued")
+		s.refuseInvitation(w, r, InvitationNotContinued)
+		return
+	case !s.invitationBindingMatches(r, res):
 		s.auditInvitation(r, "invitation_accept_denied", res.InvitationId,
 			identity.AuditOutcomeBlocked, "binding_mismatch")
-		w.WriteHeader(http.StatusForbidden)
-		s.renderInvitationRejection(w, r, InvitationInvalid,
-			"Finish in the browser that opened the invitation",
-			"For safety, an invitation can only be accepted in the same browser that first opened it. "+
-				"This looks like a different browser, a different device, or a private window.",
-			"Open the original link again on the device where you first opened it. "+
-				"If you cannot, ask whoever invited you for a fresh invitation.")
+		s.refuseInvitation(w, r, InvitationBoundElsewhere)
 		return
 	}
 
@@ -471,6 +527,94 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 	// they opened the email in, so this is a redirect and not an instruction to
 	// go and do something else.
 	http.Redirect(w, r, "/enroll?code="+url.QueryEscape(out.EnrolmentCode), http.StatusSeeOther)
+}
+
+// continueInvitation binds a live invitation to the browser that pressed
+// Continue and sends it back to the page, where Accept is now offered.
+//
+// res was resolved for this request, so its binding is the row's current one.
+// The write itself is first-write-wins under the store's lock
+// (Store.BindUserInvitation): two browsers pressing at once cannot both win,
+// and the loser arrives here as ErrInvitationBoundElsewhere.
+func (s *Server) continueInvitation(w http.ResponseWriter, r *http.Request, code string, res InvitationResolution) {
+	page := "/invitation?code=" + url.QueryEscape(code)
+
+	if strings.TrimSpace(res.BindingHash) != "" {
+		if s.invitationBindingMatches(r, res) {
+			// This browser already pressed it: a double press, the back
+			// button. Nothing to write, and a second cookie would only replace
+			// one that already works. Its own action, so the trail does not
+			// read as a second binding.
+			s.auditInvitation(r, "invitation_continue_repeated", res.InvitationId, identity.AuditOutcomeSuccess, "")
+			http.Redirect(w, r, page, http.StatusSeeOther)
+			return
+		}
+		s.auditInvitation(r, "invitation_binding_taken", res.InvitationId,
+			identity.AuditOutcomeBlocked, "bound_elsewhere")
+		s.refuseInvitation(w, r, InvitationBoundElsewhere)
+		return
+	}
+
+	nonce := newBindingNonce()
+	if nonce == "" {
+		s.auditInvitation(r, "invitation_binding_not_stamped", res.InvitationId,
+			identity.AuditOutcomeFailure, "nonce_unavailable")
+		s.renderInvitationContinueFailed(w, r)
+		return
+	}
+	switch err := s.bindInvitation(r.Context(), res.InvitationId, hashBindingNonce(nonce)); {
+	case err == nil:
+		// Bound to this browser; its cookie is handed over below.
+
+	case errors.Is(err, identity.ErrInvitationBoundElsewhere):
+		// THE CONTROL WORKING, NOT A FAULT -- and the distinction is the whole
+		// reason this is its own branch.
+		//
+		// Somebody else pressed Continue on this invitation between our
+		// resolve and our stamp. That is precisely the event the binding exists
+		// to catch, so it is recorded as a BLOCKED outcome under its own reason
+		// rather than folded into the failure below. A run of these on one
+		// invitation is the signature of a forwarded email being continued by
+		// more than one person; a run of bind_failed is infrastructure. An
+		// operator grepping the trail must be able to tell those apart, and a
+		// single collapsed reason would make a forwarding incident look like a
+		// database wobble.
+		s.auditInvitation(r, "invitation_binding_taken", res.InvitationId,
+			identity.AuditOutcomeBlocked, "bound_elsewhere")
+		s.refuseInvitation(w, r, InvitationBoundElsewhere)
+		return
+
+	default:
+		// FATAL TO THIS PRESS, where the same failure on the old first-touch
+		// GET was not. The accept refuses an unbound row, so carrying on would
+		// only move the refusal one page later. Nothing was written, so asking
+		// the person to press again is safe, and it is recorded so the trail
+		// shows the binding was never made.
+		s.Logger.Warn("identity-web: invitation binding stamp failed",
+			"error", err.Error(), "invitationId", res.InvitationId)
+		s.auditInvitation(r, "invitation_binding_not_stamped", res.InvitationId,
+			identity.AuditOutcomeFailure, "bind_failed")
+		s.renderInvitationContinueFailed(w, r)
+		return
+	}
+
+	s.writeBindingCookie(w, invitationCookieName, invitationCookiePath, nonce, time.Until(res.ExpiresAt))
+	s.auditInvitation(r, "invitation_continued", res.InvitationId, identity.AuditOutcomeSuccess, "")
+
+	// Back to the page, which now offers Accept to this browser. A redirect
+	// rather than the page itself, so a reload re-reads the row rather than
+	// re-posting the form.
+	http.Redirect(w, r, page, http.StatusSeeOther)
+}
+
+// renderInvitationContinueFailed answers a Continue whose binding could not be
+// written. Nothing changed, so the next step is simply to press it again.
+func (s *Server) renderInvitationContinueFailed(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusInternalServerError)
+	s.renderInvitationRejection(w, r, InvitationInvalid,
+		"Something went wrong",
+		"We could not continue with this invitation just now.",
+		"Open the link again in a moment and press Continue.")
 }
 
 // acceptViaStepUp handles the privileged-role branch: issue a magic link to the
@@ -526,17 +670,20 @@ func invitationCodeFrom(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("invitation"))
 }
 
-// invitationBindingMatches reports whether this browser holds the first-touch
-// nonce for the row.
+// invitationBindingMatches reports whether this browser holds the nonce whose
+// digest is bound to the row: whether it is the browser that pressed Continue.
 //
-// A row with NO binding admits the accept. That is not a hole left open: rows
-// issued before this control existed carry no digest, and refusing them would
-// invalidate every invitation already in flight at deploy time. The same
-// judgment magicLinkRequest.bindingHash records for its own pre-existing rows.
+// AN UNBOUND ROW MATCHES NO BROWSER. It used to admit the accept, because rows
+// issued before binding existed carried no digest and refusing them would have
+// invalidated every invitation in flight at deploy time. That reason is gone:
+// an unbound row is now offered Continue, which binds it, so refusing it at
+// accept strands nobody -- it refuses only a post that skipped the step the
+// page always shows first. What refusing buys is one invariant: every accepted
+// invitation was continued in the browser that accepted it.
 func (s *Server) invitationBindingMatches(r *http.Request, res InvitationResolution) bool {
 	want := strings.TrimSpace(res.BindingHash)
 	if want == "" {
-		return true
+		return false
 	}
 	c, err := r.Cookie(invitationCookieName)
 	if err != nil || c == nil || strings.TrimSpace(c.Value) == "" {
@@ -553,8 +700,9 @@ func (s *Server) invitationBindingMatches(r *http.Request, res InvitationResolut
 // newBindingNonce mints the 32-byte CSPRNG value handed to the browser.
 //
 // Returns the empty string on the (impossible in practice) failure of the
-// system entropy source, which the caller treats as "no binding for this row"
-// rather than as a reason to refuse a valid invitation.
+// system entropy source. Continue then refuses rather than leaving the row
+// unbound: an unbound row cannot be accepted, so carrying on would only move
+// the refusal one page later.
 func newBindingNonce() string {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
@@ -649,8 +797,22 @@ func (s *Server) requireSecureInvitation(w http.ResponseWriter, r *http.Request,
 // entirely, and only "invalid" leaves someone with nothing but the link to
 // re-check. Collapsing them would send four of those five people to the wrong
 // place. /enroll makes the same argument for its four.
+//
+// Plus two about this browser rather than the row: "bound elsewhere" sends the
+// reader back to the browser where Continue was pressed, and "not continued"
+// to the step they skipped.
 func invitationCopy(state InvitationState) (heading, message, nextStep string) {
 	switch state {
+	case InvitationBoundElsewhere:
+		return "Finish in the browser you continued with",
+			"For safety, an invitation can only be accepted in the same browser it was continued with. " +
+				"This looks like a different browser, a different device, or a private window.",
+			"Open the original link again in the browser where you pressed Continue. " +
+				"If you cannot, ask whoever invited you for a fresh invitation."
+	case InvitationNotContinued:
+		return "Press Continue first",
+			"An invitation is accepted in the browser where Continue was pressed, and it has not been pressed yet.",
+			"Open the link in your invitation email again and press Continue."
 	case InvitationExpired:
 		return "This invitation has expired",
 			"Invitations are time-limited on purpose, and this one ran out before it was used.",
@@ -683,11 +845,18 @@ func invitationRejectionStatus(state InvitationState) int {
 		return http.StatusGone
 	case InvitationAlreadyUsed:
 		return http.StatusConflict
-	case InvitationRevoked, InvitationWrongKind:
+	case InvitationRevoked, InvitationWrongKind, InvitationBoundElsewhere, InvitationNotContinued:
 		return http.StatusForbidden
 	default:
 		return http.StatusNotFound
 	}
+}
+
+// refuseInvitation writes the refusal page for state, with its status and copy.
+func (s *Server) refuseInvitation(w http.ResponseWriter, r *http.Request, state InvitationState) {
+	heading, message, nextStep := invitationCopy(state)
+	w.WriteHeader(invitationRejectionStatus(state))
+	s.renderInvitationRejection(w, r, state, heading, message, nextStep)
 }
 
 func (s *Server) renderInvitationRejection(w http.ResponseWriter, r *http.Request, state InvitationState, heading, message, nextStep string) {

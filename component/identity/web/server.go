@@ -292,9 +292,10 @@ type Server struct {
 	enrolLimiterOnce  sync.Once
 
 	// Invitation redeem (memql#4601). resolveInvitation validates a presented
-	// invitation token, bindInvitation stamps the first-touch browser binding,
-	// acceptInvitation spends it (provision + mark accepted + mint the
-	// enrolment token), and invitationAudit receives one event per outcome.
+	// invitation token, bindInvitation stamps the browser binding when the
+	// invitee presses Continue, acceptInvitation spends it (provision + mark
+	// accepted + mint the enrolment token), and invitationAudit receives one
+	// event per outcome.
 	//
 	// All four are wired together by SetInvitationFlow and all four must be
 	// non-nil for either route to mount, the same all-or-nothing judgment the
@@ -546,11 +547,13 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// above -- the invitation code IS the credential, so neither route is
 	// wrapped in preAuth. Mounts only when the whole flow is wired.
 	//
-	// TWO ROUTES, AND THE SPLIT IS LOAD-BEARING. The GET renders and never
-	// spends; the POST spends. Enterprise mail security prefetches URLs out of
-	// email to scan them, so a GET that consumed the invitation would be burnt
-	// by a scanner before its recipient ever clicked -- see the note at the top
-	// of invitation.go.
+	// TWO ROUTES, AND THE SPLIT IS LOAD-BEARING. The GET renders and writes
+	// nothing; the POST carries both writes, Continue (intent=continue, which
+	// binds the invitation to the browser) and Accept (which spends it).
+	// Enterprise mail security prefetches URLs out of email to scan them, so a
+	// GET that consumed the invitation -- or bound it -- would hand it to a
+	// scanner before its recipient ever clicked. See the notes at the top of
+	// invitation.go.
 	if s.resolveInvitation != nil && s.bindInvitation != nil && s.acceptInvitation != nil && s.invitationAudit != nil {
 		mux.HandleFunc("GET /invitation", wrap(s.handleInvitationGet))
 		mux.HandleFunc("POST /invitation/accept", wrap(s.handleInvitationAccept))

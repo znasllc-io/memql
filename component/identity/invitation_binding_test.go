@@ -2,17 +2,19 @@ package identity
 
 // invitation_binding_test.go -- memql#4601.
 //
-// First-touch binding is a control with two silent failure modes, and neither
-// one shows up as a broken flow:
+// The invitation's browser binding (stamped when the invitee presses Continue)
+// is a control with two silent failure modes, and neither one shows up as a
+// broken test:
 //
 //  1. THE PROJECTION. `bindingHash` can exist on the concept, be written by the
 //     mutation, and still never reach Go, because the query the store runs
 //     selects an explicit field list through a shape. A field the shape omits
 //     comes back as the zero value, and for this field the zero value is not
-//     "unknown" -- it reads as "no browser has bound this row", which is the
-//     state the accept path is required to admit. So the whole control fails
-//     OPEN, and it does so with every test that stubs the engine still green.
-//     That is not hypothetical: `active` and `inviteeRole` were lifted by
+//     "unknown" -- it reads as "nobody has pressed Continue". Through the by-id
+//     re-read BindUserInvitation runs, every Continue then re-binds the row and
+//     the invitation belongs to whoever pressed last: the control fails OPEN,
+//     with every test that stubs the engine still green. That is not
+//     hypothetical: `active` and `inviteeRole` were lifted by
 //     LookupInvitationByTokenHash while invitationFull omitted them, for the
 //     same reason and with the same silence.
 //
@@ -219,8 +221,9 @@ func TestInvitationLookupsProjectTheBindingHash(t *testing.T) {
 			if !slices.Contains(paths, "bindingHash") {
 				t.Errorf("%s runs %s, whose shape projects %v -- no bindingHash.\n\t"+
 					"The lift in firstInvitationRow then reads the empty string, which does not "+
-					"mean \"unknown\": it means \"no browser has bound this row\", and the accept "+
-					"path admits an unbound row. The control fails OPEN and nothing says so.",
+					"mean \"unknown\": it means \"nobody has pressed Continue\". Through the by-id "+
+					"re-read every Continue re-binds the row, so the invitation belongs to whoever "+
+					"pressed last; through the token lookup every Accept is refused. Nothing says so.",
 					tc.name, name, paths)
 			}
 		})
@@ -252,14 +255,15 @@ func TestInvitationLookupsLiftTheBindingHash(t *testing.T) {
 			}
 			if row.BindingHash != bindTestHash {
 				t.Errorf("%s lifted BindingHash = %q, want %q. An empty one reads as an unbound "+
-					"row, which is the state the accept path lets through", tc.name, row.BindingHash, bindTestHash)
+					"row: one any Continue may re-bind, and one every Accept is refused on",
+					tc.name, row.BindingHash, bindTestHash)
 			}
 		})
 	}
 }
 
-// TestBindUserInvitationStampsAnUnboundRow is the happy path: first touch
-// writes, through the @serverOnly gate's internal origin.
+// TestBindUserInvitationStampsAnUnboundRow is the happy path: the first
+// Continue writes, through the @serverOnly gate's internal origin.
 func TestBindUserInvitationStampsAnUnboundRow(t *testing.T) {
 	e := &bindingEngine{row: boundRow("")}
 	s := &Store{Engine: e}
@@ -291,7 +295,7 @@ func TestBindUserInvitationStampsAnUnboundRow(t *testing.T) {
 //
 // A second browser must not be able to take a binding the first one holds. If
 // it could, a forwarded invitation would be redeemable by the forwardee, which
-// is the entire thing first-touch binding exists to stop.
+// is the entire thing the binding exists to stop.
 //
 // Failing-first: delete the existing-binding branch from BindUserInvitation and
 // this reports a write that should not have happened.
@@ -311,15 +315,14 @@ func TestBindUserInvitationRefusesToMoveAnExistingBinding(t *testing.T) {
 }
 
 // TestBindUserInvitationIsIdempotentForTheSameBrowser keeps the refusal above
-// from being a trap for the ordinary case: a reload, a back button or a
-// prefetch re-touches the link from the SAME browser, and that must not read as
-// an attack.
+// from being a trap for the ordinary case: the SAME browser's digest arriving
+// again (a caller repeating a write that landed) must not read as an attack.
 func TestBindUserInvitationIsIdempotentForTheSameBrowser(t *testing.T) {
 	e := &bindingEngine{row: boundRow(bindTestHash)}
 	s := &Store{Engine: e}
 
 	if err := s.BindUserInvitation(context.Background(), bindTestInvitationId, bindTestHash); err != nil {
-		t.Fatalf("a re-touch by the same browser was refused: %v", err)
+		t.Fatalf("a repeat by the same browser was refused: %v", err)
 	}
 	if writes := e.writes(); len(writes) != 0 {
 		t.Errorf("the store re-wrote an identical binding (%v). Harmless today, but it makes the "+
@@ -420,11 +423,12 @@ func TestAuthoredBindUserInvitationWritesOnlyTheBinding(t *testing.T) {
 	fields := writeFieldSources(t, stmt)
 	if fields["bindingHash"] != "args.bindingHash" {
 		t.Errorf("the write does not carry bindingHash: args.bindingHash (payload: %s), so the "+
-			"binding is never recorded and the accept path admits every browser", stmt.PayloadRaw)
+			"binding is never recorded: Continue appears to work, the page offers it again, and "+
+			"every Accept is refused", stmt.PayloadRaw)
 	}
 	for _, forbidden := range []string{"status", "active", "respondedAt", "inviteeId"} {
 		if _, touched := fields[forbidden]; touched {
-			t.Errorf("the write touches %q (payload: %s). Opening a link is not responding to an "+
+			t.Errorf("the write touches %q (payload: %s). Pressing Continue is not responding to an "+
 				"invitation: a bind that moved the lifecycle would spend the invitation for a "+
 				"person who has not accepted anything yet", forbidden, stmt.PayloadRaw)
 		}

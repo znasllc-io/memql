@@ -29,8 +29,8 @@ import "strings"
 type InvitationData struct {
 	Layout LayoutData
 
-	// Code is the presented invitation token, carried into the accept form's
-	// hidden field so the POST can re-resolve it.
+	// Code is the presented invitation token, carried into the Continue and
+	// Accept forms' hidden field so the POST can re-resolve it.
 	//
 	// IT IS ALREADY IN THE ADDRESS BAR. Putting it in a hidden input adds no
 	// exposure the URL did not already carry, and the alternative -- holding it
@@ -40,9 +40,11 @@ type InvitationData struct {
 	Code string
 
 	// Rejection is "" on the live path. Otherwise it is the machine-readable
-	// state: "invalid", "expired", "already-used", "revoked" or "wrong-kind".
-	// Rendered into a data attribute so a test (and a support engineer reading
-	// a screenshot) can tell them apart without matching on prose.
+	// state: "invalid", "expired", "already-used", "revoked" or "wrong-kind"
+	// about the row, or "bound-elsewhere" or "not-continued" about this
+	// browser. Rendered into a data attribute so a test (and a support
+	// engineer reading a screenshot) can tell them apart without matching on
+	// prose.
 	Rejection string
 
 	// Heading and Message are the refusal's human text. Empty on the live path.
@@ -74,7 +76,25 @@ type InvitationData struct {
 	// straight to a passkey. The page says so BEFORE the button is pressed:
 	// an extra step that arrives unannounced reads as the flow failing.
 	StepUp bool
+
+	// Step is which of the live page's two steps this browser is at, decided
+	// by the GET from the row's binding and this browser's cookie:
+	// InvitationStepContinue while nobody has pressed Continue, and
+	// InvitationStepAccept for the browser that did. Live path only; any
+	// other browser gets a refusal, not a step. Anything but
+	// InvitationStepAccept renders Continue, so the page never shows a button
+	// the server can only refuse.
+	Step string
 }
+
+// The live page's two steps. The Continue form posts InvitationStepContinue
+// back as its `intent`, which binds the invitation to the browser that pressed
+// it; the Accept form posts no intent, which the handler reads as Accept (it is
+// what every Accept form posted before Continue existed).
+const (
+	InvitationStepContinue = "continue"
+	InvitationStepAccept   = "accept"
+)
 
 // InviterSentence attributes the invitation, or says nothing.
 //
@@ -99,10 +119,13 @@ func (d InvitationData) RoleSentence() string {
 
 // Invitation renders the invitation page.
 //
-// ONE BUTTON, AND IT POSTS. The form method is the security boundary, not a
-// preference: enterprise mail security prefetches URLs out of email, so a link
-// that accepted on GET would be spent by a scanner before its recipient
-// clicked. See the note at the top of component/identity/web/invitation.go.
+// ONE BUTTON PER STEP, AND EVERY ONE POSTS. The form method is the security
+// boundary, not a preference: enterprise mail security prefetches URLs out of
+// email, so a link that accepted -- or bound itself to a browser -- on GET
+// would be taken by a scanner before its recipient clicked. Continue binds the
+// invitation to this browser; Accept, shown only to the browser that
+// continued, spends it. See the notes at the top of
+// component/identity/web/invitation.go.
 func Invitation(data InvitationData) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -144,7 +167,7 @@ func Invitation(data InvitationData) templ.Component {
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Rejection)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 101, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 124, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 				if templ_7745c5c3_Err != nil {
@@ -157,7 +180,7 @@ func Invitation(data InvitationData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Heading)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 105, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 128, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -170,7 +193,7 @@ func Invitation(data InvitationData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.Message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 106, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 129, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -188,7 +211,7 @@ func Invitation(data InvitationData) templ.Component {
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(data.NextStep)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 108, Col: 59}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 131, Col: 59}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -211,7 +234,7 @@ func Invitation(data InvitationData) templ.Component {
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(data.InviterSentence())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 115, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 138, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -224,7 +247,7 @@ func Invitation(data InvitationData) templ.Component {
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(data.RoleSentence())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 115, Col: 53}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 138, Col: 53}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -242,7 +265,7 @@ func Invitation(data InvitationData) templ.Component {
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(data.InviteeEmail)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 119, Col: 56}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 142, Col: 56}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 					if templ_7745c5c3_Err != nil {
@@ -261,7 +284,7 @@ func Invitation(data InvitationData) templ.Component {
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(data.ExpiresIn)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 124, Col: 54}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 147, Col: 54}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 					if templ_7745c5c3_Err != nil {
@@ -272,54 +295,99 @@ func Invitation(data InvitationData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				if data.StepUp {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<p class=\"text-small text-subtle\">Because this invitation grants an elevated role, we will email a sign-in link to that address to confirm it is yours before your account is created.</p>")
+				if data.Step == InvitationStepAccept {
+					if data.StepUp {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<p class=\"text-small text-subtle\">Because this invitation grants an elevated role, we will email a sign-in link to that address to confirm it is yours before your account is created.</p>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<p class=\"text-small text-subtle\">Accepting creates your account and sets up a passkey, so you sign in with the unlock you already use on this device. There is nothing to remember and nothing to type.</p>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " <form method=\"POST\" action=\"/invitation/accept\" data-submit-once>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = CSRFField(data.Layout.CSRFToken).Render(ctx, templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<input type=\"hidden\" name=\"code\" value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var11 string
+					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Code)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 166, Col: 56}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\"><div class=\"mt-2\"><button type=\"submit\" class=\"btn btn-primary\" data-pending-label=\"Working...\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if data.StepUp {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "Send my sign-in link")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "Accept the invitation")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</button></div></form>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<p class=\"text-small text-subtle\">Accepting creates your account and sets up a passkey, so you sign in with the unlock you already use on this device. There is nothing to remember and nothing to type.</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<p class=\"text-small text-subtle\">Only the browser where you press Continue can accept this invitation.</p><form method=\"POST\" action=\"/invitation/accept\" data-submit-once>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = CSRFField(data.Layout.CSRFToken).Render(ctx, templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<input type=\"hidden\" name=\"code\" value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var12 string
+					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Code)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 183, Col: 56}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\"> <input type=\"hidden\" name=\"intent\" value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var13 string
+					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(InvitationStepContinue)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 184, Col: 71}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"><div class=\"mt-2\"><button type=\"submit\" class=\"btn btn-primary\" data-pending-label=\"Working...\">Continue</button></div></form>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<form method=\"POST\" action=\"/invitation/accept\" data-submit-once>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = CSRFField(data.Layout.CSRFToken).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<input type=\"hidden\" name=\"code\" value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var11 string
-				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Code)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `invitation.templ`, Line: 142, Col: 55}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\"><div class=\"mt-2\"><button type=\"submit\" class=\"btn btn-primary\" data-pending-label=\"Working...\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if data.StepUp {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "Send my sign-in link")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "Accept the invitation")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</button></div></form></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

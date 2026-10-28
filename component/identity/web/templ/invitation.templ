@@ -21,8 +21,8 @@ import "strings"
 type InvitationData struct {
 	Layout LayoutData
 
-	// Code is the presented invitation token, carried into the accept form's
-	// hidden field so the POST can re-resolve it.
+	// Code is the presented invitation token, carried into the Continue and
+	// Accept forms' hidden field so the POST can re-resolve it.
 	//
 	// IT IS ALREADY IN THE ADDRESS BAR. Putting it in a hidden input adds no
 	// exposure the URL did not already carry, and the alternative -- holding it
@@ -32,9 +32,11 @@ type InvitationData struct {
 	Code string
 
 	// Rejection is "" on the live path. Otherwise it is the machine-readable
-	// state: "invalid", "expired", "already-used", "revoked" or "wrong-kind".
-	// Rendered into a data attribute so a test (and a support engineer reading
-	// a screenshot) can tell them apart without matching on prose.
+	// state: "invalid", "expired", "already-used", "revoked" or "wrong-kind"
+	// about the row, or "bound-elsewhere" or "not-continued" about this
+	// browser. Rendered into a data attribute so a test (and a support
+	// engineer reading a screenshot) can tell them apart without matching on
+	// prose.
 	Rejection string
 
 	// Heading and Message are the refusal's human text. Empty on the live path.
@@ -66,7 +68,25 @@ type InvitationData struct {
 	// straight to a passkey. The page says so BEFORE the button is pressed:
 	// an extra step that arrives unannounced reads as the flow failing.
 	StepUp bool
+
+	// Step is which of the live page's two steps this browser is at, decided
+	// by the GET from the row's binding and this browser's cookie:
+	// InvitationStepContinue while nobody has pressed Continue, and
+	// InvitationStepAccept for the browser that did. Live path only; any
+	// other browser gets a refusal, not a step. Anything but
+	// InvitationStepAccept renders Continue, so the page never shows a button
+	// the server can only refuse.
+	Step string
 }
+
+// The live page's two steps. The Continue form posts InvitationStepContinue
+// back as its `intent`, which binds the invitation to the browser that pressed
+// it; the Accept form posts no intent, which the handler reads as Accept (it is
+// what every Accept form posted before Continue existed).
+const (
+	InvitationStepContinue = "continue"
+	InvitationStepAccept   = "accept"
+)
 
 // InviterSentence attributes the invitation, or says nothing.
 //
@@ -91,10 +111,13 @@ func (d InvitationData) RoleSentence() string {
 
 // Invitation renders the invitation page.
 //
-// ONE BUTTON, AND IT POSTS. The form method is the security boundary, not a
-// preference: enterprise mail security prefetches URLs out of email, so a link
-// that accepted on GET would be spent by a scanner before its recipient
-// clicked. See the note at the top of component/identity/web/invitation.go.
+// ONE BUTTON PER STEP, AND EVERY ONE POSTS. The form method is the security
+// boundary, not a preference: enterprise mail security prefetches URLs out of
+// email, so a link that accepted -- or bound itself to a browser -- on GET
+// would be taken by a scanner before its recipient clicked. Continue binds the
+// invitation to this browser; Accept, shown only to the browser that
+// continued, spends it. See the notes at the top of
+// component/identity/web/invitation.go.
 templ Invitation(data InvitationData) {
 	@Layout(data.Layout) {
 		if data.Rejection != "" {
@@ -124,32 +147,48 @@ templ Invitation(data InvitationData) {
 						It is single-use and expires in { data.ExpiresIn }.
 					</p>
 				}
-				if data.StepUp {
-					<p class="text-small text-subtle">
-						Because this invitation grants an elevated role, we will email a
-						sign-in link to that address to confirm it is yours before your
-						account is created.
-					</p>
+				if data.Step == InvitationStepAccept {
+					if data.StepUp {
+						<p class="text-small text-subtle">
+							Because this invitation grants an elevated role, we will email a
+							sign-in link to that address to confirm it is yours before your
+							account is created.
+						</p>
+					} else {
+						<p class="text-small text-subtle">
+							Accepting creates your account and sets up a passkey, so you sign in
+							with the unlock you already use on this device. There is nothing to
+							remember and nothing to type.
+						</p>
+					}
+					<form method="POST" action="/invitation/accept" data-submit-once>
+						@CSRFField(data.Layout.CSRFToken)
+						<input type="hidden" name="code" value={ data.Code }/>
+						<div class="mt-2">
+							<button type="submit" class="btn btn-primary" data-pending-label="Working...">
+								if data.StepUp {
+									Send my sign-in link
+								} else {
+									Accept the invitation
+								}
+							</button>
+						</div>
+					</form>
 				} else {
 					<p class="text-small text-subtle">
-						Accepting creates your account and sets up a passkey, so you sign in
-						with the unlock you already use on this device. There is nothing to
-						remember and nothing to type.
+						Only the browser where you press Continue can accept this invitation.
 					</p>
+					<form method="POST" action="/invitation/accept" data-submit-once>
+						@CSRFField(data.Layout.CSRFToken)
+						<input type="hidden" name="code" value={ data.Code }/>
+						<input type="hidden" name="intent" value={ InvitationStepContinue }/>
+						<div class="mt-2">
+							<button type="submit" class="btn btn-primary" data-pending-label="Working...">
+								Continue
+							</button>
+						</div>
+					</form>
 				}
-				<form method="POST" action="/invitation/accept" data-submit-once>
-					@CSRFField(data.Layout.CSRFToken)
-					<input type="hidden" name="code" value={ data.Code }/>
-					<div class="mt-2">
-						<button type="submit" class="btn btn-primary" data-pending-label="Working...">
-							if data.StepUp {
-								Send my sign-in link
-							} else {
-								Accept the invitation
-							}
-						</button>
-					</div>
-				</form>
 			</div>
 		}
 	}

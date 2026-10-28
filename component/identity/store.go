@@ -2152,10 +2152,12 @@ type InvitationRow struct {
 	ExpiresAt   time.Time
 	RespondedAt time.Time
 	// BindingHash is the SHA-256 hex digest of the nonce handed as a cookie to
-	// the browser that FIRST opened this invitation link (memql#4601). Empty
-	// means no browser has touched the row yet, or that it predates first-touch
-	// binding; the accept path decides what an unbound row is worth, which is
-	// why this is projected rather than judged here.
+	// the browser in which the invitee pressed Continue on the invitation page
+	// (memql#4601). Rows the page bound on first open, before it waited for
+	// Continue, keep that binding. Empty means nobody has pressed Continue;
+	// the web layer decides what an unbound row is worth (it offers Continue
+	// and refuses Accept), which is why this is projected rather than judged
+	// here.
 	BindingHash string
 	// GroupIds are the groups the recipient joins on acceptance (epic
 	// memql#5165, section G). Validated at ISSUE; the accept path writes one
@@ -2193,8 +2195,8 @@ func (s *Store) LookupInvitationByTokenHash(ctx context.Context, tokenHash strin
 }
 
 // LookupInvitationById is the by-id twin of LookupInvitationByTokenHash, for a
-// caller that already resolved the row once and holds its id -- the first-touch
-// binding re-read below is the first of those.
+// caller that already resolved the row once and holds its id -- the binding
+// re-read below is the first of those.
 //
 // Not @serverOnly, so no internal origin: invitationById is client-reachable and
 // carries its own tracked caller-scope debt (see
@@ -2218,8 +2220,10 @@ func (s *Store) LookupInvitationById(ctx context.Context, invitationId string) (
 // shape (invitationFull), and a field lifted in one projection and forgotten in
 // the other is a silent hole rather than a compile error: the caller reads the
 // zero value and concludes the row does not carry the field. bindingHash is the
-// field where that costs the most -- an empty one reads as "no browser has
-// bound this yet", which is the state the accept path admits (memql#4601).
+// field where that costs the most -- an empty one reads as "nobody has pressed
+// Continue yet" (memql#4601). Dropped from the by-id re-read, it lets every
+// Continue overwrite the binding, so the invitation belongs to whoever pressed
+// last; dropped from the token lookup, every Accept is refused.
 func firstInvitationRow(nodes []*memqlv1.MemoryNode) *InvitationRow {
 	if len(nodes) == 0 || nodes[0] == nil {
 		return nil
@@ -2242,22 +2246,23 @@ func firstInvitationRow(nodes []*memqlv1.MemoryNode) *InvitationRow {
 	}
 }
 
-// Sentinel outcomes of the first-touch binding write. Both are ordinary
-// results of the flow rather than failures, and a caller that treats every
-// non-nil error as a 500 will render the wrong page for the second one.
+// Sentinel outcomes of the binding write. Both are ordinary results of the
+// flow rather than failures, and a caller that treats every non-nil error as a
+// 500 will render the wrong page for the second one.
 var (
 	// ErrInvitationNotFound means no invitation row exists at that id.
 	ErrInvitationNotFound = errors.New("identity.store: invitation not found")
 	// ErrInvitationBoundElsewhere means the row already carries a DIFFERENT
 	// browser's binding. It is the refusal the control exists to produce: the
-	// person holding this tab is not the person who opened the link first.
-	// Distinguished from a re-touch by the SAME browser, which returns nil,
-	// because a reload must not look like an attack.
+	// person holding this tab is not the person who pressed Continue first.
+	// Distinguished from a repeat by the SAME browser, which returns nil,
+	// because a double press must not look like an attack.
 	ErrInvitationBoundElsewhere = errors.New("identity.store: invitation is bound to another browser")
 )
 
-// BindUserInvitation stamps the first-touch browser binding on a user
-// invitation, and refuses to move one that is already set (memql#4601).
+// BindUserInvitation stamps the browser binding on a user invitation when its
+// invitee presses Continue, and refuses to move one that is already set
+// (memql#4601).
 //
 // An emailed credential's holder is, on its own, anybody who can read the
 // mailbox: a forwarded message, a shared alias, a scanner that follows links.
@@ -2268,8 +2273,14 @@ var (
 // it lives in the recipient's cookie and nowhere else, the same arrangement
 // magicLinkRequest.bindingHash makes for the magic-link flow.
 //
+// THE CALLER IS A POST, NEVER THE PAGE'S GET. The page used to call this on the
+// first GET of the link, so whatever fetched it first -- a scanner, a link
+// preview, an email app's own browser -- took the binding and the invitee was
+// refused in their own browser. component/identity/web/invitation.go records
+// why it now waits for the invitee to press Continue.
+//
 // THE NO-OVERWRITE RULE IS THE CONTROL, NOT HYGIENE. A row a second browser can
-// re-bind is an unbound row: the forwardee opens the link, takes the binding,
+// re-bind is an unbound row: the forwardee presses Continue, takes the binding,
 // and the accept then completes for them while the person the invitation names
 // is locked out of their own invitation. So the write happens only from empty.
 //
@@ -2293,15 +2304,15 @@ var (
 // beside the others in magic_link_gate.go.
 //
 // WHICH ERROR IT IS MATTERS TO THE CALLER, which is why there are two
-// sentinels. A failure to STAMP is not fatal to the redeem: refusing to serve
-// the invitation page because a binding could not be written would strand
-// somebody whose invitation is perfectly good, so the caller may proceed while
-// recording that the control was not applied to this row -- what it must never
-// do is fail silently, which is why the error is returned rather than
-// swallowed. ErrInvitationBoundElsewhere is the opposite of that: not the
-// control failing but the control WORKING, on a browser that must not be let
-// through. A caller that collapses the two into "binding unavailable, carry on"
-// has removed the protection while appearing to log it.
+// sentinels. A failure to STAMP is infrastructure: nothing was written, the
+// row stays unbound, and the caller asks the person to press Continue again --
+// it cannot carry on, because the accept refuses an unbound row -- recording
+// that the binding was never made. What it must never do is fail silently,
+// which is why the error is returned rather than swallowed.
+// ErrInvitationBoundElsewhere is the opposite of that: not the control failing
+// but the control WORKING, on a browser that must not be let through. A caller
+// that collapses the two into one "binding unavailable" answer has made a
+// forwarding incident look like a database wobble.
 //
 // LIFECYCLE IS NOT JUDGED HERE. The row is pending when the flow calls this, but
 // an accepted or revoked one is not refused: status is what the accept path
@@ -2333,9 +2344,11 @@ func (s *Store) BindUserInvitation(ctx context.Context, invitationId, bindingHas
 		}
 		if existing := strings.TrimSpace(row.BindingHash); existing != "" {
 			if existing == bindingHash {
-				// The same browser, touching again -- a reload, a back button,
-				// a prefetch. Idempotent by design: this is the ordinary case,
-				// not a near-miss.
+				// The same digest again: a caller repeating a write that
+				// already landed. Idempotent by design -- a repeat by the
+				// browser that holds the binding is not a near-miss. (The web
+				// layer answers a second Continue from that browser without
+				// calling here at all.)
 				return nil
 			}
 			return ErrInvitationBoundElsewhere
