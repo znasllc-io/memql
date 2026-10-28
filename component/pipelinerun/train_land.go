@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelinenotify"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // train_land.go -- the owner's approval and the landing (design record,
@@ -276,20 +277,25 @@ func (i *Integration) handleTrainExpress(ctx context.Context, args map[string]an
 
 // intListArg reads a list of whole numbers: the engine hands a JSON number
 // as float64, and a fraction or a non-number is dropped rather than rounded.
+//
+// narrowing: ZERO -- every caller passes the list through uniquePositive,
+// which reads 0 as "not a pull request", so a number no int holds is dropped
+// with the fractions instead of saturating into a pull request that does not
+// exist.
 func intListArg(args map[string]any, key string) []int {
 	list, _ := args[key].([]any)
 	var out []int
 	for _, v := range list {
 		switch n := v.(type) {
 		case float64:
-			if n == float64(int(n)) {
-				out = append(out, int(n))
+			if whole, ok := num.WholeInt64(n); ok {
+				out = append(out, num.Int64OrZero(whole))
 			}
 		case int:
 			out = append(out, n)
 		case int64:
-			out = append(out, int(n))
+			out = append(out, num.Int64OrZero(n))
 		}
 	}
-	return out
+	return slices.DeleteFunc(out, func(n int) bool { return n == 0 })
 }

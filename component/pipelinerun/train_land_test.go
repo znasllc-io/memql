@@ -172,3 +172,20 @@ func TestExpressRefusesAnotherOwner(t *testing.T) {
 		t.Fatal("an express train started with no person behind it")
 	}
 }
+
+// TestExpressPullRequestNumbersAreWholeAndInRange: a pull request number
+// arrives as a JSON number, so 2^63 -- one past int64 -- must be dropped, not
+// narrowed to the largest int and treated as a pull request, and a fraction or
+// a string is dropped rather than rounded.
+func TestExpressPullRequestNumbersAreWholeAndInRange(t *testing.T) {
+	got := intListArg(map[string]any{"pullRequests": []any{float64(1 << 63), 12.0, 3.5, "7", int64(5), int(9)}}, "pullRequests")
+	want := []int{12, 5, 9}
+	if len(got) != len(want) {
+		t.Fatalf("intListArg = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("intListArg = %v, want %v", got, want)
+		}
+	}
+}
