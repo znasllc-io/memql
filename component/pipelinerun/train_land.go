@@ -31,20 +31,7 @@ func (i *Integration) awaitApproval(ctx context.Context, d Deps, s pipelines.Tra
 	if err != nil {
 		return err
 	}
-	open, merged, err := gh.PullRequestOpen(ctx, token, p.Repository, t.PullRequest)
-	if err != nil {
-		return err
-	}
-	switch {
-	case merged:
-		// Merged by hand: what landed is the owner's own doing.
-		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainLanded)})
-		return err
-	case !open:
-		cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed.")})
-		if err == nil && ok {
-			retireTrain(ctx, d, gh, token, p, Train{Branch: cancelled.Branch}, "")
-		}
+	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 		return err
 	}
 	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
@@ -92,50 +79,107 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 	if err != nil {
 		return err
 	}
-	open, merged, err := gh.PullRequestOpen(ctx, token, p.Repository, t.PullRequest)
+	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
+		return err
+	}
+	head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
 	if err != nil {
 		return err
 	}
-	landed := t.LandedSHA
-	if !merged {
-		if !open {
-			cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed before it landed.")})
-			if err == nil && ok {
-				retireTrain(ctx, d, gh, token, p, Train{Branch: cancelled.Branch}, "")
-			}
+	if head != t.BaseSHA {
+		updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1), ApprovedBy: ptr(""), ApprovedSHA: ptr("")})
+		if err != nil || !ok {
 			return err
 		}
-		head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
-		if err != nil {
-			return err
-		}
-		if head != t.BaseSHA {
-			updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1), ApprovedBy: ptr(""), ApprovedSHA: ptr("")})
-			if err != nil || !ok {
-				return err
-			}
-			return i.build(ctx, d, s, p, updated)
-		}
-		sha, err := gh.MergePullRequest(ctx, token, p.Repository, t.PullRequest, t.HeadSHA)
-		if err != nil {
-			if status := githubapp.StatusOf(err); status == http.StatusConflict || status == http.StatusMethodNotAllowed {
-				return i.hold(ctx, d, s, p, t, fmt.Sprintf("GitHub would not merge the approved train (%d). Its head or main moved, or a rule refused it.", status), nil, "")
-			}
-			return err
-		}
-		landed = sha
+		return i.build(ctx, d, s, p, updated)
 	}
-	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainLanded), LandedSHA: ptr(landed)})
+	sha, err := gh.MergePullRequest(ctx, token, p.Repository, t.PullRequest, t.HeadSHA)
+	if err != nil {
+		status := githubapp.StatusOf(err)
+		if status != http.StatusConflict && status != http.StatusMethodNotAllowed {
+			return err
+		}
+		// GitHub refused the merge. It may have refused it because the
+		// pull request is already merged -- another tick, or the owner, got
+		// there first -- and then the train landed.
+		if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
+			return err
+		}
+		return i.hold(ctx, d, s, p, t, fmt.Sprintf("GitHub would not merge the approved train (%d). Its head or main moved, or a rule refused it.", status), nil, "")
+	}
+	return i.recordLanded(ctx, d, s, p, t, gh, token, sha)
+}
+
+// settleClosedTrain reads the train pull request and finishes a train whose
+// pull request is no longer open: merged, it landed -- by the App, by the
+// owner on GitHub, or on a tick that died before recording it -- and closed,
+// it is cancelled. It reports whether it finished the train.
+func (i *Integration) settleClosedTrain(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string) (bool, error) {
+	if t.PullRequest <= 0 {
+		return false, nil
+	}
+	st, err := gh.PullRequestState(ctx, token, p.Repository, t.PullRequest)
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case st.Merged:
+		return true, i.recordLanded(ctx, d, s, p, t, gh, token, st.MergeCommitSHA)
+	case st.State != "open":
+		return true, i.cancelTrain(ctx, d, s, p, t, gh, token, "The train pull request was closed.", false)
+	}
+	return false, nil
+}
+
+// recordLanded records a merged train and tells everyone it carried: a
+// comment on each pull request on board naming the commit that boarded and
+// the merge commit, the branch deleted, and the landed message.
+func (i *Integration) recordLanded(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token, mergeSHA string) error {
+	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainLanded), LandedSHA: ptr(mergeSHA)})
 	if err != nil || !ok {
 		return err
 	}
+	as := ""
+	if mergeSHA != "" {
+		as = fmt.Sprintf(" (merged as `%s`)", shortCommit(mergeSHA))
+	}
 	for _, car := range t.OnBoard {
 		_ = gh.CommentOnPullRequest(ctx, token, p.Repository, car.Number, fmt.Sprintf(
-			"Landed on main in %s at `%s` (merged as `%s`).", t.Branch, shortCommit(car.SHA), shortCommit(landed)))
+			"Landed on main in %s at `%s`%s.", t.Branch, shortCommit(car.SHA), as))
 	}
 	_ = gh.DeleteBranchRef(ctx, token, p.Repository, t.Branch)
-	return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainLanded,
-		fmt.Sprintf("Landed %s on main as %s.", trainCount(len(t.OnBoard)), shortCommit(landed)), nil)
+	reason := "Landed " + trainCount(len(t.OnBoard)) + " on main."
+	if mergeSHA != "" {
+		reason = fmt.Sprintf("Landed %s on main as %s.", trainCount(len(t.OnBoard)), shortCommit(mergeSHA))
+	}
+	return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainLanded, reason, nil)
+}
+
+// cancelTrain records a train cancelled, then retires what it left on GitHub
+// and tells the owner. comment says whether the train pull request is told
+// why: not when the owner closed it themselves.
+func (i *Integration) cancelTrain(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token, reason string, comment bool) error {
+	cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr(reason)})
+	if err != nil || !ok {
+		return err
+	}
+	i.retireCancelled(ctx, d, s, p, cancelled, gh, token, reason, comment)
+	return nil
+}
+
+// retireCancelled is what follows any cancellation: its branch deleted (which
+// closes a pull request still open), and the cancelled message when the owner
+// has seen the train's pull request, so a train that left or asked for an
+// approval never goes quiet.
+func (i *Integration) retireCancelled(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, cancelled Train, gh trainGitHub, token, reason string, comment bool) {
+	target := cancelled
+	if !comment {
+		target.PullRequest = 0
+	}
+	retireTrain(ctx, d, gh, token, p, target, reason)
+	if cancelled.PullRequest > 0 {
+		_ = i.notifyTrain(ctx, d, s, p, cancelled, pipelinenotify.TrainCancelled, reason, nil)
+	}
 }
 
 // TrainExpress starts an express train carrying only the named pull requests
@@ -226,7 +270,9 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 		// the express train's, for the owner to approve a train that can no
 		// longer land.
 		if gh, token, _, err := trainAccess(ctx, d, p); err == nil {
-			retireTrain(ctx, d, gh, token, p, *replaced, "Replaced by express train "+created.Branch+". Its pull requests board the next train.")
+			view := *replaced
+			view.State = TrainCancelled
+			i.retireCancelled(ctx, d, s, p, view, gh, token, "Replaced by express train "+created.Branch+". Its pull requests board the next train.", true)
 		} else {
 			trainLog(d).Warn("pipelines: the train an express train replaced was not closed", "repository", p.Repository, "branch", replaced.Branch, "error", err.Error())
 		}

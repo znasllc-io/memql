@@ -319,19 +319,6 @@ func (c *Client) AddPullRequestLabels(ctx context.Context, bearer, owner, repo s
 	return err
 }
 
-// PullRequestOpen reports whether a pull request is open, and whether it was
-// merged.
-func (c *Client) PullRequestOpen(ctx context.Context, bearer, owner, repo string, number int) (open, merged bool, err error) {
-	var out struct {
-		State  string `json:"state"`
-		Merged bool   `json:"merged"`
-	}
-	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/pulls/"+strconv.Itoa(number), bearer, &out); err != nil {
-		return false, false, err
-	}
-	return out.State == "open", out.Merged, nil
-}
-
 // callAllowingEmpty is callJSON for the one write here whose success may have
 // no body: GitHub answers a merge that had nothing to merge with 204, and do
 // decodes every 2xx body, so an empty one would read as a failure. It keeps

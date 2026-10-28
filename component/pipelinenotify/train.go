@@ -36,12 +36,18 @@ const (
 	TrainReminder         TrainEvent = "reminder"
 	TrainLanded           TrainEvent = "landed"
 	TrainAdmissionHeld    TrainEvent = "admission_held"
+	// TrainCancelled says a train the owner has seen will not land, so a
+	// train never goes quiet after asking for anything.
+	TrainCancelled TrainEvent = "cancelled"
+	// TrainStalled says a train has stopped moving for a reason the owner
+	// may need to fix: no run started, or a step that keeps failing.
+	TrainStalled TrainEvent = "stalled"
 )
 
 // ActionNeeded reports whether the event asks something of the owner.
 func (e TrainEvent) ActionNeeded() bool {
 	switch e {
-	case TrainHeld, TrainAwaitingApproval, TrainReminder, TrainAdmissionHeld:
+	case TrainHeld, TrainAwaitingApproval, TrainReminder, TrainAdmissionHeld, TrainStalled:
 		return true
 	}
 	return false
@@ -75,6 +81,7 @@ const (
 	trainColorDeparted = 3447003
 	trainColorDropped  = 15158332
 	trainColorLanded   = 3066993
+	trainColorEnded    = 9807270
 )
 
 var trainMentionRe = regexp.MustCompile(`^[0-9]{17,20}$`)
@@ -164,6 +171,7 @@ const (
 	trainTodoApprove = "Review the train pull request on GitHub and approve it. It lands within a minute of your approval."
 	trainTodoHeld    = "Close the train pull request to cancel this train, or add train:hold to a pull request on board to rebuild without it. If main itself fails, land its fix on an express train first."
 	trainTodoAdmit   = "Open an admission window for the build pool: the Azure cost guard is holding new runs."
+	trainTodoStalled = "Fix what the reason names; the train goes on by itself once it clears. Close the train pull request to cancel it instead."
 )
 
 func trainCopy(m TrainMessage, branch string) (trainWords, error) {
@@ -200,6 +208,10 @@ func trainCopy(m TrainMessage, branch string) (trainWords, error) {
 		return trainWords{headline: "PASSED: " + branch + " landed on main", description: or(reason, "The train landed on main."), color: trainColorLanded}, nil
 	case TrainAdmissionHeld:
 		return trainWords{headline: "ACTION NEEDED: the cost guard is holding " + branch + "'s run", description: or(reason, "The build pool has not admitted this train's run."), todo: trainTodoAdmit, color: trainColorAction}, nil
+	case TrainCancelled:
+		return trainWords{headline: "Train " + branch + " was cancelled", description: or(reason, "This train will not land; its pull requests board the next one."), color: trainColorEnded}, nil
+	case TrainStalled:
+		return trainWords{headline: "ACTION NEEDED: " + branch + " is stuck", description: or(reason, "This train has stopped moving."), todo: trainTodoStalled, color: trainColorAction}, nil
 	}
 	return trainWords{}, fmt.Errorf("pipelines: %q is not a train event", m.Event)
 }

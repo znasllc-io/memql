@@ -54,6 +54,9 @@ type trainRemote struct {
 	// Go tree the train's head holds.
 	shaFiles map[string][]string
 	headTree fstest.MapFS
+	// raceMerge makes the next merge lose a race: another tick merged the
+	// pull request first, so GitHub answers 405.
+	raceMerge bool
 }
 
 const trainAppID = 4822538
@@ -283,6 +286,10 @@ func (r *trainRemote) MergePullRequest(ctx context.Context, token, repository st
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	pr := r.trainPRs[number]
+	if pr != nil && pr.open && r.raceMerge {
+		r.raceMerge = false
+		pr.open, pr.merged, pr.landedAs = false, true, r.nextSHA("l")
+	}
 	if pr == nil || !pr.open {
 		return "", &githubapp.StatusError{Status: http.StatusMethodNotAllowed, Endpoint: "/merge"}
 	}
@@ -311,15 +318,19 @@ func (r *trainRemote) AddPullRequestLabels(ctx context.Context, token, repositor
 	return nil
 }
 
-func (r *trainRemote) PullRequestOpen(ctx context.Context, token, repository string, number int) (bool, bool, error) {
-	watchGitHubCall(r.t, ctx, "PullRequestOpen")
+func (r *trainRemote) PullRequestState(ctx context.Context, token, repository string, number int) (githubapp.PullRequestObservation, error) {
+	watchGitHubCall(r.t, ctx, "PullRequestState")
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	pr := r.trainPRs[number]
 	if pr == nil {
-		return false, false, &githubapp.StatusError{Status: http.StatusNotFound, Endpoint: "/pulls"}
+		return githubapp.PullRequestObservation{}, &githubapp.StatusError{Status: http.StatusNotFound, Endpoint: "/pulls"}
 	}
-	return pr.open, pr.merged, nil
+	state := "closed"
+	if pr.open {
+		state = "open"
+	}
+	return githubapp.PullRequestObservation{Number: number, State: state, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
 }
 
 func (r *trainRemote) OwnerLogin(ctx context.Context, credential, user, repository string) (string, error) {
@@ -750,6 +761,13 @@ func TestARebuildWithNothingLeftClosesItsPullRequest(t *testing.T) {
 	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1], "will not land") {
 		t.Errorf("comments on the train pull request: %v", comments)
 	}
+	var said bool
+	for _, m := range th.messages() {
+		said = said || strings.Contains(m, "was cancelled")
+	}
+	if !said {
+		t.Errorf("the owner saw this train leave and was never told it was cancelled: %v", th.messages())
+	}
 }
 
 // TestBoardingCountsOnlyTheAppsOwnCheck: the check a pull request boards on
@@ -902,5 +920,27 @@ func TestTriageReadsTheBoardedCommitsFiles(t *testing.T) {
 	got := th.train(t)
 	if len(got.Dropped) != 1 || got.Dropped[0].Number != 8 {
 		t.Fatalf("dropped %+v (state %s, reason %q); want #8: #7's boarded commit changed only docs", got.Dropped, got.State, got.HeldReason)
+	}
+}
+
+// TestClosingARunningTrainsPullRequestCancelsIt: the owner closed the train
+// pull request while its run was going. The train is cancelled at once and
+// its branch deleted; nothing later rebuilds it onto the closed pull request.
+func TestClosingARunningTrainsPullRequestCancelsIt(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	th.remote.mu.Lock()
+	th.remote.trainPRs[tr.PullRequest].open = false
+	th.remote.mu.Unlock()
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainCancelled {
+		t.Fatalf("state %s, want cancelled", got.State)
+	}
+	if _, branchLeft, _ := th.trainLeftOnGitHub(got); branchLeft {
+		t.Error("the cancelled train's branch was left behind")
 	}
 }

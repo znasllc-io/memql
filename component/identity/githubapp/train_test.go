@@ -220,10 +220,6 @@ func TestRefsReviewsCommentsAndLabels(t *testing.T) {
 	if err := c.AddPullRequestLabels(ctx, "tok", "acme", "widget", 7, []string{"train:dropped"}); err != nil {
 		t.Errorf("AddPullRequestLabels: %v", err)
 	}
-	open, merged, err := c.PullRequestOpen(ctx, "tok", "acme", "widget", 41)
-	if err != nil || open || !merged {
-		t.Errorf("PullRequestOpen = %v, %v, %v; want closed and merged", open, merged, err)
-	}
 	var reset map[string]any
 	for _, r := range hub.seen() {
 		if r.Method == http.MethodPatch {

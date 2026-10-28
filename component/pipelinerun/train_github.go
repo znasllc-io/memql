@@ -37,7 +37,7 @@ type trainGitHub interface {
 	MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error)
 	CommentOnPullRequest(ctx context.Context, token, repository string, number int, body string) error
 	AddPullRequestLabels(ctx context.Context, token, repository string, number int, labels []string) error
-	PullRequestOpen(ctx context.Context, token, repository string, number int) (bool, bool, error)
+	PullRequestState(ctx context.Context, token, repository string, number int) (githubapp.PullRequestObservation, error)
 	OwnerLogin(ctx context.Context, credential, user, repository string) (string, error)
 }
 
@@ -174,12 +174,12 @@ func (g *packagesGitHub) AddPullRequestLabels(ctx context.Context, token, reposi
 	return c.AddPullRequestLabels(ctx, token, owner, name, number, labels)
 }
 
-func (g *packagesGitHub) PullRequestOpen(ctx context.Context, token, repository string, number int) (bool, bool, error) {
+func (g *packagesGitHub) PullRequestState(ctx context.Context, token, repository string, number int) (githubapp.PullRequestObservation, error) {
 	c, owner, name, err := g.target(repository)
 	if err != nil {
-		return false, false, err
+		return githubapp.PullRequestObservation{}, err
 	}
-	return c.PullRequestOpen(ctx, token, owner, name, number)
+	return c.PullRequestState(ctx, token, owner, name, number)
 }
 
 // OwnerLogin is the GitHub login of the person whose grant the pipeline runs

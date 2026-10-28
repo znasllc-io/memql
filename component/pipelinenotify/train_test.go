@@ -136,6 +136,8 @@ func TestTrainEventMessages(t *testing.T) {
 		{TrainReminder, nil, "znasllc-io/memql · ACTION NEEDED: train/2026-10-28-1 is still waiting for your approval", true, 15105570, "What you need to do"},
 		{TrainLanded, func(m *TrainMessage) { m.Reason = "Landed on main as 9f8e7d6." }, "znasllc-io/memql · PASSED: train/2026-10-28-1 landed on main", false, 3066993, "On board"},
 		{TrainAdmissionHeld, nil, "znasllc-io/memql · ACTION NEEDED: the cost guard is holding train/2026-10-28-1's run", true, 15105570, "What you need to do"},
+		{TrainCancelled, func(m *TrainMessage) { m.Reason = "Replaced by express train train/2026-10-28-2." }, "znasllc-io/memql · Train train/2026-10-28-1 was cancelled", false, 9807270, "On board"},
+		{TrainStalled, func(m *TrainMessage) { m.Reason = "No run has started for the train's head in 20 minutes." }, "znasllc-io/memql · ACTION NEEDED: train/2026-10-28-1 is stuck", true, 15105570, "What you need to do"},
 	}
 	for _, c := range cases {
 		t.Run(string(c.event), func(t *testing.T) {
