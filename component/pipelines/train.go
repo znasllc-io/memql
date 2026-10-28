@@ -182,8 +182,13 @@ type TrainCandidate struct {
 	Title, HeadSHA, HeadRef, BaseRef, Author string
 	URL                                      string
 	Draft                                    bool
-	Labels                                   []string
-	CheckStatus, CheckConclusion             string
+	// Fork marks a head in another repository, or in none (a deleted fork).
+	// A fork never boards: its pull request is refused a run of its own
+	// (trigger.go, D6), and a train would run its code here with the
+	// pipeline's secrets on the strength of a check anything can write.
+	Fork                         bool
+	Labels                       []string
+	CheckStatus, CheckConclusion string
 }
 
 // TrainSkip is a pull request that did not board, and why, in a sentence the
@@ -227,6 +232,8 @@ func BoardingOrder(defaultBranch, checkName string, cands []TrainCandidate, expr
 
 func boardingRefusal(defaultBranch, checkName string, c TrainCandidate) string {
 	switch {
+	case c.Fork:
+		return "comes from a fork; a train carries only this repository's branches"
 	case c.BaseRef != defaultBranch:
 		return fmt.Sprintf("targets %s, not %s", c.BaseRef, defaultBranch)
 	case c.Draft:

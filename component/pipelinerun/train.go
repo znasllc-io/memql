@@ -249,8 +249,9 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 			continue
 		}
 		c := pipelines.TrainCandidate{Number: pr.Number, Title: pr.Title, HeadSHA: pr.HeadSHA, HeadRef: pr.HeadRef, BaseRef: pr.BaseRef,
-			Author: pr.Author, URL: pr.URL, Draft: pr.Draft, Labels: pr.Labels}
-		if !pr.Draft {
+			Author: pr.Author, URL: pr.URL, Draft: pr.Draft, Labels: pr.Labels,
+			Fork: pr.HeadRepository == "" || !strings.EqualFold(pr.HeadRepository, p.Repository)}
+		if !pr.Draft && !c.Fork {
 			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, check, 0)
 			if err != nil {
 				return err

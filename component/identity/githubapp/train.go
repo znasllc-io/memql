@@ -41,9 +41,12 @@ func checkBranchName(branch string) error {
 type TrainPullRequest struct {
 	Number                                   int
 	Title, HeadSHA, HeadRef, BaseRef, Author string
-	URL                                      string
-	Draft                                    bool
-	Labels                                   []string
+	// HeadRepository is the head's "owner/name", empty when GitHub reports it
+	// null (a deleted fork): a head in another repository is a fork's.
+	HeadRepository string
+	URL            string
+	Draft          bool
+	Labels         []string
 }
 
 // TrainPullRequests lists the open pull requests into base, oldest first, one
@@ -60,8 +63,11 @@ func (c *Client) TrainPullRequests(ctx context.Context, bearer, owner, repo, bas
 			Login string `json:"login"`
 		} `json:"user"`
 		Head struct {
-			SHA string `json:"sha"`
-			Ref string `json:"ref"`
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo *struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
 		} `json:"head"`
 		Base struct {
 			Ref string `json:"ref"`
@@ -77,6 +83,9 @@ func (c *Client) TrainPullRequests(ctx context.Context, bearer, owner, repo, bas
 	for _, w := range wire {
 		pr := TrainPullRequest{Number: w.Number, Title: w.Title, HeadSHA: w.Head.SHA, HeadRef: w.Head.Ref, BaseRef: w.Base.Ref,
 			Author: w.User.Login, URL: w.HTMLURL, Draft: w.Draft}
+		if w.Head.Repo != nil {
+			pr.HeadRepository = w.Head.Repo.FullName
+		}
 		for _, l := range w.Labels {
 			pr.Labels = append(pr.Labels, l.Name)
 		}

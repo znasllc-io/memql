@@ -449,6 +449,8 @@ automation runs every minute on the one agent that holds the
 A pull request boards a train when all of these hold:
 
 - it is open, is not a draft, and targets the default branch;
+- its head is a branch of this repository: a fork's pull request
+  [never runs](#pull-requests-from-forks), so it never boards either;
 - the pipeline's pull request check, `MemQL / <name>`, completed with success
   on its current head;
 - it carries neither `train:hold` nor `train:dropped`.

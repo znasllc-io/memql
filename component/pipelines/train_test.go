@@ -141,8 +141,10 @@ func TestBoardingOrder(t *testing.T) {
 	otherBase.BaseRef = "release/1.2"
 	aTrain := ready(18)
 	aTrain.HeadRef = TrainBranchPrefix + "2026-10-28-1"
+	fork := ready(19)
+	fork.Fork = true
 
-	board, skipped := BoardingOrder("main", "MemQL / shop", []TrainCandidate{held, ready(7), draft, dropped, pending, failed, otherBase, aTrain, ready(3)}, nil)
+	board, skipped := BoardingOrder("main", "MemQL / shop", []TrainCandidate{held, ready(7), draft, dropped, pending, failed, otherBase, aTrain, fork, ready(3)}, nil)
 	if got := numbersOf(board); !reflect.DeepEqual(got, []int{3, 7}) {
 		t.Errorf("boarded %v, want [3 7] in pull request number order", got)
 	}
@@ -157,6 +159,7 @@ func TestBoardingOrder(t *testing.T) {
 		15: "MemQL / shop has not passed on abcdef1",
 		16: "MemQL / shop has not passed on abcdef1",
 		17: "release/1.2",
+		19: "fork",
 	} {
 		if !strings.Contains(reasons[n], want) {
 			t.Errorf("#%d skipped for %q, want a reason naming %q", n, reasons[n], want)

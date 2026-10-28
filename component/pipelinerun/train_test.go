@@ -68,7 +68,7 @@ func (r *trainRemote) addPR(n int, head string, check string, opts ...func(*gith
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	pr := &githubapp.TrainPullRequest{Number: n, Title: fmt.Sprintf("Change %d", n), HeadSHA: head, HeadRef: fmt.Sprintf("claude/change-%d", n),
-		BaseRef: "main", Author: "znas-io", URL: fmt.Sprintf("https://github.com/acme/shop/pull/%d", n)}
+		HeadRepository: repoName, BaseRef: "main", Author: "znas-io", URL: fmt.Sprintf("https://github.com/acme/shop/pull/%d", n)}
 	for _, o := range opts {
 		o(pr)
 	}
@@ -612,5 +612,35 @@ func TestBoardingReadsThePipelinesOwnCheck(t *testing.T) {
 	th.tick(t)
 	if tr := th.train(t); len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
 		t.Fatalf("a pull request whose MemQL / shop check passed did not board: state %s, left off %+v", tr.State, tr.LeftOff)
+	}
+}
+
+// TestAForkNeverBoards: a fork's pull request is refused a pipeline run of its
+// own, so a train must never carry it into one. A check of the right name on
+// a fork's head can come from anything that writes checks -- another App, or
+// a workflow the fork itself adds -- and boarding it would run the fork's code
+// in this repository's train run, with the pipeline's secrets.
+func TestAForkNeverBoards(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(9, "4444444444444444444444444444444444444444", "success", func(pr *githubapp.TrainPullRequest) {
+		pr.HeadRepository = "mallory/shop"
+	})
+	th.remote.addPR(11, "5555555555555555555555555555555555555555", "success", func(pr *githubapp.TrainPullRequest) {
+		pr.HeadRepository = "" // a deleted fork
+	})
+	th.tick(t)
+	tr := th.train(t)
+	if len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
+		t.Fatalf("on board %+v, want only #7", tr.OnBoard)
+	}
+	reasons := map[int]string{}
+	for _, sk := range tr.LeftOff {
+		reasons[sk.Number] = sk.Reason
+	}
+	for _, n := range []int{9, 11} {
+		if !strings.Contains(reasons[n], "fork") {
+			t.Errorf("#%d left off for %q, want a reason naming the fork", n, reasons[n])
+		}
 	}
 }

@@ -23,8 +23,10 @@ func TestTrainPullRequestsDecodesDraftLabelsAndRefs(t *testing.T) {
 			return http.StatusBadRequest, `{"message":"unexpected query ` + r.URL.RawQuery + `"}`
 		}
 		return http.StatusOK, `[{"number":7,"title":"Fix the badge","draft":true,"html_url":"https://github.com/acme/widget/pull/7",
-			"user":{"login":"znas-io"},"head":{"sha":"aaa111","ref":"claude/badge"},"base":{"ref":"main"},
-			"labels":[{"name":"train:hold"},{"name":"bug"}]}]`
+			"user":{"login":"znas-io"},"head":{"sha":"aaa111","ref":"claude/badge","repo":{"full_name":"acme/widget"}},"base":{"ref":"main"},
+			"labels":[{"name":"train:hold"},{"name":"bug"}]},
+			{"number":8,"title":"From a deleted fork","html_url":"https://github.com/acme/widget/pull/8",
+			"user":{"login":"mallory"},"head":{"sha":"bbb222","ref":"patch-1","repo":null},"base":{"ref":"main"},"labels":[]}]`
 	})
 	got, err := trainTestClient(t, hub).TrainPullRequests(context.Background(), "tok", "acme", "widget", "main")
 	if err != nil {
@@ -32,10 +34,15 @@ func TestTrainPullRequestsDecodesDraftLabelsAndRefs(t *testing.T) {
 	}
 	want := TrainPullRequest{Number: 7, Title: "Fix the badge", HeadSHA: "aaa111", HeadRef: "claude/badge", BaseRef: "main",
 		Author: "znas-io", URL: "https://github.com/acme/widget/pull/7", Draft: true, Labels: []string{"train:hold", "bug"}}
-	if len(got) != 1 || got[0].Number != want.Number || got[0].HeadSHA != want.HeadSHA || got[0].HeadRef != want.HeadRef ||
+	if len(got) != 2 || got[0].Number != want.Number || got[0].HeadSHA != want.HeadSHA || got[0].HeadRef != want.HeadRef ||
 		got[0].BaseRef != want.BaseRef || got[0].Author != want.Author || got[0].URL != want.URL || !got[0].Draft ||
 		strings.Join(got[0].Labels, ",") != "train:hold,bug" {
-		t.Errorf("TrainPullRequests = %+v, want [%+v]", got, want)
+		t.Errorf("TrainPullRequests = %+v, want [%+v ...]", got, want)
+	}
+	// The head's repository is what tells a fork apart; GitHub reports a
+	// deleted fork's as null, which must read as no repository, never as ours.
+	if len(got) == 2 && (got[0].HeadRepository != "acme/widget" || got[1].HeadRepository != "") {
+		t.Errorf("head repositories = %q, %q; want acme/widget and empty", got[0].HeadRepository, got[1].HeadRepository)
 	}
 }
 
