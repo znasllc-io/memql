@@ -64,6 +64,40 @@ describe("native identity screens", () => {
     expect(posts[0]?.[1]?.headers).toMatchObject({ "X-CSRF-Token": "pair" });
     expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toEqual({ ml: "emailed-token_9x" });
   });
+  it("binds an invitation with Continue before it offers Accept, each posted once", async () => {
+    // identity binds the invitation to this browser on intent=continue and
+    // accepts only from that browser afterwards (component/identity/web/invitation.go).
+    const invitation = { Code: "mql_inv_x", InviterName: "Ada", InviteeEmail: "bo@example.test", Role: "developer", ExpiresIn: "2 days" };
+    let continued = false;
+    const fetcher = vi.fn(async (url: URL, init?: RequestInit) => {
+      if (init?.method !== "POST") return json({ page: "invitation", csrf: "pair", data: { ...invitation, Step: continued ? "accept" : "continue" } });
+      const form = Object.fromEntries(init.body as URLSearchParams);
+      if (form.intent === "continue") { continued = true; return json({ redirect: "/invitation?code=mql_inv_x" }); }
+      return url.pathname === "/invitation/accept" ? json({ redirect: "/enroll?code=mql_enr_y" }) : json({});
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<IdentityScreen initialPath="/invitation?code=mql_inv_x" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(screen.queryByRole("button", { name: "Accept invitation" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation" }));
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.pathname === "/enroll")).toBe(true));
+    const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts.map(([url, init]) => [url.pathname, Object.fromEntries(init?.body as URLSearchParams)])).toEqual([
+      ["/invitation/accept", { code: "mql_inv_x", intent: "continue" }],
+      ["/invitation/accept", { code: "mql_inv_x" }],
+    ]);
+    expect(posts[0]?.[1]?.headers).toMatchObject({ "X-CSRF-Token": "pair" });
+  });
+  it("offers neither step on an invitation refused in this browser", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ page: "invitation", data: {
+      Rejection: "bound-elsewhere", Heading: "Finish in the browser you continued with", Message: "For safety.", NextStep: "Open it there.",
+    } }, 403)));
+    render(<IdentityScreen initialPath="/invitation?code=mql_inv_x" />);
+    await screen.findByRole("heading", { level: 1, name: "Finish in the browser you continued with" });
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Accept invitation" })).toBeNull();
+  });
   it.each([
     ["check_email", { Email: "owner@example.test", ExpiresIn: "10 minutes" }, "Check your email"],
     ["landing", { Approved: true }, "Sign-in confirmed"],

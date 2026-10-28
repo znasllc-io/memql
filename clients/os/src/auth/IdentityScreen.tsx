@@ -237,12 +237,22 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
           await registerPasskey(config, `${value(data, "AuthScheme") || "Enrolment"} ${code}`, fields.label || "My passkey");
           setPage({ page: "message", data: { Layout: { Title: "Passkey added", BrandName: "MemQL" }, Message: "Your passkey is ready. You can now sign in." } });
         }))}</>}</>; break;
-    case "invitation":
+    case "invitation": {
+      // Continue, then Accept (component/identity/web/invitation.go). Continue
+      // binds the invitation to this browser; identity offers Accept only to
+      // the browser that continued. Any other step offers Continue, never a
+      // button identity can only refuse.
+      const code = value(data, "Code");
+      const accepting = data.Step === "accept";
       title = value(data, "Heading") || "Accept invitation";
       body = <><p>{value(data, "Message") || `${value(data, "InviterName") || "An administrator"} invited ${value(data, "InviteeEmail")} to join.`}</p>
         <p>{value(data, "NextStep") || `Role: ${value(data, "Role") || "Cluster default"}. Expires in ${value(data, "ExpiresIn")}.`}</p>
         {data.StepUp === true && <p>We’ll verify your email before you receive this privileged role.</p>}
-        {!data.Rejection && act("Accept invitation", () => submit("/invitation/accept", { code: value(data, "Code") }))}</>; break;
+        {!data.Rejection && !accepting && <p>Only the browser where you press Continue can accept this invitation.</p>}
+        {!data.Rejection && (accepting
+          ? act("Accept invitation", () => submit("/invitation/accept", { code }))
+          : act("Continue", () => submit("/invitation/accept", { code, intent: "continue" })))}</>; break;
+    }
     case "device":
       title = deviceTitle(data);
       body = <DeviceApproval data={data} code={fields.user_code || ""} busy={busy} blocked={refreshNeeded}

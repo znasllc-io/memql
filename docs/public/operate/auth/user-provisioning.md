@@ -135,6 +135,37 @@ flow:
   itself is recorded on the token's `invitationId` (memql#4880). There is no
   separate partition grant to stamp -- the role is the whole of it.
 
+  **Opening the link changes nothing; Continue binds it to one browser.** The
+  page takes two presses, **Continue** and then **Accept**, and the order is
+  the control. Opening `/invitation?code=<token>` renders the invitation and
+  writes nothing -- no binding, no cookie -- because mail scanners, link
+  previews and email apps' built-in browsers fetch links before people do.
+  Continue posts `intent=continue` to `POST /invitation/accept`, which stamps
+  a digest (`bindingHash`) on the row and hands this browser the nonce as
+  `memql_inv` (`HttpOnly; Secure; SameSite=Lax; Path=/invitation`, `Max-Age` =
+  the invitation's remaining life). The page then offers Accept, which
+  completes only in a browser holding that cookie, so a forwarded email cannot
+  be accepted anywhere else. The page used to bind on the first open instead.
+  That gave the invitation to whatever fetched the link first, and it refused
+  invitees even when nothing else had: the emailed link opens on identity's
+  host, MemQL OS then posts the page's forms from its own host, and the
+  host-only cookie the first open set never reached the Accept.
+
+  | Case | What happens |
+  |---|---|
+  | **A mail scanner, link preview or prefetcher fetches the link** | The page renders. Nothing is written, and the invitation stays unbound. |
+  | **The invitee presses Continue, then Accept** | Bound to that browser, accepted there, and on to `/enroll` in the same window. |
+  | **The link is opened in another browser after Continue** (a forwarded email, a second device) | Refused: *Finish in the browser you continued with*. The page does not show whom the invitation is for. |
+  | **A forwardee presses Continue first** | They hold the binding, as the first opener did before; the invitee is refused. Revoke the invitation and issue a fresh one. |
+  | **The invitee pressed Continue in an email app's built-in browser, then opened the link elsewhere** | Refused in the second browser. Finish in the first one, or ask for a fresh invitation. |
+  | **Accept is posted without Continue** | Refused (*Press Continue first*), and nothing is spent. The page never offers Accept first. |
+  | **An invitation bound when its link was opened, before this change** | Keeps that binding; nothing migrates it. Expect its invitee to be refused: revoke it and issue a fresh one. |
+
+  The audit trail separates the outcomes: `invitation_continued` names the
+  browser that bound the invitation (source IP and user agent),
+  `invitation_binding_taken` is a second browser refused at Continue, and
+  `invitation_accept_denied` carries `not_continued` or `binding_mismatch`.
+
   **What the registration mode does to it.** The policy is applied in the
   gate (`component/identity/adminops`), never by the console:
 
