@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/scripts/ci/pyyaml"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,9 +28,7 @@ import (
 // replicas, as `make scale N=2` does, and requires the connection gate to accept the
 // result against the rendered Cluster's own max_connections.
 func TestLocalClusterFitsTwoReplicasOfEveryNode(t *testing.T) {
-	if exec.Command("python3", "-c", "import yaml").Run() != nil {
-		t.Skip("python3 + PyYAML not available (the connection gate needs them)")
-	}
+	pyyaml.Require(t)
 	cluster, ok := databaseObjects(t)["Cluster/memql-db"]
 	if !ok {
 		t.Fatal("no Cluster/memql-db rendered")

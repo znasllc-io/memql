@@ -4,12 +4,13 @@ const h = vi.hoisted(() => ({ connection: null as any }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 const { MachineAppRouting } = await import("../../src/apps/fleet/machines/MachineAppRouting");
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
-const { withSession, machineRow, builtinReply } = await import("./harness");
+const { withSession, machineRow, builtinReply, generatedQuery } = await import("./harness");
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const machine = machineFromRow(machineRow({ id: "machine", ownerUserId: "me" }));
 it("defaults to Auto, saves a machine-only strategy and keeps the confirmed choice until the live row arrives", async () => {
- const save = vi.fn().mockResolvedValue(builtinReply("fleetSetAppRouting", [{ revision: "saved" }]));
- h.connection = { query: { fleetSetAppRouting: save } };
+ const query = generatedQuery({ fleetSetAppRouting: async () => builtinReply("fleetSetAppRouting", [{ revision: "saved" }]) });
+ const save = query.fleetSetAppRouting;
+ h.connection = { query };
  render(withSession(<MachineAppRouting machine={machine} />, { userId: "me" }));
  expect(screen.getByRole("combobox", { name: "App strategy" }).textContent).toContain("Auto");
  fireEvent.click(screen.getByRole("combobox", { name: "App strategy" }));
@@ -22,7 +23,7 @@ it("defaults to Auto, saves a machine-only strategy and keeps the confirmed choi
 });
 it("keeps a rejected draft and reports failure outside the active settings surface", async () => {
  vi.spyOn(console, "error").mockImplementation(() => {});
- h.connection = { query: { fleetSetAppRouting: vi.fn().mockRejectedValue(new Error("stale revision")) } };
+ h.connection = { query: generatedQuery({ fleetSetAppRouting: async () => { throw new Error("stale revision"); } }) };
  render(withSession(<MachineAppRouting machine={machine} />, { userId: "me" }));
  fireEvent.click(screen.getByRole("combobox", { name: "App strategy" }));
  fireEvent.click(screen.getByRole("option", { name: /Codex only/ }));
@@ -36,8 +37,9 @@ it("keeps a rejected draft and reports failure outside the active settings surfa
 const { RetryAppAvailability } = await import("../../src/apps/fleet/machines/RetryAppAvailability");
 it("retries only the selected app, waits for confirmation and keeps failures outside the surface", async () => {
  let resolve!: (value: any) => void;
- const retry = vi.fn().mockImplementation(() => new Promise(r => { resolve = r; }));
- h.connection = { query: { fleetRetryAppAvailability: retry } };
+ const query = generatedQuery({ fleetRetryAppAvailability: () => new Promise(r => { resolve = r; }) });
+ const retry = query.fleetRetryAppAvailability;
+ h.connection = { query };
  const view = render(withSession(<section data-testid="active"><RetryAppAvailability registrationId="machine" app="codex" disabled={false} /></section>, { userId: "me" }));
  const button = screen.getByRole("button", { name: "Retry Codex availability" });
  fireEvent.click(button); fireEvent.click(button);

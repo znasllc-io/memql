@@ -495,8 +495,9 @@ describe("New chain", () => {
     // Hold the re-read, and look at every render until it lands.
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => { release = resolve; });
+    // The held read is still the generated method, so it runs on its client.
     const read = calls.routerListPolicies.getMockImplementation()!;
-    calls.routerListPolicies.mockImplementation(async (...args: unknown[]) => { await held; return read(...args); });
+    calls.routerListPolicies.mockImplementation(async function (this: unknown, ...args: unknown[]) { await held; return read.apply(this, args); });
     // EVERY paint, not just the settled one: the flash lasted one render.
     let flashed = false;
     // The RECORDS, not the page when the observer runs: by then the next
