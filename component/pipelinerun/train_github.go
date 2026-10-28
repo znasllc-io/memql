@@ -33,7 +33,7 @@ type trainGitHub interface {
 	CreateTrainPullRequest(ctx context.Context, token, repository, head, base, title, body string) (int, string, error)
 	EditPullRequestBody(ctx context.Context, token, repository string, number int, body string) error
 	PullRequestReviews(ctx context.Context, token, repository string, number int) ([]githubapp.PullRequestReview, error)
-	PullRequestFiles(ctx context.Context, token, repository string, number int) ([]string, bool, error)
+	CompareFiles(ctx context.Context, token, repository, base, head string) ([]string, bool, error)
 	MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error)
 	CommentOnPullRequest(ctx context.Context, token, repository string, number int, body string) error
 	AddPullRequestLabels(ctx context.Context, token, repository string, number int, labels []string) error
@@ -139,12 +139,15 @@ func (g *packagesGitHub) PullRequestReviews(ctx context.Context, token, reposito
 	return c.PullRequestReviews(ctx, token, owner, name, number)
 }
 
-func (g *packagesGitHub) PullRequestFiles(ctx context.Context, token, repository string, number int) ([]string, bool, error) {
+// CompareFiles lists what head changed relative to its merge base with base
+// (GET /compare/{base}...{head}), and whether the list is whole: GitHub stops
+// at 300 files.
+func (g *packagesGitHub) CompareFiles(ctx context.Context, token, repository, base, head string) ([]string, bool, error) {
 	c, owner, name, err := g.target(repository)
 	if err != nil {
 		return nil, false, err
 	}
-	return c.PullRequestFiles(ctx, token, owner, name, number)
+	return c.Compare(ctx, token, owner, name, base, head)
 }
 
 func (g *packagesGitHub) MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error) {

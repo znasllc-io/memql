@@ -539,18 +539,25 @@ The train decides, in this order:
    re-run does. A failed test is never retried.
 2. **The default branch fails too: hold.** When the default branch's newest
    completed push run failed one of the same steps, no pull request on the
-   train is to blame, and the train is held. Fix the default branch first, for
-   example with an express train carrying the fix.
+   train is to blame, and the train is held. A step is the same when its key
+   matches and neither run split it into shards, or when the two tested any of
+   the same packages: shard numbers divide a pull request run's packages and a
+   push run's differently. Fix the default branch first, for example with an
+   express train carrying the fix.
 3. **The cap: hold.** After `maxRebuilds` rebuilds in one departure, the train
    is held.
 4. **One suspect: drop it.** Each failed step names the Go packages it tested.
-   A pull request on board that changed files in one of those packages, or in a
-   directory above one, is a suspect, and so is one whose changed files could
-   not all be listed. Exactly one suspect is dropped: it gets `train:dropped`
-   and a comment saying why, and the train is rebuilt without it and runs
-   again. Anything else holds the train, because the train never drops a pull
-   request it cannot single out. A failed step that tested no package names no
-   suspect.
+   The train runs the pipeline's own affected analysis on the files each pull
+   request changed at the commit that boarded, over the import graph of the
+   train's head. A pull request is a suspect when its change reaches one of
+   those packages, the ones it changed or any that imports them, and for every
+   failed step when the analysis cannot bound its change: a module file
+   (`go.mod`, `go.sum`), the manifest, vendored code, a `select.full` path, or
+   more files than GitHub lists. Exactly one suspect is dropped: it gets
+   `train:dropped` and a comment saying why, and the train is rebuilt without
+   it and runs again. Anything else holds the train, because the train never
+   drops a pull request it cannot single out. A failed step that tested no
+   package names no suspect.
 
 Only a failed step is evidence: a step cancelled around it proved nothing
 about the packages it would have tested. A cancelled run, or a run that failed

@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -46,6 +49,11 @@ type trainRemote struct {
 	// head's check came from, ours unless a test says otherwise.
 	appID     int64
 	checkApps map[string]int64
+	// shaFiles are the files a commit changed, where a test pins them to a
+	// commit rather than to a pull request's current head; headTree is the
+	// Go tree the train's head holds.
+	shaFiles map[string][]string
+	headTree fstest.MapFS
 }
 
 const trainAppID = 4822538
@@ -69,7 +77,7 @@ func newTrainRemote(g *fakeGitHub) *trainRemote {
 		files: map[string]map[string][]byte{}, branchFile: map[string]map[string][]byte{}, branches: map[string]string{},
 		branchBase: map[string]string{}, conflicts: map[string]bool{}, trainPRs: map[int]*trainPR{}, nextPR: 100,
 		reviews: map[int][]githubapp.PullRequestReview{}, prFiles: map[int][]string{}, comments: map[int][]string{}, login: "ada-gh",
-		appID: trainAppID, checkApps: map[string]int64{},
+		appID: trainAppID, checkApps: map[string]int64{}, shaFiles: map[string][]string{},
 	}
 }
 
@@ -237,11 +245,37 @@ func (r *trainRemote) PullRequestReviews(ctx context.Context, token, repository 
 	return append([]githubapp.PullRequestReview(nil), r.reviews[number]...), nil
 }
 
-func (r *trainRemote) PullRequestFiles(ctx context.Context, token, repository string, number int) ([]string, bool, error) {
-	watchGitHubCall(r.t, ctx, "PullRequestFiles")
+// CompareFiles answers the files changed at head: shaFiles when a test set
+// them for that commit, else the files of the pull request whose head it is.
+func (r *trainRemote) CompareFiles(ctx context.Context, token, repository, base, head string) ([]string, bool, error) {
+	watchGitHubCall(r.t, ctx, "CompareFiles")
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]string(nil), r.prFiles[number]...), true, nil
+	if files, ok := r.shaFiles[head]; ok {
+		return append([]string(nil), files...), true, nil
+	}
+	for n, pr := range r.open {
+		if pr.HeadSHA == head {
+			return append([]string(nil), r.prFiles[n]...), true, nil
+		}
+	}
+	return nil, true, nil
+}
+
+// Tree serves headTree at any commit when a test set one: the train's head
+// is a merge commit the fake names as it goes.
+func (r *trainRemote) Tree(ctx context.Context, token, repository, sha string, keep func(string) bool, maxBytes int64) (fs.FS, error) {
+	if r.headTree == nil {
+		return r.fakeGitHub.Tree(ctx, token, repository, sha, keep, maxBytes)
+	}
+	watchGitHubCall(r.t, ctx, "Tree")
+	out := fstest.MapFS{}
+	for name, f := range r.headTree {
+		if keep == nil || keep(name) {
+			out[name] = &fstest.MapFile{Data: slices.Clone(f.Data)}
+		}
+	}
+	return out, nil
 }
 
 func (r *trainRemote) MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error) {
@@ -321,6 +355,14 @@ func newTrainHarness(t *testing.T) *trainHarness {
 	h.github.heads[repoName+"@main"] = headAnswer{SHA: baseSHA}
 	h.github.mu.Unlock()
 	th.remote.files[baseSHA] = map[string][]byte{"VERSION": []byte("0.31.4\n"), "go.mod": []byte("module github.com/acme/shop\n\ngo 1.26\n")}
+	// The train head's Go tree: component/memql imports core/num, so a change
+	// to core/num reaches component/memql's tests.
+	th.remote.headTree = fstest.MapFS{
+		"go.mod":               {Data: []byte("module github.com/acme/shop\n\ngo 1.26\n")},
+		"core/num/num.go":      {Data: []byte("package num\n")},
+		"component/memql/x.go": {Data: []byte("package memql\n\nimport _ \"github.com/acme/shop/core/num\"\n")},
+		"component/other/o.go": {Data: []byte("package other\n")},
+	}
 	h.integ = New(Deps{
 		Store:    h.store,
 		GitHub:   th.remote,
@@ -813,5 +855,52 @@ func TestHeldAndDroppedMessagesLinkTheRun(t *testing.T) {
 	}
 	if !linked {
 		t.Errorf("the dropped message does not link run %s: %v", failed.ID, th.messages())
+	}
+}
+
+// TestADependencyMakesTwoSuspects: #8 changed core/num, which
+// component/memql imports, so #8 can have broken component/memql's tests as
+// surely as #7, which changed component/memql itself. Neither is singled out,
+// so the train holds rather than blaming #7.
+func TestADependencyMakesTwoSuspects(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"core/num/num.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainHeld || len(got.Dropped) != 0 {
+		t.Fatalf("state %s, dropped %+v; want held: #8 reaches component/memql through core/num", got.State, got.Dropped)
+	}
+}
+
+// TestTriageReadsTheBoardedCommitsFiles (Review Focus 1): #7 boarded with a
+// docs change and pushed a component/memql change while the train ran. The
+// train tested the boarded commit, so #7 cannot have broken component/memql's
+// tests, and #8 is the one to drop.
+func TestTriageReadsTheBoardedCommitsFiles(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.shaFiles[shaA] = []string{"docs/a.md"}
+	th.remote.prFiles[8] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.remote.mu.Lock()
+	th.remote.open[7].HeadSHA = "6666666666666666666666666666666666666666"
+	th.remote.prFiles[7] = []string{"component/memql/y.go"}
+	th.remote.mu.Unlock()
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if len(got.Dropped) != 1 || got.Dropped[0].Number != 8 {
+		t.Fatalf("dropped %+v (state %s, reason %q); want #8: #7's boarded commit changed only docs", got.Dropped, got.State, got.HeldReason)
 	}
 }

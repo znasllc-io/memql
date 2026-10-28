@@ -3,6 +3,7 @@ package pipelines
 import (
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -48,12 +49,12 @@ func TestApprovalForAnOlderHeadDoesNotLand(t *testing.T) {
 
 func TestTriageTrainFailure(t *testing.T) {
 	const mod = "github.com/znasllc-io/memql"
-	unit := TrainFailedStep{Key: "tests.go-unit#2", Packages: []string{mod + "/component/memql"}}
-	timeout := TrainFailedStep{Key: "tests.go-unit#3", ErrorCode: CodeStepTimeout, Packages: []string{mod + "/component/memql"}}
-	files := map[int][]string{7: {"component/memql/x.go"}, 9: {"docs/a.md"}}
-	complete := map[int]bool{7: true, 9: true}
+	memqlPkg, numPkg := mod+"/component/memql", mod+"/core/num"
+	unit := TrainFailedStep{Key: "tests.go-unit#2", Packages: []string{memqlPkg}}
+	timeout := TrainFailedStep{Key: "tests.go-unit#3", ErrorCode: CodeStepTimeout, Packages: []string{memqlPkg}}
 	base := func() TrainTriageInput {
-		return TrainTriageInput{Failed: []TrainFailedStep{unit}, MaxRebuilds: 2, Files: files, FilesComplete: complete, ModulePath: mod}
+		return TrainTriageInput{Failed: []TrainFailedStep{unit}, MaxRebuilds: 2,
+			Reach: map[int]TrainReach{7: {Packages: []string{memqlPkg}}, 9: {}}}
 	}
 
 	cases := []struct {
@@ -78,38 +79,48 @@ func TestTriageTrainFailure(t *testing.T) {
 			in.Failed = []TrainFailedStep{timeout, unit}
 			return in
 		}, "drop", 7, ""},
-		{"the one pull request that touched the failing package", base, "drop", 7, ""},
-		{"two pull requests touched it", func() TrainTriageInput {
+		{"the one pull request whose change reaches the failing package", base, "drop", 7, "#7"},
+		{"a dependency makes two suspects", func() TrainTriageInput {
 			in := base()
-			in.Files = map[int][]string{7: {"component/memql/x.go"}, 9: {"component/memql/y.go"}}
+			in.Reach = map[int]TrainReach{7: {Packages: []string{memqlPkg}}, 9: {Packages: []string{numPkg, memqlPkg}}}
 			return in
 		}, "hold", 0, "could not tell which pull request caused tests.go-unit#2"},
-		{"main fails the same step", func() TrainTriageInput {
+		{"main fails the same unsharded step", func() TrainTriageInput {
 			in := base()
-			in.MainFailedKeys = []string{"tests.go-unit#2"}
+			in.Failed = []TrainFailedStep{{Key: "vulnerabilities.go-vulnerabilities"}}
+			in.MainFailed = []TrainFailedStep{{Key: "vulnerabilities.go-vulnerabilities"}}
+			return in
+		}, "hold", 0, "main fails vulnerabilities.go-vulnerabilities too"},
+		{"main fails the same packages in another shard", func() TrainTriageInput {
+			in := base()
+			in.MainFailed = []TrainFailedStep{{Key: "tests.go-unit#5", Packages: []string{numPkg, memqlPkg}}}
 			return in
 		}, "hold", 0, "main fails tests.go-unit#2 too"},
+		{"main's same shard number tested other packages", func() TrainTriageInput {
+			in := base()
+			in.MainFailed = []TrainFailedStep{{Key: "tests.go-unit#2", Packages: []string{numPkg}}}
+			return in
+		}, "drop", 7, ""},
 		{"the rebuild cap", func() TrainTriageInput {
 			in := base()
 			in.Rebuilds = 2
 			return in
 		}, "hold", 0, "stopped after 2 rebuilds"},
-		{"an incomplete file list suspects every package-scoped step", func() TrainTriageInput {
+		{"an unbounded change is a suspect everywhere", func() TrainTriageInput {
 			in := base()
-			in.FilesComplete = map[int]bool{7: true, 9: false}
+			in.Reach[9] = TrainReach{Unbounded: true, Why: "a Go module graph file changed"}
 			return in
 		}, "hold", 0, "could not tell"},
+		{"an unbounded change is the one suspect when the rest is out of reach", func() TrainTriageInput {
+			in := base()
+			in.Reach = map[int]TrainReach{7: {Packages: []string{numPkg}}, 9: {Unbounded: true, Why: "a Go module graph file changed"}}
+			return in
+		}, "drop", 9, "a Go module graph file changed"},
 		{"a step with no packages names no suspect", func() TrainTriageInput {
 			in := base()
 			in.Failed = []TrainFailedStep{{Key: "checks.lint"}}
 			return in
 		}, "hold", 0, "could not tell which pull request caused checks.lint"},
-		{"a file under a directory suspects its ancestors' packages", func() TrainTriageInput {
-			in := base()
-			in.Failed = []TrainFailedStep{{Key: "tests.dsl", Packages: []string{mod + "/dsl"}}}
-			in.Files = map[int][]string{7: {"dsl/pipelines/x.memql"}, 9: {"docs/a.md"}}
-			return in
-		}, "drop", 7, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -122,6 +133,55 @@ func TestTriageTrainFailure(t *testing.T) {
 			}
 			if got.Reason == "" {
 				t.Errorf("verdict %q carries no reason for the owner", got.Action)
+			}
+		})
+	}
+}
+
+// TestTrainReachOf: a pull request's reach is what the pipeline's own
+// affected analysis would select for its change -- the packages its files
+// are in and every package importing them -- and unbounded wherever the
+// shipped selection policy would run everything.
+func TestTrainReachOf(t *testing.T) {
+	g, err := ScanGoTree(fstest.MapFS{
+		"go.mod":               {Data: []byte("module example.com/shop\n\ngo 1.26\n")},
+		"core/num/num.go":      {Data: []byte("package num\n")},
+		"component/memql/x.go": {Data: []byte("package memql\n\nimport _ \"example.com/shop/core/num\"\n")},
+		"component/other/o.go": {Data: []byte("package other\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := []string{"deploy/**"}
+	cases := []struct {
+		name     string
+		files    []string
+		complete bool
+		graph    *Graph
+		want     []string
+		why      string
+	}{
+		{"a package change reaches its importers", []string{"core/num/num.go"}, true, g, []string{"example.com/shop/component/memql", "example.com/shop/core/num"}, ""},
+		{"a change outside every package reaches nothing", []string{"docs/a.md"}, true, g, nil, ""},
+		{"a module graph file is unbounded", []string{"go.sum"}, true, g, nil, "a Go module graph file changed"},
+		{"the manifest is unbounded", []string{"memql-package.yaml"}, true, g, nil, "the pipeline manifest changed"},
+		{"a select.full path is unbounded", []string{"deploy/k8s/x.yaml"}, true, g, nil, "a configured full-selection path changed"},
+		{"vendored code is unbounded", []string{"vendor/x/y.go"}, true, g, nil, "vendored code changed"},
+		{"an incomplete file list is unbounded", []string{"core/num/num.go"}, false, g, nil, "the changed-file comparison is unavailable"},
+		{"an empty file list is unbounded", nil, true, g, nil, "the change list is empty"},
+		{"no import graph is unbounded", []string{"core/num/num.go"}, true, nil, nil, "the import graph is unavailable"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := TrainReachOf(c.graph, c.files, c.complete, full)
+			if c.why != "" {
+				if !got.Unbounded || got.Why != c.why {
+					t.Fatalf("reach = %+v, want unbounded because %q", got, c.why)
+				}
+				return
+			}
+			if got.Unbounded || strings.Join(got.Packages, ",") != strings.Join(c.want, ",") {
+				t.Fatalf("reach = %+v, want packages %v", got, c.want)
 			}
 		})
 	}

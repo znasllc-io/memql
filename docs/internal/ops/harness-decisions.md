@@ -1031,13 +1031,19 @@ id; `TestBoardingCountsOnlyTheAppsOwnCheck`), and a fork never boards
 train run with the pipeline's secrets, which the engine's refusal of fork runs
 (`pipelines/trigger.go`, D6) exists to prevent. A branch in this repository
 needs write access, which the repository already trusts. The token also reads
-checks, which a private repository's installation token cannot without it. A failed train run is judged on its
-failed steps' error codes and Go packages, each boarded pull request's changed
-files (300 at most; an incomplete list makes it a suspect), the root `go.mod`
-module path at the train's base, and `main`'s newest completed push run's
-failed steps. The approval is the latest `APPROVED` or `CHANGES_REQUESTED`
-review by the pipeline owner's login, learned from their own GitHub
-connection, and it counts only for the commit it names.
+checks, which a private repository's installation token cannot without it.
+
+A failed train run is judged only on its FAILED steps (a cancelled step proved
+nothing), their error codes and Go packages; on each boarded pull request's
+files at the BOARDED commit (`compare/<base>...<boarded head>`, 300 at most);
+on what those files reach in the train head's import graph, through the
+pipeline's own affected analysis (`pipelines.TrainReachOf`, mirroring the
+shipped `pipelinePackageSelection` policy's global paths); and on `main`'s
+newest completed push run's failed steps with their packages (`TestTrainReachOf`,
+`TestADependencyMakesTwoSuspects`, `TestTriageReadsTheBoardedCommitsFiles`,
+`TestACancelledStepNamesNoSuspect`). The approval is the latest `APPROVED` or
+`CHANGES_REQUESTED` review by the pipeline owner's login, learned from their own
+GitHub connection, and it counts only for the commit it names.
 
 **The invariant: what lands is what the owner approved.**
 `pipelines.ApprovalLands` requires that review to name the train pull

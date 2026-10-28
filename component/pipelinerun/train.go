@@ -13,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/pipelinenotify"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -452,25 +453,17 @@ func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSetti
 	if err != nil {
 		return err
 	}
-	files, complete := map[int][]string{}, map[int]bool{}
-	for _, car := range t.OnBoard {
-		f, whole, err := gh.PullRequestFiles(ctx, token, p.Repository, car.Number)
-		if err != nil {
-			return err
-		}
-		files[car.Number], complete[car.Number] = f, whole
+	reach, err := trainReach(ctx, d, gh, token, p, t)
+	if err != nil {
+		return err
 	}
-	modulePath := ""
-	if goMod, err := gh.FileAtRef(ctx, token, p.Repository, t.BaseSHA, "go.mod"); err == nil {
-		modulePath = goModulePath(string(goMod))
-	}
-	mainFailed, err := mainFailedKeys(ctx, d, p)
+	mainFailed, err := mainFailedSteps(ctx, d, p)
 	if err != nil {
 		return err
 	}
 	verdict := pipelines.TriageTrainFailure(pipelines.TrainTriageInput{
 		Failed: failed, Retried: t.Retried, Rebuilds: t.Rebuilds, MaxRebuilds: s.MaxRebuilds,
-		Files: files, FilesComplete: complete, ModulePath: modulePath, MainFailedKeys: mainFailed,
+		Reach: reach, MainFailed: mainFailed,
 	})
 	switch verdict.Action {
 	case "retry":
@@ -690,9 +683,41 @@ func trainAccess(ctx context.Context, d Deps, p Pipeline) (trainGitHub, string, 
 	return gh, token, appID, nil
 }
 
-// mainFailedKeys are the steps main's newest completed push run failed: a
-// train failing one of those is failing main's problem, not its own.
-func mainFailedKeys(ctx context.Context, d Deps, p Pipeline) ([]string, error) {
+// trainReach is what each boarded pull request's change can reach
+// (pipelines.TrainReachOf): its files at the BOARDED commit -- the commit the
+// train merged and tested, not the pull request's head now, which may have
+// moved on -- over the import graph of the train's head, which holds every
+// package the train added. A head whose tree cannot be read bounds nothing,
+// so every pull request is unbounded and the train holds unless it carries
+// only one.
+func trainReach(ctx context.Context, d Deps, gh trainGitHub, token string, p Pipeline, t Train) (map[int]pipelines.TrainReach, error) {
+	var graph *pipelines.Graph
+	var fullGlobs []string
+	if tree, err := d.GitHub.Tree(ctx, token, p.Repository, t.HeadSHA, keepForRun, maxTreeBytes); err == nil {
+		if g, err := pipelines.ScanGoTree(tree); err == nil {
+			graph = g
+		}
+		if m, err := packages.ReadManifest(tree); err == nil && m.Pipeline != nil && m.Pipeline.Select != nil {
+			fullGlobs = m.Pipeline.Select.Full
+		}
+	} else {
+		trainLog(d).Warn("pipelines: the train head's tree was not read; every pull request on board is a suspect", "repository", p.Repository, "branch", t.Branch, "error", err.Error())
+	}
+	out := make(map[int]pipelines.TrainReach, len(t.OnBoard))
+	for _, car := range t.OnBoard {
+		files, complete, err := gh.CompareFiles(ctx, token, p.Repository, t.BaseSHA, car.SHA)
+		if err != nil {
+			return nil, err
+		}
+		out[car.Number] = pipelines.TrainReachOf(graph, files, complete, fullGlobs)
+	}
+	return out, nil
+}
+
+// mainFailedSteps are the steps main's newest completed push run failed, with
+// the packages each tested: a train failing one of those is failing main's
+// problem, not its own.
+func mainFailedSteps(ctx context.Context, d Deps, p Pipeline) ([]pipelines.TrainFailedStep, error) {
 	runs, err := d.Store.PreviousRuns(memql.ContextWithFreshRead(ctx), p.ID, pipelines.EventPush)
 	if err != nil {
 		return nil, err
@@ -709,25 +734,15 @@ func mainFailedKeys(ctx context.Context, d Deps, p Pipeline) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		var keys []string
+		var out []pipelines.TrainFailedStep
 		for _, st := range steps {
 			if st.Status == WorkStepFailed {
-				keys = append(keys, st.Key)
+				out = append(out, pipelines.TrainFailedStep{Key: st.Key, ErrorCode: st.ErrorCode, Packages: st.Packages})
 			}
 		}
-		return keys, nil
+		return out, nil
 	}
 	return nil, nil
-}
-
-func goModulePath(goMod string) string {
-	for _, line := range strings.Split(goMod, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "module" {
-			return strings.Trim(fields[1], `"`)
-		}
-	}
-	return ""
 }
 
 func trainPullRequestBody(p Pipeline, t Train, base string, onBoard []TrainCar, skipped []pipelines.TrainSkip, version string) string {

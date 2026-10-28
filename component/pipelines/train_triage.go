@@ -2,7 +2,6 @@ package pipelines
 
 import (
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 	"time"
@@ -64,18 +63,73 @@ type TrainFailedStep struct {
 	Packages       []string
 }
 
-// TrainTriageInput is everything the triage reads. Files holds each boarded
-// pull request's changed paths, FilesComplete whether that list is whole
-// (GitHub stops listing a pull request's files at 3,000; the coordinator at
-// 300). MainFailedKeys are the steps main's newest completed push run failed.
+// TrainReach is what one boarded pull request's change can reach: the Go
+// packages the pipeline's own affected analysis would select for the files
+// it changed at its boarded commit -- the packages those files are in, and
+// every package importing them, over the train head's import graph -- or
+// Unbounded, with Why, where that analysis cannot bound the change.
+type TrainReach struct {
+	Unbounded bool
+	Why       string
+	Packages  []string
+}
+
+// TrainReachOf is the reach of one pull request's changed files in g.
+// complete says whether files is the whole list (a comparison stops at 300
+// files). It is unbounded exactly where the shipped selection policy
+// (dsl/pipelines automation pipelinePackageSelection) runs every package,
+// with that policy's reasons -- an unknown or empty change list, an
+// incomplete graph, a path outside the repository, the manifest, a module
+// graph file, vendored code, a select.full path -- plus no graph at all. An
+// installation that replaced that policy is still judged by the shipped one
+// here: triage only decides whom to suspect, never what to test.
+func TrainReachOf(g *Graph, files []string, complete bool, fullGlobs []string) TrainReach {
+	unbounded := func(why string) TrainReach { return TrainReach{Unbounded: true, Why: why} }
+	switch {
+	case !complete:
+		return unbounded("the changed-file comparison is unavailable")
+	case len(files) == 0:
+		return unbounded("the change list is empty")
+	case g == nil:
+		return unbounded("the import graph is unavailable")
+	}
+	facts, err := AnalyzeSelection(g, files, true, fullGlobs)
+	if err != nil {
+		return unbounded("the change could not be analyzed")
+	}
+	if !facts.GraphComplete {
+		return unbounded("the import graph is incomplete")
+	}
+	for _, f := range facts.Paths {
+		switch {
+		case !f.RepositoryPath:
+			return unbounded("a changed path is not repository-relative")
+		case f.Path == ManifestPath:
+			return unbounded("the pipeline manifest changed")
+		case f.BaseName == "go.mod" || f.BaseName == "go.sum" || f.BaseName == "go.work" || f.BaseName == "go.work.sum":
+			return unbounded("a Go module graph file changed")
+		case f.Vendored:
+			return unbounded("vendored code changed")
+		case f.ConfiguredFull:
+			return unbounded("a configured full-selection path changed")
+		}
+	}
+	sel, err := ResolveSelection(g, facts, SelectionDecision{})
+	if err != nil {
+		return unbounded("the change could not be analyzed")
+	}
+	return TrainReach{Packages: sel.Packages}
+}
+
+// TrainTriageInput is everything the triage reads. Reach is each boarded
+// pull request's TrainReach; MainFailed are the steps main's newest
+// completed push run failed, with the packages they tested.
 type TrainTriageInput struct {
 	Failed                []TrainFailedStep
 	Retried               bool
 	Rebuilds, MaxRebuilds int
-	Files                 map[int][]string
-	FilesComplete         map[int]bool
-	ModulePath            string
-	MainFailedKeys        []string
+	Reach                 map[int]TrainReach
+	MainFailed            []TrainFailedStep
 }
 
 // TrainVerdict is what a train does about a failed run: "retry" the failed
@@ -92,21 +146,30 @@ type TrainVerdict struct {
 //  2. main's own newest run failed one of the same steps: hold, because the
 //     break is main's and dropping a pull request would blame its author;
 //  3. the rebuild cap reached: hold;
-//  4. exactly one boarded pull request changed files in the failed steps'
-//     packages: drop it; otherwise hold.
+//  4. exactly one boarded pull request can reach the failed steps' packages:
+//     drop it; otherwise hold.
 //
-// Rule 4 maps a changed file to its directory's package and every ancestor
-// directory's (dsl/pipelines/x.memql suspects .../dsl/pipelines, .../dsl and
-// the module root): a change to embedded data or a parent's files can break
-// that package, and over-suspecting only ever turns a drop into a hold.
+// "The same step" (rule 2) is the same key for an unsharded step, and for a
+// step that tested packages, an overlap in those packages: shard numbers
+// partition a pull request run's affected packages and main's full set
+// differently, so tests.go-unit#2 names different packages in the two.
+//
+// Rule 4 asks the pipeline's own affected analysis (TrainReachOf): a pull
+// request is a suspect for a failed step when its change reaches one of the
+// step's packages through the import graph, and for every failed step when
+// the analysis cannot bound its change. A pull request is cleared only when
+// the graph shows its change cannot reach what failed, so a single suspect is
+// dropped only when every other pull request on board is out of reach. What
+// the graph cannot see -- a test reading a file at run time -- is the same
+// blind spot the pipeline's affected runs already accept.
 func TriageTrainFailure(in TrainTriageInput) TrainVerdict {
 	keys := failedKeys(in.Failed)
 	if !in.Retried && len(in.Failed) > 0 && allEnvironmental(in.Failed) {
 		return TrainVerdict{Action: "retry", Reason: "retrying " + keys + " once: the runner reported " + codesOf(in.Failed)}
 	}
 	for _, f := range in.Failed {
-		for _, k := range in.MainFailedKeys {
-			if f.Key == k {
+		for _, m := range in.MainFailed {
+			if sameStep(f, m) {
 				return TrainVerdict{Action: "hold", Reason: "main fails " + f.Key + " too, so no pull request on this train is to blame; fix main first (an express train)"}
 			}
 		}
@@ -119,49 +182,44 @@ func TriageTrainFailure(in TrainTriageInput) TrainVerdict {
 		if len(f.Packages) == 0 {
 			continue
 		}
-		failing := map[string]bool{}
-		for _, p := range f.Packages {
-			failing[p] = true
-		}
-		for n, paths := range in.Files {
-			if !in.FilesComplete[n] {
+		for n, r := range in.Reach {
+			if r.Unbounded || overlaps(r.Packages, f.Packages) {
 				suspects[n] = true
-				continue
-			}
-			for _, p := range paths {
-				if touches(in.ModulePath, p, failing) {
-					suspects[n] = true
-					break
-				}
 			}
 		}
 	}
 	if len(suspects) == 1 {
 		for n := range suspects {
-			return TrainVerdict{Action: "drop", Drop: n, Reason: fmt.Sprintf("#%d changed files in the packages %s covers", n, keys)}
+			reason := fmt.Sprintf("#%d is the only pull request on board whose change reaches what %s tested", n, keys)
+			if r := in.Reach[n]; r.Unbounded {
+				reason += " (" + r.Why + ")"
+			}
+			return TrainVerdict{Action: "drop", Drop: n, Reason: reason}
 		}
 	}
 	return TrainVerdict{Action: "hold", Reason: "could not tell which pull request caused " + keys}
 }
 
-func touches(modulePath, file string, failing map[string]bool) bool {
-	if modulePath == "" {
-		return false
+// sameStep reports whether main's failed step m is the train's failed step
+// f: the same key when neither is a shard, or packages in common.
+func sameStep(f, m TrainFailedStep) bool {
+	if !strings.Contains(f.Key, "#") && !strings.Contains(m.Key, "#") && f.Key == m.Key {
+		return true
 	}
-	dir := path.Dir(strings.TrimPrefix(file, "/"))
-	for {
-		pkg := modulePath
-		if dir != "." && dir != "/" && dir != "" {
-			pkg = modulePath + "/" + dir
-		}
-		if failing[pkg] {
+	return len(f.Packages) > 0 && len(m.Packages) > 0 && overlaps(f.Packages, m.Packages)
+}
+
+func overlaps(a, b []string) bool {
+	set := make(map[string]bool, len(a))
+	for _, x := range a {
+		set[x] = true
+	}
+	for _, y := range b {
+		if set[y] {
 			return true
 		}
-		if dir == "." || dir == "/" || dir == "" {
-			return false
-		}
-		dir = path.Dir(dir)
 	}
+	return false
 }
 
 func allEnvironmental(failed []TrainFailedStep) bool {
