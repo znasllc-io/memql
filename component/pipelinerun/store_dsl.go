@@ -772,7 +772,11 @@ func (s *dslStore) CreateTrain(ctx context.Context, owner string, t Train) error
 	setIfSet(args, "headSha", t.HeadSHA)
 	setIfSet(args, "pullRequestUrl", t.PullRequestURL)
 	setIfSet(args, "runId", bareID(t.RunID))
-	setIfSet(args, "updatedAt", formatTimeIfSet(t.UpdatedAt))
+	if !t.UpdatedAt.IsZero() {
+		// Nanoseconds: the coordinator compares updatedAt as the row's version
+		// (casTrain), and two writes in one second must not read as one.
+		args["updatedAt"] = t.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
 	if len(t.Requested) > 0 {
 		args["requested"] = append([]int(nil), t.Requested...)
 	}
@@ -833,8 +837,8 @@ func (s *dslStore) UpdateTrain(ctx context.Context, owner, trainID string, patch
 	if patch.Notified != nil {
 		args["notified"] = stringList(*patch.Notified)
 	}
-	if patch.UpdatedAt != nil {
-		args["updatedAt"] = formatTimeIfSet(*patch.UpdatedAt)
+	if patch.UpdatedAt != nil && !patch.UpdatedAt.IsZero() {
+		args["updatedAt"] = patch.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return s.ownerWrite(ctx, owner, mUpdatePipelineTrain, args)
 }
