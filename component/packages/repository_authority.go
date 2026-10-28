@@ -105,3 +105,27 @@ func (i *Integration) RepositoryWriterToken(ctx context.Context, credentialID, o
 	token, _, err := d.GitHubApp.ScopedInstallationToken(ctx, authority.InstallationID, []string{repo}, map[string]string{"contents": "write", "pull_requests": "write"})
 	return token, authority.InstallationID, err
 }
+
+// RepositoryTrainToken is RepositoryWriterToken for a release train: the same
+// fresh write-authority check and the same contents and pull request writes,
+// plus checks read, because a train boards a pull request on its pipeline's
+// check and a private repository's installation token cannot read checks
+// without it. It also answers the App that minted the token, from the same
+// configuration, so the train counts only that App's check: a check of the
+// same name from another App is somebody else's verdict.
+func (i *Integration) RepositoryTrainToken(ctx context.Context, credentialID, ownerUserID, owner, repo string) (string, int64, int64, error) {
+	d, err := i.resolve()
+	if err != nil {
+		return "", 0, 0, err
+	}
+	authority, err := d.repositoryAccess(ctx, credentialID, ownerUserID, owner, repo)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	if !authority.CanWrite {
+		return "", 0, 0, refuse("repository_write_not_authorized", "this GitHub identity can read the repository but cannot authorize changes; request approval from its maintainer")
+	}
+	token, _, appID, err := d.GitHubApp.ScopedInstallationTokenWithApp(ctx, authority.InstallationID, []string{repo},
+		map[string]string{"contents": "write", "pull_requests": "write", "checks": "read"})
+	return token, authority.InstallationID, appID, err
+}

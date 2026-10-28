@@ -1023,13 +1023,15 @@ guessing at a typo every minute. An express train is
 **Evidence, and what it is not.** A pull request boards on its pipeline's own
 pull request check, `pipelines.CheckRunName(name)`, completed `success` on its
 current head, and on its labels, and only when its head is a branch of this
-repository. The check is read by name with no App id, because the pipeline row
-carries none, so anything that writes checks could report one of that name: a
-fork's own workflow included. A fork therefore never boards
+repository. Two independent guards, because anything that writes checks can
+report one of that name, a fork's own workflow included. The check counts only
+from the App that minted the train's token (`RepositoryTrainToken` answers its
+id; `TestBoardingCountsOnlyTheAppsOwnCheck`), and a fork never boards
 (`TestAForkNeverBoards`): its code would otherwise run in this repository's
 train run with the pipeline's secrets, which the engine's refusal of fork runs
 (`pipelines/trigger.go`, D6) exists to prevent. A branch in this repository
-needs write access, which the repository already trusts. A failed train run is judged on its
+needs write access, which the repository already trusts. The token also reads
+checks, which a private repository's installation token cannot without it. A failed train run is judged on its
 failed steps' error codes and Go packages, each boarded pull request's changed
 files (300 at most; an incomplete list makes it a suspect), the root `go.mod`
 module path at the train's base, and `main`'s newest completed push run's

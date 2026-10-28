@@ -451,8 +451,8 @@ A pull request boards a train when all of these hold:
 - it is open, is not a draft, and targets the default branch;
 - its head is a branch of this repository: a fork's pull request
   [never runs](#pull-requests-from-forks), so it never boards either;
-- the pipeline's pull request check, `MemQL / <name>`, completed with success
-  on its current head;
+- the pipeline's pull request check, `MemQL / <name>` written by the
+  pipeline's own GitHub App, completed with success on its current head;
 - it carries neither `train:hold` nor `train:dropped`.
 
 A pull request whose head branch starts with `train/` is a train's own and
@@ -490,7 +490,8 @@ day's count of that repository's trains.
 ### Building the train
 
 Acting as the GitHub App, with an installation token minted through the
-pipeline owner's GitHub connection, the train:
+pipeline owner's GitHub connection (contents and pull requests write, checks
+read), the train:
 
 1. creates its branch at the default branch's head (on a rebuild, resets it
    there);

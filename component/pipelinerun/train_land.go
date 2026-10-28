@@ -27,7 +27,7 @@ import (
 
 // awaitApproval watches a train whose run passed.
 func (i *Integration) awaitApproval(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, now time.Time) error {
-	gh, token, err := trainAccess(ctx, d, p)
+	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (i *Integration) awaitApproval(ctx context.Context, d Deps, s pipelines.Tra
 // approval and the merge -- resumes here, and one already merged is only
 // recorded.
 func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train) error {
-	gh, token, err := trainAccess(ctx, d, p)
+	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 		// The replaced train's pull request would otherwise stay open beside
 		// the express train's, for the owner to approve a train that can no
 		// longer land.
-		if gh, token, err := trainAccess(ctx, d, p); err == nil {
+		if gh, token, _, err := trainAccess(ctx, d, p); err == nil {
 			retireTrain(ctx, d, gh, token, p, *replaced, "Replaced by express train "+created.Branch+". Its pull requests board the next train.")
 		} else {
 			trainLog(d).Warn("pipelines: the train an express train replaced was not closed", "repository", p.Repository, "branch", replaced.Branch, "error", err.Error())

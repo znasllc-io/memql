@@ -14,13 +14,14 @@ import (
 // production port (packagesGitHub) can build a train.
 //
 // Every call takes the repository as "owner/name" and a token the caller
-// minted with RepositoryWriterToken: an installation token for the one
-// repository, minted only after packages re-verifies the pipeline owner's
-// grant (component/packages/repository_authority.go). Train pull requests are
+// minted with TrainToken: an installation token for the one repository,
+// minted only after packages re-verifies the pipeline owner's grant
+// (component/packages/repository_authority.go), that can also read checks,
+// together with the id of the App that minted it. Train pull requests are
 // therefore authored by the MemQL app, which is what lets the owner approve
 // them.
 type trainGitHub interface {
-	RepositoryWriterToken(ctx context.Context, credential, user, repository string) (string, int64, error)
+	TrainToken(ctx context.Context, credential, user, repository string) (token string, installation, appID int64, err error)
 	TrainPullRequests(ctx context.Context, token, repository, base string) ([]githubapp.TrainPullRequest, error)
 	CheckRunConclusion(ctx context.Context, token, repository, sha, name string, appID int64) (string, string, error)
 	CreateBranchRef(ctx context.Context, token, repository, branch, sha string) error
@@ -194,4 +195,20 @@ func (g *packagesGitHub) OwnerLogin(ctx context.Context, credential, user, repos
 		return "", errors.New("the pipeline owner's GitHub login cannot be verified")
 	}
 	return access.RepositoryOwnerLogin(ctx, credential, user, owner, name)
+}
+
+// TrainToken mints a train's installation token through packages, which
+// re-verifies the pipeline owner's write authority on every mint.
+func (g *packagesGitHub) TrainToken(ctx context.Context, credential, user, repository string) (string, int64, int64, error) {
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	access, ok := g.pkgs.(interface {
+		RepositoryTrainToken(context.Context, string, string, string, string) (string, int64, int64, error)
+	})
+	if !ok {
+		return "", 0, 0, errors.New("repository write authority cannot be verified")
+	}
+	return access.RepositoryTrainToken(ctx, credential, user, owner, name)
 }

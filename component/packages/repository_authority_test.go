@@ -103,3 +103,35 @@ func TestRepositoryAuthorityRequiresTheProvidersExactStableIdentity(t *testing.T
 		}
 	}
 }
+
+// A release train boards a pull request on its pipeline's check, so its token
+// must read checks -- a private repository's installation token cannot without
+// it -- and name the App that minted it, so the train counts only that App's
+// check. It is still a writer: the same fresh authority check refuses a
+// connection that can only read.
+func TestRepositoryTrainTokenReadsChecksAndNamesTheApp(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	hub := installedRepo(newGrantHub(), "acme", "widget")
+	hub.body("/repos/acme/widget", http.StatusOK, `{"id":123,"full_name":"acme/widget","permissions":{"push":true}}`)
+	i, _, _, _ := grantHarness(t, hub, sealedGrantRow(t, grantRowOpts{}))
+	token, installation, appID, err := i.RepositoryTrainToken(context.Background(), grantCredentialId, grantOwner, "acme", "widget")
+	if err != nil || token == "" || installation != 42 || appID != 1234567 {
+		t.Fatalf("RepositoryTrainToken = token %t, installation %d, app %d, %v", token != "", installation, appID, err)
+	}
+	var body struct {
+		Repositories []string          `json:"repositories"`
+		Permissions  map[string]string `json:"permissions"`
+	}
+	bodies := hub.bodies()
+	if err := json.Unmarshal([]byte(bodies[len(bodies)-1]), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Repositories) != 1 || body.Repositories[0] != "widget" || len(body.Permissions) != 3 ||
+		body.Permissions["contents"] != "write" || body.Permissions["pull_requests"] != "write" || body.Permissions["checks"] != "read" {
+		t.Fatalf("train token scope = %+v", body)
+	}
+	hub.body("/repos/acme/widget", http.StatusOK, `{"id":123,"full_name":"acme/widget","permissions":{"pull":true}}`)
+	if token, _, _, err := i.RepositoryTrainToken(context.Background(), grantCredentialId, grantOwner, "acme", "widget"); token != "" || RefusalCode(err) != "repository_write_not_authorized" {
+		t.Fatalf("a read-only connection obtained a train token: %v", err)
+	}
+}

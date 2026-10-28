@@ -221,7 +221,7 @@ func (i *Integration) departScheduled(ctx context.Context, d Deps, s pipelines.T
 // request, then records the train running. t is a building train this tick
 // owns.
 func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train) error {
-	gh, token, err := trainAccess(ctx, d, p)
+	gh, token, appID, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 			Author: pr.Author, URL: pr.URL, Draft: pr.Draft, Labels: pr.Labels,
 			Fork: pr.HeadRepository == "" || !strings.EqualFold(pr.HeadRepository, p.Repository)}
 		if !pr.Draft && !c.Fork {
-			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, check, 0)
+			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, check, appID)
 			if err != nil {
 				return err
 			}
@@ -440,7 +440,7 @@ func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSetti
 		}
 		return i.hold(ctx, d, s, p, t, reason+".", nil)
 	}
-	gh, token, err := trainAccess(ctx, d, p)
+	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err
 	}
@@ -520,7 +520,7 @@ func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSetting
 // train, a pull request on board labelled train:hold rebuilds it without that
 // one, and a moved main rebuilds it (train_land.go).
 func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train) error {
-	gh, token, err := trainAccess(ctx, d, p)
+	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err
 	}
@@ -638,19 +638,21 @@ func (i *Integration) notifyTrain(ctx context.Context, d Deps, s pipelines.Train
 	return err
 }
 
-func trainAccess(ctx context.Context, d Deps, p Pipeline) (trainGitHub, string, error) {
+// trainAccess mints the train's token for one step, and answers the App that
+// minted it: boarding counts only that App's check.
+func trainAccess(ctx context.Context, d Deps, p Pipeline) (trainGitHub, string, int64, error) {
 	gh, err := trainPort(d)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
-	token, installation, err := gh.RepositoryWriterToken(ctx, p.CredentialID, p.OwnerUserID, p.Repository)
+	token, installation, appID, err := gh.TrainToken(ctx, p.CredentialID, p.OwnerUserID, p.Repository)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	if p.InstallationID != 0 && installation != 0 && installation != p.InstallationID {
-		return nil, "", errors.New("pipelines: the repository's installation changed since the pipeline was connected")
+		return nil, "", 0, errors.New("pipelines: the repository's installation changed since the pipeline was connected")
 	}
-	return gh, token, nil
+	return gh, token, appID, nil
 }
 
 // mainFailedKeys are the steps main's newest completed push run failed: a

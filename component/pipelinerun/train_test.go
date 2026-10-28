@@ -42,6 +42,19 @@ type trainRemote struct {
 	// checkName is the only check name the fake answers for, as GitHub
 	// answers only for the name asked; empty answers every name.
 	checkName string
+	// appID is the App the train's token names; checkApps is the App each
+	// head's check came from, ours unless a test says otherwise.
+	appID     int64
+	checkApps map[string]int64
+}
+
+const trainAppID = 4822538
+
+// checkFromApp makes sha's check one another App wrote.
+func (r *trainRemote) checkFromApp(sha string, app int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.checkApps[sha] = app
 }
 
 type trainPR struct {
@@ -56,6 +69,7 @@ func newTrainRemote(g *fakeGitHub) *trainRemote {
 		files: map[string]map[string][]byte{}, branchFile: map[string]map[string][]byte{}, branches: map[string]string{},
 		branchBase: map[string]string{}, conflicts: map[string]bool{}, trainPRs: map[int]*trainPR{}, nextPR: 100,
 		reviews: map[int][]githubapp.PullRequestReview{}, prFiles: map[int][]string{}, comments: map[int][]string{}, login: "ada-gh",
+		appID: trainAppID, checkApps: map[string]int64{},
 	}
 }
 
@@ -78,9 +92,9 @@ func (r *trainRemote) addPR(n int, head string, check string, opts ...func(*gith
 	}
 }
 
-func (r *trainRemote) RepositoryWriterToken(ctx context.Context, credential, user, repository string) (string, int64, error) {
-	watchGitHubCall(r.t, ctx, "RepositoryWriterToken")
-	return "writer-token", 7, nil
+func (r *trainRemote) TrainToken(ctx context.Context, credential, user, repository string) (string, int64, int64, error) {
+	watchGitHubCall(r.t, ctx, "TrainToken")
+	return "writer-token", 7, r.appID, nil
 }
 
 func (r *trainRemote) TrainPullRequests(ctx context.Context, token, repository, base string) ([]githubapp.TrainPullRequest, error) {
@@ -104,6 +118,13 @@ func (r *trainRemote) CheckRunConclusion(ctx context.Context, token, repository,
 	defer r.mu.Unlock()
 	c, ok := r.checks[sha]
 	if !ok || (r.checkName != "" && name != r.checkName) {
+		return "", "", nil
+	}
+	from, set := r.checkApps[sha]
+	if !set {
+		from = r.appID
+	}
+	if appID > 0 && from != appID {
 		return "", "", nil
 	}
 	if c == "" {
@@ -686,5 +707,20 @@ func TestARebuildWithNothingLeftClosesItsPullRequest(t *testing.T) {
 	}
 	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1], "will not land") {
 		t.Errorf("comments on the train pull request: %v", comments)
+	}
+}
+
+// TestBoardingCountsOnlyTheAppsOwnCheck: the check a pull request boards on
+// is the one this pipeline's App wrote. Another App -- or a workflow -- can
+// write a check of the same name, and its verdict is not the pipeline's.
+func TestBoardingCountsOnlyTheAppsOwnCheck(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.checkFromApp(shaB, 999)
+	th.tick(t)
+	tr := th.train(t)
+	if len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
+		t.Fatalf("on board %+v, want only #7: #8's check came from another App", tr.OnBoard)
 	}
 }
