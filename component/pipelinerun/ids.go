@@ -76,3 +76,19 @@ func OpenGateKey(runKey string) string {
 // of them, so a cancel and a claim cannot both decide from the same stale
 // row.
 func RunGateKey(runID string) string { return "pipelines.drive:" + bareID(runID) }
+
+// TrainGateKey serializes every read-modify-write of a repository's train
+// records: a departure (whose "one unfinished train" check and the create it
+// guards are one section) and every transition after it. Per repository,
+// because a repository has one train at a time; never held across a GitHub
+// call (the rules above).
+func TrainGateKey(repository string) string {
+	return "pipelines.train:" + normalizeRepository(repository)
+}
+
+// TrainIDFor is a train's id: one per (pipeline, branch), so two replicas
+// that both decide to depart write the same row, and the second create is
+// refused by @createOnly rather than opening a second train.
+func TrainIDFor(pipelineID, branch string) string {
+	return deriveID("pipelines.train", bareID(pipelineID)+"\x00"+branch)
+}

@@ -88,6 +88,41 @@ shape run pipelineRunFull {
   durationMs
 }
 
+/// Every train field: the coordinator reads trains through this shape, so a field missing here is a
+/// field it cannot see.
+@row
+shape train pipelineTrainFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  accountId
+  pipelineId
+  repository
+  branch
+  departure
+  state
+  requested
+  replaces
+  onBoard
+  leftOff
+  dropped
+  version
+  baseSha
+  headSha
+  pullRequest
+  pullRequestUrl
+  runId
+  rebuilds
+  retried
+  approvedBy
+  approvedSha
+  landedSha
+  heldReason
+  notified
+  departedAt
+  updatedAt
+}
+
 /// Every channel field.
 @row
 shape channel pipelineChannelFull {

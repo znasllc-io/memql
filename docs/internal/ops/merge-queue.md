@@ -9,6 +9,15 @@ owner: znas
 
 # CI Tier 3 — GitHub merge queue
 
+> **Superseded for this repository by release trains** (2026-10-27). Every pull
+> request here is the owner's own, so none could enter the queue with its own
+> approval and each merged through the admin bypass, which skips it. A release
+> train batches the ready pull requests instead, and switching to trains removes
+> the `merge_queue` rule from `main`'s ruleset
+> ([ruleset baseline](ruleset-baseline.md#release-trains-replace-the-merge-queue-2026-10-27),
+> [pipelines.md](../../public/operate/pipelines.md#release-trains)). This page
+> remains the record of how the queue was set up.
+
 Part of the CI-acceleration epic (#854). This is the workflow-side wiring
 plus the **operator steps** to actually turn the queue on (a repo-admin
 action that cannot be done from a workflow file).

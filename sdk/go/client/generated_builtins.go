@@ -5513,6 +5513,34 @@ func PipelinesStatusBuild(args PipelinesStatusArgs) string {
 	return "builtin pipelinesStatus()"
 }
 
+// PipelinesTrainExpress -- Start an express release train for one of the caller's repositories, carrying only the named pull requests: the same checks and the same approval as a scheduled train, off schedule. Only the pipeline's owner may start one. It replaces a train that is waiting for approval or held, whose pull requests board the next train, and is refused while a train is building or running.
+type PipelinesTrainExpressArgs struct {
+	// The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS.
+	Repository string
+	// The pull request numbers the express train carries. Each must be ready to board: open, not a draft, its MemQL / memql check passed, no train:hold or train:dropped label.
+	PullRequests []int
+}
+
+// PipelinesTrainExpress calls the engine builtin pipelinesTrainExpress.
+func (qc *QueryClient) PipelinesTrainExpress(ctx context.Context, args PipelinesTrainExpressArgs) (*Result, error) {
+	call := PipelinesTrainExpressBuild(args)
+	return qc.executeNamed(ctx, "pipelinesTrainExpress", call)
+}
+
+func PipelinesTrainExpressBuild(args PipelinesTrainExpressArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesTrainExpress(")
+	b.WriteString("repository: ")
+	b.WriteString(quoteMemQL(args.Repository))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("pullRequests: ")
+	b.WriteString(renderMemQLValue(args.PullRequests))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ProviderAuthStatus -- List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only.
 type ProviderAuthStatusArgs struct {
 }

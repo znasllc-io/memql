@@ -2941,7 +2941,7 @@ variables:
     component: pipelines
     scope: node
     optional: true
-    description: "Optional operator-owned JSON file read fresh before an agent claims an unstarted pipeline run. Requires allowNewRuns and validUntil (RFC3339, future and at most two hours away); missing, invalid or expired decisions keep new runs queued before their execution clock starts. Started-run recovery and cancellation remain available. Mount the same projected ConfigMap directory on every agent, never subPath. Unset preserves normal admission."
+    description: "Optional operator-owned JSON file read fresh before an agent claims an unstarted pipeline run. Requires allowNewRuns and validUntil (RFC3339, future and at most two hours away); an optional allowTrainRuns admits release train runs while allowNewRuns holds the rest; missing, invalid or expired decisions keep new runs queued before their execution clock starts. Started-run recovery and cancellation remain available. Mount the same projected ConfigMap directory on every agent, never subPath. Unset preserves normal admission."
 
   - name: MEMQL_PIPELINES_RUN_MAX_MINUTES
     component: pipelines

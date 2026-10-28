@@ -173,6 +173,25 @@ func everyStoreCall(s Store, value string) []struct {
 		{"UpdateChannel (clearing)", func() error {
 			return s.UpdateChannel(ctx, value, value, ChannelPatch{SecretRef: ptr(""), Recipients: ptr([]string(nil))})
 		}},
+		{"LatestTrain", func() error { _, err := s.LatestTrain(ctx, value); return err }},
+		{"TrainsSince", func() error { _, err := s.TrainsSince(ctx, value, now); return err }},
+		{"CreateTrain (every field)", func() error {
+			return s.CreateTrain(ctx, value, Train{
+				ID: value, OwnerUserID: value, AccountID: value, PipelineID: value, Repository: value, Branch: value,
+				Departure: value, State: value, Requested: []int{7, 9},
+				OnBoard: []TrainCar{{Number: 7, Title: value, SHA: value, URL: value}}, LeftOff: []pipelines.TrainSkip{{Number: 9, Reason: value}},
+				Dropped: []TrainCar{{Number: 8, SHA: value, Reason: value}}, Version: value, BaseSHA: value, HeadSHA: value,
+				PullRequest: 42, PullRequestURL: value, RunID: value, Notified: []string{value}, DepartedAt: now, UpdatedAt: now,
+			})
+		}},
+		{"UpdateTrain (every field)", func() error {
+			return s.UpdateTrain(ctx, value, value, TrainPatch{
+				State: ptr(value), Version: ptr(value), BaseSHA: ptr(value), HeadSHA: ptr(value), PullRequestURL: ptr(value), RunID: ptr(value),
+				ApprovedBy: ptr(value), ApprovedSHA: ptr(value), LandedSHA: ptr(value), HeldReason: ptr(value),
+				OnBoard: ptr([]TrainCar{{Number: 7, Title: value}}), Dropped: ptr([]TrainCar{}), LeftOff: ptr([]pipelines.TrainSkip{{Number: 9, Reason: value}}),
+				PullRequest: ptr(42), Rebuilds: ptr(1), Retried: ptr(true), Notified: ptr([]string{value}), UpdatedAt: ptr(now),
+			})
+		}},
 		{"StageNotification (to a secret)", func() error {
 			return s.StageNotification(ctx, NotificationRequest{
 				RequestID: value, Medium: "webhook", TargetSecret: value, Subject: value, Body: value, DedupeKey: value, RequestedBy: value,

@@ -27,19 +27,19 @@ func TestFileRunAdmissionFailsClosedAndReadsEveryDecision(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "admission.json")
 	gate := FileRunAdmission(path)
-	if allow, err := gate(testNow); allow || err == nil {
+	if allow, err := gate(testNow, false); allow || err == nil {
 		t.Fatal("missing configured decision must hold new runs")
 	}
 	writeAdmission(t, path, true, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow); !allow || err != nil {
+	if allow, err := gate(testNow, false); !allow || err != nil {
 		t.Fatalf("fresh allowance: %v, %v", allow, err)
 	}
 	writeAdmission(t, path, false, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow); allow || err != nil {
+	if allow, err := gate(testNow, false); allow || err != nil {
 		t.Fatalf("the updated hold must be read without restarting: %v, %v", allow, err)
 	}
 	writeAdmission(t, path, true, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow.Add(90 * time.Minute)); allow || err == nil {
+	if allow, err := gate(testNow.Add(90*time.Minute), false); allow || err == nil {
 		t.Fatal("a stopped writer cannot leave an indefinite allowance")
 	}
 	for _, content := range []string{
@@ -50,7 +50,7 @@ func TestFileRunAdmissionFailsClosedAndReadsEveryDecision(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if allow, err := gate(testNow); allow || err == nil {
+		if allow, err := gate(testNow, false); allow || err == nil {
 			t.Fatalf("invalid decision allowed admission: %q", content)
 		}
 	}
@@ -105,12 +105,86 @@ func TestAdmissionDoesNotPreventCancellingAnUnstartedClaim(t *testing.T) {
 	run.CancelRequested = true
 	h.store.addRun(run)
 	h.integ.Configure(func(d *Deps) {
-		d.AdmitRun = func(time.Time) (bool, error) {
+		d.AdmitRun = func(time.Time, bool) (bool, error) {
 			t.Fatal("cancellation must not depend on admission")
 			return false, nil
 		}
 	})
 	if _, ok, err := h.integ.claim(context.Background(), h.integ.snapshot(), run.ID); !ok || err != nil {
 		t.Fatalf("cancel recovery blocked: %v, %v", ok, err)
+	}
+}
+
+func writeTrainAdmission(t *testing.T, path string, allowRuns, allowTrains bool, until time.Time) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"allowNewRuns": allowRuns, "allowTrainRuns": allowTrains, "validUntil": until, "reason": "train allowance"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The cost guard can hold new runs and still admit release trains, which run
+// on a schedule and a budget of their own (design record 2026-10-27, 5.3).
+func TestAdmissionAdmitsATrainRunUnderTheTrainAllowance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission.json")
+	gate := FileRunAdmission(path)
+	writeTrainAdmission(t, path, false, true, testNow.Add(90*time.Minute))
+	if allow, err := gate(testNow, true); !allow || err != nil {
+		t.Fatalf("a train run under the train allowance: %v, %v", allow, err)
+	}
+	if allow, err := gate(testNow, false); allow || err != nil {
+		t.Fatalf("an ordinary run under the train allowance alone was admitted: %v, %v", allow, err)
+	}
+}
+
+func TestAdmissionWithoutTheTrainFieldIsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission.json")
+	gate := FileRunAdmission(path)
+	writeAdmission(t, path, false, testNow.Add(90*time.Minute))
+	if allow, err := gate(testNow, true); allow || err != nil {
+		t.Fatalf("a hold with no train field held a train run: %v, %v", allow, err)
+	}
+	writeAdmission(t, path, true, testNow.Add(90*time.Minute))
+	if allow, err := gate(testNow, true); !allow || err != nil {
+		t.Fatalf("an open window admits a train run too: %v, %v", allow, err)
+	}
+	if err := os.WriteFile(path, []byte(`{"allowNewRuns":false,"allowTrainRuns":"yes","validUntil":"`+testNow.Add(time.Hour).Format(time.RFC3339)+`"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if allow, err := gate(testNow, true); allow || err == nil {
+		t.Fatalf("a train allowance that is not a boolean was read: %v, %v", allow, err)
+	}
+}
+
+func TestClaimPassesTheTrainFact(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	train := queuedRun(p, shaA)
+	train.HeadBranch = "train/2026-10-28-1"
+	ordinary := queuedRun(p, shaB)
+	ordinary.ID, ordinary.RunKey = "run-ordinary", "k-ordinary"
+	h.store.addRun(train)
+	h.store.addRun(ordinary)
+	var asked []bool
+	h.integ.Configure(func(d *Deps) {
+		d.AdmitRun = func(_ time.Time, isTrain bool) (bool, error) {
+			asked = append(asked, isTrain)
+			return false, nil
+		}
+	})
+	for _, id := range []string{train.ID, ordinary.ID} {
+		if _, _, err := h.integ.claim(context.Background(), h.integ.snapshot(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(asked) != 2 || !asked[0] || asked[1] {
+		t.Fatalf("admission was asked %v, want [true false]: a train run, then an ordinary one", asked)
+	}
+	if !IsTrainRun(train) || IsTrainRun(ordinary) {
+		t.Errorf("IsTrainRun misreads the head branch")
 	}
 }

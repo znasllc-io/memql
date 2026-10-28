@@ -12,8 +12,9 @@
 #   - protoc-gen-go         (Go bindings generator)
 #   - protoc-gen-go-grpc    (Go gRPC stubs generator)
 #   - PyYAML                (for the python3 first on PATH: tests that `make
-#                            test` runs exec scripts/ci's Python, which
-#                            imports it -- see install_pyyaml)
+#                            test` runs exec scripts/ci's Python and the
+#                            connection gate's, which import it -- see
+#                            install_pyyaml)
 # On Linux protoc and the distribution's PyYAML package come from the package
 # manager through sudo, refused up front when sudo would prompt for a password.
 #
@@ -231,7 +232,9 @@ EOF
 # interpreter the tests reach: they exec "python3" by name. Go tests in the
 # root package, scripts/ci and scripts/cidb run scripts/ci's own Python
 # (pipeline-db-tests.py, codeql-scan.py and the unittest suites beside them),
-# which imports PyYAML, so a machine without it fails tests that CI passes.
+# and tests in scripts/deploy and deploy/k8s/overlays/local run the Python
+# inside the connection gate (scripts/deploy/conn-headroom-check.sh). Both
+# import PyYAML, so a machine without it fails tests that CI passes.
 # CI's toolchain image installs python3-yaml for the same reason
 # (deploy/toolchain-image/Dockerfile). Those tests fail rather than skip
 # without it, naming this target (scripts/ci/pyyaml).

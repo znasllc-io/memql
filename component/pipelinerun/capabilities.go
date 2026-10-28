@@ -79,6 +79,21 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{},
 		},
 		{
+			Name:        "trainTick",
+			Description: "The release train's one-minute step (design record 2026-10-27), reachable only from the sealed agent automation. Reads MEMQL_PIPELINES_TRAINS and, for each enabled repository, takes one step of its newest v1:pipelines:train: depart at a scheduled time, build the train branch from main and the ready pull requests, watch the train pull request's run, retry an environmental failure once, drop the one pull request a failure points to, hold for the owner, or land a train the owner approved. Answers {repositories, departed, advanced, notes}.",
+			Handler:     i.handleTrainTick,
+			ArgsSchema:  map[string]string{},
+		},
+		{
+			Name:        "trainExpress",
+			Description: "Start an express release train carrying only the named pull requests of one of the caller's repositories: the pipeline's owner only. It replaces a train waiting for approval or held, and is refused while a train is building or running. The train is built at once and runs the same checks and needs the same approval as a scheduled one. Answers {trainId, branch, state, pullRequest, onBoard}.",
+			Handler:     i.handleTrainExpress,
+			ArgsSchema: map[string]string{
+				"repository":   "string (required) -- owner/name, configured in MEMQL_PIPELINES_TRAINS",
+				"pullRequests": "[]int (required) -- the pull request numbers the express train carries",
+			},
+		},
+		{
 			Name:        "connect",
 			Description: "Connect a pipeline to one of the caller's sources (D12, D14): prove the grant reaches the repository by minting a token through it, read memql-package.yaml at the default branch's head, refuse a source with no pipeline block (pipeline_not_declared) or one that does not validate, and create or reconnect the source's one pipeline. Answers {pipelineId, repository, delivery, compute, schedule, stages}.",
 			Handler:     i.handleConnect,

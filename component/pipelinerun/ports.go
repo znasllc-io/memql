@@ -158,6 +158,13 @@ type Store interface {
 	CreateRun(ctx context.Context, r Run) error
 	UpdateRun(ctx context.Context, owner, runID string, patch RunPatch) error
 	CreateChannel(ctx context.Context, c Channel) error
+	// The release train's record (design record 2026-10-27): its newest row,
+	// the rows that departed since a time (a day's train count), and the two
+	// server-only writes, made under the pipeline owner's authority.
+	LatestTrain(ctx context.Context, pipelineID string) (*Train, error)
+	TrainsSince(ctx context.Context, pipelineID string, since time.Time) ([]Train, error)
+	CreateTrain(ctx context.Context, owner string, t Train) error
+	UpdateTrain(ctx context.Context, owner, trainID string, patch TrainPatch) error
 	UpdateChannel(ctx context.Context, owner, channelID string, patch ChannelPatch) error
 
 	// StageNotification stages one outbound row for the outbound worker to
