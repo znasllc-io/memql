@@ -2,8 +2,6 @@ package work
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -12,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // AppDispatchSource recognizes only a persisted, owner-selected Apps route.
@@ -36,6 +35,8 @@ func appOwnedRun(row map[string]any) bool {
 
 func appDispatchGate(runID string) string { return "app-dispatch:" + memql.BareShortId(runID) }
 
+var appRecoveryIDs = id.NewUntracked()
+
 // appRecoverySnapshot binds a hint to the stored generation, consent and last
 // real progress. No graph payload, authority, input or model content travels.
 func appRecoverySnapshot(row map[string]any) string {
@@ -47,8 +48,9 @@ func appRecoverySnapshot(row map[string]any) string {
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	// Preserve the exact JSON bytes, including nested sequence order and number
+	// precision; FromMap would decode them again before fingerprinting.
+	return string(appRecoveryIDs.FromBytes(data))
 }
 
 func (i *Integration) claimAppRun(ctx context.Context, req DispatchRequest, claimer RunClaimer, key string, ttl time.Duration) bool {
