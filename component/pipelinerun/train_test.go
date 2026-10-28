@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -59,6 +60,9 @@ type trainRemote struct {
 	raceMerge bool
 	// branchHistory is every commit each branch has pointed at.
 	branchHistory map[string][]string
+	// tokenErr fails every token mint: the owner's connection lost the
+	// repository, say.
+	tokenErr error
 }
 
 const trainAppID = 4822538
@@ -107,6 +111,11 @@ func (r *trainRemote) addPR(n int, head string, check string, opts ...func(*gith
 
 func (r *trainRemote) TrainToken(ctx context.Context, credential, user, repository string) (string, int64, int64, error) {
 	watchGitHubCall(r.t, ctx, "TrainToken")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tokenErr != nil {
+		return "", 0, 0, r.tokenErr
+	}
 	return "writer-token", 7, r.appID, nil
 }
 
@@ -1053,5 +1062,67 @@ func TestATrainBranchNeverPointsAtMain(t *testing.T) {
 	}
 	if len(history) != 2 {
 		t.Errorf("the train branch moved %d times (%v), want once per build", len(history), history)
+	}
+}
+
+func (th *trainHarness) stuckMessages() []string {
+	var out []string
+	for _, m := range th.messages() {
+		if strings.Contains(m, "is stuck") {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// TestATrainWithNoRunTellsTheOwner: the train pull request opened and no run
+// ever started for its head -- a missed webhook, a pipeline that no longer
+// takes pull request events. The train would wait forever, so after twenty
+// minutes the owner is told, once.
+func TestATrainWithNoRunTellsTheOwner(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	th.clock = th.clock.Add(10 * time.Minute)
+	th.tick(t)
+	if n := len(th.stuckMessages()); n != 0 {
+		t.Fatalf("%d stuck messages after ten minutes, want none yet", n)
+	}
+	for range 3 {
+		th.clock = th.clock.Add(6 * time.Minute)
+		th.tick(t)
+	}
+	stuck := th.stuckMessages()
+	if len(stuck) != 1 || !strings.Contains(stuck[0], "No run has started") || !strings.Contains(stuck[0], "<@123456789012345678>") {
+		t.Fatalf("stuck messages %v, want one ACTION NEEDED naming the missing run", stuck)
+	}
+}
+
+// TestAStepThatKeepsFailingTellsTheOwner: every tick's step fails the same
+// way -- here the owner's GitHub connection no longer mints the train's
+// token. The log alone says so every minute; after fifteen minutes of it the
+// owner is told, once.
+func TestAStepThatKeepsFailingTellsTheOwner(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	th.remote.mu.Lock()
+	th.remote.tokenErr = errors.New("repository_write_not_authorized: this GitHub identity can read the repository but cannot authorize changes")
+	th.remote.mu.Unlock()
+	for range 3 {
+		th.clock = th.clock.Add(4 * time.Minute)
+		th.tick(t)
+	}
+	// The first failure was at minute 4, so minute 12 is eight minutes of it.
+	if n := len(th.stuckMessages()); n != 0 {
+		t.Fatalf("%d stuck messages after eight minutes of errors, want none yet", n)
+	}
+	for range 4 {
+		th.clock = th.clock.Add(2 * time.Minute)
+		th.tick(t)
+	}
+	stuck := th.stuckMessages()
+	if len(stuck) != 1 || !strings.Contains(stuck[0], "cannot authorize changes") {
+		t.Fatalf("stuck messages %v, want one naming the failing step", stuck)
 	}
 }

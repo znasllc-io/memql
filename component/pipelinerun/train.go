@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -48,7 +49,49 @@ const (
 	// trainAdmissionWait is how long a train's run may sit queued before the
 	// owner is told the cost guard is holding it.
 	trainAdmissionWait = 15 * time.Minute
+	// trainRunStartWait is how long a running train may wait for any run at
+	// its head -- a missed webhook, a pipeline no longer taking pull request
+	// events -- before the owner is told it is stuck.
+	trainRunStartWait = 20 * time.Minute
+	// trainStallWait is how long a train's step may keep failing before the
+	// owner is told. Shorter failures are GitHub or the store blinking, and
+	// the next tick tries again.
+	trainStallWait = 15 * time.Minute
 )
+
+// trainStallClock remembers, per pipeline, since when its train's step has
+// failed on every tick, for the train head it failed on.
+type trainStallClock struct {
+	mu    sync.Mutex
+	since map[string]trainStall
+}
+
+type trainStall struct {
+	key   string
+	first time.Time
+}
+
+// failing records a failed step for key (train id and head) and answers since
+// when it has failed: a new key starts the clock again.
+func (c *trainStallClock) failing(pipeline, key string, now time.Time) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.since == nil {
+		c.since = map[string]trainStall{}
+	}
+	st, ok := c.since[pipeline]
+	if !ok || st.key != key {
+		st = trainStall{key: key, first: now}
+		c.since[pipeline] = st
+	}
+	return st.first
+}
+
+func (c *trainStallClock) cleared(pipeline string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.since, pipeline)
+}
 
 // TrainTickResult is what one tick did, for the automation's log.
 type TrainTickResult struct {
@@ -104,6 +147,9 @@ func (i *Integration) TrainTick(ctx context.Context) (TrainTickResult, error) {
 		if err != nil {
 			trainLog(d).Warn("pipelines: a train step failed; the next tick tries again", "repository", repo, "error", err.Error())
 			res.Notes = append(res.Notes, repo+": "+err.Error())
+			i.noteTrainStall(ctx, d, s, p, err)
+		} else {
+			i.trainStalls.cleared(p.ID)
 		}
 		if departed {
 			res.Departed++
@@ -113,6 +159,24 @@ func (i *Integration) TrainTick(ctx context.Context) (TrainTickResult, error) {
 		}
 	}
 	return res, nil
+}
+
+// noteTrainStall tells the owner, once per train head, when the train's step
+// has failed on every tick for trainStallWait: an error the log repeats every
+// minute -- a lost GitHub connection, a refused re-run -- would otherwise stop
+// every later departure without anyone hearing of it.
+func (i *Integration) noteTrainStall(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, stepErr error) {
+	cur, err := d.Store.LatestTrain(memql.ContextWithFreshRead(ctx), p.ID)
+	if err != nil || cur == nil || cur.Finished() {
+		return
+	}
+	now := d.Now().UTC()
+	first := i.trainStalls.failing(p.ID, cur.ID+"@"+cur.HeadSHA, now)
+	if now.Sub(first) < trainStallWait {
+		return
+	}
+	_ = i.notifyTrain(ctx, d, s, p, *cur, pipelinenotify.TrainStalled,
+		fmt.Sprintf("The train's step has failed on every tick for %s: %s", now.Sub(first).Round(time.Minute), oneLine(stepErr.Error())), nil)
 }
 
 func trainPipeline(ctx context.Context, d Deps, repo string) (Pipeline, error) {
@@ -431,6 +495,11 @@ func (i *Integration) observeRun(ctx context.Context, d Deps, s pipelines.TrainS
 		}
 	}
 	if len(prRuns) == 0 {
+		if now.Sub(t.UpdatedAt) >= trainRunStartWait {
+			return i.notifyTrain(ctx, d, s, p, t, pipelinenotify.TrainStalled, fmt.Sprintf(
+				"No run has started for the train's head %s in %s. Check that the pipeline receives this repository's pull request events (its webhook, or the poll).",
+				shortCommit(t.HeadSHA), trainRunStartWait), nil)
+		}
 		return nil
 	}
 	run, _ := newestAttempt(prRuns)

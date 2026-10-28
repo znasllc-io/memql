@@ -615,7 +615,9 @@ MemQL OS.
 | Held | ACTION NEEDED | Why the train is held, and its failed steps |
 | Reminder | ACTION NEEDED | The train has waited past a departure for approval |
 | Admission held | ACTION NEEDED | The train's run has been queued for 15 minutes while [run admission](#operator-run-admission) holds new runs |
+| Stuck | ACTION NEEDED | No run has started for the train's head in 20 minutes, or the train's step has failed on every tick for 15 minutes, with the error |
 | Landed | Status | How many pull requests landed, and the merge commit |
+| Cancelled | Status | A train whose pull request was opened will not land, and why |
 
 **Only ACTION NEEDED messages mention anyone, and only `ownerDiscordUserId`.**
 The mention is the message's text, with `allowed_mentions` naming that one
