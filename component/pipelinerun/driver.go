@@ -1338,6 +1338,7 @@ func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.
 		BaseSHA:          f.baseSHA,
 		Mode:             f.mode,
 		Event:            f.event,
+		HeadBranch:       f.branch,
 		Version:          f.version,
 		Domain:           f.domain,
 		InstallationID:   f.installation,

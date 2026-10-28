@@ -15,7 +15,7 @@ func TestCloudAdmissionWaitSurvivesReplicaAndLateHold(t *testing.T) {
 		t.Run(when, func(t *testing.T) {
 			reads := 0
 			h := newRunnerHarness(t, func(c *Config) {
-				c.AdmitCloud = func(time.Time) (bool, error) {
+				c.AdmitCloud = func(time.Time, bool) (bool, error) {
 					reads++
 					if when == "unreadable decision" {
 						return true, errors.New("unavailable")
@@ -40,7 +40,7 @@ func TestCloudAdmissionWaitSurvivesReplicaAndLateHold(t *testing.T) {
 			// A fresh replica owns no memory or capture from that creator.
 			cfg := h.cfg
 			cfg.NodeID = rtOther
-			cfg.AdmitCloud = func(time.Time) (bool, error) { return true, nil }
+			cfg.AdmitCloud = func(time.Time, bool) (bool, error) { return true, nil }
 			second := h.newRunner(cfg)
 			h.c.script(testJobName, rtFinishingScript(testJobName, 0, ""))
 			run.RecoverOnly = true
@@ -55,7 +55,7 @@ func TestCloudAdmissionWaitSurvivesReplicaAndLateHold(t *testing.T) {
 func TestCloudAdmissionDoesNotBlockAdoptionOrCancellation(t *testing.T) {
 	t.Run("adoption", func(t *testing.T) {
 		h := newRunnerHarness(t, func(c *Config) {
-			c.AdmitCloud = func(time.Time) (bool, error) {
+			c.AdmitCloud = func(time.Time, bool) (bool, error) {
 				t.Fatal("existing work must not request a new spending allowance")
 				return false, nil
 			}
@@ -72,7 +72,7 @@ func TestCloudAdmissionDoesNotBlockAdoptionOrCancellation(t *testing.T) {
 		}
 	})
 	t.Run("cancel waiting", func(t *testing.T) {
-		h := newRunnerHarness(t, func(c *Config) { c.AdmitCloud = func(time.Time) (bool, error) { return false, nil } })
+		h := newRunnerHarness(t, func(c *Config) { c.AdmitCloud = func(time.Time, bool) (bool, error) { return false, nil } })
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		done := h.start(ctx, rtRun())
@@ -88,7 +88,7 @@ func TestCloudAdmissionDoesNotBlockAdoptionOrCancellation(t *testing.T) {
 func TestCloudAdmissionRechecksIsolationProbeAllocation(t *testing.T) {
 	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
 	reads := 0
-	h.r.cfg.AdmitCloud = func(time.Time) (bool, error) {
+	h.r.cfg.AdmitCloud = func(time.Time, bool) (bool, error) {
 		reads++
 		if reads == 1 {
 			return true, nil
@@ -112,7 +112,7 @@ func TestCloudAdmissionRechecksIsolationProbeAllocation(t *testing.T) {
 
 func TestCloudAdmissionExpiredArrivalStartsNoAdmissionOrCleanup(t *testing.T) {
 	h := newIsoHarness(t, nil)
-	h.r.cfg.AdmitCloud = func(time.Time) (bool, error) {
+	h.r.cfg.AdmitCloud = func(time.Time, bool) (bool, error) {
 		t.Error("an expired arrival must not ask for a spending decision")
 		return false, nil
 	}

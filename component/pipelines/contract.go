@@ -187,7 +187,10 @@ type StepRequest struct {
 	BaseSHA      string     `json:"baseSha,omitempty"`
 	Mode         Mode       `json:"mode"`
 	Event        Event      `json:"event"`
-	Version      string     `json:"version"`
+	// HeadBranch is the immutable run's head, used with Event for train admission.
+	// It is trusted driver metadata, never derived from a step's environment.
+	HeadBranch string `json:"headBranch,omitempty"`
+	Version    string `json:"version"`
 	// Domain is the front-door domain of the cluster running the pipeline
 	// (its MEMQL_DOMAIN), "" when none is configured. A step reads it as
 	// MEMQL_DOMAIN to reach this cluster's public hosts -- verify-rollout's

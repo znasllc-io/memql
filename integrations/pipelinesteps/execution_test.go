@@ -74,7 +74,7 @@ func TestInvalidBuildPoolRefusesBeforeExternalEffects(t *testing.T) {
 			// No Kubernetes client: even the isolation gate must refuse before
 			// deleting an old probe or creating a new Job or Secret.
 			runner := NewRunner(cfg, nil, nil, nil, nil)
-			verdict, decided := runner.probeIsolation(t.Context())
+			verdict, decided := runner.probeIsolation(t.Context(), nil)
 			if !decided || !verdict.Inconclusive || verdict.Isolated || !strings.Contains(verdict.Detail, "MEMQL_PIPELINES_NODE_POOL") {
 				t.Fatalf("invalid pool proof = %+v", verdict)
 			}

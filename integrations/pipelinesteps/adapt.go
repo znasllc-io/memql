@@ -49,6 +49,7 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		Repository:      req.Repository,
 		SHA:             req.SHA,
 		Event:           req.Event,
+		HeadBranch:      req.HeadBranch,
 		InstallationID:  req.InstallationID,
 		Image:           req.Step.Image,
 		ImagePullSecret: req.Step.ImagePullSecret,

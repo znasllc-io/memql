@@ -18,7 +18,7 @@ func TestVerificationFingerprintPreservesTheLiveDriver(t *testing.T) {
 	dr := &runDriver{
 		d:        Deps{EngineRevision: func() string { return "engine-revision" }, Domain: func() string { return "example.test" }},
 		p:        Pipeline{ID: "pipeline", OwnerUserID: "owner", Repository: "example/project"},
-		run:      Run{SHA: shaA, Event: pipelines.EventMergeGroup, Mode: pipelines.ModeFull, Version: "1.2.3", InboundRequestID: "inbound"},
+		run:      Run{SHA: shaA, Event: pipelines.EventMergeGroup, HeadBranch: "train/2026-10-28-1", Mode: pipelines.ModeFull, Version: "1.2.3", InboundRequestID: "inbound"},
 		workflow: &workflowProgram{fingerprint: "captured-workflow"},
 	}
 	step := pipelines.Step{Key: "tests.unit", Kind: pipelines.StepCommand, Run: "go test ./unit", Packages: []string{"example/unit"}, Verification: true}
@@ -30,7 +30,7 @@ func TestVerificationFingerprintPreservesTheLiveDriver(t *testing.T) {
 	}
 	want := &runDriver{d: dr.d, p: dr.p, run: Run{SHA: shaA}, workflow: dr.workflow}
 	if verification != want.definitionOf(step) {
-		t.Fatal("verification changed more than the event, mode, version and inbound request")
+		t.Fatal("verification changed more than the event, branch, mode, version and inbound request")
 	}
 	want.run.SHA = shaB
 	if verification == want.verificationOf(step) {

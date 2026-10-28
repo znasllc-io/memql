@@ -976,9 +976,11 @@ a clone token. Fleet execution currently has no durable remote receipt lookup;
 an interrupted fleet intent is also uncertain and is not dispatched again.
 Inspect the original attempt before authorizing new work.
 
-The workbench action is `pipelineStepV10` and its receipt acknowledgement is
+The workbench action is `pipelineStepV11` and its receipt acknowledgement is
 `pipelineReceiptAckV3`. Older replicas reject these actions instead of ignoring
-new execution, recovery or cleanup guarantees. Upgrade the coordinated engine
+new execution, recovery or cleanup guarantees. V11 carries the saved run's
+head branch beside its event for train-aware cloud admission; command
+environment variables cannot supply it. Upgrade the coordinated engine
 set and drain old drivers before enabling the new protocol.
 
 Job retirement fences delayed creation and confirms owned resource absence.

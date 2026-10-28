@@ -1136,10 +1136,11 @@ own contracts. Current machine consent and resources remain independent gates.
 
 Version 2 of the operator admission file separates a global new-run pause from
 cloud spending. Cost holds can therefore leave eligible Fleet work running.
-The optional release-train allowance still admits train runs, but never
-overrides the independent cloud-spending gate; a held cloud gate can therefore
-leave an admitted train waiting for capacity
-(`TestTrainAllowancePreservesIndependentCloudHold`).
+The optional release-train allowance still admits train runs under a global
+hold, but never overrides an explicit version 2 `allowCloud:false`; that hold can
+therefore leave an admitted train waiting for capacity
+(`TestTrainAllowancePreservesIndependentCloudHold`; how a legacy decision treats
+trains is in the release-train section below).
 Workbench reads the live cloud decision again before each command or isolation
 probe Job, including a later step in an already-started run. A held attempt saves
 its exact queued definition before waiting; a new replica can recover that
@@ -1174,3 +1175,34 @@ validation or delivery fails, preserving that original error. Cancellation,
 truncation and a reply lost before completion leave the witness fenced.
 `TestManagerReleasesOnlyCompletedRuntimeErrors` exercises real runtime responses
 and a second manager against the durable witness.
+
+## Release-train allowance across cloud allocation (2026-10-28)
+
+The separate Fleet/cloud spending gate must preserve main's existing train
+allowance. A legacy `allowNewRuns:false, allowTrainRuns:true` admits the train's
+run, probe and cloud commands. Version 2 additionally requires `allowCloud`, so
+an explicit spending hold wins even for a train. Ordinary runs do not inherit
+the train allowance.
+
+The driver forwards the immutable run event and head branch in `StepRequest`
+and `StepRun`, independent of command environment. Execution and queued-effect
+fingerprints bind both, so a replacement replica cannot widen a retained
+attempt's admission class. Reusable verification excludes these run-only facts
+because its command still receives neither event nor branch. The coordinated
+workbench action is `pipelineStepV11`; older actions cannot silently discard
+this identity.
+
+A shared isolation proof retains each current waiter's class and cancellation
+context, rechecking the live operator decision before every probe POST. A train
+can fund that proof only while waiting; after cancellation, ordinary waiters
+need their own allowance. A cached successful probe is only isolation evidence,
+and every command rechecks its own spending gate after using it. Recovery of
+existing Jobs and cleanup remain independent of new-allocation admission.
+
+Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
+`TestTrainAdmissionIdentityComesFromSavedRunAndBindsRecovery`,
+`TestTrainCloudAdmissionSurvivesForwardAndFundsIsolation`,
+`TestTrainCloudRecoveryBindsEventAndHeadBranch`, and
+`TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
+contract and in-process replica hop; they do not establish that a running
+installation has been upgraded.

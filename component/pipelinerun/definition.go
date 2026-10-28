@@ -39,7 +39,7 @@ func (dr *runDriver) definitionForRun(step pipelines.Step, run Run) string {
 		"repository": dr.p.Repository, "pipelineId": bareID(dr.p.ID),
 		"ownerUserId": dr.p.OwnerUserID, "compute": dr.p.Compute,
 		"sha": run.SHA, "version": run.Version, "inboundRequestId": run.InboundRequestID,
-		"mode": run.Mode, "event": run.Event, "domain": domain,
+		"mode": run.Mode, "event": run.Event, "headBranch": run.HeadBranch, "domain": domain,
 	}
 	if step.Placement == pipelines.PlacementPool {
 		// The source snapshot is immutable; an authored expression can still
@@ -65,6 +65,6 @@ func (dr *runDriver) verificationOf(step pipelines.Step) string {
 		return ""
 	}
 	run := dr.run
-	run.Event, run.Mode, run.Version, run.InboundRequestID = "", "", "", ""
+	run.Event, run.Mode, run.Version, run.InboundRequestID, run.HeadBranch = "", "", "", "", ""
 	return dr.definitionForRun(step, run)
 }
