@@ -23,7 +23,8 @@ in this repository's `cockpit/` module; its release artifacts remain separate.
 Deploy the capability before enabling manifest `placement: pool`, selecting an
 installed `computePlacement` policy, or switching the admission writer to
 version 2. Every agent and workbench must understand the scoped admission file
-first. See [the pipeline reference](docs/public/operate/pipelines.md#operator-run-admission)
+and `pipelineStepV11` train identity first. Legacy train allowances remain valid
+for train Jobs; a version-2 cloud hold still denies every new cloud allocation. See [the pipeline reference](docs/public/operate/pipelines.md#operator-run-admission)
 and [worker admission](cockpit/docs/pipelines.md#shared-host-admission). These
 contracts describe source behavior, not evidence that an installation has
 already been upgraded.

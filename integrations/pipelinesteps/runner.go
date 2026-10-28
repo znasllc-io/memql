@@ -864,11 +864,11 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 
 // cloudAdmission does not cache a decision or copy it into a repository-owned
 // job definition. A live hold/error denies new allocation on every replica.
-func (r *Runner) cloudAdmission() (bool, string) {
+func (r *Runner) cloudAdmission(train bool) (bool, string) {
 	if r.cfg.AdmitCloud == nil {
 		return true, ""
 	}
-	allowed, err := r.cfg.AdmitCloud(r.now())
+	allowed, err := r.cfg.AdmitCloud(r.now(), train)
 	if err != nil {
 		return false, "unavailable"
 	}
@@ -879,7 +879,7 @@ func (r *Runner) cloudAdmission() (bool, string) {
 }
 
 func (s *step) cloudAdmitted() bool {
-	allowed, reason := s.r.cloudAdmission()
+	allowed, reason := s.r.cloudAdmission(pl.IsTrainEvent(s.run.Event, s.run.HeadBranch))
 	if !allowed && !s.admissionNoted {
 		s.admissionNoted = true
 		s.log.Info("pipelines: waiting for cloud spending admission", "reason", reason)

@@ -1335,3 +1335,34 @@ rollback. It also measured 146 database embedded files. These receipts qualify
 that candidate, not its integration with the later build-time architecture
 change, nor a deployed recovery. The combined source needs its own focused
 integration and canonical build checks before release.
+
+## Release-train allowance across cloud allocation (2026-10-28)
+
+The separate Fleet/cloud spending gate must preserve main's existing train
+allowance. A legacy `allowNewRuns:false, allowTrainRuns:true` admits the train's
+run, probe and cloud commands. Version 2 additionally requires `allowCloud`, so
+an explicit spending hold wins even for a train. Ordinary runs do not inherit
+the train allowance.
+
+The driver forwards the immutable run event and head branch in `StepRequest`
+and `StepRun`, independent of command environment. Execution and queued-effect
+fingerprints bind both, so a replacement replica cannot widen a retained
+attempt's admission class. Reusable verification excludes these run-only facts
+because its command still receives neither event nor branch. The coordinated
+workbench action is `pipelineStepV11`; older actions cannot silently discard
+this identity.
+
+A shared isolation proof retains each current waiter's class and cancellation
+context, rechecking the live operator decision before every probe POST. A train
+can fund that proof only while waiting; after cancellation, ordinary waiters
+need their own allowance. A cached successful probe is only isolation evidence,
+and every command rechecks its own spending gate after using it. Recovery of
+existing Jobs and cleanup remain independent of new-allocation admission.
+
+Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
+`TestTrainAdmissionIdentityComesFromSavedRunAndBindsRecovery`,
+`TestTrainCloudAdmissionSurvivesForwardAndFundsIsolation`,
+`TestTrainCloudRecoveryBindsEventAndHeadBranch`, and
+`TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
+contract and in-process replica hop; they do not establish that a running
+installation has been upgraded.

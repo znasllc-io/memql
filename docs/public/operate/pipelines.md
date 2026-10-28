@@ -1665,14 +1665,19 @@ request run of a `train/` branch, and trains are scheduled, so a cost guard can
 budget them apart. Without the field, a train run is admitted exactly as any
 other run. Install an engine that reads `allowTrainRuns` before any writer
 emits it: an older engine refuses the unknown field and holds every run.
-This allowance opens only the run gate. It does not override the separate cloud
-spending gate: a train can use eligible Fleet capacity while cloud allocation
-remains held.
+The train allowance also admits that train's cloud commands and isolation
+probes under a legacy decision. With version 2, cloud allocation requires
+`(allowNewRuns OR the run's allowTrainRuns) AND allowCloud`; an explicit
+`allowCloud:false` holds trains too. Ordinary runs cannot borrow this allowance
+from command environment variables or a shared isolation probe. The agent
+forwards the saved run's event and head branch, and recovery binds that identity.
+A shared probe may use a train's allowance only while that train still waits;
+a completed proof is a reusable isolation fact, never spending permission.
 
 ```mermaid
 flowchart LR
     S[Webhook, poll or manual request] --> Q[Durable queued pipeline run]
-    Q --> G{Global admission open?}
+    Q --> G{Run or train allowance open?}
     G -->|Hold or unavailable| Q
     G -->|Allow| C[Claim lease and start run clock]
     C --> F[Eligible opted-in Fleet capacity]
@@ -1683,8 +1688,8 @@ flowchart LR
     R[Recovery of existing cloud Job] --> K
 ```
 
-The agent reads global admission afresh inside the cross-replica run gate. The
-workbench separately reads both allowances before every new command Job and
+The agent reads run and train admission afresh inside the cross-replica run gate.
+The workbench separately reads the applicable run allowance and cloud decision before every new command Job and
 isolation-probe Job, including later steps of an already-started run. A hold
 does not prevent adoption, settlement or cancellation of work already created.
 Before waiting, the runner preserves its existing durable queued marker, so a
@@ -1698,8 +1703,8 @@ allow for propagation delay. The engine needs no cloud billing credentials or
 provider-specific budget policy; an external observer publishes the decision.
 Deploy an engine that understands version 2 before changing the writer.
 
-A global hold covers new runs on both cluster and Fleet compute, including
-release and manual runs. It does not stop application requests, agent goals,
+A global hold with no train allowance covers new runs on both cluster and Fleet
+compute, including release and manual runs. It does not stop application requests, agent goals,
 backups or database work. A globally held run stays queued without consuming
 `MEMQL_PIPELINES_RUN_MAX_MINUTES`; the usual poll, deduplication and supersession
 rules still apply. A cloud-only hold allows the run to start and use Fleet.

@@ -20,7 +20,7 @@ const admissionMaxBytes = 4096
 // a configured but unreadable, malformed or expired decision fails closed.
 // This gate controls new pipeline runs, never recovery or the serving runtime.
 // The optional train allowance preserves release-train admission under a
-// new-run hold. It never widens the separate live cloud spending decision.
+// new-run hold. An explicit cloud spending hold still applies to trains.
 func FileRunAdmission(path string) func(time.Time, bool) (bool, error) {
 	return fileAdmission(path, false)
 }
@@ -28,14 +28,12 @@ func FileRunAdmission(path string) func(time.Time, bool) (bool, error) {
 // FileCloudAdmission gates new cloud Jobs, including isolation probes. A cost
 // hold must not stop Fleet work, but neither a captured policy nor an already
 // admitted run can authorize spending after this live decision closes. Legacy
-// decisions retain their global meaning; v2 requires both global and cloud
-// admission. Adoption and cleanup of existing work do not call this gate.
-func FileCloudAdmission(path string) func(time.Time) (bool, error) {
-	gate := fileAdmission(path, true)
-	if gate == nil {
-		return nil
-	}
-	return func(now time.Time) (bool, error) { return gate(now, false) }
+// decisions retain the train allowance from run admission; v2 additionally
+// requires allowCloud, including for trains. The train argument comes from the
+// immutable run event and head branch, never the command environment. Adoption
+// and cleanup of existing work do not call this gate.
+func FileCloudAdmission(path string) func(time.Time, bool) (bool, error) {
+	return fileAdmission(path, true)
 }
 
 func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) {
@@ -94,7 +92,7 @@ func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) 
 			return false, fmt.Errorf("version 2 admission requires allowNewRuns and allowCloud booleans")
 		}
 		if cloud {
-			return *decision.AllowNewRuns && *allowCloud, nil
+			return allowRun && *allowCloud, nil
 		}
 		return allowRun, nil
 	}
@@ -105,5 +103,5 @@ func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) 
 // write access could name a branch so, and would be admitted on the train
 // allowance; write access is already trusted with the repository).
 func IsTrainRun(r Run) bool {
-	return r.Event == pipelines.EventPullRequest && strings.HasPrefix(r.HeadBranch, pipelines.TrainBranchPrefix)
+	return pipelines.IsTrainEvent(r.Event, r.HeadBranch)
 }

@@ -53,6 +53,10 @@ type StepRun struct {
 	// command environment. Verification deliberately omits MEMQL_EVENT there;
 	// its admission class must not change its command or cache trust.
 	Event pl.Event `json:"event,omitempty"`
+	// HeadBranch accompanies Event from the immutable run, not Env. Together
+	// they select the operator's train allowance; creationDefinition binds both
+	// so another replica cannot promote a queued ordinary attempt into a train.
+	HeadBranch string `json:"headBranch,omitempty"`
 	// InstallationID is the GitHub App installation the clone token is minted
 	// under; 0 is an anonymous clone of a public repository.
 	InstallationID int64  `json:"installationId,omitempty"`

@@ -18,8 +18,9 @@ type Config struct {
 	// AdmitCloud reads the operator's current spending decision immediately
 	// before each new command or isolation-probe Job. Nil preserves unconfigured
 	// installations. A hold/error waits under the run ceiling; adoption and
-	// cleanup never require permission to allocate new capacity.
-	AdmitCloud func(time.Time) (bool, error)
+	// cleanup never require permission to allocate new capacity. The bool is
+	// the train classification of the trusted run identity, never Env.
+	AdmitCloud func(time.Time, bool) (bool, error)
 	// QueueName opts Jobs into an installed Kueue LocalQueue. Jobs are born
 	// suspended, so an unavailable admission controller cannot start work.
 	QueueName string

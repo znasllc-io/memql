@@ -80,13 +80,20 @@ type IsolationVerdict struct {
 type isolationProof struct {
 	done   chan struct{}
 	cancel context.CancelFunc
-	// waiters is how many steps wait on it; guarded by Runner.isoMu.
-	waiters int
+	// Each live waiter retains only its context and trusted admission class.
+	// A train can fund the shared proof while it waits, never after it leaves.
+	// Membership is guarded by Runner.isoMu; no runner-wide train flag exists.
+	waiters map[*isolationWaiter]struct{}
 	// verdict and abandoned are written before done is closed. abandoned:
 	// every step that waited left before the proof decided, so it was
 	// stopped and its verdict says nothing.
 	verdict   IsolationVerdict
 	abandoned bool
+}
+
+type isolationWaiter struct {
+	ctx   context.Context
+	train bool
 }
 
 const (
@@ -145,7 +152,7 @@ func (s *step) isolationGate(runDeadline time.Time) (res pl.StepResult, done boo
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, left)
 	defer cancel()
-	v, err := s.r.proveIsolation(ctx)
+	v, err := s.r.proveIsolation(ctx, pl.IsTrainEvent(s.run.Event, s.run.HeadBranch))
 	switch {
 	case err == nil && v.Isolated:
 		return pl.StepResult{}, false
@@ -176,7 +183,7 @@ func isolationRefusal(v IsolationVerdict) string {
 // the waiting step's, bounded by its run's ceiling: when it ends first the
 // step stops waiting (its error), and a proof no step waits on any more is
 // stopped.
-func (r *Runner) proveIsolation(ctx context.Context) (IsolationVerdict, error) {
+func (r *Runner) proveIsolation(ctx context.Context, train bool) (IsolationVerdict, error) {
 	if err := ctx.Err(); err != nil {
 		return IsolationVerdict{}, err
 	}
@@ -200,40 +207,77 @@ func (r *Runner) proveIsolation(ctx context.Context) (IsolationVerdict, error) {
 				return v, nil
 			}
 		}
+		w := &isolationWaiter{ctx: ctx, train: train}
 		p := r.isoProof
 		if p == nil {
 			// The proof's own context: the steps that wait on it come and
 			// go, and it is stopped only when the last of them has gone.
 			pctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-			p = &isolationProof{done: make(chan struct{}), cancel: cancel}
+			p = &isolationProof{done: make(chan struct{}), cancel: cancel, waiters: map[*isolationWaiter]struct{}{}}
 			r.isoProof = p
 			go r.runIsolationProof(pctx, p)
 		}
-		p.waiters++
+		p.waiters[w] = struct{}{}
 		r.isoMu.Unlock()
 
 		select {
 		case <-p.done:
+			r.releaseIsolationWaiter(p, w)
 			if !p.abandoned {
 				return p.verdict, nil
 			}
 			// It stopped as this step joined it, every step before it
 			// having given up: prove again.
 		case <-ctx.Done():
-			r.isoMu.Lock()
-			if p.waiters--; p.waiters == 0 {
-				p.cancel()
-			}
-			r.isoMu.Unlock()
+			r.releaseIsolationWaiter(p, w)
 			return IsolationVerdict{}, ctx.Err()
 		}
 	}
 }
 
+func (r *Runner) releaseIsolationWaiter(p *isolationProof, w *isolationWaiter) {
+	r.isoMu.Lock()
+	defer r.isoMu.Unlock()
+	delete(p.waiters, w)
+	if len(p.waiters) == 0 {
+		p.cancel()
+	}
+}
+
+// Re-evaluate the live spending decision for current waiters at every probe
+// POST. Sharing a successful isolation fact is safe; sharing a departed
+// train's spending permission is not. Every command still checks its own
+// class after the proof, including commands reusing a cached verdict.
+func (r *Runner) probeCloudAdmission(proof *isolationProof) (bool, string) {
+	if proof == nil { // an explicit standalone isolation check has no train
+		return r.cloudAdmission(false)
+	}
+	r.isoMu.Lock()
+	waiters := make([]*isolationWaiter, 0, len(proof.waiters))
+	for w := range proof.waiters {
+		waiters = append(waiters, w)
+	}
+	r.isoMu.Unlock()
+	reason := "held"
+	for _, w := range waiters {
+		if w.ctx.Err() != nil {
+			continue
+		}
+		allowed, why := r.cloudAdmission(w.train)
+		if allowed && w.ctx.Err() == nil {
+			return true, ""
+		}
+		if why == "unavailable" {
+			reason = why
+		}
+	}
+	return false, reason
+}
+
 // runIsolationProof runs one proof to its verdict, or until no step waits on
 // it, and records it: Runner.Isolation's answer when it decided.
 func (r *Runner) runIsolationProof(ctx context.Context, p *isolationProof) {
-	v, decided := r.probeIsolation(ctx)
+	v, decided := r.probeIsolation(ctx, p)
 	p.cancel()
 	switch {
 	case !decided:
@@ -263,6 +307,7 @@ type prober struct {
 	target  string // its Secret
 	log     *slog.Logger
 	trouble apiTrouble
+	proof   *isolationProof
 }
 
 // probeListener is index 0's listener as the probe saw it ready: its pod --
@@ -277,7 +322,7 @@ type probeListener struct {
 // probeIsolation runs the probe once, and answers its verdict; decided is
 // false when no step waited on it any more before there was one. Cleanup is
 // confirmed before a successful verdict is returned.
-func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, decided bool) {
+func (r *Runner) probeIsolation(ctx context.Context, proof *isolationProof) (verdict IsolationVerdict, decided bool) {
 	if err := r.cfg.ValidatePlacement(); err != nil {
 		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
 	}
@@ -286,7 +331,7 @@ func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, 
 	}
 	name := IsolationProbeName(r.cfg.NodeID)
 	p := &prober{
-		r: r, ctx: ctx, name: name, target: IsolationTargetName(name),
+		r: r, ctx: ctx, name: name, target: IsolationTargetName(name), proof: proof,
 		log: r.log.With("probeJob", name, "node", r.cfg.NodeID), trouble: apiTrouble{},
 	}
 	// Whatever this replica's last probe left goes first: a probe Secret of
@@ -352,7 +397,7 @@ func (p *prober) create() (Job, error) {
 		// Probes consume the same paid capacity as commands. A step may have
 		// entered this proof before the budget closed, so check the live gate
 		// before every probe POST as well as before the command Job itself.
-		if allowed, reason := p.r.cloudAdmission(); !allowed {
+		if allowed, reason := p.r.probeCloudAdmission(p.proof); !allowed {
 			if !admissionNoted {
 				admissionNoted = true
 				p.r.log.Info("pipelines: waiting for cloud spending admission before isolation probe", "reason", reason)
