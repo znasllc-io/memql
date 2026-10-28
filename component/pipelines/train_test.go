@@ -197,6 +197,9 @@ func TestTrainBranch(t *testing.T) {
 	if got := TrainBranch(day, 2); got != "train/2026-10-28-2" {
 		t.Errorf("TrainBranch = %q, want train/2026-10-28-2", got)
 	}
+	if got := TrainScratchBranch("train/2026-10-28-2"); got != "train-build/2026-10-28-2" || strings.HasPrefix(got, TrainBranchPrefix) {
+		t.Errorf("TrainScratchBranch = %q, want train-build/2026-10-28-2, outside train/", got)
+	}
 }
 
 func keysOf(m map[string]TrainSettings) []string {

@@ -285,3 +285,17 @@ func NextPatchVersion(current string) (string, error) {
 func TrainBranch(day time.Time, n int) string {
 	return fmt.Sprintf("%s%s-%d", TrainBranchPrefix, day.Format("2006-01-02"), n)
 }
+
+// TrainScratchPrefix marks the ref a train is built on before its branch
+// moves. It is not under train/: a scratch ref has no pull request, and is
+// never a train's run.
+const TrainScratchPrefix = "train-build/"
+
+// TrainScratchBranch is the scratch ref a train branch is built on:
+// train-build/2026-10-28-2 for train/2026-10-28-2. The merges and the
+// version bump happen there, and the train branch then moves once, to the
+// finished head: it never points at the default branch's head, where GitHub
+// could take its open pull request for merged.
+func TrainScratchBranch(branch string) string {
+	return TrainScratchPrefix + strings.TrimPrefix(branch, TrainBranchPrefix)
+}

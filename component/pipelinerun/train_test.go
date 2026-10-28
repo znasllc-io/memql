@@ -57,6 +57,8 @@ type trainRemote struct {
 	// raceMerge makes the next merge lose a race: another tick merged the
 	// pull request first, so GitHub answers 405.
 	raceMerge bool
+	// branchHistory is every commit each branch has pointed at.
+	branchHistory map[string][]string
 }
 
 const trainAppID = 4822538
@@ -80,7 +82,7 @@ func newTrainRemote(g *fakeGitHub) *trainRemote {
 		files: map[string]map[string][]byte{}, branchFile: map[string]map[string][]byte{}, branches: map[string]string{},
 		branchBase: map[string]string{}, conflicts: map[string]bool{}, trainPRs: map[int]*trainPR{}, nextPR: 100,
 		reviews: map[int][]githubapp.PullRequestReview{}, prFiles: map[int][]string{}, comments: map[int][]string{}, login: "ada-gh",
-		appID: trainAppID, checkApps: map[string]int64{}, shaFiles: map[string][]string{},
+		appID: trainAppID, checkApps: map[string]int64{}, shaFiles: map[string][]string{}, branchHistory: map[string][]string{},
 	}
 }
 
@@ -120,7 +122,20 @@ func (r *trainRemote) TrainPullRequests(ctx context.Context, token, repository, 
 			out = append(out, copy)
 		}
 	}
+	// GitHub lists a train's own open pull request among them, as the App's.
+	for n, pr := range r.trainPRs {
+		if pr.open && pr.base == base {
+			out = append(out, githubapp.TrainPullRequest{Number: n, Title: pr.title, HeadSHA: r.branches[pr.head], HeadRef: pr.head,
+				HeadRepository: repoName, BaseRef: pr.base, Author: "memql[bot]", URL: fmt.Sprintf("https://github.com/acme/shop/pull/%d", n)})
+		}
+	}
 	return out, nil
+}
+
+// setBranch moves a branch and remembers every value it takes.
+func (r *trainRemote) setBranch(name, sha string) {
+	r.branches[name] = sha
+	r.branchHistory[name] = append(r.branchHistory[name], sha)
 }
 
 func (r *trainRemote) CheckRunConclusion(ctx context.Context, token, repository, sha, name string, appID int64) (string, string, error) {
@@ -151,7 +166,8 @@ func (r *trainRemote) CreateBranchRef(ctx context.Context, token, repository, br
 	if _, ok := r.branches[branch]; ok {
 		return &githubapp.StatusError{Status: http.StatusUnprocessableEntity, Endpoint: "/git/refs"}
 	}
-	r.branches[branch], r.branchBase[branch] = sha, sha
+	r.setBranch(branch, sha)
+	r.branchBase[branch] = sha
 	return nil
 }
 
@@ -159,7 +175,8 @@ func (r *trainRemote) ResetBranchRef(ctx context.Context, token, repository, bra
 	watchGitHubCall(r.t, ctx, "ResetBranchRef")
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.branches[branch], r.branchBase[branch] = sha, sha
+	r.setBranch(branch, sha)
+	r.branchBase[branch] = sha
 	delete(r.branchFile, branch)
 	return nil
 }
@@ -186,7 +203,7 @@ func (r *trainRemote) MergeIntoBranch(ctx context.Context, token, repository, ba
 		return githubapp.MergeOutcome{Conflict: true}, nil
 	}
 	sha := r.nextSHA("m")
-	r.branches[base] = sha
+	r.setBranch(base, sha)
 	r.merged = append(r.merged, base+" <- "+headSHA)
 	return githubapp.MergeOutcome{SHA: sha}, nil
 }
@@ -218,7 +235,9 @@ func (r *trainRemote) PutBranchFile(ctx context.Context, token, repository, bran
 	}
 	r.branchFile[branch][path] = content
 	sha := r.nextSHA("c")
-	r.branches[branch] = sha
+	r.setBranch(branch, sha)
+	// The commit holds the file: a branch moved to it reads it there.
+	r.files[sha] = map[string][]byte{path: content}
 	return sha, nil
 }
 
@@ -226,6 +245,11 @@ func (r *trainRemote) CreateTrainPullRequest(ctx context.Context, token, reposit
 	watchGitHubCall(r.t, ctx, "CreateTrainPullRequest")
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, pr := range r.trainPRs {
+		if pr.open && pr.head == head {
+			return 0, "", &githubapp.StatusError{Status: http.StatusUnprocessableEntity, Endpoint: "/pulls"}
+		}
+	}
 	r.nextPR++
 	r.trainPRs[r.nextPR] = &trainPR{head: head, base: base, title: title, body: body, open: true}
 	return r.nextPR, fmt.Sprintf("https://github.com/acme/shop/pull/%d", r.nextPR), nil
@@ -459,8 +483,8 @@ func TestTrainDepartsAtTheScheduledTime(t *testing.T) {
 	if tr.BaseSHA != baseSHA || tr.Version != "0.31.5" || tr.PullRequest == 0 || tr.HeadSHA == "" {
 		t.Errorf("base %s version %s pr %d head %s", tr.BaseSHA, tr.Version, tr.PullRequest, tr.HeadSHA)
 	}
-	if got := string(th.remote.branchFile[tr.Branch]["VERSION"]); got != "0.31.5\n" {
-		t.Errorf("VERSION on the train = %q, want the patch bump", got)
+	if got, err := th.remote.FileAtRef(automationCtx(), "", repoName, tr.HeadSHA, "VERSION"); err != nil || string(got) != "0.31.5\n" {
+		t.Errorf("VERSION at the train's head = %q, %v; want the patch bump", got, err)
 	}
 	pr := th.remote.trainPRs[tr.PullRequest]
 	if pr == nil || pr.head != tr.Branch || pr.base != "main" || !strings.Contains(pr.body, "#7") {
@@ -522,7 +546,7 @@ func TestTrainMergesTheBoardedCommitNotTheNewHead(t *testing.T) {
 	if again.HeadSHA != tr.HeadSHA || again.OnBoard[0].SHA != shaA || again.State != TrainRunning {
 		t.Errorf("a new push to a boarded pull request changed the running train: %+v", again)
 	}
-	if len(th.remote.merged) != 1 || th.remote.merged[0] != tr.Branch+" <- "+shaA {
+	if len(th.remote.merged) != 1 || th.remote.merged[0] != pipelines.TrainScratchBranch(tr.Branch)+" <- "+shaA {
 		t.Errorf("merged %v, want only the boarded commit", th.remote.merged)
 	}
 }
@@ -942,5 +966,92 @@ func TestClosingARunningTrainsPullRequestCancelsIt(t *testing.T) {
 	}
 	if _, branchLeft, _ := th.trainLeftOnGitHub(got); branchLeft {
 		t.Error("the cancelled train's branch was left behind")
+	}
+}
+
+// TestABoardedPullRequestThatLeftRebuildsTheWaitingTrain: a pull request on a
+// waiting train was closed, or put back to draft. Approving the train would
+// land it anyway, so the train is rebuilt without it and asks again.
+func TestABoardedPullRequestThatLeftRebuildsTheWaitingTrain(t *testing.T) {
+	for name, leave := range map[string]func(r *trainRemote){
+		"closed":   func(r *trainRemote) { delete(r.open, 8) },
+		"draft":    func(r *trainRemote) { r.open[8].Draft = true },
+		"retarget": func(r *trainRemote) { r.open[8].BaseRef = "release/1.2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			th, _ := awaitingTrain(t)
+			th.remote.mu.Lock()
+			leave(th.remote)
+			th.remote.mu.Unlock()
+			th.clock = th.clock.Add(time.Minute)
+			th.tick(t)
+			got := th.train(t)
+			if got.State != TrainRunning || got.Rebuilds != 1 || len(got.OnBoard) != 1 || got.OnBoard[0].Number != 7 {
+				t.Fatalf("state %s rebuilds %d on board %+v; want rebuilt with #7 alone", got.State, got.Rebuilds, got.OnBoard)
+			}
+		})
+	}
+}
+
+// TestABuildAdoptsTheTrainPullRequestAlreadyOpen: a build died after GitHub
+// opened its pull request and before the train recorded it. The reclaimed
+// build adopts the open pull request instead of failing to open a second one
+// every ten minutes.
+func TestABuildAdoptsTheTrainPullRequestAlreadyOpen(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	const branch = "train/2026-10-28-1"
+	th.remote.mu.Lock()
+	th.remote.trainPRs[150] = &trainPR{head: branch, base: "main", title: "Train " + branch, open: true}
+	th.remote.setBranch(branch, "9999999999999999999999999999999999999999")
+	th.remote.mu.Unlock()
+	stale := th.clock.Add(-11 * time.Minute)
+	if err := th.store.CreateTrain(context.Background(), th.p.OwnerUserID, Train{ID: TrainIDFor(th.p.ID, branch), OwnerUserID: th.p.OwnerUserID,
+		PipelineID: th.p.ID, Repository: th.p.Repository, Branch: branch, Departure: TrainDepartureScheduled, State: TrainBuilding,
+		DepartedAt: stale, UpdatedAt: stale}); err != nil {
+		t.Fatal(err)
+	}
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainRunning || got.PullRequest != 150 {
+		t.Fatalf("state %s pull request %d; want running on the adopted #150", got.State, got.PullRequest)
+	}
+	th.remote.mu.Lock()
+	n := len(th.remote.trainPRs)
+	th.remote.mu.Unlock()
+	if n != 1 {
+		t.Errorf("%d train pull requests, want the one adopted", n)
+	}
+}
+
+// TestATrainBranchNeverPointsAtMain: GitHub may treat a pull request whose
+// head reaches its base as merged, so the train branch only ever takes a
+// finished train head: the merges and the version bump happen on a scratch
+// ref, on the first build and on every rebuild.
+func TestATrainBranchNeverPointsAtMain(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"docs/a.md"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.Rebuilds != 1 || got.State != TrainRunning {
+		t.Fatalf("state %s rebuilds %d; want a rebuild", got.State, got.Rebuilds)
+	}
+	th.remote.mu.Lock()
+	history := append([]string(nil), th.remote.branchHistory[tr.Branch]...)
+	th.remote.mu.Unlock()
+	for _, sha := range history {
+		if sha == baseSHA {
+			t.Fatalf("the train branch pointed at main's head: %v", history)
+		}
+	}
+	if len(history) != 2 {
+		t.Errorf("the train branch moved %d times (%v), want once per build", len(history), history)
 	}
 }

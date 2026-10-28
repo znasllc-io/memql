@@ -493,8 +493,8 @@ Acting as the GitHub App, with an installation token minted through the
 pipeline owner's GitHub connection (contents and pull requests write, checks
 read), the train:
 
-1. creates its branch at the default branch's head (on a rebuild, resets it
-   there);
+1. starts a scratch ref, `train-build/<date>-<n>`, at the default branch's
+   head;
 2. merges each boarding pull request's head into it on GitHub's side, in
    number order, with nothing checked out. A pull request that conflicts with
    the default branch, or with one merged onto the train before it, stays off
@@ -503,9 +503,13 @@ read), the train:
    file plus one, unless a pull request on board already changed it. A
    repository with no `VERSION` file, or one that is not `MAJOR.MINOR.PATCH`,
    gets no bump;
-4. opens the train pull request, *Train train/\<date\>-\<n\>*, listing the pull
+4. moves the train branch to the finished head, once, and deletes the scratch
+   ref. The train branch never points at the default branch's head, where
+   GitHub could take its open pull request for merged;
+5. opens the train pull request, *Train train/\<date\>-\<n\>*, listing the pull
    requests on board (number, title and head commit), those left off or dropped
-   and why, and the version. A rebuild updates the same pull request.
+   and why, and the version. A rebuild updates the same pull request, and a
+   build that died after GitHub opened it adopts the one already open.
 
 The train pull request runs the pipeline as any pull request does and reports
 the same `MemQL / <name>` check.
@@ -590,9 +594,10 @@ request on board gets a comment naming the train and the merge commit, and the
 train branch is deleted. A train pull request someone merged by hand is
 recorded `landed`.
 
-While a train waits for approval, adding `train:hold` to one of its pull
-requests, or the default branch moving, rebuilds it, and the owner is asked
-again. A train still waiting when the next departure time passes sends one
+While a train waits for approval, a pull request on board that should no
+longer land with it -- labelled `train:hold`, closed, put back to draft or
+moved off the default branch -- rebuilds the train without it, and so does
+the default branch moving; the owner is asked again. A train still waiting when the next departure time passes sends one
 reminder.
 
 ### Discord messages

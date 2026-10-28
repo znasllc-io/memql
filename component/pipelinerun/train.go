@@ -267,18 +267,21 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		return i.cancelBuild(ctx, d, s, gh, token, p, t, base, skipped, "No pull request was ready to board.")
 	}
 
-	if err := gh.CreateBranchRef(ctx, token, p.Repository, t.Branch, base); err != nil {
-		if githubapp.StatusOf(err) != http.StatusUnprocessableEntity {
-			return err
-		}
-		if err := gh.ResetBranchRef(ctx, token, p.Repository, t.Branch, base); err != nil {
-			return err
-		}
+	// The train is built on a scratch ref and its branch moved once, to the
+	// finished head (pipelines.TrainScratchBranch says why).
+	scratch := pipelines.TrainScratchBranch(t.Branch)
+	if err := moveBranch(ctx, gh, token, p, scratch, base); err != nil {
+		return err
 	}
+	defer func() {
+		if err := gh.DeleteBranchRef(ctx, token, p.Repository, scratch); err != nil && githubapp.StatusOf(err) != http.StatusUnprocessableEntity && githubapp.StatusOf(err) != http.StatusNotFound {
+			trainLog(d).Warn("pipelines: a train's scratch ref was not deleted", "repository", p.Repository, "ref", scratch, "error", err.Error())
+		}
+	}()
 	head := base
 	var onBoard []TrainCar
 	for _, c := range board {
-		out, err := gh.MergeIntoBranch(ctx, token, p.Repository, t.Branch, c.HeadSHA, fmt.Sprintf("Board #%d: %s", c.Number, oneLine(c.Title)))
+		out, err := gh.MergeIntoBranch(ctx, token, p.Repository, scratch, c.HeadSHA, fmt.Sprintf("Board #%d: %s", c.Number, oneLine(c.Title)))
 		if err != nil {
 			return err
 		}
@@ -298,12 +301,24 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		return i.cancelBuild(ctx, d, s, gh, token, p, t, base, skipped, "Every ready pull request conflicted.")
 	}
 
-	version, head, err := trainVersion(ctx, gh, token, p, t, base, head)
+	version, head, err := trainVersion(ctx, gh, token, p, t, scratch, base, head)
 	if err != nil {
+		return err
+	}
+	if err := moveBranch(ctx, gh, token, p, t.Branch, head); err != nil {
 		return err
 	}
 	body := trainPullRequestBody(p, t, base, onBoard, skipped, version)
 	number, url := t.PullRequest, t.PullRequestURL
+	if number == 0 {
+		// A build that died after GitHub opened its pull request left one
+		// open for this branch: adopt it rather than fail to open a second.
+		for _, pr := range prs {
+			if pr.HeadRef == t.Branch {
+				number, url = pr.Number, pr.URL
+			}
+		}
+	}
 	if number == 0 {
 		number, url, err = gh.CreateTrainPullRequest(ctx, token, p.Repository, t.Branch, p.DefaultBranch, "Train "+t.Branch, body)
 	} else {
@@ -357,11 +372,20 @@ func retireTrain(ctx context.Context, d Deps, gh trainGitHub, token string, p Pi
 	}
 }
 
+// moveBranch points branch at sha, creating it when it does not exist.
+func moveBranch(ctx context.Context, gh trainGitHub, token string, p Pipeline, branch, sha string) error {
+	err := gh.CreateBranchRef(ctx, token, p.Repository, branch, sha)
+	if err == nil || githubapp.StatusOf(err) != http.StatusUnprocessableEntity {
+		return err
+	}
+	return gh.ResetBranchRef(ctx, token, p.Repository, branch, sha)
+}
+
 // trainVersion keeps a version a pull request on board set, or commits the
-// patch bump onto the train. A repository with no VERSION file, or one whose
-// version is not MAJOR.MINOR.PATCH, gets no bump: a train never guesses over a
-// version a person chose.
-func trainVersion(ctx context.Context, gh trainGitHub, token string, p Pipeline, t Train, base, head string) (string, string, error) {
+// patch bump onto ref, the train's scratch ref. A repository with no VERSION
+// file, or one whose version is not MAJOR.MINOR.PATCH, gets no bump: a train
+// never guesses over a version a person chose.
+func trainVersion(ctx context.Context, gh trainGitHub, token string, p Pipeline, t Train, ref, base, head string) (string, string, error) {
 	baseVersion, err := gh.FileAtRef(ctx, token, p.Repository, base, "VERSION")
 	if githubapp.StatusOf(err) == http.StatusNotFound {
 		return "", head, nil
@@ -369,7 +393,7 @@ func trainVersion(ctx context.Context, gh trainGitHub, token string, p Pipeline,
 	if err != nil {
 		return "", head, err
 	}
-	onTrain, err := gh.FileAtRef(ctx, token, p.Repository, t.Branch, "VERSION")
+	onTrain, err := gh.FileAtRef(ctx, token, p.Repository, ref, "VERSION")
 	if err == nil && strings.TrimSpace(string(onTrain)) != strings.TrimSpace(string(baseVersion)) {
 		return strings.TrimSpace(string(onTrain)), head, nil
 	}
@@ -377,7 +401,7 @@ func trainVersion(ctx context.Context, gh trainGitHub, token string, p Pipeline,
 	if err != nil {
 		return strings.TrimSpace(string(baseVersion)), head, nil
 	}
-	sha, err := gh.PutBranchFile(ctx, token, p.Repository, t.Branch, "VERSION", "chore: prepare "+next+" for "+t.Branch, []byte(next+"\n"))
+	sha, err := gh.PutBranchFile(ctx, token, p.Repository, ref, "VERSION", "chore: prepare "+next+" for "+t.Branch, []byte(next+"\n"))
 	if err != nil {
 		return "", head, err
 	}
@@ -568,25 +592,32 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 	return nil
 }
 
-// rebuildIfAsked rebuilds a waiting train when the owner labelled a pull
-// request on board train:hold, or when main moved from the train's base, and
-// reports whether it did.
+// rebuildIfAsked rebuilds a waiting train when a pull request on board should
+// no longer land with it -- the owner labelled it train:hold, it was closed,
+// put back to draft or moved off the default branch -- or when main moved
+// from the train's base, and reports whether it did. Approving the train as
+// it stands would land a pull request its author withdrew.
 func (i *Integration) rebuildIfAsked(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string) (bool, error) {
 	prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
 	if err != nil {
 		return false, err
 	}
-	held := false
+	open := make(map[int]githubapp.TrainPullRequest, len(prs))
 	for _, pr := range prs {
-		if onBoard(t, pr.Number) && slices.ContainsFunc(pr.Labels, func(l string) bool { return strings.EqualFold(l, pipelines.TrainHoldLabel) }) {
-			held = true
+		open[pr.Number] = pr
+	}
+	left := false
+	for _, car := range t.OnBoard {
+		pr, ok := open[car.Number]
+		if !ok || pr.Draft || slices.ContainsFunc(pr.Labels, func(l string) bool { return strings.EqualFold(strings.TrimSpace(l), pipelines.TrainHoldLabel) }) {
+			left = true
 		}
 	}
 	head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
 	if err != nil {
 		return false, err
 	}
-	if !held && head == t.BaseSHA {
+	if !left && head == t.BaseSHA {
 		return false, nil
 	}
 	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1)})
