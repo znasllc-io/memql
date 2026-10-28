@@ -724,3 +724,94 @@ func TestBoardingCountsOnlyTheAppsOwnCheck(t *testing.T) {
 		t.Fatalf("on board %+v, want only #7: #8's check came from another App", tr.OnBoard)
 	}
 }
+
+// TestACancelledRunHoldsAndDropsNobody: a cancelled step ran nothing to a
+// verdict -- a person cancelled the run, or the run hit its ceiling -- so it
+// is evidence against no pull request. The train holds for the owner.
+func TestACancelledRunHoldsAndDropsNobody(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionCancelled, map[string]any{"key": "tests.go-unit#2", "status": WorkStepCancelled,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainHeld || len(got.Dropped) != 0 || !strings.Contains(got.HeldReason, "cancelled") {
+		t.Fatalf("state %s, dropped %+v, reason %q; want held for the cancelled run, nobody dropped", got.State, got.Dropped, got.HeldReason)
+	}
+}
+
+// TestACancelledStepNamesNoSuspect: in a failed run, only a step that FAILED
+// is evidence. A step cancelled beside it keeps its packages but proved
+// nothing about them.
+func TestACancelledStepNamesNoSuspect(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure,
+		map[string]any{"key": "checks.lint", "status": WorkStepFailed},
+		map[string]any{"key": "tests.go-unit#2", "status": WorkStepCancelled,
+			"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainHeld || len(got.Dropped) != 0 {
+		t.Fatalf("state %s, dropped %+v; want held: the only failed step names no package", got.State, got.Dropped)
+	}
+}
+
+// TestReRunningAHeldTrainsRunResumesIt: the held message tells the owner to
+// re-run a cancelled run, so a newer attempt at the train's head must bring
+// the train back: a passing re-run asks for approval.
+func TestReRunningAHeldTrainsRunResumesIt(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	first := th.runFor(t, tr, ConclusionCancelled)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	held := th.train(t)
+	if held.State != TrainHeld || held.RunID != first.ID {
+		t.Fatalf("state %s run %q; want held on %s", held.State, held.RunID, first.ID)
+	}
+	again := first
+	again.ID, again.Attempt, again.Conclusion, again.QueuedAt = first.ID+"-2", 2, ConclusionSuccess, th.clock
+	th.store.addRun(again)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainAwaitingApproval || got.RunID != again.ID {
+		t.Fatalf("state %s run %q; want awaiting approval on the re-run %s", got.State, got.RunID, again.ID)
+	}
+}
+
+// TestHeldAndDroppedMessagesLinkTheRun: the owner decides from the message,
+// so a held or dropped train's message links the run that failed.
+func TestHeldAndDroppedMessagesLinkTheRun(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"docs/a.md"}
+	th.tick(t)
+	tr := th.train(t)
+	failed := th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	var linked bool
+	for _, m := range th.messages() {
+		if strings.Contains(m, "Dropped #7") && strings.Contains(m, "pipelineRun="+failed.ID) {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Errorf("the dropped message does not link run %s: %v", failed.ID, th.messages())
+	}
+}

@@ -552,11 +552,14 @@ The train decides, in this order:
    request it cannot single out. A failed step that tested no package names no
    suspect.
 
-A run that failed with no failed step to blame, such as a refusal, holds the
-train with the run's own reason.
+Only a failed step is evidence: a step cancelled around it proved nothing
+about the packages it would have tested. A cancelled run, or a run that failed
+with no failed step to blame, such as a refusal, holds the train with the
+run's own reason.
 
-**A held train waits for the owner.** Closing the train pull request cancels
-the train, and its pull requests board the next one. Adding `train:hold` to a
+**A held train waits for the owner.** Re-running the train's run puts it back
+to running, and a passing re-run asks for approval. Closing the train pull
+request cancels the train, and its pull requests board the next one. Adding `train:hold` to a
 pull request on board rebuilds the train without it, and so does the default
 branch moving: a train held because the default branch failed is rebuilt by
 itself once a fix lands there.

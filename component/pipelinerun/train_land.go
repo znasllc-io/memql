@@ -119,7 +119,7 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 		sha, err := gh.MergePullRequest(ctx, token, p.Repository, t.PullRequest, t.HeadSHA)
 		if err != nil {
 			if status := githubapp.StatusOf(err); status == http.StatusConflict || status == http.StatusMethodNotAllowed {
-				return i.hold(ctx, d, s, p, t, fmt.Sprintf("GitHub would not merge the approved train (%d). Its head or main moved, or a rule refused it.", status), nil)
+				return i.hold(ctx, d, s, p, t, fmt.Sprintf("GitHub would not merge the approved train (%d). Its head or main moved, or a rule refused it.", status), nil, "")
 			}
 			return err
 		}

@@ -419,8 +419,13 @@ func (i *Integration) observeRun(ctx context.Context, d Deps, s pipelines.TrainS
 	return i.triage(ctx, d, s, p, t, run)
 }
 
-// triage decides a failed train run (spec section 6) and acts on it.
+// triage decides a failed train run (spec section 6) and acts on it. The
+// run is recorded on the train whatever the verdict, so the message links it
+// and a held train can tell a re-run from the run it was held on.
 func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, run Run) error {
+	if run.Conclusion == ConclusionCancelled {
+		return i.hold(ctx, d, s, p, t, "The train's run was cancelled before it reached a verdict. Re-run it to go on, or close the train pull request to cancel the train.", nil, run.ID)
+	}
 	steps, err := d.Store.WorkSteps(memql.ContextWithFreshRead(ctx), run.WorkRunID)
 	if err != nil {
 		return err
@@ -428,7 +433,10 @@ func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSetti
 	var failed []pipelines.TrainFailedStep
 	var keys []string
 	for _, st := range steps {
-		if st.Status == WorkStepFailed || st.Status == WorkStepCancelled {
+		// Only a FAILED step is evidence. A cancelled one -- the run was
+		// cancelled, or hit its ceiling, around it -- keeps the packages it
+		// would have tested and proved nothing about any of them.
+		if st.Status == WorkStepFailed {
 			failed = append(failed, pipelines.TrainFailedStep{Key: st.Key, ErrorCode: st.ErrorCode, Packages: st.Packages})
 			keys = append(keys, st.Key)
 		}
@@ -438,7 +446,7 @@ func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSetti
 		if why := firstNonEmpty(run.RefusalMessage, run.FailureMessage); why != "" {
 			reason += ": " + oneLine(why)
 		}
-		return i.hold(ctx, d, s, p, t, reason+".", nil)
+		return i.hold(ctx, d, s, p, t, reason+". Re-run it to go on, or close the train pull request to cancel the train.", nil, run.ID)
 	}
 	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
@@ -474,12 +482,12 @@ func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSetti
 		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{Retried: ptr(true)})
 		return err
 	case "drop":
-		return i.dropAndRebuild(ctx, d, s, p, t, gh, token, verdict)
+		return i.dropAndRebuild(ctx, d, s, p, t, gh, token, verdict, run.ID)
 	}
-	return i.hold(ctx, d, s, p, t, verdict.Reason, keys)
+	return i.hold(ctx, d, s, p, t, verdict.Reason, keys, run.ID)
 }
 
-func (i *Integration) dropAndRebuild(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string, verdict pipelines.TrainVerdict) error {
+func (i *Integration) dropAndRebuild(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string, verdict pipelines.TrainVerdict, runID string) error {
 	car := TrainCar{Number: verdict.Drop}
 	for _, c := range t.OnBoard {
 		if c.Number == verdict.Drop {
@@ -492,7 +500,7 @@ func (i *Integration) dropAndRebuild(ctx context.Context, d Deps, s pipelines.Tr
 		t.Branch, verdict.Reason, pipelines.TrainDroppedLabel))
 	_ = gh.AddPullRequestLabels(ctx, token, p.Repository, car.Number, []string{pipelines.TrainDroppedLabel})
 	dropped := append(slices.Clone(t.Dropped), car)
-	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Dropped: ptr(dropped), Rebuilds: ptr(t.Rebuilds + 1)})
+	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Dropped: ptr(dropped), Rebuilds: ptr(t.Rebuilds + 1), RunID: ptr(runID)})
 	if err != nil || !ok {
 		return err
 	}
@@ -508,8 +516,15 @@ func (i *Integration) dropAndRebuild(ctx context.Context, d Deps, s pipelines.Tr
 	return i.build(ctx, d, s, p, *rebuilt)
 }
 
-func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, reason string, failed []string) error {
-	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainHeld), HeldReason: ptr(reason)})
+// hold stops the train for the owner. runID, when set, is the run the train
+// is held on: the message links it, and a newer attempt at the same head
+// resumes the train (observeHeld).
+func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, reason string, failed []string, runID string) error {
+	patch := TrainPatch{State: ptr(TrainHeld), HeldReason: ptr(reason)}
+	if runID != "" {
+		patch.RunID = ptr(runID)
+	}
+	updated, ok, err := i.casTrain(ctx, d, p, t, patch)
 	if err != nil || !ok {
 		return err
 	}
@@ -537,8 +552,28 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 			return err
 		}
 	}
-	_, err = i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
-	return err
+	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
+	if err != nil || rebuilt || t.RunID == "" {
+		return err
+	}
+	// A newer attempt at the train's head than the run it was held on -- the
+	// owner re-ran it -- puts the train back to running, where observeRun
+	// reads that attempt's verdict.
+	runs, err := d.Store.RunsForPipelineSHA(memql.ContextWithFreshRead(ctx), p.ID, t.HeadSHA)
+	if err != nil {
+		return err
+	}
+	var prRuns []Run
+	for _, r := range runs {
+		if r.Event == pipelines.EventPullRequest {
+			prRuns = append(prRuns, r)
+		}
+	}
+	if newest, _ := newestAttempt(prRuns); newest.ID != "" && newest.ID != t.RunID {
+		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainRunning), HeldReason: ptr("")})
+		return err
+	}
+	return nil
 }
 
 // rebuildIfAsked rebuilds a waiting train when the owner labelled a pull
