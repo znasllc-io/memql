@@ -1275,7 +1275,10 @@ func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string
 	defer g.mu.Unlock()
 	c, ok := g.commits[repository+"@"+ref]
 	if !ok {
-		return "", "", &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/commits/" + ref}
+		// GitHub answers a ref that names no commit with 422 ("No commit found
+		// for SHA"), not 404. The fake answers the same, so a caller that reads
+		// only 404 as absence fails here as it does against GitHub.
+		return "", "", &githubapp.StatusError{Status: 422, Endpoint: "/repos/" + repository + "/commits/" + ref}
 	}
 	return c.SHA, c.Message, nil
 }

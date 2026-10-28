@@ -105,6 +105,20 @@ func StatusOf(err error) int {
 	return 0
 }
 
+// IsMissingRef reports whether err is CommitForRef's answer for a branch or tag
+// that names no commit. GitHub spells that 422 ("No commit found for SHA"), not
+// 404, so a caller that read only 404 as absence refused every new release tag
+// and never saw a dropped merge-queue branch. 404 stays a missing ref too: both
+// callers read the ref through a token that can read the repository, and they
+// always treated it so.
+func IsMissingRef(err error) bool {
+	switch StatusOf(err) {
+	case http.StatusNotFound, http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
+}
+
 // Client talks to GitHub as the app and as the app's users.
 //
 // Safe for concurrent use: the private key is parsed once behind a sync.Once

@@ -1050,7 +1050,8 @@ checked separately.
 ### Recovery and maintenance
 
 Recovery reads GitHub's current queue ref before cancelling work whose merge
-group disappeared or moved. An unavailable provider response leaves it running.
+group disappeared or moved. GitHub answers a deleted ref with 422, not 404, and
+both count as disappeared. An unavailable provider response leaves it running.
 Supersession cannot cancel unrelated full runs or releases.
 
 After a failed run, the frozen `maintenance` policy returns `none`, `human`, or
