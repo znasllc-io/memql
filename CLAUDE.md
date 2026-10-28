@@ -62,8 +62,9 @@ and [work context and recovery](docs/public/ai/work-context-and-recovery.md).
 `make install-deps` checks them and installs protoc, its Go plugins and PyYAML
 for the `python3` first on PATH; for Homebrew's externally managed Python it
 waits for the owner's PEP 668 opt-in (`PIP_BREAK_SYSTEM_PACKAGES=1`) or an
-activated virtualenv. Tests in `make test` that run `scripts/ci`'s Python FAIL
-without PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
+activated virtualenv. Tests in `make test` that run `scripts/ci`'s Python or
+the connection gate's (`scripts/deploy/conn-headroom-check.sh`) FAIL without
+PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
 
 ```bash
 # --- k3d + ArgoCD: the ONLY supported local run path ---
