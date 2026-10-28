@@ -813,6 +813,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentReport"}: true,
 		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentScope"}:  true,
 		{Path: "platform/mutations.memql", Name: "closePackageDeployment"}:        true,
+		// Confirmation first resolves the caller-visible package and parked
+		// run under the shared per-package opening gate, then checks the saved
+		// report/snapshot and cancellation before this internal journal claim.
+		// actor.userId scoping cannot replace those checks: even the owner must
+		// not assign a runner/heartbeat or move their own run out of
+		// awaiting_confirm without native admission. Keep the public confirm
+		// capability as the entry point and this write off the client wire.
+		{Path: "platform/mutations.memql", Name: "claimPackageDeploymentConfirmation"}: true,
 		// epic memql#4900. Two more writes about a RUN rather than about a
 		// person, and neither is caller-scopable for the reason the four
 		// above are not: the value is a claim about what a node did.

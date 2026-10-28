@@ -2385,8 +2385,11 @@ mutation packageDeployment advancePackageDeployment {
 /// Accept a parked confirmation under the native per-package database gate.
 /// The native caller has freshly verified the caller-visible package and run,
 /// parked status, cancellation and retained snapshot before this single write.
-/// This is not a client claim: actor scoping cannot establish those facts, so
-/// only the pipeline writer may call it. No snapshot or owner field changes.
+/// actor.userId scoping is not the fix: even the run's owner must not assign a
+/// runner and heartbeat or leave awaiting_confirm without those checks and the
+/// shared gate. This internal journal transition records the native pipeline's
+/// claim after caller-authorized confirmation; ownership alone cannot prove
+/// that execution was admitted. No snapshot or owner field changes.
 @serverOnly
 mutation packageDeployment claimPackageDeploymentConfirmation {
   args {
@@ -2395,10 +2398,11 @@ mutation packageDeployment claimPackageDeploymentConfirmation {
     heartbeatAt datetime!
   }
   update {
-    id: args.deploymentId
-    status: "analyzing"
-    nodeId: args.nodeId
-    heartbeatAt: args.heartbeatAt
+    accept { nodeId, heartbeatAt }
+    stamp {
+      id: args.deploymentId
+      status: "analyzing"
+    }
   }
 }
 
