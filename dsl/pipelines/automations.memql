@@ -289,6 +289,7 @@ automation pipelineMaintenancePolicy {
 
 /// Evidence reuse is explicitly enabled by an installation, separately from a
 /// source command's opt-in verification contract. Generic defaults rerun work.
+/// A release run is never asked: it executes every step for its candidate.
 @template
 automation pipelineEvidenceReuse {
  args { event string! sourceEvent string! sourceMode string! ageSeconds int! }

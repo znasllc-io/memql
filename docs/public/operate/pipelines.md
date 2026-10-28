@@ -1047,6 +1047,15 @@ production and publication always retain their own receipts; a reused test does
 not stand in for either. Equal trees with different commit hashes are currently
 checked separately.
 
+**A release run never reuses evidence**, and the selector is not asked about
+one. Candidate preparation accepts only receipts the release run executed
+itself (it refuses a carried `pipeline_passed_earlier` step), and a release
+request cannot adopt a re-run. A release that carried main's receipts could
+never be prepared, so its version would be lost: 0.31.4 was lost that way to
+the push run at its commit. Reuse would save a release only its artifact-free
+checks, a few minutes. `TestReleaseRunsExecuteEveryVerificationStep` holds
+this.
+
 ### Recovery and maintenance
 
 Recovery reads GitHub's current queue ref before cancelling work whose merge
@@ -1880,7 +1889,7 @@ failed and no step reported why
 | `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |
-| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages | Nothing |
+| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages. Or the installed policy reused another full run's receipt at this commit ([Reusing verification evidence](#reusing-verification-evidence)); a release run never does | Nothing |
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout
