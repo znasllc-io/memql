@@ -175,7 +175,8 @@ func DepartureDue(s TrainSettings, last, now time.Time) (time.Time, bool) {
 }
 
 // TrainCandidate is an open pull request as boarding sees it. CheckStatus and
-// CheckConclusion are the newest MemQL / memql check on HeadSHA.
+// CheckConclusion are the newest pull request check of the train's pipeline
+// (CheckRunName) on HeadSHA.
 type TrainCandidate struct {
 	Number                                   int
 	Title, HeadSHA, HeadRef, BaseRef, Author string
@@ -193,13 +194,15 @@ type TrainSkip struct {
 }
 
 // BoardingOrder picks the pull requests a train carries, in pull request
-// number order (spec 4.1 and 4.3). With express non-empty only the named pull
-// requests are considered: an express train carries exactly what was asked
-// for, and a named one that cannot board is reported, not silently dropped.
+// number order (spec 4.1 and 4.3). checkName is the pipeline's pull request
+// check, CheckRunName of its name, which a refusal names. With express
+// non-empty only the named pull requests are considered: an express train
+// carries exactly what was asked for, and a named one that cannot board is
+// reported, not silently dropped.
 //
 // A train's own pull request (a train/ head) is ignored without a reason: it
 // is not a candidate, and listing it as "skipped" would read as a fault.
-func BoardingOrder(defaultBranch string, cands []TrainCandidate, express []int) (board []TrainCandidate, skipped []TrainSkip) {
+func BoardingOrder(defaultBranch, checkName string, cands []TrainCandidate, express []int) (board []TrainCandidate, skipped []TrainSkip) {
 	named := map[int]bool{}
 	for _, n := range express {
 		named[n] = true
@@ -211,7 +214,7 @@ func BoardingOrder(defaultBranch string, cands []TrainCandidate, express []int) 
 		if strings.HasPrefix(c.HeadRef, TrainBranchPrefix) {
 			continue
 		}
-		if reason := boardingRefusal(defaultBranch, c); reason != "" {
+		if reason := boardingRefusal(defaultBranch, checkName, c); reason != "" {
 			skipped = append(skipped, TrainSkip{Number: c.Number, Reason: reason})
 			continue
 		}
@@ -222,7 +225,7 @@ func BoardingOrder(defaultBranch string, cands []TrainCandidate, express []int) 
 	return board, skipped
 }
 
-func boardingRefusal(defaultBranch string, c TrainCandidate) string {
+func boardingRefusal(defaultBranch, checkName string, c TrainCandidate) string {
 	switch {
 	case c.BaseRef != defaultBranch:
 		return fmt.Sprintf("targets %s, not %s", c.BaseRef, defaultBranch)
@@ -233,7 +236,7 @@ func boardingRefusal(defaultBranch string, c TrainCandidate) string {
 	case hasLabel(c.Labels, TrainDroppedLabel):
 		return "was dropped from an earlier train (" + TrainDroppedLabel + "); remove the label once a fix is pushed"
 	case c.CheckStatus != "completed" || c.CheckConclusion != "success":
-		return "MemQL / memql has not passed on " + shortSHA(c.HeadSHA)
+		return checkName + " has not passed on " + shortSHA(c.HeadSHA)
 	}
 	return ""
 }

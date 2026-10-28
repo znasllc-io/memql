@@ -39,6 +39,9 @@ type trainRemote struct {
 	comments   map[int][]string
 	login      string
 	seq        int
+	// checkName is the only check name the fake answers for, as GitHub
+	// answers only for the name asked; empty answers every name.
+	checkName string
 }
 
 type trainPR struct {
@@ -100,7 +103,7 @@ func (r *trainRemote) CheckRunConclusion(ctx context.Context, token, repository,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.checks[sha]
-	if !ok {
+	if !ok || (r.checkName != "" && name != r.checkName) {
 		return "", "", nil
 	}
 	if c == "" {
@@ -282,6 +285,7 @@ func newTrainHarness(t *testing.T) *trainHarness {
 	h.store.work = newFakeWork()
 	th.p = testPipeline(DeliveryWebhook)
 	th.p.ChannelIDs = []string{"ch1"}
+	th.remote.checkName = pipelines.CheckRunName(th.p.Name)
 	h.store.addPipeline(th.p)
 	h.store.mu.Lock()
 	h.store.putChannel(Channel{ID: "ch1", OwnerUserID: th.p.OwnerUserID, Name: "releases", Kind: channelDiscord, SecretRef: "RELEASES_WEBHOOK", Status: channelActive})
@@ -596,5 +600,17 @@ func TestTickRefusesAClientCaller(t *testing.T) {
 	th := newTrainHarness(t)
 	if _, err := th.integ.TrainTick(personCtx(ownerID)); err == nil {
 		t.Fatal("a person's call ran the train tick")
+	}
+}
+
+// TestBoardingReadsThePipelinesOwnCheck: a pull request boards on its
+// pipeline's own check, MemQL / <pipeline name> -- the harness pipeline is
+// "shop" -- and not on a check name written into the train.
+func TestBoardingReadsThePipelinesOwnCheck(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	if tr := th.train(t); len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
+		t.Fatalf("a pull request whose MemQL / shop check passed did not board: state %s, left off %+v", tr.State, tr.LeftOff)
 	}
 }

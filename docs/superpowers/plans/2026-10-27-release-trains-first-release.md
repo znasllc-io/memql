@@ -424,7 +424,7 @@ Separate repository `znasllc-io/memql-znas`, after the engine from Task 8 runs i
 - Modify: `docs/public/operate/pipelines.md` (new "Release trains" section: settings variable, boarding, departures, states, failure handling, approval, Discord messages, express trains, the fast-phase note), `docs/internal/ops/harness-decisions.md` (trains entry: triggers, evidence, chosen path, fallback, invariant), `CLAUDE.md` (Branch Workflow: sessions open a PR, get it green, stop; the train carries it; `train:dropped` is removed after a fix; urgent fixes ask for an express train; `merge-as-owner.sh --emergency` only), the spec's `status: draft` to `status: stable` once Task 12 step 6 passes
 - Test: the docs gates.
 
-- [ ] **Step 1: Write the docs.** No `znas.io` in engine docs (`vendor_domain_test.go`); no link from `docs/public` into `docs/internal` or `docs/superpowers` (`docs_public_boundary_test.go`); any `memql` block compiles or is marked `fragment`.
+- [ ] **Step 1: Write the docs.** No operator's domain in engine docs (`vendor_domain_test.go`); no link from `docs/public` into `docs/internal` or `docs/superpowers` (`docs_public_boundary_test.go`); any `memql` block compiles or is marked `fragment`.
 - [ ] **Step 2: Run the gates**: `go test -count=1 -run 'TestDocs|TestDocumentedTestCommandCoversTheEngine|TestVendor|TestEnvironmentTier|TestMakeTargetCitations' .` and `go test -count=1 ./scripts/dev/`. Expected: PASS.
 - [ ] **Step 3: Commit** by path, message `docs: release trains, the branch workflow and the harness decision`.
 

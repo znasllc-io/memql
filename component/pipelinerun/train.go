@@ -41,9 +41,6 @@ import (
 // verified login (train_land.go).
 
 const (
-	// trainCheckName is the check a pull request must have passed to board:
-	// the PR lane's MemQL / memql, whatever the default branch requires.
-	trainCheckName = "MemQL / memql"
 	// trainBuildLease is how long a building train belongs to the tick that
 	// claimed it.
 	trainBuildLease = 10 * time.Minute
@@ -236,6 +233,11 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 	if err != nil {
 		return err
 	}
+	// A pull request boards on its pipeline's own pull request check,
+	// whatever the default branch requires: during a switch-over the branch
+	// may require the push check instead, and that never runs on a pull
+	// request.
+	check := pipelines.CheckRunName(p.Name)
 	var cands []pipelines.TrainCandidate
 	var skipped []pipelines.TrainSkip
 	for _, pr := range prs {
@@ -249,7 +251,7 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		c := pipelines.TrainCandidate{Number: pr.Number, Title: pr.Title, HeadSHA: pr.HeadSHA, HeadRef: pr.HeadRef, BaseRef: pr.BaseRef,
 			Author: pr.Author, URL: pr.URL, Draft: pr.Draft, Labels: pr.Labels}
 		if !pr.Draft {
-			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, trainCheckName, 0)
+			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, check, 0)
 			if err != nil {
 				return err
 			}
@@ -257,7 +259,7 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		}
 		cands = append(cands, c)
 	}
-	board, refused := pipelines.BoardingOrder(p.DefaultBranch, cands, t.Requested)
+	board, refused := pipelines.BoardingOrder(p.DefaultBranch, check, cands, t.Requested)
 	skipped = append(skipped, refused...)
 	if len(board) == 0 {
 		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), BaseSHA: ptr(base), LeftOff: ptr(skipped),
