@@ -69,7 +69,9 @@ _register_operator_app "$MEMQL_OPERATOR_TEST_APP"
 				}
 				// /bin/bash is the real Bash 3.2 on supported macOS hosts. Linux
 				// runs its native Bash; no cluster or kubectl installation is needed.
-				cmd := exec.Command("/bin/bash", script)
+				// The extracted function fragment is sourced, not presented as
+				// a complete capability invocation that must emit its result.
+				cmd := exec.Command("/bin/bash", "-c", `source "$1"`, "bash", script)
 				applied := filepath.Join(root, "applied.jsonl")
 				cmd.Env = append(os.Environ(),
 					"PATH="+filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"),
