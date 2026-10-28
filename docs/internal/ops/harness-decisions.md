@@ -1238,7 +1238,12 @@ version, which the independent review measured at ~55 POSTs in one publish),
 and writing inside the publish (it delayed the first step by tens of seconds
 and the final row by up to the two-minute call budget). Tests:
 `TestADrivenRunReportsACheckPerStep`, `TestAFailedStepsCheckShowsItsMaskedOutput`
-(masked with the drive's secret values, like the run's check).
+(masked with the drive's secret values, like the run's check). The writer
+composes from a copy of the run and pipeline that each offer hands it, never
+from the drive's run row, which only the drive's goroutine touches: the race
+detector caught a version that copied the row while the drive patched it. No
+pipeline step runs this package under `-race`, so that check is a local
+`go test -race ./component/pipelinerun/`.
 
 **Rate limits and refusals.** A rate-limited answer pauses the writer for a
 minute and keeps every state it still owes (`TestARateLimitedStepCheckPausesTheWriter`:

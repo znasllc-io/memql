@@ -240,7 +240,8 @@ type runDriver struct {
 	log     *slog.Logger
 
 	// run is the row as this drive last wrote or read it. Only the drive's
-	// own goroutine touches it; a step's goroutine reads facts instead.
+	// own goroutine touches it; a step's goroutine reads facts instead, and
+	// the step-check writer the copy each offer hands it (step_checks.go).
 	run          Run
 	p            Pipeline
 	havePipeline bool

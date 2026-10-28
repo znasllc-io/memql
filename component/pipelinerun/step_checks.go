@@ -23,7 +23,9 @@ import (
 // (stepCheckPace), keeping only each step's newest state, so a step that
 // settles while an earlier state of it waits is written once, settled. No
 // step check ever delays the run's own check, a step, or the run row's
-// conclusion, which a release train waits on.
+// conclusion, which a release train waits on. The writer never reads the
+// drive's run row, which the drive's goroutine alone touches: each offer
+// hands it a copy of the run and pipeline to compose from.
 //
 // CREATED WHEN A STEP STARTS. A step's check is created the first time the
 // step is seen past pending, not when the run opens: a run of sixty steps
@@ -82,6 +84,8 @@ type stepChecks struct {
 	want    map[string]pipelines.StepReport
 	shown   map[string]*stepCheck
 	token   string
+	p       Pipeline // copied from the drive at each offer
+	run     Run
 	final   bool
 	until   time.Time // a concluded run's writer gives up then
 	pause   time.Time // rate limited, or a failed write, until then
@@ -145,6 +149,7 @@ func (dr *runDriver) offerStepChecks(token string, final bool) {
 	if token != "" {
 		sc.token = token
 	}
+	sc.p, sc.run = dr.p, dr.run
 	if final && !sc.final {
 		sc.final = true
 		// The writer keeps its own time on the wall clock: Deps.Now is the
@@ -198,7 +203,7 @@ func (dr *runDriver) writeStepChecks() {
 			sc.mu.Unlock()
 			return
 		}
-		token, final := sc.token, sc.final
+		token, final, p, run := sc.token, sc.final, sc.p, sc.run
 		key, want, check, due := sc.nextLocked()
 		var wait time.Duration
 		if now.Before(sc.pause) {
@@ -217,10 +222,10 @@ func (dr *runDriver) writeStepChecks() {
 			continue
 		case !looked:
 			looked = true
-			dr.findStepChecks(token)
+			dr.findStepChecks(token, p, run)
 			continue // what was found may already show this state
 		}
-		dr.writeOneStepCheck(token, key, want, check)
+		dr.writeOneStepCheck(token, p, run, key, want, check)
 		dr.waitForOffer(final, dr.d.stepCheckPaceOrDefault())
 	}
 }
@@ -266,21 +271,21 @@ func (dr *runDriver) waitForOffer(final bool, d ...time.Duration) {
 
 // writeOneStepCheck creates or moves one step's check run and records what
 // GitHub answered.
-func (dr *runDriver) writeOneStepCheck(token, key string, want pipelines.StepReport, check *stepCheck) {
+func (dr *runDriver) writeOneStepCheck(token string, p Pipeline, r Run, key string, want pipelines.StepReport, check *stepCheck) {
 	origin := ""
 	if dr.d.OSOrigin != nil {
 		origin = dr.d.OSOrigin()
 	}
-	run := ComposeStepCheckRun(origin, dr.p, dr.run, want, dr.d.now())
+	run := ComposeStepCheckRun(origin, p, r, want, dr.d.now())
 	ctx, cancel := context.WithTimeout(context.Background(), githubCallTimeout)
 	defer cancel()
 	var id int64
 	var err error
 	moving := check != nil && check.id > 0
 	if moving {
-		err = dr.d.GitHub.UpdateCheckRun(ctx, token, dr.p.Repository, check.id, run)
+		err = dr.d.GitHub.UpdateCheckRun(ctx, token, p.Repository, check.id, run)
 	} else {
-		id, err = dr.d.GitHub.CreateCheckRun(ctx, token, dr.p.Repository, run)
+		id, err = dr.d.GitHub.CreateCheckRun(ctx, token, p.Repository, run)
 	}
 	sc := &dr.steps
 	sc.mu.Lock()
@@ -316,10 +321,10 @@ func (dr *runDriver) writeOneStepCheck(token, key string, want pipelines.StepRep
 // findStepChecks records the step checks this run already has on its commit,
 // the newest for each step: written by a drive on another replica before this
 // one took the run over.
-func (dr *runDriver) findStepChecks(token string) {
+func (dr *runDriver) findStepChecks(token string, p Pipeline, r Run) {
 	ctx, cancel := context.WithTimeout(context.Background(), githubCallTimeout)
 	defer cancel()
-	refs, err := dr.d.GitHub.CheckRunsForCommit(ctx, token, dr.p.Repository, dr.run.SHA)
+	refs, err := dr.d.GitHub.CheckRunsForCommit(ctx, token, p.Repository, r.SHA)
 	if err != nil {
 		dr.log.Warn("pipelines: the run's existing step checks could not be listed; a step may show twice",
 			"error", dr.mask(err.Error()))
@@ -330,7 +335,7 @@ func (dr *runDriver) findStepChecks(token string) {
 	defer sc.mu.Unlock()
 	for _, ref := range refs {
 		runID, key, ok := pipelines.StepFromExternalID(ref.ExternalID)
-		if !ok || !sameID(runID, bareID(dr.run.ID)) || ref.ID <= 0 {
+		if !ok || !sameID(runID, bareID(r.ID)) || ref.ID <= 0 {
 			continue
 		}
 		if c := sc.shown[key]; c == nil || ref.ID > c.id {
