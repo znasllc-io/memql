@@ -119,10 +119,30 @@ catalog journals. The configured recipe resumes verified prior work rather than
 publishing another draft. Do not delete an intent, move a tag, fabricate a
 receipt or replace an approved destination to make recovery appear successful.
 
-A failed build stays linked to its failed run. Correct its cause and use the
-normal pipeline recovery controls. The saved release does not automatically
-substitute another attempt. If the provider outcome cannot be established, keep
-that uncertainty and its original fence intact.
+### Recover a failed build
+
+A failed build keeps its saved release. When the cause is in the code, fix it
+and release a new version. When it is environmental (a machine, a network, a
+provider), open the failed run and choose **Re-run failed steps**. The re-run
+is the next attempt of the same release, at the same commit and tag. It runs
+again every step that failed, was blocked or was cancelled, and every step
+whose earlier result produced artifacts, so each image and file the candidate
+pins comes from the attempt the candidate names. Every other passed step is
+carried as `pipeline_passed_earlier`.
+
+The saved release adopts the re-run the next time it is read. The newer
+attempt must name the recorded one in its `rerunOf` chain, the recorded
+attempt must have finished without success, and no candidate may exist yet.
+Anything else keeps the recorded run. Candidate preparation then proves each
+carried step against the attempt that executed it: the same release, the same
+step definition and packages, and an artifact-free success. It records the
+proof as `carriedFrom`. An unproven carry refuses the candidate, naming the
+step.
+
+A release whose first attempt was opened more than 24 hours before the re-run
+carries nothing: every step runs again, so vulnerability scans and the rest are
+current. If a provider outcome cannot be established, keep that uncertainty and
+its original fence intact.
 
 ## Configure the native flow
 

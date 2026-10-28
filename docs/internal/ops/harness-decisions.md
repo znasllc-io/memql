@@ -1121,3 +1121,75 @@ App-authored pull request satisfies `require_code_owner_review` together with
 GitHub marks a pull request merged when its head reaches `main` through
 another pull request's merge (memql#6325 marked memql#6318 to memql#6324
 merged).
+
+## A failed release re-runs only what failed (2026-10-28)
+
+On 2026-10-28 the owner lost engine versions 0.31.4 to 0.31.7 to one-step
+release failures. The last was an editor lane whose Chromium download stalled
+on one fleet Mac. A failed release could not be recovered: the saved release
+refused any run but the one it recorded ("native release observation changed
+its execution identity"), and `releasePrepareCandidateWorkflow` refused the
+`pipeline_passed_earlier` receipts a failed-only re-run carries. Each failure
+therefore cost a version bump, a pull request check and a full release run of
+about three hours. Design record:
+`docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md`; the
+connected workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#recover-a-failed-build).
+
+- **Trigger.** The owner re-runs a failed release attempt, usually its failed
+  steps only, from the run page.
+- **Planning** (`carryPassed`, `releaseChainFresh` in
+  `component/pipelinerun/driver.go`). A release re-run never carries a step
+  whose earlier result named artifacts, because a candidate pins artifacts only
+  from the run it names. It carries nothing once the release's first attempt was
+  opened more than 24 hours before the re-run (`releaseCarryWindow`, the
+  evidence-reuse window). A read that does not answer stops the drive; a chain
+  that cannot be followed carries nothing.
+- **Attempt chain** (`releaseAttemptChain` in
+  `component/pipelinerun/release_build.go`). Each observation reports the
+  earlier attempts of the release run key, newest first, through `rerunOf`
+  alone. A missing link, a different run key, an attempt that does not decrease
+  or more than 50 attempts leaves the chain empty. Observation keeps working;
+  nothing can adopt the attempt.
+- **Adoption** (`adoptableBuildRun`, `integrations/release/build_adopt.go`). The
+  saved release replaces its recorded run only with a descendant of a recorded
+  attempt that completed without success, before any candidate or publication.
+  The journal's SQL fence (`build_ledger.go`) admits exactly that change, so a
+  replica holding an older view cannot write an earlier run back. A release
+  blocked by a failed build keeps the `observe` action, which the OS release
+  journey runs on every read; every other block keeps none.
+- **Proof** (`carriedFrom`, `integrations/release/candidate_carried.go`).
+  Coverage proves each carried step: the carrying run is a full release re-run,
+  its chain stays inside the release and reaches attempt 1 within 24 hours, and
+  the nearest earlier attempt that did not carry the step executed it as an
+  artifact-free successful command (`pl.InspectCarriedReleaseReceipt`) with the
+  same definition digest and packages. The recipe accepts
+  `pipeline_passed_earlier` only together with that proof; anything unproven
+  refuses the candidate, naming the step.
+
+Rejected: a candidate whose evidence spans attempts (attempt 1's complete
+evidence includes its failed step, its artifacts would be pinned from a failed
+run, and the candidate format would change), and adopting only full re-runs
+(saves the version bump and pull request check but not the long run; the design
+adopts full re-runs too, which carry nothing). Cross-event reuse stays off for
+releases (#6344): a receipt from a push, pull request or merge-group run has no
+chain inside the release.
+
+Invariants: a successful or running recorded attempt is never replaced; a
+prepared, approved or published candidate is never re-pointed; every artifact
+in a candidate comes from the run it names; a carried step is accepted only
+with a native proof tied by digest to a step that executed within the same
+release run key. What survives a retry or a replica change: the chain is read
+natively on every observation, adoption is recorded in the journal under its
+fence, and the proof is recomputed from journal rows at candidate preparation.
+
+Tests: `TestCarriedReleaseReceipt*` (`component/pipelines`);
+`TestReleaseAttemptChain*`, `TestCarryPassedReleaseRerunsArtifactProducers`
+and `TestReleaseRerunCarriesNothingPastTheWindow` (`component/pipelinerun`);
+`TestAdoptableBuildRun`, `TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun`
+(including a refused stale write-back), `TestCarriedChain*`,
+`TestCarriedReceipt*` and the proven-carry case of
+`TestCandidateWorkflowChoosesAllowedPlannedSkips` (`integrations/release`, the
+last ones db-gated). Not verified here: a live release re-run on a cluster.
+This change helps only after it ships in an engine release; the release that
+carries it is still prepared under the previous rules.
