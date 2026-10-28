@@ -1051,8 +1051,11 @@ request's current head; landing requires `main` to still be the train's base;
 and the merge sends that head as GitHub's guard. Any of them moving sends the
 train back to `building` and the owner is asked again
 (`TestRebuiltTrainAsksAgain`, `TestMainMovingRebuildsAWaitingTrain`,
-`TestApprovalForAnOlderHeadDoesNotLand`). Nothing in the coordinator can create
-a review, so a model never approves. Boarding merges the head commit read at
+`TestApprovalForAnOlderHeadDoesNotLand`, `TestAnApprovalBeforeARebuildNeverLandsTheRebuiltTrain`).
+Nothing in the coordinator creates a review. That alone does not keep a model
+from approving: agent sessions act on GitHub under the owner's account, so the
+rest of the guarantee is the `CLAUDE.md` rule that a session never reviews or
+approves a pull request. Boarding merges the head commit read at
 boarding, not the branch, so a push after boarding never rides along
 (`TestTrainMergesTheBoardedCommitNotTheNewHead`).
 

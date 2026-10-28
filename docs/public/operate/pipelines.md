@@ -585,8 +585,9 @@ reads that pull request's reviews: the latest `APPROVED` or
 `CHANGES_REQUESTED` review by the pipeline owner's GitHub login, learned from
 their GitHub connection, decides, and it lands the train only when it approves
 the train pull request's **current head**. An approval given before a rebuild
-does not land the rebuilt train. Nothing in the train can create a review: a
-model never approves.
+does not land the rebuilt train. Nothing in the train creates a review, and
+the approval must be the owner's own: an agent working under the owner's
+GitHub account must never review or approve a train pull request.
 
 To land, the default branch must still be the commit the train was built on.
 The App then merges the train pull request with the `merge` method, guarded by
@@ -638,7 +639,8 @@ appears in Discord only when it is left off or dropped.
 3. Require the pipeline's pull request check, `MemQL / <name>`, on the default
    branch, and remove its merge-queue rule: the train does the batching.
 4. Add the repository to `MEMQL_PIPELINES_TRAINS` with `enabled: true`. The
-   next departure is the first train.
+   first tick after that departs a train for the latest departure time within
+   the past day, so the first train leaves within a minute.
 
 Keep the administrator bypass, for emergencies only. While a repository moves
 to trains, its default branch can require the push run's check,

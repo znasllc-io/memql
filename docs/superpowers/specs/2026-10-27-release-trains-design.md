@@ -261,7 +261,9 @@ board rebuilds the train without it.
 - After landing, each pull request on board shows as merged, because its head
   is in `main`, and gets a comment naming the train.
 - A model never approves. The approval is read from GitHub as the owner's
-  review, and nothing in the coordinator can create one.
+  review, and nothing in the coordinator can create one. Agent sessions act
+  on GitHub under the owner's account, so `CLAUDE.md` also forbids a session
+  to review or approve a pull request.
 
 ## 8. GitHub rules and agent workflow
 
@@ -375,9 +377,9 @@ There is no shadow period (2): production has no clients relying on it yet.
 
 1. **Switch** as soon as the first release (10) runs in production: save the
    ruleset; change CODEOWNERS and the ruleset; make `merge-as-owner.sh`
-   emergency-only; update `CLAUDE.md`; turn the train setting on. The next
-   scheduled departure is the first live train, and the owner's approval of it
-   is the acceptance test.
+   emergency-only; update `CLAUDE.md`; turn the train setting on. The first
+   tick after that departs the first live train, for the latest departure time
+   within the past day, and the owner's approval of it is the acceptance test.
 2. **Fallback.** Turn the setting off, restore the saved ruleset, and merge with
    `merge-as-owner.sh --emergency` until the train is fixed.
 

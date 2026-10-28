@@ -344,7 +344,10 @@ MemQL uses a single long-lived branch: `main`.
    ([pipelines.md](docs/public/operate/pipelines.md#release-trains); design
    record [2026-10-27](docs/superpowers/specs/2026-10-27-release-trains-design.md)):
    a session branches, pushes, opens the PR, gets its `MemQL / memql` check
-   green, and **stops -- it never merges**. At each departure (twice a day, per
+   green, and **stops -- it never merges, and never reviews or approves a pull
+   request**: sessions act on GitHub under the owner's account, so a session's
+   approval of a train pull request would land code the owner has not seen.
+   At each departure (twice a day, per
    `MEMQL_PIPELINES_TRAINS`) the MemQL app merges every ready PR onto one
    `train/<date>-<n>` branch, runs the pipeline once and opens a train PR; the
    owner's GitHub approval of that PR is what lands it, and Discord says what
