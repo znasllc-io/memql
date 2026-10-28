@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/pipelines"
 )
 
 const admissionMaxBytes = 4096
@@ -17,12 +19,19 @@ const admissionMaxBytes = 4096
 // No decision is cached in a replica. An unset path preserves normal admission;
 // a configured but unreadable, malformed or expired decision fails closed.
 // This gate controls new pipeline runs, never recovery or the serving runtime.
-func FileRunAdmission(path string) func(time.Time) (bool, error) {
+//
+// TRAIN RUNS HAVE AN ALLOWANCE OF THEIR OWN (release trains, design record
+// 2026-10-27, section 5.3): an optional allowTrainRuns admits a train run while
+// allowNewRuns holds every other one, because trains are scheduled and the cost
+// guard budgets them apart. A decision without the field admits a train run
+// exactly as it admits any run. The reader refuses unknown fields, so the
+// engine that knows this field ships before any guard writes it.
+func FileRunAdmission(path string) func(time.Time, bool) (bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
 	}
-	return func(now time.Time) (bool, error) {
+	return func(now time.Time, train bool) (bool, error) {
 		info, err := os.Stat(path)
 		if err != nil {
 			return false, fmt.Errorf("read admission decision: %w", err)
@@ -40,9 +49,10 @@ func FileRunAdmission(path string) func(time.Time) (bool, error) {
 			return false, fmt.Errorf("admission decision could not be read within its size limit")
 		}
 		var decision struct {
-			AllowNewRuns *bool     `json:"allowNewRuns"`
-			ValidUntil   time.Time `json:"validUntil"`
-			Reason       string    `json:"reason"`
+			AllowNewRuns   *bool     `json:"allowNewRuns"`
+			AllowTrainRuns *bool     `json:"allowTrainRuns"`
+			ValidUntil     time.Time `json:"validUntil"`
+			Reason         string    `json:"reason"`
 		}
 		decoder := json.NewDecoder(strings.NewReader(string(data)))
 		decoder.DisallowUnknownFields()
@@ -56,6 +66,17 @@ func FileRunAdmission(path string) func(time.Time) (bool, error) {
 		if decision.AllowNewRuns == nil || !decision.ValidUntil.After(now) || decision.ValidUntil.After(now.Add(2*time.Hour)) {
 			return false, fmt.Errorf("admission decision needs allowNewRuns and a future validUntil no more than two hours away")
 		}
-		return *decision.AllowNewRuns, nil
+		if *decision.AllowNewRuns {
+			return true, nil
+		}
+		return train && decision.AllowTrainRuns != nil && *decision.AllowTrainRuns, nil
 	}
+}
+
+// IsTrainRun reports whether a run is a release train's: the pull request run
+// of a train/ branch, which only a train coordinator creates (a person with
+// write access could name a branch so, and would be admitted on the train
+// allowance; write access is already trusted with the repository).
+func IsTrainRun(r Run) bool {
+	return r.Event == pipelines.EventPullRequest && strings.HasPrefix(r.HeadBranch, pipelines.TrainBranchPrefix)
 }

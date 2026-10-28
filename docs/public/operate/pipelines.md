@@ -1353,6 +1353,13 @@ unreadable files, invalid values and expired decisions hold new runs. Unset
 configuration preserves ordinary admission. A writer must refresh an allowance
 before it expires; stopping the writer cannot leave admission open indefinitely.
 
+An optional boolean `allowTrainRuns` admits [release train](#release-trains)
+runs while `allowNewRuns` holds every other run: a train run is the pull
+request run of a `train/` branch, and trains are scheduled, so a cost guard can
+budget them apart. Without the field, a train run is admitted exactly as any
+other run. Install an engine that reads `allowTrainRuns` before any writer
+emits it: an older engine refuses the unknown field and holds every run.
+
 ```mermaid
 flowchart LR
     S[Webhook, poll or manual request] --> Q[Durable queued pipeline run]

@@ -372,7 +372,7 @@ func (i *Integration) observeRun(ctx context.Context, d Deps, s pipelines.TrainS
 	run, _ := newestAttempt(prRuns)
 	if !run.Finished() {
 		if run.Status == StatusQueued && now.Sub(run.QueuedAt) >= trainAdmissionWait && d.AdmitRun != nil {
-			if admitted, err := d.AdmitRun(now); err == nil && !admitted {
+			if admitted, err := d.AdmitRun(now, true); err == nil && !admitted {
 				return i.notifyTrain(ctx, d, s, p, t, pipelinenotify.TrainAdmissionHeld,
 					fmt.Sprintf("The train's run has waited %s for the build pool.", now.Sub(run.QueuedAt).Round(time.Minute)), nil)
 			}

@@ -74,7 +74,9 @@ type Deps struct {
 	// must be a bounded local read: claim calls it inside the shared row gate.
 	// False or an error keeps the run queued, without starting its deadline.
 	// Recovery of started runs and cancellation never depend on this gate.
-	AdmitRun func(time.Time) (bool, error)
+	// The bool says whether the run is a release train's (IsTrainRun), which
+	// the cost guard may admit on its own allowance.
+	AdmitRun func(time.Time, bool) (bool, error)
 	// Secrets resolves a globalSecret value for the driver (Task 10b).
 	Secrets Secrets
 	// Journal writes a pipeline run's v1:work goal, run and steps (Task 10b).
