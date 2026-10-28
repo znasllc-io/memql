@@ -1175,6 +1175,15 @@ adopts full re-runs too, which carry nothing). Cross-event reuse stays off for
 releases (#6344): a receipt from a push, pull request or merge-group run has no
 chain inside the release.
 
+Compatibility: `RerunOf` and `Chain` are omitted when empty, so a run without
+re-run facts encodes exactly as before. Journals written earlier keep their
+selection digest, and an older engine still decodes every journal that never
+adopted a re-run; one that did is unreadable to it after a rollback
+(`TestReleaseBuildRunEncodingKeepsEarlierJournals`). The runner's carry rule is
+a subset of what the proof accepts: a step that declares `artifacts` or an
+image build, or whose earlier receipt named an intent or a file, always runs
+again, and the runner stops at the proof's 50-attempt bound.
+
 Invariants: a successful or running recorded attempt is never replaced; a
 prepared, approved or published candidate is never re-pointed; every artifact
 in a candidate comes from the run it names; a carried step is accepted only
@@ -1183,9 +1192,12 @@ release run key. What survives a retry or a replica change: the chain is read
 natively on every observation, adoption is recorded in the journal under its
 fence, and the proof is recomputed from journal rows at candidate preparation.
 
-Tests: `TestCarriedReleaseReceipt*` (`component/pipelines`);
-`TestReleaseAttemptChain*`, `TestCarryPassedReleaseRerunsArtifactProducers`
-and `TestReleaseRerunCarriesNothingPastTheWindow` (`component/pipelinerun`);
+Tests: `TestCarriedReleaseReceipt*` and
+`TestReleaseBuildRunEncodingKeepsEarlierJournals` (`component/pipelines`);
+`TestReleaseAttemptChain*`, `TestCarryPassedReleaseRerunsArtifactProducers`,
+`TestCarryPassedReleaseRerunsDeclaredProducers`,
+`TestReleaseChainFreshStopsAtTheAttemptBound` and
+`TestReleaseRerunCarriesNothingPastTheWindow` (`component/pipelinerun`);
 `TestAdoptableBuildRun`, `TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun`
 (including a refused stale write-back), `TestCarriedChain*`,
 `TestCarriedReceipt*` and the proven-carry case of

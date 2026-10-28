@@ -36,13 +36,19 @@ type ReleaseBuildRun struct {
 	Attempt                                           int
 	CancelRequested                                   bool
 	// RerunOf is the attempt this one re-runs; empty for attempt 1.
-	RerunOf string
+	//
+	// Both re-run fields are omitted when empty. Saved-release journals store
+	// this type inside the selection their digest covers, and an older engine
+	// decodes it strictly, so a run without re-run facts must encode exactly
+	// as it did before these fields existed. The JSON keys stay the Go names:
+	// the journal's SQL fence reads run.Chain (integrations/release/build_ledger.go).
+	RerunOf string `json:"RerunOf,omitempty"`
 	// Chain lists the earlier attempts of the same release run key, newest
 	// first, read through rerunOf. It is nil for attempt 1 and for a chain
 	// that cannot be followed back to attempt 1 inside its run key, so a saved
 	// release adopts a re-run only through an unbroken chain
 	// (integrations/release/build_adopt.go).
-	Chain []ReleaseBuildAttempt
+	Chain []ReleaseBuildAttempt `json:"Chain,omitempty"`
 }
 
 // ReleaseBuildAttempt is one earlier attempt's lifecycle: enough to decide

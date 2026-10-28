@@ -658,9 +658,16 @@ func TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lease.close(ownerCtx())
+	// Both answers are the fence's own refusal, not a database error: a stale
+	// run with no chain, and one whose chain does not name the adopted re-run.
 	stale := first
-	lease.record.Run = &stale
-	if err := lease.save(ownerCtx()); err == nil {
-		t.Fatal("an earlier attempt was written back over the adopted re-run")
+	unrelatedChain := first
+	unrelatedChain.ID = id.NewShortId()
+	unrelatedChain.Chain = []pl.ReleaseBuildAttempt{{ID: id.NewShortId(), Attempt: 1, Status: "completed", Conclusion: "failure"}}
+	for _, run := range []pl.ReleaseBuildRun{stale, unrelatedChain} {
+		lease.record.Run = &run
+		if err := lease.save(ownerCtx()); err == nil || !strings.Contains(err.Error(), "release update lost its immutable selection or lease") {
+			t.Fatalf("a run that does not descend from the adopted re-run was not refused by the fence: %+v %v", run, err)
+		}
 	}
 }

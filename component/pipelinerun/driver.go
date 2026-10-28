@@ -663,7 +663,7 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 			return false
 		}
 		if !inWindow {
-			dr.log.Warn("pipelines: a release re-run past its 24-hour window runs every step",
+			dr.log.Warn("pipelines: a release re-run past its 24-hour window, or without an unbroken attempt chain, runs every step",
 				"rerunOf", originalID)
 			return true
 		}
@@ -685,8 +685,13 @@ const releaseCarryWindow = 24 * time.Hour
 // attempt. Every carried pass is younger than attempt 1, so one comparison
 // bounds them all. A read that did not answer stops the drive, as in
 // carryFromOriginal; a chain that cannot be followed inside the release run
-// key answers false, and the re-run then runs every step.
+// key, or an attempt past maxReleaseAttempts, answers false, and the re-run
+// then runs every step. Both bounds match candidate coverage's, so the runner
+// never carries a pass coverage would refuse.
 func (dr *runDriver) releaseChainFresh(ctx context.Context) (bool, error) {
+	if dr.run.Attempt > maxReleaseAttempts {
+		return false, nil
+	}
 	fresh := memql.ContextWithFreshRead(ctx)
 	current := dr.run
 	for hops := 0; current.Attempt > 1; hops++ {
@@ -747,7 +752,7 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int, releas
 		if !ok || t.step.Skip != nil || t.step.Kind != pipelines.StepCommand || producers[t.step.Key] {
 			continue
 		}
-		if release && len(row.ArtifactFileIDs) > 0 {
+		if release && releaseProducer(t.step, row) {
 			continue
 		}
 		passed := row.Status == WorkStepDone
@@ -767,6 +772,27 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int, releas
 		}
 		t.step.Skip = &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: reason}
 	}
+}
+
+// releaseProducer reports a step a release re-run must run again because it
+// produces artifacts, judged by what the step declares and by what its earlier
+// receipt named. Library file IDs alone are not enough: an outcome over its
+// size bound loses them but never its intent IDs, and a row carried by an
+// older engine names none. Candidate coverage refuses a carried step whose
+// executing receipt named any intent (pipelines.InspectCarriedReleaseReceipt),
+// so the runner must not carry one.
+func releaseProducer(step pipelines.Step, row WorkStep) bool {
+	if len(step.Artifacts) > 0 || step.ImageBuild != nil || len(row.ArtifactFileIDs) > 0 {
+		return true
+	}
+	meta, _ := row.Result["metadata"].(map[string]any)
+	switch ids := meta["artifactIntentIds"].(type) {
+	case []any:
+		return len(ids) > 0
+	case []string:
+		return len(ids) > 0
+	}
+	return false
 }
 
 // decls are the plan's steps as the journal declares them, in plan order: an

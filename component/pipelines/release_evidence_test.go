@@ -168,6 +168,7 @@ func TestCarriedReleaseReceiptAdmitsAFailedEnclosingRun(t *testing.T) {
 		"succeeded": func(map[string]any) {},
 		"failed":    func(r map[string]any) { r["status"] = "failed" },
 		"cancelled": func(r map[string]any) { r["status"] = "cancelled"; r["cancelRequested"] = true },
+		"abandoned": func(r map[string]any) { r["status"] = "abandoned" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, s := artifactFreeReleaseWork()
@@ -216,5 +217,27 @@ func TestCarriedReleaseReceiptRefusesWhatCannotBeCarried(t *testing.T) {
 				t.Fatalf("receipt that cannot be carried was accepted: %+v", got)
 			}
 		})
+	}
+}
+
+// TestReleaseBuildRunEncodingKeepsEarlierJournals: saved-release journals
+// store ReleaseBuildRun inside the selection their digest covers, and an
+// older engine decodes them strictly. A run with no re-run facts must encode
+// exactly as it did before RerunOf and Chain existed, or every journal that
+// captured one fails its identity check after an upgrade.
+func TestReleaseBuildRunEncodingKeepsEarlierJournals(t *testing.T) {
+	const earlier = `{"ID":"run-1","OwnerUserID":"owner","PipelineID":"pipeline","Repository":"acme/engine","SHA":"` +
+		`bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","Tag":"v1.2.3","Mode":"full","Event":"release","Status":"completed",` +
+		`"Conclusion":"failure","WorkRunID":"work-1","Attempt":1,"CancelRequested":false}`
+	var run ReleaseBuildRun
+	if err := json.Unmarshal([]byte(earlier), &run); err != nil {
+		t.Fatal(err)
+	}
+	again, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again) != earlier {
+		t.Fatalf("a run without re-run facts re-encodes differently:\n got %s\nwant %s", again, earlier)
 	}
 }

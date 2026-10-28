@@ -2040,3 +2040,58 @@ func TestReleaseRerunCarriesNothingPastTheWindow(t *testing.T) {
 		})
 	}
 }
+
+// TestCarryPassedReleaseRerunsDeclaredProducers: a release re-run decides a
+// producer by what its step declares and what its receipt named, not only by
+// the Library files an outcome kept. An outcome over its size bound loses its
+// file IDs, never its intents, so the runner never carries a step candidate
+// coverage would refuse.
+func TestCarryPassedReleaseRerunsDeclaredProducers(t *testing.T) {
+	track := func(key string) *stepTrack {
+		return &stepTrack{step: pipelines.Step{Key: key, Kind: pipelines.StepCommand}, definition: "same-definition"}
+	}
+	declared, image, intents, plain := track("tests.editor"), track("images.bff"), track("tests.report"), track("tests.unit")
+	declared.step.Artifacts = []string{".memql-host-reports"}
+	image.step.ImageBuild = &pipelines.ImageBuild{}
+	prior := []WorkStep{
+		{Key: "tests.editor", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+		{Key: "images.bff", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+		{Key: "tests.report", Status: WorkStepDone, DefinitionFingerprint: "same-definition",
+			Result: map[string]any{"metadata": map[string]any{"artifactIntentIds": []any{strings.Repeat("c", 64)}}}},
+		{Key: "tests.unit", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+	}
+	carryPassed([]*stepTrack{declared, image, intents, plain}, prior, 1, true)
+	for _, producer := range []*stepTrack{declared, image, intents} {
+		if producer.step.Skip != nil {
+			t.Errorf("%s produces artifacts and was carried into a release re-run: %+v", producer.step.Key, producer.step.Skip)
+		}
+	}
+	if plain.step.Skip == nil || plain.step.Skip.Code != pipelines.CodePassedEarlier {
+		t.Errorf("an artifact-free pass was not carried: %+v", plain.step.Skip)
+	}
+}
+
+// TestReleaseChainFreshStopsAtTheAttemptBound: the runner carries nothing for
+// an attempt candidate coverage would not prove, and coverage stops at 50.
+func TestReleaseChainFreshStopsAtTheAttemptBound(t *testing.T) {
+	for _, tc := range []struct {
+		attempts int
+		want     bool
+	}{{50, true}, {51, false}} {
+		store := newMemStore()
+		var latest Run
+		for n := 1; n <= tc.attempts; n++ {
+			run := Run{ID: fmt.Sprintf("a%d", n), RunKey: "release-key", Attempt: n, Event: pipelines.EventRelease, Mode: pipelines.ModeFull, QueuedAt: testNow}
+			if n > 1 {
+				run.RerunOf = fmt.Sprintf("a%d", n-1)
+			}
+			store.addRun(run)
+			latest = run
+		}
+		dr := &runDriver{d: Deps{Store: store}, run: latest}
+		got, err := dr.releaseChainFresh(context.Background())
+		if err != nil || got != tc.want {
+			t.Errorf("attempt %d: releaseChainFresh = %v, %v; want %v", tc.attempts, got, err, tc.want)
+		}
+	}
+}

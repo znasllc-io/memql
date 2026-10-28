@@ -123,21 +123,26 @@ receipt or replace an approved destination to make recovery appear successful.
 
 A failed build keeps its saved release. When the cause is in the code, fix it
 and release a new version. When it is environmental (a machine, a network, a
-provider), open the failed run and choose **Re-run failed steps**. The re-run
-is the next attempt of the same release, at the same commit and tag. It runs
-again every step that failed, was blocked or was cancelled, and every step
-whose earlier result produced artifacts, so each image and file the candidate
-pins comes from the attempt the candidate names. Every other passed step is
-carried as `pipeline_passed_earlier`.
+provider), open the run the release names and choose **Re-run failed**. On a
+disconnected pipeline the run page hides that control; call
+`builtin pipelinesRerun(runId: "<run id>", failedOnly: true)` instead. The
+re-run is the next attempt of the same release, at the same commit and tag. It
+runs again every step that failed, was blocked or was cancelled, and every step
+that produces artifacts (one that declares `artifacts` or an image build, or
+whose earlier receipt named any), so each image and file the candidate pins
+comes from the attempt the candidate names. Every other passed step is carried
+as `pipeline_passed_earlier`.
 
 The saved release adopts the re-run the next time it is read. The newer
 attempt must name the recorded one in its `rerunOf` chain, the recorded
 attempt must have finished without success, and no candidate may exist yet.
-Anything else keeps the recorded run. Candidate preparation then proves each
-carried step against the attempt that executed it: the same release, the same
-step definition and packages, and an artifact-free success. It records the
-proof as `carriedFrom`. An unproven carry refuses the candidate, naming the
-step.
+Anything else keeps the recorded run, and the release reads as an unconfirmed
+operation until the attempt it names is the one re-run: re-run that attempt,
+not an older one or another check run's. Candidate preparation then proves
+each carried step against the attempt that executed it: the same release, the
+same step definition and packages, and an artifact-free success. It records
+the proof as `carriedFrom`. An unproven carry refuses the candidate, naming
+the step.
 
 A release whose first attempt was opened more than 24 hours before the re-run
 carries nothing: every step runs again, so vulnerability scans and the rest are

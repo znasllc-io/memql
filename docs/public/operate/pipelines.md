@@ -760,7 +760,14 @@ Afterwards:
   announces the new attempt, which has an outcome of its own. A run with no
   failed or cancelled step (one that passed, or one refused before any step) is
   refused `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole
-  re-run: one check run reports the whole run.
+  re-run: one check run reports the whole run. **In a release** a failed-only
+  re-run also runs again every step that produces artifacts (one that declares
+  `artifacts` or an image build, or whose earlier receipt named any), so every
+  artifact a candidate pins comes from the attempt it names. It carries nothing
+  once the release's first attempt was opened more than 24 hours before the
+  re-run. The saved release adopts the re-run, and candidate preparation proves
+  each carried step
+  ([release-cutting.md](release-cutting.md#recover-a-failed-build)).
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:pipelines/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
@@ -1047,14 +1054,17 @@ production and publication always retain their own receipts; a reused test does
 not stand in for either. Equal trees with different commit hashes are currently
 checked separately.
 
-**A release run never reuses evidence**, and the selector is not asked about
-one. Candidate preparation accepts only receipts the release run executed
-itself (it refuses a carried `pipeline_passed_earlier` step), and a release
-request cannot adopt a re-run. A release that carried main's receipts could
+**A release run never reuses another event's evidence**, and the selector is
+not asked about one. Candidate preparation accepts a carried
+`pipeline_passed_earlier` step only when it proves the step against an earlier
+attempt of the same release, and a receipt from a push, pull request or
+merge-group run has no such chain. A release that carried main's receipts could
 never be prepared, so its version would be lost: 0.31.4 was lost that way to
 the push run at its commit. Reuse would save a release only its artifact-free
 checks, a few minutes. `TestReleaseRunsExecuteEveryVerificationStep` holds
-this.
+this. A failed release recovers instead by re-running its failed steps, which
+carries passes inside the release's own attempt chain
+([release-cutting.md](release-cutting.md#recover-a-failed-build)).
 
 ### Recovery and maintenance
 

@@ -87,8 +87,9 @@ const (
 	admitReleased receiptAdmission = iota
 	// admitScanner: a completed scanner inside a running or failed run.
 	admitScanner
-	// admitCarried: a pass inside an attempt that ended in any terminal state,
-	// including a cancellation.
+	// admitCarried: a pass inside an attempt that ended in any terminal state
+	// of a work run: succeeded, failed, cancelled (even mid-request) or
+	// abandoned.
 	admitCarried
 )
 
@@ -139,7 +140,7 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 	case admitScanner:
 		runAdmitted = r.Status == "running" || r.Status == "succeeded" || r.Status == "failed"
 	case admitCarried:
-		runAdmitted = r.Status == "succeeded" || r.Status == "failed" || r.Status == "cancelled"
+		runAdmitted = r.Status == "succeeded" || r.Status == "failed" || r.Status == "cancelled" || r.Status == "abandoned"
 		cancelAdmitted = true
 	}
 	definition := "sha256:" + strings.TrimPrefix(s.Call.DefinitionFingerprint, "work-definition-v2:")

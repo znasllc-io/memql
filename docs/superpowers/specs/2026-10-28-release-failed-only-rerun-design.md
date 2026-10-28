@@ -103,8 +103,10 @@ The blocked reason becomes: "The selected release build did not succeed.
 Re-run its failed steps from its run; this release continues with that attempt
 when it passes."
 
-Journals written before this change have no chain. They therefore refuse
-adoption, which is today's behavior.
+Adoption reads the chain from the native observation, not from the journal.
+A run without re-run facts encodes exactly as before (`RerunOf` and `Chain`
+are omitted when empty), so journals written before this change keep their
+selection digest and still decode on an older engine.
 
 ### 4. Carried receipt verification
 
@@ -198,7 +200,10 @@ lane):
 - This ships in the next engine release. Production benefits once it runs that
   engine. The release that carries the change is still prepared under the
   previous rules.
-- No data migration. Old journals refuse adoption, as today.
+- No data migration. A run without re-run facts encodes as before, so existing
+  journals keep their selection digest. An adopted re-run writes `RerunOf` and
+  `Chain`, which an older engine cannot decode: rolling back after adopting a
+  re-run leaves that one saved release unreadable to the older engine.
 - Steps with artifacts, including editor lanes that keep reports, always run
   again. Carrying them would require a candidate that spans attempts.
 
