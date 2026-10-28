@@ -139,3 +139,82 @@ func TestReleaseStepEvidenceRefusesInventedDeliveryOrSkip(t *testing.T) {
 		})
 	}
 }
+
+// artifactFreeReleaseWork is the fixture without artifact intents: the only
+// kind of receipt a failed-only release re-run may carry.
+func artifactFreeReleaseWork() (map[string]any, map[string]any) {
+	r, s := releaseWorkFixture()
+	delete(s["result"].(map[string]any)["metadata"].(map[string]any), "artifactIntentIds")
+	return r, s
+}
+
+// TestCarriedReleaseReceiptAdmitsAFailedEnclosingRun holds the one relaxation
+// the carried inspector makes: a step that passed inside an attempt which
+// failed or was cancelled elsewhere is admitted. Its identity leaves out the
+// enclosing run's terminal state, so the same step receipt has one digest
+// whichever way its attempt ended, and it never collides with a release
+// receipt's digest, which binds that state.
+func TestCarriedReleaseReceiptAdmitsAFailedEnclosingRun(t *testing.T) {
+	r, s := artifactFreeReleaseWork()
+	want, err := InspectCarriedReleaseReceipt("owner", "run", "test.full", r, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released, err := InspectReleaseStepReceipt("owner", "run", "test.full", r, s)
+	if err != nil || released.ReceiptDigest == want.ReceiptDigest {
+		t.Fatal("a carried identity must not pass for a release receipt", err)
+	}
+	for name, change := range map[string]func(map[string]any){
+		"succeeded": func(map[string]any) {},
+		"failed":    func(r map[string]any) { r["status"] = "failed" },
+		"cancelled": func(r map[string]any) { r["status"] = "cancelled"; r["cancelRequested"] = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, s := artifactFreeReleaseWork()
+			change(r)
+			got, err := InspectCarriedReleaseReceipt("owner", "run", "test.full", r, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != "done" || got.StepKind != string(StepCommand) || got.ReceiptDigest != want.ReceiptDigest {
+				t.Fatalf("carried receipt lost its identity: %+v", got)
+			}
+		})
+	}
+}
+
+// TestCarriedReleaseReceiptRefusesWhatCannotBeCarried: only an executed,
+// artifact-free, successful command is evidence another attempt may carry.
+func TestCarriedReleaseReceiptRefusesWhatCannotBeCarried(t *testing.T) {
+	for name, change := range map[string]func(map[string]any, map[string]any){
+		"artifacts": func(r, s map[string]any) {
+			s["result"].(map[string]any)["metadata"].(map[string]any)["artifactIntentIds"] = []string{strings.Repeat("c", 64)}
+		},
+		"planned skip": func(r, s map[string]any) {
+			s["call"].(map[string]any)["skip"] = map[string]any{"code": CodeNotAffected, "reason": "No packages."}
+			s["status"], s["errorCode"] = "skipped", CodeNotAffected
+			s["result"] = map[string]any{"code": CodeNotAffected, "reason": "No packages."}
+		},
+		"carried skip": func(r, s map[string]any) {
+			s["call"].(map[string]any)["skip"] = map[string]any{"code": CodePassedEarlier, "reason": "Passed in attempt 1."}
+			s["status"], s["errorCode"] = "skipped", CodePassedEarlier
+			s["result"] = map[string]any{"code": CodePassedEarlier, "reason": "Passed in attempt 1."}
+		},
+		"notification": func(r, s map[string]any) {
+			s["call"].(map[string]any)["pipelineKind"] = "notify"
+			s["result"] = map[string]any{"status": "succeeded", "notificationStatus": "delivered", "channel": "owners", "kind": "email", "requestIds": []string{"request-1"}}
+		},
+		"nonzero exit":   func(r, s map[string]any) { s["result"].(map[string]any)["metadata"].(map[string]any)["exitCode"] = 1 },
+		"caller payload": func(r, s map[string]any) { r["callerSuppliedPayload"] = true },
+		"run running":    func(r, s map[string]any) { r["status"] = "running" },
+		"other owner":    func(r, s map[string]any) { s["ownerUserId"] = "stranger" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, s := artifactFreeReleaseWork()
+			change(r, s)
+			if got, err := InspectCarriedReleaseReceipt("owner", "run", "test.full", r, s); err == nil {
+				t.Fatalf("receipt that cannot be carried was accepted: %+v", got)
+			}
+		})
+	}
+}

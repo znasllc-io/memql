@@ -41,7 +41,7 @@ func InspectReleaseWorkReceipt(owner, runID, stepKey string, run, step map[strin
 // that actually executed. DSL decides which skip reasons its policy permits;
 // an unplanned skip, failed delivery or ambiguous command can never pass here.
 func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
-	return inspectPipelineStepReceipt(owner, runID, stepKey, run, step, false)
+	return inspectPipelineStepReceipt(owner, runID, stepKey, run, step, admitReleased)
 }
 
 // InspectScannerReceipt admits a completed scanner while its enclosing run is
@@ -49,7 +49,7 @@ func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[strin
 // Its identity excludes the enclosing run's changing status, so recovery after
 // completion still addresses the same external publication.
 func InspectScannerReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
-	out, err := inspectPipelineStepReceipt(owner, runID, stepKey, run, step, true)
+	out, err := inspectPipelineStepReceipt(owner, runID, stepKey, run, step, admitScanner)
 	if err != nil {
 		return out, err
 	}
@@ -59,7 +59,40 @@ func InspectScannerReceipt(owner, runID, stepKey string, run, step map[string]an
 	return out, nil
 }
 
-func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[string]any, scanner bool) (ReleaseWorkReceipt, error) {
+// InspectCarriedReleaseReceipt admits the receipt a failed-only release re-run
+// carries: a step that actually ran and passed in an earlier attempt of the
+// same release, whose work run then failed or was cancelled elsewhere. That
+// terminal state is the one relaxation. The step must still be a successful
+// command with exit zero, and it must name no artifact intents, because every
+// artifact a candidate pins comes from the attempt the candidate names
+// (docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md).
+// Its identity excludes the enclosing run's terminal state, so one step
+// receipt has one digest however its attempt ended.
+func InspectCarriedReleaseReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
+	out, err := inspectPipelineStepReceipt(owner, runID, stepKey, run, step, admitCarried)
+	if err != nil {
+		return out, err
+	}
+	if out.StepKind != string(StepCommand) || out.Status != "done" || len(out.ArtifactIntentIDs) != 0 {
+		return ReleaseWorkReceipt{}, errors.New("a carried release receipt requires an executed, artifact-free successful command")
+	}
+	return out, nil
+}
+
+// receiptAdmission names which enclosing work runs an inspection admits.
+type receiptAdmission int
+
+const (
+	// admitReleased: the enclosing run succeeded and was never cancelled.
+	admitReleased receiptAdmission = iota
+	// admitScanner: a completed scanner inside a running or failed run.
+	admitScanner
+	// admitCarried: a pass inside an attempt that ended in any terminal state,
+	// including a cancellation.
+	admitCarried
+)
+
+func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[string]any, admission receiptAdmission) (ReleaseWorkReceipt, error) {
 	var out ReleaseWorkReceipt
 	var r struct {
 		ID, OwnerUserID, Status, TemplateFingerprint, TriggeredBy, Mode string
@@ -101,14 +134,19 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 		return out, err
 	}
 	runAdmitted := r.Status == "succeeded"
-	if scanner {
+	cancelAdmitted := false
+	switch admission {
+	case admitScanner:
 		runAdmitted = r.Status == "running" || r.Status == "succeeded" || r.Status == "failed"
+	case admitCarried:
+		runAdmitted = r.Status == "succeeded" || r.Status == "failed" || r.Status == "cancelled"
+		cancelAdmitted = true
 	}
 	definition := "sha256:" + strings.TrimPrefix(s.Call.DefinitionFingerprint, "work-definition-v2:")
 	if !releaseIdentity(owner) || !releaseIdentity(runID) || !releaseIdentity(stepKey) ||
 		r.ID != runID || r.OwnerUserID != owner || s.OwnerUserID != owner || s.RunID != runID || s.Key != stepKey ||
 		!releaseIdentity(s.ID) || s.CreatedAt == "" || s.FinishedAt == "" || s.Attempt < 1 ||
-		!runAdmitted || r.CancelRequested || r.CallerSuppliedPayload || r.Mode != "live" ||
+		!runAdmitted || (r.CancelRequested && !cancelAdmitted) || r.CallerSuppliedPayload || r.Mode != "live" ||
 		r.TriggeredBy != WorkTriggerPrefix+r.Input.Mode || r.Input.PipelineID == "" || r.Input.PipelineRunID == "" || r.Input.Attempt < 1 ||
 		!strings.HasPrefix(r.TemplateFingerprint, "work-definition-v2:") || !releaseDigest("sha256:"+strings.TrimPrefix(r.TemplateFingerprint, "work-definition-v2:")) ||
 		(s.Status != "done" && s.Status != "skipped") || s.StepType != "exec" || s.Kind != "deterministic" || s.Call.Construct != "pipeline" ||
@@ -163,9 +201,16 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 	// currently serving the read may change without changing completed work.
 	// Full call/result values are included, including fields unknown here.
 	prefix := "memql.release-work-receipt.v1\x00"
-	if scanner {
+	switch admission {
+	case admitScanner:
 		r.Status = "" // mutable enclosing state is gated above, not publication identity
 		prefix = "memql.scanner-work-receipt.v1\x00"
+	case admitCarried:
+		// The attempt's terminal state is gated above. Leaving it out keeps one
+		// digest per step receipt, and the prefix keeps that digest apart from
+		// any release receipt's.
+		r.Status, r.CancelRequested = "", false
+		prefix = "memql.carried-work-receipt.v1\x00"
 	}
 	identity := struct {
 		Run  any
