@@ -35,4 +35,21 @@ type ReleaseBuildRun struct {
 	Mode, Event, Status, Conclusion, WorkRunID        string
 	Attempt                                           int
 	CancelRequested                                   bool
+	// RerunOf is the attempt this one re-runs; empty for attempt 1.
+	RerunOf string
+	// Chain lists the earlier attempts of the same release run key, newest
+	// first, read through rerunOf. It is nil for attempt 1 and for a chain
+	// that cannot be followed back to attempt 1 inside its run key, so a saved
+	// release adopts a re-run only through an unbroken chain
+	// (integrations/release/build_adopt.go).
+	Chain []ReleaseBuildAttempt
+}
+
+// ReleaseBuildAttempt is one earlier attempt's lifecycle: enough to decide
+// whether a later attempt of the same release may replace it.
+type ReleaseBuildAttempt struct {
+	ID                 string
+	Attempt            int
+	Status, Conclusion string
+	CancelRequested    bool
 }

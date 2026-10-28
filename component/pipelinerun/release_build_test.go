@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -255,6 +256,81 @@ func TestReleaseBuildNativeAuthorityFenceRunsAfterReadsAndUnderGate(t *testing.T
 			}
 			if calls != refuseAt || len(h.github.created) != 0 || len(h.store.allRuns()) != 0 {
 				t.Fatalf("late authority refusal: calls %d checks %d runs %d", calls, len(h.github.created), len(h.store.allRuns()))
+			}
+		})
+	}
+}
+
+// releaseAttempt is one attempt of the release run key these chain tests share.
+func releaseAttempt(id string, attempt int, rerunOf string) Run {
+	return Run{ID: id, RunKey: "release-key", Attempt: attempt, RerunOf: rerunOf, Event: pipelines.EventRelease, Mode: pipelines.ModeFull,
+		Status: StatusCompleted, Conclusion: ConclusionFailure, Trigger: TriggerManual}
+}
+
+// TestReleaseAttemptChainFollowsRerunOf: a release run's chain is every earlier
+// attempt of its run key, newest first, read through rerunOf alone. A GitHub
+// "Re-run" (trigger rerun) belongs to the chain like an owner's re-run.
+func TestReleaseAttemptChainFollowsRerunOf(t *testing.T) {
+	a1 := releaseAttempt("a1", 1, "")
+	a2 := releaseAttempt("a2", 2, "a1")
+	a2.Trigger, a2.Conclusion, a2.CancelRequested = TriggerRerun, ConclusionCancelled, true
+	a3 := releaseAttempt("a3", 3, "v1:pipelines:run:a2")
+	a3.Status, a3.Conclusion = StatusInProgress, ConclusionNone
+	byID := map[string]Run{"a1": a1, "a2": a2, "a3": a3}
+	want := []pipelines.ReleaseBuildAttempt{
+		{ID: "a2", Attempt: 2, Status: StatusCompleted, Conclusion: ConclusionCancelled, CancelRequested: true},
+		{ID: "a1", Attempt: 1, Status: StatusCompleted, Conclusion: ConclusionFailure},
+	}
+	if got := releaseAttemptChain(a3, byID); !reflect.DeepEqual(got, want) {
+		t.Fatalf("chain of attempt 3:\n got %+v\nwant %+v", got, want)
+	}
+	if got := releaseAttemptChain(a1, byID); got != nil {
+		t.Fatalf("a first attempt has no earlier attempts: %+v", got)
+	}
+}
+
+// TestReleaseAttemptChainIsEmptyWhenBroken: a chain that cannot be followed to
+// attempt 1 inside its own run key is no chain at all, so nothing adopts it.
+func TestReleaseAttemptChainIsEmptyWhenBroken(t *testing.T) {
+	long := func() (Run, map[string]Run) {
+		byID := map[string]Run{}
+		for n := 1; n <= 51; n++ {
+			rerunOf := ""
+			if n > 1 {
+				rerunOf = fmt.Sprintf("a%d", n-1)
+			}
+			byID[fmt.Sprintf("a%d", n)] = releaseAttempt(fmt.Sprintf("a%d", n), n, rerunOf)
+		}
+		return byID["a51"], byID
+	}
+	for name, build := range map[string]func() (Run, map[string]Run){
+		"missing link": func() (Run, map[string]Run) {
+			a2 := releaseAttempt("a2", 2, "gone")
+			return a2, map[string]Run{"a2": a2}
+		},
+		"cycle": func() (Run, map[string]Run) {
+			a2, a3 := releaseAttempt("a2", 2, "a3"), releaseAttempt("a3", 3, "a2")
+			return a3, map[string]Run{"a2": a2, "a3": a3}
+		},
+		"other run key": func() (Run, map[string]Run) {
+			a1, a2 := releaseAttempt("a1", 1, ""), releaseAttempt("a2", 2, "a1")
+			a1.RunKey = "push-key"
+			return a2, map[string]Run{"a1": a1, "a2": a2}
+		},
+		"attempt does not decrease": func() (Run, map[string]Run) {
+			a1, a2 := releaseAttempt("a1", 2, ""), releaseAttempt("a2", 2, "a1")
+			return a2, map[string]Run{"a1": a1, "a2": a2}
+		},
+		"ends above attempt 1": func() (Run, map[string]Run) {
+			a2, a3 := releaseAttempt("a2", 2, ""), releaseAttempt("a3", 3, "a2")
+			return a3, map[string]Run{"a2": a2, "a3": a3}
+		},
+		"more than 50 attempts": long,
+	} {
+		t.Run(name, func(t *testing.T) {
+			latest, byID := build()
+			if got := releaseAttemptChain(latest, byID); got != nil {
+				t.Fatalf("a broken chain was followed: %+v", got)
 			}
 		})
 	}

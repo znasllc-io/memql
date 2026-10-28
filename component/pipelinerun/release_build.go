@@ -187,6 +187,7 @@ func existingReleaseBuild(ctx context.Context, d Deps, p Pipeline, r pipelines.R
 		return pipelines.ReleaseBuildRun{}, false, errors.New("release run history exceeded its complete observation bound")
 	}
 	var latest *Run
+	byID := map[string]Run{}
 	for n := range rows {
 		run := &rows[n]
 		if run.Event != pipelines.EventRelease {
@@ -198,6 +199,7 @@ func existingReleaseBuild(ctx context.Context, d Deps, p Pipeline, r pipelines.R
 		if latest != nil && latest.Attempt == run.Attempt && latest.ID != run.ID {
 			return pipelines.ReleaseBuildRun{}, false, errors.New("existing release attempt is ambiguous")
 		}
+		byID[bareID(run.ID)] = *run
 		if latest == nil || latest.Attempt < run.Attempt {
 			latest = run
 		}
@@ -205,7 +207,42 @@ func existingReleaseBuild(ctx context.Context, d Deps, p Pipeline, r pipelines.R
 	if latest == nil {
 		return pipelines.ReleaseBuildRun{}, false, nil
 	}
-	return projectReleaseBuild(*latest), true, nil
+	out := projectReleaseBuild(*latest)
+	out.RerunOf = bareID(latest.RerunOf)
+	out.Chain = releaseAttemptChain(*latest, byID)
+	return out, true, nil
+}
+
+// maxReleaseAttempts bounds how far back a release attempt chain is followed.
+// Attempt numbers strictly decrease along a chain, so it also bounds the
+// chain's length and rules out a cycle.
+const maxReleaseAttempts = 50
+
+// releaseAttemptChain follows latest's rerunOf links through byID back to
+// attempt 1 and returns the earlier attempts, newest first. Every link must
+// stay inside latest's run key and name a strictly earlier attempt. A missing
+// link, a chain that ends above attempt 1, or one longer than
+// maxReleaseAttempts answers nil. A nil chain is not an observation error: the
+// release keeps being observed, and a saved release simply cannot adopt the
+// attempt (docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md).
+func releaseAttemptChain(latest Run, byID map[string]Run) []pipelines.ReleaseBuildAttempt {
+	if latest.Attempt > maxReleaseAttempts {
+		return nil
+	}
+	var chain []pipelines.ReleaseBuildAttempt
+	current := latest
+	for current.Attempt > 1 {
+		prev, ok := byID[bareID(current.RerunOf)]
+		if !ok || prev.RunKey != latest.RunKey || prev.Attempt >= current.Attempt {
+			return nil
+		}
+		chain = append(chain, pipelines.ReleaseBuildAttempt{ID: prev.ID, Attempt: prev.Attempt, Status: prev.Status, Conclusion: prev.Conclusion, CancelRequested: prev.CancelRequested})
+		current = prev
+	}
+	if current.Attempt != 1 {
+		return nil
+	}
+	return chain
 }
 
 func projectReleaseBuild(r Run) pipelines.ReleaseBuildRun {
