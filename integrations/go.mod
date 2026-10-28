@@ -76,7 +76,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.13.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/storage/internal v0.1.0 // indirect
 	github.com/andybalholm/brotli v1.2.6 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.79.1 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.84.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow-go/v18 v18.7.0 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -176,7 +176,9 @@ require (
 	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.45.0 // indirect
+	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

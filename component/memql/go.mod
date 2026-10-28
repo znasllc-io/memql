@@ -7,7 +7,7 @@ go 1.26.8
 toolchain go1.27.3
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.79.1
+	github.com/anthropics/anthropic-sdk-go v1.84.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/kljensen/snowball v0.10.0
 	github.com/lib/pq v1.12.3
@@ -45,12 +45,20 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
+	github.com/go-logr/logr v1.4.4 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
+	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/time v0.15.0 // indirect
+	google.golang.org/api v0.264.0 // indirect
 )
 
 require (
