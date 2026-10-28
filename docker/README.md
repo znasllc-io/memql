@@ -12,10 +12,24 @@ and the quick start in [CLAUDE.md](../CLAUDE.md) (`make up` / `make dev` /
 
 | File | Purpose |
 |------|---------|
-| `memql.Dockerfile` | The engine image. Every node type (identity / bff / agent / planner / workbench / mcp / edge) is selected via `--build-arg BUILD_TAGS=<type>` against the single default runtime stage. Used by `make dev` (`scripts/k3d/dev.sh`, local k3d import) and the native image stage in `memql-package.yaml` for cloud deploys. Carrier images (product-DSL-bearing node types) build from the product pack repo's Dockerfile via the carrier hook (docs/public/operate/downstream-stacks.md). |
 | `init-db.sql` | The PostgreSQL extension bootstrap the migrations expect (TimescaleDB, etc.). Referenced by `.github/workflows/ci.yml` and applied by the local k3d postgres on first boot. |
 
-Local image builds (engine + carrier) are imported into k3d by
-`make dev` (`scripts/k3d/dev.sh`). Deployable images are built on the
-GitHub build server (OIDC -> ACR), never hand-pushed -- see
-docs/public/operate/deployment-strategy.md (see the product pack repo's docs/operate/deployment-strategy.md).
+## The engine image is not here
+
+Every node type (identity / bff / agent / planner / workbench / mcp / edge)
+builds from the repository's root [`Dockerfile`](../Dockerfile), selected by
+`--build-arg BUILD_TAGS=<type>` and a target stage
+(`scripts/lib/engine_build_args.sh` maps one to the other):
+
+- `make dev` (`scripts/k3d/dev.sh`) builds node images and imports them into
+  k3d.
+- `make release` (`scripts/release/release.sh`) builds the bff image locally.
+- The native release build in [`memql-package.yaml`](../memql-package.yaml)
+  builds every node type for deploys. Deployable images are never hand-pushed;
+  see [release candidates](../docs/public/operate/release-candidates.md).
+
+This directory used to hold `memql.Dockerfile`, a second engine Dockerfile
+that only `make release` built. It drifted from the root one until it could
+not build at all, and was retired. Carrier images (product-DSL-bearing node
+types) build from the product pack repo's Dockerfile via the carrier hook
+([downstream-stacks.md](../docs/public/operate/downstream-stacks.md)).

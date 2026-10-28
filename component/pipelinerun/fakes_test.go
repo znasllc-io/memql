@@ -619,6 +619,8 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 	set(&r.RefusalCode, patch.RefusalCode)
 	set(&r.RefusalMessage, patch.RefusalMessage)
 	set(&r.RefusalScope, patch.RefusalScope)
+	set(&r.FailureCode, patch.FailureCode)
+	set(&r.FailureMessage, patch.FailureMessage)
 	set(&r.CheckRunState, patch.CheckRunState)
 	set(&r.WorkRunID, patch.WorkRunID)
 	set(&r.WorkGoalID, patch.WorkGoalID)

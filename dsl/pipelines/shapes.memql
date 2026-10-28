@@ -69,6 +69,8 @@ shape run pipelineRunFull {
   refusalCode
   refusalMessage
   refusalScope
+  failureCode
+  failureMessage
   checkRunId
   checkRunState
   notes

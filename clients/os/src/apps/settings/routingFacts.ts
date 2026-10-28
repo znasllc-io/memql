@@ -607,7 +607,9 @@ export function useLevelBindings(enabled: boolean): {
     }
     const controller = new AbortController();
     let stale = false;
-    void read({}, { signal: controller.signal })
+    // On its client: a generated method calls `this.executeNamed`, and a bare
+    // call throws inside this effect (useDecisions makes the same call).
+    void read.call(connection.query, {}, { signal: controller.signal })
       .then((result) => {
         if (stale) return;
         const next: Partial<Record<LevelId, { model: string; where: string; measured?: Figure }>> = {};

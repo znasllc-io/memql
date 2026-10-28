@@ -40,7 +40,9 @@ const checkPermissionMessage = "GitHub refused this run's check run: the GitHub 
 
 // ReportFor is the run as the check run reports it: the run row's facts plus
 // the steps the caller tracks. A refused run carries its refusal and no
-// steps. The caller masks each step's LogTail with that step's secret values
+// steps; a run that failed for a reason no step reported carries that reason
+// (Run.Failure), read off the row, so a republish states it as the drive did.
+// The caller masks each step's LogTail with that step's secret values
 // before passing it (pipelines.MaskSecrets): this function has no values to
 // mask with, by design.
 func ReportFor(p Pipeline, r Run, steps []pipelines.StepReport) pipelines.RunReport {
@@ -53,6 +55,7 @@ func ReportFor(p Pipeline, r Run, steps []pipelines.StepReport) pipelines.RunRep
 		Status:      r.Status,
 		Conclusion:  r.Conclusion,
 		Refusal:     r.Refusal(),
+		Failure:     r.Failure(),
 		Steps:       steps,
 	}
 }

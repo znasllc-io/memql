@@ -109,7 +109,9 @@ identity-templ:
 
 ## Compile Tailwind input -> static/app.css for the identity web app.
 ## The script auto-downloads the standalone Tailwind CLI for the host
-## platform on first run (cached under bin/tools/).
+## platform on first run (cached under bin/tools/, and downloaded again when
+## that copy is not the pinned version) and, on macOS, re-signs it ad hoc
+## when its code signature does not verify.
 identity-tailwind:
 	bash scripts/identity/build-css.sh
 
@@ -965,10 +967,13 @@ env-registry-check:
 	$(GO) run ./cmd/envscan -check
 
 ## Install + verify every build-time tool the dev workflow needs:
-## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
-## missing) plus go / docker / k3d / kubectl (verified only -- printed
-## install hint if missing). Idempotent. Run before 'make generate'
-## or after a fresh clone so 'make up' isn't surprised by a missing tool.
+## protoc + protoc-gen-go + protoc-gen-go-grpc, and PyYAML for the python3
+## on PATH that 'make test' runs scripts/ci's Python with (auto-installed
+## when missing; for Homebrew's externally managed Python, only with
+## PIP_BREAK_SYSTEM_PACKAGES=1) plus go / docker / k3d / kubectl (verified
+## only -- printed install hint if missing). Idempotent. Run before 'make
+## generate' or 'make test', or after a fresh clone so 'make up' isn't
+## surprised by a missing tool.
 install-deps:
 	@bash scripts/dev/install-deps.sh
 

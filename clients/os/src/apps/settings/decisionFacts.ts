@@ -281,7 +281,11 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
     if (door !== "") args["door"] = door;
     if (rule !== "") args["rule"] = rule;
     if (outcome !== "") args["outcome"] = outcome;
-    return (read as (a: Record<string, unknown>, o?: unknown) => Promise<{ rows: () => Iterable<Row> }>)(
+    // ON ITS CLIENT. A generated method lives on QueryClient.prototype and
+    // calls `this.executeNamed`; called bare, it throws inside this effect and
+    // the window's error boundary takes down the whole Fleet app.
+    return (read as (a: Record<string, unknown>, o?: unknown) => Promise<{ rows: () => Iterable<Row> }>).call(
+      connection.query,
       args,
       { signal, priority: "background" },
     )

@@ -36,6 +36,7 @@ patches:
 images:
   - name: memql-db
     newName: acrmemql.azurecr.io/memql-db
+    newTag: 16.15-timescaledb-2.29.1   # the tag stays beside the digest
     digest: sha256:...
 ```
 
@@ -79,6 +80,13 @@ other Postgres.
 > Wherever it is pinned, **the tag must begin with the PostgreSQL major**: CNPG's
 > webhook parses it to derive the major version. See
 > [`deploy/db-image/README.md`](../../../db-image/README.md).
+>
+> So a digest pin **keeps its tag**: `digest:` goes beside `newTag:`, never in
+> its place, and kustomize renders the pair as `memql-db:<tag>@sha256:...`. A
+> digest-only `imageName` leaves the webhook no tag to read, and it refuses
+> the Cluster with *"Can't use just the image sha as we can't detect
+> upgrades"*. `TestComponentImageIsPinnedByEveryConsumer` refuses that render
+> in every overlay.
 
 ## Presets
 

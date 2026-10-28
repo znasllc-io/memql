@@ -137,12 +137,12 @@ function rendered_images() {
 # IMAGE-REF NORMALIZATION
 #=============================================================================
 
-# Canonicalize a "[registry/]repo@sha256:DIGEST" image ref so two refs that
-# name the SAME image compare equal regardless of the implicit Docker Hub
-# defaults. Docker reports a pod's imageID with the registry fully qualified
-# (docker.io/library/redis@sha256:...) while a kustomize overlay typically pins
-# the bare form (redis@sha256:...) -- same digest, different surface text.
-# Without this they spuriously diverge (#1441).
+# Canonicalize a "[registry/]repo[:tag]@sha256:DIGEST" image ref so two refs
+# that name the SAME image compare equal regardless of the implicit Docker Hub
+# defaults or a tag beside the digest. Docker reports a pod's imageID with the
+# registry fully qualified (docker.io/library/redis@sha256:...) while a
+# kustomize overlay typically pins the bare form (redis@sha256:...) -- same
+# digest, different surface text. Without this they spuriously diverge (#1441).
 #
 # The defaults Docker fills in for a bare reference, and which we therefore
 # strip back off:
@@ -154,6 +154,18 @@ function rendered_images() {
 # Refs pinned to any OTHER registry (an ACR host, ghcr.io, quay.io, ...) keep
 # their host: the host carries meaning there and two different registries are
 # legitimately different images. We only collapse the Docker Hub defaults.
+#
+# A TAG BESIDE THE DIGEST is dropped as well. A CloudNativePG Cluster's
+# imageName must carry both (memql-db:16.15-timescaledb-2.29.1@sha256:...):
+# CNPG reads the PostgreSQL major from the tag and refuses a digest-only name.
+# The kubelet's imageID for that image is memql-db@sha256:... with no tag, and
+# a tag beside a digest selects nothing (the reference grammar's own
+# ParseDockerRef, github.com/distribution/reference, keeps only the digest).
+# Without this, --live reported every tag-and-digest pin as drift while its
+# exact digest was running (TestDriftCheckLiveComparesTaggedPinsByDigest).
+# Only a colon in the LAST path component is a tag. One before the last "/" is
+# a registry port (localhost:5000/x@sha256:...) and stays: two ports are two
+# registries.
 function normalize_imageref() {
     local ref="$1"
     # Strip a leading Docker Hub registry host (with optional :port). These
@@ -163,6 +175,14 @@ function normalize_imageref() {
     ref="${ref#registry-1.docker.io/}"
     # Strip the implicit "library/" official-image namespace.
     ref="${ref#library/}"
+    # Strip a tag beside the digest. With no "@" there is no digest, and the
+    # tag is what names the image, so the ref is left alone.
+    if [[ "$ref" == *@* ]]; then
+        local name="${ref%%@*}"
+        if [[ "${name##*/}" == *:* ]]; then
+            ref="${name%:*}@${ref#*@}"
+        fi
+    fi
     printf '%s\n' "$ref"
 }
 
@@ -236,10 +256,11 @@ function check_live() {
     fi
     info "comparing committed $ENV overlay digests vs live cluster digests..."
     local committed live
-    # Normalize the implicit docker.io/ + library/ defaults on BOTH sides so a
-    # bare overlay pin (redis@sha256:...) matches the live pod's
-    # registry-qualified imageID (docker.io/library/redis@sha256:...) for the
-    # same image (#1441).
+    # Normalize BOTH sides (normalize_imageref) so a bare overlay pin
+    # (redis@sha256:...) matches the live pod's registry-qualified imageID
+    # (docker.io/library/redis@sha256:...) for the same image (#1441), and a
+    # tag-and-digest pin (memql-db:<tag>@sha256:...) matches the tagless
+    # imageID the kubelet reports for it.
     committed="$(rendered_images | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
     live="$(kubectl get pods -n "$NAMESPACE" \
         -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' 2>/dev/null \

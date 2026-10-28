@@ -23,4 +23,4 @@ components:
 # A real overlay supplies these two as well; the examples omit them so the
 # component's own defaults stay visible to the preset assertions.
 #   patches: ObjectStore /spec/configuration/destinationPath
-#   images:  memql-db -> <registry>/memql-db@sha256:...
+#   images:  memql-db -> <registry>/memql-db:<tag>@sha256:... (newTag beside digest)

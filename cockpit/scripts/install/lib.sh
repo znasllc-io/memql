@@ -1058,12 +1058,15 @@ function manifest_checksum() {
     awk -v asset="$2" 'NF >= 2 { name = $2; sub(/^\*/, "", name); sub(/^\.\//, "", name); if (name == asset) { print $1; exit } }' "$1"
 }
 
-# release_checksum_manifest names the manifest that lists a raw binary:
-# memql-computeruse-SHA256SUMS for the computer-use build, memql-SHA256SUMS
-# for the headless one (published from the release after 0.19.0).
+# release_checksum_manifest names the release file that vouches for a raw
+# binary. A computer-use build is vouched for by the <asset>.sha256 that the
+# native release step writes beside it (scripts/ci/release-checksum.py): each
+# platform builds on its own host, so no one step can list all four. Headless
+# binaries look for memql-SHA256SUMS, which `make dist` does not write, so a
+# native release reaches verify_headless_via_archive instead.
 function release_checksum_manifest() {
     case "$1" in
-        memql-computeruse-*) printf 'memql-computeruse-SHA256SUMS\n' ;;
+        memql-computeruse-*) printf '%s.sha256\n' "$1" ;;
         *) printf 'memql-SHA256SUMS\n' ;;
     esac
 }
@@ -1089,10 +1092,10 @@ sys.exit("No published Cockpit release was found; select a version explicitly.")
 # was code run from the network. A mismatch, or a manifest that cannot
 # vouch for the file, refuses with exit 5 and nothing installed.
 #
-# A headless binary from a release published before memql-SHA256SUMS
-# existed is vouched for by its release archive instead: the archive is
-# listed in memql-<version>-SHA256SUMS, and its `memql` must be the same
-# bytes as the raw download.
+# A headless binary whose release publishes no memql-SHA256SUMS is vouched
+# for by its release archive instead: the archive is listed in
+# memql-<version>-SHA256SUMS, and its `memql` must be the same bytes as the
+# raw download.
 function verify_release_binary() {
     local file="$1" asset="$2" base="$3" manifest list expected="" actual
     manifest="$(release_checksum_manifest "$asset")"

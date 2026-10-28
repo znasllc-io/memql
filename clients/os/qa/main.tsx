@@ -985,6 +985,7 @@ const VIEWS: Record<
     framed: true,
     render: () => <RunsWindow runId="r-7" />,
   },
+  "pipeline-run-failed-outside": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-10" /> },
   "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },
   "pipeline-run-uncertain": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-uncertain" /> },
   "pipeline-run-expired": {

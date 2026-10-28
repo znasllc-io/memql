@@ -301,7 +301,11 @@ func (s *receiverSnapshot) rendererPod(ctx context.Context, r *receiverReads, po
 	}
 	state, _ := states[0].(map[string]any)
 	imageID := strings.TrimPrefix(resourceText(state, "imageID"), "docker-pullable://")
-	if resourceText(state, "name") != cfg.Container || state["ready"] != true || imageID != cfg.Image || resourceMap(resourceMap(state, "state"), "running") == nil {
+	// The Deployment carries the configured text verbatim, but the kubelet
+	// reports repository@digest. Normalize a repo:tag@digest pin, which is how
+	// kustomize renders newTag plus digest, before comparing the runtime.
+	pinned, err := immutableImage(cfg.Image)
+	if err != nil || resourceText(state, "name") != cfg.Container || state["ready"] != true || imageID != pinned || resourceMap(resourceMap(state, "state"), "running") == nil {
 		return errors.New("installation renderer runtime image is not the configured immutable image")
 	}
 	return nil

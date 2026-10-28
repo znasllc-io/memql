@@ -68,7 +68,12 @@ part of the installation's authority.
 
 Each required Pod must have the correct declared images, the exact expected
 container inventory, and matching runtime image IDs from the verified root or
-selected platform manifest. Containerd can report the index root. The verifier
+selected platform manifest. The declared image is compared as text, because a
+controller, CloudNativePG included, copies it into the Pod verbatim. The
+runtime comparison first reduces it to repository and digest. That is how
+artifact verification keyed the image and how the kubelet reports it. So a
+`repo:tag@digest` pin, the only `imageName` form the CloudNativePG webhook
+admits, verifies on its digest. Containerd can report the index root. The verifier
 therefore reads the Pod's exact assigned Node, checks native `nodeInfo` OS and
 architecture against the verified platform and requires Node readiness. The
 OCI verifier has already refused ambiguous platform selection. Arbitrary
@@ -114,7 +119,10 @@ or retention release.
 
 Protocol tests use signed publication envelopes, real OCI manifest/config/layer
 reads and the native Argo render codec. They cover all eight admitted workload
-kinds, multi-platform index/manifest runtime IDs bound to an assigned Node, changed ownership and configuration,
+kinds, multi-platform index/manifest runtime IDs bound to an assigned Node,
+tag-and-digest pins on every kind with retagged Pods and unverified runtime
+digests refused (`TestWorkloadsObserveTagAndDigestImages`,
+`TestWorkloadsRefuseTaggedImageSubstitution`), changed ownership and configuration,
 missing/extra Pods and containers, concurrent resource changes, stale evidence,
 and recovery in a fresh host. Host tests run both the installed recipe and an
 alternate composition, and verify that caller inputs, unbound operations or

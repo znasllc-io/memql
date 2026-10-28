@@ -741,7 +741,10 @@ Missing/truncated collections, replacements and inconsistent endpoints refuse.
 
 The renderer must be fully ready, with service endpoints addressing Pods owned
 through ReplicaSets by the configured Deployment. Each observed runtime image
-must match the configured immutable platform image. That image/profile pairing
+must match the configured immutable platform image. The Deployment must carry
+the configured text verbatim. The kubelet's image ID is compared with that
+image reduced to repository and digest, because the kubelet drops the tag of a
+`repo:tag@digest` pin. That image/profile pairing
 is an operator-reviewed trust input; a version label is not an executable
 verification result. Custom binary mounts, sidecars, commands, Kustomize
 versions and unsupported transports require their own qualified profile.

@@ -15,11 +15,14 @@ function fn(impl?: AnyFn): MockFn {
   const calls: unknown[][] = [];
   let returns: unknown;
   let hasReturn = false;
-  const f = ((...args: unknown[]) => {
+  // A `function`, not an arrow: vitest's spy runs its implementation with the
+  // caller's `this`, and the routing double's routerDecisionsRecent is the
+  // generated method itself, which needs its client as `this`.
+  const f = function (this: unknown, ...args: unknown[]) {
     calls.push(args);
     if (hasReturn) return returns;
-    return impl ? impl(...args) : undefined;
-  }) as MockFn;
+    return impl ? impl.apply(this, args) : undefined;
+  } as MockFn;
   f.mock = { calls };
   f.mockReturnValue = (v: unknown) => {
     returns = v;

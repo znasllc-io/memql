@@ -233,6 +233,12 @@ type Run struct {
 	RefusalCode    string
 	RefusalMessage string
 	RefusalScope   string
+	// FailureCode and FailureMessage are the run's OWN reason for failing,
+	// when it failed for one no step reported (see Failure). Empty for a run
+	// that passed, was cancelled or was refused, and for one whose failed
+	// step's own report is the reason.
+	FailureCode    string
+	FailureMessage string
 
 	// CheckRunID is GitHub's id for the run's check run, stored as text; 0
 	// when none was written, in which case CheckRunState says why.
@@ -269,12 +275,30 @@ func (r Run) Finished() bool { return r.Status == StatusCompleted }
 // a `failure` WITH its refusal, so its check run says what is wrong and what
 // to do rather than "Failed" over an empty table. The refusal fields are
 // written only then: a run failed by its steps carries the codes on its steps
-// and none here, and its check run reports the stage table.
+// and none here, and its check run reports the stage table. A run that
+// failed for a reason no step reported carries that reason in its own
+// fields (Failure), beside the table.
 func (r Run) Refusal() *pipelines.Refusal {
 	if r.Status != StatusCompleted || strings.TrimSpace(r.RefusalCode) == "" {
 		return nil
 	}
 	return &pipelines.Refusal{Code: r.RefusalCode, Detail: r.RefusalMessage, Scope: r.RefusalScope}
+}
+
+// Failure is the reason a completed run failed when no step's report says it,
+// or nil. The driver writes it with the conclusion (driver.go's
+// failedOutsideSteps, conclude): a workflow that erred after every step
+// passed, a required step blocked or never reported, a resumed plan that
+// changed with nothing left to fail. It is NOT a refusal: a refusal ended the
+// run before any step ran and is the check run's whole report, while this
+// sits beside a stage table that can read Passed in every row. The check run
+// and the run page state it; without it they said "Failed" and nothing else.
+// The message is masked like every text the runner reports.
+func (r Run) Failure() *pipelines.RunFailure {
+	if r.Status != StatusCompleted || r.Conclusion != ConclusionFailure || strings.TrimSpace(r.FailureMessage) == "" {
+		return nil
+	}
+	return &pipelines.RunFailure{Code: r.FailureCode, Message: r.FailureMessage}
 }
 
 // Note is an informational fact on a run that changes no outcome -- a
@@ -384,6 +408,8 @@ type RunPatch struct {
 	RefusalCode        *string
 	RefusalMessage     *string
 	RefusalScope       *string
+	FailureCode        *string
+	FailureMessage     *string
 	CheckRunID         *int64
 	CheckRunState      *string
 	Notes              *[]Note

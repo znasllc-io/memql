@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -711,6 +712,51 @@ func TestEngineManifestGateStepRunsRepositoryGatePackages(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("the %s step runs %v; required repository-reading gate packages are %v",
 			manifestStepGateInputs, got, want)
+	}
+}
+
+// The gate step builds the architecture call graph on every pull request (ci.yml
+// skipped it there with RUN_GATES=true, which this native step does not set), so
+// its packages need room: on the build pool component/architecture measured 154s
+// to over 300s and the step's packages 680s to 900s of test time (2026-10-26/27).
+// The 300s package bound and the 20m default step deadline failed memql#6325
+// twice on code that passes in 80-95s locally under the same flags. The
+// measurements live on the step in memql-package.yaml; this holds the floor.
+func TestEngineManifestGateStepHasHeadroom(t *testing.T) {
+	step, ok := engineDeclaredStep(engineManifest(t).Pipeline, manifestStepGateInputs)
+	if !ok {
+		t.Fatalf("the pipeline has no %s step", manifestStepGateInputs)
+	}
+	deadline := pipelines.DefaultStepTimeout
+	if step.Timeout != "" {
+		d, err := time.ParseDuration(step.Timeout)
+		if err != nil {
+			t.Fatalf("the %s step's timeout %q is not a duration: %v", manifestStepGateInputs, step.Timeout, err)
+		}
+		deadline = d
+	}
+	if deadline < 30*time.Minute {
+		t.Errorf("the %s step's deadline is %s; it needs at least 30m, as its sibling test steps have", manifestStepGateInputs, deadline)
+	}
+	for _, line := range strings.Split(step.Run, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "go" || fields[1] != "test" {
+			continue
+		}
+		// go test's own default is 10m, which is room enough.
+		bound := 10 * time.Minute
+		for _, f := range fields[2:] {
+			if v, ok := strings.CutPrefix(f, "-timeout="); ok {
+				d, err := time.ParseDuration(v)
+				if err != nil {
+					t.Fatalf("the %s step's go test -timeout %q is not a duration: %v", manifestStepGateInputs, v, err)
+				}
+				bound = d
+			}
+		}
+		if bound < 600*time.Second {
+			t.Errorf("the %s step's go test -timeout is %s; component/architecture alone has needed over 300s on the build pool", manifestStepGateInputs, bound)
+		}
 	}
 }
 

@@ -8,7 +8,7 @@
 #
 # The engine is the whole platform: this repo builds EVERY node type
 # (identity/bff/agent/planner/workbench/mcp/edge) as a
-# product-agnostic image from docker/memql.Dockerfile. Product DSL is
+# product-agnostic image from its root Dockerfile. Product DSL is
 # NOT compiled in -- it is delivered at RUNTIME: a product ships its
 # DSL as a tiny data-only bundle image, an init-container copies the
 # tree into a shared volume, and dsl.MountRuntimeDomainsFromEnv mounts
@@ -24,8 +24,8 @@
 #     memql:X.Y.Z   <-- the engine-version leg of the release triple
 #
 # This script produces that image. Given VERSION (semver, e.g.
-# 2.4.0) and the current short git SHA it builds, from the repo's
-# docker/memql.Dockerfile, an image tagged:
+# 2.4.0) and the current short git SHA it builds the bff node from the
+# repo's root Dockerfile, an image tagged:
 #
 #     <REGISTRY/>memql:X.Y.Z         (the pinnable, immutable tag)
 #
@@ -35,6 +35,18 @@
 # write-once: pushing over an existing tag is refused unless
 # --allow-overwrite is given, which is what makes the tag a
 # trustworthy engine-version pin for a release.
+#
+# ONE ENGINE DOCKERFILE. The build arguments and target come from
+# scripts/lib/engine_build_args.sh, the node-type mapping `make dev` uses,
+# so this cuts the image memql-package.yaml's bff step builds: the root
+# Dockerfile's runtime target with BUILD_TAGS=bff. This script used to
+# build docker/memql.Dockerfile, a second engine Dockerfile nothing else
+# built. It passed no BUILD_TAGS, so its binary was the untagged default,
+# and the file drifted until it could not build: from 2026-08-07 its
+# `go mod download` ran before the nested modules' go.mod files were
+# copied. It was retired rather than kept in step. Only the bff is cut
+# here; the native release build cuts every node type. Pinned by
+# release_stamp_test.go's TestBreakGlassReleaseIsThePipelinesBffImage.
 #
 # PUSHING IS BREAK-GLASS (memql#4116). CLAUDE.md's "Image builds" section
 # is a HARD RULE: local Docker for dev, the MemQL build server for
@@ -58,6 +70,10 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/engine_build_args.sh
+source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
+
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
@@ -72,7 +88,10 @@ readonly DEFAULT_ACR_NAME="acrmemql"
 # actually asserting, so it cannot be typed absent-mindedly (memql#4116).
 readonly PUSH_CONFIRM_PHRASE="push-from-an-operator-machine"
 readonly IMAGE_NAME="memql"
-readonly DOCKERFILE="docker/memql.Dockerfile"
+readonly DOCKERFILE="Dockerfile"
+# The node type this script cuts; engine_build_args_for_node turns it into
+# the build arguments and target.
+readonly NODE_TYPE="bff"
 
 #=============================================================================
 # FUNCTIONS
@@ -192,18 +211,21 @@ function resolve_sha() {
     # Short SHA stamps the image's revision label so an immutable
     # X.Y.Z tag is traceable back to an exact commit. A dirty tree is
     # flagged so we never cut a "clean" release from uncommitted work.
+    # The full revision LINKED into the binary (memql#4486) comes from
+    # engine_build_args_for_node, with the same dirty-tree flag, so a
+    # "clean" release can never be cut from uncommitted work through
+    # either surface.
     SHORT_SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
-    # The full revision is what gets LINKED into the binary (memql#4486); the
-    # short one stays the image label it always was. Both carry the same
-    # dirty-tree flag, so a "clean" release can never be cut from uncommitted
-    # work through either surface.
-    FULL_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo "")"
     if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain 2>/dev/null)" ]]; then
         SHORT_SHA="${SHORT_SHA}-dirty"
-        if [[ -n "$FULL_SHA" ]]; then
-            FULL_SHA="${FULL_SHA}-dirty"
-        fi
     fi
+}
+
+function resolve_build_args() {
+    # Sets ENGINE_BUILD_ARGS (BUILD_TAGS and MEMQL_COMMIT) and
+    # ENGINE_BUILD_TARGET from the one node-type mapping
+    # (scripts/lib/engine_build_args.sh).
+    engine_build_args_for_node "${NODE_TYPE}" "${REPO_ROOT}" || exit 1
 }
 
 function resolve_registry() {
@@ -271,6 +293,7 @@ function print_plan() {
     echo "Source SHA: $SHORT_SHA"
     echo "Image:      $IMAGE_REF"
     echo "Dockerfile: $DOCKERFILE"
+    echo "Node:       $NODE_TYPE (target $ENGINE_BUILD_TARGET)"
     echo "Push:       $PUSH"
     echo "Overwrite:  $ALLOW_OVERWRITE"
     echo "Dry run:    $DRY_RUN"
@@ -297,20 +320,22 @@ function build_image() {
         docker build
         --platform "${BUILD_PLATFORM:-linux/amd64}"
         -f "${REPO_ROOT}/${DOCKERFILE}"
+        --target "${ENGINE_BUILD_TARGET}"
         -t "$IMAGE_REF"
+        # BUILD_TAGS, and the REVISION (memql#4486): the tag says which
+        # release this is, the commit says which source is executing, and a
+        # tag's image pins are written before that tag's own images exist --
+        # so the two legitimately differ and only the commit can point an
+        # incident at the right diff. The helper passes the FULL revision:
+        # ShortCommit() abbreviates for display, and a stamp that arrives
+        # pre-abbreviated cannot be un-abbreviated.
+        "${ENGINE_BUILD_ARGS[@]}"
         # The release goes into the BINARY as well as onto the image
         # (memql#3998), so the node can state it on ServerHello.engine_version
         # rather than reporting a build stamp derived from a stale file. Same
         # value as the tag and the version label -- one release, stated once.
+        # The shared helper leaves it out because no other caller cuts one.
         --build-arg "MEMQL_RELEASE=${VERSION}"
-        # And the REVISION, for the same reason one release down (memql#4486):
-        # the tag says which release this is, the commit says which source is
-        # executing, and a tag's image pins are written before that tag's own
-        # images exist -- so the two legitimately differ and only the commit can
-        # point an incident at the right diff. FULL_SHA rather than SHORT_SHA:
-        # ShortCommit() abbreviates for display, and a stamp that arrives
-        # pre-abbreviated cannot be un-abbreviated.
-        --build-arg "MEMQL_COMMIT=${FULL_SHA}"
         --label "org.opencontainers.image.version=${VERSION}"
         --label "org.opencontainers.image.revision=${SHORT_SHA}"
         "${REPO_ROOT}"
@@ -354,6 +379,7 @@ function main() {
     resolve_version
     resolve_sha
     resolve_registry
+    resolve_build_args
     validate_push
     check_prerequisites
     print_plan

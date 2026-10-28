@@ -38,6 +38,18 @@ const RUNS: Row[] = [
     ],
   }),
   runRow({ id: "r-7", ownerUserId: VIEWER, workRunId: "wr-7", ...finishedAfter(52, 460000) }),
+  // Every stage passed, then the workflow failed reaching a model for the
+  // independent review: the run's own reason is on the row.
+  runRow({
+    id: "r-10", ownerUserId: VIEWER, pullRequest: 43, headBranch: "delivery-estimate", title: "Show the delivery estimate",
+    sha: "4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071", conclusion: "failure", workRunId: "wr-10",
+    failureCode: "pipeline_executor_error", failureMessage: "Pipeline workflow failed: every_door_shut: no door to a model is open for this call",
+    stages: [
+      { name: "checks", status: "passed", durationMs: 50000, steps: 2, failed: 0 },
+      { name: "tests", status: "passed", durationMs: 395000, steps: 3, failed: 0 },
+    ],
+    ...finishedAfter(90, 452000),
+  }),
   runRow({
     id: "r-6", ownerUserId: VIEWER, event: "push", pullRequest: 0, headBranch: "main", title: "Merge pull request #40 from acme/receipts",
     sha: "5c4b3a29180716f5e4d3c2b1a09f8e7d6c5b4a39", mode: "full", conclusion: "success", workRunId: "wr-6",
@@ -125,6 +137,17 @@ const FAILED_FILES: Row[] = [
   { id: "artifact-cov", sourceConceptRef: "v1:library:file:file-cov", title: "dist__coverage.html", format: "other", producedByRunId: "wr-7" } as unknown as Row,
 ];
 
+const outside = (key: string, over: Record<string, unknown>) => stepRow(key, { runId: "v1:work:run:wr-10", logFileId: "", ...over });
+
+/** The attempt that failed outside its steps: every step passed. */
+const OUTSIDE_STEPS: Row[] = [
+  outside("checks.vet", { seq: 0, durationMs: 22000 }),
+  outside("checks.lint", { seq: 1, durationMs: 30000 }),
+  outside("tests.go-tests#1", { seq: 2, durationMs: 395000 }),
+  outside("tests.go-tests#2", { seq: 3, durationMs: 371000 }),
+  outside("tests.os", { seq: 4, durationMs: 91000 }),
+];
+
 const running = (key: string, over: Record<string, unknown>) => stepRow(key, { runId: "v1:work:run:wr-8", ...over });
 
 /**
@@ -181,7 +204,7 @@ export const PIPELINES_SEED: FakeSeed = {
   packages: PACKAGES,
   pipelines: PIPELINES,
   pipelineRuns: RUNS,
-  workSteps: { "wr-7": FAILED_STEPS, "wr-8": RUNNING_STEPS, "wr-uncertain": uncertainStepRows() },
+  workSteps: { "wr-7": FAILED_STEPS, "wr-8": RUNNING_STEPS, "wr-10": OUTSIDE_STEPS, "wr-uncertain": uncertainStepRows() },
   runArtifacts: { "wr-7": FAILED_FILES },
 };
 

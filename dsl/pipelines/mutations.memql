@@ -188,6 +188,8 @@ mutation run updatePipelineRun {
     refusalCode        string
     refusalMessage     string
     refusalScope       string
+    failureCode        string
+    failureMessage     string
     checkRunId         string
     checkRunState      string
     notes              []object
@@ -204,7 +206,7 @@ mutation run updatePipelineRun {
     durationMs         int
   }
   update {
-    accept { reviewEvidence, selectionFacts, maintenanceState, maintenanceGoalId, maintenanceMessage, status, conclusion, refusalCode, refusalMessage, refusalScope, checkRunId, checkRunState, notes, workRunId, workGoalId, driverNodeId, driverLeaseId, driverHeartbeatAt, cancelRequested, cancelledBy, stages, startedAt, finishedAt, durationMs }
+    accept { reviewEvidence, selectionFacts, maintenanceState, maintenanceGoalId, maintenanceMessage, status, conclusion, refusalCode, refusalMessage, refusalScope, failureCode, failureMessage, checkRunId, checkRunState, notes, workRunId, workGoalId, driverNodeId, driverLeaseId, driverHeartbeatAt, cancelRequested, cancelledBy, stages, startedAt, finishedAt, durationMs }
     stamp {
       id: args.runId
     }

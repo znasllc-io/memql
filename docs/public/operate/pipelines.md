@@ -44,7 +44,7 @@ checks to another source, disconnect the pipeline it has first
 | Row | One per | What it holds |
 |---|---|---|
 | `v1:pipelines:pipeline` | source | The repository, how deliveries arrive, where steps may run, which secrets they may resolve, what the poll has seen, the timing table. Never the manifest: every run reads that at its own commit |
-| `v1:pipelines:run` | attempt of one run key | The event and mode, status and conclusion, the refusal that ended it, the check run's id and state, the stage table, the agent driving it |
+| `v1:pipelines:run` | attempt of one run key | The event and mode, status and conclusion, the refusal that ended it, the run's own reason when it failed and no step reported why, the check run's id and state, the stage table, the agent driving it |
 | `v1:pipelines:channel` | notify target | Where a notify stage delivers; managed in Pipelines → Settings → Channels |
 
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
@@ -573,7 +573,9 @@ release publication or installation authority.
 - **A run’s page** draws the stages down the left, or across a narrow window,
   read from the step rows; the open stop's steps say where each ran and for how long; a failed
   step shows its last lines -- read from its full log, which the runner keeps in
-  your Library -- with **Open the full log**; a skipped step says why; the
+  your Library -- with **Open the full log**; a skipped step says why; a run
+  that failed with no step at fault says why above the stages
+  ([A run can fail with every step passed](#a-run-can-fail-with-every-step-passed)); the
   artifacts open in Files. One bar carries the state and the acts the run
   allows: **Open on GitHub**, **Re-run**, **Re-run failed**, or **Cancel** while
   it runs. The check run's details link, `https://os.<domain>/?pipelineRun=<run
@@ -1404,7 +1406,7 @@ OS, `https://os.<domain>/?pipelineRun=<run id>`.
 | Queued | *Queued* |
 | Running | *Preparing the run* until the plan is read, then *Running: \<stage\>* |
 | Passed | *Passed: \<n\> stages in \<time\>*, or *Passed: nothing to run* |
-| Failed | *Failed at \<stage\>: \<step key\>*, ending *and \<n\> more* when several steps failed |
+| Failed | *Failed at \<stage\>: \<step key\>*, ending *and \<n\> more* when several steps failed; *Failed: \<reason\>* when no step failed and the run has a reason of its own |
 | Cancelled | *Cancelled* |
 | Refused | *Refused: \<what\> (\<where\>)* |
 
@@ -1427,6 +1429,36 @@ A stage reads *Passed*, *Failed*, *Cancelled*, *Running*, *Waiting*, *Not run*,
 its longest step's, and `-` is a time nobody measured. The check run's text is
 the last lines of each failed step's output, with secret values masked. A
 refused run shows the refusal and what to do instead of a table.
+
+### A run can fail with every step passed
+
+A run's workflow can fail after its steps -- the
+[independent review](#independent-review-for-ordinary-pull-requests) reaching
+no model, for one -- and a required step can be blocked by the workflow or
+never report how it ended. The run is a failure, and no step's row says why.
+The driver writes that reason on the run row with the conclusion, as
+`failureCode` and `failureMessage`, masked like every text a run reports. The
+check run's title is *Failed: \<reason\>*, and its summary adds a
+**Run failure** section under the stage table:
+
+```text
+Mode affected · Pull request #42 · Commit 3f9c2ab
+
+| Stage  | Status | Steps    | Time   |
+| ---    | ---    | ---      | ---    |
+| checks | Passed | 2 passed | 52s    |
+| tests  | Passed | 8 passed | 7m 40s |
+
+### Run failure
+
+Pipeline workflow failed: every_door_shut: no door to a model is open for this call (`pipeline_executor_error`)
+```
+
+A failed step keeps the title, and the run's own reason is listed before the
+failed steps. The run page says *The run failed outside its steps* above the
+stages, with the same reason. Both read it from the row, so a final report that
+recovery republishes from another replica states it too. A refusal is never
+written there: it ended the run before any step ran, and stays the whole report.
 
 **A 403 never stops a run.** An installation that has not accepted the checks
 permission answers 403 to every check-run write. The run opens, executes and
@@ -1526,7 +1558,10 @@ first.
 
 A **refusal** ends the run before any step runs; a **failure** fails one
 step; a **skip** or a **note** changes no outcome. The scope a code carries
-says where: `<stage>/<step>`, a stage, or a path into the block.
+says where: `<stage>/<step>`, a stage, or a path into the block. A failure or
+skip code can also be a run's own reason, its `failureCode`, when the run
+failed and no step reported why
+([A run can fail with every step passed](#a-run-can-fail-with-every-step-passed)).
 
 | Code | Kind | Meaning | What to do |
 |---|---|---|---|
@@ -1547,7 +1582,7 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_already_connected` | refusal | Connect only: another source's pipeline already runs the repository, and a repository has one | Disconnect that pipeline -- its owner does, with `pipelinesDisconnect` -- or work from that source |
 | `pipeline_nothing_to_rerun` | refusal | Re-run failed only: the run has no failed or cancelled step to run again | Re-run it whole |
 | `pipeline_runner_unavailable` | failure | No runner could take the step: the cluster is not set up to run steps, or the part that would run it was unreachable | Set the cluster up as [Where a step runs](pipelines-substrate.md#where-a-step-runs) says, then re-run. Nothing in the repository is wrong |
-| `pipeline_executor_error` | failure | The runner could not report how the step ended | Re-run; if it repeats, look at the runner |
+| `pipeline_executor_error` | failure | The runner could not report how the step ended; as a run's `failureCode`, the pipeline workflow failed, perhaps after every step passed | Re-run; if it repeats, look at the runner, or at the reason the check run and the run page state |
 | `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster; or a Discord channel's secret has none | Store a value under that name, then re-run |
 | `pipeline_channel_missing` | failure | No channel of the name the notify stage gives belongs to the pipeline's owner | Create it, or correct the name, then re-run |
 | `pipeline_channel_archived` | failure | The notify stage's channel is archived, and delivers nothing | Name an active channel, then re-run |

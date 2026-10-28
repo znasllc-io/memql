@@ -769,11 +769,22 @@ pipeline:
         - name: gate-inputs
           placement: cluster
           when: { bucket: gates }
+          # Its siblings' 30m and twice ci.yml's 300s package bound. ci.yml set
+          # RUN_GATES=true here, which skips component/architecture's call
+          # graph; this step runs on every pull request, Go changes included,
+          # and keeps that check, so it costs more. On the build pool that
+          # package measured 154s-199s on 2026-10-26/27, then 261s, 300s and
+          # 301s; the step's packages took 680s-900s of test time. Both
+          # memql#6325 attempts failed on the old bounds (the 300s package
+          # timeout, then the 20m default step deadline) on code whose
+          # architecture test passes in 80s-95s locally under these flags.
+          # TestEngineManifestGateStepHasHeadroom holds the floor.
+          timeout: 30m
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+            go test -count=1 -timeout=600s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
     - name: installer-smoke
       on: [pull_request, merge_group, push, manual]

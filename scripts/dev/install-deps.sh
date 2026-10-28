@@ -5,16 +5,20 @@
 #
 # Verifies + installs every build-time tool the MemQL dev workflow
 # expects. Idempotent: skips anything already present. Safe to run
-# before `make generate` or `make up`.
+# before `make generate`, `make test` or `make up`.
 #
 # Installed (or verified):
 #   - protoc                (Protocol Buffer compiler -- regen .pb.go)
 #   - protoc-gen-go         (Go bindings generator)
 #   - protoc-gen-go-grpc    (Go gRPC stubs generator)
+#   - PyYAML                (for the python3 first on PATH: tests that `make
+#                            test` runs exec scripts/ci's Python, which
+#                            imports it -- see install_pyyaml)
+# On Linux protoc and the distribution's PyYAML package come from the package
+# manager through sudo, refused up front when sudo would prompt for a password.
 #
 # Verified-only (printed install hint if missing -- we never auto-
-# install platform tools like Docker or sudo-requiring packages from
-# inside a make target):
+# install platform tools like Docker from inside a make target):
 #   - Go                    (>= 1.26.1; the repo's pinned version)
 #   - Docker                (k3d runs the cluster inside Docker)
 #   - k3d + kubectl         (the local k3d + ArgoCD cluster; `make up`)
@@ -223,6 +227,187 @@ EOF
     fi
 }
 
+# install_pyyaml makes `import yaml` work for the python3 first on PATH, the
+# interpreter the tests reach: they exec "python3" by name. Go tests in the
+# root package, scripts/ci and scripts/cidb run scripts/ci's own Python
+# (pipeline-db-tests.py, codeql-scan.py and the unittest suites beside them),
+# which imports PyYAML, so a machine without it fails tests that CI passes.
+# CI's toolchain image installs python3-yaml for the same reason
+# (deploy/toolchain-image/Dockerfile). Those tests fail rather than skip
+# without it, naming this target (scripts/ci/pyyaml).
+#
+# THE ROUTE follows who owns the interpreter, which is also what decides
+# whether pip may write to it (PEP 668):
+#   - Linux's /usr/bin/python3 belongs to the distribution: install its own
+#     package (python3-yaml, as CI does), never pip. It may not have pip.
+#   - A virtualenv takes a plain `pip install`; pip refuses --user in one.
+#   - Any other interpreter takes `pip install --user`: no sudo, and nothing
+#     written under the interpreter's own prefix. That covers the Command Line
+#     Tools' /usr/bin/python3 on macOS.
+#   - An EXTERNALLY-MANAGED interpreter that is not the distribution's --
+#     Homebrew's, on macOS -- refuses --user too, unless told
+#     --break-system-packages. That override is PEP 668's explicit opt-in, so
+#     it is the user's to give, never this script's: without pip's own switch
+#     (PIP_BREAK_SYSTEM_PACKAGES) the step installs nothing and offers both
+#     ways forward. The override with --user changes nothing under Homebrew's
+#     prefix: the files go to ~/Library/Python/<version>, and Homebrew has no
+#     PyYAML formula for them to shadow. A virtualenv, which Homebrew
+#     recommends, needs no override but only helps while it is activated:
+#     `make test` from a fresh shell, a bare `go test` and an editor's test
+#     runner all reach the python3 on PATH.
+# The one interpreter served is the first python3 on THIS shell's PATH, so run
+# the target from the shell that runs the tests. A Homebrew Python of a new
+# minor version has a new user site and needs the target again.
+function install_pyyaml() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "  ERROR: python3 is not installed. 'make test' runs scripts/ci's Python with it."
+        echo "         macOS:  xcode-select --install   (or: brew install python)"
+        echo "         Linux:  your distribution's python3 package, then re-run 'make install-deps'."
+        return 1
+    fi
+    local python
+    python="$(command -v python3)"
+    if python3 -c 'import yaml' >/dev/null 2>&1; then
+        echo "  [ok] PyYAML $(python3 -c 'import yaml; print(yaml.__version__)') for ${python}"
+        return 0
+    fi
+
+    echo "  ${python} cannot import yaml -- attempting to install PyYAML..."
+    local pkg="" package=""
+    if is_distro_python3 "${python}"; then
+        pkg="$(detect_pkg_manager)"
+        package="$(distro_pyyaml_package "${pkg}")"
+    fi
+    if [[ -n "${package}" ]]; then
+        install_pyyaml_with_distro "${pkg}" "${package}" || return 1
+    else
+        install_pyyaml_with_pip || return 1
+    fi
+
+    # A reported success is not the proof: pip can install into a user site
+    # this interpreter does not read (PYTHONNOUSERSITE, for one).
+    if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+        echo "  ERROR: the install reported success, but ${python} still cannot import yaml:"
+        echo "         $(python3 -c 'import yaml' 2>&1 | tail -n 1)"
+        return 1
+    fi
+    echo "  [ok] PyYAML $(python3 -c 'import yaml; print(yaml.__version__)') installed for ${python}"
+}
+
+# is_distro_python3 -- is this interpreter the Linux distribution's own?
+function is_distro_python3() {
+    [[ "$(detect_os)" == "linux" && "$1" == "/usr/bin/python3" ]]
+}
+
+# distro_pyyaml_package names the package that carries PyYAML for a Linux
+# distribution's python3, or prints nothing for a package manager not listed.
+function distro_pyyaml_package() {
+    case "$1" in
+        apt)    echo "python3-yaml" ;;
+        dnf)    echo "python3-pyyaml" ;;
+        pacman) echo "python-yaml" ;;
+    esac
+}
+
+function install_pyyaml_with_distro() {
+    local pkg="$1" package="$2"
+    # The same up-front refusal as install_protoc: a sudo that would prompt
+    # with nobody to answer fails late and says less.
+    if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+        cat <<EOF
+  ERROR: installing ${package} needs sudo, but sudo would prompt for a password
+         and this script can't read one (no controlling terminal, or sudo
+         timestamp expired). Install it once, manually, then re-run
+         'make install-deps':
+
+           sudo apt-get install -y python3-yaml    # Debian/Ubuntu
+           sudo dnf install -y python3-pyyaml      # Fedora
+           sudo pacman -S python-yaml              # Arch
+EOF
+        return 1
+    fi
+    case "${pkg}" in
+        apt)    as_root apt-get update -qq && as_root apt-get install -y "${package}" ;;
+        dnf)    as_root dnf install -y "${package}" ;;
+        pacman) as_root pacman -S --noconfirm "${package}" ;;
+    esac
+}
+
+function install_pyyaml_with_pip() {
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        echo "  ERROR: $(command -v python3) has no pip to install PyYAML with. Install pip"
+        echo "         for it (python3 -m ensurepip --upgrade), or PyYAML another way,"
+        echo "         then re-run 'make install-deps'."
+        return 1
+    fi
+    local kind
+    kind="$(python_install_kind)"
+    local -a cmd=(python3 -m pip install --disable-pip-version-check)
+    case "${kind}" in
+        venv)
+            cmd+=(pyyaml)
+            ;;
+        externally-managed)
+            if ! pip_override_given; then
+                cat <<EOF
+  ERROR: $(command -v python3) is EXTERNALLY-MANAGED (PEP 668), as Homebrew's
+         Python is: pip refuses to install into it, --user included, unless
+         the user overrides that. Choose one, then re-run:
+
+         - PyYAML in this user's site directory, outside the interpreter's
+           own prefix (pip install --user --break-system-packages pyyaml):
+               PIP_BREAK_SYSTEM_PACKAGES=1 make install-deps
+         - a virtualenv, activated in every shell that runs the tests:
+               python3 -m venv ~/.venvs/memql && . ~/.venvs/memql/bin/activate
+               make install-deps
+EOF
+                return 1
+            fi
+            cmd+=(--user --break-system-packages pyyaml)
+            ;;
+        *)
+            cmd+=(--user pyyaml)
+            ;;
+    esac
+    echo "  running: ${cmd[*]}"
+    "${cmd[@]}"
+}
+
+# pip_override_given -- has the user set pip's own PEP 668 override? Read with
+# the spellings pip itself accepts as true, so "0" or "no" stays a refusal.
+function pip_override_given() {
+    case "${PIP_BREAK_SYSTEM_PACKAGES:-}" in
+        1|[Yy]|[Yy][Ee][Ss]|[Tt]|[Tt][Rr][Uu][Ee]|[Oo][Nn]) return 0 ;;
+    esac
+    return 1
+}
+
+# python_install_kind prints how pip may install into the python3 on PATH, by
+# the test pip applies itself: "venv" inside a virtualenv; otherwise
+# "externally-managed" when the stdlib directory carries the PEP 668 marker,
+# else "base".
+function python_install_kind() {
+    python3 - <<'PY'
+import os, sys, sysconfig
+if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
+    print("venv")
+elif os.path.isfile(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")):
+    print("externally-managed")
+else:
+    print("base")
+PY
+}
+
+# as_root runs a command as root: directly when this already is root (a
+# container), otherwise through sudo.
+function as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 # check_requirements -- print this machine against the minimum requirements
 # `make up` holds it to. Never fails the dependency check.
 function check_requirements() {
@@ -260,8 +445,14 @@ function main() {
     check_kubectl
     install_protoc
     install_protoc_go_plugins
+    install_pyyaml
     check_requirements
     summary
 }
 
-main "$@"
+# Run main only when EXECUTED, so a test can source this file and drive one
+# step against stub tools (scripts/dev/install_deps_pyyaml_test.go). Executed
+# directly this is identical to the bare `main "$@"` it replaces.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

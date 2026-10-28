@@ -3259,10 +3259,16 @@ done
 # whose lib.sh lacks a function it calls refuses up front.
 
 _iv="${_tmp}/integrity"
-mkdir -p "${_iv}/release"
+mkdir -p "${_iv}/release" "${_iv}/build/bin"
 printf '#!/bin/sh\necho "memql 0.20.0 (computeruse)"\n' > "${_iv}/cu-binary"
 printf '#!/bin/sh\necho "memql 0.19.0 (headless)"\n' > "${_iv}/hl-binary"
-printf '%s  memql-computeruse-darwin-arm64\n' "$(sha256_of "${_iv}/cu-binary")" > "${_iv}/release/memql-computeruse-SHA256SUMS"
+# The computer-use checksum is the one the native release step publishes
+# beside the binary, written here by that same script: the installer once
+# asked for a memql-computeruse-SHA256SUMS no release had ever published, so
+# every computer-use install refused. A rename on either side fails this.
+cp "${_iv}/cu-binary" "${_iv}/build/bin/memql-computeruse-darwin-arm64"
+(cd "${_iv}/build" && python3 "${_script_dir}/../ci/release-checksum.py" darwin-arm64 >/dev/null)
+cp "${_iv}/build/dist/memql-computeruse-darwin-arm64.sha256" "${_iv}/release/"
 # The headless archive of a release published before memql-SHA256SUMS.
 mkdir -p "${_iv}/archive-src"
 cp "${_iv}/hl-binary" "${_iv}/archive-src/memql"
@@ -3283,10 +3289,10 @@ function _iv_run() {
 }
 
 _out="$(_iv_run "${_iv}/cu-binary" memql-computeruse-darwin-arm64 "https://example.invalid/releases/download/v0.20.0" 2>&1)"; _rc=$?
-if [[ "$_rc" == 0 && "$_out" == *"verified memql-computeruse-darwin-arm64 against memql-computeruse-SHA256SUMS"* ]]; then
-    pass "verify_release_binary accepts a binary its manifest lists"
+if [[ "$_rc" == 0 && "$_out" == *"verified memql-computeruse-darwin-arm64 against memql-computeruse-darwin-arm64.sha256"* ]]; then
+    pass "verify_release_binary accepts a computer-use binary its release checksum vouches for"
 else
-    fail "verify_release_binary should accept a listed binary (rc=$_rc): $_out"
+    fail "verify_release_binary should accept a computer-use binary its release checksum vouches for (rc=$_rc): $_out"
 fi
 printf '#!/bin/sh\necho tampered\n' > "${_iv}/tampered"
 _out="$(_iv_run "${_iv}/tampered" memql-computeruse-darwin-arm64 "https://example.invalid/releases/download/v0.20.0" 2>&1)"; _rc=$?
@@ -3295,11 +3301,11 @@ if [[ "$_rc" == 5 && "$_out" == *"does not match its release checksum"* && "$_ou
 else
     fail "verify_release_binary should refuse a mismatch with 5 (rc=$_rc): $_out"
 fi
-mv "${_iv}/release/memql-computeruse-SHA256SUMS" "${_iv}/release/hidden"
+mv "${_iv}/release/memql-computeruse-darwin-arm64.sha256" "${_iv}/release/hidden"
 _out="$(_iv_run "${_iv}/cu-binary" memql-computeruse-darwin-arm64 "https://example.invalid/releases/download/v0.20.0" 2>&1)"; _rc=$?
-mv "${_iv}/release/hidden" "${_iv}/release/memql-computeruse-SHA256SUMS"
+mv "${_iv}/release/hidden" "${_iv}/release/memql-computeruse-darwin-arm64.sha256"
 if [[ "$_rc" == 5 && "$_out" == *"does not vouch for memql-computeruse-darwin-arm64"* ]]; then
-    pass "verify_release_binary refuses a computer-use binary no manifest vouches for"
+    pass "verify_release_binary refuses a computer-use binary no release checksum vouches for"
 else
     fail "verify_release_binary should refuse an unvouched binary (rc=$_rc): $_out"
 fi

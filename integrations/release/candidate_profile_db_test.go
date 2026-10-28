@@ -232,6 +232,41 @@ func TestCandidateProfileRecoversImmutableSelectionAcrossReplicas(t *testing.T) 
 	}
 }
 
+// A product resolver may answer an empty optional list. The first call must
+// accept its own stored row, not only a retry that reuses the row.
+func TestCandidateProfileFirstSelectionAcceptsEmptyCompatibility(t *testing.T) {
+	f := newProfileDBFixture(t, "release", "full")
+	*f.source = strings.Replace(*f.source, `publications: [{targetId`, `compatibility: [], publications: [{targetId`, 1)
+	_, first := f.materialize(t)
+	_, again, err := f.i.materializeProfile(ownerCtx(), "engine", first.Configuration, f.runs)
+	if err != nil || !reflect.DeepEqual(first, again) {
+		t.Fatal("first selection differs from the one a retry resumes", err)
+	}
+}
+
+// Values the JSON round trip drops are the same durable selection. A different
+// selection another replica stored under the same ID still refuses.
+func TestCandidateProfileBindingRefusesOnlyADifferentSelection(t *testing.T) {
+	f := newProfileDBFixture(t, "release", "full")
+	_, b := f.materialize(t)
+	storage, err := f.i.candidateStorage(ownerCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, snapshot := b, *b.Snapshot
+	snapshot.Entries, snapshot.Phases = []string{}, map[string]string{}
+	same.Snapshot, same.Selection.Compatibility = &snapshot, []pl.ReleaseCompatibility{}
+	if stored, err := storage.ledger.saveProfileBinding(ownerCtx(), same); err != nil || stored.Digest != b.Digest {
+		t.Fatal("equivalent selection refused", err)
+	}
+	other := b
+	other.Selection.Publications = append(b.Selection.Publications[:0:0], b.Selection.Publications...)
+	other.Selection.Publications[0].Tag = "v" + other.Selection.Publications[0].Tag
+	if _, err := storage.ledger.saveProfileBinding(ownerCtx(), other); err == nil || !strings.Contains(err.Error(), "disagrees with its durable materialization") {
+		t.Fatal("different selection accepted", err)
+	}
+}
+
 func TestCandidateProfileRefusesRevokedAuthorityBeforeEffect(t *testing.T) {
 	f := newProfileDBFixture(t, "release", "full")
 	p, b := f.materialize(t)

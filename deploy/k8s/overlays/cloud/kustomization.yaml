@@ -297,9 +297,16 @@ images:
   #
   # Pinned by TAG here and NOT yet by digest, deliberately and visibly: this
   # image has never been cut on the build server, so no digest exists to pin.
-  # Run .github/workflows/build-db-image.yml, then replace this with the
-  # `@sha256:` the run summary prints -- `scripts/deploy/pin-overlay-digests.sh`
-  # does it mechanically.
+  # Publish it as a native `database` release candidate (deploy/db-image/
+  # README.md, "Building"). Then set `newTag:` to the tag it was published
+  # under and ADD its digest as `digest:` beside it. Kustomize renders the
+  # pair as `memql-db:<tag>@sha256:...`.
+  #
+  # Do NOT replace the tag with the digest. CNPG's webhook reads the
+  # PostgreSQL major from the tag and refuses a digest-only imageName ("Can't
+  # use just the image sha as we can't detect upgrades"), and that refusal
+  # fails the whole sync. TestComponentImageIsPinnedByEveryConsumer
+  # (components/cnpg-db) refuses such a render before it ships.
   #
   # Until then `scripts/deploy/drift-check.sh --rendered` FAILS this overlay,
   # which is the correct answer to "is this deployable?" -- and it can only give

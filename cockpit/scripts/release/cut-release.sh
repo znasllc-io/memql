@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# cut-release.sh -- recommend the next semver from the commits since the last
-# tag (conventional-commit prefixes; NO AI), then optionally prepare a version
-# pull request. After it merges, tag the reviewed main commit and start its
-# release build in MemQL. Publication uses the retained native candidate.
+# cut-release.sh -- recommend the next semver from the commits under cockpit/
+# since the last cockpit/v* tag (conventional-commit prefixes; NO AI), then
+# optionally prepare a version pull request. After it merges, tag the reviewed
+# main commit and start its release build in MemQL. Publication uses the
+# retained native candidate.
 #
 # Usage:
 #   make release                         recommend only (safe; shows next version + why)
@@ -75,13 +76,18 @@ function last_version() {
 }
 
 function classify_commits() {
-    # Reads commits since the base ref; prints "major", "minor", or "patch".
+    # Reads the commits under this directory since the base ref -- the
+    # monorepo's engine commits are not Cockpit changes -- and prints "major",
+    # "minor", or "patch". Here-strings, not `echo | grep -q`: under pipefail a
+    # grep that exits at its first match while echo is still writing fails the
+    # whole pipeline, which turned any range larger than a pipe buffer into a
+    # patch bump.
     local base="$1" level="patch" subjects bodies
-    subjects="$(git -C "$REPO_ROOT" log "${base}..HEAD" --format='%s' 2>/dev/null || true)"
-    bodies="$(git -C "$REPO_ROOT" log "${base}..HEAD" --format='%b' 2>/dev/null || true)"
-    if echo "$subjects" | grep -qE '^[a-z]+(\([^)]+\))?!:' || echo "$bodies" | grep -q 'BREAKING CHANGE'; then
+    subjects="$(git -C "$REPO_ROOT" log "${base}..HEAD" --format='%s' -- . 2>/dev/null || true)"
+    bodies="$(git -C "$REPO_ROOT" log "${base}..HEAD" --format='%b' -- . 2>/dev/null || true)"
+    if grep -qE '^[a-z]+(\([^)]+\))?!:' <<< "$subjects" || grep -q 'BREAKING CHANGE' <<< "$bodies"; then
         level="major"
-    elif echo "$subjects" | grep -qE '^feat(\([^)]+\))?:'; then
+    elif grep -qE '^feat(\([^)]+\))?:' <<< "$subjects"; then
         level="minor"
     fi
     echo "$level"
@@ -100,11 +106,13 @@ function bump() {
 
 function show_range() {
     local base="$1" total drivers
-    total="$(git -C "$REPO_ROOT" rev-list --count "${base}..HEAD" 2>/dev/null || echo 0)"
+    total="$(git -C "$REPO_ROOT" rev-list --count "${base}..HEAD" -- . 2>/dev/null || echo 0)"
     log ""
     log "Commits since cockpit/v${CUR}: ${total}"
-    drivers="$(git -C "$REPO_ROOT" log "${base}..HEAD" --format='%s' 2>/dev/null \
-        | perl -ne 'chomp; if(/^[a-z]+(\([^)]+\))?!:/){print "  [MAJOR] $_\n"} elsif(/^feat(\([^)]+\))?:/){print "  [minor] $_\n"}' \
+    # Subject and body per commit, so a BREAKING CHANGE body is listed as the
+    # driver classify_commits counts it as.
+    drivers="$(git -C "$REPO_ROOT" log "${base}..HEAD" --format='%s%x1f%b%x1e' -- . 2>/dev/null \
+        | perl -0x1e -ne 'chomp; s/^\n//; my ($s, $b) = split /\x1f/, $_, 2; $b //= ""; if ($s =~ /^[a-z]+(\([^)]+\))?!:/ || $b =~ /BREAKING CHANGE/) {print "  [MAJOR] $s\n"} elsif ($s =~ /^feat(\([^)]+\))?:/) {print "  [minor] $s\n"}' \
         | head -25 || true)"
     if [ -n "$drivers" ]; then
         log "Version-driving commits (feat / breaking):"; echo "$drivers" >&2

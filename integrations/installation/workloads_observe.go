@@ -532,13 +532,18 @@ func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *recei
 				}
 			}
 			runtime := strings.TrimPrefix(resourceText(state, "imageID"), "docker-pullable://")
-			root := resourceText(w, "image")
+			// The text check above stays verbatim: controllers, CNPG included,
+			// copy the image string into the Pod. Verification keyed this image
+			// as repository@digest (inventoryImages), and the kubelet reports
+			// it that way, so normalize a repo:tag@digest pin before comparing.
+			// CNPG refuses an imageName without its tag; it reads the major there.
+			root, err := immutableImage(resourceText(w, "image"))
 			manifest := s.runtimeImages[root]
 			// containerd may report the root index; other runtimes report the
 			// selected manifest. Native OCI verification established exactly one
 			// matching platform, and the Pod's actual Node was checked above.
 			// A config ID, arbitrary digest or unknown root remains insufficient.
-			if state == nil || manifest == "" || (runtime != manifest && runtime != root) {
+			if err != nil || state == nil || manifest == "" || (runtime != manifest && runtime != root) {
 				return errors.New("workload runtime image differs from its verified image and platform")
 			}
 			if completed || pair[0] == "initContainers" {
