@@ -90,7 +90,9 @@ A pull request is ready to board when all of these hold:
 - it is open, not a draft, and its base is `main`;
 - its `MemQL / memql` check succeeded on its current head. That is the PR lane
   (5.1) once the two lanes exist, and the full pull-request run until then;
-- it carries no `train:hold` label. The owner or a session adds the label.
+- it carries neither `train:hold` (the owner or a session adds it) nor
+  `train:dropped` (a train adds it, 6; the session removes it once its fix is
+  pushed).
 
 Agent sessions keep opening pull requests under the owner's account, get the
 PR lane green, and stop. They never merge.
@@ -148,6 +150,13 @@ States: `building`, `running`, `awaiting_approval`, `landing`, `landed`,
 `held` (needs the owner) and `cancelled`. Dropping a pull request returns the
 train to `building`.
 
+Settings live in the global variable `MEMQL_PIPELINES_TRAINS`, read the way
+`MEMQL_PIPELINES_REPOSITORY_CHANGE_RULES` is: a JSON object keyed by
+repository, each entry naming `enabled`, `departures` (`HH:MM` in `timeZone`),
+`timeZone` (IANA), `channel`, `ownerDiscordUserId` and `maxRebuilds`
+(default 2). A malformed variable sends no train anywhere and says why in the
+log.
+
 A scheduled automation on the cron leader drives it. Every transition is a
 compare-and-swap on the record under a Postgres lock, with a read that skips
 the node's result cache, so a coordinator that moves to another replica in the
@@ -189,6 +198,12 @@ allowance, and PR-lane runs from a small separate allowance, instead of hourly
 windows opened by hand. This changes the cost guard in memql-znas
 (`azure-cost-guard`) and belongs to this project.
 
+The engine's admission file (`component/pipelinerun/admission.go`) gains an
+optional `allowTrainRuns`; a train run is a pull-request run whose head branch
+starts with `train/`. The reader refuses unknown fields, so the engine ships
+before the guard emits the new field. The PR-lane allowance comes with the two
+lanes, after the switch.
+
 ## 6. When a train fails
 
 In this order:
@@ -199,9 +214,13 @@ In this order:
 2. **A single suspect is dropped.** Each failed step covers a package slice. A
    pull request on board that changed files in that slice is a suspect. When
    there is exactly one, it is dropped.
-3. **No suspect: check `main`.** The failed steps run against `main`'s head
-   alone. If `main` fails too, the train is `held`, the owner is told (9), and
-   the fix rides an express train; the held train is rebuilt after it lands.
+3. **No suspect: check `main`.** If `main`'s newest completed push run failed
+   the same step, `main` has the problem: the train is `held`, the owner is
+   told (9), and the fix rides an express train; the held train is rebuilt
+   after it lands. Otherwise the train is `held` and the owner is told the
+   cause is unclear. Running only the failed steps against `main`'s head needs
+   a run limited to named steps, which the engine cannot start today; it comes
+   with splitting (step 4), after the switch.
 4. **Several suspects, or none while `main` passes: split.** The suspects are
    split in half, and only the failing steps run on a train branch carrying
    each half, until one pull request is isolated. A split costs minutes, not
@@ -211,6 +230,10 @@ In this order:
    is rebuilt without it and runs the full pipeline again.
 6. **Two rebuilds is the cap.** After two rebuilds in one departure the train
    is `held` with a summary for the owner.
+
+A held train waits for the owner. Closing the train pull request cancels it,
+and the next departure starts fresh; adding `train:hold` to a pull request on
+board rebuilds the train without it.
 
 ## 7. Approval and landing
 
@@ -222,8 +245,12 @@ In this order:
   The app then merges through the normal rules (merge method `merge`), with no
   bypass. If the head or `main` moved after the approval, it does not merge;
   the train is rebuilt and asks again.
-- The app learns of an approval from GitHub's `pull_request_review` events, a
-  new subscription on the app, and checks periodically as a fallback.
+- The first release learns of an approval by reading the train pull request's
+  reviews on every one-minute tick. Subscribing the app to
+  `pull_request_review` events comes after the switch: today the intake's
+  classifier deliberately ignores review payloads
+  (`component/pipelines/trigger.go`, `deliveryKind`), so the event needs its
+  own kind and route.
 - After landing, each pull request on board shows as merged, because its head
   is in `main`, and gets a comment naming the train.
 - A model never approves. The approval is read from GitHub as the owner's
@@ -238,8 +265,14 @@ In this order:
   Keep `pull_request` with `require_code_owner_review: true`, and keep
   `MemQL / memql` required; on a train pull request it is the full run. Save
   the current ruleset JSON first, for the fallback (12).
-- **The app:** subscribe to `pull_request_review` events. Its permissions
-  already suffice.
+- **The app:** its permissions already suffice. The `pull_request_review`
+  subscription waits for the review-event route (7).
+- **Until the switch** (owner decision, 2026-10-28): `main` requires
+  `MemQL / memql / push` instead of `MemQL / memql`, so a release can be cut
+  from `main`'s own run while pull requests merge at once through the admin
+  bypass. The switch restores `MemQL / memql`, which the train pull request's
+  run reports, and the release source then comes from the merged train pull
+  request. Both rulesets as they stood before are saved for that restore.
 - **The bypass:** keep it, for emergencies only. `merge-as-owner.sh` refuses to
   merge without `--emergency=<reason>` and records the reason on the pull
   request as a comment.
@@ -275,8 +308,10 @@ In this order:
   as ACTION NEEDED, FAILED and PASSED, never emojis. `component/pipelinenotify`
   gains the new message kinds; there is still one composer. Text from pull
   requests and commits stays neutralized, so it can never produce a mention;
-  the owner's mention comes only from the channel's settings (the owner's
-  Discord user ID, a new channel field).
+  the owner's mention comes only from the train settings
+  (`ownerDiscordUserId`, 4.5), sent in the message's `content` with
+  `allowed_mentions` naming that one user. Mentions inside embeds do not
+  notify on Discord.
 - **Today's messages get fixed.** The outbound delivery records of the last two
   weeks are audited, each wrong message is fixed, and every message kind gets
   a golden test of its exact payload.
