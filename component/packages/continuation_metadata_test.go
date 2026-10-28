@@ -216,7 +216,10 @@ func TestPackagePublicationRejectsUnselectedBindingDelta(t *testing.T) {
 }
 
 type firstSiteListEmptyEngine struct {
-	Engine
+	// Preserve the real engine's authorization capabilities while hiding only
+	// the first lookup; a wrapper around Engine alone would fail closed before
+	// exercising discovery of an existing site inside EnsureSite.
+	*memql.MemQLEngine
 	first  bool
 	writes int
 }
@@ -229,7 +232,7 @@ func (e *firstSiteListEmptyEngine) Execute(ctx context.Context, q string) (*memq
 	if !strings.HasPrefix(q, "query ") {
 		e.writes++
 	}
-	return e.Engine.Execute(ctx, q)
+	return e.MemQLEngine.Execute(ctx, q)
 }
 
 func TestPackageContinuationDraftAndExistingSitePreparation(t *testing.T) {
@@ -245,7 +248,7 @@ func TestPackageContinuationDraftAndExistingSitePreparation(t *testing.T) {
 			d.Store = &s
 			var observed *firstSiteListEmptyEngine
 			if existing {
-				observed = &firstSiteListEmptyEngine{Engine: native}
+				observed = &firstSiteListEmptyEngine{MemQLEngine: native.(*memql.MemQLEngine)}
 				s.engine = observed
 			} else {
 				if _, err := db.ExecContext(f.ctx, `UPDATE "MemoryNodes" SET payload=jsonb_set(payload,'{deleted}','true'::jsonb) WHERE id=$1`, "v1:platform:site:"+memql.BareShortId(f.pkg)); err != nil {
