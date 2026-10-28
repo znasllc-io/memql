@@ -477,7 +477,8 @@ fix is pushed, and the next train can take the pull request.
   at once carrying only the named pull requests, each of which must be ready to
   board. Only the pipeline's owner can start one, holding `execute` on
   `app:pipelines/rerun`. It replaces a train that is waiting for approval or
-  held: that train is cancelled, *Replaced by an express train.*, and its pull
+  held: that train is cancelled, *Replaced by an express train.*, its pull
+  request is closed with a comment naming the express train, and its pull
   requests board the next train. It is refused while a train is building or
   running.
 - **Nothing ready.** A departure with no ready pull request is recorded as a
@@ -518,7 +519,7 @@ the same `MemQL / <name>` check.
 | `landing` | Approved, and being merged |
 | `landed` | On the default branch |
 | `held` | Needs the owner; the reason is on the record and in Discord |
-| `cancelled` | Its pull request was closed, an express train replaced it, or nothing was ready |
+| `cancelled` | Its pull request was closed, an express train replaced it, or nothing was ready. Its branch is deleted, which closes a pull request still open, after a comment saying why |
 
 Each train is a `v1:pipelines:train` row, read with `pipelineTrainsForOwner`.
 **The row is the state, not the process.** Each one-minute tick reads it afresh

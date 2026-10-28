@@ -41,7 +41,10 @@ func (i *Integration) awaitApproval(ctx context.Context, d Deps, s pipelines.Tra
 		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainLanded)})
 		return err
 	case !open:
-		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed.")})
+		cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed.")})
+		if err == nil && ok {
+			retireTrain(ctx, d, gh, token, p, Train{Branch: cancelled.Branch}, "")
+		}
 		return err
 	}
 	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
@@ -96,7 +99,10 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 	landed := t.LandedSHA
 	if !merged {
 		if !open {
-			_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed before it landed.")})
+			cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed before it landed.")})
+			if err == nil && ok {
+				retireTrain(ctx, d, gh, token, p, Train{Branch: cancelled.Branch}, "")
+			}
 			return err
 		}
 		head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
@@ -179,6 +185,7 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	day := now.In(loc)
 	startOfDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 	var created Train
+	var replaced *Train
 	err = d.gate(ctx, TrainGateKey(p.Repository), func(gctx context.Context) error {
 		latest, err := d.Store.LatestTrain(memql.ContextWithFreshRead(gctx), p.ID)
 		if err != nil {
@@ -197,6 +204,7 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 			}); err != nil {
 				return err
 			}
+			replaced = latest
 		}
 		today, err := d.Store.TrainsSince(memql.ContextWithFreshRead(gctx), p.ID, startOfDay)
 		if err != nil {
@@ -212,6 +220,16 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	})
 	if err != nil {
 		return Train{}, err
+	}
+	if replaced != nil {
+		// The replaced train's pull request would otherwise stay open beside
+		// the express train's, for the owner to approve a train that can no
+		// longer land.
+		if gh, token, err := trainAccess(ctx, d, p); err == nil {
+			retireTrain(ctx, d, gh, token, p, *replaced, "Replaced by express train "+created.Branch+". Its pull requests board the next train.")
+		} else {
+			trainLog(d).Warn("pipelines: the train an express train replaced was not closed", "repository", p.Repository, "branch", replaced.Branch, "error", err.Error())
+		}
 	}
 	if err := i.build(ctx, d, s, p, created); err != nil {
 		return Train{}, err

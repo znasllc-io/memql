@@ -189,3 +189,22 @@ func TestExpressPullRequestNumbersAreWholeAndInRange(t *testing.T) {
 		}
 	}
 }
+
+// TestExpressClosesTheTrainItReplaces: the replaced train is cancelled, so its
+// pull request must be closed and say why, or the owner sees two trains
+// waiting and may approve the one that can no longer land.
+func TestExpressClosesTheTrainItReplaces(t *testing.T) {
+	th, waiting := awaitingTrain(t)
+	th.clock = th.clock.Add(time.Minute)
+	express, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", []int{8})
+	if err != nil {
+		t.Fatalf("TrainExpress: %v", err)
+	}
+	prOpen, branchLeft, comments := th.trainLeftOnGitHub(waiting)
+	if prOpen || branchLeft {
+		t.Errorf("the replaced train left its pull request open=%v, branch=%v", prOpen, branchLeft)
+	}
+	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1], express.Branch) {
+		t.Errorf("comments on the replaced train's pull request: %v, want one naming %s", comments, express.Branch)
+	}
+}

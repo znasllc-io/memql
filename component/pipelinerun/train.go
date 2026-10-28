@@ -263,9 +263,7 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 	board, refused := pipelines.BoardingOrder(p.DefaultBranch, check, cands, t.Requested)
 	skipped = append(skipped, refused...)
 	if len(board) == 0 {
-		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), BaseSHA: ptr(base), LeftOff: ptr(skipped),
-			HeldReason: ptr("No pull request was ready to board.")})
-		return err
+		return i.cancelBuild(ctx, d, gh, token, p, t, base, skipped, "No pull request was ready to board.")
 	}
 
 	if err := gh.CreateBranchRef(ctx, token, p.Repository, t.Branch, base); err != nil {
@@ -296,9 +294,7 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		onBoard = append(onBoard, TrainCar{Number: c.Number, Title: c.Title, SHA: c.HeadSHA, URL: c.URL})
 	}
 	if len(onBoard) == 0 {
-		_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), BaseSHA: ptr(base), LeftOff: ptr(skipped),
-			HeldReason: ptr("Every ready pull request conflicted.")})
-		return err
+		return i.cancelBuild(ctx, d, gh, token, p, t, base, skipped, "Every ready pull request conflicted.")
 	}
 
 	version, head, err := trainVersion(ctx, gh, token, p, t, base, head)
@@ -327,6 +323,37 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainDeparted, "", nil)
 	}
 	return nil
+}
+
+// cancelBuild records a build that found nothing to carry as cancelled, then
+// retires what it left on GitHub: on a rebuild, the train pull request the
+// owner could otherwise still approve.
+func (i *Integration) cancelBuild(ctx context.Context, d Deps, gh trainGitHub, token string, p Pipeline, t Train, base string, skipped []pipelines.TrainSkip, reason string) error {
+	cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), BaseSHA: ptr(base), LeftOff: ptr(skipped),
+		HeldReason: ptr(reason)})
+	if err != nil || !ok {
+		return err
+	}
+	retireTrain(ctx, d, gh, token, p, cancelled, reason)
+	return nil
+}
+
+// retireTrain closes what a cancelled train leaves on GitHub: a comment on its
+// pull request saying why, then its branch, whose deletion closes that pull
+// request -- GitHub closes an open pull request whose head branch is deleted.
+// It runs after the cancellation is recorded, outside the gate, and a failure
+// is logged rather than retried: the train is finished, and a branch left
+// behind costs a stale ref, not a landing.
+func retireTrain(ctx context.Context, d Deps, gh trainGitHub, token string, p Pipeline, t Train, reason string) {
+	if t.PullRequest > 0 {
+		if err := gh.CommentOnPullRequest(ctx, token, p.Repository, t.PullRequest,
+			"This train will not land: "+reason); err != nil {
+			trainLog(d).Warn("pipelines: a cancelled train's pull request was not told why", "repository", p.Repository, "branch", t.Branch, "error", err.Error())
+		}
+	}
+	if err := gh.DeleteBranchRef(ctx, token, p.Repository, t.Branch); err != nil && githubapp.StatusOf(err) != http.StatusUnprocessableEntity && githubapp.StatusOf(err) != http.StatusNotFound {
+		trainLog(d).Warn("pipelines: a cancelled train's branch was not deleted", "repository", p.Repository, "branch", t.Branch, "error", err.Error())
+	}
 }
 
 // trainVersion keeps a version a pull request on board set, or commits the
@@ -503,7 +530,10 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 			return err
 		}
 		if !open && !merged {
-			_, _, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed.")})
+			cancelled, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainCancelled), HeldReason: ptr("The train pull request was closed.")})
+			if err == nil && ok {
+				retireTrain(ctx, d, gh, token, p, Train{Branch: cancelled.Branch}, "")
+			}
 			return err
 		}
 	}

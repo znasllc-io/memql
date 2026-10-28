@@ -137,6 +137,12 @@ func (r *trainRemote) DeleteBranchRef(ctx context.Context, token, repository, br
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.branches, branch)
+	// GitHub closes an open pull request whose head branch is deleted.
+	for _, pr := range r.trainPRs {
+		if pr.head == branch && pr.open {
+			pr.open = false
+		}
+	}
 	return nil
 }
 
@@ -642,5 +648,43 @@ func TestAForkNeverBoards(t *testing.T) {
 		if !strings.Contains(reasons[n], "fork") {
 			t.Errorf("#%d left off for %q, want a reason naming the fork", n, reasons[n])
 		}
+	}
+}
+
+// trainLeftOnGitHub reports whether a finished train left anything open: its
+// pull request, or its branch.
+func (th *trainHarness) trainLeftOnGitHub(tr Train) (prOpen, branchLeft bool, comments []string) {
+	th.remote.mu.Lock()
+	defer th.remote.mu.Unlock()
+	if pr := th.remote.trainPRs[tr.PullRequest]; pr != nil {
+		prOpen = pr.open
+	}
+	_, branchLeft = th.remote.branches[tr.Branch]
+	return prOpen, branchLeft, append([]string(nil), th.remote.comments[tr.PullRequest]...)
+}
+
+// TestARebuildWithNothingLeftClosesItsPullRequest: dropping the only pull
+// request on board leaves nothing to rebuild with, so the train is cancelled
+// -- and its pull request must not stay open for the owner to approve.
+func TestARebuildWithNothingLeftClosesItsPullRequest(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainCancelled {
+		t.Fatalf("state %s, want cancelled: nothing is left to board", got.State)
+	}
+	prOpen, branchLeft, comments := th.trainLeftOnGitHub(got)
+	if prOpen || branchLeft {
+		t.Errorf("the cancelled train left its pull request open=%v, branch=%v", prOpen, branchLeft)
+	}
+	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1], "will not land") {
+		t.Errorf("comments on the train pull request: %v", comments)
 	}
 }
