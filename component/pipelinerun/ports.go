@@ -205,6 +205,9 @@ type GitHub interface {
 	InstallationToken(ctx context.Context, credentialID, ownerUserID, repository string) (token string, installationID int64, err error)
 	CreateCheckRun(ctx context.Context, token, repository string, run githubapp.CheckRun) (int64, error)
 	UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error
+	// CheckRunsForCommit lists sha's check runs, every attempt, with their
+	// external ids: how a driver finds the step checks a run already has.
+	CheckRunsForCommit(ctx context.Context, token, repository, sha string) ([]githubapp.CheckRunRef, error)
 	Repository(ctx context.Context, token, repository string) (githubapp.RepositoryInfo, error)
 	BranchHead(ctx context.Context, token, repository, branch string) (sha, message string, err error)
 	OpenPullRequests(ctx context.Context, token, repository string) ([]githubapp.PullRequestHead, error)

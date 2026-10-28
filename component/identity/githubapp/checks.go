@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -114,4 +115,57 @@ func (c *Client) UpdateCheckRun(ctx context.Context, bearer, owner, repo string,
 	endpoint := repoEndpoint(owner, repo) + "/check-runs/" + strconv.FormatInt(id, 10)
 	_, err := c.callJSON(ctx, http.MethodPatch, endpoint, bearer, run.wire(false), nil)
 	return err
+}
+
+// CheckRunRef is one check run as a commit's listing names it.
+type CheckRunRef struct {
+	ID         int64
+	Name       string
+	ExternalID string
+	Status     string
+	AppID      int64
+}
+
+// checkRunListPages bounds a commit's listing: 1000 check runs, GitHub's own
+// limit for a check suite listing, in pages of 100.
+const checkRunListPages = 10
+
+// CheckRunsForCommit lists every check run on sha, every attempt included
+// (filter=all), with each one's external id: how a pipeline finds the step
+// checks a run already has -- a driver taking the run over on another
+// replica, a cancel, recovery -- instead of creating them again.
+func (c *Client) CheckRunsForCommit(ctx context.Context, bearer, owner, repo, sha string) ([]CheckRunRef, error) {
+	if strings.TrimSpace(sha) == "" {
+		return nil, errors.New("listing a commit's check runs needs its SHA")
+	}
+	var out []CheckRunRef
+	for page := 1; page <= checkRunListPages; page++ {
+		var result struct {
+			TotalCount int `json:"total_count"`
+			CheckRuns  []struct {
+				ID         int64  `json:"id"`
+				Name       string `json:"name"`
+				ExternalID string `json:"external_id"`
+				Status     string `json:"status"`
+				App        *struct {
+					ID int64 `json:"id"`
+				} `json:"app"`
+			} `json:"check_runs"`
+		}
+		endpoint := repoEndpoint(owner, repo) + "/commits/" + url.PathEscape(sha) + "/check-runs?filter=all&per_page=100&page=" + strconv.Itoa(page)
+		if _, err := c.call(ctx, http.MethodGet, endpoint, bearer, &result); err != nil {
+			return nil, err
+		}
+		for _, r := range result.CheckRuns {
+			ref := CheckRunRef{ID: r.ID, Name: r.Name, ExternalID: r.ExternalID, Status: r.Status}
+			if r.App != nil {
+				ref.AppID = r.App.ID
+			}
+			out = append(out, ref)
+		}
+		if len(result.CheckRuns) < 100 || len(out) >= result.TotalCount {
+			break
+		}
+	}
+	return out, nil
 }

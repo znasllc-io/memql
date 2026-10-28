@@ -263,6 +263,9 @@ type runDriver struct {
 
 	timingsMu sync.Mutex
 	observed  map[string]float64
+
+	// steps is this drive's step checks (step_checks.go).
+	steps stepChecks
 }
 
 // work is the run's work-journal handle; nil (every method a no-op) until the

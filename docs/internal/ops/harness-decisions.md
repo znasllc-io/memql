@@ -1205,3 +1205,58 @@ Tests: `TestCarriedReleaseReceipt*` and
 last ones db-gated). Not verified here: a live release re-run on a cluster.
 This change helps only after it ships in an engine release; the release that
 carries it is still prepared under the previous rules.
+
+## A GitHub check per pipeline step (2026-10-28)
+
+The owner asked to see each step of a run on a pull request, not one check for
+the whole run, sectioned by stage (approved 2026-10-28). Every step now writes
+its own check run beside the run's; the connected workflow is in
+[pipelines.md](../../public/operate/pipelines.md#a-check-per-step).
+
+**Names, and why they cannot gate anything.** A step check is named after its
+run's own check plus `/ <stage> / <step>` (`pipelines.StepCheckName`): GitHub
+lists check runs by name, which gives the sections. Push, release and manual
+runs keep their run's suffix, because two runs of different events on one
+commit select different stages and must not overwrite each other's steps. The
+name always has more segments than any context a ruleset, a release source
+(`githubapp.releaseChecks`), the merge queue or a train's boarding asks for by
+exact name, so a step check can never satisfy or fail a required context.
+`TestStepCheckName` pins the forms.
+
+**When they are written, and the invariant.** Only inside the drive's existing
+publishes (`runDriver.publish`, `publishFinal`), after the run's own check and
+under the token minted for it: no new mint, no new call site, and the check
+that gates a merge never waits on a step's. The publish after the work run
+opens sees every step pending, so all are created queued at once; later
+publishes, which the default workflow makes after every step settles, move
+only the checks whose step changed. The final publish writes every step once
+more, a step that never ended as cancelled. Tests:
+`TestADrivenRunReportsACheckPerStep`, `TestAFailedStepsCheckShowsItsMaskedOutput`
+(output masked with the drive's secret values, like the run's check).
+
+**What is not written.** A failed-only re-run's carried step
+(`pipeline_passed_earlier`, marked on the plan before its state settles): the
+attempt that passed it already shows it passed on the commit, and a skipped
+check of the same name would replace that pass (`TestARerunLeavesCarriedStepsChecksAlone`).
+
+**Replicas, recovery, retained state.** Step check ids live in the drive's
+memory only. A drive that takes a run over lists the commit's check runs once
+and adopts its run's by external id `<run id>:<step key>`
+(`TestADriverFindsTheStepChecksARunAlreadyHas`); a listing that fails costs at
+most a duplicate check, never the run. When GitHub took no completed check at
+conclusion, recovery's republish of the run's own check also completes the
+step checks the run left open (`settleStepChecks`,
+`TestRecoverySettlesAConcludedRunsOpenStepChecks`). No row stores step check
+state.
+
+**Failures.** A step check is a view: a failed write is logged once per drive
+and tried again on the next publish, and never fails the run or its own check
+(`TestAStepCheckThatCannotBeWrittenNeverFailsTheRun`). GitHub's 403 for the
+missing permission stops step checks for the rest of the drive. The test double
+`flakyFinal` fails only the run's own check, so the retry test still counts
+what it names.
+
+**Known limits.** A driver that dies after the run's final check landed but
+before its step checks did leaves those step checks open: recovery republishes
+only runs whose own final check did not land. A step that starts and settles
+between two progress reports shows no *In progress* state.

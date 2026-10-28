@@ -1694,7 +1694,8 @@ ones, so a backlog of budget-held runs does not hide running work from recovery.
 
 ## The check run
 
-Each run writes one check run on its commit. PRs and merge candidates use
+Each run writes one check run of its own on its commit, and one per step
+([below](#a-check-per-step)). PRs and merge candidates use
 **`MemQL / <name>`**, the context a ruleset requires; `<name>` is the manifest's
 name when the pipeline was connected. Pushes, releases and manual runs append
 `/ push`, `/ release` and `/ manual`, respectively. Scheduled audits append
@@ -1734,6 +1735,40 @@ A stage reads *Passed*, *Failed*, *Cancelled*, *Running*, *Waiting*, *Not run*,
 its longest step's, and `-` is a time nobody measured. The check run's text is
 the last lines of each failed step's output, with secret values masked. A
 refused run shows the refusal and what to do instead of a table.
+
+### A check per step
+
+Every step also gets a check run of its own, so a pull request lists each step
+that passed, failed or is still going, not only the run's verdict. A step's
+check is named after its run's check, then the stage and the step:
+`MemQL / memql / tests / go-unit #2` for a pull request, and
+`MemQL / memql / push / checks / build` for a push. GitHub lists check runs by
+name, so a run's steps sit together, stage by stage.
+
+| A step check | |
+|---|---|
+| **Is required by** | Nothing. The run's own `MemQL / <name>` stays the only context a ruleset, a release source or a [release train](#release-trains) reads; a step check's name always has more segments than any of them |
+| **Appears** | When the run's steps are planned: every step is created *Queued*, so the whole list shows at once |
+| **Moves** | When the run reports progress, after each step settles: *In progress*, then *Success*, *Failure*, *Cancelled* or *Skipped* |
+| **Shows** | How the step ended, its message and code, and for a failed step the last lines of its output, masked like the run's check |
+| **Links** | The run's page in MemQL OS |
+
+A failed-only re-run writes no check for a step it carries over: the attempt
+that passed it already shows it passed on that commit, and a *Skipped* check of
+the same name would replace the pass. A driver that takes a run over on
+another replica finds the step checks the run already has by their external
+id, `<run id>:<step key>`, and moves them rather than creating a second check
+of each name. When a run ends, every step's check is written once more, and a
+step that never ended reads *Cancelled*; if GitHub took no completed check at
+that moment, recovery completes the step checks when it republishes the run's
+own.
+
+A step check is a view of the run. A write GitHub refuses is tried again on the
+next progress report and never fails the run or its own check; a missing
+`checks` permission stops step checks for the rest of the run, as it already
+marks the run's check refused. The writes share the token the run's own check
+is written under, after it. A full run of about sixty steps makes roughly two
+calls per step, well inside an installation's hourly GitHub budget.
 
 ### A run can fail with every step passed
 

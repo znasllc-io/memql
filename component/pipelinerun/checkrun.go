@@ -69,25 +69,8 @@ func ReportFor(p Pipeline, r Run, steps []pipelines.StepReport) pipelines.RunRep
 // FAILURE there (decision 15) -- neutral would satisfy a required check.
 func ComposeCheckRun(osOrigin string, p Pipeline, r Run, report pipelines.RunReport) githubapp.CheckRun {
 	title, summary, text := pipelines.CheckOutput(report)
-	name := pipelines.CheckRunName(p.Name)
-	// Event filters make these different proofs even at the same commit.
-	// In particular, release/manual runs may omit introduced-commit scans.
-	// Only PRs and exact merge candidates can report the required context.
-	switch r.Event {
-	case pipelines.EventPullRequest, pipelines.EventMergeGroup:
-	case pipelines.EventPush, pipelines.EventRelease, pipelines.EventManual:
-		name += " / " + string(r.Event)
-	case pipelines.EventSchedule:
-		cadence := "invalid"
-		if slot, ok := pipelines.ScheduledSlotFromRunKey(r.RunKey); ok {
-			cadence, _ = pipelines.ScheduleCadence(slot)
-		}
-		name += " / " + cadence
-	default:
-		name += " / invalid"
-	}
 	run := githubapp.CheckRun{
-		Name:       name,
+		Name:       runCheckName(p, r),
 		HeadSHA:    r.SHA,
 		Status:     checkStatus(report.Status),
 		ExternalID: bareID(r.ID),
@@ -108,6 +91,50 @@ func ComposeCheckRun(osOrigin string, p Pipeline, r Run, report pipelines.RunRep
 			// GitHub would show as missing.
 			run.StartedAt = r.FinishedAt
 		}
+	}
+	return run
+}
+
+// runCheckName is the run's own check name: MemQL / <pipeline>, and for any
+// event but a pull request or merge candidate, that event's suffix.
+func runCheckName(p Pipeline, r Run) string {
+	name := pipelines.CheckRunName(p.Name)
+	// Event filters make these different proofs even at the same commit.
+	// In particular, release/manual runs may omit introduced-commit scans.
+	// Only PRs and exact merge candidates can report the required context.
+	switch r.Event {
+	case pipelines.EventPullRequest, pipelines.EventMergeGroup:
+	case pipelines.EventPush, pipelines.EventRelease, pipelines.EventManual:
+		name += " / " + string(r.Event)
+	case pipelines.EventSchedule:
+		cadence := "invalid"
+		if slot, ok := pipelines.ScheduledSlotFromRunKey(r.RunKey); ok {
+			cadence, _ = pipelines.ScheduleCadence(slot)
+		}
+		name += " / " + cadence
+	default:
+		name += " / invalid"
+	}
+	return name
+}
+
+// ComposeStepCheckRun is the check run that reports one step of r: named
+// after r's own check (pipelines.StepCheckName), its external id the run's
+// and the step's, its details the run's page. A step check is created with
+// the run's commit, and only a completed one carries a conclusion.
+func ComposeStepCheckRun(osOrigin string, p Pipeline, r Run, s pipelines.StepReport) githubapp.CheckRun {
+	status, conclusion := pipelines.StepCheckState(s.Status)
+	title, summary, text := pipelines.StepCheckOutput(s)
+	run := githubapp.CheckRun{
+		Name:       pipelines.StepCheckName(runCheckName(p, r), s),
+		HeadSHA:    r.SHA,
+		Status:     status,
+		Conclusion: conclusion,
+		ExternalID: pipelines.StepCheckExternalID(bareID(r.ID), s.Key),
+		Output:     &githubapp.CheckRunOutput{Title: title, Summary: summary, Text: text},
+	}
+	if origin := strings.TrimSpace(osOrigin); origin != "" {
+		run.DetailsURL = pipelines.RunPageURL(origin, bareID(r.ID))
 	}
 	return run
 }
@@ -303,7 +330,13 @@ func (dr *runDriver) publish(ctx context.Context) {
 		return
 	}
 	callCtx, done := dr.stoppable(ctx, githubCallTimeout)
-	w := publishCheckRun(callCtx, dr.d, dr.p, dr.run, ReportFor(dr.p, dr.run, dr.report()))
+	token, tokenErr := checkRunToken(callCtx, dr.d, dr.p)
+	w := writeCheckRun(callCtx, dr.d, dr.p, dr.run, ReportFor(dr.p, dr.run, dr.report()), token, tokenErr)
+	// The step checks follow the run's own check, under the same token: the
+	// run's check gates a merge and never waits on them.
+	if tokenErr == nil && w.State != CheckRunRefused {
+		dr.publishSteps(callCtx, token, false)
+	}
 	done()
 	if w.Err != nil && !dr.lease.isLost() && !dr.lease.isCancelled() {
 		dr.log.Warn("pipelines: the run's check run was not moved",
@@ -338,7 +371,8 @@ func (dr *runDriver) publishFinal(ctx context.Context, final Run) CheckRunWrite 
 	}
 	for attempt := 0; ; attempt++ {
 		callCtx, done := context.WithTimeout(ctx, githubCallTimeout)
-		w := publishCheckRun(callCtx, dr.d, dr.p, final, report)
+		token, tokenErr := checkRunToken(callCtx, dr.d, dr.p)
+		w := writeCheckRun(callCtx, dr.d, dr.p, final, report, token, tokenErr)
 		done()
 		if w.ID > 0 {
 			final.CheckRunID, dr.run.CheckRunID = w.ID, w.ID
@@ -347,6 +381,14 @@ func (dr *runDriver) publishFinal(ctx context.Context, final Run) CheckRunWrite 
 			if w.Err != nil {
 				dr.log.Warn("pipelines: the concluded run's check run was not written",
 					"checkRunState", w.State, "attempts", attempt+1, "error", dr.mask(w.Err.Error()))
+			}
+			// Each step's final state, once, after the run's own check and
+			// under its token: a step check is a view, so it is never what a
+			// retry waits for.
+			if tokenErr == nil && w.State != CheckRunRefused && !dr.lease.isLost() {
+				stepCtx, stepDone := context.WithTimeout(ctx, githubCallTimeout)
+				dr.publishSteps(stepCtx, token, true)
+				stepDone()
 			}
 			return w
 		}
