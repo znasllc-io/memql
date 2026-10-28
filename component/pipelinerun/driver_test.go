@@ -1928,7 +1928,7 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	for i := range prior {
 		prior[i].DefinitionFingerprint = "same-definition"
 	}
-	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2)
+	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2, false)
 	if notify.step.Skip != nil {
 		t.Errorf("a notify step that delivered is sent again, announcing this attempt: %+v", notify.step.Skip)
 	}
@@ -1954,5 +1954,89 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	}
 	if planned.step.Skip.Code != pipelines.CodeNotAffected {
 		t.Errorf("the plan's own skip stands: %+v", planned.step.Skip)
+	}
+}
+
+// TestCarryPassedReleaseRerunsArtifactProducers: a release re-run runs again
+// every step whose earlier pass named artifacts, so each artifact a candidate
+// pins comes from the attempt the candidate names. Other events still carry
+// them.
+func TestCarryPassedReleaseRerunsArtifactProducers(t *testing.T) {
+	for _, release := range []bool{true, false} {
+		track := func(key string) *stepTrack {
+			return &stepTrack{step: pipelines.Step{Key: key, Kind: pipelines.StepCommand}, definition: "same-definition"}
+		}
+		producer, check := track("images.bff"), track("tests.unit")
+		prior := []WorkStep{
+			{Key: "images.bff", Status: WorkStepDone, DefinitionFingerprint: "same-definition", ArtifactFileIDs: []string{"file-1"}},
+			{Key: "tests.unit", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+		}
+		carryPassed([]*stepTrack{producer, check}, prior, 1, release)
+		if check.step.Skip == nil || check.step.Skip.Code != pipelines.CodePassedEarlier {
+			t.Errorf("release=%v: an artifact-free pass is carried: %+v", release, check.step.Skip)
+		}
+		if release && producer.step.Skip != nil {
+			t.Errorf("a release re-run carried an artifact producer: %+v", producer.step.Skip)
+		}
+		if !release && (producer.step.Skip == nil || producer.step.Skip.Code != pipelines.CodePassedEarlier) {
+			t.Errorf("a non-release re-run stopped carrying an artifact producer: %+v", producer.step.Skip)
+		}
+	}
+}
+
+// TestReleaseRerunCarriesNothingPastTheWindow: a failed-only re-run of a
+// release carries passes only while the release's first attempt was opened
+// within releaseCarryWindow of the re-run. Past it, every step runs again.
+func TestReleaseRerunCarriesNothingPastTheWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		want []string
+	}{
+		{"within the window", 23 * time.Hour, []string{"tests.unit"}},
+		{"past the window", 25 * time.Hour, []string{"checks.vet", "tests.lint", "tests.unit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dh := newDriveHarness(t, driveManifest)
+			var failUnit atomic.Bool
+			failUnit.Store(true)
+			// Artifact-free passes: a release re-run never carries a producer,
+			// so only these show the window deciding on its own.
+			dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+				res := passed(req)
+				res.ArtifactFileIDs = nil
+				if req.StepKey == "tests.unit" && failUnit.Load() {
+					res.Status, res.ExitCode = pipelines.OutcomeFailed, 1
+				}
+				return res, nil
+			}
+			first := dh.openRun(t, Opening{Event: pipelines.EventRelease, Mode: pipelines.ModeFull, SHA: shaA, ReleaseTag: "v1.4.0", Trigger: TriggerManual})
+			deliver(t, dh.integ, first)
+			ended, _ := dh.store.run(first.ID)
+			if ended.Conclusion != ConclusionFailure {
+				t.Fatalf("the first attempt concludes %q, want failure", ended.Conclusion)
+			}
+			ended.QueuedAt = ended.QueuedAt.Add(-tc.age)
+			dh.store.addRun(ended)
+			sentBefore := len(dh.exec.sent())
+
+			failUnit.Store(false)
+			next, err := dh.integ.Rerun(personCtx(ownerID), first.ID, true)
+			if err != nil {
+				t.Fatalf("rerun failed steps: %v", err)
+			}
+			deliver(t, dh.integ, next)
+			var keys []string
+			for _, req := range dh.exec.sent()[sentBefore:] {
+				keys = append(keys, req.StepKey)
+			}
+			slices.Sort(keys)
+			if !slices.Equal(keys, tc.want) {
+				t.Fatalf("steps sent to the runner: %v, want %v", keys, tc.want)
+			}
+			if got, _ := dh.store.run(next.ID); got.Conclusion != ConclusionSuccess {
+				t.Fatalf("the re-run concludes %q", got.Conclusion)
+			}
+		})
 	}
 }

@@ -655,8 +655,57 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 		dr.abort("reading the steps of the attempt this run re-runs", err)
 		return false
 	}
-	carryPassed(dr.tracks, rows, max(original.Attempt, 1))
+	release := dr.run.Event == pipelines.EventRelease
+	if release {
+		inWindow, err := dr.releaseChainFresh(ctx)
+		if err != nil {
+			dr.abort("reading the attempts this release re-run descends from", err)
+			return false
+		}
+		if !inWindow {
+			dr.log.Warn("pipelines: a release re-run past its 24-hour window runs every step",
+				"rerunOf", originalID)
+			return true
+		}
+	}
+	carryPassed(dr.tracks, rows, max(original.Attempt, 1), release)
 	return true
+}
+
+// releaseCarryWindow is how old a release may be and still carry passes into a
+// re-run: the age of its first attempt when the re-run opened. It matches
+// evidence reuse's freshness window (evidence.go). Past it, a re-run checks
+// everything again: a release's code does not move, but a vulnerability
+// scan's advisory database does
+// (docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md).
+const releaseCarryWindow = 24 * time.Hour
+
+// releaseChainFresh walks this release attempt's rerunOf links back to attempt
+// 1 and answers whether attempt 1 was opened within releaseCarryWindow of this
+// attempt. Every carried pass is younger than attempt 1, so one comparison
+// bounds them all. A read that did not answer stops the drive, as in
+// carryFromOriginal; a chain that cannot be followed inside the release run
+// key answers false, and the re-run then runs every step.
+func (dr *runDriver) releaseChainFresh(ctx context.Context) (bool, error) {
+	fresh := memql.ContextWithFreshRead(ctx)
+	current := dr.run
+	for hops := 0; current.Attempt > 1; hops++ {
+		if hops >= maxReleaseAttempts {
+			return false, nil
+		}
+		prev, err := dr.d.Store.RunByID(fresh, bareID(current.RerunOf))
+		if err != nil {
+			return false, err
+		}
+		if prev == nil || prev.RunKey != dr.run.RunKey || prev.Attempt >= current.Attempt {
+			return false, nil
+		}
+		current = *prev
+	}
+	if current.Attempt != 1 {
+		return false, nil
+	}
+	return !current.QueuedAt.Before(dr.run.QueuedAt.Add(-releaseCarryWindow)), nil
 }
 
 // carryPassed marks a planned step skipped pipeline_passed_earlier when the
@@ -669,7 +718,13 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 // A NOTIFY STEP IS NEVER CARRIED. What it delivered announced the attempt it
 // ran in; this attempt has an outcome of its own -- most often, that the
 // pipeline recovered -- and a carried notification would leave it unsaid.
-func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
+//
+// IN A RELEASE, A STEP THAT PRODUCED ARTIFACTS RUNS AGAIN. A candidate pins
+// artifacts only from the run it names, so a carried producer would leave its
+// images and files on an attempt the candidate cannot cover. Candidate
+// coverage proves each carried release pass against the attempt that executed
+// it (integrations/release/candidate_carried.go).
+func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int, release bool) {
 	// Report publications bind the producing run, so a new attempt must produce
 	// its own scanner artifacts instead of carrying a skip from an older run.
 	producers := map[string]bool{}
@@ -690,6 +745,9 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	for _, t := range tracks {
 		row, ok := byKey[t.step.Key]
 		if !ok || t.step.Skip != nil || t.step.Kind != pipelines.StepCommand || producers[t.step.Key] {
+			continue
+		}
+		if release && len(row.ArtifactFileIDs) > 0 {
 			continue
 		}
 		passed := row.Status == WorkStepDone
