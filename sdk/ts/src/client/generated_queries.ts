@@ -6954,6 +6954,29 @@ QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: 
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
 };
 
+/** The caller's release trains, most recently departed first, optionally narrowed to one pipeline. */
+// Bound concept: v1:pipelines:train (machine-readable: BoundConcepts["pipelineTrainsForOwner"] in generated_concepts.ts).
+export interface PipelineTrainsForOwnerArgs {
+  /** The pipeline to narrow to. Absent lists every pipeline's trains. */
+  pipelineId?: string;
+}
+
+export function buildPipelineTrainsForOwner(args: PipelineTrainsForOwnerArgs): string {
+  const parts: string[] = [];
+  if (args.pipelineId !== undefined) parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "query pipelineTrainsForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineTrainsForOwner(args: PipelineTrainsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineTrainsForOwner = function (this: QueryClient, args: PipelineTrainsForOwnerArgs = {} as PipelineTrainsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineTrainsForOwner", buildPipelineTrainsForOwner(args), opts);
+};
+
 /** Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
 export interface PipelinesForOwnerArgs {

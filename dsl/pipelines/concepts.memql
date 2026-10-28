@@ -5,14 +5,16 @@
 // is the `pipeline:` block of a repository's memql-package.yaml, connected to
 // this cluster; a run is one attempt at one (repository, SHA, mode, event),
 // compiled into a v1:work:goal with one v1:work:step per step and reported to
-// GitHub as a check run; a channel is where a notify stage delivers (D16).
+// GitHub as a check run; a channel is where a notify stage delivers (D16); a
+// train is one departure of a repository's release train (design record
+// docs/superpowers/specs/2026-10-27-release-trains-design.md).
 //
 // ONE PIPELINE PER SOURCE (plan decision 12). A pipeline hangs off a
 // v1:platform:package; its id is derived from the package id and its owner is
 // the package's owner, whose sourceCredential grant mints every installation
 // token the pipeline is driven under.
 //
-// TIER. All three declare the composite owner tier with the account argument,
+// TIER. All four declare the composite owner tier with the account argument,
 // exactly as v1:platform:package does: a person reads their own, a cluster
 // owner reads every one, and a member of the account the row names reads it.
 // A run copies its pipeline's accountId and a pipeline its package's, so a
@@ -127,6 +129,49 @@ concept run {
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
   @relationship(type="references", as="compiledInto", field="workGoalId", target=goal, direction="outgoing")
+}
+
+/// One release train (design record docs/superpowers/specs/2026-10-27-release-trains-design.md): the
+/// ready pull requests of one departure, merged onto one train branch from main, tested together by
+/// one run of the train pull request the MemQL app opens, and landed only when the owner approves it.
+/// Written by component/pipelinerun's train coordinator alone, through createPipelineTrain and
+/// updatePipelineTrain, both server-only. One train per pipeline is unfinished at a time: the newest
+/// row is the current one, and a landed or cancelled row is history.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="branch", secondary="repository", tertiary="state", status="state")
+concept train {
+  ownerUserId     string  @serverSet  @description("v1:identity:user.id of the pipeline's owner, stamped from the actor by createPipelineTrain: the train is written under the owner's borrowed authority, like the pipeline's runs.")
+  accountId       string  @description("Copied from the pipeline, so the train is readable by exactly the people its pipeline is.")
+  pipelineId      string!  @description("The v1:pipelines:pipeline whose repository this train carries changes into.")
+  repository      string!  @description("The repository as lower-cased owner/name.")
+  branch          string!  @description("The train branch, train/<yyyy-mm-dd>-<n>, rebuilt from main on every rebuild.")
+  departure       enum("scheduled", "express")!  @description("Why the train left: a scheduled departure from MEMQL_PIPELINES_TRAINS, or an express train the owner asked for.")
+  state           enum("building", "running", "awaiting_approval", "landing", "landed", "held", "cancelled")!  @description("Where the train is. `held` waits for the owner; `landed` and `cancelled` are final.")
+  requested       []int  @description("An express train's pull request numbers: only these board it. Empty for a scheduled train.")
+  onBoard         []object  @description("[{number, title, sha, url}] -- the pull requests the train carries, each at the commit it boarded with.")
+  leftOff         []object  @description("[{number, reason}] -- pull requests that could not board this train, and why.")
+  dropped         []object  @description("[{number, sha, reason}] -- pull requests a failed run dropped from this train.")
+  version         string  @description("The version the train carries: VERSION's patch plus one, or the version a pull request on board set.")
+  baseSha         string  @description("The default branch head the train was built on. A different head at approval means main moved, and the train is rebuilt and asks again.")
+  headSha         string  @description("The train branch's head: the commit its run tests and the owner approves.")
+  pullRequest     int  @description("The train pull request's number.")
+  pullRequestUrl  string  @description("The train pull request's page.")
+  runId           string  @description("The v1:pipelines:run of the train pull request's head, once one opened.")
+  rebuilds        int  @description("Rebuilds in this departure: a dropped pull request, a held one, or a moved main. The settings cap them (default 2).")
+  retried         bool  @description("The run's failed steps were re-run once for an environmental failure.")
+  approvedBy      string  @description("The GitHub login whose approval landed the train.")
+  approvedSha     string  @description("The commit that approval named.")
+  landedSha       string  @description("The merge commit the train landed on main as.")
+  heldReason      string  @description("Why the train waits for the owner, as the owner reads it.")
+  notified        []string  @description("<event>@<headSha> keys of the messages already sent, so a message is sent once whichever replica's tick sends it.")
+  departedAt      datetime!  @description("When the train left: its departure time, or when the express request was made.")
+  updatedAt       datetime  @description("When the coordinator last wrote the row.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
+  @relationship(type="references", as="testedBy", field="runId", target=run, direction="outgoing")
 }
 
 /// Where a notify stage delivers (D16): a Discord webhook or an email list, named by a manifest

@@ -15,6 +15,7 @@ import (
 const (
 	PipelineConcept = "v1:pipelines:pipeline"
 	RunConcept      = "v1:pipelines:run"
+	TrainConcept    = "v1:pipelines:train"
 )
 
 // The values v1:pipelines:run and v1:pipelines:pipeline spell their
@@ -568,4 +569,77 @@ func withNote(notes []Note, note Note) []Note {
 	out := make([]Note, 0, len(notes)+1)
 	out = append(out, notes...)
 	return append(out, note)
+}
+
+// The values v1:pipelines:train spells its departure and lifecycle in
+// (dsl/pipelines/concepts.memql), one spelling for the coordinator and its
+// tests.
+const (
+	TrainDepartureScheduled = "scheduled"
+	TrainDepartureExpress   = "express"
+
+	TrainBuilding         = "building"
+	TrainRunning          = "running"
+	TrainAwaitingApproval = "awaiting_approval"
+	TrainLanding          = "landing"
+	TrainLanded           = "landed"
+	TrainHeld             = "held"
+	TrainCancelled        = "cancelled"
+)
+
+// Train is one v1:pipelines:train row as the coordinator reads it: one
+// departure of a repository's release train (design record
+// docs/superpowers/specs/2026-10-27-release-trains-design.md, section 4.5).
+// Ids are bare; OwnerUserID is as stored.
+type Train struct {
+	ID, OwnerUserID, AccountID, PipelineID, Repository, Branch string
+	Departure, State                                           string
+	// Requested is an express train's pull requests; only these board it.
+	Requested []int
+	OnBoard   []TrainCar
+	LeftOff   []pipelines.TrainSkip
+	Dropped   []TrainCar
+	Version   string
+	// BaseSHA is the default branch head the train was built on; HeadSHA the
+	// train branch's head, which its run tests and the owner approves.
+	BaseSHA, HeadSHA string
+	PullRequest      int
+	PullRequestURL   string
+	RunID            string
+	Rebuilds         int
+	Retried          bool
+	ApprovedBy       string
+	ApprovedSHA      string
+	LandedSHA        string
+	HeldReason       string
+	// Notified holds the <event>@<headSha> keys of the messages already sent.
+	Notified   []string
+	DepartedAt time.Time
+	UpdatedAt  time.Time
+}
+
+// Finished reports whether the train is history: landed or cancelled.
+func (t Train) Finished() bool { return t.State == TrainLanded || t.State == TrainCancelled }
+
+// TrainCar is one pull request on a train, at the commit it boarded with;
+// Reason says why it was dropped, for a dropped car.
+type TrainCar struct {
+	Number int    `json:"number"`
+	Title  string `json:"title,omitempty"`
+	SHA    string `json:"sha,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// TrainPatch is the fields one train transition writes. A nil field is not
+// written: updatePipelineTrain is a read-merge with no defaults.
+type TrainPatch struct {
+	State, Version, BaseSHA, HeadSHA, PullRequestURL, RunID *string
+	ApprovedBy, ApprovedSHA, LandedSHA, HeldReason          *string
+	OnBoard, Dropped                                        *[]TrainCar
+	LeftOff                                                 *[]pipelines.TrainSkip
+	PullRequest, Rebuilds                                   *int
+	Retried                                                 *bool
+	Notified                                                *[]string
+	UpdatedAt                                               *time.Time
 }

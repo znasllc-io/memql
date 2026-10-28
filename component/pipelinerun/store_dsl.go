@@ -78,6 +78,12 @@ const (
 	mCreatePipelineChannel = "createPipelineChannel"
 	mUpdatePipelineChannel = "updatePipelineChannel"
 
+	// The release train's record: the coordinator's server-only read and its
+	// two server-only writes.
+	qPipelineTrainsForPipeline = "pipelineTrainsForPipeline" // (pipelineId)
+	mCreatePipelineTrain       = "createPipelineTrain"
+	mUpdatePipelineTrain       = "updatePipelineTrain"
+
 	// Deployables' read of the source a pipeline hangs off (dsl/platform).
 	qPackageByID = "packageById" // (packageId)
 
@@ -715,6 +721,140 @@ func (s *dslStore) UpdateChannel(ctx context.Context, owner, channelID string, p
 	return s.ownerWrite(ctx, owner, mUpdatePipelineChannel, args)
 }
 
+// LatestTrain is one pipeline's newest train, or nil when it has none. The
+// coordinator passes a fresh-read context: it decides on this row.
+func (s *dslStore) LatestTrain(ctx context.Context, pipelineID string) (*Train, error) {
+	rows, err := s.systemRead(ctx, qPipelineTrainsForPipeline, map[string]any{"pipelineId": bareID(pipelineID)})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	t := trainFromRow(rows[0])
+	return &t, nil
+}
+
+// TrainsSince is the pipeline's trains that departed at or after since, newest
+// first, from the newest twenty: how many trains a day has had, for the next
+// branch's number.
+func (s *dslStore) TrainsSince(ctx context.Context, pipelineID string, since time.Time) ([]Train, error) {
+	rows, err := s.systemRead(ctx, qPipelineTrainsForPipeline, map[string]any{"pipelineId": bareID(pipelineID)})
+	if err != nil {
+		return nil, err
+	}
+	var out []Train
+	for _, row := range rows {
+		if t := trainFromRow(row); !t.DepartedAt.Before(since) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+// CreateTrain writes a train's first row under its owner's authority.
+func (s *dslStore) CreateTrain(ctx context.Context, owner string, t Train) error {
+	if _, err := requireOwner(owner, mCreatePipelineTrain); err != nil {
+		return err
+	}
+	if bareID(t.ID) == "" {
+		return fmt.Errorf("pipelines: %s: a train needs an id", mCreatePipelineTrain)
+	}
+	args := map[string]any{
+		"trainId":    bareID(t.ID),
+		"pipelineId": bareID(t.PipelineID),
+		"repository": normalizeRepository(t.Repository),
+		"branch":     t.Branch,
+		"departure":  t.Departure,
+		"state":      t.State,
+		"departedAt": formatTime(t.DepartedAt),
+	}
+	setIfSet(args, "accountId", bareID(t.AccountID))
+	setIfSet(args, "version", t.Version)
+	setIfSet(args, "baseSha", t.BaseSHA)
+	setIfSet(args, "headSha", t.HeadSHA)
+	setIfSet(args, "pullRequestUrl", t.PullRequestURL)
+	setIfSet(args, "runId", bareID(t.RunID))
+	setIfSet(args, "updatedAt", formatTimeIfSet(t.UpdatedAt))
+	if len(t.Requested) > 0 {
+		args["requested"] = append([]int(nil), t.Requested...)
+	}
+	if len(t.OnBoard) > 0 {
+		args["onBoard"] = trainCars(t.OnBoard)
+	}
+	if len(t.LeftOff) > 0 {
+		args["leftOff"] = trainSkips(t.LeftOff)
+	}
+	if len(t.Dropped) > 0 {
+		args["dropped"] = trainCars(t.Dropped)
+	}
+	if t.PullRequest > 0 {
+		args["pullRequest"] = t.PullRequest
+	}
+	if len(t.Notified) > 0 {
+		args["notified"] = stringList(t.Notified)
+	}
+	return s.ownerWrite(ctx, owner, mCreatePipelineTrain, args)
+}
+
+// UpdateTrain writes the named fields of patch and nothing else.
+func (s *dslStore) UpdateTrain(ctx context.Context, owner, trainID string, patch TrainPatch) error {
+	if _, err := requireOwner(owner, mUpdatePipelineTrain); err != nil {
+		return err
+	}
+	args := map[string]any{"trainId": bareID(trainID)}
+	setNamed(args, "state", patch.State)
+	setNamed(args, "version", patch.Version)
+	setNamed(args, "baseSha", patch.BaseSHA)
+	setNamed(args, "headSha", patch.HeadSHA)
+	setNamed(args, "pullRequestUrl", patch.PullRequestURL)
+	setNamed(args, "approvedBy", patch.ApprovedBy)
+	setNamed(args, "approvedSha", patch.ApprovedSHA)
+	setNamed(args, "landedSha", patch.LandedSHA)
+	setNamed(args, "heldReason", patch.HeldReason)
+	if patch.RunID != nil {
+		args["runId"] = bareID(*patch.RunID)
+	}
+	if patch.OnBoard != nil {
+		args["onBoard"] = trainCars(*patch.OnBoard)
+	}
+	if patch.LeftOff != nil {
+		args["leftOff"] = trainSkips(*patch.LeftOff)
+	}
+	if patch.Dropped != nil {
+		args["dropped"] = trainCars(*patch.Dropped)
+	}
+	if patch.PullRequest != nil {
+		args["pullRequest"] = *patch.PullRequest
+	}
+	if patch.Rebuilds != nil {
+		args["rebuilds"] = *patch.Rebuilds
+	}
+	if patch.Retried != nil {
+		args["retried"] = *patch.Retried
+	}
+	if patch.Notified != nil {
+		args["notified"] = stringList(*patch.Notified)
+	}
+	if patch.UpdatedAt != nil {
+		args["updatedAt"] = formatTimeIfSet(*patch.UpdatedAt)
+	}
+	return s.ownerWrite(ctx, owner, mUpdatePipelineTrain, args)
+}
+
+func trainCars(cars []TrainCar) []TrainCar {
+	out := make([]TrainCar, 0, len(cars))
+	return append(out, cars...)
+}
+
+// trainSkips writes pipelines.TrainSkip, which carries no JSON tags (that
+// package names no wire), as the {number, reason} objects the concept
+// declares.
+func trainSkips(skips []pipelines.TrainSkip) []map[string]any {
+	out := make([]map[string]any, 0, len(skips))
+	for _, s := range skips {
+		out = append(out, map[string]any{"number": s.Number, "reason": s.Reason})
+	}
+	return out
+}
+
 // StageNotification stages one outbound row as the system actor, through a
 // server staging that marks it serverStaged. A row naming a secret goes
 // through stageOutboundRequestToSecret, which stamps the medium and the
@@ -1090,6 +1230,56 @@ func channelFromRow(row map[string]any) Channel {
 		Status:      rowString(row, "status"),
 		Recipients:  rowStrings(row, "recipients"),
 	}
+}
+
+// trainFromRow reads a v1:pipelines:train through pipelineTrainFull.
+func trainFromRow(row map[string]any) Train {
+	t := Train{
+		ID:             bareID(rowString(row, "id")),
+		OwnerUserID:    rowString(row, "ownerUserId"),
+		AccountID:      bareID(rowString(row, "accountId")),
+		PipelineID:     bareID(rowString(row, "pipelineId")),
+		Repository:     rowString(row, "repository"),
+		Branch:         rowString(row, "branch"),
+		Departure:      rowString(row, "departure"),
+		State:          rowString(row, "state"),
+		Version:        rowString(row, "version"),
+		BaseSHA:        rowString(row, "baseSha"),
+		HeadSHA:        rowString(row, "headSha"),
+		PullRequest:    rowInt(row, "pullRequest"),
+		PullRequestURL: rowString(row, "pullRequestUrl"),
+		RunID:          bareID(rowString(row, "runId")),
+		Rebuilds:       rowInt(row, "rebuilds"),
+		Retried:        rowBool(row, "retried"),
+		ApprovedBy:     rowString(row, "approvedBy"),
+		ApprovedSHA:    rowString(row, "approvedSha"),
+		LandedSHA:      rowString(row, "landedSha"),
+		HeldReason:     rowString(row, "heldReason"),
+		Notified:       rowStrings(row, "notified"),
+		DepartedAt:     rowTime(row, "departedAt"),
+		UpdatedAt:      rowTime(row, "updatedAt"),
+	}
+	if list, ok := row["requested"].([]any); ok {
+		for _, v := range list {
+			if n := rowInt(map[string]any{"n": v}, "n"); n > 0 {
+				t.Requested = append(t.Requested, n)
+			}
+		}
+	}
+	for _, o := range rowObjects(row, "onBoard") {
+		t.OnBoard = append(t.OnBoard, trainCarFromObject(o))
+	}
+	for _, o := range rowObjects(row, "dropped") {
+		t.Dropped = append(t.Dropped, trainCarFromObject(o))
+	}
+	for _, o := range rowObjects(row, "leftOff") {
+		t.LeftOff = append(t.LeftOff, pipelines.TrainSkip{Number: rowInt(o, "number"), Reason: rowString(o, "reason")})
+	}
+	return t
+}
+
+func trainCarFromObject(o map[string]any) TrainCar {
+	return TrainCar{Number: rowInt(o, "number"), Title: rowString(o, "title"), SHA: rowString(o, "sha"), URL: rowString(o, "url"), Reason: rowString(o, "reason")}
 }
 
 // outboundStatusFromRow reads a v1:platform:outboundRequest through

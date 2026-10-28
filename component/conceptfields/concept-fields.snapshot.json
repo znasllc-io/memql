@@ -4138,6 +4138,61 @@
       }
     },
     {
+      "concept": "v1:pipelines:train",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "approvedBy",
+        "approvedSha",
+        "baseSha",
+        "branch",
+        "departedAt",
+        "departure",
+        "dropped",
+        "headSha",
+        "heldReason",
+        "landedSha",
+        "leftOff",
+        "notified",
+        "onBoard",
+        "ownerUserId",
+        "pipelineId",
+        "pullRequest",
+        "pullRequestUrl",
+        "rebuilds",
+        "repository",
+        "requested",
+        "retried",
+        "runId",
+        "state",
+        "updatedAt",
+        "version"
+      ],
+      "required": [
+        "branch",
+        "departedAt",
+        "departure",
+        "pipelineId",
+        "repository",
+        "state"
+      ],
+      "enums": {
+        "departure": [
+          "express",
+          "scheduled"
+        ],
+        "state": [
+          "awaiting_approval",
+          "building",
+          "cancelled",
+          "held",
+          "landed",
+          "landing",
+          "running"
+        ]
+      }
+    },
+    {
       "concept": "v1:planner:responsibility",
       "file": "planner/concepts.memql",
       "fields": [

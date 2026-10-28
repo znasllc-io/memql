@@ -179,6 +179,36 @@ query run pipelineRunsForKey {
   shape   pipelineRunFull
 }
 
+/// One pipeline's release trains, most recently departed first: the newest is the current train and
+/// the rest are history. @serverOnly: the coordinator reads it on a scheduled tick, with no person
+/// behind it, so there is no actor.userId to scope to; the owner is learned from the rows.
+@serverOnly
+@actor
+query train pipelineTrainsForPipeline {
+  args {
+    pipelineId  string!
+  }
+  filter    row => row.pipelineId == args.pipelineId
+                && actor.isClusterOwner == true
+  sort      "departedAt", "desc"
+  paginate  20
+  shape     pipelineTrainFull
+}
+
+/// The caller's release trains, most recently departed first, optionally narrowed to one pipeline.
+@actor
+query train pipelineTrainsForOwner {
+  args {
+    /// The pipeline to narrow to. Absent lists every pipeline's trains.
+    pipelineId  string
+  }
+  filter    row => row.ownerUserId == actor.userId
+                && (args.pipelineId == nil || row.pipelineId == args.pipelineId)
+  sort      "departedAt", "desc"
+  paginate  50
+  shape     pipelineTrainFull
+}
+
 /// The runs of one pipeline at one SHA, most recently queued first -- what a re-requested check
 /// suite re-runs. @serverOnly: the request is GitHub's, with no person behind it, so there is no
 /// actor.userId to scope to; the owner is learned from the rows this returns.
