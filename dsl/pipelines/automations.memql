@@ -91,8 +91,11 @@ automation schedulePipelines {
 /// Every minute: each enabled repository's release train takes one step (design record
 /// docs/superpowers/specs/2026-10-27-release-trains-design.md). One agent replica holds the lease
 /// (`pipelines-trains`), but the train record is the state: every step is a compare-and-swap on it,
-/// so a tick that moves replica, or two at once, never acts twice.
+/// so a tick that moves replica, or two at once, never acts twice. A step's GitHub writes (comments,
+/// labels, a re-run) come before its compare-and-swap, so a tick still running when the next minute
+/// fires is skipped rather than run beside it.
 @trigger(schedule="0 * * * * *", node="agent", lease="pipelines-trains")
+@mode(single)
 automation tickPipelineTrains {
   ticked := builtin pipelinesTrainTick()
 }
