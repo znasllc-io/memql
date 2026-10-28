@@ -36,7 +36,6 @@ type sharedAnalysisRows struct {
 	cancelRequested atomic.Bool
 	parked          atomic.Bool
 	opened          atomic.Bool
-	cancelAtPark    bool
 	parkAtCancel    bool
 }
 
@@ -52,9 +51,6 @@ func (e *sharedAnalysisRows) Execute(ctx context.Context, q string) (*memql.Exec
 	}
 	if strings.HasPrefix(q, "mutation advancePackageDeployment(") && strings.Contains(q, `"awaiting_confirm"`) {
 		e.parked.Store(true)
-		if e.cancelAtPark {
-			e.cancelRequested.Store(true)
-		}
 	}
 	if strings.HasPrefix(q, "query packageDeploymentById(") && e.opened.Load() {
 		status := StatusAnalyzing
@@ -118,7 +114,9 @@ func TestBackgroundAnalysisSurvivesLeavingAndCanBeCancelledOnAnotherReplica(t *t
 			}
 			if cancelOnReplica {
 				other := NewIntegration(rows, discardLogger())
-				other.depsOnce.Do(func() { other.deps = &Deps{Store: &store{engine: rows}, Logger: discardLogger()} })
+				other.depsOnce.Do(func() {
+					other.deps = &Deps{Store: &store{engine: rows, deploymentGate: offlineDeploymentGate}, Logger: discardLogger()}
+				})
 				_, err = other.handleCancelDeployment(callerCtx("v1:identity:user:someone"), map[string]any{"packageId": "abc", "deploymentId": out.DeploymentId}, 0)
 				if err != nil {
 					t.Fatal(err)
@@ -142,10 +140,17 @@ func TestBackgroundAnalysisSurvivesLeavingAndCanBeCancelledOnAnotherReplica(t *t
 }
 
 func TestCancellationRacingAnalysisParkingIsNeverLeftUnread(t *testing.T) {
-	t.Run("flag written during park", func(t *testing.T) {
+	t.Run("flag committed before parking gate", func(t *testing.T) {
 		h := newHarness(t, spaOnlyPackage(), ownerPackage())
-		rows := &sharedAnalysisRows{recordingEngine: h.engine, cancelAtPark: true}
-		h.deps.Store = &store{engine: rows, deploymentGate: offlineDeploymentGate}
+		rows := &sharedAnalysisRows{recordingEngine: h.engine}
+		h.deps.Store = &store{engine: rows, deploymentGate: func(ctx context.Context, key string, fn func(context.Context) error) error {
+			// The first gate opens the run. The next gate parks it, after the
+			// heartbeat joined; a Cancel won this gate immediately beforehand.
+			if rows.opened.Load() {
+				rows.cancelRequested.Store(true)
+			}
+			return fn(ctx)
+		}}
 		out, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: "abc", Actor: plainUser()})
 		if RefusalCode(err) != CodeDeploymentCancelled || out.Status != StatusCancelled || out.AwaitingConfirm {
 			t.Fatalf("lost cancellation: %+v %v", out, err)
@@ -155,7 +160,9 @@ func TestCancellationRacingAnalysisParkingIsNeverLeftUnread(t *testing.T) {
 		rows := &sharedAnalysisRows{recordingEngine: &recordingEngine{}, parkAtCancel: true}
 		rows.opened.Store(true)
 		other := NewIntegration(rows, discardLogger())
-		other.depsOnce.Do(func() { other.deps = &Deps{Store: &store{engine: rows}, Logger: discardLogger()} })
+		other.depsOnce.Do(func() {
+			other.deps = &Deps{Store: &store{engine: rows, deploymentGate: offlineDeploymentGate}, Logger: discardLogger()}
+		})
 		reply, err := other.handleCancelDeployment(context.Background(), map[string]any{"packageId": "abc", "deploymentId": "fixed1"}, 0)
 		if err != nil {
 			t.Fatal(err)

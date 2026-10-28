@@ -51,13 +51,17 @@ type VerifiedBlob struct {
 // expire under the provider's retention; committed-object cleanup is explicit.
 // This bounded primitive also supports exports and backup archives.
 func (u *AzureBlobUploader) CreateVerifiedStream(ctx context.Context, container, object string, source io.Reader, size int64, digest, contentType string) (VerifiedBlob, error) {
+	return u.createVerifiedStream(ctx, container, object, source, size, digest, contentType, false)
+}
+
+func (u *AzureBlobUploader) createVerifiedStream(ctx context.Context, container, object string, source io.Reader, size int64, digest, contentType string, clusterAsset bool) (VerifiedBlob, error) {
 	if source == nil {
 		return VerifiedBlob{}, errors.New("verified upload requires a source")
 	}
 	if err := verifiedStreamIdentity(size, digest); err != nil {
 		return VerifiedBlob{}, err
 	}
-	if err := u.ReserveStorage(ctx, container, object, size); err != nil {
+	if err := u.reserveStorage(ctx, container, object, size, clusterAsset); err != nil {
 		return VerifiedBlob{}, err
 	}
 	bc, err := u.blockClient(container, object)
@@ -68,7 +72,7 @@ func (u *AzureBlobUploader) CreateVerifiedStream(ctx context.Context, container,
 	if stored, err := verifyStream(ctx, bc, size, digest); err == nil {
 		// A prior successful commit may have lost its SQL receipt. Keep orphan
 		// staging charged unless the provider proves there are no such blocks.
-		g, e := u.beginCapacity(ctx, container, object)
+		g, e := u.beginAssetCapacity(ctx, container, object, clusterAsset)
 		if e != nil {
 			return VerifiedBlob{}, e
 		}
@@ -103,7 +107,7 @@ func (u *AzureBlobUploader) CreateVerifiedStream(ctx context.Context, container,
 		}
 		_, _ = hash.Write(chunk)
 		block := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s-%08d", prefix, len(blocks))))
-		if err := u.StageBlock(ctx, container, object, block, chunk); err != nil {
+		if err := u.stageBlock(ctx, container, object, block, chunk, clusterAsset); err != nil {
 			return VerifiedBlob{}, err
 		}
 		blocks = append(blocks, block)
@@ -127,7 +131,7 @@ func (u *AzureBlobUploader) CreateVerifiedStream(ctx context.Context, container,
 	if contentType = strings.TrimSpace(contentType); contentType != "" {
 		opts.HTTPHeaders = &blob.HTTPHeaders{BlobContentType: &contentType}
 	}
-	capacity, err := u.commitCapacity(ctx, container, object, blocks)
+	capacity, err := u.commitAssetCapacity(ctx, container, object, blocks, clusterAsset)
 	if err != nil {
 		return VerifiedBlob{}, err
 	}

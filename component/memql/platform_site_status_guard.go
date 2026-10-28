@@ -141,6 +141,7 @@ var packageDeploymentTerminal = map[string]struct{}{
 	"refused":   {},
 	"failed":    {},
 	"abandoned": {},
+	"cancelled": {},
 }
 
 // validatePackageDeploymentAppendOnly enforces D7's append-only rule: a

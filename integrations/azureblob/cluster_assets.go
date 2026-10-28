@@ -3,6 +3,7 @@ package azureblob
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"regexp"
 	"strings"
@@ -49,4 +50,15 @@ func clusterAssetPath(object string) bool {
 		return clusterSiteID.MatchString(parts[1]) && clusterSiteVersion.MatchString(parts[2])
 	}
 	return false
+}
+
+// ClusterAssetsCreateVerifiedStream creates an immutable shared asset without
+// changing the caller's authorization or request context. Mutable active.json
+// must use the separate version-conditional operation. Ordinary verified uploads
+// retain their caller-owned accounting, including snapshots and build outputs.
+func (u *AzureBlobUploader) ClusterAssetsCreateVerifiedStream(ctx context.Context, container, object string, source io.Reader, size int64, digest, contentType string) (VerifiedBlob, error) {
+	if object == "packages/active.json" || !clusterAssetPath(object) {
+		return VerifiedBlob{}, errors.New("verified shared upload requires an immutable native asset destination")
+	}
+	return u.createVerifiedStream(ctx, container, object, source, size, digest, contentType, true)
 }

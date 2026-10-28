@@ -12036,9 +12036,11 @@ func SetSenderIdentityStatusBuild(args SetSenderIdentityStatusArgs) string {
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["setSiteCandidate"] in generated_concepts.go).
 type SetSiteCandidateArgs struct {
-	SiteId       string
-	CandidateRef string
-	ArtifactId   string
+	SiteId         string
+	CandidateRef   string
+	ArtifactId     string
+	Binding        map[string]any
+	PreviewBinding map[string]any
 }
 
 // SetSiteCandidate calls the engine mutation setSiteCandidate.
@@ -12063,6 +12065,20 @@ func SetSiteCandidateBuild(args SetSiteCandidateArgs) string {
 		}
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	if args.Binding != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("binding: ")
+		b.WriteString(renderMemQLValue(args.Binding))
+	}
+	if args.PreviewBinding != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("previewBinding: ")
+		b.WriteString(renderMemQLValue(args.PreviewBinding))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -14435,13 +14451,15 @@ func UpdateSiteAccountBuild(args UpdateSiteAccountArgs) string {
 
 // UpdateSiteBundle -- Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
 // `artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ?? ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
-// AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared edits preserve the original owner and record the current writer on the new version. Package publication also checks the target site's deploy/publish permission before external effects; a grant on its source package's organization does not grant rights in another organization.
+// AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared edits preserve the original owner and record the current writer on the new version. Package publication also checks the target site's deploy/publish permission before external effects; a grant on its source package's organization does not grant rights in another organization. Optional bindings publish a selected package connection with its bytes in one write. Omission preserves the existing value. The ordinary changed-field guards require store permission and readable selected stores; this adds no package-only bypass.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.go).
 type UpdateSiteBundleArgs struct {
-	SiteId     string
-	BundleRef  string
-	ArtifactId string
+	SiteId         string
+	BundleRef      string
+	ArtifactId     string
+	Binding        map[string]any
+	PreviewBinding map[string]any
 }
 
 // UpdateSiteBundle calls the engine mutation updateSiteBundle.
@@ -14466,6 +14484,20 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 		}
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	if args.Binding != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("binding: ")
+		b.WriteString(renderMemQLValue(args.Binding))
+	}
+	if args.PreviewBinding != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("previewBinding: ")
+		b.WriteString(renderMemQLValue(args.PreviewBinding))
 	}
 	b.WriteString(")")
 	return b.String()

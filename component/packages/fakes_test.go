@@ -52,6 +52,13 @@ func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.Execu
 			return &memql.ExecuteResult{Bundle: asBundle(rows)}, nil
 		}
 	}
+	if strings.HasPrefix(query, "query packageDeploymentById(") {
+		for _, row := range e.rows["query packageDeploymentsInFlight"] {
+			if strings.Contains(query, fmt.Sprintf("%q", rowString(row, "id"))) {
+				return &memql.ExecuteResult{Bundle: asBundle([]map[string]any{row})}, nil
+			}
+		}
+	}
 	return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 }
 

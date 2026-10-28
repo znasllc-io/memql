@@ -1,7 +1,6 @@
 package packages
 
 import (
-	"context"
 	"io/fs"
 	"testing"
 )
@@ -33,20 +32,21 @@ func TestADomainOfOnlySubNamespacesIsAnalyzedAndStaged(t *testing.T) {
 		t.Fatalf("want the nested concept counted in acme, got %d (%+v)", got, rep.DslDomains[0].Constructs)
 	}
 
-	h := newHarness(t, tree, ownerPackage())
-	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId:  "v1:platform:package:abc",
-		Actor:      mayDeployDsl(),
-		Confirmed:  true,
-		Placements: firstDeployPlacements(),
-	}); err != nil {
-		t.Fatalf("deploy: %v", err)
+	// A changed DSL domain now needs the durable checkpoint, conditional
+	// pointer and exact rollout observation. Use the real two-replica journal
+	// fixture instead of pretending the legacy in-memory roller can satisfy it.
+	c := newContinuationFixtureSource(t, tree)
+	c.start(t)
+	if len(c.stager.staged) != 1 || c.stager.staged[0] != "acme" {
+		t.Fatalf("want the domain staged, got %v", c.stager.staged)
 	}
-	if len(h.stager.staged) != 1 || h.stager.staged[0] != "acme" {
-		t.Fatalf("want the domain staged, got %v", h.stager.staged)
+	if c.stager.written != 1 || c.roller.calls != 1 {
+		t.Fatalf("new DSL must move the pointer and roll once: written=%d rolls=%d", c.stager.written, c.roller.calls)
 	}
-	if h.stager.written != 1 || h.roller.rolls != 1 {
-		t.Fatalf("new DSL must move the pointer and roll once: written=%d rolls=%d", h.stager.written, h.roller.rolls)
+	c.roller.ready = true
+	c.resume(t)
+	if rowString(c.row(t), "status") != StatusSucceeded || c.stager.written != 1 || c.roller.calls != 1 {
+		t.Fatal("the observed nested-domain rollout must complete without restaging or restarting")
 	}
 	// What was staged is the whole domain tree, the nested file included.
 	sub, err := fs.Sub(tree, "dsl/acme")
@@ -59,6 +59,10 @@ func TestADomainOfOnlySubNamespacesIsAnalyzedAndStaged(t *testing.T) {
 	}
 	if _, ok := files["billing/concepts.memql"]; !ok {
 		t.Fatalf("the staged tree does not carry the nested namespace: %v", keysOfFiles(files))
+	}
+	prefix, err := c.stager.PrefixFor("acme", sub)
+	if err != nil || c.stager.active["acme"] != prefix {
+		t.Fatalf("the active pointer does not name the complete nested tree: %v", err)
 	}
 }
 

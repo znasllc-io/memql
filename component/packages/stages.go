@@ -296,79 +296,6 @@ type Roller interface {
 	Roll(ctx context.Context, reason string) error
 }
 
-// stageAndRoll writes the package's DSL and, IF ANYTHING CHANGED, flips the
-// pointer and rolls.
-//
-// The "if anything changed" is not an optimisation. A roll is a restart of
-// every DSL-consuming node, so performing one for a deploy that changed no DSL
-// would make an SPA-only redeploy the most disruptive thing a person can do --
-// the exact opposite of what D6 promises.
-func (d *Deps) stageAndRoll(ctx context.Context, snapshot *SourceSnapshot, rep *Report, out *DeployOutcome) (string, bool, error) {
-	if d.Stager == nil {
-		return "", false, refuse(CodeSourceUnreadable,
-			"this package ships DSL and this cluster has no DSL staging surface configured")
-	}
-	if err := d.Store.advance(ctx, out.DeploymentId, StatusStagingDsl); err != nil {
-		return "", false, err
-	}
-
-	current, err := d.Stager.ReadActiveSet(ctx)
-	if err != nil {
-		return "", false, err
-	}
-	next := map[string]string{}
-	for k, v := range current {
-		next[k] = v
-	}
-
-	changed := false
-	prefixes := make([]string, 0, len(rep.DslDomains))
-	for _, domain := range rep.DslDomains {
-		sub, serr := fs.Sub(snapshot.Tree, path.Join(DslRoot, domain.Domain))
-		if serr != nil {
-			return "", false, serr
-		}
-		prefix, perr := d.Stager.StageDomain(ctx, domain.Domain, sub)
-		if perr != nil {
-			return "", false, perr
-		}
-		prefixes = append(prefixes, prefix)
-		if next[domain.Domain] != prefix {
-			next[domain.Domain] = prefix
-			changed = true
-		}
-	}
-	sort.Strings(prefixes)
-	dslVersion := strings.Join(prefixes, " ")
-
-	if !changed {
-		return dslVersion, false, nil
-	}
-
-	if err := d.Store.advance(ctx, out.DeploymentId, StatusRolling); err != nil {
-		return "", false, err
-	}
-	// THE POINTER FLIP COMES FIRST, THEN THE ROLL. A roll against an
-	// unwritten pointer restarts every node onto the tree it already had,
-	// which looks like a successful deploy that changed nothing.
-	if err := d.Stager.WriteActiveSet(ctx, next); err != nil {
-		return "", false, err
-	}
-	if d.Roller == nil {
-		return "", false, refuse(CodeSourceUnreadable,
-			"this cluster has no rollout surface configured, so the staged DSL cannot be made live")
-	}
-	if err := d.Roller.Roll(ctx, "package deploy "+out.DeploymentId); err != nil {
-		// Break-glass is written into the message rather than left to a
-		// runbook: the pointer has moved and the roll has not, so the cluster
-		// is serving the old trees with a new pointer -- recoverable by
-		// rolling again, or by putting the pointer back.
-		return "", false, fmt.Errorf(
-			"the DSL was staged and the active-set pointer was updated, but the rolling restart failed: %w. Nothing is serving the new DSL yet; roll again, or revert the pointer", err)
-	}
-	return dslVersion, true, nil
-}
-
 // hashTree is the content address of a DSL domain's tree.
 //
 // Over the sorted (path, content) pairs rather than over a tarball, because a
@@ -494,6 +421,100 @@ func boundStoreId(row map[string]any) string {
 	return strings.TrimSpace(id)
 }
 
+// resolvePublicationStores is shared by immediate publication and durable
+// preparation. Resolution reads under the caller; omitted or unresolved bindings
+// preserve the stored connection and its nonfatal note. Only publication writes.
+func (d *Deps) resolvePublicationStores(ctx context.Context, dep DeployableReport, row map[string]any, accountID string) (string, string, *Problem, error) {
+	// THE STORE IS RESOLVED HERE, before the first-deploy branch, so a
+	// redeploy re-points rather than quietly keeping a store the manifest
+	// no longer names.
+	//
+	// Analyze already refused a storefront that names NO store, offline
+	// and fatally; this is the half that needs a cluster.
+	//
+	// =====================================================================
+	// AN UNRESOLVABLE STORE IS NEVER FATAL (Connect Shopify, D5)
+	// =====================================================================
+	// The read runs under the CALLER's actor, deliberately: a caller who
+	// may not read a store may not bind a storefront to one -- and since
+	// developers read every store (D3), a caller who may read one but not
+	// ATTACH it (the store part) gets the same "" from the resolver. Either
+	// way the run goes on, and what it records depends on what is bound.
+	//
+	// With no binding, place the design as a draft. It can go live for
+	// design review while its Store panel still reports setup needed.
+	// Commerce remains unavailable until the storefront is connected.
+
+	// SOMETHING BOUND: leaving a binding ALONE is not a privileged act --
+	// the binding already exists, somebody who could attach that store made
+	// it, and this run is publishing bytes rather than changing it. Refusing
+	// the whole deploy because the deployer cannot read a row the deploy
+	// does not touch punishes a bundle update for an authorization fact
+	// about something else. It is also the auto-deploy feed's case on EVERY
+	// automatic run: it borrows the package owner as a RANKLESS WRITER (see
+	// Deps.Roles), below the store tier's developer read floor, so
+	// storeByDomain answers zero rows -- and the manifest's store cannot
+	// have changed on that path anyway, because `bindingWord` puts it in
+	// the plan fingerprint and a changed one parks the run at the confirm
+	// gate (autodeploy.go).
+	//
+	// Both notes are NON-FATAL and recorded on the outcome. The note is
+	// what stops either being silent.
+	storeId := ""
+	var storeNote *Problem
+	if dep.Kind == KindStorefront && hasBinding(dep.Binding) {
+		named := strings.TrimSpace(dep.Binding.Store)
+		bound := boundStoreId(row)
+		resolved, serr := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
+		if serr != nil {
+			return "", "", nil, serr
+		}
+		switch {
+		case resolved != "":
+			storeId = resolved
+		case bound == "":
+			storeNote = &Problem{
+				Code:  CodeDeployableStoreUnknown,
+				Scope: dep.Name,
+				Fatal: false,
+				Message: fmt.Sprintf(
+					"deployable %q names store %q, and this cluster has no store by that name that you may read and attach, so the storefront is not attached to a store. It can go live for design review; connect a store on its Store panel to enable shopping.",
+					dep.Name, named),
+			}
+		default:
+			storeNote = &Problem{
+				Code:  CodeDeployableStoreUnknown,
+				Scope: dep.Name,
+				Fatal: false,
+				Message: fmt.Sprintf(
+					"deployable %q names store %q, which this run could not resolve, so its store is unchanged -- it still fronts the one it was bound to. Either nothing here mirrors that name, or this caller may not read or attach it.",
+					dep.Name, named),
+			}
+		}
+	}
+	previewStoreId := ""
+
+	if dep.Testing != nil && hasBinding(dep.Testing.Binding) {
+		named := strings.TrimSpace(dep.Testing.Binding.Store)
+		bound := boundStoreId(map[string]any{"binding": row["previewBinding"]})
+		resolved, err := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
+		if err != nil {
+			return "", "", nil, err
+		}
+		if resolved != "" && resolved != bound {
+			previewStoreId = resolved
+		} else if resolved == "" {
+			note := fmt.Sprintf("Testing store %q could not be read and attached; the existing testing connection is unchanged.", named)
+			if storeNote == nil {
+				storeNote = &Problem{Code: CodeDeployableStoreUnknown, Scope: dep.Name, Fatal: false, Message: note}
+			} else {
+				storeNote.Message += " " + note
+			}
+		}
+	}
+	return storeId, previewStoreId, storeNote, nil
+}
+
 func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]any, rep *Report, bundles map[string]edge.Bundle) ([]DeployableOutcome, error) {
 	existing, err := d.Store.sitesForPackage(ctx, req.PackageId)
 	if err != nil {
@@ -559,74 +580,10 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			accountID = firstNonEmpty(strings.TrimSpace(req.Placements[dep.Name].AccountId), rowString(pkg, "accountId"))
 		}
 
-		// THE STORE IS RESOLVED HERE, before the first-deploy branch, so a
-		// redeploy re-points rather than quietly keeping a store the manifest
-		// no longer names.
-		//
-		// Analyze already refused a storefront that names NO store, offline
-		// and fatally; this is the half that needs a cluster.
-		//
-		// =====================================================================
-		// AN UNRESOLVABLE STORE IS NEVER FATAL (Connect Shopify, D5)
-		// =====================================================================
-		// The read runs under the CALLER's actor, deliberately: a caller who
-		// may not read a store may not bind a storefront to one -- and since
-		// developers read every store (D3), a caller who may read one but not
-		// ATTACH it (the store part) gets the same "" from the resolver. Either
-		// way the run goes on, and what it records depends on what is bound.
-		//
-		// With no binding, place the design as a draft. It can go live for
-		// design review while its Store panel still reports setup needed.
-		// Commerce remains unavailable until the storefront is connected.
-
-		// SOMETHING BOUND: leaving a binding ALONE is not a privileged act --
-		// the binding already exists, somebody who could attach that store made
-		// it, and this run is publishing bytes rather than changing it. Refusing
-		// the whole deploy because the deployer cannot read a row the deploy
-		// does not touch punishes a bundle update for an authorization fact
-		// about something else. It is also the auto-deploy feed's case on EVERY
-		// automatic run: it borrows the package owner as a RANKLESS WRITER (see
-		// Deps.Roles), below the store tier's developer read floor, so
-		// storeByDomain answers zero rows -- and the manifest's store cannot
-		// have changed on that path anyway, because `bindingWord` puts it in
-		// the plan fingerprint and a changed one parks the run at the confirm
-		// gate (autodeploy.go).
-		//
-		// Both notes are NON-FATAL and recorded on the outcome. The note is
-		// what stops either being silent.
-		storeId := ""
-		var storeNote *Problem
-		if dep.Kind == KindStorefront && hasBinding(dep.Binding) {
-			named := strings.TrimSpace(dep.Binding.Store)
-			bound := boundStoreId(byName[dep.Name])
-			resolved, serr := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
-			if serr != nil {
-				return outcomes, serr
-			}
-			switch {
-			case resolved != "":
-				storeId = resolved
-			case bound == "":
-				storeNote = &Problem{
-					Code:  CodeDeployableStoreUnknown,
-					Scope: dep.Name,
-					Fatal: false,
-					Message: fmt.Sprintf(
-						"deployable %q names store %q, and this cluster has no store by that name that you may read and attach, so the storefront is not attached to a store. It can go live for design review; connect a store on its Store panel to enable shopping.",
-						dep.Name, named),
-				}
-			default:
-				storeNote = &Problem{
-					Code:  CodeDeployableStoreUnknown,
-					Scope: dep.Name,
-					Fatal: false,
-					Message: fmt.Sprintf(
-						"deployable %q names store %q, which this run could not resolve, so its store is unchanged -- it still fronts the one it was bound to. Either nothing here mirrors that name, or this caller may not read or attach it.",
-						dep.Name, named),
-				}
-			}
+		storeId, previewStoreId, storeNote, err := d.resolvePublicationStores(ctx, dep, byName[dep.Name], accountID)
+		if err != nil {
+			return outcomes, err
 		}
-
 		if siteId == "" {
 			requested := strings.TrimSpace(placement.Hostname)
 			if requested == "" {
@@ -670,24 +627,9 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			}
 		}
 
-		if dep.Testing != nil && hasBinding(dep.Testing.Binding) {
-			named := strings.TrimSpace(dep.Testing.Binding.Store)
-			bound := boundStoreId(map[string]any{"binding": byName[dep.Name]["previewBinding"]})
-			resolved, err := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
-			if err != nil {
+		if previewStoreId != "" {
+			if err := d.Publisher.BindSiteTestingStore(ctx, siteId, previewStoreId); err != nil {
 				return outcomes, err
-			}
-			if resolved != "" && resolved != bound {
-				if err := d.Publisher.BindSiteTestingStore(ctx, siteId, resolved); err != nil {
-					return outcomes, err
-				}
-			} else if resolved == "" {
-				note := fmt.Sprintf("Testing store %q could not be read and attached; the existing testing connection is unchanged.", named)
-				if storeNote == nil {
-					storeNote = &Problem{Code: CodeDeployableStoreUnknown, Scope: dep.Name, Fatal: false, Message: note}
-				} else {
-					storeNote.Message += " " + note
-				}
 			}
 		}
 

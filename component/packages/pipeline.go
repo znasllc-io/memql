@@ -258,6 +258,9 @@ type DeployRequest struct {
 	// exactly what the lost run was deploying -- not whatever the branch has
 	// moved to since.
 	FromDeploymentId string
+	// Derived from the saved report by native background confirmation only.
+	// Not accepted from a client and never substituted for per-build limits.
+	confirmationTimeout time.Duration
 }
 
 // Placement is where one deployable goes on its first deploy (D8): the
@@ -344,37 +347,11 @@ func (o *DeployOutcome) recordBuiltOn(on BuiltOn) {
 	}
 }
 
-// Deploy runs one deployment attempt to a terminal status, or parks it at the
-// confirm gate.
-//
-// ===========================================================================
-// THE WHOLE RUN IS ONE CALL ON ONE NODE, AND THAT IS A CHOICE
-// ===========================================================================
-// The design anticipated stage handoffs as row events with routing rules, and
-// the multi-node rules that follow from that (explicit plumbing, an in-process
-// hop test per handoff). This implementation does not need them: the stages
-// advance inside this function, so there is no stage-to-stage hop to plumb and
-// none to test.
-//
-// What that costs, stated rather than discovered: a node lost mid-deploy
-// strands its row at a non-terminal status. Nothing is inconsistent -- the D6
-// order guarantees every site is still serving what it was, because the run
-// died before `publish` or after it finished -- but the row does not advance
-// again on its own. The recovery is the one the append-only rule already
-// prescribes everywhere else: start a new attempt, which opens a new row.
-//
-// What IS cross-node is the READ, and it is not optional: every row written
-// here is read in an OS window some other node is serving, which is what the
-// broadcast routing rules carry (component/node/routing.go, asserted by
-// TestPackageRowsReachABrowserOnAnotherNode). Without them the packages list
-// is correct on load and frozen afterwards.
-//
-// It never panics a stage past its predecessor: each step either advances the
-// row and continues, or closes the row and returns. The row IS the state
-// machine's memory, which is what makes a stage idempotent under re-delivery --
-// re-running a completed stage re-reads the same inputs and reaches the same
-// answer, and re-running a TERMINAL row is refused by the append-only guard
-// rather than by anything here.
+// Deploy runs one saved attempt. Builds and site preparation precede the
+// durable self-roll checkpoint. After that checkpoint another replica can
+// observe the fixed rollout and finish selected publications from native
+// receipts; it never rebuilds or replays an uncertain external request.
+// Attempts lost before the checkpoint retain the abandoned-run contract.
 func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
 	pkg, out, prepared, err := prepareDeployment(ctx, d, req)
 	if err != nil {
@@ -404,6 +381,13 @@ func StartAnalysis(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutc
 }
 
 func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
+	if req.Confirmed && strings.TrimSpace(req.DeploymentId) != "" {
+		return prepareConfirmation(ctx, d, req, false)
+	}
+	return prepareDeploymentUnclaimed(ctx, d, req)
+}
+
+func prepareDeploymentUnclaimed(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
 	// THE PLACEMENTS ARE READ BEFORE ANYTHING IS OPENED. An unknown target is a
 	// request this pipeline cannot honour in either direction -- reading it as
 	// the serving version would put in front of the public a build somebody
@@ -537,11 +521,22 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 	})
 	runErr := runDeploy(runCtx, d, req, pkg, out, &cancelled)
 	stopHeartbeat()
-	if runErr == nil && out.AwaitingConfirm {
-		if asked, err := d.Store.cancelRequestedFor(ctx, deploymentId); err == nil && asked {
-			out.AwaitingConfirm = false
-			runErr = refuse(CodeDeploymentCancelled, "You stopped this analysis. Nothing was built or published.")
+	if errors.Is(runErr, errContinuationPending) {
+		if out.Status != StatusPublishing {
+			out.Status = StatusRolling
 		}
+		return out, nil // The native checkpoint, not this process, owns completion.
+	}
+	// Bookkeeping must survive a cancelled synchronous caller too. This does
+	// not detach any effect: runDeploy has already returned and its heartbeat
+	// has stopped. A self-roll checkpoint owns its later continuation; a lost
+	// process before that checkpoint remains an abandoned attempt.
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer finishCancel()
+	if runErr == nil && out.AwaitingConfirm {
+		// Expose the confirmation gate only after the analysis heartbeat has
+		// joined. Cancel and confirmation use the same shared package gate.
+		runErr = finishParking(finishCtx, d, req, out)
 	}
 
 	if err := runErr; err != nil {
@@ -561,8 +556,8 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 		}
 		out.Status = status
 		out.Problem = problem
-		d.closeRun(ctx, deploymentId, out, problem)
-		d.audit(ctx, req, out, err)
+		d.closeRun(finishCtx, deploymentId, out, problem)
+		d.audit(finishCtx, req, out, err)
 		return out, err
 	}
 
@@ -571,13 +566,13 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 		// deliberately NOT closed: a terminal row accepts no further writes,
 		// so closing here would make the person's confirmation land on a row
 		// nothing could advance.
-		d.audit(ctx, req, out, nil)
+		d.audit(finishCtx, req, out, nil)
 		return out, nil
 	}
 
 	out.Status = StatusSucceeded
-	d.closeRun(ctx, deploymentId, out, nil)
-	d.audit(ctx, req, out, nil)
+	d.closeRun(finishCtx, deploymentId, out, nil)
+	d.audit(finishCtx, req, out, nil)
 	return out, nil
 }
 
@@ -768,12 +763,12 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 				out.AwaitingConfirm = true
 				out.Status = StatusAwaitingConfirm
 				out.ConfirmReason = why
-				return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+				return nil
 			}
 		} else {
 			out.AwaitingConfirm = true
 			out.Status = StatusAwaitingConfirm
-			return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+			return nil
 		}
 	}
 
@@ -815,15 +810,12 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	}
 
 	if len(rep.DslDomains) > 0 {
-		dslVersion, staged, serr := d.stageAndRoll(ctx, snapshot, rep, out)
-		if serr != nil {
-			return serr
+		handled, err := d.checkpointSelfRoll(ctx, req, pkg, snapshot, rep, out, bundles)
+		if err != nil {
+			return err
 		}
-		out.DslVersion = dslVersion
-		if !staged {
-			d.log().Info("packages: DSL unchanged; stage and roll skipped",
-				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
-				"deployment", out.DeploymentId)
+		if handled {
+			return nil
 		}
 	}
 

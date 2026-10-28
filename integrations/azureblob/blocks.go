@@ -48,6 +48,10 @@ func (u *AzureBlobUploader) blockClient(container, objectName string) (*blockblo
 // empty chunk is refused here as well as at the route -- a zero-byte block
 // has no meaning in a size-verified commit.
 func (u *AzureBlobUploader) StageBlock(ctx context.Context, container, objectName, blockID string, chunk []byte) error {
+	return u.stageBlock(ctx, container, objectName, blockID, chunk, false)
+}
+
+func (u *AzureBlobUploader) stageBlock(ctx context.Context, container, objectName, blockID string, chunk []byte, clusterAsset bool) error {
 	bc, err := u.blockClient(container, objectName)
 	if err != nil {
 		return err
@@ -58,7 +62,7 @@ func (u *AzureBlobUploader) StageBlock(ctx context.Context, container, objectNam
 	if len(chunk) == 0 {
 		return fmt.Errorf("azure blob block body is empty")
 	}
-	capacity, err := u.beginCapacity(ctx, container, objectName)
+	capacity, err := u.beginAssetCapacity(ctx, container, objectName, clusterAsset)
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,10 @@
 package packages
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -266,7 +269,8 @@ func (b *blobStager) StageDomain(ctx context.Context, domain string, tree fs.FS)
 	}
 	prefix := blobStagePrefix(domain, hash)
 	for name, data := range files {
-		if _, err := b.uploader.ClusterAssets().Upload(ctx, b.container, prefix+name, data, "text/plain"); err != nil {
+		digest := sha256.Sum256(data)
+		if _, err := b.uploader.ClusterAssetsCreateVerifiedStream(ctx, b.container, prefix+name, bytes.NewReader(data), int64(len(data)), hex.EncodeToString(digest[:]), "text/plain"); err != nil {
 			return "", err
 		}
 	}
@@ -290,34 +294,16 @@ func blobStagePrefix(domain, hash string) string {
 }
 
 func (b *blobStager) ReadActiveSet(ctx context.Context) (map[string]string, error) {
-	if err := b.resolve(ctx); err != nil {
-		return nil, err
-	}
-	raw, err := b.uploader.Download(ctx, b.container, ActiveSetPath)
-	if err != nil {
-		// A cluster that has never staged a package has no pointer, and that
-		// is the ordinary first-deploy state rather than a fault. Returning
-		// empty is what makes the first deploy identical to every later one.
-		return map[string]string{}, nil
-	}
-	set := map[string]string{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &set); err != nil {
-			return nil, fmt.Errorf("packages: the active-set pointer at %s is not readable: %w", ActiveSetPath, err)
-		}
-	}
-	return set, nil
+	version, err := b.ReadActiveSetVersion(ctx)
+	return version.Domains, err
 }
 
 func (b *blobStager) WriteActiveSet(ctx context.Context, set map[string]string) error {
-	if err := b.resolve(ctx); err != nil {
-		return err
-	}
-	raw, err := marshalActiveSet(set)
+	before, err := b.ReadActiveSetVersion(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = b.uploader.ClusterAssets().Upload(ctx, b.container, ActiveSetPath, raw, "application/json")
+	_, err = b.CompareAndSwapActiveSet(ctx, before, set)
 	return err
 }
 
@@ -647,6 +633,14 @@ func (p *enginePublisher) requireSiteAction(ctx context.Context, siteID, action 
 type packageSiteWriter struct{ publisher *enginePublisher }
 
 func (s packageSiteWriter) PointVersion(ctx context.Context, siteID string, target edge.Target, ref string) error {
+	return s.pointVersion(ctx, siteID, target, ref, nil, nil)
+}
+
+func (s packageSiteWriter) PointPrepared(ctx context.Context, b PreparedSiteBundle) error {
+	return s.pointVersion(ctx, b.SiteID, b.Target, b.BundleRef, b.Binding, b.PreviewBinding)
+}
+
+func (s packageSiteWriter) pointVersion(ctx context.Context, siteID string, target edge.Target, ref string, binding, preview *memql.PackageSiteBinding) error {
 	action := "deploy"
 	if target == edge.TargetCandidate {
 		action = "preview"
@@ -657,6 +651,24 @@ func (s packageSiteWriter) PointVersion(ctx context.Context, siteID string, targ
 	q, err := edge.PointVersionStatement(siteID, target, ref, "")
 	if err != nil {
 		return err
+	}
+	// Optional selected bindings share the bundle's ordinary site mutation,
+	// row-version check, native receipt and outbox transaction. The engine's
+	// changed-field guards still require store authority for either delta.
+	for _, item := range []struct {
+		name  string
+		value *memql.PackageSiteBinding
+	}{{"binding", binding}, {"previewBinding", preview}} {
+		if item.value != nil {
+			raw, err := json.Marshal(item.value)
+			if err != nil {
+				return err
+			}
+			q = strings.TrimSuffix(q, ")") + ", " + item.name + ": " + string(raw) + ")"
+		}
+	}
+	if memql.HasPackagePublicationFence(ctx) {
+		ctx = auth.ContextWithClientOrigin(ctx)
 	}
 	_, err = s.publisher.engine.Execute(ctx, q)
 	return err

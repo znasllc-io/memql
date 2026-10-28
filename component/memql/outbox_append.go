@@ -198,7 +198,7 @@ func (e *MemQLEngine) runInWriteTx(ctx context.Context, fn func(store memorynode
 	if db == nil {
 		return fmt.Errorf("memory engine database not configured")
 	}
-	fenced := len(rowVersionFences(ctx)) > 0
+	fenced := len(rowVersionFences(ctx)) > 0 || HasPackagePublicationFence(ctx) || HasPackageDomainFence(ctx)
 	if fenced {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 15*time.Second)

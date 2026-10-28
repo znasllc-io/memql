@@ -97,6 +97,7 @@ func captureStore(t *testing.T) []string {
 		RequestedBy:   "v1:identity:user:someone",
 		StartedAt:     at,
 	})
+	_ = s.claimConfirmation(ctx, "v1:platform:packageDeployment:def", "bff-two", at)
 	for _, st := range stageOrder {
 		_ = s.advance(ctx, "v1:platform:packageDeployment:def", st)
 	}

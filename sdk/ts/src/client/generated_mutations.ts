@@ -7025,6 +7025,8 @@ export interface SetSiteCandidateArgs {
   siteId: string;
   candidateRef: string;
   artifactId?: string;
+  binding?: Record<string, unknown>;
+  previewBinding?: Record<string, unknown>;
 }
 
 export function buildSetSiteCandidate(args: SetSiteCandidateArgs): string {
@@ -7032,6 +7034,8 @@ export function buildSetSiteCandidate(args: SetSiteCandidateArgs): string {
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("candidateRef: " + renderMemQLValue(args.candidateRef));
   if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.binding !== undefined) parts.push("binding: " + renderMemQLValue(args.binding));
+  if (args.previewBinding !== undefined) parts.push("previewBinding: " + renderMemQLValue(args.previewBinding));
   return "mutation setSiteCandidate(" + parts.join(", ") + ")";
 }
 
@@ -8430,12 +8434,14 @@ QueryClient.prototype.updateSiteAccount = function (this: QueryClient, args: Upd
 
 /** Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
 `artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ?? ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
-AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared edits preserve the original owner and record the current writer on the new version. Package publication also checks the target site's deploy/publish permission before external effects; a grant on its source package's organization does not grant rights in another organization. */
+AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared edits preserve the original owner and record the current writer on the new version. Package publication also checks the target site's deploy/publish permission before external effects; a grant on its source package's organization does not grant rights in another organization. Optional bindings publish a selected package connection with its bytes in one write. Omission preserves the existing value. The ordinary changed-field guards require store permission and readable selected stores; this adds no package-only bypass. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.ts).
 export interface UpdateSiteBundleArgs {
   siteId: string;
   bundleRef: string;
   artifactId?: string;
+  binding?: Record<string, unknown>;
+  previewBinding?: Record<string, unknown>;
 }
 
 export function buildUpdateSiteBundle(args: UpdateSiteBundleArgs): string {
@@ -8443,6 +8449,8 @@ export function buildUpdateSiteBundle(args: UpdateSiteBundleArgs): string {
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("bundleRef: " + renderMemQLValue(args.bundleRef));
   if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.binding !== undefined) parts.push("binding: " + renderMemQLValue(args.binding));
+  if (args.previewBinding !== undefined) parts.push("previewBinding: " + renderMemQLValue(args.previewBinding));
   return "mutation updateSiteBundle(" + parts.join(", ") + ")";
 }
 

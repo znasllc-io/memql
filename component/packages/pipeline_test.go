@@ -439,31 +439,27 @@ func TestAnSpaOnlyDeploySkipsStageAndRollEntirely(t *testing.T) {
 }
 
 func TestUnchangedDslSkipsTheRollAndPublishesAnyway(t *testing.T) {
-	h := newHarness(t, validPackage(), ownerPackage())
-	req := DeployRequest{
-		PackageId:  "v1:platform:package:abc",
-		Actor:      mayDeployDsl(),
-		Confirmed:  true,
-		Placements: firstDeployPlacements(),
+	tree := validPackage()
+	h := newHarness(t, tree, ownerPackage())
+	// The changed-DSL transition is covered by the real two-replica native
+	// journal test. This fast path starts with the same installed source.
+	domain, err := fs.Sub(tree, DslRoot+"/acme")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := Deploy(context.Background(), h.deps, req); err != nil {
-		t.Fatalf("first deploy: %v", err)
+	prefix, err := h.stager.PrefixFor("acme", domain)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if h.roller.rolls != 1 {
-		t.Fatalf("the first deploy of new DSL must roll once, got %d", h.roller.rolls)
+	h.stager.active["acme"] = prefix
+	req := DeployRequest{PackageId: "v1:platform:package:abc", Actor: mayDeployDsl(), Confirmed: true, Placements: firstDeployPlacements()}
+	for i := 0; i < 2; i++ {
+		if _, err := Deploy(context.Background(), h.deps, req); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	// Same tree, same bytes. The active set already points at this content,
-	// so nothing changed and nothing restarts.
-	before := h.roller.rolls
-	if _, err := Deploy(context.Background(), h.deps, req); err != nil {
-		t.Fatalf("second deploy: %v", err)
-	}
-	if h.roller.rolls != before {
-		t.Fatalf("redeploying identical DSL must not roll again: %d -> %d", before, h.roller.rolls)
-	}
-	if len(h.publisher.published) != 4 {
-		t.Fatalf("the sites must still be republished both times: %v", h.publisher.published)
+	if h.roller.rolls != 0 || h.stager.written != 0 || len(h.stager.staged) != 0 || len(h.publisher.published) != 4 {
+		t.Fatalf("unchanged DSL repeated effects: rolls=%d writes=%d staged=%v published=%v", h.roller.rolls, h.stager.written, h.stager.staged, h.publisher.published)
 	}
 }
 
@@ -838,7 +834,7 @@ func TestEveryStatusTheMachineWritesIsInTheDeclaredEnum(t *testing.T) {
 		declared[s] = true
 	}
 
-	h := newHarness(t, validPackage(), ownerPackage())
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
 		Actor:      mayDeployDsl(),
@@ -869,41 +865,41 @@ func TestEveryStatusTheMachineWritesIsInTheDeclaredEnum(t *testing.T) {
 	}
 }
 
-// TestTheStageOrderIsTheD6Law pins the ORDER the row records, which is what
-// makes a partial deploy structurally impossible: a failure anywhere before
-// publishing leaves every site serving what it was serving.
+// The changed-DSL stage order needs the actual native journal, including its
+// separate-replica continuation. A recording fake cannot prove that boundary.
 func TestTheStageOrderIsTheD6Law(t *testing.T) {
-	h := newHarness(t, validPackage(), ownerPackage())
-	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId:  "v1:platform:package:abc",
-		Actor:      mayDeployDsl(),
-		Confirmed:  true,
-		Placements: firstDeployPlacements(),
-	}); err != nil {
-		t.Fatalf("deploy: %v", err)
+	c := newContinuationFixture(t)
+	c.start(t)
+	c.roller.ready = true
+	c.resume(t)
+	f := c.base
+	db, err := f.deps[0].Store.continuationDB()
+	if err != nil {
+		t.Fatal(err)
 	}
-
+	rows, err := db.QueryContext(f.ctx, `SELECT payload->>'status' FROM "MemoryNodes" WHERE id=$1 ORDER BY "createdAt"`, f.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
 	var order []string
-	for _, q := range h.engine.statements() {
-		if !strings.HasPrefix(q, "mutation advancePackageDeployment") {
-			continue
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			t.Fatal(err)
 		}
-		value := strings.Trim(strings.SplitN(strings.Split(q, "status: ")[1], ")", 2)[0], `" `)
-		order = append(order, value)
-	}
-
-	want := []string{StatusBuilding, StatusStagingDsl, StatusRolling, StatusPublishing}
-	if len(order) != len(want) {
-		t.Fatalf("want the four post-confirm stages, got %v", order)
-	}
-	for i := range want {
-		if order[i] != want[i] {
-			t.Fatalf("stage %d: want %s, got %s (full order %v)", i, want[i], order[i], order)
+		if len(order) == 0 || order[len(order)-1] != status {
+			order = append(order, status)
 		}
 	}
-	// And the effects landed in that order too: the pointer moved before the
-	// roll, and the roll before the publish.
-	if h.stager.written != 1 || h.roller.rolls != 1 || len(h.publisher.published) != 2 {
-		t.Fatalf("effects: written=%d rolls=%d published=%v", h.stager.written, h.roller.rolls, h.publisher.published)
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{StatusAnalyzing, StatusAwaitingConfirm, StatusAnalyzing, StatusBuilding, StatusStagingDsl, StatusRolling, StatusPublishing, StatusSucceeded}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("stage order %v, want %v", order, want)
+	}
+	if c.stager.written != 1 || c.roller.calls != 1 || c.publishers[1].published.Load() != 1 {
+		t.Fatal("native stage effects did not occur once")
 	}
 }

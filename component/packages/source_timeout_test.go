@@ -13,12 +13,14 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"testing/synctest"
 	"time"
 )
 
-// A slow, healthy transfer must survive many idle intervals; a stalled one
-// must be interrupted while Read is blocked. These use actual HTTP bodies so
-// cancellation exercises the same transport boundary as the GitHub download.
+// A slow, healthy transfer must outlive one idle interval; a stalled one must
+// be interrupted while Read is blocked. Virtual time separates that contract
+// from host scheduling. TestFetchRepoCancellationInterruptsBodyAndCleansUp
+// below separately exercises cancellation through an actual HTTP body.
 func TestSourceBodyProgressAndStall(t *testing.T) {
 	for _, stall := range []bool{false, true} {
 		name := "progress"
@@ -26,42 +28,43 @@ func TestSourceBodyProgressAndStall(t *testing.T) {
 			name = "stall"
 		}
 		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				w.(http.Flusher).Flush()
+			synctest.Test(t, func(t *testing.T) {
+				const idle = 100 * time.Millisecond
+				ctx, cancel := context.WithCancelCause(context.Background())
+				defer cancel(nil)
+				reader, writer := io.Pipe()
+				defer reader.Close()
+				stop := context.AfterFunc(ctx, func() { _ = reader.CloseWithError(context.Cause(ctx)) })
+				defer stop()
+				go func() {
+					defer writer.Close()
+					if stall {
+						<-ctx.Done()
+						return
+					}
+					for range 12 {
+						time.Sleep(15 * time.Millisecond)
+						if _, err := writer.Write([]byte("a")); err != nil {
+							return
+						}
+					}
+				}()
+				start := time.Now()
+				got, err := io.ReadAll(&sourceBody{ReadCloser: reader, cancel: cancel, idle: idle})
 				if stall {
-					<-r.Context().Done()
+					if err == nil || !errors.Is(context.Cause(ctx), errSourceReadIdle) || time.Since(start) != idle {
+						t.Fatalf("stalled source not cancelled at idle bound: %v, cause %v, elapsed %v", err, context.Cause(ctx), time.Since(start))
+					}
 					return
 				}
-				for i := 0; i < 12; i++ {
-					select {
-					case <-r.Context().Done():
-						return
-					case <-time.After(15 * time.Millisecond):
-					}
-					_, _ = w.Write([]byte("a"))
-					w.(http.Flusher).Flush()
+				if err != nil || string(got) != "aaaaaaaaaaaa" || time.Since(start) <= idle {
+					t.Fatalf("healthy source was cut off: %q, %v, elapsed %v", got, err, time.Since(start))
 				}
-			}))
-			defer server.Close()
-			ctx, cancel := context.WithCancelCause(context.Background())
-			defer cancel(nil)
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
-			resp, err := server.Client().Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer resp.Body.Close()
-			got, err := io.ReadAll(&sourceBody{ReadCloser: resp.Body, cancel: cancel, idle: 100 * time.Millisecond})
-			if stall {
-				if err == nil || !errors.Is(context.Cause(ctx), errSourceReadIdle) {
-					t.Fatalf("stalled source not cancelled: %v, cause %v", err, context.Cause(ctx))
+				time.Sleep(2 * idle)
+				if ctx.Err() != nil {
+					t.Fatalf("completed reads left a live idle timer: %v", context.Cause(ctx))
 				}
-				return
-			}
-			if err != nil || string(got) != "aaaaaaaaaaaa" {
-				t.Fatalf("healthy source was cut off: %q, %v", got, err)
-			}
+			})
 		})
 	}
 }

@@ -34,8 +34,9 @@ type SourceSnapshot struct {
 	// re-storing bytes the Library already holds would give one snapshot two
 	// identities.
 	Bytes []byte
-	// ArtifactId is the snapshot this tree ALREADY has in the Library, set
-	// when the bytes came from an earlier run rather than from the source.
+	// ArtifactId is the snapshot this tree ALREADY has in the Library: the
+	// uploaded artifact's id, or the blob reference retained by an earlier
+	// repository run. The source kind decides which reader can resolve it.
 	// It is what lets the retry's own row point at the same content-addressed
 	// artifact instead of recording none (memql#4955): a row with no snapshot
 	// cannot be resumed at its confirm and cannot be retried again, so a
@@ -378,6 +379,9 @@ func isHex(s string) bool {
 // provenance link ambiguous. Re-analysis of an artifact-sourced package
 // therefore costs nothing but a read, which is section I's "repeatable from
 // the stored snapshot without refetching" in its cheapest form.
+// Keep the authorized artifact id beside the digest of the bytes we actually
+// read. storeSnapshot then records that existing identity for a self-roll
+// checkpoint without inventing a repository tar snapshot or uploading again.
 func (f *githubFetcher) FetchArtifact(ctx context.Context, artifactId string, limits Limits) (*SourceSnapshot, error) {
 	if f.artifactBytes == nil {
 		return nil, refuse(CodeSourceUnreadable, "this node cannot read Library artifacts")
@@ -391,9 +395,10 @@ func (f *githubFetcher) FetchArtifact(ctx context.Context, artifactId string, li
 		return nil, zerr
 	}
 	return &SourceSnapshot{
-		Tree:    tree,
-		Version: contentHash(raw),
-		cleanup: func() {},
+		Tree:       tree,
+		Version:    contentHash(raw),
+		ArtifactId: artifactId,
+		cleanup:    func() {},
 	}, nil
 }
 

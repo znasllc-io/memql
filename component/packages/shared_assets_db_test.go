@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,8 +53,11 @@ func sharedAssetStorage(t *testing.T, objects map[string]sharedAssetObject) *sha
 		t.Fatal(err)
 	}
 	bodies := map[string][]byte{}
+	staged := map[string]map[string][]byte{}
+	versions := map[string]int{}
 	for key, object := range objects {
 		bodies["/test/memql/"+key] = bytes.Clone(object.body)
+		versions["/test/memql/"+key] = 1
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -60,32 +67,105 @@ func sharedAssetStorage(t *testing.T, objects map[string]sharedAssetObject) *sha
 			fmt.Fprintf(w, `<StorageServiceProperties><DeleteRetentionPolicy><Enabled>%t</Enabled></DeleteRetentionPolicy></StorageServiceProperties>`, f.retention)
 			return
 		}
+		path := r.URL.Path
+		comp := r.URL.Query().Get("comp")
+		etag := fmt.Sprintf(`"shared-%d"`, versions[path])
+		data, exists := bodies[path]
+		refuse := func(status int, code string) {
+			w.Header().Set("x-ms-error-code", code)
+			w.WriteHeader(status)
+		}
+		// Azure's block inventory is XML, not the committed object's bytes.
+		if r.Method == http.MethodGet && comp == "blocklist" {
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<BlockList><UncommittedBlocks>`)
+			var ids []string
+			for id := range staged[path] {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			for _, id := range ids {
+				fmt.Fprintf(w, `<Block><Name>%s</Name><Size>%d</Size></Block>`, id, len(staged[path][id]))
+			}
+			_, _ = io.WriteString(w, `</UncommittedBlocks></BlockList>`)
+			return
+		}
+		if match := r.Header.Get("If-Match"); match != "" && (!exists || match != etag) {
+			refuse(http.StatusPreconditionFailed, "ConditionNotMet")
+			return
+		}
+		if r.Header.Get("If-None-Match") == "*" && exists {
+			refuse(http.StatusPreconditionFailed, "ConditionNotMet")
+			return
+		}
 		if r.Method == http.MethodPut {
-			data, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			incoming, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 			if err != nil {
 				t.Error(err)
 				w.WriteHeader(500)
 				return
 			}
-			bodies[r.URL.Path] = data
+			switch comp {
+			case "block":
+				id := r.URL.Query().Get("blockid")
+				if _, err := base64.StdEncoding.DecodeString(id); err != nil || id == "" {
+					t.Error("invalid staged block identity")
+					w.WriteHeader(400)
+					return
+				}
+				if staged[path] == nil {
+					staged[path] = map[string][]byte{}
+				}
+				staged[path][id] = incoming
+			case "blocklist":
+				var list struct {
+					Latest []string `xml:"Latest"`
+				}
+				if err := xml.Unmarshal(incoming, &list); err != nil {
+					t.Error(err)
+					w.WriteHeader(400)
+					return
+				}
+				data = nil
+				for _, id := range list.Latest {
+					chunk, ok := staged[path][id]
+					if !ok {
+						t.Error("commit references an unstaged block")
+						w.WriteHeader(400)
+						return
+					}
+					data = append(data, chunk...)
+				}
+				bodies[path] = data
+				delete(staged, path)
+				versions[path]++
+			case "":
+				bodies[path] = incoming
+				versions[path]++
+			default:
+				t.Errorf("unexpected fixture PUT operation %q", comp)
+				w.WriteHeader(400)
+				return
+			}
 			f.puts++
 			if f.afterPut != nil {
 				f.afterPut()
 			}
-			w.Header().Set("ETag", `"shared"`)
+			w.Header().Set("ETag", fmt.Sprintf(`"shared-%d"`, versions[path]))
 			w.WriteHeader(201)
 			return
 		}
-		data, ok := bodies[r.URL.Path]
-		if !ok {
-			w.Header().Set("x-ms-error-code", "BlobNotFound")
-			w.WriteHeader(404)
+		if !exists {
+			refuse(http.StatusNotFound, "BlobNotFound")
 			return
 		}
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		w.Header().Set("ETag", `"shared"`)
+		w.Header().Set("ETag", etag)
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(data)
+		} else if r.Method != http.MethodHead {
+			t.Errorf("unexpected fixture method %q", r.Method)
+			w.WriteHeader(405)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -159,7 +239,9 @@ func (e *sharedAssetEngine) assertActor(ctx context.Context) {
 	e.t.Helper()
 	got, ok := auth.AccessFromContext(ctx)
 	want, _ := auth.AccessFromContext(e.caller)
-	if !ok || got != want || got.Synthetic || ctx != e.caller {
+	deadline, hasDeadline := ctx.Deadline()
+	wantDeadline, wantHasDeadline := e.caller.Deadline()
+	if !ok || !reflect.DeepEqual(got, want) || got.Synthetic || auth.TokenInfoFromContext(ctx) != auth.TokenInfoFromContext(e.caller) || hasDeadline != wantHasDeadline || !deadline.Equal(wantDeadline) || ctx.Done() != e.caller.Done() {
 		e.t.Error("shared accounting replaced the authenticated caller context")
 	}
 }
@@ -199,7 +281,7 @@ func TestPackageSharedAssetsUseClusterAccountingAcrossReplicas(t *testing.T) {
 	}
 	bundle := edge.Bundle{"index.html": []byte("<!doctype html><title>Shared</title>")}
 	siteKey := sharedSiteKey(t, bundle)
-	f := sharedAssetStorage(t, map[string]sharedAssetObject{prefix + "agents.memql": {body: []byte("fixture DSL")}, ActiveSetPath: {body: []byte(`{"old":"packages/old/"}`)}, siteKey: {body: bundle["index.html"]}})
+	f := sharedAssetStorage(t, map[string]sharedAssetObject{prefix + "agents.memql": {body: []byte("fixture DSL")}, ActiveSetPath: {body: []byte(`{"old":"packages/old/0123456789abcdef0123456789abcdef/"}`)}, siteKey: {body: bundle["index.html"]}})
 	ctx := sharedAssetCaller(t)
 	// The prior route demonstrably refuses the existing cluster-owned object.
 	if _, err := f.uploader.Upload(ctx, "memql", prefix+"agents.memql", tree["agents.memql"].Data, "text/plain"); err == nil || !strings.Contains(err.Error(), "different owner") {
@@ -212,8 +294,20 @@ func TestPackageSharedAssetsUseClusterAccountingAcrossReplicas(t *testing.T) {
 	if _, err := stager.StageDomain(ctx, "example", tree); err != nil {
 		t.Fatal(err)
 	}
+	prior, err := stager.ReadActiveSetVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := stager.WriteActiveSet(ctx, map[string]string{"example": prefix}); err != nil {
 		t.Fatal(err)
+	}
+	current, err := stager.ReadActiveSetVersion(ctx)
+	if err != nil || current.ETag == prior.ETag || current.Domains["example"] != prefix {
+		t.Fatalf("conditional active set did not advance: %+v %v", current, err)
+	}
+	writes := f.writes()
+	if _, err := stager.CompareAndSwapActiveSet(ctx, prior, map[string]string{"example": prefix}); !errors.Is(err, azureblob.ErrPackageActiveSetChanged) || f.writes() != writes {
+		t.Fatalf("stale active set changed provider bytes: %v", err)
 	}
 	// Two new clients with no originating request state share only durable
 	// accounting. Repeated concurrent content writes must charge bytes once.
@@ -282,7 +376,14 @@ func TestPackageSharedAssetsNeverAdoptPersonalLedgerRows(t *testing.T) {
 		for _, kind := range []string{"dsl", "pointer", "site"} {
 			t.Run(owner+"/"+kind, func(t *testing.T) {
 				key := map[string]string{"dsl": prefix + "agents.memql", "pointer": ActiveSetPath, "site": siteKey}[kind]
-				f := sharedAssetStorage(t, map[string]sharedAssetObject{key: {owner: owner, body: []byte("retained")}})
+				body := []byte("retained")
+				if kind == "pointer" {
+					body, err = json.Marshal(map[string]string{"example": prefix})
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				f := sharedAssetStorage(t, map[string]sharedAssetObject{key: {owner: owner, body: body}})
 				before := f.state(t, key)
 				ctx := sharedAssetCaller(t)
 				stager := &blobStager{uploader: f.uploader, container: "memql"}

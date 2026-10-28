@@ -451,6 +451,16 @@ func ContextWithGrantMemo(ctx context.Context) context.Context {
 	return context.WithValue(ctx, grantMemoKey{}, &grantMemo{})
 }
 
+// ContextWithFreshGrantMemo starts a new grant evaluation within a long-lived
+// operation. It retains the caller, cancellation and all other context values;
+// only the already-resolved per-request grant answers are discarded.
+func ContextWithFreshGrantMemo(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, grantMemoKey{}, &grantMemo{})
+}
+
 // GrantRowID derives the one id a (subjectKind, subjectId, verb, resourceType)
 // tuple ever has -- the groupMembership discipline (D11): re-granting writes a
 // new VERSION of one logical row rather than a second row, and revoking writes

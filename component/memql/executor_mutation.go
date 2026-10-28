@@ -1700,7 +1700,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// only thing standing between an operator's typo and a certificate request
 	// for the platform's own sign-in host.
 	// See component/memql/platform_custom_domain_policy.go.
-	if conceptMeta.Name == conceptPlatformCustomDomain {
+	if conceptMeta.Name == conceptPlatformCustomDomain && !HasPackageDomainFence(ctx) {
 		if err := e.validateCustomDomainPolicy(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorHostname, meta.priorStatus); err != nil {
 			return nil, meta, err
 		}
@@ -1739,9 +1739,26 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// Other writes retain the single-statement path below.
 	var result memorynodes.Node
 	observationOnly := false
-	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 {
+	domainObserved := false
+	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 || HasPackagePublicationFence(ctx) || HasPackageDomainFence(ctx) {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
+			if err := checkPackagePublication(ctx, txStore.(*bunStore).db, conceptMeta.Name, id, organizationPrior, payload); err != nil {
+				return err
+			}
+			if HasPackageDomainFence(ctx) {
+				observed, err := e.checkPackageDomain(ctx, txStore.(*bunStore).db, conceptMeta.Name, id, payload)
+				if err != nil {
+					return err
+				}
+				if observed != nil {
+					domainObserved = true
+					return nil
+				}
+				if err := e.validateCustomDomainPolicy(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorHostname, meta.priorStatus); err != nil {
+					return err
+				}
+			}
 			txStore.(*bunStore).onInsert = func(concept string, appended bool) {
 				if concept == conceptMeta.Name && memorynodes.HasLiveness(concept) {
 					observationOnly = !appended
@@ -1757,6 +1774,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if createErr != nil {
 				return createErr
 			}
+			if err := recordPackageDomain(ctx, txStore.(*bunStore).db, created); err != nil {
+				return err
+			}
+			if err := recordPackagePublication(ctx, txStore.(*bunStore).db, created); err != nil {
+				return err
+			}
 			result = created
 			if dedupe != nil && dedupe.unchanged {
 				meta.unchanged = true
@@ -1766,6 +1789,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		})
 		if txErr != nil {
 			return nil, meta, txErr
+		}
+		if domainObserved {
+			return nil, meta, ErrPackageDomainRecorded
 		}
 		// THE OUTBOX ENTRIES ARE A SECOND WRITE, TO A SECOND CONCEPT, AND
 		// NOTHING ELSE ANNOUNCES THEM (memql#4531). appendOutboxEntries

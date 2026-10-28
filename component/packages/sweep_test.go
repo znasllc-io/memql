@@ -80,11 +80,15 @@ func TestTheAbandonedSentenceNamesTheNodeAndWhenItWasHeard(t *testing.T) {
 	if closed == "" {
 		t.Fatal("nothing was closed")
 	}
-	// The three things a person needs, and nothing the sweep cannot know.
-	for _, want := range []string{"bff-4", last.Format(time.RFC3339), "nothing was published", CodeDeploymentAbandoned} {
+	// Name the last observed node and time without inventing absence of effects.
+	// A node can disappear after a write but before its terminal receipt.
+	for _, want := range []string{"bff-4", last.Format(time.RFC3339), "Inspect any staging, rollout or publication already recorded", "this record does not prove that no external effect happened", CodeDeploymentAbandoned} {
 		if !strings.Contains(closed, want) {
 			t.Errorf("the sentence must carry %q: %s", want, closed)
 		}
+	}
+	if strings.Contains(closed, "nothing was published") {
+		t.Fatal("abandonment must not claim that a lost node performed no publication")
 	}
 }
 

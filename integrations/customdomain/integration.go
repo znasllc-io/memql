@@ -209,6 +209,17 @@ func (i *Integration) handleAdd(ctx context.Context, args map[string]any, _ int)
 			"customDomainAdd: no deployable %q is readable by this caller, so there is nothing to bind %q to",
 			siteID, hostname)
 	}
+	accountID := i.store.SiteAccountID(ctx, siteID)
+	domainID := id.NewShortId()
+	if selected, durable := memql.PackageDomainIntentFromContext(ctx); durable {
+		// The native selection supplies an operation identity, never an account
+		// or permission override. Keep the normal caller-scoped site reads and
+		// let the write transaction recheck this person after the service stamp.
+		if selected.DomainID == "" || selected.DomainID != memql.BareShortId(selected.DomainID) || selected.SiteID != memql.BareShortId(siteID) || selected.Hostname != hostname || selected.AccountID != accountID {
+			return nil, memql.ErrPackageDomainFence
+		}
+		domainID = selected.DomainID
+	}
 
 	token, err := mintToken()
 	if err != nil {
@@ -216,11 +227,11 @@ func (i *Integration) handleAdd(ctx context.Context, args map[string]any, _ int)
 	}
 
 	binding := Binding{
-		ID:        id.NewShortId(),
+		ID:        domainID,
 		SiteID:    siteID,
 		Hostname:  hostname,
 		Token:     token,
-		AccountID: i.store.SiteAccountID(ctx, siteID),
+		AccountID: accountID,
 		Status:    StatusPendingDNS,
 	}
 	if err := i.store.Create(ctx, binding); err != nil {

@@ -194,7 +194,7 @@ func cancelHarness(t *testing.T, status string) (*Integration, *recordingEngine)
 	}}
 	i := NewIntegration(engine, discardLogger())
 	i.depsOnce.Do(func() {
-		i.deps = &Deps{Store: &store{engine: engine}, Logger: discardLogger()}
+		i.deps = &Deps{Store: &store{engine: engine, deploymentGate: offlineDeploymentGate}, Logger: discardLogger()}
 	})
 	return i, engine
 }

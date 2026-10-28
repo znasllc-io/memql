@@ -83,7 +83,14 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 
 	// ---- then the pointer back, and roll ----
 	if dslVersion != "" && d.Stager != nil {
+		var witness *ActiveSetVersion
 		current, rerr := d.Stager.ReadActiveSet(ctx)
+		if conditional, ok := d.Stager.(conditionalStager); ok {
+			version, err := conditional.ReadActiveSetVersion(ctx)
+			rerr = err
+			current = version.Domains
+			witness = &version
+		}
 		if rerr != nil {
 			return restored, rerr
 		}
@@ -103,7 +110,13 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			}
 		}
 		if changed {
-			if err := d.Stager.WriteActiveSet(ctx, next); err != nil {
+			var err error
+			if witness != nil {
+				_, err = d.Stager.(conditionalStager).CompareAndSwapActiveSet(ctx, *witness, next)
+			} else {
+				err = d.Stager.WriteActiveSet(ctx, next)
+			}
+			if err != nil {
 				return restored, err
 			}
 			if d.Roller == nil {

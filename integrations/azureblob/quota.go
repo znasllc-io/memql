@@ -192,7 +192,11 @@ func storageOwner(ctx context.Context, object string) (string, error) {
 }
 
 func (u *AzureBlobUploader) ReserveStorage(ctx context.Context, container, object string, size int64) error {
-	g, err := u.beginCapacity(ctx, container, object)
+	return u.reserveStorage(ctx, container, object, size, false)
+}
+
+func (u *AzureBlobUploader) reserveStorage(ctx context.Context, container, object string, size int64, clusterAsset bool) error {
+	g, err := u.beginAssetCapacity(ctx, container, object, clusterAsset)
 	if err != nil {
 		return err
 	}
@@ -211,7 +215,11 @@ func (u *AzureBlobUploader) StorageUsage(ctx context.Context) (storagequota.Usag
 }
 
 func (u *AzureBlobUploader) commitCapacity(ctx context.Context, container, object string, ids []string) (*storagequota.Guard, error) {
-	g, err := u.beginCapacity(ctx, container, object)
+	return u.commitAssetCapacity(ctx, container, object, ids, false)
+}
+
+func (u *AzureBlobUploader) commitAssetCapacity(ctx context.Context, container, object string, ids []string, clusterAsset bool) (*storagequota.Guard, error) {
+	g, err := u.beginAssetCapacity(ctx, container, object, clusterAsset)
 	if err != nil || g == nil {
 		return g, err
 	}
@@ -283,4 +291,16 @@ func (u *AzureBlobUploader) blockRetention(ctx context.Context, reason string) e
 		}
 	}
 	return errors.New(reason)
+}
+
+// beginAssetCapacity selects accounting only; it does not replace the request
+// context or grant authority. Shared destinations remain a closed native set.
+func (u *AzureBlobUploader) beginAssetCapacity(ctx context.Context, container, object string, clusterAsset bool) (*storagequota.Guard, error) {
+	if !clusterAsset {
+		return u.beginCapacity(ctx, container, object)
+	}
+	if !clusterAssetPath(object) {
+		return nil, errors.New("storage destination is not a native shared asset")
+	}
+	return u.beginCapacityForOwner(ctx, container, object, "")
 }

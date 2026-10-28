@@ -994,9 +994,10 @@ Repository confirmation requires the saved report and snapshot and refuses a
 redirect to another attempt. Execution keeps the caller's authority, detaches
 transport cancellation under a plan-derived time budget, and retains durable
 Cancel, heartbeat and bounded terminal bookkeeping. Cancel and abandonment
-checks re-read under the same gate. This is not a persistent job executor:
-process loss, including during the DSL restart, can still abandon the attempt
-before publication. No automatic continuation or effect replay is promised.
+checks re-read under the same gate. Background confirmation alone is not a
+persistent executor: process loss before the native rollout checkpoint can
+still abandon the attempt. The continuation below is limited to its saved
+selection and never authorizes replay of an uncertain effect.
 
 ## Repository requests in owned Work (source candidate, 2026-10-25)
 
@@ -1280,3 +1281,57 @@ validation or delivery fails, preserving that original error. Cancellation,
 truncation and a reply lost before completion leave the witness fenced.
 `TestManagerReleasesOnlyCompletedRuntimeErrors` exercises real runtime responses
 and a second manager against the durable witness.
+
+## Package self-roll continuation candidate (2026-10-25)
+
+The background-confirmation candidate above removes transport-lifetime coupling
+but cannot survive its own process restart. The follow-on candidate adds one
+package-native continuation journal after builds and retained site preparation,
+before the active DSL pointer and consumer roll. Its immutable selection, lease
+and effect intents are durable. The existing sweep may continue that selection
+on another replica; it never rebuilds, starts a new selection, reopens terminal
+history or resubmits an uncertain pointer/roll operation.
+
+Publication verifies the retained outputs to EOF, then rechecks the active DSL
+version and the original requester's current role and grants before the normal
+site mutation. Request-local authorization memos are refreshed without replacing
+the caller, token, cancellation or native fences. Site publication and its exact
+continuation receipt share the existing graph/outbox transaction and lease lock.
+An external outcome that cannot be observed remains uncertain; cancellation and
+deadline preserve that evidence rather than asserting that no effect occurred.
+
+Preparation now resolves store choices without changing a serving site. A new
+site may be created as an empty draft to reserve its asset path, but an existing
+site (including one discovered by `EnsureSite`) retains its original version
+witness. Optional serving/testing binding deltas are fixed in the native
+selection and commit with the bundle under ordinary store, site and account
+guards. Omission keeps the current binding; neither an upload failure nor a
+failed checkpoint may redirect a live storefront. The native publication fence
+compares the whole selected row delta and couples its receipt to the site and
+outbox transaction.
+
+Domain additions run after the selected publication. Their stable domain IDs
+and receipts survive replica replacement, while verification tokens remain only
+in the ordinary domain row. The native fence retains the original requester
+across the integration's system stamp and rechecks current authority, the
+publication receipt and the site version. Matching existing domains are observed
+without reminting tokens; known no-effect collisions become nonfatal receipts;
+unknown reads or write outcomes remain pending. Uploaded source artifacts keep
+their existing ID and content digest; changing the package's artifact reference
+refuses continuation. Regression coverage is in
+[metadata continuation tests](../../../component/packages/continuation_metadata_test.go),
+[artifact continuation tests](../../../component/packages/artifact_continuation_test.go),
+[native domain fence tests](../../../component/memql/package_domain_fence_test.go)
+and [domain handler tests](../../../integrations/customdomain/package_domain_test.go).
+These source additions require their own guarded validation; the earlier proof
+below does not qualify them or establish live recovery.
+
+The standalone source candidate passed 52 focused top-level cases (111 including
+subcases), then 4,669 affected top-level cases (10,235 including subcases) with
+11 documented intentional skips recorded separately. The proof used owned
+PostgreSQL and cached Azurite, including real conditional active-pointer writes,
+cross-replica continuation, late authority revocation and atomic publication
+rollback. It also measured 146 database embedded files. These receipts qualify
+that candidate, not its integration with the later build-time architecture
+change, nor a deployed recovery. The combined source needs its own focused
+integration and canonical build checks before release.

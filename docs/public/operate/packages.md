@@ -451,6 +451,49 @@ adds no permissions. Native gRPC avoids the browser connection dependency, but
 still requires checking the final deployment, serving sites and restarted DSL
 consumers. It does not make node loss recover automatically.
 
+### Connection-independent confirmation and self-roll recovery
+
+A caller can request background confirmation of the exact saved attempt with
+`background: true`, `confirm: true` and its parked `deploymentId`. The server
+claims its review gate before acknowledging, retains the original requester and
+selected snapshot, and bounds execution independently of the connection. An
+acknowledgement is acceptance, not completion. Without `background: true`,
+confirmation stays synchronous and connection loss before the durable checkpoint
+can still interrupt it. Concurrent confirmation cannot start the same attempt
+twice; Cancel remains available while the attempt is cancellable.
+
+For a package that changes DSL, recovery begins only after the build outputs and
+selected site assets have been retained and a native checkpoint has been saved,
+before changing the active DSL pointer or restarting consumers. Another replica
+can continue that same selection through the existing maintenance sweep. It
+checks the exact source, current requester authority, active pointer version,
+rollout identities and retained output bytes. Each selected site publication and
+its receipt commit together under the ordinary site and account guards.
+
+Preparation leaves existing store connections and custom domains untouched.
+A first deployment can create an empty draft for retained assets, but it does
+not activate the site or attach its stores. After rollout readiness, the bundle
+and any selected serving/testing store changes commit together. An omitted or
+unavailable store keeps its prior connection and the normal nonfatal note.
+Custom-domain additions then use stable selected identities and separate
+receipts. An existing matching binding keeps its verification token; a known
+collision is recorded as a nonfatal refusal. A lost reply is resolved from the
+receipt without creating another binding or rotating its token.
+
+For an uploaded ZIP source, the checkpoint keeps the existing Files artifact
+identity and the content digest read under the caller's access. It does not
+upload another copy or treat the artifact as a repository snapshot. Recovery
+also checks that the package still names that artifact; replacing the source
+reference stops continuation rather than publishing the earlier selection.
+
+This does not replay a build, create a replacement attempt or reopen terminal
+history. A lost pointer-write or rollout response is reconciled by observing the
+original operation; absence alone does not authorize resubmission. Revoked
+access, changed source or output, changed rollout identity, cancellation and the
+checkpoint deadline can stop progress. Work lost before the checkpoint can
+still become abandoned. Read the exact deployment, site and rollout evidence;
+there is no promise that every uncertain external outcome can be resolved.
+
 ## Private sources
 
 A source fetches under a personal credential its **owner** holds:

@@ -422,6 +422,13 @@ func (s *store) advance(ctx context.Context, deploymentId, status string) error 
 		langparser.QuoteString(deploymentId), langparser.QuoteString(status)))
 }
 
+func (s *store) claimConfirmation(ctx context.Context, deploymentId, nodeId string, at time.Time) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation claimPackageDeploymentConfirmation(deploymentId: %s, nodeId: %s, heartbeatAt: %s)",
+		langparser.QuoteString(deploymentId), langparser.QuoteString(nodeId),
+		langparser.QuoteString(at.UTC().Format(time.RFC3339))))
+}
+
 func (s *store) recordReport(ctx context.Context, deploymentId string, rep *Report, snapshotArtifactId string) error {
 	return s.writeInternal(ctx, fmt.Sprintf(
 		"mutation recordPackageDeploymentReport(deploymentId: %s, report: %s, sourceVersion: %s, snapshotArtifactId: %s)",
@@ -778,11 +785,12 @@ func (s *store) requestDeploymentCancel(ctx context.Context, deploymentId string
 		langparser.QuoteString(deploymentId)))
 }
 
-// cancelRequestedFor re-reads the flag the running pipeline checks at each
-// stage boundary. Internal: the pipeline is not a person and has no actor of
-// its own on a stage advance.
+// cancelRequestedFor reads the durable flag used by the heartbeat cancellation
+// latch and the analysis parking gate. A different replica may have committed
+// Cancel before this node receives cache invalidation; preserve the caller
+// while bypassing that cache, without relying on a preceding heartbeat write.
 func (s *store) cancelRequestedFor(ctx context.Context, deploymentId string) (bool, error) {
-	row, err := s.deploymentById(ctx, deploymentId)
+	row, err := s.deploymentById(memql.ContextWithFreshRead(ctx), deploymentId)
 	if err != nil || row == nil {
 		return false, err
 	}
