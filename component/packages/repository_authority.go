@@ -57,6 +57,34 @@ func (d *Deps) repositoryAccess(ctx context.Context, credentialID, ownerUserID, 
 	return RepositoryAuthority{RepositoryID: repository.ID, Repository: strings.ToLower(repository.FullName), InstallationID: installationID, CanWrite: repository.Permissions.CanWrite()}, nil
 }
 
+// RepositoryOwnerLogin is the GitHub login behind a source owner's grant,
+// read LIVE with their user token after the same access check a write needs
+// (release trains, design record 2026-10-27, section 7). A train lands only
+// on this login's approval, so it must come from the person's verified
+// connection, never from a stored or configured string: a connection that
+// lost the repository names nobody.
+func (i *Integration) RepositoryOwnerLogin(ctx context.Context, credentialID, ownerUserID, owner, repo string) (string, error) {
+	d, err := i.resolve()
+	if err != nil {
+		return "", err
+	}
+	if _, err := d.repositoryAccess(ctx, credentialID, ownerUserID, owner, repo); err != nil {
+		return "", err
+	}
+	credential, err := d.Credentials(ctx, strings.TrimSpace(credentialID), strings.TrimSpace(ownerUserID))
+	if err != nil {
+		return "", err
+	}
+	user, err := d.GitHubApp.User(ctx, credential.Bearer)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(user.Login) == "" {
+		return "", refuse("repository_identity_unavailable", "GitHub did not name the account behind this connection")
+	}
+	return user.Login, nil
+}
+
 // RepositoryWriterToken is the only package-to-pipeline writer mint. A source
 // owner who can merely see a repository must never borrow the App's wider
 // installation permissions. Revalidate on every call, even on a replica that

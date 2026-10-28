@@ -62,6 +62,32 @@ func TestRepositoryWriterRevalidatesAndNarrowsEveryMint(t *testing.T) {
 	}
 }
 
+// The login a release train lands on is read live with the person's own
+// token, after the same access check a write needs: a connection that lost
+// the repository names nobody.
+func TestRepositoryAccessReportsTheLogin(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	hub := installedRepo(newGrantHub(), "acme", "widget")
+	hub.body("/repos/acme/widget", http.StatusOK, `{"id":123,"full_name":"acme/widget","permissions":{"push":true}}`)
+	hub.body("/user", http.StatusOK, `{"login":"Ada-GH","id":9}`)
+	i, _, _, _ := grantHarness(t, hub, sealedGrantRow(t, grantRowOpts{}))
+	login, err := i.RepositoryOwnerLogin(context.Background(), grantCredentialId, grantOwner, "acme", "widget")
+	if err != nil || login != "Ada-GH" {
+		t.Fatalf("RepositoryOwnerLogin = %q, %v; want Ada-GH", login, err)
+	}
+
+	lost := installedRepo(newGrantHub(), "acme", "widget")
+	lost.body("/repos/acme/widget", http.StatusNotFound, `{"message":"Not Found"}`)
+	lost.body("/user", http.StatusOK, `{"login":"Ada-GH","id":9}`)
+	i, _, _, _ = grantHarness(t, lost, sealedGrantRow(t, grantRowOpts{}))
+	if login, err := i.RepositoryOwnerLogin(context.Background(), grantCredentialId, grantOwner, "acme", "widget"); err == nil || login != "" {
+		t.Fatalf("a connection that cannot see the repository named %q", login)
+	}
+	if lost.hits("/user") != 0 {
+		t.Errorf("the login was read before repository access was established")
+	}
+}
+
 func TestRepositoryAuthorityRequiresTheProvidersExactStableIdentity(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, testMasterKey)
 	for _, body := range []string{

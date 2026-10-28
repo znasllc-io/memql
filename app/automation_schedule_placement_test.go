@@ -71,6 +71,13 @@ func TestPipelinesPollRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, pipelinesPollAutomation, "agent")
 }
 
+// The release train re-runs a failed train's steps through the same opening a
+// person's re-run uses, which only an agent's driver picks up (design record
+// 2026-10-27).
+func TestReleaseTrainsTickOnlyOnElectedAgent(t *testing.T) {
+	assertPlacedOnlyOn(t, "tickPipelineTrains", "agent")
+}
+
 func TestPipelineArtifactRetentionRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, "sweepPipelineArtifacts", "agent")
 }

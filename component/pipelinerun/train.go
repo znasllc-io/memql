@@ -504,15 +504,17 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 			return err
 		}
 	}
-	return i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
+	_, err = i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
+	return err
 }
 
 // rebuildIfAsked rebuilds a waiting train when the owner labelled a pull
-// request on board train:hold, or when main moved from the train's base.
-func (i *Integration) rebuildIfAsked(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string) error {
+// request on board train:hold, or when main moved from the train's base, and
+// reports whether it did.
+func (i *Integration) rebuildIfAsked(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string) (bool, error) {
 	prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
 	if err != nil {
-		return err
+		return false, err
 	}
 	held := false
 	for _, pr := range prs {
@@ -522,16 +524,16 @@ func (i *Integration) rebuildIfAsked(ctx context.Context, d Deps, s pipelines.Tr
 	}
 	head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !held && head == t.BaseSHA {
-		return nil
+		return false, nil
 	}
 	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1)})
 	if err != nil || !ok {
-		return err
+		return ok, err
 	}
-	return i.build(ctx, d, s, p, updated)
+	return true, i.build(ctx, d, s, p, updated)
 }
 
 // casTrain applies patch only if the train is still the one read: same id,
