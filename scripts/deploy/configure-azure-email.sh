@@ -18,7 +18,11 @@ readonly CONTRIBUTOR='b24988ac-6180-42a0-ab88-20f7382dd24c'
 KUBE_FILE=""
 
 function cleanup() {
+    local rc=$?
+    # Preserve the capability's failure while cleaning up its kubeconfig.
+    set +e
     if [[ -n "$KUBE_FILE" ]]; then rm -f "$KUBE_FILE"; fi
+    (exit "$rc")
     _cap_on_exit
 }
 function validate_arguments() {

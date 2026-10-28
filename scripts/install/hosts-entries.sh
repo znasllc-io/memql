@@ -305,6 +305,19 @@ function cleanup_tmp() {
     return 0
 }
 
+# _hosts_on_exit -- apply()'s EXIT trap: removes the temp file, then runs
+# capability.sh's result guarantee with the status the script exited with, not
+# cleanup_tmp's.
+function _hosts_on_exit() {
+    local rc=$?
+    # errexit off: `(exit "$rc")` is a failing command whenever rc is non-zero,
+    # and errexit would abandon the handler there, before the envelope.
+    set +e
+    cleanup_tmp
+    (exit "$rc")
+    _cap_on_exit
+}
+
 # apply <mode> <path> -- renders the desired file, and writes it only when it
 # actually differs. Returns 0 when it wrote, 1 when the file was already right.
 function apply() {
@@ -315,8 +328,11 @@ function apply() {
     # `trap cleanup_tmp EXIT` overwrote it, and with it the guarantee that an
     # unexpected abort still emits a failure envelope -- so from this line on,
     # a `set -e` death produced silence on stdout and the caller saw a bare
-    # exit code with no message (memql#3562).
-    trap 'cleanup_tmp; _cap_on_exit' EXIT
+    # exit code with no message (memql#3562). The composition is
+    # _hosts_on_exit: the inline `cleanup_tmp; _cap_on_exit` it replaced handed
+    # _cap_on_exit cleanup_tmp's 0 instead of the abort's code, so an abort
+    # still said nothing.
+    trap _hosts_on_exit EXIT
     render "$mode" > "$_TMP_FILE"
 
     if cmp -s "$_TMP_FILE" "$path"; then

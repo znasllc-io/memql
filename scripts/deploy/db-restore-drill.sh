@@ -121,6 +121,18 @@ function teardown() {
     fi
 }
 
+# _drill_on_exit -- the EXIT trap: tears down, then runs capability.sh's result
+# guarantee with the status the script exited with, not teardown's.
+function _drill_on_exit() {
+    local rc=$?
+    # errexit off: `(exit "$rc")` is a failing command whenever rc is non-zero,
+    # and errexit would abandon the handler there, before the envelope.
+    set +e
+    teardown
+    (exit "$rc")
+    _cap_on_exit
+}
+
 function ensure_prerequisites() {
     command -v kubectl &>/dev/null || cap_fail 4 "kubectl is not installed"
     kc get cluster "$CLUSTER" &>/dev/null \
@@ -279,8 +291,10 @@ function main() {
     # `trap teardown EXIT` here would silently remove it, so an abort would clean
     # up correctly and then say nothing at all to its caller -- which for a
     # scheduled drill means a failure that reports as no output rather than as a
-    # failure.
-    trap 'teardown; _cap_on_exit' EXIT
+    # failure. The chain is _drill_on_exit: the inline `teardown; _cap_on_exit`
+    # it replaced handed _cap_on_exit teardown's 0 instead of the abort's code,
+    # so an abort said nothing anyway.
+    trap _drill_on_exit EXIT
 
     local started="$SECONDS"
     if [[ "$SAME_NS" == "false" ]]; then

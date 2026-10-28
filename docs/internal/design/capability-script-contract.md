@@ -173,7 +173,7 @@ Rules:
 | code | meaning                                                        |
 |------|----------------------------------------------------------------|
 | 0    | success                                                        |
-| 1    | generic / unexpected failure (the `set -e` abort default)      |
+| 1    | generic / unexpected failure (the `set -e` abort default, and a run that ends without a result) |
 | 2    | bad invocation: missing/invalid/unknown parameter              |
 | 3    | refused: required confirmation not provided                    |
 | 4    | precondition failed (a required tool/resource is absent)       |
@@ -240,7 +240,24 @@ Key helpers (full reference in the file header):
 
 The library installs an `EXIT` trap so that **even an uncaught `set -e` abort
 emits a failure envelope** — there is no silent death. Success paths must call
-`cap_ok` explicitly; the conformance test enforces this.
+`cap_ok` explicitly, and the trap holds them to it: a run that ends with status
+0 but never emitted an envelope is reported as a failure (`error.code` 1) and
+its exit is forced to 1. Stock macOS bash 3.2 is why that matters: under
+`set -e` it ends a script that hits a fatal expansion error (an unbound
+variable, a bad substitution such as `${x,,}`) with the status of the last
+command that ran, almost always 0, where bash 4+ exits 1. Trusting that 0 made
+those deaths report nothing at all.
+
+A script that needs `EXIT` cleanup of its own composes it with the guarantee
+rather than replacing it, through a handler that hands `_cap_on_exit` the
+script's own status: capture `$?` as the handler's first statement, turn
+errexit off (`set +e`), and restore the status with `(exit "$rc")` immediately
+before calling `_cap_on_exit` (`_install_on_exit` in
+`scripts/install/install-binary.sh`). Without the `set +e`, `(exit "$rc")` is
+itself a failing command on every abort and errexit abandons the handler there.
+An inline `trap 'cleanup; _cap_on_exit' EXIT` hands `_cap_on_exit` cleanup's
+status instead. `_cap_on_exit` may exit, so nothing after it in a handler is
+sure to run.
 
 ### Progress lines: `cap_progress`
 
@@ -319,7 +336,13 @@ source `capability.sh`):
 - resolves every key of a multi-key stdin-JSON params object -- stdin is
   buffered once in the parent shell, never re-read per `cap_param` (#2508);
 - `cap_progress` writes its one line to stderr and nothing to stdout, in both
-  shapes, and never fails the script on a malformed count.
+  shapes, and never fails the script on a malformed count;
+- a run that ends with status 0 without calling `cap_ok` or `cap_fail` exits 1
+  with exactly one failure envelope, under any bash, and so does a script
+  killed by an expansion error under bash 3.2 where one is available (the
+  `bash32-smoke` CI lane runs that case under the real interpreter);
+- an `EXIT` trap that composes `_cap_on_exit` with cleanup hands it the
+  script's own status, with errexit off.
 
 New capability scripts are picked up automatically. A script that is *not* a
 capability backend (a pure status reporter, a dev convenience) need not adopt

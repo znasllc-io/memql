@@ -21,7 +21,9 @@
 # -- plus whatever each script does at source time. It does NOT execute the
 # bodies; only seed-bootstrap.sh, whose body is the one that broke, is driven
 # far enough to build its argument list. Anything a body does past that point is
-# still uncovered here and is covered by the static gate.
+# still uncovered here and is covered by the static gate. One fixture of its own
+# drives the runtime's exit path: a capability killed by an expansion error,
+# which this interpreter ends with status 0, must still report a failure.
 #
 # NOT A CAPABILITY SCRIPT: it is a CI reporter, not a DSL-callable action, so it
 # does not source lib/capability.sh and emits no envelope.
@@ -129,6 +131,46 @@ function seed_bootstrap_dry_run() {
     esac
 }
 
+# no_result_is_not_a_success -- the runtime's answer to this interpreter's
+# silent deaths.
+#
+# Under `set -e`, bash 3.2 ends a script that hits a fatal expansion error --
+# here an unbound variable, the commonest -- with the status of the last
+# command that ran, which is almost always 0. capability.sh must report that as
+# a failure: trusting the 0 is how a capability printed its work and then
+# exited 0 with no envelope. The fixture lives in a temporary directory, never
+# under scripts/, so no discovery here or in the Go contract gate takes it for
+# a capability; `lib` names the runtime on a line of its own for the same
+# reason, since a `source` line naming lib/capability.sh is what both match.
+function no_result_is_not_a_success() {
+    local dir lib out status
+    dir="$(mktemp -d)"
+    lib="$(pwd)/scripts/lib/capability.sh"
+    cat > "${dir}/no-result.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source "${lib}"
+cap_init "ci.noResult" "an expansion death under bash 3.2"
+cap_info "value: \${never_set}"
+cap_ok
+EOF
+    out="$(run_bounded 30 bash "${dir}/no-result.sh" 2>/dev/null)"
+    status=$?
+    rm -rf "$dir"
+    if [[ "$status" -eq 0 ]]; then
+        fail "an expansion death under bash ${BASH_VERSION} exited 0, reported as a success: ${out}"
+        return
+    fi
+    case "$out" in
+        *'"ok":false'*)
+            note "an expansion death is reported as a failure (exit ${status})"
+            ;;
+        *)
+            fail "an expansion death exited ${status} with no failure envelope on stdout: ${out}"
+            ;;
+    esac
+}
+
 function main() {
     note "bash ${BASH_VERSION}"
     case "${BASH_VERSION}" in
@@ -153,6 +195,7 @@ function main() {
     fi
 
     seed_bootstrap_dry_run
+    no_result_is_not_a_success
 
     if [[ "$FAILURES" -gt 0 ]]; then
         printf 'FAILURES: %s\n' "$FAILURES" >&2

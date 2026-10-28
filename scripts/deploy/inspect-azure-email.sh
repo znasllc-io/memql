@@ -12,7 +12,11 @@ cap_spec_param "namespace" "Engine namespace (default memql)"
 readonly UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 KUBE_FILE=""
 function cleanup() {
+    local rc=$?
+    # Preserve the capability's failure while cleaning up its kubeconfig.
+    set +e
     if [[ -n "$KUBE_FILE" ]]; then rm -f "$KUBE_FILE"; fi
+    (exit "$rc")
     _cap_on_exit
 }
 function main() {

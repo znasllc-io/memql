@@ -41,7 +41,9 @@
 #   main "$@"
 #
 # Anything sourcing this file inherits a `trap` that guarantees exactly one
-# JSON envelope is written to stdout, even on an unexpected `set -e` abort.
+# JSON envelope is written to stdout, even on an unexpected `set -e` abort,
+# and that a run which ends without calling cap_ok is reported as a failure,
+# never as a silent exit 0.
 
 # Guard against double-sourcing.
 if [[ -n "${_CAP_LIB_LOADED:-}" ]]; then
@@ -56,6 +58,7 @@ _CAP_LIB_LOADED=1
 _CAP_NAME=""            # capability id, e.g. "k3d.down"
 _CAP_SUMMARY=""         # one-line human summary
 _CAP_EMITTED=0          # 1 once a result envelope has been written
+_CAP_IS_MAIN=1          # 0 when a shell sourced the script instead of running it
 _CAP_CHANGED=false      # idempotency signal: did this run mutate anything
 _CAP_RESULT_FIELDS=()   # accumulated "key":<json-value> pairs for result{}
 _CAP_SPEC_PARAMS=()     # "name|description" for --print-spec
@@ -71,9 +74,19 @@ _CAP_STDIN_READ=0
 # the CAP_PARAMS_STDIN env opt-in is set, stdin params are buffered here, in
 # the PARENT shell, so later "$(cap_param ...)" subshells all read the same
 # captured JSON instead of each draining stdin (#2508).
+#
+# It also records whether the capability IS the program bash is running: the
+# file that called cap_init is $0 (or empty, for code read from stdin or -c).
+# A shell that only sourced the script -- a test harness exercising its
+# functions -- is not the capability, and _cap_on_exit leaves its exit 0 alone.
 function cap_init() {
     _CAP_NAME="${1:?cap_init requires a capability id}"
     _CAP_SUMMARY="${2:-}"
+    if [[ -z "${BASH_SOURCE[1]:-}" || "${BASH_SOURCE[1]}" == "$0" ]]; then
+        _CAP_IS_MAIN=1
+    else
+        _CAP_IS_MAIN=0
+    fi
     if [[ -n "${CAP_PARAMS_STDIN:-}" ]]; then
         _cap_load_stdin
     fi
@@ -238,15 +251,42 @@ function _cap_emit_raw_result() {
     _CAP_EMITTED=1
 }
 
-# _cap_on_exit -- EXIT trap: guarantees a failure envelope if the script
-# aborts (set -e / uncaught error) without explicitly emitting one. Success
-# paths MUST call cap_ok; the conformance test enforces that.
+# _cap_on_exit -- EXIT trap: guarantees that a script which never emitted its
+# own envelope still ends with exactly one, and that it reports a failure.
+#
+#   - A non-zero exit (a set -e abort, an uncaught error) is reported with
+#     that code.
+#   - An exit of 0 is NOT a success. Success paths MUST call cap_ok, so a
+#     zero with no envelope means the script never got as far as saying it
+#     succeeded. It is reported as a failure and the exit is forced to 1, the
+#     contract's code for an unexpected failure. This binds the capability's
+#     own process only: a shell that sourced the script to exercise its
+#     functions (see cap_init) keeps its exit 0.
+#
+# The second case is not hypothetical. Under set -e, stock macOS bash 3.2
+# ends a script that hits a fatal expansion error -- an unbound variable, a
+# bad substitution such as ${x,,} -- with the status of the last command that
+# ran, almost always 0, where bash 4+ exits 1. Trusting that 0 made those
+# deaths report nothing at all.
+#
+# _cap_on_exit reads the status from $?, so a trap that composes it with
+# cleanup must hand it the script's own status: capture $? first, turn errexit
+# off, and restore it with `(exit "$rc")` right before the call, as
+# _install_on_exit in scripts/install/install-binary.sh does. And because it
+# may exit, nothing placed after it in a handler is sure to run.
 function _cap_on_exit() {
     local code=$?
     [[ "$_CAP_EMITTED" == "1" ]] && return
     if [[ $code -ne 0 ]]; then
         _cap_emit "false" "$code" "capability '${_CAP_NAME}' aborted (exit ${code}) without an explicit result"
+        return
     fi
+    [[ "$_CAP_IS_MAIN" == "1" ]] || return 0
+    # set -e still holds inside a trap, and when it fires there it abandons
+    # the handler WITHOUT changing the exit status, so the exit below must
+    # not depend on the emit succeeding.
+    _cap_emit "false" 1 "capability '${_CAP_NAME}' ended (exit 0) without an explicit result, which is not a success: no cap_ok or cap_fail ran (bash 3.2 also exits 0 when an unbound variable or a bad substitution kills a script; stderr names it)" || true
+    exit 1
 }
 
 #=============================================================================
