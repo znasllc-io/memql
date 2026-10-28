@@ -48,18 +48,22 @@ function show_help() {
 Usage: $0 --pr=<number> [options]
 
 Merge a pull request you authored on a repo that requires code-owner review,
-using the admin bypass the ruleset already grants you.
+using the admin bypass the ruleset already grants you -- in an EMERGENCY only.
+Release trains carry main (docs/public/operate/pipelines.md, Release trains):
+a pull request is landed by the train the owner approves, not by this script.
 
 Options:
     --pr=N            pull request number (required)
     --repo=OWNER/NAME repository (default: $DEFAULT_REPO)
     --check           report policy and PR readiness, merge nothing
+    --emergency=WHY   required to merge: why this cannot wait for the release
+                      train; posted on the pull request before the merge
     --strategy=S      merge | squash | rebase (default: merge)
     --help            this message
 
 Examples:
-    $0 --pr=4476
     $0 --pr=4476 --check
+    $0 --pr=4476 --emergency="production is down: the identity fix cannot wait for the train"
     $0 --pr=4476 --repo=znasllc-io/memql-znas --strategy=squash
 
 Why the bypass and not a settings change:
@@ -85,6 +89,7 @@ function parse_arguments() {
     REPO="$DEFAULT_REPO"
     CHECK_ONLY=false
     STRATEGY="merge"
+    EMERGENCY=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -92,6 +97,7 @@ function parse_arguments() {
             --repo=*)     REPO="${1#*=}"; shift ;;
             --strategy=*) STRATEGY="${1#*=}"; shift ;;
             --check)      CHECK_ONLY=true; shift ;;
+            --emergency=*) EMERGENCY="${1#*=}"; shift ;;
             --help|-h)    show_help; exit 0 ;;
             *)            log_error "unknown option: $1"; show_help; exit 2 ;;
         esac
@@ -103,6 +109,13 @@ function parse_arguments() {
         merge|squash|rebase) ;;
         *) log_error "--strategy must be merge, squash or rebase"; exit 2 ;;
     esac
+    # THE RELEASE TRAIN CARRIES MAIN (design record 2026-10-27, section 8): the
+    # owner approves a train pull request and it lands, so this bypass is
+    # break-glass. A merge states why it cannot wait; --check reads only.
+    if [[ "$CHECK_ONLY" != true && -z "${EMERGENCY//[[:space:]]/}" ]]; then
+        log_error "merging outside the release train needs --emergency=<why this cannot wait for the next train>; the reason is posted on the pull request"
+        exit 2
+    fi
 }
 
 # report_policy prints what the ruleset actually requires, so the bypass is used
@@ -482,6 +495,13 @@ function merge_pr() {
         log_info "pull request is ${MERGE_STATE}; merging through the ordinary path, no bypass needed"
     fi
 
+    # The reason goes on the pull request FIRST: a merge whose reason could not
+    # be recorded does not happen, so the trail always says why main moved
+    # outside a train.
+    if ! gh pr comment "$PR" --repo "$REPO" --body "Emergency merge outside the release train: ${EMERGENCY}" 2>&1; then
+        log_error "the emergency reason could not be posted on the pull request; nothing was merged"
+        exit 5
+    fi
     if gh pr merge "$PR" --repo "$REPO" "${extra[@]+"${extra[@]}"}" "--${STRATEGY}" 2>&1; then
         log_info "merge command accepted"
     else

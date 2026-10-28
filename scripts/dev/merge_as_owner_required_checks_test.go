@@ -94,6 +94,7 @@ case "$sub" in
     case "${args[0]:-}" in
       view)  emit ` + shellQuote(pr) + ` ;;
       merge) echo "STUB-MERGE-INVOKED" ;;
+      comment) printf '%s\n' "${args[*]}" >> ` + shellQuote(filepath.Join(dir, "comments")) + `; echo "STUB-COMMENT-INVOKED" ;;
       *)     echo '{}' ;;
     esac
     ;;
@@ -113,8 +114,16 @@ esac
 // --check returns BEFORE guard_readiness and would test nothing here.
 func runMergeAsOwner(t *testing.T, stubDir string) (string, int) {
 	t.Helper()
+	return runMergeAsOwnerWith(t, stubDir, "--pr=1", "--emergency=test merge")
+}
+
+// runMergeAsOwnerWith runs the script with exactly args: the release train
+// carries main, so a merge here needs an --emergency reason (design record
+// 2026-10-27, section 8), and the tests that are about that pass their own.
+func runMergeAsOwnerWith(t *testing.T, stubDir string, args ...string) (string, int) {
+	t.Helper()
 	script := filepath.Join(repoRoot(t), "scripts", "dev", "merge-as-owner.sh")
-	cmd := exec.Command("bash", script, "--pr=1")
+	cmd := exec.Command("bash", append([]string{script}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	code := 0
@@ -619,5 +628,41 @@ func TestGuardHonorsRequiredCheckAppAndHead(t *testing.T) {
 				t.Fatalf("App evidence must name the reviewed PR head: %s (%v)", asked, err)
 			}
 		})
+	}
+}
+
+// Once release trains carry main, this script is the break-glass path: a merge
+// without a stated emergency is refused before anything is read or merged.
+func TestMergeRefusesWithoutAnEmergencyReason(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, prRollup(ciRequiredGreen))
+	for _, args := range [][]string{{"--pr=1"}, {"--pr=1", "--emergency="}, {"--pr=1", "--emergency=   "}} {
+		out, code := runMergeAsOwnerWith(t, stub, args...)
+		if code != 2 {
+			t.Fatalf("%v: exit %d, want 2\n%s", args, code, out)
+		}
+		if strings.Contains(out, "STUB-MERGE-INVOKED") || !strings.Contains(out, "release train") {
+			t.Errorf("%v: the refusal must merge nothing and name the release train:\n%s", args, out)
+		}
+	}
+	if out, code := runMergeAsOwnerWith(t, stub, "--pr=1", "--check"); code != 0 {
+		t.Errorf("--check needs no emergency reason: exit %d\n%s", code, out)
+	}
+}
+
+// The reason is recorded on the pull request before the merge, so the trail
+// says why main was moved outside a train.
+func TestEmergencyReasonIsRecordedOnThePullRequest(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, prRollup(ciRequiredGreen))
+	out, code := runMergeAsOwnerWith(t, stub, "--pr=1", "--emergency=production is down")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	comment, merge := strings.Index(out, "STUB-COMMENT-INVOKED"), strings.Index(out, "STUB-MERGE-INVOKED")
+	if comment < 0 || merge < 0 || comment > merge {
+		t.Fatalf("the reason must be commented before the merge:\n%s", out)
+	}
+	recorded, err := os.ReadFile(filepath.Join(stub, "comments"))
+	if err != nil || !strings.Contains(string(recorded), "production is down") {
+		t.Errorf("comment = %q, %v; want the reason", recorded, err)
 	}
 }
