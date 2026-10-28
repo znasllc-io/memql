@@ -54,8 +54,9 @@ stays in the plan (is not carried) if either holds:
 - its earlier row named artifacts (`WorkStep.ArtifactFileIDs` is not empty).
   Every artifact the candidate pins must come from the attempt being released.
 - the release is no longer fresh: the first attempt of the release run key
-  started more than 24 hours before this attempt. In that case nothing is
-  carried and every step runs.
+  was opened (`queuedAt`) more than 24 hours before this attempt was opened. In
+  that case nothing is carried and every step runs. `queuedAt` is used because
+  every run has it, while `startedAt` is optional.
 
 The 24-hour bound matches evidence reuse. It makes a late re-run check
 vulnerabilities and everything else again. It is a chain-level bound: every
@@ -76,8 +77,12 @@ packages, command steps only, never SARIF or repository-change producers.
 
 `existingReleaseBuild` fills both from the release runs it already reads for the
 commit. An attempt above 1 must name, through `RerunOf`, an earlier attempt of
-the same run key. A missing link, a cycle or more than 50 attempts is an error.
+the same run key. A missing link, a cycle or more than 50 attempts breaks the
+chain.
 The chain never crosses run keys, so it never mixes events, modes or commits.
+A broken chain leaves `Chain` empty instead of failing the observation, so a
+release with irregular history keeps today's behavior: it observes, and it
+refuses adoption.
 
 ### 3. Saved release adoption
 
@@ -112,8 +117,8 @@ chain:
    Every attempt must match the carrying run's owner, pipeline, repository,
    commit, mode `full`, event `release`, version and tag. The walk must end at
    attempt 1.
-2. Freshness: attempt 1 started at most 24 hours before the carrying attempt
-   started.
+2. Freshness: attempt 1 was opened (`queuedAt`) at most 24 hours before the
+   carrying attempt was opened.
 3. For the step key, take the nearest earlier attempt that executed it, moving
    back past attempts that carried it. Inspect that step with the new
    `pipelines.InspectCarriedReleaseReceipt`. It differs from
