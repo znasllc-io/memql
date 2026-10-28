@@ -997,3 +997,111 @@ database; the run page tests in
 `clients/os/test/deployables/pipelines/runPage.test.tsx` cover the notice. A
 live cluster run and a check run accepted by GitHub itself are not verified
 here.
+
+## Release trains carry main (2026-10-27)
+
+Every pull request to this repository is opened under the owner's account, so
+GitHub never lets one be approved: each merged through `merge-as-owner.sh`'s
+admin bypass, which skips the merge queue, and every merge left the other open
+pull requests behind `main` to run the whole pipeline again. The owner chose
+trains (design record `docs/superpowers/specs/2026-10-27-release-trains-design.md`):
+ready pull requests collect, a train tests them together once, and only the
+owner's GitHub approval of the train pull request moves `main`. The connected
+workflow is in [pipelines.md](../../public/operate/pipelines.md#release-trains).
+
+**Trigger.** `tickPipelineTrains` runs every minute on the one agent replica
+holding the `pipelines-trains` lease (`TestReleaseTrainsTickOnlyOnElectedAgent`):
+an agent, because a retry opens the same failed-only re-run a person's re-run
+opens, and only an agent's driver picks that up. `pipelinesTrainTick` is
+internal-origin only (`TestTickRefusesAClientCaller`). A repository takes part
+only when `MEMQL_PIPELINES_TRAINS` names it with `enabled: true`; a value that
+does not parse runs no train anywhere and logs the field at fault, rather than
+guessing at a typo every minute. An express train is
+`pipelinesTrainExpress`, the pipeline owner's alone, under
+`execute app:pipelines/rerun`.
+
+**Evidence, and what it is not.** A pull request boards on its pipeline's own
+pull request check, `pipelines.CheckRunName(name)`, completed `success` on its
+current head, and on its labels. The check is read by name with no App id,
+because the pipeline row carries none: another App reporting a check of the
+same name could board a pull request. A failed train run is judged on its
+failed steps' error codes and Go packages, each boarded pull request's changed
+files (300 at most; an incomplete list makes it a suspect), the root `go.mod`
+module path at the train's base, and `main`'s newest completed push run's
+failed steps. The approval is the latest `APPROVED` or `CHANGES_REQUESTED`
+review by the pipeline owner's login, learned from their own GitHub
+connection, and it counts only for the commit it names.
+
+**The invariant: what lands is what the owner approved.**
+`pipelines.ApprovalLands` requires that review to name the train pull
+request's current head; landing requires `main` to still be the train's base;
+and the merge sends that head as GitHub's guard. Any of them moving sends the
+train back to `building` and the owner is asked again
+(`TestRebuiltTrainAsksAgain`, `TestMainMovingRebuildsAWaitingTrain`,
+`TestApprovalForAnOlderHeadDoesNotLand`). Nothing in the coordinator can create
+a review, so a model never approves. Boarding merges the head commit read at
+boarding, not the branch, so a push after boarding never rides along
+(`TestTrainMergesTheBoardedCommitNotTheNewHead`).
+
+**Ownership and permissions.** Every GitHub call uses an installation token
+minted through the pipeline owner's GitHub connection, and is refused if the
+repository's installation changed since the pipeline was connected. The train
+row is on the owner tier like every pipelines concept; its two mutations are
+`@serverOnly`. The merge goes through the branch's normal rules with no bypass.
+
+**Freshness and replicas.** The row is the state, not the process. Each tick
+reads it with `memql.ContextWithFreshRead` and takes one step; every write is a
+compare-and-swap on `(id, state, updatedAt)` under `TrainGateKey`'s Postgres
+lock, with `updatedAt` written in nanoseconds and moved strictly forward as the
+row's version. GitHub is never called under the gate. A build makes many GitHub
+calls, so a `building` train younger than 10 minutes belongs to the tick that
+claimed it and an older one is reclaimed and rebuilt from `main`
+(`TestTwoTicksBuildOneTrain`). A replica lost between approval and merge
+leaves the train `landing`, and the next tick merges it or records the merge
+it finds (`TestLandingResumesAfterAReplicaChange`). Both race tests are
+in-process: two ticks over one store, not a live two-replica cluster.
+
+**Failure handling, in order** (`pipelines.TriageTrainFailure`,
+`TestTriageTrainFailure`): every failed step environmental and not yet
+retried, retry once; `main` failing one of the same steps, hold, because
+dropping a pull request would blame its author for `main`'s break; the rebuild
+cap reached, hold; exactly one suspect, drop it with a comment and
+`train:dropped`, and rebuild; anything else, hold. Rejected: dropping the
+newest or largest pull request when several are suspects, because a wrong drop
+costs its author a day and blames them for someone else's break. Splitting a
+train to isolate the cause needs a run limited to named steps, which the engine
+cannot start, so it waits until after the switch. A held train waits for the
+owner: closing its pull request cancels it, and `train:hold` on a pull request
+on board, or `main` moving, rebuilds it.
+
+**Retained and temporary.** The train rows are kept as the history of every
+departure, a cancelled empty departure included: recording it stops the next
+tick re-reading GitHub every minute until the next departure time, at the cost
+of one row. The train branch is deleted on landing. A train's messages are
+keyed `<event>@<headSha>` on the row and on the outbound delivery's dedupe
+key, so a message staged twice by two replicas, or before a write failed, is
+one delivery (`TestTrainMessagesAreSentOnce`); a message that cannot be sent is
+logged and never stops the train.
+
+**Admission.** A train run is the pull request run of a `train/` branch; the
+admission file's optional `allowTrainRuns` admits it while `allowNewRuns`
+holds other runs (`TestAdmissionAdmitsATrainRunUnderTheTrainAllowance`,
+`TestAdmissionWithoutTheTrainFieldIsUnchanged`). The engine reads the field
+before any guard emits it, because the reader refuses unknown fields and an
+older engine would hold every run. A train run queued 15 minutes while
+admission holds it sends the owner an ACTION NEEDED message.
+
+**The bypass becomes break-glass.** `scripts/dev/merge-as-owner.sh` refuses to
+merge without `--emergency=<why>` and posts the reason on the pull request
+before merging; a reason it cannot post stops the merge, so the trail always
+says why `main` moved outside a train.
+
+**Not verified here.** No live train has run. Unverified until the first one:
+that the App may create `train/*` branches and merge into them under this
+repository's rulesets; that the train pull request's run starts from the App's
+own pull request event or the poll; and that the owner's review of an
+App-authored pull request satisfies `require_code_owner_review` together with
+`require_extra_approval_for_unattributed_changes`. Verified on 2026-10-28:
+GitHub marks a pull request merged when its head reaches `main` through
+another pull request's merge (memql#6325 marked memql#6318 to memql#6324
+merged).

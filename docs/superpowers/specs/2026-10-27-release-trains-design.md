@@ -104,8 +104,12 @@ PR lane green, and stop. They never merge.
   hours, so each train reaches the owner around 12:00 and 18:00.
 - An express train departs on demand with only the pull requests named. The
   owner starts it, or tells an agent to. It goes ahead of a train that is
-  waiting for approval; that train is rebuilt after the express train lands.
-- A departure with no ready pull request creates nothing and sends nothing.
+  waiting for approval or held: as built, that train is cancelled and its pull
+  requests board the next train. It is refused while a train is building or
+  running.
+- A departure with no ready pull request sends nothing. As built, it is
+  recorded as a cancelled train, so the next tick does not re-read GitHub
+  every minute until the next departure.
 
 ### 4.3 Building the train
 
@@ -157,7 +161,9 @@ repository, each entry naming `enabled`, `departures` (`HH:MM` in `timeZone`),
 (default 2). A malformed variable sends no train anywhere and says why in the
 log.
 
-A scheduled automation on the cron leader drives it. Every transition is a
+A scheduled automation drives it, every minute, on the one agent replica
+holding the `pipelines-trains` lease (an agent, because a retry opens the
+failed-only re-run only an agent's driver picks up). Every transition is a
 compare-and-swap on the record under a Postgres lock, with a read that skips
 the node's result cache, so a coordinator that moves to another replica in the
 middle of a train resumes from the record (the cross-node rule in
@@ -391,9 +397,9 @@ There is no shadow period (2): production has no clients relying on it yet.
 
 ## 15. Assumptions not yet verified
 
-- GitHub marks a pull request merged when its head reaches `main` through
-  another pull request's merge. memql#6325 tests this when it merges: it
-  should mark #6318, #6319, #6320, #6321, #6322, #6323 and #6324 merged.
+- Verified 2026-10-28: GitHub marks a pull request merged when its head
+  reaches `main` through another pull request's merge. memql#6325's merge
+  marked #6318, #6319, #6320, #6321, #6322, #6323 and #6324 merged.
 - The app's token may create `train/*` branches and merge into them with
   `POST /merges` under this repository's rulesets. Today's rulesets target
   `main`.

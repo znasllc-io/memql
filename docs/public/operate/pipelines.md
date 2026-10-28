@@ -46,6 +46,7 @@ checks to another source, disconnect the pipeline it has first
 | `v1:pipelines:pipeline` | source | The repository, how deliveries arrive, where steps may run, which secrets they may resolve, what the poll has seen, the timing table. Never the manifest: every run reads that at its own commit |
 | `v1:pipelines:run` | attempt of one run key | The event and mode, status and conclusion, the refusal that ended it, the run's own reason when it failed and no step reported why, the check run's id and state, the stage table, the agent driving it |
 | `v1:pipelines:channel` | notify target | Where a notify stage delivers; managed in Pipelines → Settings → Channels |
+| `v1:pipelines:train` | departure of a repository's [release train](#release-trains) | The pull requests on board, left off and dropped, the train branch, pull request and run, the state, the approval and the landed commit |
 
 A run compiles into one `v1:work:goal` with one `v1:work:step` per step, so the
 work spine's journal and the Nexus drawing show it like any other work. Every
@@ -87,6 +88,9 @@ queue admission, replace it only through the reviewed, atomic transition
 described [below](#independent-review-for-ordinary-pull-requests), then qualify
 the first live mixed queue group under the new required checks. An unqualified
 or failing group stays blocked.
+A repository with [release trains](#release-trains) on replaces the queue
+step: its pull requests stop at a passing check, and a train tests them together
+and lands them when the owner approves the train pull request.
 An existing automatic GitOps or package feed can reconcile changes to the source
 it watches. Check that feed's settings before merging an installation update;
 the separation above does not disable independently configured automation.
@@ -383,6 +387,254 @@ actual mixed group only after that transition; missing, moved-head,
 changed-membership or unconfirmed evidence must block it. Offline group tests
 are not a live queue proof. Installing the engine does not enable this role or
 change GitHub protections.
+
+## Release trains
+
+**A release train collects a repository's ready pull requests, tests them
+together once, and lands them on the default branch only when the pipeline's
+owner approves.** It replaces merging pull requests one at a time. A repository
+has trains only when the train settings name it ([below](#turning-trains-on));
+without them nothing in this section applies.
+
+Trains are for a repository whose pull requests are all opened under the
+owner's own account. GitHub never lets a pull request's author approve it, so
+each one merges through an administrator bypass, and the bypass skips the merge
+queue: every merge leaves the other open pull requests behind the default
+branch, and each runs the whole pipeline again. A train pull request is opened
+by the cluster's GitHub App, so the owner can approve it, and one approval
+covers every pull request on board.
+
+```mermaid
+flowchart LR
+    PR["Pull request: its check passes"] --> WAIT["Waits; nothing merges on its own"]
+    WAIT --> DEPART["Departure: scheduled or express"]
+    DEPART --> BUILD["Train branch: default branch plus each ready pull request, and a version bump"]
+    BUILD --> RUN["The train pull request's run"]
+    RUN -->|Passed| ASK["ACTION NEEDED: approve the train pull request"]
+    RUN -->|Failed| TRIAGE["Retry once, drop one pull request, or hold for the owner"]
+    TRIAGE -->|Dropped| BUILD
+    ASK -->|Owner approves the current head| LAND["Merged onto the default branch"]
+```
+
+### Turning trains on
+
+Trains read the global variable `MEMQL_PIPELINES_TRAINS`: one JSON object,
+keyed by repository.
+
+```json
+{"repositories":{"acme/shop":{"enabled":true,"departures":["09:00","15:00"],"timeZone":"America/Chicago","channel":"releases","ownerDiscordUserId":"123456789012345678","maxRebuilds":2}}}
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `enabled` | no | `true` runs trains for the repository; `false` keeps the entry and runs none |
+| `departures` | yes | One or more `HH:MM` times, in `timeZone`, at which boarding closes and a train leaves |
+| `timeZone` | yes | An IANA zone name, such as `America/Chicago` |
+| `channel` | yes | The name of the pipeline owner's Discord [notification channel](#configure-a-notification-channel) that every train message goes to. It must be active and accept the repository's pipeline |
+| `ownerDiscordUserId` | no | The one Discord user (17 to 20 digits) an ACTION NEEDED message mentions. Without it, messages mention no one |
+| `maxRebuilds` | no | How many times one departure may rebuild its train, 1 to 5; default 2 |
+
+An unknown key, a malformed time or zone, or a repository that is not
+`owner/name` turns trains off **in every repository** until it is fixed: each
+tick logs `pipelines: release trains are off until the settings parse` with
+the field at fault, and runs nothing. A train also needs the repository's
+active pipeline, the GitHub App installation that pipeline uses (the train
+writes branches, pull requests, comments and labels, under `contents` and
+`pull_requests` write), and an agent replica: the `tickPipelineTrains`
+automation runs every minute on the one agent that holds the
+`pipelines-trains` lease.
+
+### Boarding
+
+A pull request boards a train when all of these hold:
+
+- it is open, is not a draft, and targets the default branch;
+- the pipeline's pull request check, `MemQL / <name>`, completed with success
+  on its current head;
+- it carries neither `train:hold` nor `train:dropped`.
+
+A pull request whose head branch starts with `train/` is a train's own and
+never boards. Ready pull requests board in pull request number order. Each one
+left off is listed on the train pull request with its reason, such as
+*MemQL / shop has not passed on 3f9c2ab* or *is held with train:hold*.
+
+People and agent sessions open a pull request, get its check green, and stop;
+nothing merges it but a train. `train:hold` keeps a pull request off trains
+until the label is removed. `train:dropped` is the label a train adds when it
+drops a pull request ([below](#when-a-trains-run-fails)); remove it once the
+fix is pushed, and the next train can take the pull request.
+
+### Departures
+
+- **Scheduled.** A train leaves at each `departures` time unless the newest
+  train has not finished: one train runs at a time, and ready pull requests
+  keep collecting. A departure blocked that way leaves on the first minute
+  after that train lands or is cancelled. A coordinator that was down across
+  several departures runs one train, for the latest of them.
+- **Express.** `pipelinesTrainExpress(repository, pullRequests)` starts a train
+  at once carrying only the named pull requests, each of which must be ready to
+  board. Only the pipeline's owner can start one, holding `execute` on
+  `app:pipelines/rerun`. It replaces a train that is waiting for approval or
+  held: that train is cancelled, *Replaced by an express train.*, and its pull
+  requests board the next train. It is refused while a train is building or
+  running.
+- **Nothing ready.** A departure with no ready pull request is recorded as a
+  cancelled train, *No pull request was ready to board.*, and sends nothing.
+
+A train's branch is `train/<yyyy-mm-dd>-<n>`: the date in `timeZone`, and the
+day's count of that repository's trains.
+
+### Building the train
+
+Acting as the GitHub App, with an installation token minted through the
+pipeline owner's GitHub connection, the train:
+
+1. creates its branch at the default branch's head (on a rebuild, resets it
+   there);
+2. merges each boarding pull request's head into it on GitHub's side, in
+   number order, with nothing checked out. A pull request that conflicts with
+   the default branch, or with one merged onto the train before it, stays off
+   and gets a comment saying so;
+3. commits the version bump: the patch number of the repository's `VERSION`
+   file plus one, unless a pull request on board already changed it. A
+   repository with no `VERSION` file, or one that is not `MAJOR.MINOR.PATCH`,
+   gets no bump;
+4. opens the train pull request, *Train train/\<date\>-\<n\>*, listing the pull
+   requests on board (number, title and head commit), those left off or dropped
+   and why, and the version. A rebuild updates the same pull request.
+
+The train pull request runs the pipeline as any pull request does and reports
+the same `MemQL / <name>` check.
+
+### States
+
+| State | Meaning |
+|---|---|
+| `building` | Its branch and pull request are being made. A build belongs to the tick that claimed it for 10 minutes; one older than that was abandoned, and the next tick builds it again |
+| `running` | The train pull request's run is under way |
+| `awaiting_approval` | The run passed; the owner decides |
+| `landing` | Approved, and being merged |
+| `landed` | On the default branch |
+| `held` | Needs the owner; the reason is on the record and in Discord |
+| `cancelled` | Its pull request was closed, an express train replaced it, or nothing was ready |
+
+Each train is a `v1:pipelines:train` row, read with `pipelineTrainsForOwner`.
+**The row is the state, not the process.** Each one-minute tick reads it afresh
+and takes one step, and every step is a compare-and-swap under a Postgres lock
+held per repository: a tick that moves to another agent replica resumes from
+the row, and two ticks never act twice on one state.
+
+### When a train's run fails
+
+The train decides, in this order:
+
+1. **The machinery failed: retry once.** When every failed step reports
+   `pipeline_step_timeout`, `pipeline_runner_unavailable`,
+   `pipeline_executor_error`, `pipeline_image_pull_failed` or
+   `pipeline_clone_failed`, the failed steps run again once, as a failed-only
+   re-run does. A failed test is never retried.
+2. **The default branch fails too: hold.** When the default branch's newest
+   completed push run failed one of the same steps, no pull request on the
+   train is to blame, and the train is held. Fix the default branch first, for
+   example with an express train carrying the fix.
+3. **The cap: hold.** After `maxRebuilds` rebuilds in one departure, the train
+   is held.
+4. **One suspect: drop it.** Each failed step names the Go packages it tested.
+   A pull request on board that changed files in one of those packages, or in a
+   directory above one, is a suspect, and so is one whose changed files could
+   not all be listed. Exactly one suspect is dropped: it gets `train:dropped`
+   and a comment saying why, and the train is rebuilt without it and runs
+   again. Anything else holds the train, because the train never drops a pull
+   request it cannot single out. A failed step that tested no package names no
+   suspect.
+
+A run that failed with no failed step to blame, such as a refusal, holds the
+train with the run's own reason.
+
+**A held train waits for the owner.** Closing the train pull request cancels
+the train, and its pull requests board the next one. Adding `train:hold` to a
+pull request on board rebuilds the train without it, and so does the default
+branch moving: a train held because the default branch failed is rebuilt by
+itself once a fix lands there.
+
+### Approval and landing
+
+The owner approves the train pull request on GitHub. Every minute, the train
+reads that pull request's reviews: the latest `APPROVED` or
+`CHANGES_REQUESTED` review by the pipeline owner's GitHub login, learned from
+their GitHub connection, decides, and it lands the train only when it approves
+the train pull request's **current head**. An approval given before a rebuild
+does not land the rebuilt train. Nothing in the train can create a review: a
+model never approves.
+
+To land, the default branch must still be the commit the train was built on.
+The App then merges the train pull request with the `merge` method, guarded by
+the approved head, under the branch's normal rules and with no bypass. If the
+default branch moved, the train is rebuilt and asks again; if GitHub refuses
+the merge, the train is held with GitHub's status. After landing, each pull
+request on board gets a comment naming the train and the merge commit, and the
+train branch is deleted. A train pull request someone merged by hand is
+recorded `landed`.
+
+While a train waits for approval, adding `train:hold` to one of its pull
+requests, or the default branch moving, rebuilds it, and the owner is asked
+again. A train still waiting when the next departure time passes sends one
+reminder.
+
+### Discord messages
+
+Every train message goes to the settings' `channel` through the cluster's
+outbound worker, which owns delivery, retries and the receipt. Messages come
+from *MemQL Pipelines* and link the train pull request and the run's page in
+MemQL OS.
+
+| Event | Kind | Says |
+|---|---|---|
+| Departed | Status | The pull requests on board, and those left off and why |
+| Dropped | Status | The pull request dropped, and why |
+| Awaiting approval | ACTION NEEDED | The train passed: approve the train pull request |
+| Held | ACTION NEEDED | Why the train is held, and its failed steps |
+| Reminder | ACTION NEEDED | The train has waited past a departure for approval |
+| Admission held | ACTION NEEDED | The train's run has been queued for 15 minutes while [run admission](#operator-run-admission) holds new runs |
+| Landed | Status | How many pull requests landed, and the merge commit |
+
+**Only ACTION NEEDED messages mention anyone, and only `ownerDiscordUserId`.**
+The mention is the message's text, with `allowed_mentions` naming that one
+user, because Discord never notifies a mention inside an embed. Text from pull
+requests and commits is escaped, so a title cannot mention anyone. Each message
+is sent once per event and train head, and one that cannot be sent is logged
+and never stops the train. A pull request's own results stay on GitHub: it
+appears in Discord only when it is left off or dropped.
+
+### Moving a repository to trains
+
+1. Create the Discord channel and allow the pipeline on it.
+2. Make the owner the code owner of every path, so the owner's approval is the
+   review GitHub requires on a train pull request.
+3. Require the pipeline's pull request check, `MemQL / <name>`, on the default
+   branch, and remove its merge-queue rule: the train does the batching.
+4. Add the repository to `MEMQL_PIPELINES_TRAINS` with `enabled: true`. The
+   next departure is the first train.
+
+Keep the administrator bypass, for emergencies only. While a repository moves
+to trains, its default branch can require the push run's check,
+`MemQL / <name> / push`, instead: a release can then be cut from the default
+branch's own run while pull requests still merge one at a time. The push check
+never runs on a pull request, so require `MemQL / <name>` again when trains
+start; a train pull request's run reports it. To fall back, set `enabled` to
+`false`, restore the saved branch rules, and merge one pull request at a time.
+
+### Not yet
+
+- **Splitting.** A failure with several suspects holds the train; it does not
+  yet split them to find the cause.
+- **A shorter pull request check.** Every pull request, and every train pull
+  request, runs the pipeline as its manifest selects it.
+- **Reusing the train's result.** The default branch's push run tests the
+  landed commit again, though its tree is the one the train tested.
+- **Review events.** Approval is read every minute rather than delivered.
+- **Releasing from the train.** Cut a release from the default branch after a
+  train lands, as before.
 
 ## Connecting a pipeline
 
