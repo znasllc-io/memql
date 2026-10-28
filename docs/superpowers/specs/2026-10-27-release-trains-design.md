@@ -104,9 +104,10 @@ PR lane green, and stop. They never merge.
   hours, so each train reaches the owner around 12:00 and 18:00.
 - An express train departs on demand with only the pull requests named. The
   owner starts it, or tells an agent to. It goes ahead of a train that is
-  waiting for approval or held: as built, that train is cancelled and its pull
-  requests board the next train. It is refused while a train is building or
-  running.
+  waiting for approval or held: as built, that train is cancelled, and its
+  pull requests leave on a new train as soon as the express train finishes. It
+  is refused while a train is building or running, and, changing nothing,
+  when none of the named pull requests can board.
 - A departure with no ready pull request sends nothing. As built, it is
   recorded as a cancelled train, so the next tick does not re-read GitHub
   every minute until the next departure.
@@ -222,8 +223,8 @@ In this order:
    there is exactly one, it is dropped.
 3. **No suspect: check `main`.** If `main`'s newest completed push run failed
    the same step, `main` has the problem: the train is `held`, the owner is
-   told (9), and the fix rides an express train; the held train is rebuilt
-   after it lands. Otherwise the train is `held` and the owner is told the
+   told (9), and the fix rides an express train; the held train's pull
+   requests leave on a new train as soon as it lands. Otherwise the train is `held` and the owner is told the
    cause is unclear. Running only the failed steps against `main`'s head needs
    a run limited to named steps, which the engine cannot start today; it comes
    with splitting (step 4), after the switch.

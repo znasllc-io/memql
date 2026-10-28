@@ -325,3 +325,57 @@ func TestAMergeRaceStillLands(t *testing.T) {
 		t.Fatalf("state %s landed %q; want landed after the race", got.State, got.LandedSHA)
 	}
 }
+
+// TestExpressRefusesWhenNothingNamedCanBoard: the owner named a pull request
+// whose check is still running and a number that is not open. Nothing could
+// leave, so the waiting train is left as it was and the refusal says why for
+// each number.
+func TestExpressRefusesWhenNothingNamedCanBoard(t *testing.T) {
+	th, waiting := awaitingTrain(t)
+	th.remote.addPR(9, "4444444444444444444444444444444444444444", "")
+	th.clock = th.clock.Add(time.Minute)
+	_, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", []int{9, 42})
+	if err == nil {
+		t.Fatal("an express train with nothing able to board started")
+	}
+	for _, want := range []string{"#9", "has not passed", "#42", "not an open pull request"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not say %q", err, want)
+		}
+	}
+	if got := th.train(t); got.ID != waiting.ID || got.State != TrainAwaitingApproval {
+		t.Errorf("the waiting train became %s %s; a refused express must leave it alone", got.ID, got.State)
+	}
+}
+
+// TestAReplacedTrainsPullRequestsLeaveWhenTheExpressLands: an express train
+// cancels the waiting train it goes ahead of, and that train's pull requests
+// leave on a new train as soon as the express lands, not at the next
+// scheduled departure.
+func TestAReplacedTrainsPullRequestsLeaveWhenTheExpressLands(t *testing.T) {
+	th, _ := awaitingTrain(t)
+	th.clock = th.clock.Add(time.Minute)
+	express, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", []int{8})
+	if err != nil {
+		t.Fatalf("TrainExpress: %v", err)
+	}
+	// The express train lands; GitHub marks #8 merged with it.
+	th.mergeByHand(express, "5555555555555555555555555555555555555555")
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.ID != express.ID || got.State != TrainLanded {
+		t.Fatalf("the express train is %s %s, want landed", got.ID, got.State)
+	}
+	th.remote.mu.Lock()
+	delete(th.remote.open, 8)
+	th.remote.mu.Unlock()
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	next := th.train(t)
+	if next.ID == express.ID || next.Departure != TrainDepartureScheduled || len(next.OnBoard) != 1 || next.OnBoard[0].Number != 7 {
+		t.Fatalf("after the express landed, train %+v; want a new train carrying #7 at once", next)
+	}
+	if !next.DepartedAt.Equal(th.clock) {
+		t.Errorf("the new train departed at %s, want now (%s), not the next scheduled time", next.DepartedAt, th.clock)
+	}
+}

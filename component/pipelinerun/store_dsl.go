@@ -772,6 +772,7 @@ func (s *dslStore) CreateTrain(ctx context.Context, owner string, t Train) error
 	setIfSet(args, "headSha", t.HeadSHA)
 	setIfSet(args, "pullRequestUrl", t.PullRequestURL)
 	setIfSet(args, "runId", bareID(t.RunID))
+	setIfSet(args, "replaces", bareID(t.Replaces))
 	if !t.UpdatedAt.IsZero() {
 		// Nanoseconds: the coordinator compares updatedAt as the row's version
 		// (casTrain), and two writes in one second must not read as one.
@@ -1246,6 +1247,7 @@ func trainFromRow(row map[string]any) Train {
 		Repository:     rowString(row, "repository"),
 		Branch:         rowString(row, "branch"),
 		Departure:      rowString(row, "departure"),
+		Replaces:       bareID(rowString(row, "replaces")),
 		State:          rowString(row, "state"),
 		Version:        rowString(row, "version"),
 		BaseSHA:        rowString(row, "baseSha"),

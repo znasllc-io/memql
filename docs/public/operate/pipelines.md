@@ -476,11 +476,12 @@ fix is pushed, and the next train can take the pull request.
 - **Express.** `pipelinesTrainExpress(repository, pullRequests)` starts a train
   at once carrying only the named pull requests, each of which must be ready to
   board. Only the pipeline's owner can start one, holding `execute` on
-  `app:pipelines/rerun`. It replaces a train that is waiting for approval or
-  held: that train is cancelled, *Replaced by an express train.*, its pull
-  request is closed with a comment naming the express train, and its pull
-  requests board the next train. It is refused while a train is building or
-  running.
+  `app:pipelines/rerun`. It is refused, changing nothing, when none of the
+  named pull requests can board, with each one's reason. It replaces a train
+  that is waiting for approval or held: that train is cancelled, *Replaced by
+  an express train.*, its pull request is closed with a comment naming the
+  express train, and its pull requests leave on a new train as soon as the
+  express train finishes. It is refused while a train is building or running.
 - **Nothing ready.** A departure with no ready pull request is recorded as a
   cancelled train, *No pull request was ready to board.*, and sends nothing.
 
@@ -573,7 +574,9 @@ to running, and a passing re-run asks for approval. Closing the train pull
 request cancels the train, and its pull requests board the next one. Adding `train:hold` to a
 pull request on board rebuilds the train without it, and so does the default
 branch moving: a train held because the default branch failed is rebuilt by
-itself once a fix lands there.
+itself once a fix lands there. When the fix goes on an express train, the held
+train's pull requests leave on a new train as soon as the express train
+lands.
 
 ### Approval and landing
 

@@ -184,9 +184,12 @@ func (i *Integration) retireCancelled(ctx context.Context, d Deps, s pipelines.T
 
 // TrainExpress starts an express train carrying only the named pull requests
 // (spec 4.2). Only the pipeline's owner may: it is their repository's main.
-// It goes ahead of a train that is waiting for approval or held, which is
-// cancelled (its pull requests board the next train); it refuses while a
-// train is building or running, rather than abandoning a run in flight.
+// It refuses, changing nothing, when none of them can board. It goes ahead of
+// a train that is waiting for approval or held: that train is cancelled, and
+// recorded as the one the express train Replaces, so its pull requests leave
+// on a new train as soon as the express train finishes (departScheduled). It
+// refuses while a train is building or running, rather than abandoning a run
+// in flight.
 func (i *Integration) TrainExpress(ctx context.Context, repository string, numbers []int) (Train, error) {
 	caller, err := personFrom(ctx)
 	if err != nil {
@@ -225,6 +228,28 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	if err != nil {
 		return Train{}, err
 	}
+	// Board before anything is cancelled: an express train that could carry
+	// nothing must leave the waiting train as it was, and say why for each
+	// number named.
+	gh, token, appID, err := trainAccess(ctx, d, p)
+	if err != nil {
+		return Train{}, err
+	}
+	prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
+	if err != nil {
+		return Train{}, err
+	}
+	board, skipped, err := boardTrain(ctx, gh, token, appID, p, Train{Requested: requested}, prs)
+	if err != nil {
+		return Train{}, err
+	}
+	if len(board) == 0 {
+		reasons := make([]string, 0, len(skipped))
+		for _, sk := range skipped {
+			reasons = append(reasons, fmt.Sprintf("#%d %s", sk.Number, sk.Reason))
+		}
+		return Train{}, fmt.Errorf("pipelines: no pull request named can board an express train: %s", strings.Join(reasons, "; "))
+	}
 	now := d.Now().UTC()
 	day := now.In(loc)
 	startOfDay := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
@@ -260,6 +285,9 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 			Repository: p.Repository, Branch: branch, Departure: TrainDepartureExpress, State: TrainBuilding,
 			Requested: requested, DepartedAt: now, UpdatedAt: now,
 		}
+		if replaced != nil {
+			created.Replaces = replaced.ID
+		}
 		return d.Store.CreateTrain(gctx, p.OwnerUserID, created)
 	})
 	if err != nil {
@@ -269,13 +297,9 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 		// The replaced train's pull request would otherwise stay open beside
 		// the express train's, for the owner to approve a train that can no
 		// longer land.
-		if gh, token, _, err := trainAccess(ctx, d, p); err == nil {
-			view := *replaced
-			view.State = TrainCancelled
-			i.retireCancelled(ctx, d, s, p, view, gh, token, "Replaced by express train "+created.Branch+". Its pull requests board the next train.", true)
-		} else {
-			trainLog(d).Warn("pipelines: the train an express train replaced was not closed", "repository", p.Repository, "branch", replaced.Branch, "error", err.Error())
-		}
+		view := *replaced
+		view.State = TrainCancelled
+		i.retireCancelled(ctx, d, s, p, view, gh, token, "Replaced by express train "+created.Branch+". Its pull requests leave on a new train as soon as the express train finishes.", true)
 	}
 	if err := i.build(ctx, d, s, p, created); err != nil {
 		return Train{}, err

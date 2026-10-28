@@ -22,6 +22,7 @@ func TestTrainRowsAreWrittenAndReadBack(t *testing.T) {
 		OnBoard:    []TrainCar{{Number: 7, Title: "Fix the badge", SHA: shaA, URL: "https://github.com/acme/shop/pull/7"}},
 		LeftOff:    []pipelines.TrainSkip{{Number: 9, Reason: "is a draft"}},
 		BaseSHA:    shaB,
+		Replaces:   "t0",
 		DepartedAt: departed,
 	}
 	if err := store.CreateTrain(ctx, owner, tr); err != nil {
@@ -41,7 +42,7 @@ func TestTrainRowsAreWrittenAndReadBack(t *testing.T) {
 	if !create.origin.IsInternal() || create.actor == nil || create.actor.UserId != owner || create.actor.Synthetic {
 		t.Errorf("a train is written as its owner, stamped internal: %+v", create.actor)
 	}
-	for _, want := range []string{"trainId:", "onBoard:", "leftOff:", "is a draft", "baseSha:", "departure:", "departedAt:"} {
+	for _, want := range []string{"trainId:", "onBoard:", "leftOff:", "is a draft", "baseSha:", "departure:", "departedAt:", "replaces:"} {
 		if !strings.Contains(create.query, want) {
 			t.Errorf("create carries no %s: %s", want, create.query)
 		}
@@ -57,6 +58,7 @@ func TestTrainRowsAreWrittenAndReadBack(t *testing.T) {
 		"departure":      "express",
 		"state":          "awaiting_approval",
 		"requested":      []any{float64(7)},
+		"replaces":       "v1:pipelines:train:t0",
 		"onBoard":        []any{map[string]any{"number": float64(7), "title": "Fix the badge", "sha": shaA, "url": "https://github.com/acme/shop/pull/7"}},
 		"leftOff":        []any{map[string]any{"number": float64(9), "reason": "is a draft"}},
 		"dropped":        []any{map[string]any{"number": float64(8), "sha": shaB, "reason": "broke tests"}},
@@ -82,8 +84,8 @@ func TestTrainRowsAreWrittenAndReadBack(t *testing.T) {
 	if got.State != TrainAwaitingApproval || got.Departure != TrainDepartureExpress || got.PullRequest != 42 || got.Rebuilds != 1 || !got.Retried {
 		t.Errorf("scalars: %+v", got)
 	}
-	if len(got.Requested) != 1 || got.Requested[0] != 7 {
-		t.Errorf("requested = %v, want [7]", got.Requested)
+	if len(got.Requested) != 1 || got.Requested[0] != 7 || got.Replaces != "t0" {
+		t.Errorf("requested = %v, replaces %q; want [7] and t0", got.Requested, got.Replaces)
 	}
 	if len(got.OnBoard) != 1 || got.OnBoard[0].Number != 7 || got.OnBoard[0].SHA != shaA || got.OnBoard[0].URL == "" {
 		t.Errorf("onBoard = %+v", got.OnBoard)

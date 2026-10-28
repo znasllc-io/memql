@@ -235,6 +235,7 @@ mutation train createPipelineTrain {
     departure       string!
     state           string!
     requested       []int
+    replaces        string
     onBoard         []object
     leftOff         []object
     dropped         []object
@@ -249,7 +250,7 @@ mutation train createPipelineTrain {
     updatedAt       string
   }
   insert {
-    accept { pipelineId, accountId, repository, branch, departure, state, requested, onBoard, leftOff, dropped, version, baseSha, headSha, pullRequest, pullRequestUrl, runId, notified, departedAt, updatedAt }
+    accept { pipelineId, accountId, repository, branch, departure, state, requested, replaces, onBoard, leftOff, dropped, version, baseSha, headSha, pullRequest, pullRequestUrl, runId, notified, departedAt, updatedAt }
     stamp {
       id: args.trainId
       ownerUserId: actor.userId

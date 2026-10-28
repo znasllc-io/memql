@@ -169,7 +169,7 @@ type trainWords struct {
 
 const (
 	trainTodoApprove = "Review the train pull request on GitHub and approve it. It lands within a minute of your approval."
-	trainTodoHeld    = "Close the train pull request to cancel this train, or add train:hold to a pull request on board to rebuild without it. If main itself fails, land its fix on an express train first."
+	trainTodoHeld    = "Close the train pull request to cancel this train, or add train:hold to a pull request on board to rebuild without it. If main itself fails, land its fix on an express train first: this train's pull requests leave on a new train as soon as it lands."
 	trainTodoAdmit   = "Open an admission window for the build pool: the Azure cost guard is holding new runs."
 	trainTodoStalled = "Fix what the reason names; the train goes on by itself once it clears. Close the train pull request to cancel it instead."
 )

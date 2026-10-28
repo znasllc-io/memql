@@ -102,6 +102,7 @@ shape train pipelineTrainFull {
   departure
   state
   requested
+  replaces
   onBoard
   leftOff
   dropped

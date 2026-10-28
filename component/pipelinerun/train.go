@@ -243,6 +243,12 @@ func (i *Integration) departScheduled(ctx context.Context, d Deps, s pipelines.T
 		last = newest.DepartedAt
 	}
 	at, due := pipelines.DepartureDue(s, last, now)
+	if newest != nil && newest.Departure == TrainDepartureExpress && newest.Replaces != "" {
+		// An express train went ahead of a train it cancelled. That train's
+		// pull requests have waited for it: they leave now, on a new train,
+		// rather than at the next scheduled departure (spec 4.2).
+		at, due = now, true
+	}
 	if !due {
 		return Train{}, false, nil
 	}
@@ -298,35 +304,10 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 	if err != nil {
 		return err
 	}
-	// A pull request boards on its pipeline's own pull request check,
-	// whatever the default branch requires: during a switch-over the branch
-	// may require the push check instead, and that never runs on a pull
-	// request.
-	check := pipelines.CheckRunName(p.Name)
-	var cands []pipelines.TrainCandidate
-	var skipped []pipelines.TrainSkip
-	for _, pr := range prs {
-		if strings.HasPrefix(pr.HeadRef, pipelines.TrainBranchPrefix) {
-			continue
-		}
-		if droppedFrom(t, pr.Number) {
-			skipped = append(skipped, pipelines.TrainSkip{Number: pr.Number, Reason: "was dropped from this train"})
-			continue
-		}
-		c := pipelines.TrainCandidate{Number: pr.Number, Title: pr.Title, HeadSHA: pr.HeadSHA, HeadRef: pr.HeadRef, BaseRef: pr.BaseRef,
-			Author: pr.Author, URL: pr.URL, Draft: pr.Draft, Labels: pr.Labels,
-			Fork: pr.HeadRepository == "" || !strings.EqualFold(pr.HeadRepository, p.Repository)}
-		if !pr.Draft && !c.Fork {
-			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, check, appID)
-			if err != nil {
-				return err
-			}
-			c.CheckStatus, c.CheckConclusion = status, conclusion
-		}
-		cands = append(cands, c)
+	board, skipped, err := boardTrain(ctx, gh, token, appID, p, t, prs)
+	if err != nil {
+		return err
 	}
-	board, refused := pipelines.BoardingOrder(p.DefaultBranch, check, cands, t.Requested)
-	skipped = append(skipped, refused...)
 	if len(board) == 0 {
 		return i.cancelBuild(ctx, d, s, gh, token, p, t, base, skipped, "No pull request was ready to board.")
 	}
@@ -403,6 +384,49 @@ func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettin
 		return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainDeparted, "", nil)
 	}
 	return nil
+}
+
+// boardTrain picks the pull requests t carries from the open ones, and says
+// why each other one stays off. A pull request boards on its pipeline's own
+// pull request check, written by the App that minted the token, whatever the
+// default branch requires: during a switch-over the branch may require the
+// push check instead, and that never runs on a pull request. For an express
+// train, a named number that is not an open pull request into the default
+// branch is reported too, not dropped in silence.
+func boardTrain(ctx context.Context, gh trainGitHub, token string, appID int64, p Pipeline, t Train, prs []githubapp.TrainPullRequest) ([]pipelines.TrainCandidate, []pipelines.TrainSkip, error) {
+	check := pipelines.CheckRunName(p.Name)
+	var cands []pipelines.TrainCandidate
+	var skipped []pipelines.TrainSkip
+	open := map[int]bool{}
+	for _, pr := range prs {
+		open[pr.Number] = true
+		if strings.HasPrefix(pr.HeadRef, pipelines.TrainBranchPrefix) {
+			continue
+		}
+		if droppedFrom(t, pr.Number) {
+			skipped = append(skipped, pipelines.TrainSkip{Number: pr.Number, Reason: "was dropped from this train"})
+			continue
+		}
+		c := pipelines.TrainCandidate{Number: pr.Number, Title: pr.Title, HeadSHA: pr.HeadSHA, HeadRef: pr.HeadRef, BaseRef: pr.BaseRef,
+			Author: pr.Author, URL: pr.URL, Draft: pr.Draft, Labels: pr.Labels,
+			Fork: pr.HeadRepository == "" || !strings.EqualFold(pr.HeadRepository, p.Repository)}
+		if !pr.Draft && !c.Fork {
+			status, conclusion, err := gh.CheckRunConclusion(ctx, token, p.Repository, pr.HeadSHA, check, appID)
+			if err != nil {
+				return nil, nil, err
+			}
+			c.CheckStatus, c.CheckConclusion = status, conclusion
+		}
+		cands = append(cands, c)
+	}
+	board, refused := pipelines.BoardingOrder(p.DefaultBranch, check, cands, t.Requested)
+	skipped = append(skipped, refused...)
+	for _, n := range t.Requested {
+		if !open[n] {
+			skipped = append(skipped, pipelines.TrainSkip{Number: n, Reason: "is not an open pull request into " + p.DefaultBranch})
+		}
+	}
+	return board, skipped, nil
 }
 
 // cancelBuild records a build that found nothing to carry as cancelled, then

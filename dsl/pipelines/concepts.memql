@@ -149,6 +149,7 @@ concept train {
   departure       enum("scheduled", "express")!  @description("Why the train left: a scheduled departure from MEMQL_PIPELINES_TRAINS, or an express train the owner asked for.")
   state           enum("building", "running", "awaiting_approval", "landing", "landed", "held", "cancelled")!  @description("Where the train is. `held` waits for the owner; `landed` and `cancelled` are final.")
   requested       []int  @description("An express train's pull request numbers: only these board it. Empty for a scheduled train.")
+  replaces        string  @description("The train an express train went ahead of. That train was cancelled, and its pull requests leave on a new train as soon as this one finishes.")
   onBoard         []object  @description("[{number, title, sha, url}] -- the pull requests the train carries, each at the commit it boarded with.")
   leftOff         []object  @description("[{number, reason}] -- pull requests that could not board this train, and why.")
   dropped         []object  @description("[{number, sha, reason}] -- pull requests a failed run dropped from this train.")

@@ -596,10 +596,13 @@ type Train struct {
 	Departure, State                                           string
 	// Requested is an express train's pull requests; only these board it.
 	Requested []int
-	OnBoard   []TrainCar
-	LeftOff   []pipelines.TrainSkip
-	Dropped   []TrainCar
-	Version   string
+	// Replaces is the train an express train went ahead of: cancelled, its
+	// pull requests leave on a new train as soon as this one finishes.
+	Replaces string
+	OnBoard  []TrainCar
+	LeftOff  []pipelines.TrainSkip
+	Dropped  []TrainCar
+	Version  string
 	// BaseSHA is the default branch head the train was built on; HeadSHA the
 	// train branch's head, which its run tests and the owner approves.
 	BaseSHA, HeadSHA string
