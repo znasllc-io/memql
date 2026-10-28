@@ -11,7 +11,7 @@ require (
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/kljensen/snowball v0.10.0
 	github.com/lib/pq v1.12.3
-	github.com/openai/openai-go/v3 v3.81.0
+	github.com/openai/openai-go/v3 v3.86.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/stretchr/testify v1.12.1
 	github.com/uptrace/bun v1.3.0
