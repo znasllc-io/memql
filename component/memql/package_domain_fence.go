@@ -91,6 +91,11 @@ var ErrPackageDomainRecorded = errors.New("package domain result already recorde
 // outcomes commit only a receipt; nil means the ordinary creation guard and
 // graph write must still succeed. The continuation row lock couples either
 // outcome to the same live lease, preventing a stale replica from recording it.
+// staged-data: MUST-NOT-GATE -- this is publication/ownership evidence, not a
+// content read. A staged site still carries the authoritative account, package
+// and published version; hiding it would falsely refuse that exact receipt or
+// let an older visible version stand in for current authority. The original
+// requester is separately checked against the actual row and current grants.
 func (e *MemQLEngine) checkPackageDomain(ctx context.Context, db bun.IDB, concept, domainID string, payload map[string]any) (*PackageDomainReceipt, error) {
 	f, ok := ctx.Value(packageDomainFenceKey{}).(packageDomainFence)
 	if !ok {
@@ -214,6 +219,12 @@ func domainReceipt(p PackageDomainIntent) PackageDomainReceipt {
 // error string. Unknown reads propagate unchanged. The usual policy still runs
 // for a new binding; this classification preserves its optional refusal result
 // and recognizes an existing same-site binding without rotating its token.
+// staged-data: MUST-NOT-GATE -- hostname exclusivity and the per-site domain
+// cap include staged bindings and sites, just like the ordinary domain policy.
+// Hiding them would admit duplicate hostnames or undercount the cap; hiding an
+// already-created matching binding would also lose the evidence needed to
+// recover its receipt without reminting a verification token. These reads
+// classify durable effects and never return a domain payload or token.
 func (e *MemQLEngine) observePackageDomain(ctx context.Context, db bun.IDB, p PackageDomainIntent) (*PackageDomainReceipt, error) {
 	receipt := domainReceipt(p)
 	if err := validateCustomDomainHostname(p.Hostname, customDomainPolicyDomain()); err != nil {
