@@ -111,6 +111,10 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 		// for each read, and a delivery that never comes twenty minutes.
 		d.notifyPoll = time.Millisecond
 		d.notifyTimeout = 10 * time.Second
+		// The step-check writer at the production pace would take a second a
+		// write; a test waits for it (waitStepChecks) and must not.
+		d.stepCheckPace, d.stepCheckRetry, d.stepCheckLimitPause = time.Microsecond, time.Millisecond, 5*time.Millisecond
+		d.stepCheckWindow, d.stepCheckIdle = 300*time.Millisecond, 5*time.Millisecond
 	})
 	integ.EnableDriver()
 }

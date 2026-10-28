@@ -759,14 +759,15 @@ Afterwards:
   packages is not a pass of these. A notify stage is never carried: it
   announces the new attempt, which has an outcome of its own. A run with no
   failed or cancelled step (one that passed, or one refused before any step) is
-  refused `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole
-  re-run: one check run reports the whole run. **In a release** a failed-only
-  re-run also runs again every step that produces artifacts (one that declares
-  `artifacts` or an image build, or whose earlier receipt named any), so every
-  artifact a candidate pins comes from the attempt it names. It carries nothing
-  once the release's first attempt was opened more than 24 hours before the
-  re-run. The saved release adopts the re-run, and candidate preparation proves
-  each carried step
+  refused `pipeline_nothing_to_rerun`. GitHub's own re-request of the run's
+  check re-runs it whole; a re-request of a [step's check](#a-check-per-step)
+  re-runs what did not pass when the run failed, and the whole run when it
+  passed. **In a release** a failed-only re-run also runs again every step that
+  produces artifacts (one that declares `artifacts` or an image build, or whose
+  earlier receipt named any), so every artifact a candidate pins comes from the
+  attempt it names. It carries nothing once the release's first attempt was
+  opened more than 24 hours before the re-run. The saved release adopts the
+  re-run, and candidate preparation proves each carried step
   ([release-cutting.md](release-cutting.md#recover-a-failed-build)).
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:pipelines/cancel`). It flags the run; the agent driving it cancels
@@ -1234,8 +1235,11 @@ of its signed body. The `X-GitHub-Event` header is not covered by the
 signature, so it is a cross-check only, and a delivery whose header disagrees
 with its body is ignored.
 
-A re-requested check run re-runs the run that check run reports; a re-requested
-check suite re-runs the newest run of the pipeline at that commit.
+A re-requested check run re-runs the run that check run reports: a run's own
+check re-runs it whole, and a [step's check](#a-check-per-step), found by its
+external id, re-runs what did not pass when the run failed and the whole run
+when it passed. A re-requested check suite re-runs the newest run of the
+pipeline at that commit.
 
 ### The run key
 
@@ -1748,27 +1752,38 @@ name, so a run's steps sit together, stage by stage.
 | A step check | |
 |---|---|
 | **Is required by** | Nothing. The run's own `MemQL / <name>` stays the only context a ruleset, a release source or a [release train](#release-trains) reads; a step check's name always has more segments than any of them |
-| **Appears** | When the run's steps are planned: every step is created *Queued*, so the whole list shows at once |
-| **Moves** | When the run reports progress, after each step settles: *In progress*, then *Success*, *Failure*, *Cancelled* or *Skipped* |
-| **Shows** | How the step ended, its message and code, and for a failed step the last lines of its output, masked like the run's check |
+| **Appears** | When the step starts, so a later stage's steps appear as it begins; a step a run never started gets none |
+| **Moves** | *In progress*, then *Success*, *Failure*, *Cancelled* or *Skipped*, a little after the step does: a writer per run sends one write a second and keeps only each step's newest state |
+| **Shows** | How the step ended, its message and code, and for a failed step the last lines of its output, masked like the run's check; its start and end times are the step's own |
 | **Links** | The run's page in MemQL OS |
+| **Re-run** | Re-runs what did not pass when the run failed, and the whole run when it passed |
 
 A failed-only re-run writes no check for a step it carries over: the attempt
 that passed it already shows it passed on that commit, and a *Skipped* check of
-the same name would replace the pass. A driver that takes a run over on
-another replica finds the step checks the run already has by their external
-id, `<run id>:<step key>`, and moves them rather than creating a second check
-of each name. When a run ends, every step's check is written once more, and a
-step that never ended reads *Cancelled*; if GitHub took no completed check at
-that moment, recovery completes the step checks when it republishes the run's
-own.
+the same name would replace the pass. A step that reused another run's
+verification at the commit shows a pass that says where it was verified; its
+name carries its own run's event, so nothing of the other run's is replaced. A
+driver that takes a run over on another replica finds the step checks the run
+already has by their external id, `<run id>:<step key>`, and moves them rather
+than creating a second check of each name.
 
-A step check is a view of the run. A write GitHub refuses is tried again on the
-next progress report and never fails the run or its own check; a missing
-`checks` permission stops step checks for the rest of the run, as it already
-marks the run's check refused. The writes share the token the run's own check
-is written under, after it. A full run of about sixty steps makes roughly two
-calls per step, well inside an installation's hourly GitHub budget.
+When a run ends, each step's final state is written, a step that started and
+never ended reading *Cancelled*. The writer keeps trying for ten minutes after
+the run concluded, without holding the run back. If GitHub took no completed
+check at all at that moment, recovery completes the step checks the run left
+open when it republishes the run's own check. A step check left open past both
+stays open.
+
+A step check is a view of the run, written off its path: the run's own check is
+written first, and the step checks only after it landed, under its token. None
+of their failures fails the run or its own check. GitHub's rate limits, a 429
+or a 403 it marks as one, pause the writer for a minute with everything it
+still owes; a missing `checks` permission stops step checks for the run, as it
+already marks the run's check refused; anything else is tried again after a
+few seconds. A step makes two or three writes, paced at one a second per run:
+the per-minute secondary limit, not the hourly budget, is the one that matters,
+and a commit with more than a thousand check runs makes GitHub's own listings
+incomplete, which a manifest of a few hundred steps per event could reach.
 
 ### A run can fail with every step passed
 

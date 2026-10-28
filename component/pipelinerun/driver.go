@@ -204,7 +204,12 @@ func (i *Integration) claimAndDrive(runID string) {
 		i: i, d: d, lease: l, runID: runID, run: run, claimID: run.DriverLeaseID,
 		log: d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, runID), "node", d.NodeID),
 	}
-	switch dr.drive(ctx) {
+	outcome := dr.drive(ctx)
+	// A writer whose run concluded drains on; any other ends with the drive
+	// -- a lease lost, a run left unfinished for recovery -- so no writer
+	// outlives a drive that will not finish its steps (step_checks.go).
+	dr.endStepChecks()
+	switch outcome {
 	case driveConcluded:
 		i.forgetAborts(runID)
 	case driveAborted:
@@ -934,6 +939,14 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			attempt:    max(row.Attempt, 1),
 			sent:       row.Status == WorkStepRunning,
 			state:      StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
+		}
+		if row.Skip != nil {
+			// The skip the plan declared -- a failed-only re-run's carry among
+			// them -- so a drive that took the run over still knows a step is
+			// carried before its receipt settles (step_checks.go writes no
+			// check for one).
+			skip := *row.Skip
+			t.step.Skip = &skip
 		}
 		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))

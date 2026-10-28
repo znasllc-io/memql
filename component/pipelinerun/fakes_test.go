@@ -1081,6 +1081,7 @@ type fakeGitHub struct {
 	stepWrites  []checkWrite
 	stepCreated []checkWrite
 	stepRefs    map[int64]*githubapp.CheckRunRef
+	stepSHAs    map[int64]string // the commit each step check is on; "" for one a test seeds
 	stepErr     error
 
 	repos   map[string]githubapp.RepositoryInfo
@@ -1175,7 +1176,10 @@ func (g *fakeGitHub) CheckRunsForCommit(ctx context.Context, token, repository, 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var out []githubapp.CheckRunRef
-	for _, ref := range g.stepRefs {
+	for id, ref := range g.stepRefs {
+		if on := g.stepSHAs[id]; on != "" && on != sha {
+			continue // GitHub lists one commit's check runs
+		}
 		out = append(out, *ref)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -1214,7 +1218,11 @@ func (g *fakeGitHub) CreateCheckRun(ctx context.Context, token, repository strin
 		if g.stepRefs == nil {
 			g.stepRefs = map[int64]*githubapp.CheckRunRef{}
 		}
+		if g.stepSHAs == nil {
+			g.stepSHAs = map[int64]string{}
+		}
 		g.stepRefs[g.nextID] = &githubapp.CheckRunRef{ID: g.nextID, Name: run.Name, ExternalID: run.ExternalID, Status: run.Status, AppID: 4822538}
+		g.stepSHAs[g.nextID] = run.HeadSHA
 		return g.nextID, nil
 	}
 	if g.createErr != nil {

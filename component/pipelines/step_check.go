@@ -79,6 +79,11 @@ func StepCheckOutput(s StepReport) (title, summary, text string) {
 	}
 	switch s.Status {
 	case "succeeded":
+		if s.Code == CodePassedEarlier && message != "" {
+			// Verified at this commit in another run: there is no duration
+			// of this run's to show, only where it passed.
+			return "Passed: " + oneLine(s.Message, 200), "Step " + key + " passed: " + message, ""
+		}
 		took := formatDuration(s.DurationMs)
 		return "Passed in " + took, "Step " + key + " passed in " + took + ".", ""
 	case "failed", "refused":
@@ -87,7 +92,7 @@ func StepCheckOutput(s StepReport) (title, summary, text string) {
 			title += ": " + m
 		}
 		if strings.TrimSpace(s.LogTail) != "" {
-			tail := strings.ToValidUTF8(s.LogTail, "�")
+			tail := strings.ToValidUTF8(s.LogTail, "\uFFFD")
 			if !strings.HasSuffix(tail, "\n") {
 				tail += "\n"
 			}

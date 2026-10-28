@@ -135,6 +135,10 @@ type Deps struct {
 	// two seconds a read, or twenty minutes for a delivery that never comes.
 	notifyPoll    time.Duration
 	notifyTimeout time.Duration
+	// The step-check writer's pace, retry wait, rate-limit pause, concluded
+	// run window and idle wait (step_checks.go); zero takes the production
+	// value. A test shortens them all.
+	stepCheckPace, stepCheckRetry, stepCheckLimitPause, stepCheckWindow, stepCheckIdle time.Duration
 }
 
 // Integration is the `pipelines` plug-in.
@@ -146,6 +150,10 @@ type Integration struct {
 	// piece of a run's state that lives in memory, and only for as long as
 	// this replica holds the run's lease (driver.go).
 	drives driveRegistry
+
+	// stepWriters counts this node's live step-check writers
+	// (step_checks.go), so a test can wait for them.
+	stepWriters sync.WaitGroup
 
 	// trainStalls is how long each pipeline's train step has kept failing on
 	// this replica (train.go, noteTrainStall). In memory on purpose: it only

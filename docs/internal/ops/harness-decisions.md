@@ -1217,46 +1217,76 @@ its own check run beside the run's; the connected workflow is in
 run's own check plus `/ <stage> / <step>` (`pipelines.StepCheckName`): GitHub
 lists check runs by name, which gives the sections. Push, release and manual
 runs keep their run's suffix, because two runs of different events on one
-commit select different stages and must not overwrite each other's steps. The
-name always has more segments than any context a ruleset, a release source
+commit select different stages and must not overwrite each other's steps.
+Stage and step names cannot hold a slash, so the name always has more
+segments than any context a ruleset, a release source
 (`githubapp.releaseChecks`), the merge queue or a train's boarding asks for by
-exact name, so a step check can never satisfy or fail a required context.
-`TestStepCheckName` pins the forms.
+exact name; a step check can never satisfy or fail a required context
+(`TestStepCheckName`).
 
-**When they are written, and the invariant.** Only inside the drive's existing
-publishes (`runDriver.publish`, `publishFinal`), after the run's own check and
-under the token minted for it: no new mint, no new call site, and the check
-that gates a merge never waits on a step's. The publish after the work run
-opens sees every step pending, so all are created queued at once; later
-publishes, which the default workflow makes after every step settles, move
-only the checks whose step changed. The final publish writes every step once
-more, a step that never ended as cancelled. Tests:
+**A writer per drive, off the run's path (the invariant).** A publish writes
+the run's own check first and, only once that landed, hands the drive's writer
+goroutine the token it minted and each step's newest state
+(`offerStepChecks`). The writer sends one write at a time, a second apart,
+keeping only each step's newest state, so neither the merge-gating check, a
+step, nor the run row's conclusion -- which a release train waits on -- ever
+waits on a step check. A step's check is created when the step first leaves
+pending, not when the run opens: sixty creates at once would spend a third of
+GitHub's per-minute secondary write limit, and several runs opening together
+would exceed it. Rejected: creating every check queued at the start (the first
+version, which the independent review measured at ~55 POSTs in one publish),
+and writing inside the publish (it delayed the first step by tens of seconds
+and the final row by up to the two-minute call budget). Tests:
 `TestADrivenRunReportsACheckPerStep`, `TestAFailedStepsCheckShowsItsMaskedOutput`
-(output masked with the drive's secret values, like the run's check).
+(masked with the drive's secret values, like the run's check).
 
-**What is not written.** A failed-only re-run's carried step
-(`pipeline_passed_earlier`, marked on the plan before its state settles): the
-attempt that passed it already shows it passed on the commit, and a skipped
-check of the same name would replace that pass (`TestARerunLeavesCarriedStepsChecksAlone`).
+**Rate limits and refusals.** A rate-limited answer pauses the writer for a
+minute and keeps every state it still owes (`TestARateLimitedStepCheckPausesTheWriter`:
+one limited create, then the rest). `githubapp` now also files a 403 carrying
+`Retry-After`, or a message naming a secondary rate limit, as rate limiting
+(`TestRateLimitIsRecognisedInBothSpellings`): before, such a 403 on a run's
+own final write was recorded `refused` with the missing-permission note and
+never retried, leaving a required check unfinished. A 403 creating a step check
+is the missing permission and stops step checks for the drive
+(`TestAMissingChecksPermissionStopsStepChecks`); a 403 moving a check the
+writer adopted drops that one and creates the run's own. Anything else waits a
+few seconds and is tried again; no failure fails the run
+(`TestAStepCheckThatCannotBeWrittenNeverFailsTheRun`).
 
-**Replicas, recovery, retained state.** Step check ids live in the drive's
-memory only. A drive that takes a run over lists the commit's check runs once
-and adopts its run's by external id `<run id>:<step key>`
-(`TestADriverFindsTheStepChecksARunAlreadyHas`); a listing that fails costs at
-most a duplicate check, never the run. When GitHub took no completed check at
-conclusion, recovery's republish of the run's own check also completes the
-step checks the run left open (`settleStepChecks`,
-`TestRecoverySettlesAConcludedRunsOpenStepChecks`). No row stores step check
-state.
+**At conclusion, and what survives.** The final publish hands the writer every
+step's final state, a started step that never ended as cancelled; the drive
+returns and the writer keeps trying for ten minutes, then exits. A drive that
+ends without concluding stops its writer (`endStepChecks`), so no goroutine
+outlives a drive that will not finish its steps. When GitHub took no completed
+check at conclusion, recovery's republish of the run's own check also
+completes the step checks the run left open (`settleStepChecks`,
+`TestRecoverySettlesAConcludedRunsOpenStepChecks`). Step check ids live in the
+writer's memory only; no row stores them.
 
-**Failures.** A step check is a view: a failed write is logged once per drive
-and tried again on the next publish, and never fails the run or its own check
-(`TestAStepCheckThatCannotBeWrittenNeverFailsTheRun`). GitHub's 403 for the
-missing permission stops step checks for the rest of the drive. The test double
-`flakyFinal` fails only the run's own check, so the retry test still counts
-what it names.
+**Steps that did not run here.** A failed-only re-run's carry
+(`pipeline_passed_earlier` with no evidence run) writes no check: attempt 1's
+pass stays on the commit (`TestARerunLeavesCarriedStepsChecksAlone`). A step
+that reused another run's verification shows a pass naming that run
+(`TestReusedEvidenceShowsAsAPass`). A drive that took a run over without
+reading its plan again (`adoptRows`) now keeps the plan's skip, so a carried
+step stays recognised across the hop (`TestATakeoverKeepsACarriedStepsPass`).
 
-**Known limits.** A driver that dies after the run's final check landed but
-before its step checks did leaves those step checks open: recovery republishes
-only runs whose own final check did not land. A step that starts and settles
-between two progress reports shows no *In progress* state.
+**Replicas.** A writer lists its run's existing step checks once, by external
+id, the newest for each step, and moves them rather than creating a second
+(`TestATakeoverAdoptsTheStepChecksAnotherReplicaCreated`, a real two-replica
+hop). A writer whose drive lost its lease stops before its next write. A
+listing that fails, or a commit with more than a thousand check runs (now an
+error, not a silent short list), costs at most duplicates.
+
+**Re-run on a step's check.** GitHub offers Re-run on every check an App
+writes. `check_run.rerequested` for a step's check is resolved by its external
+id at the re-requested commit: a failed run gets a failed-only re-run, a passed
+one a whole re-run (`TestRerequestingAStepCheckRerunsItsRun`).
+
+**Known limits.** A step check stays open when GitHub refused its final write
+for the whole ten-minute window while the run's own check landed, or when the
+agent restarted inside that window. A step that starts and settles between two
+progress reports shows no *In progress* state. A manifest with several hundred
+steps per event could push a busy commit past GitHub's thousand-run listings,
+which release-source verification and merge-queue admission read; no cap is
+enforced.

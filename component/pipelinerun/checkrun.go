@@ -122,7 +122,7 @@ func runCheckName(p Pipeline, r Run) string {
 // after r's own check (pipelines.StepCheckName), its external id the run's
 // and the step's, its details the run's page. A step check is created with
 // the run's commit, and only a completed one carries a conclusion.
-func ComposeStepCheckRun(osOrigin string, p Pipeline, r Run, s pipelines.StepReport) githubapp.CheckRun {
+func ComposeStepCheckRun(osOrigin string, p Pipeline, r Run, s pipelines.StepReport, now time.Time) githubapp.CheckRun {
 	status, conclusion := pipelines.StepCheckState(s.Status)
 	title, summary, text := pipelines.StepCheckOutput(s)
 	run := githubapp.CheckRun{
@@ -135,6 +135,14 @@ func ComposeStepCheckRun(osOrigin string, p Pipeline, r Run, s pipelines.StepRep
 	}
 	if origin := strings.TrimSpace(osOrigin); origin != "" {
 		run.DetailsURL = pipelines.RunPageURL(origin, bareID(r.ID))
+	}
+	// GitHub shows a check's time from its start and end: a step's own, from
+	// when the writer saw it, never the run's queue time.
+	switch status {
+	case StatusInProgress:
+		run.StartedAt = now.Add(-time.Duration(s.DurationMs) * time.Millisecond)
+	case StatusCompleted:
+		run.StartedAt, run.CompletedAt = now.Add(-time.Duration(s.DurationMs)*time.Millisecond), now
 	}
 	return run
 }
@@ -332,10 +340,11 @@ func (dr *runDriver) publish(ctx context.Context) {
 	callCtx, done := dr.stoppable(ctx, githubCallTimeout)
 	token, tokenErr := checkRunToken(callCtx, dr.d, dr.p)
 	w := writeCheckRun(callCtx, dr.d, dr.p, dr.run, ReportFor(dr.p, dr.run, dr.report()), token, tokenErr)
-	// The step checks follow the run's own check, under the same token: the
-	// run's check gates a merge and never waits on them.
-	if tokenErr == nil && w.State != CheckRunRefused {
-		dr.publishSteps(callCtx, token, false)
+	// The step checks follow the run's own check, under the same token, once
+	// it landed: the writer takes them from here (step_checks.go), so the
+	// check that gates a merge never waits on them.
+	if tokenErr == nil && w.Err == nil {
+		dr.offerStepChecks(token, false)
 	}
 	done()
 	if w.Err != nil && !dr.lease.isLost() && !dr.lease.isCancelled() {
@@ -382,13 +391,11 @@ func (dr *runDriver) publishFinal(ctx context.Context, final Run) CheckRunWrite 
 				dr.log.Warn("pipelines: the concluded run's check run was not written",
 					"checkRunState", w.State, "attempts", attempt+1, "error", dr.mask(w.Err.Error()))
 			}
-			// Each step's final state, once, after the run's own check and
-			// under its token: a step check is a view, so it is never what a
-			// retry waits for.
-			if tokenErr == nil && w.State != CheckRunRefused && !dr.lease.isLost() {
-				stepCtx, stepDone := context.WithTimeout(ctx, githubCallTimeout)
-				dr.publishSteps(stepCtx, token, true)
-				stepDone()
+			// Each step's final state, handed to the writer once the run's
+			// own check landed: the writer keeps trying after the run row
+			// concludes, which never waits on it (step_checks.go).
+			if tokenErr == nil && w.Err == nil && !dr.lease.isLost() {
+				dr.offerStepChecks(token, true)
 			}
 			return w
 		}

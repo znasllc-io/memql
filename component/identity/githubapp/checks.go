@@ -3,6 +3,7 @@ package githubapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -164,8 +165,10 @@ func (c *Client) CheckRunsForCommit(ctx context.Context, bearer, owner, repo, sh
 			out = append(out, ref)
 		}
 		if len(result.CheckRuns) < 100 || len(out) >= result.TotalCount {
-			break
+			return out, nil
 		}
 	}
-	return out, nil
+	// A listing cut short is not a whole one: a caller that reads it as whole
+	// would miss what lies past the last page.
+	return nil, fmt.Errorf("GitHub lists more than %d check runs on %s; the listing is incomplete", checkRunListPages*100, sha)
 }

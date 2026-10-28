@@ -56,6 +56,12 @@ func TestStepCheckOutput(t *testing.T) {
 	if title != "Passed in 52s" || !strings.Contains(summary, "`checks.build`") {
 		t.Errorf("a passed step reads %q / %q", title, summary)
 	}
+	// Verified at this commit in another run: no duration of its own to show,
+	// so the title says where it passed.
+	title, summary, _ = StepCheckOutput(StepReport{Key: "tests.unit", Status: "succeeded", Code: CodePassedEarlier, Message: "Verified at this commit in run r1."})
+	if title != "Passed: Verified at this commit in run r1." || !strings.Contains(summary, "r1") {
+		t.Errorf("a step verified elsewhere reads %q / %q", title, summary)
+	}
 	title, summary, text := StepCheckOutput(StepReport{Key: "tests.go-unit#2", Status: "failed", DurationMs: 460000,
 		Code: "pipeline_step_failed", Message: "go test exited 1 in component/memql", LogTail: "--- FAIL: TestX\nFAIL\n"})
 	if !strings.HasPrefix(title, "Failed: go test exited 1") || !strings.Contains(summary, "`pipeline_step_failed`") {
