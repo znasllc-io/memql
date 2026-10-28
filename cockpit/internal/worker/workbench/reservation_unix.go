@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 )
 
 var ErrBusy = errors.New("fleet workbench capacity is occupied")
@@ -77,6 +79,13 @@ func reserveAt(root string, slotIndex int) (*reservation, error) {
 	if err != nil || stat.Size() != 0 {
 		pipeline.Close()
 		return nil, ErrInterrupted
+	}
+	// A worker may have exited while its model runtime is still working. The
+	// shared lock alone is insufficient after that exit; only the runtime's
+	// confirmed completion clears its separate activity witness.
+	if err := capacity.CheckInferenceIdle(root); err != nil {
+		pipeline.Close()
+		return nil, fmt.Errorf("%w: %v", ErrInterrupted, err)
 	}
 	slot, err := lockFile(filepath.Join(root, fmt.Sprintf("workbench-%d.lock", slotIndex)), false)
 	if err != nil {

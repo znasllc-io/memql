@@ -347,7 +347,21 @@ func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, 
 func (p *prober) create() (Job, error) {
 	spec := BuildIsolationProbe(p.r.cfg, p.name)
 	waiting, attempts, leftovers := false, 0, 0
+	admissionNoted := false
 	for {
+		// Probes consume the same paid capacity as commands. A step may have
+		// entered this proof before the budget closed, so check the live gate
+		// before every probe POST as well as before the command Job itself.
+		if allowed, reason := p.r.cloudAdmission(); !allowed {
+			if !admissionNoted {
+				admissionNoted = true
+				p.r.log.Info("pipelines: waiting for cloud spending admission before isolation probe", "reason", reason)
+			}
+			if !sleepCtx(p.ctx, p.r.cfg.PollInterval) {
+				return Job{}, errProbeStopped
+			}
+			continue
+		}
 		job, created, err := p.r.kube.CreateJob(p.ctx, spec)
 		switch {
 		case err == nil && created:

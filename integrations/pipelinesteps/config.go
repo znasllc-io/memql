@@ -15,6 +15,11 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// AdmitCloud reads the operator's current spending decision immediately
+	// before each new command or isolation-probe Job. Nil preserves unconfigured
+	// installations. A hold/error waits under the run ceiling; adoption and
+	// cleanup never require permission to allocate new capacity.
+	AdmitCloud func(time.Time) (bool, error)
 	// QueueName opts Jobs into an installed Kueue LocalQueue. Jobs are born
 	// suspended, so an unavailable admission controller cannot start work.
 	QueueName string

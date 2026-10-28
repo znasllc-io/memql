@@ -275,8 +275,9 @@ type BackupPolicy struct {
 // workspace_root is where each step's fresh checkout is made and removed
 // again; absent, it is fs.workspace_root/pipelines, else ~/.memql/pipelines.
 // max_timeout_sec caps the timeout a step asks for (default 3600).
-// container_memory_mib sizes the command container only (default 2048).
-// Services keep their separate 2 GiB caps. The request cannot override this.
+// container_memory_mib and container_cpu_milli cap the command container
+// (defaults 2048 MiB / 2000 milliCPU). A request can ask for less, never more.
+// Services retain separate 2 CPU / 2 GiB caps; aggregate host admission includes them.
 // min_free_disk_mib is the available workspace filesystem headroom required
 // before checkout and command admission (default 20480). It is not a quota.
 //
@@ -289,6 +290,7 @@ type PipelinesPolicy struct {
 	WorkspaceRoot      string   `yaml:"workspace_root"`
 	MaxTimeoutSec      int      `yaml:"max_timeout_sec"`
 	ContainerMemoryMiB int      `yaml:"container_memory_mib"`
+	ContainerCPUMilli  int      `yaml:"container_cpu_milli"`
 	MinFreeDiskMiB     int      `yaml:"min_free_disk_mib"`
 }
 
@@ -298,6 +300,8 @@ const DefaultPipelineMaxTimeoutSec = 3600
 
 const DefaultPipelineContainerMemoryMiB = 2048
 
+const DefaultPipelineContainerCPUMilli = 2000
+
 const DefaultPipelineMinFreeDiskMiB = 20480
 
 // Check decides whether this machine runs a pipeline step of repository. The
@@ -306,6 +310,9 @@ const DefaultPipelineMinFreeDiskMiB = 20480
 func (pp PipelinesPolicy) Check(repository string) error {
 	if !pp.Allow {
 		return errors.New("this machine runs no pipeline steps: its owner has not set pipelines.allow: true in policy.yaml")
+	}
+	if pp.ContainerCPUMilli != 0 && (pp.ContainerCPUMilli < 1 || pp.ContainerCPUMilli > 256000) {
+		return errors.New("pipelines.container_cpu_milli must be between 1 and 256000, or omitted for the 2000 default")
 	}
 	if pp.ContainerMemoryMiB != 0 && (pp.ContainerMemoryMiB < 256 || pp.ContainerMemoryMiB > 32768) {
 		return errors.New("pipelines.container_memory_mib must be between 256 and 32768 MiB, or omitted for the 2048 MiB default")
@@ -547,6 +554,7 @@ func (p *Policy) Pipelines() PipelinesPolicy {
 			WorkspaceRoot:      pipelinesWorkspaceRoot("", ""),
 			MaxTimeoutSec:      DefaultPipelineMaxTimeoutSec,
 			ContainerMemoryMiB: DefaultPipelineContainerMemoryMiB,
+			ContainerCPUMilli:  DefaultPipelineContainerCPUMilli,
 			MinFreeDiskMiB:     DefaultPipelineMinFreeDiskMiB,
 		}
 	}
@@ -559,6 +567,9 @@ func (p *Policy) Pipelines() PipelinesPolicy {
 	out.WorkspaceRoot = pipelinesWorkspaceRoot(p.pipelines.WorkspaceRoot, p.fs.WorkspaceRoot)
 	if out.MaxTimeoutSec <= 0 {
 		out.MaxTimeoutSec = DefaultPipelineMaxTimeoutSec
+	}
+	if out.ContainerCPUMilli == 0 {
+		out.ContainerCPUMilli = DefaultPipelineContainerCPUMilli
 	}
 	if out.ContainerMemoryMiB == 0 {
 		out.ContainerMemoryMiB = DefaultPipelineContainerMemoryMiB

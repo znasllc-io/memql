@@ -104,6 +104,15 @@ def host_build_guard(inherited_fd=None, *, _completed_record=None):
             raise GuardError("This machine is already building or running a Fleet workbench; retry when it finishes") from error
         if os.fstat(fd).st_size:
             raise GuardError("An interrupted Fleet pipeline needs reconciliation before a local build can start")
+        # Inference may outlive the worker process that held the shared lock.
+        # Presence alone fences builds: age/PID disappearance does not prove
+        # that the model runtime completed, and this helper never clears it.
+        try:
+            (root / "inference-active.json").lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise GuardError("An interrupted inference operation needs reconciliation before a local build can start")
         for path in root.glob("workbench-*.lock"):
             info = path.lstat()
             if not regular_owned(info) or info.st_size:

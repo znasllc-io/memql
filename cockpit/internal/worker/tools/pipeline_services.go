@@ -125,7 +125,11 @@ func (r *pipelineRun) startPipelineServices(ctx context.Context, record pipeline
 }
 
 func (r *pipelineRun) serviceControl(ctx context.Context, args ...string) error {
-	result, err := runGroup(ctx, dockerCommand(args...), r.mask, r.emit)
+	cmd, err := dockerCommandAt(ctx, args...)
+	if err != nil {
+		return err
+	}
+	result, err := runGroup(ctx, cmd, r.mask, r.emit)
 	r.bytes.Add(result.bytes)
 	if err != nil || result.exitCode != 0 || result.stopped {
 		return errors.New("Docker service operation failed")
@@ -184,7 +188,7 @@ func waitPipelineService(ctx context.Context, name string, probe bool) error {
 }
 
 func validPipelineAttempt(record pipelineAttemptRecord) bool {
-	if record.Execution != "container" || record.DockerID == "" || !regexp.MustCompile(`^memql-step-[0-9a-f]{32}$`).MatchString(record.Container) || len(record.Services) > maxPipelineServices {
+	if record.Execution != "container" || record.DockerID == "" || !validPipelineDockerEndpoint(record.DockerEndpoint) || !regexp.MustCompile(`^memql-step-[0-9a-f]{32}$`).MatchString(record.Container) || len(record.Services) > maxPipelineServices {
 		return false
 	}
 	if len(record.Services) == 0 {
@@ -205,6 +209,10 @@ func removePipelineAttempt(ctx context.Context, record pipelineAttemptRecord) er
 	if !validPipelineAttempt(record) {
 		return errPipelineUnreconciled
 	}
+	ctx = withPipelineDockerEndpoint(ctx, record.DockerEndpoint)
+	if err := verifyPipelineDockerDaemon(ctx, record.DockerID); err != nil {
+		return err
+	}
 	var errs []error
 	errs = append(errs, removePipelineContainer(ctx, record.Container))
 	// Remove the command, then siblings, then the namespace owner, then bridge.
@@ -219,5 +227,8 @@ func removePipelineAttempt(ctx context.Context, record pipelineAttemptRecord) er
 			}
 		}
 	}
+	// Absence on a replacement daemon is not proof that the recorded one
+	// stopped. Retain ownership if the socket changed during cleanup.
+	errs = append(errs, verifyPipelineDockerDaemon(ctx, record.DockerID))
 	return errors.Join(errs...)
 }

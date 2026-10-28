@@ -573,15 +573,23 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 	go m.watchdog(ctx, c, stream, limits, observeIdle, watchdogDone)
 
 	ctx = withRuntimeProgress(ctx, stream.runtimeProgress)
+	var reservation *resourceReservation
 	if resources := m.limiter.resources; resources != nil && localRuntime(info.BaseURL) {
-		release, err := resources.acquire(ctx, requestMemory(info, start), m.http, m.logger)
+		var err error
+		reservation, err = resources.acquire(ctx, requestMemory(info, start), m.http, m.logger)
 		if err != nil {
 			stopWatchdog()
 			finish, code, detail := m.classify(c, err)
 			_ = sender.SendModelCallEnd(&memqlv1.ModelCallEnd{RequestId: c.requestID, FinishReason: finish, ErrorCode: code, Error: detail})
 			return
 		}
-		defer release()
+		defer reservation.close()
+		if err := reservation.begin(); err != nil {
+			stopWatchdog()
+			finish, code, detail := m.classify(c, err)
+			_ = sender.SendModelCallEnd(&memqlv1.ModelCallEnd{RequestId: c.requestID, FinishReason: finish, ErrorCode: code, Error: detail})
+			return
+		}
 	}
 	var (
 		res   Result
@@ -606,6 +614,17 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 			Tools:    toolsFromStart(start),
 			Level:    start.GetLevel(),
 		}, stream.emit)
+	}
+	// A terminal runtime response ends resource use even if local validation or
+	// delivery fails afterward. Keep that error, but release its exact activity
+	// witness. Cancellation and truncated transports have no terminal evidence
+	// and remain fenced for reconciliation after these process locks close.
+	// Successful clients already require a terminal response; the explicit
+	// evidence additionally preserves completion on their error paths.
+	if reservation != nil && (err == nil || res.RuntimeCompleted) {
+		if completeErr := reservation.complete(); completeErr != nil {
+			err = errors.Join(err, fmt.Errorf("inference completed but shared capacity could not be released: %w", completeErr))
+		}
 	}
 
 	stopWatchdog()
@@ -759,7 +778,9 @@ func (m *Manager) runModality(
 		// same shape on the other side.
 		if out.Text != "" {
 			if err := emit(out.Text); err != nil {
-				return Result{}, modalityResult{}, err
+				// Transcribe completed before delivery began. Preserve that
+				// distinction if the cluster stream disappears afterward.
+				return Result{RuntimeCompleted: true, Usage: out.Usage}, modalityResult{}, err
 			}
 		}
 		return Result{FinishReason: FinishStop, Usage: out.Usage},

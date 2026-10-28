@@ -33,16 +33,23 @@ func (dr *runDriver) definitionForRun(step pipelines.Step, run Run) string {
 		domain = dr.d.Domain()
 	}
 	step.Skip = nil // the journal owns the original selection, not a new compare
+	call := map[string]any{
+		"engineRevision": revision, "step": step,
+		"workflow":   dr.workflowIdentity(),
+		"repository": dr.p.Repository, "pipelineId": bareID(dr.p.ID),
+		"ownerUserId": dr.p.OwnerUserID, "compute": dr.p.Compute,
+		"sha": run.SHA, "version": run.Version, "inboundRequestId": run.InboundRequestID,
+		"mode": run.Mode, "event": run.Event, "domain": domain,
+	}
+	if step.Placement == pipelines.PlacementPool {
+		// The source snapshot is immutable; an authored expression can still
+		// use a clock. Bind its validated answer too, so recovery refuses a
+		// changed capacity decision instead of widening a journaled effect.
+		call["computePlacement"] = dr.computePlacement
+	}
 	value, err := workjournal.DefinitionFingerprint("pipeline-execution-v1", []workjournal.StepDecl{{
 		Key: step.Key, Kind: workjournal.KindDeterministic, StepType: "exec",
-		Call: map[string]any{
-			"engineRevision": revision, "step": step,
-			"workflow":   dr.workflowIdentity(),
-			"repository": dr.p.Repository, "pipelineId": bareID(dr.p.ID),
-			"ownerUserId": dr.p.OwnerUserID, "compute": dr.p.Compute,
-			"sha": run.SHA, "version": run.Version, "inboundRequestId": run.InboundRequestID,
-			"mode": run.Mode, "event": run.Event, "domain": domain,
-		},
+		Call: call,
 	}})
 	if err != nil {
 		return "" // typed definition data should always encode; never bless a failure
