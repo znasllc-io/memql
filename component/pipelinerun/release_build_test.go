@@ -63,6 +63,19 @@ func TestReleaseBuildInspectionMakesNoRunAndRetainsConflicts(t *testing.T) {
 	}
 }
 
+// Preparing a new version reads a tag that does not exist yet, and GitHub
+// answers that read with 422, not 404. Reading only 404 as absence refused
+// every release whose tag had not been made (0.31.4's first source check).
+func TestReleaseBuildInspectionReadsAMissingTagAsAbsent(t *testing.T) {
+	h := newHarness(t)
+	r, g := configureReleaseBuild(t, h)
+	delete(g.commits, repoName+"@refs/tags/v1.4.0")
+	source, err := h.integ.InspectReleaseBuild(personCtx(ownerID), r)
+	if err != nil || source.TagExists || source.TagSHA != "" || source.SHA != shaA {
+		t.Fatalf("missing tag was not read as absent: %+v %v", source, err)
+	}
+}
+
 func TestReleaseBuildRefusesChangedAuthorityBeforeOpening(t *testing.T) {
 	for _, name := range []string{"foreign owner", "archived source", "changed source owner", "changed connection", "changed repository", "changed installation", "changed provider identity", "failed check", "missing check", "incomplete binding", "missing tag", "cancelled", "provider unavailable", "source moves during proof", "grant revoked during proof"} {
 		t.Run(name, func(t *testing.T) {

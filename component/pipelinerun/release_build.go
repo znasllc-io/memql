@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
 
@@ -143,7 +142,7 @@ func (i *Integration) inspectReleaseBuild(ctx context.Context, r pipelines.Relea
 	}
 	if r.Tag != "" {
 		sha, _, readErr := d.GitHub.CommitForRef(ctx, token, p.Repository, "refs/tags/"+r.Tag)
-		if readErr != nil && githubapp.StatusOf(readErr) != http.StatusNotFound {
+		if readErr != nil && !githubapp.IsMissingRef(readErr) {
 			return empty, p, "", readErr
 		}
 		if readErr == nil {

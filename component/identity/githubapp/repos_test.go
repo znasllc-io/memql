@@ -232,6 +232,32 @@ func TestCommitForRefResolvesARefToItsCommit(t *testing.T) {
 	}
 }
 
+// GitHub answers a ref that names no commit with 422, not 404. The body is the
+// one it sends for a tag that does not exist yet.
+func TestIsMissingRefReadsGitHubsAnswerForARefWithNoCommit(t *testing.T) {
+	now := time.Now().UTC()
+	hub := newHub().json("/repos/acme/widget/commits/refs/tags/v9.9.9", http.StatusUnprocessableEntity,
+		`{"message":"No commit found for SHA: refs/tags/v9.9.9","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"422"}`)
+	c := testClient(t, hub, &now)
+	_, _, err := c.CommitForRef(context.Background(), installToken, "acme", "widget", "refs/tags/v9.9.9")
+	if err == nil || !IsMissingRef(err) {
+		t.Fatalf("a ref with no commit must read as missing: %v", err)
+	}
+	hub.json("/repos/acme/gone/commits/main", http.StatusNotFound, `{"message":"Not Found"}`)
+	if _, _, err := c.CommitForRef(context.Background(), installToken, "acme", "gone", "main"); err == nil || !IsMissingRef(err) {
+		t.Fatalf("a 404 must stay a missing ref: %v", err)
+	}
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusInternalServerError} {
+		hub.json("/repos/acme/widget/commits/main", status, `{"message":"no"}`)
+		if _, _, err := c.CommitForRef(context.Background(), installToken, "acme", "widget", "main"); err == nil || IsMissingRef(err) {
+			t.Fatalf("HTTP %d is not a missing ref: %v", status, err)
+		}
+	}
+	if IsMissingRef(errors.New("network down")) || IsMissingRef(nil) {
+		t.Fatal("an error that is not GitHub's answer is not a missing ref")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The archive
 // ---------------------------------------------------------------------------
