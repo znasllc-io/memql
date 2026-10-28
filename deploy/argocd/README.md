@@ -40,8 +40,9 @@ Prerequisites worth knowing before operating this:
   `deploy/external-secrets/secretstore.yaml` in it before base's
   `ExternalSecret`s can sync. The monitoring manifests under
   `deploy/k8s/monitoring/` declare their own `namespace: memql`.
-- **`scripts/deploy/drift-check.sh`** compares the overlay's committed digests
-  against running pods; `--namespace=` overrides the default.
+- **`scripts/deploy/drift-check.sh`** compares the cloud overlay's committed
+  digests against the pods running in the namespace the overlay deploys them to
+  (`memql`); `--env=` names another overlay and `--namespace=` another namespace.
 
 ## Layout
 

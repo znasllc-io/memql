@@ -13,10 +13,11 @@
 #       @sha256: digest -- no floating :tags. Catches a PR that re-introduces a
 #       mutable tag (the #684 root cause). This is what CI gates on.
 #
-#   --live      (needs kubectl context to the env cluster)
+#   --live      (needs a kubectl context to the cluster)
 #       Compare the digests the overlay pins against the digests actually
-#       running in the cluster (pod imageID). Any divergence = out-of-band
-#       mutation, which v2 forbids (the overlay, reconciled, is authoritative).
+#       running in the namespaces the overlay deploys them to (pod imageID).
+#       Any divergence = out-of-band mutation, which v2 forbids (the overlay,
+#       reconciled, is authoritative).
 #       Used by the deploy pack's post-apply guard and by a scheduled drift
 #       job; once Argo CD is live (Phase 2) its OutOfSync status is the
 #       continuous equivalent.
@@ -33,9 +34,6 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 K8S_DIR="$REPO_ROOT/deploy/k8s"
-# Set from --env by namespace_for_env(); see there for why it is no longer a
-# constant.
-NAMESPACE=""
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -51,7 +49,7 @@ function fail() { echo "DRIFT: $*"; }
 
 function show_help() {
     cat << EOF
-Usage: $0 [--rendered|--live] [--env=ENV]
+Usage: $0 [--rendered|--live] [--env=OVERLAY] [--namespace=NS]
 
 Drift detector for the digest-pinned deploy overlay (deployment-v2 #699).
 
@@ -59,39 +57,23 @@ Options:
     --rendered    Assert the overlay pins every image by \@sha256: digest
                   (no cluster access; CI gate). This is the default.
     --live        Assert live cluster digests == the committed overlay digests
-                  (needs a kubectl context to the env cluster).
-    --env=ENV     Overlay to check (default: staging) -> deploy/k8s/overlays/ENV
-                  Also selects the namespace --live compares against:
-                  prod -> memql-prod, staging -> memql-staging, local -> memql.
-    --namespace=NS  Override that namespace (--live only).
+                  (needs a kubectl context to the cluster). Reads the pods of
+                  every namespace the overlay places an image in.
+    --env=OVERLAY Overlay to check (default: cloud) -> deploy/k8s/overlays/OVERLAY
+    --namespace=NS  Read the pods of NS instead (--live only).
     --help        Show this help.
 
 Exit: 0 = no drift; non-zero = drift / unpinned image / render failure.
 EOF
 }
 
-# namespace_for_env prints the namespace an environment's workloads run in.
-#
-# THIS USED TO BE THE CONSTANT `memql` FOR EVERY ENV, and that stopped being
-# true when staging and production became two namespaces in one cluster
-# (memql#3766). `--live --env=staging` was then comparing the staging overlay's
-# committed digests against pods in a namespace the staging overlay does not
-# deploy to -- so it reported either "converged" against somebody else's
-# workloads or nothing at all, which is the worst possible answer from a drift
-# detector. The overlay path and the namespace are two faces of one input, so
-# they are derived from one flag.
-function namespace_for_env() {
-    case "$1" in
-        prod)    printf 'memql-prod' ;;
-        staging) printf 'memql-staging' ;;
-        local)   printf 'memql' ;;
-        *)       printf 'memql-%s' "$1" ;;
-    esac
-}
-
 function parse_arguments() {
     MODE="rendered"
-    ENV="staging"
+    # The overlay deploy/argocd/apps/memql.yaml reconciles. This was staging
+    # until one installation shape (epic memql#3943) retired the staging and
+    # prod overlays, which left a bare run checking a directory that no longer
+    # existed (TestDriftCheckDefaultsToTheCloudOverlay).
+    ENV="cloud"
     NORMALIZE_ARG=""
     NAMESPACE_OVERRIDE=""
     while [[ $# -gt 0 ]]; do
@@ -109,12 +91,29 @@ function parse_arguments() {
         esac
     done
     OVERLAY_DIR="$K8S_DIR/overlays/$ENV"
-    NAMESPACE="${NAMESPACE_OVERRIDE:-$(namespace_for_env "$ENV")}"
 }
 
 #=============================================================================
 # RENDER
 #=============================================================================
+
+# Fail, listing the overlays that exist, when --env names no overlay. A render
+# of a missing directory prints nothing (the renders discard kubectl's error),
+# so --live used to report a retired or misspelled --env as "overlay rendered
+# no digests" (TestDriftCheckNamesAMissingOverlay).
+function require_overlay() {
+    if [ -f "$OVERLAY_DIR/kustomization.yaml" ]; then
+        return 0
+    fi
+    local dir names=""
+    for dir in "$K8S_DIR"/overlays/*; do
+        if [ -f "$dir/kustomization.yaml" ]; then
+            names="$names $(basename "$dir")"
+        fi
+    done
+    fail "no overlay at $OVERLAY_DIR (overlays:$names)"
+    return 1
+}
 
 # Render the overlay; emit one "name@digest-or-tag" per image line.
 #
@@ -130,6 +129,39 @@ function parse_arguments() {
 function rendered_images() {
     kubectl kustomize "$OVERLAY_DIR" 2>/dev/null \
         | awk '/^[[:space:]]+image(Name)?:[[:space:]]/ { sub(/^[[:space:]]+image(Name)?:[[:space:]]*/, ""); gsub(/"/, ""); print }' \
+        | sort -u
+}
+
+# Print each namespace in which the overlay places a resource that names an
+# image, under either key rendered_images reads. These are the namespaces
+# --live reads pods from, unless --namespace names one.
+#
+# THE NAMESPACE COMES FROM THE OVERLAY, NOT FROM --env. It came from a table
+# keyed by --env (prod -> memql-prod, staging -> memql-staging), written when
+# staging and production were two namespaces in one cluster (memql#3766). One
+# installation shape (epic memql#3943) retired both, and the table's fallback
+# then sent --env=cloud to memql-cloud, which nothing deploys to: every overlay
+# deploys to memql, which deploy/k8s/base sets. The overlay and the namespace
+# are two faces of one input, so the namespace is read from the overlay, and
+# the two cannot disagree again (TestDriftCheckLiveReadsTheOverlaysNamespaces).
+#
+# A namespace holding no image is not read. Every overlay also renders
+# memql-pipelines, which holds a quota, a service account and network policies
+# but no image: the pods that run there are pipeline steps, created at run
+# time. The awk keeps each document's metadata.namespace and prints it at the
+# document's end when a line of that document named an image.
+function rendered_namespaces() {
+    kubectl kustomize "$OVERLAY_DIR" 2>/dev/null \
+        | awk '
+            function flush() {
+                if (has_image && ns != "") print ns
+                ns = ""; has_image = 0; top = ""
+            }
+            /^---/ { flush(); next }
+            /^[^[:space:]-]/ { top = $1 }
+            top == "metadata:" && /^  namespace:/ { ns = $2; gsub(/"/, "", ns) }
+            /^[[:space:]]+image(Name)?:[[:space:]]/ { has_image = 1 }
+            END { flush() }' \
         | sort -u
 }
 
@@ -210,9 +242,7 @@ function check_rendered() {
     if [ "$ENV" = "local" ]; then
         info "skipping digest-pin gate for the 'local' overlay (uses dev-built images with mutable tags, not @sha256 digests)"
         # Still verify the overlay renders without errors.
-        if [ ! -f "$OVERLAY_DIR/kustomization.yaml" ]; then
-            fail "no overlay at $OVERLAY_DIR"; return 1
-        fi
+        require_overlay || return 1
         local imgs
         imgs="$(rendered_images)"
         if [ -z "$imgs" ]; then
@@ -222,9 +252,7 @@ function check_rendered() {
         return 0
     fi
     info "rendering $OVERLAY_DIR and asserting every image is digest-pinned..."
-    if [ ! -f "$OVERLAY_DIR/kustomization.yaml" ]; then
-        fail "no overlay at $OVERLAY_DIR"; return 1
-    fi
+    require_overlay || return 1
     local imgs unpinned=0 line
     imgs="$(rendered_images)"
     if [ -z "$imgs" ]; then
@@ -249,12 +277,32 @@ function check_rendered() {
     return 0
 }
 
+# Print the imageID of every container in the pods of each namespace in $1
+# (one namespace per line).
+function live_image_ids() {
+    local ns
+    while IFS= read -r ns; do
+        [ -z "$ns" ] && continue
+        kubectl get pods -n "$ns" \
+            -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' 2>/dev/null
+    done <<< "$1"
+}
+
 # Live guard: committed overlay digests == digests running in the cluster.
 function check_live() {
+    require_overlay || return 1
     if ! kubectl cluster-info &> /dev/null; then
         echo "ERROR: --live needs a reachable cluster (kubectl context)."; return 2
     fi
-    info "comparing committed $ENV overlay digests vs live cluster digests..."
+    local namespaces="$NAMESPACE_OVERRIDE" where
+    if [ -z "$namespaces" ]; then
+        namespaces="$(rendered_namespaces)"
+    fi
+    if [ -z "$namespaces" ]; then
+        fail "overlay places no image in any namespace (render failure?); name one with --namespace="; return 1
+    fi
+    where="$(paste -s -d, - <<< "$namespaces")"
+    info "comparing committed $ENV overlay digests vs live pods in namespace(s) $where..."
     local committed live
     # Normalize BOTH sides (normalize_imageref) so a bare overlay pin
     # (redis@sha256:...) matches the live pod's registry-qualified imageID
@@ -262,11 +310,9 @@ function check_live() {
     # tag-and-digest pin (memql-db:<tag>@sha256:...) matches the tagless
     # imageID the kubelet reports for it.
     committed="$(rendered_images | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
-    live="$(kubectl get pods -n "$NAMESPACE" \
-        -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' 2>/dev/null \
-        | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
+    live="$(live_image_ids "$namespaces" | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
     if [ -z "$committed" ]; then fail "overlay rendered no digests"; return 1; fi
-    if [ -z "$live" ]; then fail "cluster reported no running image digests"; return 1; fi
+    if [ -z "$live" ]; then fail "cluster reported no running image digests in namespace(s) $where"; return 1; fi
 
     # A digest the overlay pins but the cluster is NOT running = un-converged
     # (or out-of-band drift). We only flag overlay-pinned images (the 8 we own);

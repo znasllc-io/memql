@@ -1,5 +1,14 @@
-// Tests for the deployment-v2 drift detector's image-ref normalization
-// (scripts/deploy/drift-check.sh, #1441). The --live mode compares the
+// Tests for the deployment-v2 drift detector (scripts/deploy/drift-check.sh):
+// which overlay it checks, where --live looks for pods, and image-ref
+// normalization.
+//
+// A bare run checks deploy/k8s/overlays/cloud, and --live reads pods from every
+// namespace in which the rendered overlay places an image. The defaults used to
+// name the retired staging overlay and a table of tier namespaces, so the bare
+// commands the runbooks give failed before comparing anything. The --live cases
+// run the real script against a stub kubectl that records what it was asked.
+//
+// Image-ref normalization (#1441). The --live mode compares the
 // digests the overlay pins against the digests a cluster is actually
 // running (pod imageID). Docker reports an imageID with the registry fully
 // qualified (docker.io/livekit/livekit-server@sha256:...) while the overlay
@@ -22,10 +31,12 @@ package deploy
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -163,25 +174,38 @@ func TestDriftCheckNormalizeEquivalence(t *testing.T) {
 	}
 }
 
-// driftCheckStubKubectl answers the three calls check_live makes: the
-// cluster-info probe, the overlay render and the pod imageID listing. Any
-// other call fails, so a change in what --live asks the cluster cannot be
-// answered by this stub.
+// driftCheckStubKubectl answers the calls drift-check.sh makes, the way a
+// cluster would. It renders only a directory holding a kustomization.yaml, so a
+// missing overlay fails as kubectl's own render does, and it lists pods only in
+// a namespace that has a file under DRIFT_CHECK_TEST_PODS. Every call is
+// appended to DRIFT_CHECK_TEST_CALLS, so a case can assert which overlay was
+// rendered and which namespaces were read. Any other call fails, so a change in
+// what the script asks the cluster cannot be answered by this stub.
 const driftCheckStubKubectl = `#!/bin/bash
 function main() {
+  printf '%s\n' "$*" >> "$DRIFT_CHECK_TEST_CALLS"
   case "$1" in
     cluster-info) ;;
-    kustomize) cat "$DRIFT_CHECK_TEST_RENDERED" ;;
-    get) [[ "$2" == pods ]] && cat "$DRIFT_CHECK_TEST_IMAGE_IDS" ;;
+    kustomize) [[ -f "$2/kustomization.yaml" ]] && cat "$DRIFT_CHECK_TEST_RENDERED" ;;
+    get)
+      [[ "$2" == pods && "$3" == -n ]] || exit 1
+      if [[ -f "$DRIFT_CHECK_TEST_PODS/$4" ]]; then cat "$DRIFT_CHECK_TEST_PODS/$4"; fi ;;
     *) exit 1 ;;
   esac
 }
 main "$@"
 `
 
-// runDriftCheckLive runs the real drift-check.sh --live, with a stub kubectl
-// serving the given render and one running imageID per line.
-func runDriftCheckLive(t *testing.T, rendered, imageIDs string) (string, error) {
+// driftCheckCluster is what the stub kubectl serves: one overlay render, and
+// for each namespace the imageID of every running container, one per line.
+type driftCheckCluster struct {
+	rendered string
+	pods     map[string]string
+}
+
+// runDriftCheck runs the real drift-check.sh with args against a stub kubectl
+// serving cluster. It returns the script's output and every kubectl call made.
+func runDriftCheck(t *testing.T, cluster driftCheckCluster, args ...string) (string, []string, error) {
 	t.Helper()
 	dir := t.TempDir()
 	write := func(name, content string, mode os.FileMode) string {
@@ -192,10 +216,30 @@ func runDriftCheckLive(t *testing.T, rendered, imageIDs string) (string, error) 
 		return p
 	}
 	write("kubectl", driftCheckStubKubectl, 0o755)
+	if err := os.Mkdir(filepath.Join(dir, "pods"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for ns, imageIDs := range cluster.pods {
+		write(filepath.Join("pods", ns), imageIDs, 0o644)
+	}
+	calls := filepath.Join(dir, "calls.txt")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("DRIFT_CHECK_TEST_RENDERED", write("rendered.yaml", rendered, 0o644))
-	t.Setenv("DRIFT_CHECK_TEST_IMAGE_IDS", write("image-ids.txt", imageIDs, 0o644))
-	return runAks(t, "drift-check.sh", "--live", "--env=cloud", "--namespace=memql")
+	t.Setenv("DRIFT_CHECK_TEST_RENDERED", write("rendered.yaml", cluster.rendered, 0o644))
+	t.Setenv("DRIFT_CHECK_TEST_PODS", filepath.Join(dir, "pods"))
+	t.Setenv("DRIFT_CHECK_TEST_CALLS", calls)
+	out, err := runAks(t, "drift-check.sh", args...)
+	// The file is absent when the script never called kubectl.
+	logged, _ := os.ReadFile(calls)
+	return out, strings.FieldsFunc(string(logged), func(r rune) bool { return r == '\n' }), err
+}
+
+// runDriftCheckLive runs --live against the cloud overlay's render and the pods
+// of namespace memql, which run imageIDs (one per line).
+func runDriftCheckLive(t *testing.T, rendered, imageIDs string) (string, error) {
+	t.Helper()
+	out, _, err := runDriftCheck(t, driftCheckCluster{rendered: rendered, pods: map[string]string{"memql": imageIDs}},
+		"--live", "--env=cloud", "--namespace=memql")
+	return out, err
 }
 
 // TestDriftCheckLiveComparesTaggedPinsByDigest is the regression test for a
@@ -243,4 +287,177 @@ spec:
 			t.Errorf("--live output has no line matching %q:\n%s", want, out)
 		}
 	})
+}
+
+// driftCheckDeployment renders, in kustomize's output layout, a Deployment
+// named name in namespace ns with one container running image.
+func driftCheckDeployment(ns, name, image string) string {
+	return fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %[2]s
+  namespace: %[1]s
+spec:
+  template:
+    spec:
+      containers:
+      - name: %[2]s
+        image: %[3]s
+`, ns, name, image)
+}
+
+// driftCheckDatabase renders a CloudNativePG Cluster in namespace ns. It names
+// its image under imageName rather than image.
+func driftCheckDatabase(ns, image string) string {
+	return fmt.Sprintf(`apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: memql-db
+  namespace: %s
+spec:
+  imageName: %s
+  instances: 1
+`, ns, image)
+}
+
+// driftCheckStepAccount names no image, in the namespace every overlay renders
+// for pipeline steps.
+const driftCheckStepAccount = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memql-pipelines-step
+  namespace: memql-pipelines
+`
+
+// driftCheckRenderedOverlays returns the directory of every overlay render in
+// calls.
+func driftCheckRenderedOverlays(calls []string) []string {
+	var dirs []string
+	for _, c := range calls {
+		if dir, ok := strings.CutPrefix(c, "kustomize "); ok {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
+// driftCheckPodNamespaces returns, sorted, the namespace of every pod listing
+// in calls.
+func driftCheckPodNamespaces(calls []string) []string {
+	var namespaces []string
+	for _, c := range calls {
+		if rest, ok := strings.CutPrefix(c, "get pods -n "); ok {
+			namespaces = append(namespaces, strings.Fields(rest)[0])
+		}
+	}
+	slices.Sort(namespaces)
+	return namespaces
+}
+
+// TestDriftCheckDefaultsToTheCloudOverlay pins the overlay a bare run checks:
+// deploy/k8s/overlays/cloud, the one deploy/argocd/apps/memql.yaml reconciles.
+// The default was staging, an overlay retired with the staging/production split
+// (epic memql#3943), so the bare commands deploy/argocd/README.md and
+// docs/internal/ops/dr-runbook.md give failed before reading any overlay.
+func TestDriftCheckDefaultsToTheCloudOverlay(t *testing.T) {
+	image := "acrmemql.azurecr.io/memql-bff@sha256:" + strings.Repeat("a", 64)
+	cluster := driftCheckCluster{
+		rendered: driftCheckDeployment("memql", "bff", image),
+		pods:     map[string]string{"memql": image + "\n"},
+	}
+	for _, mode := range []string{"--rendered", "--live"} {
+		t.Run(mode, func(t *testing.T) {
+			out, calls, err := runDriftCheck(t, cluster, mode)
+			if err != nil {
+				t.Fatalf("a bare %s exited non-zero: %v\n%s", mode, err, out)
+			}
+			overlays := driftCheckRenderedOverlays(calls)
+			if len(overlays) == 0 {
+				t.Fatalf("a bare %s rendered no overlay; kubectl calls: %q", mode, calls)
+			}
+			for _, dir := range overlays {
+				if !strings.HasSuffix(dir, "/deploy/k8s/overlays/cloud") {
+					t.Errorf("a bare %s rendered %s; want deploy/k8s/overlays/cloud", mode, dir)
+				}
+			}
+		})
+	}
+}
+
+// TestDriftCheckLiveReadsTheOverlaysNamespaces pins where --live looks for
+// pods. Without --namespace, it reads every namespace in which the rendered
+// overlay places a resource that names an image, and no other. The namespace
+// used to come from a table keyed by --env, whose fallback sent --env=cloud to
+// memql-cloud, a namespace nothing deploys to.
+func TestDriftCheckLiveReadsTheOverlaysNamespaces(t *testing.T) {
+	bff := "acrmemql.azurecr.io/memql-bff@sha256:" + strings.Repeat("b", 64)
+	db := "acrmemql.azurecr.io/memql-db@sha256:" + strings.Repeat("c", 64)
+	cases := []struct {
+		name     string
+		rendered string
+		pods     map[string]string
+		args     []string
+		want     []string
+	}{
+		{
+			name:     "the cloud overlay's namespace, not memql-cloud",
+			rendered: driftCheckDeployment("memql", "bff", bff),
+			pods:     map[string]string{"memql": bff + "\n"},
+			args:     []string{"--live", "--env=cloud"},
+			want:     []string{"memql"},
+		},
+		{
+			name:     "whatever namespace the overlay names",
+			rendered: driftCheckDeployment("elsewhere", "bff", bff),
+			pods:     map[string]string{"elsewhere": bff + "\n"},
+			args:     []string{"--live", "--env=cloud"},
+			want:     []string{"elsewhere"},
+		},
+		{
+			name: "every namespace holding an image, and none holding none",
+			rendered: driftCheckDeployment("memql", "bff", bff) + "---\n" +
+				driftCheckDatabase("memql-data", db) + "---\n" + driftCheckStepAccount,
+			pods: map[string]string{"memql": bff + "\n", "memql-data": db + "\n"},
+			args: []string{"--live", "--env=cloud"},
+			want: []string{"memql", "memql-data"},
+		},
+		{
+			name:     "--namespace overrides the overlay",
+			rendered: driftCheckDeployment("memql", "bff", bff),
+			pods:     map[string]string{"other": bff + "\n"},
+			args:     []string{"--live", "--env=cloud", "--namespace=other"},
+			want:     []string{"other"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, calls, err := runDriftCheck(t, driftCheckCluster{rendered: tc.rendered, pods: tc.pods}, tc.args...)
+			if err != nil {
+				t.Fatalf("%q exited non-zero: %v\n%s", tc.args, err, out)
+			}
+			if got := driftCheckPodNamespaces(calls); !slices.Equal(got, tc.want) {
+				t.Errorf("%q read pods from %q; want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDriftCheckNamesAMissingOverlay pins the failure for an --env with no
+// overlay, such as the retired staging and prod. Both modes name the missing
+// directory and list the overlays that exist. --live used to report it as
+// "overlay rendered no digests", which named the symptom rather than the cause.
+func TestDriftCheckNamesAMissingOverlay(t *testing.T) {
+	want := regexp.MustCompile(`no overlay at .*/deploy/k8s/overlays/staging \(overlays: [^)]*\bcloud\b[^)]*\)`)
+	for _, mode := range []string{"--rendered", "--live"} {
+		t.Run(mode, func(t *testing.T) {
+			out, _, err := runDriftCheck(t, driftCheckCluster{}, mode, "--env=staging")
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("%s --env=staging did not exit non-zero (err %v):\n%s", mode, err, out)
+			}
+			if !want.MatchString(out) {
+				t.Errorf("%s --env=staging output has no line matching %q:\n%s", mode, want, out)
+			}
+		})
+	}
 }
