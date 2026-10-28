@@ -23,12 +23,12 @@ Deploy the engine before offering the new Cockpit installation from Fleet.
 Every product built on MemQL follows the same constellation (see
 [docs/public/operate/downstream-stacks.md](docs/public/operate/downstream-stacks.md)):
 
-| Repo | Role |
+| Source | Role |
 |---|---|
 | `znasllc-io/memql` (this repo) | The engine + node-type binaries (bff / voice / cognition / agent / planner / workbench / mcp / identity) and the wire protocol. **Upstream.** |
 | the product's **carrier** repo | Imports MemQL's Go packages, registers its DSL subtree + product integrations through the plugin-SDK seams, and builds the deployable backend (carrier) images. Owns the product's deploy/release estate. |
 | the product's **frontend** repo | The SPA and its client-side deploy config. |
-| `znasllc-io/memql-cockpit` | The **fleet worker CLI** (display name "MemQL Cockpit"), installed as the `memql` command; the worker run-mode binary. A gRPC client of MemQL. |
+| `cockpit/` in `znasllc-io/memql` | The **fleet worker CLI** (display name "MemQL Cockpit"), installed as the `memql` command; the worker run-mode binary. A gRPC client with independent release artifacts. |
 
 The concrete repo names, versions, and pin values for a given product
 live in that product's carrier repo (its VERSIONING/COMPATIBILITY
@@ -46,7 +46,7 @@ pinning:
   product carrier  (BFF carrier)
       │  go.mod require + image built from ──►
       ▼
-  memql  (engine + protocol)          ◄── memql-cockpit declares the
+  memql  (engine + protocol)          ◄── Cockpit declares the
                                           min MemQL / protocol it speaks
 ```
 
@@ -62,14 +62,14 @@ pinning:
    reverse), MemQL carries no require on any carrier — see the product
    pack repo's docs/operate/deployment-strategy.md.
 
-3. **memql-cockpit → memql (declared minimum).** Cockpit is a gRPC
+3. **Cockpit → MemQL (declared minimum).** Cockpit is a gRPC
    client, not part of the backend image, so it is not in the build
    pin chain above. Instead it **declares the minimum MemQL engine /
    wire-protocol version it speaks** and checks the connected
    cluster's reported version against that minimum at connect time.
    Cockpit and the engine can therefore advance on independent
    release cadences as long as the cluster meets Cockpit's declared
-   floor.
+   floor. Their source builds use the same monorepo checkout.
 
 ### How a deploy resolves
 
@@ -98,7 +98,7 @@ The **exception** is the `1.0.0` cut at the invite-only beta
 (~Aug 2026). At the beta, all platform repos are tagged `1.0.0`
 **together as a coordinated train** — a single coherent
 "first real users" release across the engine, the product's carrier +
-frontend repos, and memql-cockpit. After the train departs, repos
+frontend repos, and Cockpit. After the train departs, components
 resume **independent semver** and the pin chain again does the work of
 keeping combinations coherent.
 

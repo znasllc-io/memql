@@ -281,7 +281,7 @@ also be in `models.allow`; the runtime declaration itself is not permission.
 Whisper.cpp can provide local ASR; Kokoro's OpenAI-compatible endpoint can
 provide speech. Cockpit supports multipart OpenAI ASR and whisper.cpp `/inference`.
 Kokoro voice IDs can be mapped to MemQL's male/female choices in worker policy.
-See [Cockpit local-model configuration](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/local-models.md).
+See [Cockpit local-model configuration](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/local-models.md).
 
 The entire call can stay local when Fleet offers ASR, tool-capable chat and TTS.
 An eligible local tool-capable chat route enables text Ask; voice additionally needs both audio

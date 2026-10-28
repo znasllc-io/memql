@@ -29,7 +29,6 @@ docs/
 │   ├── ai/            LLM cost control, operator capabilities
 │   ├── build/         gRPC/audio, build tags
 │   ├── operate/       deploy, auth/, env, runbooks (public)
-│   ├── cockpit/       engine-backed Cockpit surfaces (Editor); the rest live in the memql-cockpit repo
 │   └── reference/     generated reference; the bundle renders the concept catalog as reference/concepts.md
 ├── public_boundary_allowlist.toml   links the boundary gate lets through for now; only shrinks
 ├── internal/          Never published
@@ -41,6 +40,10 @@ docs/
     ├── specs/         front-matter and relative-link gates, so its
     └── plans/         lifecycle is a convention and nothing enforces it
 ```
+
+Machine-side Cockpit documentation lives in this repository's
+[`cockpit/docs/`](../cockpit/docs/). Public worker operations remain in
+[`public/operate/workers-runbook.md`](public/operate/workers-runbook.md).
 
 **`superpowers/` is the one tree no gate watches**, which is why its rule is
 written out below rather than left to the standard. It was absent from this
