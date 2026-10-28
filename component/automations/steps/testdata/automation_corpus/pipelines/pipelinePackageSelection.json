@@ -22,7 +22,8 @@
         "result": {
           "output": {
             "full": true,
-            "reason": "full run mode"
+            "reason": "full run mode",
+            "testInputs": []
           },
           "status": "completed"
         }
@@ -49,7 +50,8 @@
         "result": {
           "output": {
             "full": true,
-            "reason": "full run mode"
+            "reason": "full run mode",
+            "testInputs": []
           },
           "status": "completed"
         }
