@@ -2,12 +2,14 @@ package pipelinehop
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -17,8 +19,10 @@ import (
 	"github.com/znasllc-io/memql/component/pipelines"
 )
 
-// hop_db_test.go -- the cases. Every one runs on the same two replicas, each on
-// a repository and a pipeline of its own.
+// hop_db_test.go -- the cases, each on a repository and a pipeline of its own.
+// The delivery cases share one pair of replicas; the retry case boots its own,
+// because it installs a compute policy on the bff that no other case's runs may
+// capture.
 //
 // HOW TO CONFIRM IT IS LOAD-BEARING: delete the two v1:pipelines:run rules
 // from component/node/routing.go's core slice and run this file. The run's
@@ -459,6 +463,266 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 		}
 		t.Logf("check_run rerequested -> %s/%s attempt %d of %s, driven by %s", rerun.Mode, rerun.Event, rerun.Attempt, rerun.RerunOf, rerun.DriverNodeID)
 	})
+}
+
+// The step the retry case retries, and the owner's machine it runs on, by the
+// registration id an attempt's Where carries. The owner gave the machine no
+// display name, so a check run calls it by the start of that id
+// (pipelines.MachineWords).
+const (
+	retriedStep = "tests.unit"
+	laptop      = "laptop"
+)
+
+// TestAFleetStepRetriedOnTheAgentReplica: a push arrives on the bff, the agent
+// drives the run, and a step whose first attempt never started on the owner's
+// machine is tried on that machine again and passes -- every write of the
+// retry made by the agent, from what the run row and its events carried across.
+//
+// tests.unit is a pool step (poolManifest) on a pipeline whose owner consented
+// to the fleet. Its first attempt reaches the machine "laptop", whose fetch of
+// the commit fails before the command starts, which the fleet reads as nothing
+// ran (laptopAnswer). The agent records that outcome on the step's row, says
+// on the check run that the step is retrying, waits the delay the run's policy
+// names, and sends attempt 2 pinned to the same machine, where it passes.
+//
+// THE POLICY IS THE RUN'S, NOT THE AGENT'S. Only the bff, which opens the run
+// and captures its policy, has a policy installed whose same-machine retries
+// wait a second (shortRetrySource). The agent's own installed policy is the
+// portable one, whose first retry waits 30 s. So attempt 2 coming due a second
+// after attempt 1 ended is the agent applying the policy that crossed with the
+// run, in its captured snapshot -- and it keeps the case from sleeping half a
+// minute.
+func TestAFleetStepRetriedOnTheAgentReplica(t *testing.T) {
+	c := newCluster(t, dbtest.DSN())
+	if c == nil {
+		return
+	}
+	c.a.integ.Configure(func(d *pipelinerun.Deps) { d.WorkflowSource = shortRetrySource })
+
+	s := c.connectWith(t, "retry", pipelinerun.DeliveryWebhook, pipelines.ComputeClusterAndFleet, repositoryWith(poolManifest))
+	landed := c.commit(s, "main-41")
+	c.runner.answerWith(func(req pipelines.StepRequest) (pipelines.StepResult, bool) {
+		if req.StepKey != retriedStep || !strings.EqualFold(req.Repository.Owner+"/"+req.Repository.Name, s.name) {
+			return pipelines.StepResult{}, false
+		}
+		return laptopAnswer(req), true
+	})
+	c.deliverAndFire(t, "push", "retry-"+c.run, s.push(t, s.base, landed))
+	run := c.awaitConcluded(t, s, c.onlyRun(t, pipelines.RunKey(s.name, landed, pipelines.ModeFull, pipelines.EventPush)).ID)
+
+	// The run: opened on the bff from the push, and driven to success by the
+	// agent, which learned of it from the event that crossed from the bff.
+	if run.DriverNodeID != nodeB || run.Conclusion != pipelinerun.ConclusionSuccess {
+		t.Fatalf("run %s concluded %s by %q (refusal %q %q); want success by %s\n%s",
+			run.ID, run.Conclusion, run.DriverNodeID, run.RefusalCode, run.RefusalMessage, nodeB, c.diagnose(s, run.ID))
+	}
+	opened := c.heardB.matching(func(ev events.Event) bool {
+		return ev.Topic == runCreated && bareOf(ev.Payload["id"]) == run.ID && ev.Payload["firstVersion"] == true
+	})
+	if len(opened) != 1 || opened[0].OriginNodeId != nodeA {
+		t.Errorf("B heard the run's first version %d time(s); want once, carried from %s", len(opened), nodeA)
+	}
+
+	// The runner: the retried step twice -- at its own placement, then pinned
+	// back to the machine it never started on -- and every other step once.
+	reqs := c.runner.forRun(run.ID)
+	var tries []pipelines.StepRequest
+	for _, req := range reqs {
+		switch {
+		case req.StepKey == retriedStep:
+			tries = append(tries, req)
+		case req.Attempt != 1 || req.Placement != nil:
+			t.Errorf("%s was handed as attempt %d placed %+v; only %s is retried", req.StepKey, req.Attempt, req.Placement, retriedStep)
+		}
+	}
+	if len(reqs) != len(testStepKeys)+1 || len(tries) != 2 {
+		t.Fatalf("the runner was handed %v; want every step once and %s twice\n%s", keysOf(reqs), retriedStep, c.diagnose(s, run.ID))
+	}
+	if first := tries[0]; first.Attempt != 1 || first.Placement != nil || first.Step.Placement != pipelines.PlacementPool {
+		t.Errorf("%s's first attempt was handed as attempt %d placed %+v, step placement %q; want attempt 1 at the step's own placement, pool",
+			retriedStep, first.Attempt, first.Placement, first.Step.Placement)
+	}
+	if retry := tries[1]; retry.Attempt != 2 || retry.RunAttempt != 1 || retry.Placement == nil ||
+		retry.Placement.Surface != pipelines.PlacementFleet || retry.Placement.PinWorker != laptop || len(retry.Placement.ExcludeWorkers) != 0 {
+		t.Errorf("%s's retry was handed as attempt %d of run attempt %d, placed %+v; want attempt 2 of the same run attempt, pinned to %s",
+			retriedStep, retry.Attempt, retry.RunAttempt, retry.Placement, laptop)
+	}
+
+	// The step's row: its latest version is attempt 2's receipt, and its
+	// binding keeps both attempts' records, in order, with no next attempt.
+	steps, err := c.b.store.WorkSteps(fresh(), run.WorkRunID)
+	if err != nil {
+		t.Fatalf("workStepsForRun %s: %v", run.WorkRunID, err)
+	}
+	var unit *pipelinerun.WorkStep
+	for i := range steps {
+		if steps[i].Key == retriedStep {
+			unit = &steps[i]
+		}
+	}
+	if unit == nil || unit.Status != pipelinerun.WorkStepDone || unit.Attempt != 2 {
+		t.Fatalf("work step %s = %+v; want done at attempt 2", retriedStep, unit)
+	}
+	records := attemptRecords(unit.Binding)
+	want := []map[string]string{
+		{"attempt": "1", "class": string(pipelines.AttemptNothingRan), "code": pipelines.CodeCloneFailed,
+			"surface": pipelines.PlacementFleet, "workerId": laptop, "nodeId": nodeB},
+		{"attempt": "2", "class": "", "code": "", "surface": pipelines.PlacementFleet, "workerId": laptop, "nodeId": nodeB},
+	}
+	if len(records) != len(want) {
+		t.Fatalf("%s's binding carries %d attempt record(s); want %d: %v", retriedStep, len(records), len(want), unit.Binding)
+	}
+	for i, fields := range want {
+		for key, value := range fields {
+			if got := recordText(records[i], key); got != value {
+				t.Errorf("%s's attempt record %d has %s %q; want %q (%v)", retriedStep, i+1, key, got, value, records[i])
+			}
+		}
+	}
+	if next, ok := unit.Binding["nextAttemptAt"]; ok {
+		t.Errorf("%s's receipt still names a next attempt, at %v", retriedStep, next)
+	}
+
+	// Between the two attempts, the version that recorded attempt 1's outcome
+	// before attempt 2 began, naming when attempt 2 may start: a second after
+	// attempt 1 ended, as the run's policy says, where the agent's own would
+	// have said 30 s.
+	var between []map[string]any
+	for _, v := range c.stepVersions(t, run.WorkRunID, retriedStep) {
+		if b, _ := v["binding"].(map[string]any); recordText(b, "nextAttemptAt") != "" {
+			between = append(between, v)
+		}
+	}
+	if len(between) != 1 {
+		t.Fatalf("%s has %d version(s) naming a next attempt; want one, written between its two attempts", retriedStep, len(between))
+	}
+	binding, _ := between[0]["binding"].(map[string]any)
+	if between[0]["status"] != pipelinerun.WorkStepRunning || recordText(between[0], "attempt") != "1" || len(attemptRecords(binding)) != 1 {
+		t.Errorf("the version between %s's attempts = %v; want it running at attempt 1, holding attempt 1's record alone", retriedStep, between[0])
+	}
+	due, dueErr := time.Parse(time.RFC3339, recordText(binding, "nextAttemptAt"))
+	ended, endErr := time.Parse(time.RFC3339, recordText(records[0], "finishedAt"))
+	if dueErr != nil || endErr != nil {
+		t.Fatalf("attempt 1 ended at %q and attempt 2 was due at %q: %v %v", recordText(records[0], "finishedAt"), recordText(binding, "nextAttemptAt"), endErr, dueErr)
+	}
+	if wait := due.Sub(ended); wait < 0 || wait > 10*time.Second {
+		t.Errorf("attempt 2 was due %s after attempt 1 ended; want about a second, the delay of the policy the run was opened with "+
+			"(the agent's own installed policy waits 30 s)", wait)
+	}
+
+	// GitHub: the check run created on the bff and moved by the agent alone;
+	// one write, while the step waited, saying it was retrying; and the last,
+	// completed and successful, saying which attempt the step passed on and
+	// what ended the one before -- the machine named as a public check run may
+	// name one whose owner gave it no name.
+	const (
+		retryingLine = "- `tests.unit`: Retrying: attempt 1 failed (`pipeline_clone_failed` on machine laptop); attempt 2 "
+		passedLine   = "- `tests.unit`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on machine laptop.\n"
+	)
+	writes := c.github.writesFor(s.name)
+	if len(writes) < 3 {
+		t.Fatalf("GitHub saw %d check-run writes for %s; want a create and at least two updates\n%s", len(writes), s.name, c.diagnose(s, run.ID))
+	}
+	if !writes[0].Create || writes[0].Node != nodeA || writes[0].ID != run.CheckRunID {
+		t.Errorf("the first check-run write = %s create=%v id %d; want %s creating check run %d", writes[0].Node, writes[0].Create, writes[0].ID, nodeA, run.CheckRunID)
+	}
+	saidRetrying := false
+	for i, w := range writes[1:] {
+		if w.Create || w.Node != nodeB || w.ID != run.CheckRunID {
+			t.Errorf("check-run write %d = %s create=%v id %d; want %s moving check run %d", i+1, w.Node, w.Create, w.ID, nodeB, run.CheckRunID)
+		}
+		if w.Run.Status == pipelinerun.StatusInProgress && w.Run.Output != nil && strings.Contains(w.Run.Output.Summary, retryingLine) {
+			saidRetrying = true
+		}
+	}
+	if !saidRetrying {
+		t.Errorf("no check-run write said the step was retrying; want one in progress saying %q", retryingLine)
+	}
+	last := writes[len(writes)-1].Run
+	summary := ""
+	if last.Output != nil {
+		summary = last.Output.Summary
+	}
+	if last.Status != pipelinerun.StatusCompleted || last.Conclusion != "success" || !strings.Contains(summary, passedLine) {
+		t.Errorf("the last check-run write is %s/%s, its summary:\n%s\nwant completed/success, saying %q", last.Status, last.Conclusion, summary, passedLine)
+	}
+
+	t.Logf("run %s: push received on %s, driven by %s; %s ran %d times (%v), attempt 2 due %s after attempt 1 ended; check run %d written %d times",
+		run.ID, nodeA, run.DriverNodeID, retriedStep, len(tries), keysOf(reqs), due.Sub(ended), run.CheckRunID, len(writes))
+}
+
+// laptopAnswer is what the owner's machine "laptop" answers each attempt of
+// the retried step. The first never started there: the machine's own fetch of
+// the commit failed, which the fleet reports as pipeline_clone_failed and
+// classifies nothing ran, the same machine worth another try. The second,
+// pinned back to it, passes. Any other attempt is not the retry the case
+// drives, and fails for good, so the run says so instead of passing.
+func laptopAnswer(req pipelines.StepRequest) pipelines.StepResult {
+	at := time.Now().UTC().Truncate(time.Second).Format(time.RFC3339)
+	where := pipelines.Where{Surface: pipelines.PlacementFleet, WorkerID: laptop, NodeID: nodeB}
+	switch {
+	case req.Attempt == 1 && req.Placement == nil:
+		return pipelines.StepResult{
+			Status: pipelines.OutcomeFailed, ExitCode: -1, StartedAt: at, FinishedAt: at, Where: where,
+			Failure:      &pipelines.Failure{Code: pipelines.CodeCloneFailed, Message: "git fetch: the connection to github.com was reset"},
+			AttemptClass: pipelines.AttemptNothingRan,
+		}
+	case req.Attempt == 2 && req.Placement != nil && req.Placement.PinWorker == laptop:
+		return pipelines.StepResult{
+			Status: pipelines.OutcomeSucceeded, StartedAt: at, FinishedAt: at, Where: where, LogTail: "ok\n", LogLines: 1,
+		}
+	}
+	return pipelines.StepResult{
+		Status: pipelines.OutcomeFailed, ExitCode: 1, StartedAt: at, FinishedAt: at, Where: where,
+		Failure: &pipelines.Failure{Code: pipelines.CodeExecutorError,
+			Message: fmt.Sprintf("attempt %d placed %+v is not the retry this case drives", req.Attempt, req.Placement)},
+		AttemptClass: pipelines.AttemptFinal,
+	}
+}
+
+// shortRetryPolicy is the compute policy the bff of the retry case has
+// installed: the portable limits -- two retries on the same machine, then
+// other machines, never the cloud -- with one second before a same-machine
+// retry in place of 30 and then 120.
+const shortRetryPolicy = `@template
+automation pipelineComputePlacementPolicy {
+ args { repository string! pipelineId string! ownerUserId string! event string! }
+ return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [1], otherMachines: true}}
+}`
+
+// shortRetrySource is the installed workflow source with shortRetryPolicy in
+// place of the shipped policy. It is what Deps.WorkflowSource reads, the port
+// a replica captures an opened run's policy through: the run carries what it
+// captured in its policy snapshot, and the driver reads the policy from there.
+func shortRetrySource(kind, name string) (string, error) {
+	if kind == "automation" && name == "pipelineComputePlacementPolicy" {
+		return shortRetryPolicy, nil
+	}
+	return workflowhost.InstalledSource(kind, name)
+}
+
+// attemptRecords is the attempt history a step's binding keeps, each record as
+// the engine parsed it.
+func attemptRecords(binding map[string]any) []map[string]any {
+	list, _ := binding["attempts"].([]any)
+	out := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		if record, ok := item.(map[string]any); ok {
+			out = append(out, record)
+		}
+	}
+	return out
+}
+
+// recordText is one field of a stored object as text: "" when the object
+// leaves the field out, as an attempt record does every field with nothing to
+// say.
+func recordText(object map[string]any, key string) string {
+	if v, ok := object[key]; ok && v != nil {
+		return fmt.Sprint(v)
+	}
+	return ""
 }
 
 // awaitHeard waits until B's bus has carried the run's created event from A.

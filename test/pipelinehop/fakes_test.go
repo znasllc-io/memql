@@ -51,6 +51,34 @@ pipeline:
           run: go test -race ./...
 `
 
+// poolManifest is testManifest with tests.unit placed `pool`, the fleet-first
+// placement: the owner's machines before the cluster. A step that may run on
+// a machine names the platform it runs on, and needs the owner's consent to
+// the fleet, so its pipeline is connected with compute cluster_and_fleet. The
+// stages and step keys are testManifest's.
+const poolManifest = `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:5491
+  select:
+    go: import-graph
+  stages:
+    - name: checks
+      steps:
+        - name: vet
+          packages: affected
+          run: go vet ./...
+    - name: tests
+      needs: [checks]
+      steps:
+        - name: unit
+          placement: pool
+          platform: linux/amd64
+          run: go test ./...
+        - name: race
+          run: go test -race ./...
+`
+
 // testStages is the stage order testManifest declares.
 var testStages = []string{"checks", "tests"}
 
@@ -59,9 +87,12 @@ var testStepKeys = []string{"checks.vet", "tests.race", "tests.unit"}
 
 // tinyRepository is the repository at every commit the fake serves: the
 // manifest and a Go module small enough to read whole.
-func tinyRepository() fstest.MapFS {
+func tinyRepository() fstest.MapFS { return repositoryWith(testManifest) }
+
+// repositoryWith is tinyRepository with manifest as its memql-package.yaml.
+func repositoryWith(manifest string) fstest.MapFS {
 	return fstest.MapFS{
-		pipelines.ManifestPath: {Data: []byte(testManifest)},
+		pipelines.ManifestPath: {Data: []byte(manifest)},
 		"go.mod":               {Data: []byte("module acme.test/shop\n\ngo 1.26\n")},
 		"main.go":              {Data: []byte("package main\n\nfunc main() {}\n")},
 		// A file no run keeps: the tree read's filter is the driver's.
@@ -391,17 +422,35 @@ func commitFor(parts ...string) string {
 // ---------------------------------------------------------------------------
 
 // fakeExecutor is a runner that passes every step: it records each request
-// in the order Execute was entered, and every Cancel.
+// in the order Execute was entered, and every Cancel. A case that needs a
+// step to end otherwise gives the runner an answer (answerWith).
 type fakeExecutor struct {
 	mu       sync.Mutex
 	requests []pipelines.StepRequest
 	cancels  []string
+	// answer, when set, is asked first: it answers the requests it claims
+	// (true), and every other request passes as before.
+	answer func(pipelines.StepRequest) (pipelines.StepResult, bool)
+}
+
+// answerWith gives the runner answer from now on. A case sets it before the
+// delivery it drives, while no step is in flight.
+func (e *fakeExecutor) answerWith(answer func(pipelines.StepRequest) (pipelines.StepResult, bool)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.answer = answer
 }
 
 func (e *fakeExecutor) Execute(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 	e.mu.Lock()
 	e.requests = append(e.requests, req)
+	answer := e.answer
 	e.mu.Unlock()
+	if answer != nil {
+		if res, ok := answer(req); ok {
+			return res, nil
+		}
+	}
 	started := time.Now().UTC().Truncate(time.Second)
 	return pipelines.StepResult{
 		Status:     pipelines.OutcomeSucceeded,
