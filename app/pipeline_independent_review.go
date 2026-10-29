@@ -10,11 +10,15 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/repositoryauthority"
+	"github.com/znasllc-io/memql/component/router"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 func pipelineReviewDigest(v any) string {
@@ -409,11 +413,77 @@ func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelin
 		result, err = a.engine.InvokeCapturedPromptStructured(ctx, input.Prompt, data, "pipeline_independent_review", schema, true)
 	}
 	if err != nil {
-		return out, err
+		return out, a.pipelineModelFailure(ctx, input, err)
 	}
 	err = json.Unmarshal([]byte(result.Text), &out)
 	return out, err
 }
+
+// pipelineReviewModelFailure is the independent review's failed model call as
+// the pipeline reports it: Error() is the router's wording for the failure (a
+// stable code and its words, router.FailureReason), and Unwrap() is the original.
+//
+// WHY THE WORDS AND THE ORIGINAL TRAVEL TOGETHER. The workflow's error is
+// printed whole on the run's check run ("Pipeline workflow failed: ..."), which
+// is public on GitHub for a public repository, and the driver's mask removes
+// secret values only. A model call's error is raw runtime text: a door that
+// served from the owner's machine begins with that machine's label (the name its
+// Cockpit reported, a hostname, unless the owner chose one), a vendor's error
+// quotes what the vendor sent back, a local runtime's can carry a path or a
+// request id. So the text the pipeline carries is the router's own line for a
+// failed call, built from a code table and never from the error's text.
+//
+// The callers that decide on the error's TYPE keep working through Unwrap: a run
+// ceiling parks the run on a budget approval (errors.As to *memql.RunCeilingError),
+// a refusal parks it on its doors (work.DoorsFrom), a cancel or a deadline is
+// recognised as one (errors.Is). Only the words change. A failure that travels
+// as a string still names a refusal's code, which is what
+// work.InferenceRefusalCode matches (router.FailureReason keeps the code in the
+// line). Covered by TestAFailedReviewModelCallIsReportedByItsCodeNotItsText.
+type pipelineReviewModelFailure struct {
+	words string
+	err   error
+}
+
+func (f *pipelineReviewModelFailure) Error() string { return f.words }
+func (f *pipelineReviewModelFailure) Unwrap() error { return f.err }
+
+// pipelineModelFailure words a failed model call for the pipeline and logs the
+// original for the owner.
+//
+// THE ORIGINAL IS NOT LOST: it goes to this node's log at warn level, with the
+// run the call belongs to as the subject (the work run, bare id, as the router's
+// decision rows name it), so the owner who needs the machine's or the vendor's
+// own words reads them in Logs, a place only they can see. The line also says
+// what the pipeline reported in their place. Logging is best effort and never
+// stands between the failure and its wording: a node with no logger still words
+// the error.
+//
+// A consequence to know: the owner's work run record carries the worded text too,
+// because that is the error the run fails with. The original lives in the log
+// (and in the router's call ledger, which records the provider's own message).
+func (a *App) pipelineModelFailure(ctx context.Context, input pipelinerun.IndependentReviewInput, err error) error {
+	if err == nil {
+		return nil
+	}
+	failure := &pipelineReviewModelFailure{words: router.FailureReason(err), err: err}
+	if a != nil && a.Logger != nil {
+		attrs := []any{
+			"component", "pipelinerun",
+			"pipeline", input.Source.PipelineID, "repository", input.Source.Repository,
+			"reported", failure.words, "error", err.Error(),
+		}
+		if pr := input.PullRequest; pr != nil {
+			attrs = append(attrs, "pullRequest", pr.Number, "headSha", pr.HeadSHA)
+		}
+		if rc, ok := common.RunFromContext(ctx); ok && rc.RunId != "" {
+			attrs = append(attrs, logger.Subject(memorynodes.ConceptWorkRun, memql.BareShortId(rc.RunId)))
+		}
+		a.Logger.Warn("pipelines: the independent review's model call failed; the check run reports its code and not its text", attrs...)
+	}
+	return failure
+}
+
 func (a *App) reportPipelineIndependentReview(ctx context.Context, input pipelinerun.IndependentReviewInput, external string, observeOnly bool, fence func(context.Context) error) (pipelinerun.IndependentReviewReceipt, error) {
 	return reportIndependentPipelineReview(ctx, a.lookupPackagesIntegration(), input, external, observeOnly, fence)
 }
