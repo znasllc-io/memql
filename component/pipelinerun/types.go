@@ -352,14 +352,33 @@ type StepState struct {
 	// (resume, adoptRows), so the history a previous driver began is continued,
 	// and every receipt this drive writes restates it.
 	Attempts []attemptRecord
+	// Retrying: the step has had an attempt fail and is going again. The driver
+	// sets it, with RetryAfter, when it has durably recorded an attempt's
+	// outcome with another to follow (runStep), and settle clears it with the
+	// receipt. It is NOT inferred from Attempts being non-empty: a step's last
+	// record is written to Attempts an instant before its receipt, and a step
+	// that is about to pass or fail for good must not read as retrying to a
+	// progress published in that instant. RetryAfter is the wait the driver
+	// scheduled before that attempt.
+	Retrying   bool
+	RetryAfter time.Duration
 }
 
-// Report is the step as the check run reports it.
+// Report is the step as the check run reports it: its history as attempts
+// (attemptReports), and whether it is retrying now. Retrying is the driver's
+// word (StepState.Retrying) and is passed on only for a step that is running,
+// so a report never says a settled step is going again; the wording is
+// pipelines.CheckOutput's (retrySentence).
 func (s StepState) Report() pipelines.StepReport {
-	return pipelines.StepReport{
+	r := pipelines.StepReport{
 		Key: s.Key, Stage: s.Stage, Name: s.Name, Status: s.Status,
 		DurationMs: s.DurationMs, Code: s.Code, Message: s.Message, LogTail: s.LogTail,
+		Attempts: attemptReports(s.Attempts),
 	}
+	if s.Retrying && s.Status == StepRunning {
+		r.Retrying, r.RetryAfter = true, max(s.RetryAfter, 0)
+	}
+	return r
 }
 
 // InboundDelivery is one staged v1:platform:inboundRequest row as the trigger

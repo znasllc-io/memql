@@ -379,7 +379,9 @@ func transientCheckRunFailure(w CheckRunWrite) bool {
 // report is every step of a driven run as the check run reports it, each log
 // tail and message MASKED with every secret value the drive resolved before
 // CheckOutput ever reads them (Review Focus 5): a step can only echo its own
-// values, and masking with all of them costs nothing.
+// values, and masking with all of them costs nothing. So are the code and the
+// place of each attempt: a record was masked when it was made, with the values
+// known then, and a value another step resolved since could not have been.
 func (dr *runDriver) report() []pipelines.StepReport {
 	values := dr.maskValues()
 	out := make([]pipelines.StepReport, 0, len(dr.tracks))
@@ -387,7 +389,12 @@ func (dr *runDriver) report() []pipelines.StepReport {
 		s := t.snapshot()
 		s.LogTail = pipelines.MaskSecrets(s.LogTail, values)
 		s.Message = pipelines.MaskSecrets(s.Message, values)
-		out = append(out, s.Report())
+		step := s.Report()
+		for i := range step.Attempts {
+			step.Attempts[i].Code = pipelines.MaskSecrets(step.Attempts[i].Code, values)
+			step.Attempts[i].Where = pipelines.MaskSecrets(step.Attempts[i].Where, values)
+		}
+		out = append(out, step)
 	}
 	return out
 }

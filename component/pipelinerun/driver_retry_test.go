@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
 )
@@ -786,5 +787,293 @@ func TestAnUnconfirmedCleanupStopsTheRetries(t *testing.T) {
 	}
 	if records, next := attemptsOf(updates[0]); len(records) != 1 || next.IsZero() {
 		t.Errorf("the row keeps attempt 1's record and when attempt 2 may start: %+v, next %s", records, next)
+	}
+}
+
+// retryingMachine is the registration a retried step's first attempt ran on, and
+// what the check run calls it: the first eight characters of its id.
+const (
+	retryingMachine     = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
+	retryingMachineName = "machine 3f9c2ab0"
+)
+
+// While a step waits for its next attempt the check run says so. Nothing
+// published a thing during the wait before, so a person reading the check saw a
+// plain running step for up to minutes. The driver publishes the moment it has
+// recorded the attempt's outcome, before the wait begins, and the step's
+// receipt then states how it got there.
+func TestTheCheckRunSaysAStepIsRetryingWhileItWaits(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt == 1 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The machine's git fetch failed before the command ran."), retryingMachine), nil
+		}
+		return onMachine(passed(req), retryingMachine), nil
+	}
+	run := rh.openRun(t, prOpening())
+	fire := make(chan time.Time)
+	rh.driveIntoTheWait(t, run, fire)
+
+	// The drive is parked before attempt 2; the check run already says why.
+	waiting := rh.lastUpdate(t).Run
+	if waiting.Status != StatusInProgress {
+		t.Errorf("the check run is %s while a step waits; the run is not over", waiting.Status)
+	}
+	wantWhile := "### Retried steps\n\n" +
+		"- `build.mac`: Retrying: attempt 1 failed (`pipeline_clone_failed` on " + retryingMachineName + "); attempt 2 starts after 30s.\n"
+	if !strings.HasSuffix(waiting.Output.Summary, wantWhile) {
+		t.Errorf("the check run while the step waits:\n%s\nwant it to end\n%s", waiting.Output.Summary, wantWhile)
+	}
+	if got := rh.exec.sent(); len(got) != 1 {
+		t.Errorf("the executor was handed %d attempts while the step waits, want 1", len(got))
+	}
+
+	fire <- rh.clock.now()
+	waitDrives(t, rh.integ)
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
+		t.Fatalf("the run ended %s; want success on the step's second attempt", got.Conclusion)
+	}
+	final := rh.lastUpdate(t).Run
+	wantAfter := "### Retried steps\n\n" +
+		"- `build.mac`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on " + retryingMachineName + ".\n"
+	if final.Status != StatusCompleted || !strings.HasSuffix(final.Output.Summary, wantAfter) {
+		t.Errorf("the concluded check run:\n%s\nwant it to end\n%s", final.Output.Summary, wantAfter)
+	}
+	if strings.Contains(final.Output.Summary, "Retrying") {
+		t.Errorf("the concluded check run still says the step is retrying:\n%s", final.Output.Summary)
+	}
+}
+
+// A step that fails for good after its retries lists every attempt, and never
+// reads as retrying once its receipt is written.
+func TestTheCheckRunListsEveryAttemptOfAStepThatFailedForGood(t *testing.T) {
+	rh := newRetryHarness(t, retryClusterManifest, false)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt < 2 {
+			return noRouteResult(), nil
+		}
+		// The second attempt ran and its command failed: an ordinary exit is final.
+		return onTheCluster(pipelines.StepResult{Status: pipelines.OutcomeFailed, ExitCode: 1, AttemptClass: pipelines.AttemptFinal}, req), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionFailure {
+		t.Fatalf("the run ended %s; want failure", got.Conclusion)
+	}
+	final := rh.lastUpdate(t).Run
+	want := "### Failed steps\n\n" +
+		"- `checks.vet`: The step's command exited with status 1.\n" +
+		"  - Attempt 1: `pipeline_runner_unavailable` on the cluster.\n" +
+		"  - Attempt 2: failed on the cluster.\n"
+	if !strings.HasSuffix(final.Output.Summary, want) {
+		t.Errorf("the concluded check run:\n%s\nwant it to end\n%s", final.Output.Summary, want)
+	}
+}
+
+// A failover to another machine waits for nothing, so the check run does not
+// promise a wait: the next attempt "follows". The publish happens all the same,
+// before attempt 2 is sent.
+func TestTheCheckRunSaysAFailoverFollows(t *testing.T) {
+	const other = "5d8e1f77-9a0b-4c1d-8e2f-3a4b5c6d7e8f"
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	installComputePolicy(t, rh.driveHarness, "{fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 0, delaysSeconds: [30], otherMachines: true}}")
+	machines := []string{retryingMachine, other}
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		machine := machineFor(req.Placement, machines)
+		if req.Attempt == 1 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), machine), nil
+		}
+		return onMachine(passed(req), machine), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if sent := rh.exec.sent(); len(sent) != 2 || machineFor(sent[1].Placement, machines) != other {
+		t.Fatalf("attempt 2 goes to the other machine: %+v", sent)
+	}
+	if waits := rh.waited(); len(waits) != 0 {
+		t.Fatalf("a failover waits for nothing, and the driver waited %v", waits)
+	}
+	say := "- `build.mac`: Retrying: attempt 1 failed (`pipeline_clone_failed` on " + retryingMachineName + "); attempt 2 follows.\n"
+	said := false
+	for _, w := range rh.github.updatedRuns() {
+		said = said || (w.Run.Output != nil && strings.HasSuffix(w.Run.Output.Summary, say))
+	}
+	if !said {
+		t.Errorf("no check run write said the step was retrying and the next attempt follows; the writes ended with:\n%s", rh.lastUpdate(t).Run.Output.Summary)
+	}
+}
+
+// A final check run that did not land is republished from the work run's rows,
+// and says what the original would have: the receipt restates the step's whole
+// history, so whether a person reads "Passed on attempt 2 of 2" does not depend
+// on which write of the report arrived.
+func TestARepublishedFinalReportKeepsTheStepsAttempts(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt == 1 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), retryingMachine), nil
+		}
+		return onMachine(passed(req), retryingMachine), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+	finished, _ := rh.store.run(run.ID)
+
+	reports, err := finalStepReports(context.Background(), rh.integ.snapshot(), finished)
+	if err != nil {
+		t.Fatalf("finalStepReports: %v", err)
+	}
+	if len(reports) != 1 || reports[0].Key != "build.mac" {
+		t.Fatalf("reports = %+v; want the one step", reports)
+	}
+	want := []pipelines.AttemptReport{
+		{Attempt: 1, Code: pipelines.CodeCloneFailed, Where: retryingMachineName},
+		{Attempt: 2, Where: retryingMachineName},
+	}
+	if !reflect.DeepEqual(reports[0].Attempts, want) {
+		t.Errorf("the republished step's attempts\n got %+v\nwant %+v", reports[0].Attempts, want)
+	}
+}
+
+// The check run only ever says a step is retrying once the row holds the
+// attempt's outcome: a Retrying write the journal refused stops the drive, and
+// nothing is promised on GitHub that the row does not say.
+func TestTheCheckRunNeverPromisesARetryTheRowDoesNotHold(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	rh.work.refuseCall, rh.work.refuseErr, rh.work.refuseTimes = "updateWorkStep", errors.New("journal unavailable"), 1
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt > 1 {
+			t.Errorf("attempt %d was sent after its predecessor's outcome could not be recorded", req.Attempt)
+			return onMachine(passed(req), retryingMachine), nil
+		}
+		return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), retryingMachine), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if got, _ := rh.store.run(run.ID); got.Status == StatusCompleted {
+		t.Fatalf("a run whose step outcome was not recorded concluded %s", got.Conclusion)
+	}
+	for _, w := range rh.github.updatedRuns() {
+		if w.Run.Output != nil && strings.Contains(w.Run.Output.Summary, "Retrying") {
+			t.Errorf("the check run says a step is retrying that the row does not hold:\n%s", w.Run.Output.Summary)
+		}
+	}
+}
+
+// overlapGitHub holds the first check-run write that says a step is retrying
+// until it is released, and notes whether two writes were ever in flight at once.
+type overlapGitHub struct {
+	*fakeGitHub
+	held    chan struct{} // closed when the held write has begun
+	release chan struct{}
+	once    sync.Once
+
+	mu         sync.Mutex
+	inFlight   int
+	overlapped bool
+}
+
+func (g *overlapGitHub) UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error {
+	g.mu.Lock()
+	g.inFlight++
+	g.overlapped = g.overlapped || g.inFlight > 1
+	g.mu.Unlock()
+	defer func() {
+		g.mu.Lock()
+		g.inFlight--
+		g.mu.Unlock()
+	}()
+	if run.Output != nil && strings.Contains(run.Output.Summary, "Retrying:") {
+		hold := false
+		g.once.Do(func() { hold = true })
+		if hold {
+			close(g.held)
+			select {
+			case <-g.release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	return g.fakeGitHub.UpdateCheckRun(ctx, token, repository, id, run)
+}
+
+func (g *overlapGitHub) state() (inFlight int, overlapped bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.inFlight, g.overlapped
+}
+
+const retrySiblingsManifest = `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:abc
+  stages:
+    - name: checks
+      steps:
+        - name: slow
+          run: make slow
+        - name: fast
+          run: make fast
+`
+
+// Each progress call snapshots the steps and then writes GitHub, so two at once
+// could land the older snapshot last. The workflow's own progress, which follows
+// a step that settled, and the retry's, which runStep makes, are one at a time:
+// here the slow step's retry is being published when its sibling settles, and the
+// sibling's progress waits for it.
+func TestARetrysPublishAndTheWorkflowsProgressNeverOverlap(t *testing.T) {
+	rh := newRetryHarness(t, retrySiblingsManifest, false)
+	gh := &overlapGitHub{fakeGitHub: rh.github, held: make(chan struct{}), release: make(chan struct{})}
+	rh.integ.Configure(func(d *Deps) { d.GitHub = gh })
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gh.release) }) }
+	t.Cleanup(func() {
+		release()
+		waitDrives(t, rh.integ)
+	})
+	rh.exec.answer = func(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		switch {
+		case req.StepKey == "checks.slow" && req.Attempt == 1:
+			return noRouteResult(), nil
+		case req.StepKey == "checks.fast":
+			// The sibling settles only while the slow step's retry is being published.
+			select {
+			case <-gh.held:
+			case <-ctx.Done():
+				return pipelines.StepResult{}, ctx.Err()
+			}
+		}
+		return passed(req), nil
+	}
+	run := rh.openRun(t, prOpening())
+	rh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, run))
+	select {
+	case <-gh.held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the slow step's retry was never published")
+	}
+	deadline := time.After(10 * time.Second)
+	for len(rh.work.receiptsOf("checks.fast")) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("the sibling never settled while the retry's publish was held")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	// Its progress has had every chance to reach GitHub; it must be waiting.
+	time.Sleep(200 * time.Millisecond)
+	if inFlight, overlapped := gh.state(); inFlight != 1 || overlapped {
+		t.Errorf("%d check-run writes in flight (overlapped %v) while the retry's publish is held; the sibling's progress must wait for it", inFlight, overlapped)
+	}
+	release()
+	waitDrives(t, rh.integ)
+	if _, overlapped := gh.state(); overlapped {
+		t.Error("two check-run writes were in flight at once")
+	}
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
+		t.Errorf("the run ended %s; want success", got.Conclusion)
 	}
 }

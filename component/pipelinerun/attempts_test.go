@@ -369,3 +369,92 @@ func describe(p *pipelines.AttemptPlacement) string {
 	}
 	return b.String() + "}"
 }
+
+// ---------------------------------------------------------------------------
+// What the check run is told of a step's attempts
+// ---------------------------------------------------------------------------
+
+// The check run reads a step through StepState.Report: its history becomes the
+// attempts the run says, each with where it ran in words. The place is all the
+// record knows of it -- the machine's registration id, not its name, which only
+// the OS's machines feed holds -- so a machine is its id's first eight
+// characters and the cluster is the cluster.
+func TestAStepReportCarriesItsAttempts(t *testing.T) {
+	const machine = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
+	history := []attemptRecord{
+		{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementFleet, WorkerID: machine},
+		{Attempt: 2, Class: pipelines.AttemptOutcomeUnknown, Code: pipelines.CodeNodeLost, Surface: pipelines.PlacementCluster, JobName: "job-1"},
+		// The fleet named no machine; a canonical id is the same machine as its bare one.
+		{Attempt: 3, Class: pipelines.AttemptNothingRan, Surface: pipelines.PlacementFleet},
+		{Attempt: 4, Class: pipelines.AttemptRetryRequested, Surface: pipelines.PlacementFleet, WorkerID: "v1:worker:registration:" + machine},
+		// Nothing recorded of where it ran, and the attempt that passed.
+		{Attempt: 5},
+	}
+	got := StepState{Key: "build.mac", Stage: "build", Name: "mac", Status: StepSucceeded, Attempts: history}.Report()
+	want := []pipelines.AttemptReport{
+		{Attempt: 1, Code: pipelines.CodeCloneFailed, Where: "machine 3f9c2ab0"},
+		{Attempt: 2, Code: pipelines.CodeNodeLost, Where: "the cluster"},
+		{Attempt: 3, Where: "your fleet"},
+		{Attempt: 4, Where: "machine 3f9c2ab0"},
+		{Attempt: 5},
+	}
+	if !reflect.DeepEqual(got.Attempts, want) {
+		t.Errorf("attempts\n got %+v\nwant %+v", got.Attempts, want)
+	}
+	if got.Retrying || got.RetryAfter != 0 {
+		t.Errorf("a step that passed is not retrying: %+v", got)
+	}
+	if rep := (StepState{Key: "a.b", Status: StepSucceeded}).Report(); rep.Attempts != nil {
+		t.Errorf("a step that never reached the executor has no attempts: %+v", rep.Attempts)
+	}
+}
+
+// A step reads as retrying only while it is running and the driver said another
+// attempt follows: not before a receipt it is about to write (its last record is
+// already in the history), and not after it.
+func TestAStepReportSaysRetryingOnlyWhileItIs(t *testing.T) {
+	history := []attemptRecord{{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementCluster}}
+	for _, c := range []struct {
+		name  string
+		state StepState
+		want  bool
+	}{
+		{"running and recorded as going again", StepState{Status: StepRunning, Attempts: history, Retrying: true, RetryAfter: 30 * time.Second}, true},
+		{"running with a record and no word of another attempt", StepState{Status: StepRunning, Attempts: history}, false},
+		{"settled", StepState{Status: StepFailed, Attempts: history, Retrying: true, RetryAfter: 30 * time.Second}, false},
+		{"not yet begun", StepState{Status: StepPending, Attempts: history, Retrying: true}, false},
+	} {
+		got := c.state.Report()
+		if got.Retrying != c.want {
+			t.Errorf("%s: retrying %v, want %v", c.name, got.Retrying, c.want)
+		}
+		if c.want && got.RetryAfter != 30*time.Second {
+			t.Errorf("%s: the scheduled wait is %s, want 30s", c.name, got.RetryAfter)
+		}
+		if !c.want && got.RetryAfter != 0 {
+			t.Errorf("%s: a step that is not retrying carries a wait of %s", c.name, got.RetryAfter)
+		}
+	}
+}
+
+// A check run is read on GitHub, so the driver masks what it quotes with every
+// secret it resolved: an attempt's text as the step's message and log are, even
+// though each record was masked once when it was made (a value another step
+// resolved later could not have been).
+func TestTheCheckRunMasksAnAttemptsText(t *testing.T) {
+	dr := &runDriver{}
+	dr.remember("hunter2-token")
+	dr.tracks = []*stepTrack{{state: StepState{Key: "a.b", Stage: "a", Name: "b", Status: StepSucceeded, Attempts: []attemptRecord{
+		{Attempt: 1, Code: "failed-hunter2-token", Surface: pipelines.PlacementFleet, WorkerID: "hunter2-token-machine"},
+		{Attempt: 2},
+	}}}}
+	got := dr.report()[0].Attempts
+	for _, a := range got {
+		if strings.Contains(a.Code+a.Where, "hunter2-token") {
+			t.Errorf("attempt %d reaches the check run with a resolved secret: %+v", a.Attempt, a)
+		}
+	}
+	if got[0].Code != "failed-***" {
+		t.Errorf("code %q, want the secret masked", got[0].Code)
+	}
+}

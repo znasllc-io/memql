@@ -269,6 +269,15 @@ type runDriver struct {
 	maskMu sync.Mutex
 	masks  []string
 
+	// progressMu serializes progress (the run's stage table and its check run),
+	// whoever asks: the workflow's reportProgress after a step settles, and
+	// runStep after it records a retry. Each call snapshots the steps and then
+	// writes GitHub, so two at once could land the older snapshot last and leave
+	// the check run showing a step as it was. It lives on the driver, not on the
+	// workflow host that used to own it, for that reason: the second caller is
+	// not the host's.
+	progressMu sync.Mutex
+
 	timingsMu sync.Mutex
 	observed  map[string]float64
 }
@@ -1114,6 +1123,14 @@ func (t *stepTrack) setAttempts(history []attemptRecord) {
 	t.mu.Unlock()
 }
 
+// setRetrying records in the step's state that another attempt follows, after
+// the wait the driver scheduled: what the check run reads (StepState.Retrying).
+func (t *stepTrack) setRetrying(after time.Duration) {
+	t.mu.Lock()
+	t.state.Retrying, t.state.RetryAfter = true, after
+	t.mu.Unlock()
+}
+
 // finished reports whether the step has ended, one way or another.
 func (t *stepTrack) finished() bool {
 	switch t.snapshot().Status {
@@ -1281,6 +1298,21 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.log.Info("pipelines: a step's attempt failed and the step is tried again",
 			"step", step.Key, "attempt", t.attempt, "class", string(history[len(history)-1].Class),
 			"code", history[len(history)-1].Code, "next", describePlacement(next), "nextAttemptAt", nextAt)
+		// The check run says so now. Nothing else would for up to minutes: the
+		// workflow publishes progress when a step settles, and this one has not,
+		// so a person reading the check saw the step as it stood before its first
+		// attempt until the wait and the attempt after it were over. It is said
+		// only here, once the outcome is DURABLE (a Retrying the journal refused
+		// returned above, so the check run never promises a retry the row does not
+		// hold), and before the cleanup and the wait, so GitHub's latency comes out
+		// of the wait rather than adding to it. Retrying stays set while the next
+		// attempt runs, and its wording claims only what stays true (retrySentence),
+		// because nothing publishes again when that attempt begins: a publish there
+		// would delay the attempt itself by a GitHub round trip. A takeover does not
+		// restate it before the step settles; the row's history, which the OS reads,
+		// is not affected. Covered by TestTheCheckRunSaysAStepIsRetryingWhileItWaits.
+		t.setRetrying(max(nextAt.Sub(dr.d.now()), 0))
+		dr.progress(ctx)
 		// Its resources, before the next attempt can claim the same slot or
 		// machine. Unconfirmed, nothing more is started: confirmReceiptCleanup
 		// leaves the run for recovery, whose replica finds this outcome on the
@@ -1549,6 +1581,8 @@ func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) bool
 	s := t.snapshot()
 	s.Status, s.Code, s.Message, s.DurationMs, s.LogTail = rec.report, rec.code, rec.message, rec.durationMs, rec.logTail
 	s.ArtifactFileIDs = slices.Clone(rec.artifactFileIDs)
+	// The receipt ends any retry: whatever the step settled as, it is not going again.
+	s.Retrying, s.RetryAfter = false, 0
 	t.set(s)
 	return true
 }
@@ -2112,8 +2146,11 @@ func (dr *runDriver) writeRun(ctx context.Context, patch RunPatch) error {
 	})
 }
 
-// progress records the stages as they stand and moves the check run.
+// progress records the stages as they stand and moves the check run, one caller
+// at a time (progressMu).
 func (dr *runDriver) progress(ctx context.Context) {
+	dr.progressMu.Lock()
+	defer dr.progressMu.Unlock()
 	if err := dr.writeRun(ctx, RunPatch{Stages: ptr(dr.stageSummaries())}); err != nil {
 		if !driveStopped(err) {
 			dr.log.Warn("pipelines: the run's stage table was not recorded", "error", err)

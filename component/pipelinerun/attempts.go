@@ -91,6 +91,45 @@ func (a attemptRecord) asMap() map[string]any {
 	return out
 }
 
+// machineIDChars is how much of a machine's registration id the check run calls
+// it by. The id is a UUID, so its first eight characters name a machine the way
+// a short hash names a commit.
+const machineIDChars = 8
+
+// whereWords is where the attempt ran, in the words the check run says it in.
+// The record keeps the machine's registration id and nothing of its name, which
+// is a Fleet setting only the OS's machines feed reads, so the check run calls a
+// machine by its id's first characters and the run page -- which has the names --
+// says the name. That is a limit of this change, not a decision about wording:
+// naming the machine needs a lookup under the pipeline owner's authority on
+// every publish, which nothing here has yet.
+func (a attemptRecord) whereWords() string {
+	switch {
+	case a.Surface == pipelines.PlacementCluster:
+		return "the cluster"
+	case a.WorkerID != "":
+		return "machine " + cutText(bareID(a.WorkerID), machineIDChars)
+	case a.Surface == pipelines.PlacementFleet:
+		// The fleet named no machine: nothing was available to take the attempt.
+		return "your fleet"
+	}
+	return ""
+}
+
+// attemptReports is a step's history as the check run tells it (StepState.Report):
+// every record, in order, with the code it ended with and where it ran. Nil for a
+// step that never reached the executor.
+func attemptReports(records []attemptRecord) []pipelines.AttemptReport {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]pipelines.AttemptReport, 0, len(records))
+	for _, r := range records {
+		out = append(out, pipelines.AttemptReport{Attempt: r.Attempt, Code: r.Code, Where: r.whereWords()})
+	}
+	return out
+}
+
 // attemptsFromBinding reads a step's history back off its binding: its records
 // in order, and when the next attempt may start (the zero time when the binding
 // names none). It is the reader of what attemptsBinding writes, through the
