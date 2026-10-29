@@ -1,0 +1,394 @@
+{
+  "engine-identity": {
+    "component": "engine",
+    "artifact": "identity",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-identity"
+  },
+  "engine-bff": {
+    "component": "engine",
+    "artifact": "bff",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-bff"
+  },
+  "engine-mcp": {
+    "component": "engine",
+    "artifact": "mcp",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-mcp"
+  },
+  "engine-agent": {
+    "component": "engine",
+    "artifact": "agent",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-agent"
+  },
+  "engine-planner": {
+    "component": "engine",
+    "artifact": "planner",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-planner"
+  },
+  "engine-workbench": {
+    "component": "engine",
+    "artifact": "workbench",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-workbench"
+  },
+  "engine-edge": {
+    "component": "engine",
+    "artifact": "edge",
+    "kind": "oci",
+    "origin": "https://ghcr.io",
+    "repository": "znasllc-io/memql-edge"
+  },
+  "engine-docs": {
+    "component": "engine",
+    "artifact": "docs",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-sdk": {
+    "component": "engine",
+    "artifact": "sdk",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-release-manifest": {
+    "component": "engine",
+    "artifact": "release-manifest",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-editor-linux-x64": {
+    "component": "engine",
+    "artifact": "editor-linux-x64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-editor-linux-arm64": {
+    "component": "engine",
+    "artifact": "editor-linux-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-editor-darwin-x64": {
+    "component": "engine",
+    "artifact": "editor-darwin-x64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-editor-darwin-arm64": {
+    "component": "engine",
+    "artifact": "editor-darwin-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "engine-editor-web": {
+    "component": "engine",
+    "artifact": "editor-web",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-arm64": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-arm64-binary": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-arm64-binary",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-arm64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-arm64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-arm64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-arm64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-amd64": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-amd64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-amd64-binary": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-amd64-binary",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-amd64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-amd64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-darwin-amd64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "headless-darwin-amd64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-amd64": {
+    "component": "cockpit",
+    "artifact": "headless-linux-amd64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-amd64-binary": {
+    "component": "cockpit",
+    "artifact": "headless-linux-amd64-binary",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-amd64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "headless-linux-amd64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-amd64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "headless-linux-amd64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-arm64": {
+    "component": "cockpit",
+    "artifact": "headless-linux-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-arm64-binary": {
+    "component": "cockpit",
+    "artifact": "headless-linux-arm64-binary",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-arm64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "headless-linux-arm64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-linux-arm64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "headless-linux-arm64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-headless-checksums": {
+    "component": "cockpit",
+    "artifact": "headless-checksums",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-arm64": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-arm64-checksum": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-arm64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-arm64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-arm64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-arm64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-arm64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-menubar-darwin-arm64": {
+    "component": "cockpit",
+    "artifact": "menubar-darwin-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-menubar-darwin-arm64-checksum": {
+    "component": "cockpit",
+    "artifact": "menubar-darwin-arm64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-app-darwin-arm64": {
+    "component": "cockpit",
+    "artifact": "app-darwin-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-app-darwin-arm64-checksum": {
+    "component": "cockpit",
+    "artifact": "app-darwin-arm64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-amd64": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-amd64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-amd64-checksum": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-amd64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-amd64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-amd64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-darwin-amd64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "computeruse-darwin-amd64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-menubar-darwin-amd64": {
+    "component": "cockpit",
+    "artifact": "menubar-darwin-amd64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-menubar-darwin-amd64-checksum": {
+    "component": "cockpit",
+    "artifact": "menubar-darwin-amd64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-app-darwin-amd64": {
+    "component": "cockpit",
+    "artifact": "app-darwin-amd64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-app-darwin-amd64-checksum": {
+    "component": "cockpit",
+    "artifact": "app-darwin-amd64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-arm64": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-arm64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-arm64-checksum": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-arm64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-arm64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-arm64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-arm64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-arm64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-amd64": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-amd64",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-amd64-checksum": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-amd64-checksum",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-amd64-sbom-json": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-amd64-sbom-json",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  },
+  "cockpit-computeruse-linux-amd64-sbom-xml": {
+    "component": "cockpit",
+    "artifact": "computeruse-linux-amd64-sbom-xml",
+    "kind": "file",
+    "origin": "https://api.github.com",
+    "repository": "znasllc-io/memql"
+  }
+}

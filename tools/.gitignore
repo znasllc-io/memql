@@ -1,0 +1,7 @@
+**/__pycache__/
+**/*.pyc
+release-operator/go.work
+release-operator/go.work.sum
+release-operator/release-operator
+release-operator/release-operator-rerun
+release-operator/release-operator-failed-only

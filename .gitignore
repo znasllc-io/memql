@@ -1,0 +1,9 @@
+# Generated host-specific workspace/build files and runtime output.
+**/go.work
+**/go.work.sum
+**/__pycache__/
+**/*.pyc
+tools/release-operator/release-operator
+tools/release-operator/*.test
+runtime/
+downloads/

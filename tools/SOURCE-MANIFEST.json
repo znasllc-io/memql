@@ -1,0 +1,159 @@
+{
+  "capturedAt": "2026-10-29T17:00:18.999124+00:00",
+  "scope": "tools source package only",
+  "sourceCopies": 18,
+  "authoredFiles": 3,
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "3f046007e01b334c68f2bf78c1b1af700105f4f0ae52d76930336cf7be024f78",
+      "bytes": 199,
+      "unchangedSourceCopy": false
+    },
+    {
+      "path": "README.md",
+      "sha256": "67d3f35554730de1ea46029a7c3efade0fa89a9cf4ad1917b46ab191ea50b321",
+      "bytes": 6416,
+      "unchangedSourceCopy": false
+    },
+    {
+      "path": "public-release-qualification/fleet-fixtures.py",
+      "sha256": "d2653e0a5d9b161413ab48cd1a40ffc5da0e1f99b2a7208361ecaf0b5674bf53",
+      "bytes": 2266,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "public-release-qualification/qualify.py",
+      "sha256": "ed7a8cff417b898bcb2274836f751ddf25f8e2c5c51eeab8f0378b9b16f7c5c8",
+      "bytes": 24345,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "public-release-qualification/test_qualification.py",
+      "sha256": "341bf33d650d3187cc478a2982a45ea827a2f608fb8c8eae70c364e942adc768",
+      "bytes": 3282,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "public-release-qualification/verify-retained.py",
+      "sha256": "7d34597a79b101413e15b61628d32bb72ded8f965d443cfac3c011a780b8db45",
+      "bytes": 4031,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/assets.go",
+      "sha256": "c59e15e6b7808179754c16642ca8aedb3a65100756fa70e7a41a92049ad143d5",
+      "bytes": 9190,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/assets_test.go",
+      "sha256": "1559d40ebd1ab7c02ac0b507b4f0817b49cab86d4c845e1df883d476e4f9333e",
+      "bytes": 1634,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/go.mod",
+      "sha256": "c70c5b9a4b31c00f7d5966b35c4242f4ddcf765395cbf63620b937075eec68ec",
+      "bytes": 70,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/main.go",
+      "sha256": "43e9702c5a6b16eefc98c624276bc1c6fe25863ae1811dd9ad33e34d26fdd226",
+      "bytes": 18037,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/preflight.go",
+      "sha256": "1a95dc2253b7afe1bc068ebf42984e9f398ef83fde04d087fc78b400d3fd08cd",
+      "bytes": 8100,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/preflight_test.go",
+      "sha256": "ad49e70f380d78eb18f4717f5c4da2460617d03fb09f97417971c81229445d16",
+      "bytes": 4762,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun-failed-only-source.json",
+      "sha256": "d37fe0694af05dabdf8dda7726036cacd20ede2b16fb06c566cfa801026be1a9",
+      "bytes": 939,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun-intents/cec99162f28f29f58fb802029ca05864.json",
+      "sha256": "d0cf76d54da984bee55d655addf1e863b955a72a1da74aaad90735a8f29f5eda",
+      "bytes": 297,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun-sources.json",
+      "sha256": "c46a0ed55845a62d35c4aed12c778b539d5f34cab6cbe2f242e286902debee20",
+      "bytes": 2052,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun.go",
+      "sha256": "a7caca60cf6fd4397683e1354cb41143a5673d910b04c35a90f9d4b07e63b771",
+      "bytes": 12050,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun_failed_only_test.go",
+      "sha256": "babe85d37727d87521ffe2db08273ac7c7150f2d35e2f49f9e0a78085b071450",
+      "bytes": 9072,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun_intent.go",
+      "sha256": "39b0c9a81fb6aa09aa91ada391c240855774ef0619d7f1e394279e236fd9f7b7",
+      "bytes": 2786,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/rerun_test.go",
+      "sha256": "324f7be719be0aea843d76eac36801101cb8f2cde8126a2fa5329a2b3709d3dc",
+      "bytes": 5560,
+      "unchangedSourceCopy": true
+    },
+    {
+      "path": "release-operator/setup_workspace.py",
+      "sha256": "68f69e2284e5f4a0e9465f98909d861b0120f37f1595736be31ea333f46c1b54",
+      "bytes": 4709,
+      "unchangedSourceCopy": false
+    },
+    {
+      "path": "release-operator/targets.json",
+      "sha256": "119f91b973b6eeb9037a46b137a6717d2a0049d362901b0022e73599dd426b17",
+      "bytes": 11779,
+      "unchangedSourceCopy": true
+    }
+  ],
+  "checks": {
+    "exactAllowlist": true,
+    "sourceCopiesByteIdentical": true,
+    "allGoEmbedsPresent": true,
+    "pythonSyntax": true,
+    "qualificationUnitTestsPassed": 3,
+    "workspaceMockedChecksPassed": 9,
+    "machinePathAndCredentialPatternFindings": [],
+    "binariesIncluded": false,
+    "credentialFilesIncluded": false,
+    "seederFilesIncluded": false,
+    "productionCalls": 0,
+    "builds": 1,
+    "offlineGoRaceSuitePassed": true,
+    "offlineGoRaceDurationSeconds": 1.564,
+    "offlineGoToolchain": "go1.27.3",
+    "helperBuildPassed": true,
+    "independentWorkspaceChecksPassed": 7
+  },
+  "limitations": [
+    "Pattern scans do not prove absence of every possible secret; source/data allowlist was manually inspected.",
+    "Native CI status and release policy require fresh reads after handoff.",
+    "Completed failed-only retry marker must remain beside the documented helper build output.",
+    "Helper built/tested offline against feature source9b57; rebuild and recheck compatibility on the destination host. Generated workspace and binary remain excluded."
+  ]
+}

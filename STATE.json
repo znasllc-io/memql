@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-29T16:46:48Z",
+  "repository": "znasllc-io/memql",
+  "main": "8cd8b77a7d28b7f7b15031fdaaa526614c07f6de",
+  "productChangesPushed": true,
+  "handoffBranch": "codex/cockpit-retirement-handoff-2026-10-29",
+  "doNotMergeHandoffBranch": true,
+  "canonicalPRs": [
+    {
+      "number": 6346,
+      "branch": "codex/cockpit-installer-release-2026-10-28",
+      "head": "635e89f80108ea93adc3c95deea516220fa98c36",
+      "run": "3e2d5ba9d47bf1657057419a9667e1ba",
+      "checkRunId": 123561655756,
+      "conclusion": "cancelled",
+      "finishedAt": "2026-10-29T16:22:07Z"
+    },
+    {
+      "number": 6368,
+      "branch": "codex/native-pr-qualification",
+      "head": "9b57c888f53d95e9bf244b95f3eccbb29eac535c",
+      "run": "6d31a6b992c061cb3473cd7f2e4f79d0",
+      "checkRunId": 123561763457,
+      "conclusion": "cancelled",
+      "finishedAt": "2026-10-29T16:21:12Z"
+    }
+  ],
+  "consumerBranch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+  "consumerPRs": [
+    {
+      "repository": "znasllc-io/memql-fylo",
+      "pullRequest": 312,
+      "branch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+      "head": "b4ff0ed97637d27ea0d53ce8b6535e57ffb95c74",
+      "url": "https://github.com/znasllc-io/memql-fylo/pull/312"
+    },
+    {
+      "repository": "znasllc-io/fylo-warehouse-os",
+      "pullRequest": 89,
+      "branch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+      "head": "32500324fe079ee6dfdc54bfee9086854631a791",
+      "url": "https://github.com/znasllc-io/fylo-warehouse-os/pull/89"
+    },
+    {
+      "repository": "znasllc-io/OWL",
+      "pullRequest": 1,
+      "branch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+      "head": "68926178bd29d166f1f2243efc82413d0178cda8",
+      "url": "https://github.com/znasllc-io/OWL/pull/1"
+    },
+    {
+      "repository": "znasllc-io/fylo-website",
+      "pullRequest": 1,
+      "branch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+      "head": "f43a468ffa16a802d6ca6027bef301dd8e8ce8e5",
+      "url": "https://github.com/znasllc-io/fylo-website/pull/1"
+    },
+    {
+      "repository": "znasllc-io/memql-casera",
+      "pullRequest": 7,
+      "branch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+      "head": "68368b9e807a7390db16e2b6611e299d0c5a6ee1",
+      "url": "https://github.com/znasllc-io/memql-casera/pull/7"
+    },
+    {
+      "repository": "znasllc-io/anequim-one-portal",
+      "pullRequest": 1,
+      "branch": "codex/cockpit-monorepo-bootstrap-2026-10-28",
+      "head": "8ea531e2ce4f96732dc3e5654da077f137d29144",
+      "url": "https://github.com/znasllc-io/anequim-one-portal/pull/1"
+    }
+  ],
+  "alreadyMerged": [
+    {
+      "repository": "memql-project",
+      "number": 79
+    },
+    {
+      "repository": "memql-znas",
+      "number": 273
+    }
+  ],
+  "runtimeAtLastRead": {
+    "version": "0.31.7",
+    "commit": "565af0d938e5",
+    "policy": "sha256:d1390fa3d8c00ae6c28d754565b777a5c14009110c5ab546b5b740920cd6afe7",
+    "githubCheckAppId": 4822538
+  },
+  "cockpitRelease": {
+    "existingTag": "cockpit/v0.21.0",
+    "tagObject": "9d92d17bab30a5f492aafc147873d7cd594bc888",
+    "source": "8cd8b77a7d28b7f7b15031fdaaa526614c07f6de",
+    "includesInstallerFix": false,
+    "publishedReleaseObserved": false,
+    "preserveExistingTag": true,
+    "nextVersionMustBeReconciled": true
+  },
+  "warehousePackageAccess": {
+    "secretName": "NPM_PACKAGES_READ_TOKEN",
+    "provisioned": true,
+    "activeMetadataVerified": true,
+    "package": "@znasllc-io/memql-sdk-core",
+    "version": "0.8.0",
+    "downloadVerified": true,
+    "nativeBuildVerified": false,
+    "expiry": "2026-11-28",
+    "temporaryInputDeleted": true,
+    "doNotReseed": true
+  },
+  "privatePreservation": {
+    "supplementFilename": "private-preservation-supplement.tar.gz",
+    "supplementBytes": 38883797,
+    "supplementSHA256": "3f2641f19b08aabae7df961bf4f35d7a8fc1a80c8175234a2399d8929b8319a9",
+    "archiveManifestSHA256": "ccd716cd3189464e6d59ab94092e38ab0335c71dbb057325b87399b8b5619fe5",
+    "preservationManifestSHA256": "be193d82e3cf7e235b30bead23b719c933d8595884ef0796405787507f5bb34c",
+    "releaseAssetsExcludedBytes": 12291888985,
+    "releaseAssetsExcludedCount": 565,
+    "mustVerifyFullRestoredBackupBeforeDeletion": true
+  },
+  "deletion": {
+    "repository": "znasllc-io/memql-cockpit",
+    "performed": false,
+    "finalOwnerConfirmationRequired": true,
+    "surface": "Chrome"
+  },
+  "activeBackgroundMonitors": false
+}
