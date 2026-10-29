@@ -1399,11 +1399,13 @@ in `clients/os/test/deployables/pipelines/`, and the exit-75 cases in
   runs one step at a time.
 - A step wrongly marked repeatable can run twice, and a dishonest exit 75 is
   retried within the limits; review owns both.
-- The model-call door texts (`fleet_inference.go`, `fleet_context_allocation.go`
-  in `integrations/agent/worker`) still name a machine by its reported name; no
-  pipeline step kind makes a model call, and whether such a text can reach a
-  check run's run-failure line was not traced. Words a machine's own Cockpit
-  composes are quoted as they arrive.
+- The model and app door texts (`fleet_inference.go`, `fleet_context_allocation.go`
+  in `integrations/agent/worker`) keep a machine's reported name, because they
+  serve the owner's own screens. The one model call a pipeline makes, the
+  independent review, reaches the check run as a code and the router's own
+  words (`router.FailureReason`), never as its text
+  (`TestAFailedReviewModelCallIsReportedByItsCodeNotItsText`). Words a machine's
+  own Cockpit composes are quoted as they arrive.
 
 **Not verified.** These tests prove the source contract and in-process replica
 hops. Live fleet-to-cloud failover and a production maintenance window for the
