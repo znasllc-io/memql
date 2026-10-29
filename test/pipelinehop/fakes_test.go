@@ -263,6 +263,36 @@ func (h githubAt) UpdateCheckRun(_ context.Context, token, repository string, id
 	return nil
 }
 
+// CheckRunsForCommit lists the check runs created on sha, each with the status
+// of its newest write, the way GitHub lists one commit's check runs. A driver
+// that takes a run over reads it to adopt the step checks already created.
+func (h githubAt) CheckRunsForCommit(_ context.Context, token, repository, sha string) ([]githubapp.CheckRunRef, error) {
+	g := h.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, err := g.repo(token, repository); err != nil {
+		return nil, err
+	}
+	var out []githubapp.CheckRunRef
+	at := map[int64]int{}
+	for _, w := range g.writes {
+		if w.Repository != repository {
+			continue
+		}
+		if w.Create {
+			if w.Run.HeadSHA == sha {
+				at[w.ID] = len(out)
+				out = append(out, githubapp.CheckRunRef{ID: w.ID, Name: w.Run.Name, ExternalID: w.Run.ExternalID, Status: w.Run.Status})
+			}
+			continue
+		}
+		if i, ok := at[w.ID]; ok && w.Run.Status != "" {
+			out[i].Status = w.Run.Status
+		}
+	}
+	return out, nil
+}
+
 func (h githubAt) Repository(_ context.Context, token, repository string) (githubapp.RepositoryInfo, error) {
 	g := h.g
 	g.mu.Lock()
