@@ -36,7 +36,9 @@ func (f *authenticatedFleet) Catalog(ctx context.Context, user string) ([]memql.
 	}
 	m := sizedModel("qwen3.8:27b", 27_300_000_000, 131072)
 	m.Vision = true
-	return []memql.FleetModel{m}, nil
+	// An embedder of its own: a model a machine advertises as an embedder
+	// answers nothing else (spec 2026-10-29, D3).
+	return advertisedOnEveryMachine([]memql.FleetModel{m, sizedEmbedder("qwen3-embedding:0.6b", 32768)}), nil
 }
 func (*authenticatedFleet) ModelPreference(context.Context, string) ([]string, error) {
 	return nil, nil

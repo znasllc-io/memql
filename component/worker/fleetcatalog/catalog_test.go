@@ -202,6 +202,25 @@ func TestAnOwnMachineTheOwnerReadMissedIsStillInTheCatalog(t *testing.T) {
 	}
 }
 
+// The model's window is the largest any machine reports; the floor a call
+// carries is checked against the machine that would serve it (spec
+// 2026-10-29, D3), so each machine keeps its own.
+func TestProjectKeepsEachMachinesWindow(t *testing.T) {
+	models := Project([]Candidate{
+		{RegistrationId: "asleep", Labels: map[string]string{"model:same": "ctx=262144,structured=1"}},
+		{RegistrationId: "awake", ConnectedNodeId: "agent-other", Labels: map[string]string{"model:same": "ctx=32768,structured=1"}},
+	}, time.Now())
+	if len(models) != 1 || models[0].ContextWindow != 262144 {
+		t.Fatalf("the model's window is the largest reported: %+v", models)
+	}
+	for _, machine := range models[0].Machines {
+		want := map[string]int{"asleep": 262144, "awake": 32768}[machine.RegistrationId]
+		if machine.ContextWindow != want {
+			t.Fatalf("%s window = %d, want %d", machine.RegistrationId, machine.ContextWindow, want)
+		}
+	}
+}
+
 func TestProjectionRetainsPerMachineModalities(t *testing.T) {
 	models := Project([]Candidate{
 		{RegistrationId: "offline-image", Labels: map[string]string{"model:same": "imagegen=1"}},

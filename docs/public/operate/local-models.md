@@ -228,6 +228,14 @@ and **any OpenAI-compatible endpoint** declared in the machine's `policy.yaml`
 — which covers LM Studio, vLLM and llamafile. There are no other per-vendor
 integrations.
 
+**A call is offered to a model through one machine at a time.** The model is a
+candidate only when an online machine, on its own, allows that kind of call in
+its model setup and advertises every capability and the context window the
+call needs. What an asleep machine, or another machine behind the same model,
+advertised does not count, although Fleet's model list still shows everything
+any machine reported. An embedding model never answers a chat or a structured
+call, even when an older Cockpit claims tools or structured output for it.
+
 #### Pulling a model from MemQL OS
 
 A machine's page in Fleet → Machines carries a **Models** group: what the

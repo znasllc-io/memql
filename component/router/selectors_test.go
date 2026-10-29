@@ -36,8 +36,19 @@ func sizedModel(id string, params int64, window int) memql.FleetModel {
 		ContextWindow:    window,
 		StructuredOutput: true,
 		Tools:            true,
-		Embeddings:       true,
 		Machines:         []memql.FleetMachine{{RegistrationId: "laptop", Name: "laptop", Online: true}},
+	}
+}
+
+// sizedEmbedder is an embedding model: it advertises embeddings and nothing a
+// conversation needs, so it serves embedding calls only.
+func sizedEmbedder(id string, window int) memql.FleetModel {
+	return memql.FleetModel{
+		ModelId:       id,
+		Params:        600_000_000,
+		ContextWindow: window,
+		Embeddings:    true,
+		Machines:      []memql.FleetMachine{{RegistrationId: "laptop", Name: "laptop", Online: true}},
 	}
 }
 

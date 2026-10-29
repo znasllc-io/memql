@@ -285,9 +285,10 @@ func (a ModelAttributes) String() string {
 // (memql#4682), which lists every machine considered and why each was ruled
 // out; it is not a distinct error class.
 func (a ModelAttributes) Satisfies(n ModelNeeds) (bool, string) {
-	// An embedding model answers nothing but embeddings (memql#6238): the
-	// same rule FleetModel.eligibleFor applies to the catalog.
-	if !n.Embeddings && a.Embeddings && !a.Tools && !a.StructuredOutput && !a.Vision {
+	// An embedding model answers nothing but embeddings (memql#6238), whatever
+	// else the label claims: the same rule FleetMachine.serves applies to the
+	// catalog, and the reason it is "never" is written there.
+	if !n.Embeddings && a.Embeddings {
 		return false, "model is an embedding model and answers embedding calls only"
 	}
 	if n.StructuredOutput && !a.StructuredOutput {
