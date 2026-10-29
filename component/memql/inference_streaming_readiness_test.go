@@ -65,7 +65,7 @@ func (c streamingOwnerCatalog) Catalog(_ context.Context, actor string) ([]Fleet
 		return nil, c.err
 	}
 	if actor == "alice" || c.shared {
-		return []FleetModel{capable("alice-chat")}, nil
+		return []FleetModel{FleetModelAdvertisedOnEveryMachineForTest(capable("alice-chat"))}, nil
 	}
 	return nil, nil
 }

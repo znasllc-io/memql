@@ -162,6 +162,11 @@ func (s *releaseBuildLease) save(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The last condition is the storage half of adoptableBuildRun
+	// (build_adopt.go): the recorded run keeps its ID unless the new run's
+	// chain names it as an attempt that finished without success, before any
+	// candidate or publication. A replica holding an older view can therefore
+	// never write an earlier run back over an adopted re-run.
 	result, err := db.ExecContext(ctx, `UPDATE release_build_intents SET body=$4::jsonb,updated_at=clock_timestamp()
 WHERE intent_id=$1 AND owner_user_id=$2 AND lease_id=$3 AND lease_until>clock_timestamp()
 AND body->'selection'=$4::jsonb->'selection'
@@ -171,7 +176,11 @@ AND (NOT (body->>'runAttempted')::boolean OR ($4::jsonb->>'runAttempted')::boole
 AND (NOT (body->>'publicationStarted')::boolean OR ($4::jsonb->>'publicationStarted')::boolean)
 AND (COALESCE(body->>'candidateId','')='' OR body->>'candidateId'=$4::jsonb->>'candidateId')
 AND (COALESCE(body->>'approvalId','')='' OR body->>'approvalId'=$4::jsonb->>'approvalId')
-AND (body->'run' IS NULL OR body->'run'->>'ID'=$4::jsonb->'run'->>'ID')`, s.record.ID, s.record.Selection.Owner, s.token, string(body))
+AND (body->'run' IS NULL OR body->'run'->>'ID'=$4::jsonb->'run'->>'ID'
+  OR (COALESCE(body->>'candidateId','')='' AND NOT (body->>'publicationStarted')::boolean
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE($4::jsonb->'run'->'Chain','[]'::jsonb)) AS earlier
+      WHERE earlier->>'ID'=body->'run'->>'ID' AND earlier->>'Status'='completed'
+      AND (earlier->>'Conclusion'<>'success' OR (earlier->>'CancelRequested')::boolean))))`, s.record.ID, s.record.Selection.Owner, s.token, string(body))
 	if err != nil {
 		return err
 	}

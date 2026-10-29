@@ -241,8 +241,10 @@ type flakyFinal struct {
 	fails atomic.Int32
 }
 
+// UpdateCheckRun fails the run's own completed check; a step's check is
+// another write, and counting it would spend the failures a test counts on.
 func (g *flakyFinal) UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error {
-	if run.Status == StatusCompleted && g.fails.Add(-1) >= 0 {
+	if run.Status == StatusCompleted && !isStepCheck(run) && g.fails.Add(-1) >= 0 {
 		return &githubapp.StatusError{Status: 502, Endpoint: "/repos/" + repository + "/check-runs"}
 	}
 	return g.GitHub.UpdateCheckRun(ctx, token, repository, id, run)

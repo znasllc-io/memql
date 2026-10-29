@@ -131,6 +131,9 @@ type Info struct {
 	// fresh conversation, which the engine can work with; claiming it
 	// falsely turns a follow-up into a stranger with no context.
 	FollowUps bool
+	// InferenceOnly reports whether that harness runs the app with no
+	// tools when a turn asks for inference only (see Spec.InferenceOnly).
+	InferenceOnly bool
 }
 
 // Spec is everything the cockpit needs to detect and drive one app.
@@ -169,6 +172,15 @@ type Spec struct {
 	// answer them the same way, so they move together with the word.
 	StructuredResult bool
 	FollowUps        bool
+	// InferenceOnly reports whether Harness runs the app with NO tools when
+	// AppSessionStart.inference_only is set. It is the harness's answer, like
+	// the two above: Claude Code takes `--tools ""` and the Codex app-server
+	// turns its shell, patch, multi-agent and web-search features off, while
+	// the Codex mcp-server floor has no such switch. The engine admits a
+	// tool-free model turn in a goal set to Auto only on a machine that says
+	// true (spec 2026-10-29, D4), so a false TRUE would let a goal's model
+	// call run commands on the owner's computer.
+	InferenceOnly bool
 }
 
 // Specs returns the closed set, in stable id order.
@@ -187,6 +199,7 @@ func Specs() []Spec {
 			Harness:          HarnessClaudeHeadless,
 			StructuredResult: true,
 			FollowUps:        true,
+			InferenceOnly:    true,
 		},
 		{
 			ID:     IDCodex,
@@ -228,6 +241,7 @@ func (s Spec) harnessUpgrade() (upgraded Spec, probe []string, ok bool) {
 		s.Harness = HarnessCodexAppServer
 		s.StructuredResult = true
 		s.FollowUps = true
+		s.InferenceOnly = true
 		return s, []string{"app-server", "--help"}, true
 	}
 	return s, nil, false

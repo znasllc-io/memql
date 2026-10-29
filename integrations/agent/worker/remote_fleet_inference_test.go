@@ -5,8 +5,10 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +67,47 @@ func (l *plannerModelLink) Send(target string, msg *nodev1.NodeClientMessage) bo
 		})
 	}
 	return true
+}
+
+// A machine's failure code survives the hop to the replica that asked
+// (2026-10-28: a grammar refusal reached the decision record as `other`). The
+// receiving agent has no planner context, only the wire.
+func TestAMachinesFailureCodeCrossesTheModelHop(t *testing.T) {
+	const model = "local-writer:27b"
+	labels := map[string]string{workerservice.ModelLabel(model): (ModelAttributes{ContextWindow: 131072, StructuredOutput: true}).String()}
+	store := &remoteFleetStore{candidates: []Candidate{{RegistrationId: "laptop", Name: "laptop", ConnectedNodeId: "agent-with-stream", LastSeenAt: time.Now(),
+		Capabilities: []string{workerservice.ModelCapability}, Labels: labels}}}
+	registry := workerservice.NewRegistry(slog.Default(), time.Now)
+	worker := &workerservice.Worker{RegistrationId: "laptop", OwnerUserId: "alice", Capabilities: []string{workerservice.ModelCapability}, Labels: labels, Concurrency: map[string]uint32{workerservice.ModelCapability: 1}}
+	worker.SetModelCallFunc(func(_ context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		handle, _, finish := workerservice.NewModelCallLoopback(req, func(string) {})
+		go finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishError, ErrorCode: "runtime_error",
+			Error: "ollama: /api/chat returned 400: failed to parse grammar"})
+		return handle, nil
+	})
+	registry.Add(worker)
+	link := &plannerModelLink{handler: NewForwardHandler(registry, &remoteFleetStore{candidates: append([]Candidate(nil), store.candidates...)}, slog.Default())}
+	link.router = newForwardRouter(link, func() (string, string) { return "planner", "planner" }, slog.Default())
+	fleet := NewRemoteFleetInference(store, link.router, "planner", slog.Default())
+	authority, err := auth.ForwardedAuthorityForUser(&auth.AccessContext{UserId: "alice", Role: auth.RoleWriter}, "", "", time.Time{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, err := auth.VerifyForwardedAuthority(authority, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(auth.BindForwardedContext(context.Background(), authority.Principal().Claims, access, authority), 5*time.Second)
+	defer cancel()
+	_, err = fleet.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: "alice", ModelId: model, Kind: memqlengine.FleetKindChat, ContextTokens: 8192,
+		Messages: []common.ChatMessage{{Role: "user", Content: "Diagnose"}}, Schema: &common.StructuredSchema{Name: "diagnosis", Schema: json.RawMessage(`{"type":"object"}`), Strict: true}})
+	var failed *workerservice.ModelCallFailed
+	if !errors.As(err, &failed) || failed.Code() != "runtime_error" {
+		t.Fatalf("the machine's code must cross the hop: %T %v", err, err)
+	}
+	if failed.Machine != "laptop" || !strings.Contains(err.Error(), "failed to parse grammar") {
+		t.Fatalf("the failure must still name the machine and keep the runtime's words: %q", err.Error())
+	}
 }
 
 func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {

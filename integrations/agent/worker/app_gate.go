@@ -47,6 +47,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -64,23 +65,29 @@ type PreferencesReader interface {
 }
 
 // admitAppSession is the whole gate short of the machine: whether owner may
-// open an app session reached through pin, right now. Nil admits.
+// open an app session reached through pin, right now. A nil refusal admits.
 //
 // It is asked BEFORE a machine is selected, and on the session door before a
 // child run is opened, so a refused call never reveals which machines the
 // owner has online and never leaves anything behind. The pin is asked first
 // because it needs no read.
-func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string, pin memqlengine.AppDoorPin, runID string) *appGateRefusal {
+//
+// toolFree says the turn is inference-only (appTurnToolFree). When the run's
+// destination refused it only because the goal is set to Auto, the turn is
+// admitted on the condition needsToolFreeMachine reports: the machine must
+// declare that it runs the app without tools (appToolFreeRefusal). See the
+// waiver below for why.
+func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string, pin memqlengine.AppDoorPin, runID string, toolFree bool) (needsToolFreeMachine bool, refusal *appGateRefusal) {
 	// NOBODY TO ACT FOR, first and with no read: a session runs on a person's
 	// own machine under a credential naming that person, and a system actor
 	// is a non-empty UserId that names no one. Asked here because all three
 	// ways in -- the chat door, the session door, a routed Task -- ask this
 	// gate, so one rule covers them.
 	if auth.ActsForNoPerson(ctx, owner) {
-		return &appGateRefusal{code: AppGateNoOwner, message: memqlengine.AppNoOwnerReason}
+		return false, &appGateRefusal{code: AppGateNoOwner, message: memqlengine.AppNoOwnerReason}
 	}
 	if refusal := appDoorPinRefusal(pin, owner); refusal != nil {
-		return refusal
+		return false, refusal
 	}
 	// A local app can run its own tools. A Workbench-only goal cannot escape
 	// through delegated app execution while the native host tools are gated.
@@ -94,13 +101,51 @@ func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.
 			CheckAppExecutionDestination(context.Context, string) error
 		})
 		if !available {
-			return &appGateRefusal{code: AppGateDestination, message: "This goal cannot open a computer app without destination approval"}
+			return false, &appGateRefusal{code: AppGateDestination, message: "This goal cannot open a computer app without destination approval"}
 		}
 		if err := gate.CheckAppExecutionDestination(ctx, runID); err != nil {
-			return &appGateRefusal{code: AppGateDestination, message: err.Error()}
+			if !toolFreeTurnWaivesDestination(err, toolFree) {
+				return false, &appGateRefusal{code: AppGateDestination, message: err.Error()}
+			}
+			needsToolFreeMachine = true
 		}
 	}
-	return appSessionConsent(ctx, prefs, logger, owner)
+	return needsToolFreeMachine, appSessionConsent(ctx, prefs, logger, owner)
+}
+
+// toolFreeTurnWaivesDestination reports whether a destination refusal is one
+// an inference-only turn does not need to meet.
+//
+// THE DESTINATION IS ABOUT WHERE TOOLS RUN (ParseExecutionDestination), and an
+// inference-only turn runs none: Claude Code with `--tools ""`, the Codex
+// app-server with its shell, patch, multi-agent and web-search features off,
+// and an empty delegated tool scope. It is a model answering a prompt on the
+// owner's machine -- what a local model does, which this gate never asks
+// about. Refusing it inside an Auto goal is what parked a failed run's
+// diagnosis on 2026-10-28: pipeline maintenance opens that goal for the owner
+// with no route choice, and there is nobody present to approve a move to the
+// computer for a move that is not one.
+//
+// THE WAIVER IS AS NARROW AS THE OWNER APPROVED IT (spec 2026-10-29, D4):
+//   - Auto only. An explicit Workbench goal keeps its refusal, and any other
+//     destination error (finished run, another run's destination) is not a
+//     destination the turn could satisfy.
+//   - Tool-free only. A turn with images or inputs lands files in the
+//     session's workspace, and the session door hands over a whole step that
+//     runs its tools.
+//   - Only on a machine that declares it (needsToolFreeMachine). A Cockpit
+//     that predates the declaration, or the Codex mcp-server harness, would
+//     run the same turn with its tools.
+func toolFreeTurnWaivesDestination(err error, toolFree bool) bool {
+	var required *memqlengine.ExecutionDestinationRequired
+	return toolFree && errors.As(err, &required) && required.From == "auto"
+}
+
+// appTurnToolFree is the one test of an inference-only turn: it decides both
+// AppSessionStart.inference_only (callOnWorker) and the waiver above, so the
+// gate cannot admit a turn the machine is then told to run with tools.
+func appTurnToolFree(req memqlengine.AppCallRequest) bool {
+	return len(req.Images) == 0 && len(req.Inputs) == 0
 }
 
 // appDoorPinRefusal refuses an app door reached through a pin that owner did

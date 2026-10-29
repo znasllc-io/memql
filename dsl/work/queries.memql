@@ -26,8 +26,6 @@
 // precisely what AccessContext.IsClusterOwner() tests. So the filter now says
 // out loud what the tier already implied, and the gate can see it.
 
-use common.traits.{ statusIsRunning }
-
 /// One run by id, for resume. @serverOnly: the run may be the deployment's, with a
 /// present-and-empty owner, so an actor.userId conjunct would refuse the writer its own record.
 @serverOnly
@@ -186,6 +184,11 @@ query goal workGoalForOwner {
   shape   workGoalFull
 }
 
+// workRunsForOwner and workRunSummariesForOwner are walked newest first through the owner walk
+// index, so a page costs the page and not the owner's history (component/memql latestScanWalk). The
+// walk is taken because the owner term decides these filters; a further condition here would move
+// them back to the owner lookup, which reads every version the owner ever wrote (2026-10-29).
+
 /// The caller's runs, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side, and the
 /// concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not
 /// handed anybody else's work the way an undeclared concept would.
@@ -225,27 +228,9 @@ query run workRunSummaryForOwner {
   shape workRunSummary
 }
 
-/// The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds
-/// server-side, so this answers for whoever the actor is and nobody else.
-///
-/// SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in
-/// its own comment: it is deliberately un-narrowed because two surfaces read it. This is a third
-/// question -- "what is in flight for this person" -- asked by the computer-use kill switch
-/// (memql#5066), where paging an active person's whole run history to find the few running ones is
-/// the wrong read for a control that has to act promptly.
-///
-/// BOUNDED AT 500, which is a real limit and not a formality: a person with more than 500 runs
-/// executing at once would have some missed. Nothing in the product produces that state -- runs are
-/// opened per goal and per analysis -- and an unbounded scan on the path a kill switch takes is the
-/// worse failure. The pre-dispatch gate is refusing every new call meanwhile, so a missed run's
-/// next worker call is denied regardless.
-@actor
-query run workRunningRunsForOwner {
-  filter  row => row.ownerUserId == actor.userId && statusIsRunning(row)
-  sort    "row.createdAt", "desc"
-  paginate 500
-  shape   workRunFull
-}
+// Served by the run goal lookup index, so it costs one goal's runs. The owner's index range is
+// their whole run history, and for the owner of every pipeline run reading goalId across it ran
+// past the statement limit (2026-10-29; component/memql latestLookupKeys).
 
 /// The runs of one of the caller's goals, newest first.
 @actor
@@ -257,6 +242,10 @@ query run workRunsForGoal {
   sort    "row.createdAt", "desc"
   shape   workRunFull
 }
+
+// Served by the run signature lookup index, which holds only succeeded versions: the read may use it
+// because it requires `row.status == "succeeded"` (component/memql payloadLookup.partial). Without
+// that condition it would fall back to the owner's whole history.
 
 /// The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read
 /// (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds
@@ -545,6 +534,10 @@ query approval workApprovalsForOwnedRun {
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
  shape workApprovalFull
 }
+
+// The three revision reads below are served by the run revision lookup index, which holds only the
+// reviseLibraryDocument automation's runs: they may use it because each requires that automation by
+// its literal name (component/memql payloadLookup.partial). Without it they cost the owner's history.
 
 /// Recover this person's latest document review across editor windows and restarts.
 /// Returns only an owned request identifier; Library checks the backing document

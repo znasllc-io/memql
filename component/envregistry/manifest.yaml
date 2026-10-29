@@ -51,6 +51,14 @@
 
 secrets:
 
+  # External package credential consumed only by owner-allowed native CI steps.
+  - name: NPM_PACKAGES_READ_TOKEN
+    component: pipelines
+    scope: global
+    kind: integration
+    optional: true
+    description: "Optional GitHub Packages read credential for owner-authorized native CI. Seed only an approved classic PAT with read:packages and existing package read access; this entry grants no package, repository or pipeline permission. Steps must declare this name and the pipeline or exact qualification must allow it. No boot requirement or default value."
+
   # --- seal floor (a developer .env MUST cover these to seal) ---
 
   - name: MEMQL_IDENTITY_KEY_ENCRYPTION_KEY

@@ -37,6 +37,21 @@ compiler cache and two copies of the input image. Images above 2 GiB are refused
 All ports bind only to loopback. There is no active-database, installation,
 production credential, or deployment parameter.
 
+The first `go version` can provision the workspace-selected toolchain when the
+native attempt has an empty Go cache. This prerequisite gets up to 600 seconds,
+clipped to the fixture's remaining 30-minute budget. It previously shared the
+120-second command default and timed out before any provider tests ran. Its
+combined output is retained as `go-version.log` on success, command failure, or
+timeout so a future failure can distinguish download errors from other stalls.
+The fixture stops before starting providers if this prerequisite fails, and
+starts no further command after its overall budget expires. Cleanup retains its
+separate bounded allowance. This does not retry provider tests or extend their
+timeouts; a new native run must qualify them again. The
+[fixture protocol regressions](../../../scripts/ci/delivery_artifacts_test.py)
+cover cold-toolchain preparation, the shared deadline, and retained failure
+diagnostics. These tests establish the bounds and evidence behavior, not the
+availability or speed of the worker's toolchain download service.
+
 To rehearse with an actual locally built engine image, pass its immutable Docker
 repository digest as `artifact-image`. Pass a native TimescaleDB/pgvector image
 digest as `database-image` when the CI database image does not support the host

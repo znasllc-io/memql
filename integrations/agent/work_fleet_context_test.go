@@ -55,7 +55,7 @@ func (f *workContextFleet) Catalog(ctx context.Context, owner string) ([]memql.F
 	if _, ok := ctx.Deadline(); !ok {
 		return nil, fmt.Errorf("catalog lost cancellation deadline")
 	}
-	return []memql.FleetModel{{ModelId: "qwen", Params: 27_000_000_000, ContextWindow: 131072, Tools: true, StructuredOutput: true, Machines: []memql.FleetMachine{{RegistrationId: "remote-machine", Name: "machine on another replica", Online: true}}}}, nil
+	return []memql.FleetModel{memql.FleetModelAdvertisedOnEveryMachineForTest(memql.FleetModel{ModelId: "qwen", Params: 27_000_000_000, ContextWindow: 131072, Tools: true, StructuredOutput: true, Machines: []memql.FleetMachine{{RegistrationId: "remote-machine", Name: "machine on another replica", Online: true}}})}, nil
 }
 
 func (*workContextFleet) ModelPreference(context.Context, string) ([]string, error) { return nil, nil }

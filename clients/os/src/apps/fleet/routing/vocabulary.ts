@@ -83,6 +83,7 @@ const SHIPPED_TITLES: Record<string, string> = {
   fastLocalFirst: "Fast local first",
   localOnly: "Local only",
   federationStrongest: "Local, then best vendor",
+  localFirstStrongest: "Local first, in order",
   embeddingsBinding: "Embeddings",
 };
 

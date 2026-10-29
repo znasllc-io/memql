@@ -207,7 +207,13 @@ func (s *releaseBuildScope) observe(ctx context.Context, _ map[string]any) (any,
 		s.lease.record.Phase, s.lease.record.ReasonCode, s.lease.record.Reason = "uncertain", "build_unconfirmed", "The build request is not yet confirmed. Its saved intent prevents a replacement request."
 		return s.factsAfterSave(ctx)
 	}
-	if !matchingBuildRun(s.lease.record.Selection, run) || (s.lease.record.Run != nil && s.lease.record.Run.ID != run.ID) {
+	if !matchingBuildRun(s.lease.record.Selection, run) {
+		return nil, errors.New("native release observation changed its execution identity")
+	}
+	// A newer attempt of this release replaces the recorded run only when it
+	// descends from a recorded attempt that did not succeed, before any
+	// candidate (build_adopt.go). Every other change of identity stays refused.
+	if s.lease.record.Run != nil && s.lease.record.Run.ID != run.ID && !adoptableBuildRun(s.lease.record, run) {
 		return nil, errors.New("native release observation changed its execution identity")
 	}
 	s.lease.record.Run = &run
@@ -228,7 +234,7 @@ func (s *releaseBuildScope) recordRun(ctx context.Context) (any, error) {
 		if r.Conclusion == "success" && !r.CancelRequested && r.WorkRunID != "" {
 			s.lease.record.Phase = "built"
 		} else {
-			s.lease.record.Phase, s.lease.record.ReasonCode, s.lease.record.Reason = "blocked", "build_not_successful", "The selected release build did not succeed. Review its run; this release will not replace it automatically."
+			s.lease.record.Phase, s.lease.record.ReasonCode, s.lease.record.Reason = "blocked", "build_not_successful", "The selected release build did not succeed. Re-run its failed steps from its run; this release continues with that attempt when it passes."
 		}
 	}
 	return s.factsAfterSave(ctx)

@@ -269,6 +269,11 @@ func sarifSource(ctx context.Context, d Deps, owner, runID string) (Run, Pipelin
 	if p == nil || memql.BareShortId(p.OwnerUserID) != owner || p.Repository != r.Repository || p.CredentialID == "" || p.InstallationID <= 0 {
 		return Run{}, Pipeline{}, errors.New("SARIF source is no longer bound to the caller's GitHub connection")
 	}
+	if r.Qualification != nil || r.Trigger == TriggerQualification {
+		if err := ValidateQualification(*p, *r, d.now()); err != nil {
+			return Run{}, Pipeline{}, err
+		}
+	}
 	return *r, *p, nil
 }
 
@@ -280,6 +285,12 @@ func sarifGrant(ctx context.Context, d Deps, owner string, want Run, p Pipeline)
 	if r.SHA != want.SHA || r.WorkRunID != want.WorkRunID || r.Event != want.Event || r.HeadBranch != want.HeadBranch || r.Version != want.Version ||
 		current.CredentialID != p.CredentialID || current.InstallationID != p.InstallationID {
 		return "", errors.New("SARIF source changed before publication")
+	}
+	if r.Qualification != nil || r.Trigger == TriggerQualification {
+		dr := &runDriver{d: d, p: current, run: r}
+		if err := dr.qualificationFence(ctx); err != nil {
+			return "", err
+		}
 	}
 	token, installation, err := d.GitHub.InstallationToken(ctx, current.CredentialID, current.OwnerUserID, current.Repository)
 	if err != nil {

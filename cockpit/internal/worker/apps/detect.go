@@ -207,6 +207,7 @@ func (d *Detector) Detect(ctx context.Context, allow []string) []Info {
 			Harness:          resolved.Harness,
 			StructuredResult: resolved.StructuredResult,
 			FollowUps:        resolved.FollowUps,
+			InferenceOnly:    resolved.InferenceOnly,
 		})
 	}
 	// Stable order. The engine sorts by id anyway, but an unstable one

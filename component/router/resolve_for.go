@@ -14,6 +14,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -60,6 +61,15 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 		}
 		if strings.TrimSpace(req.StepId) == "" {
 			req.StepId = run.StepKey
+		}
+		// AND THE RUN'S CALL TAGS (a pipeline goal's `pipeline`, spec
+		// 2026-10-29 D5), added after the request's own, each once: a
+		// request built outside the engine never passed the prompt seam
+		// that adds them, and a rule may need either.
+		for _, tag := range run.Tags {
+			if tag = strings.TrimSpace(tag); tag != "" && !slices.Contains(req.Tags, tag) {
+				req.Tags = append(append([]string(nil), req.Tags...), tag)
+			}
 		}
 	}
 	// AND WHAT THE RUN'S OWNER CHOSE (the Ask route picker). Applied HERE,

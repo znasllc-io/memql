@@ -42,6 +42,26 @@ func invocationRow(runId string) map[string]any {
 	return map[string]any{"id": "v1:worker:invocation:i-" + runId, "runId": runId, "ownerUserId": "u-alice"}
 }
 
+// runningReads is what the kill switch asked its running-runs read: one entry
+// per call, the owner it named and the actor the call carried.
+type runningReads []struct{ owner, actor string }
+
+// answerRunning makes the kill switch's running-runs read -- the recovery
+// projection in production (runningRunsForOwner) -- answer rows, and records
+// every call made of it.
+func answerRunning(i *Integration, rows ...map[string]any) *runningReads {
+	reads := &runningReads{}
+	i.runningRuns = func(ctx context.Context, owner string) ([]map[string]any, error) {
+		actor := ""
+		if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+			actor = ac.UserId
+		}
+		*reads = append(*reads, struct{ owner, actor string }{owner, actor})
+		return rows, nil
+	}
+	return reads
+}
+
 // THE SELECTION, which is the whole design. Two runs are in flight; one
 // dispatched to a machine and one never did. Only the first may be asked to
 // stop.
@@ -52,7 +72,7 @@ func invocationRow(runId string) map[string]any {
 func TestKillSwitchAsksOnlyTheRunsThatUsedAWorker(t *testing.T) {
 	i, eng := newTestIntegration(t)
 
-	eng.reply("workRunningRunsForOwner", runningRun("v1:work:run:r-used"), runningRun("v1:work:run:r-never"))
+	reads := answerRunning(i, runningRun("v1:work:run:r-used"), runningRun("v1:work:run:r-never"))
 	eng.replyWhen("invocationsForRun", "r-used", invocationRow("v1:work:run:r-used"))
 	eng.replyWhen("invocationsForRun", "r-never") // no rows: this run never touched a machine
 
@@ -83,6 +103,11 @@ func TestKillSwitchAsksOnlyTheRunsThatUsedAWorker(t *testing.T) {
 			"v1:work:run's write guard ignores the clusterOwner arm, so a write as anyone else is refused", updates[0].Actor)
 	}
 
+	if len(*reads) != 1 || (*reads)[0].owner != "u-alice" || (*reads)[0].actor != "u-alice" {
+		t.Errorf("the running runs were read as %+v, want one read of u-alice's runs under u-alice's borrowed\n"+
+			"authority: the selection is caller-scoped, and under a cluster owner it would answer for everyone", *reads)
+	}
+
 	reply := decodeReply(t, nodes)
 	if reply["runsChecked"] != float64(2) && reply["runsChecked"] != 2 {
 		t.Errorf("runsChecked = %v, want 2", reply["runsChecked"])
@@ -96,7 +121,7 @@ func TestKillSwitchAsksOnlyTheRunsThatUsedAWorker(t *testing.T) {
 // that has never touched a machine loses nothing when they turn the switch off.
 func TestKillSwitchLeavesRunsThatNeverTouchedAMachineAlone(t *testing.T) {
 	i, eng := newTestIntegration(t)
-	eng.reply("workRunningRunsForOwner", runningRun("v1:work:run:r-a"), runningRun("v1:work:run:r-b"))
+	answerRunning(i, runningRun("v1:work:run:r-a"), runningRun("v1:work:run:r-b"))
 	// invocationsForRun is unlisted, so it answers no rows for either.
 
 	if _, err := i.handleCancelComputerUseRuns(automationContext(),
@@ -117,7 +142,7 @@ func TestKillSwitchLeavesRunsThatNeverTouchedAMachineAlone(t *testing.T) {
 // refusing their next call, and it fails CLOSED on its own lookup error.
 func TestKillSwitchLeavesARunAloneWhenItCannotTellWhetherAWorkerWasUsed(t *testing.T) {
 	i, eng := newTestIntegration(t)
-	eng.reply("workRunningRunsForOwner", runningRun("v1:work:run:r-unknown"))
+	answerRunning(i, runningRun("v1:work:run:r-unknown"))
 	eng.refuse("invocationsForRun", errors.New("read timeout"))
 
 	nodes, err := i.handleCancelComputerUseRuns(automationContext(),
@@ -136,7 +161,7 @@ func TestKillSwitchLeavesARunAloneWhenItCannotTellWhetherAWorkerWasUsed(t *testi
 // One run that will not take the flag must not stop the rest being asked.
 func TestKillSwitchKeepsAskingAfterOneRunRefusesTheFlag(t *testing.T) {
 	i, eng := newTestIntegration(t)
-	eng.reply("workRunningRunsForOwner", runningRun("v1:work:run:r-1"), runningRun("v1:work:run:r-2"))
+	answerRunning(i, runningRun("v1:work:run:r-1"), runningRun("v1:work:run:r-2"))
 	eng.reply("invocationsForRun", invocationRow("v1:work:run:r-1"))
 	eng.refuse("updateWorkRun", errors.New("write conflict"))
 
@@ -161,15 +186,15 @@ func TestKillSwitchKeepsAskingAfterOneRunRefusesTheFlag(t *testing.T) {
 // internal-origin dispatch is refused.
 func TestCancelComputerUseRunsRefusesACallerSuppliedPayload(t *testing.T) {
 	i, eng := newTestIntegration(t)
-	eng.reply("workRunningRunsForOwner", runningRun("v1:work:run:r-1"))
+	reads := answerRunning(i, runningRun("v1:work:run:r-1"))
 	eng.reply("invocationsForRun", invocationRow("v1:work:run:r-1"))
 
 	if _, err := i.handleCancelComputerUseRuns(callerContext("u-mallory"),
 		map[string]any{"ownerUserId": "u-alice"}, 0); err == nil {
 		t.Fatal("a writer cancelled another person's runs; a call without internal origin must be refused")
 	}
-	if got := len(eng.recorded()); got != 0 {
-		t.Errorf("the refusal happened after %d engine calls; a refusal after a read is a read that happened", got)
+	if got := len(eng.recorded()) + len(*reads); got != 0 {
+		t.Errorf("the refusal happened after %d reads; a refusal after a read is a read that happened", got)
 	}
 }
 
@@ -180,26 +205,27 @@ func TestCancelComputerUseRunsRefusesACallerSuppliedPayload(t *testing.T) {
 // dispatch from a caller's.
 func TestCancelComputerUseRunsIsNotOpenedByARole(t *testing.T) {
 	i, eng := newTestIntegration(t)
-	eng.reply("workRunningRunsForOwner", runningRun("v1:work:run:r-1"))
+	reads := answerRunning(i, runningRun("v1:work:run:r-1"))
 	eng.reply("invocationsForRun", invocationRow("v1:work:run:r-1"))
 
 	if _, err := i.handleCancelComputerUseRuns(clusterOwnerContext("u-operator"),
 		map[string]any{"ownerUserId": "u-alice"}, 0); err == nil {
 		t.Fatal("a cluster owner reached the builtin directly; the gate is the origin, not the role")
 	}
-	if got := len(eng.recorded()); got != 0 {
-		t.Errorf("the refusal happened after %d engine calls", got)
+	if got := len(eng.recorded()) + len(*reads); got != 0 {
+		t.Errorf("the refusal happened after %d reads", got)
 	}
 }
 
 // A blank owner is refused rather than treated as "everyone".
 func TestCancelComputerUseRunsRefusesABlankOwner(t *testing.T) {
 	i, eng := newTestIntegration(t)
+	reads := answerRunning(i)
 	if _, err := i.handleCancelComputerUseRuns(automationContext(),
 		map[string]any{"ownerUserId": "  "}, 0); err == nil {
 		t.Fatal("a blank ownerUserId was accepted; borrowed authority for nobody is the cluster owner's own actor")
 	}
-	if got := len(eng.recorded()); got != 0 {
-		t.Errorf("the refusal happened after %d engine calls", got)
+	if got := len(eng.recorded()) + len(*reads); got != 0 {
+		t.Errorf("the refusal happened after %d reads", got)
 	}
 }

@@ -95,6 +95,14 @@ func (i *Integration) buildView(ctx context.Context, r releaseBuildRecord) (rele
 		v.Actions = append(v.Actions, "observe", "resume")
 	case "building":
 		v.Actions = append(v.Actions, "observe")
+	case "blocked":
+		// A failed build stays observable, so the saved release can adopt the
+		// owner's re-run of its failed steps (build_adopt.go). The OS release
+		// journey observes on every read while this action is offered. Every
+		// other block keeps no action.
+		if r.ReasonCode == "build_not_successful" {
+			v.Actions = append(v.Actions, "observe")
+		}
 	case "built":
 		v.Actions = append(v.Actions, "resume")
 	}

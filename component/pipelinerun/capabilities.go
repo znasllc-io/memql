@@ -45,6 +45,8 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append(retentionCapabilities(i), []memql.IntegrationCapability{
+		{Name: "previewPullRequest", Description: "Preview an owned source pull request without creating a pipeline or run.", Handler: i.handlePreviewPullRequest, ArgsSchema: map[string]string{"packageId": "string (required)", "pullRequest": "integer (required)"}},
+		{Name: "qualifyPullRequest", Description: "Authorize one exact reviewed pull-request head while automatic pipeline delivery remains inactive.", Handler: i.handleQualifyPullRequest, ArgsSchema: map[string]string{"packageId": "string (required)", "pullRequest": "integer (required)", "requestId": "string (required)", "expectedHeadSha": "string (required)", "expectedBaseSha": "string (required)", "expectedManifestDigest": "string (required)", "expiresAt": "string (required)", "compute": "string", "secretNames": "[]string"}},
 		{Name: "channelSave", Description: "Save an owner-scoped notification channel without sending a message.", Handler: i.handleChannelSave, ArgsSchema: map[string]string{"name": "string (required) -- stable channel name", "kind": "string (required) -- email or discord", "secretRef": "string -- Discord webhook secret name", "recipients": "[]string -- email addresses"}},
 		{Name: "channelArchive", Description: "Archive an owner-scoped notification channel.", Handler: i.handleChannelArchive, ArgsSchema: map[string]string{"name": "string (required) -- caller-owned channel"}},
 		{Name: "channelAllow", Description: "Allow or revoke one channel on a caller-owned pipeline.", Handler: i.handleChannelAllow, ArgsSchema: map[string]string{"pipelineId": "string (required) -- caller-owned pipeline", "name": "string (required) -- caller-owned channel", "allowed": "boolean (required) -- grant or revoke"}},
@@ -130,7 +132,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rerun",
-			Description: "Re-run one of the caller's runs: the next attempt of its run key, with the original's mode and event, trigger rerun and rerunOf naming the original, and a new check run. With failedOnly, only what the original did not pass runs again -- every step it passed with the same package slice is carried over as skipped pipeline_passed_earlier -- and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. Refused while the key's newest attempt is still going. Answers {runId, attempt, rerunOf, status, failedOnly}.",
+			Description: "Re-run one of the caller's runs: the next attempt of its run key, with the original's mode and event, trigger rerun and rerunOf naming the original, and a new check run. With failedOnly, only what the original did not pass runs again -- every step it passed with the same package slice is carried over as skipped pipeline_passed_earlier -- and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. In a release, a step that produces artifacts always runs again, and nothing is carried once the release's first attempt was opened more than 24 hours earlier. Refused while the key's newest attempt is still going. Answers {runId, attempt, rerunOf, status, failedOnly}.",
 			Handler:     i.handleRerun,
 			ArgsSchema: map[string]string{
 				"runId":      "string (required) -- the caller's v1:pipelines:run",

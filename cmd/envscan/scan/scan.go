@@ -86,6 +86,10 @@ import (
 // GITHUB_STEP_SUMMARY, K_REVISION, VERSION specifically). Keep this
 // tight -- anything MemQL actually configures belongs in the registry.
 var external = map[string]bool{
+	// External GitHub Packages credential read by downstream native CI steps.
+	// The fixed seeder may store it; it is not an engine MEMQL_ setting.
+	"NPM_PACKAGES_READ_TOKEN": true,
+
 	"GITHUB_STEP_SUMMARY": true,
 	"K_REVISION":          true,
 	"VERSION":             true,

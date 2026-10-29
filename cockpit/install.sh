@@ -60,13 +60,41 @@ resolve_version() {
         echo "cockpit/v${MEMQL_COCKPIT_VERSION#v}"; return
     fi
     command -v python3 >/dev/null 2>&1 || die "Python 3 is required to select a release; set MEMQL_COCKPIT_VERSION to pin one."
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=100" | python3 -c 'import json,re,sys
-for row in json.load(sys.stdin):
-    tag=row.get("tag_name", "")
-    if not row.get("draft") and not row.get("prerelease") and re.fullmatch(r"cockpit/v[0-9]+\.[0-9]+\.[0-9]+",tag):
-        print(tag); sys.exit(0)
-sys.exit("No published Cockpit release was found; select a version explicitly.")'
-
+    # One selector for this POSIX entry point and Fleet's token installers.
+    # A source checkout uses its own helper; curl | sh loads the matching
+    # helper before discovery. A missing helper/catalog refuses before writes.
+    helper=""
+    # In a pipe $0 is sh, so a relative lookup would execute a helper from
+    # the operator's current directory. Only a real entry-point file has a
+    # checkout sibling; downloaded execution always fetches its own helper.
+    if [ -f "$0" ] && [ "$(basename "$0")" = install.sh ]; then
+        helper="$(dirname "$0")/scripts/install/release-version.py"
+    fi
+    temporary_helper=""
+    if [ ! -f "$helper" ]; then
+        helper="$(mktemp)" || return 4
+        temporary_helper="$helper"
+        raw_base="${MEMQL_INSTALL_RAW_BASE:-https://raw.githubusercontent.com/${REPO}/main/cockpit/scripts/install}"
+        helper_protocol=https
+        helper_redirects=10
+        if [ "${MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP:-}" = 1 ] && python3 -c 'import sys; from urllib.parse import urlparse; u=urlparse(sys.argv[1]); sys.exit(not (u.scheme == "http" and u.hostname in ("127.0.0.1", "::1") and u.username is None and u.password is None and not u.fragment))' "$raw_base"; then
+            helper_protocol=http
+            helper_redirects=0
+        fi
+        if ! curl -fsSL --proto "=${helper_protocol}" --proto-redir "=${helper_protocol}" --max-redirs "$helper_redirects" --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 --max-filesize 65536 "${raw_base}/release-version.py" -o "$helper" || [ ! -s "$helper" ]; then
+            rm -f "$temporary_helper"
+            log "ERROR: Could not load the Cockpit release selector. Nothing was installed; retry later."
+            return 4
+        fi
+    fi
+    if selected_tag="$(python3 "$helper" --api-url "${MEMQL_INSTALL_RELEASE_API:-https://api.github.com/repos/${REPO}/releases?per_page=100}")"; then
+        [ -z "$temporary_helper" ] || rm -f "$temporary_helper"
+        printf '%s\n' "$selected_tag"
+    else
+        result=$?
+        [ -z "$temporary_helper" ] || rm -f "$temporary_helper"
+        return "$result"
+    fi
 }
 
 verify_checksum() {
@@ -208,24 +236,22 @@ main() {
 
     log "==> memQL Cockpit ${tag} (${os}/${arch})"
     log "==> downloading ${asset}"
-    if curl -fsSL --proto '=https' "${base}/${asset}" -o "${tmp}/${asset}" 2>/dev/null; then
-        # Current format: a versioned tar.gz (make dist / release.yml) + SHA256SUMS.
-        if curl -fsSL --proto '=https' "${base}/${sums}" -o "${tmp}/${sums}" 2>/dev/null; then
-            log "==> verifying checksum"
-            verify_checksum "$tmp" "$asset" "$sums" || die "checksum verification failed"
-        else
-            log "    (no ${sums} published for ${tag}; skipping checksum verify)"
-        fi
-        tar -xzf "${tmp}/${asset}" -C "$tmp"
-        [ -f "${tmp}/${BINARY}" ] || die "archive did not contain ${BINARY}"
-    else
-        # Legacy format: a raw per-platform binary (memql-<os>-<arch>).
-        legacy="${BINARY}-${os}-${arch}"
-        log "    (no tar.gz; trying legacy raw binary ${legacy})"
-        curl -fsSL --proto '=https' "${base}/${legacy}" -o "${tmp}/${BINARY}" \
-            || die "no release asset for ${os}/${arch} in ${tag}"
-        chmod 0755 "${tmp}/${BINARY}"
-    fi
+    # Consolidated releases publish a complete versioned archive and manifest
+    # for every supported platform. Missing evidence is a failed publication,
+    # never permission to install an unchecked archive or legacy raw binary.
+    curl -fsSL --proto '=https' --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 1800 \
+        "${base}/${asset}" -o "${tmp}/${asset}" || die "no release asset for ${os}/${arch} in ${tag}"
+    curl -fsSL --proto '=https' --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 60 \
+        "${base}/${sums}" -o "${tmp}/${sums}" || die "release checksum manifest is missing; nothing was installed"
+    log "==> verifying checksum"
+    verify_checksum "$tmp" "$asset" "$sums" || die "checksum verification failed; nothing was installed"
+    # make dist archives the staging directory as '.', yielding ./memql;
+    # older complete archives may name memql directly. Extract exactly one
+    # accepted member instead of trusting other archive paths.
+    member="$(tar -tzf "${tmp}/${asset}" | awk -v name="$BINARY" '$0 == name || $0 == "./" name { member=$0; count++ } END { if (count != 1) exit 1; print member }')" \
+        || die "archive must contain exactly one ${BINARY} file"
+    tar -xzf "${tmp}/${asset}" -C "$tmp" "$member"
+    [ -f "${tmp}/${BINARY}" ] && [ ! -L "${tmp}/${BINARY}" ] || die "archive did not contain a regular ${BINARY} file"
 
     bindir="${BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
     mkdir -p "$bindir"

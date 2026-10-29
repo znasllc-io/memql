@@ -52,5 +52,15 @@ func NewModelCallLoopback(req ModelCallRequest, onCancel func(reason string)) (
 		}
 		return nil
 	}
-	return h, h.deliverDelta, func(out ModelCallOutcome) { h.finish(out, nil) }
+	// A failed outcome finishes with the error the real stream gives
+	// (handleModelCallEnd). A stand-in that answered nil here hid the one
+	// path a machine failure takes through the hop -- the holder relabelling
+	// the machine's code -- from every test built on it.
+	return h, h.deliverDelta, func(out ModelCallOutcome) {
+		var err error
+		if out.Error != "" {
+			err = &ModelCallFailed{ErrorCode: out.ErrorCode, Message: out.Error}
+		}
+		h.finish(out, err)
+	}
 }

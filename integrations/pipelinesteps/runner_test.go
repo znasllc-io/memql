@@ -3313,6 +3313,45 @@ func TestRunnerKeepsItsFirstTerminalObservation(t *testing.T) {
 	}
 }
 
+// TestRunnerSaysAStepRanOutOfMemory: the kubelet's OOMKilled is the only word
+// that tells a memory kill from a command that exited 137 itself, and it is on
+// the pod alone, which is deleted with its Job. So it reaches the step's
+// result -- pipeline_step_memory_exceeded, the limit named, the exit code
+// kept -- and the observation recorded on the Job is that same result, which
+// is what a replica that adopts the Job settles it by.
+func TestRunnerSaysAStepRanOutOfMemory(t *testing.T) {
+	h := newRunnerHarness(t)
+	line := captureKubeLine(rtAt(1100), "ok  \tacme/widget\t0.013s")
+	ended := rtStepEnded(137, rtAt(1000), rtAt(9000))
+	ended.State.Terminated.Reason = "OOMKilled"
+	killed := rtPod(testJobName, ended, clsCloneDone)
+	killed.Spec.Containers = []Container{{Name: ContainerStep, Resources: &Resources{Limits: map[string]string{"memory": "4Gi"}}}}
+	h.c.script(testJobName, &rtScript{
+		states: []rtState{
+			{pod: rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone), visible: 1, reads: 2},
+			{pod: killed, visible: 1},
+		},
+		log:   []string{line},
+		tails: map[string]string{ContainerClone: rtCloneTail},
+	})
+
+	res := h.run(t, rtRun())
+
+	if res.Status != pl.OutcomeFailed || res.ExitCode != 137 || res.Failure == nil || res.Failure.Code != pl.CodeStepMemoryExceeded {
+		t.Fatalf("result = %+v (failure %+v), want failed, exit 137 and %s", res, res.Failure, pl.CodeStepMemoryExceeded)
+	}
+	for _, want := range []string{"ran out of memory", "OOMKilled", "4Gi"} {
+		if !strings.Contains(res.Failure.Message, want) {
+			t.Errorf("failure %q does not say %q", res.Failure.Message, want)
+		}
+	}
+	var seen pl.StepResult
+	raw := h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotObservation]
+	if err := json.Unmarshal([]byte(raw), &seen); err != nil || seen.ExitCode != 137 || seen.Failure == nil || *seen.Failure != *res.Failure {
+		t.Errorf("observation recorded on the Job = %q, want exit 137 and the result's failure %+v", raw, *res.Failure)
+	}
+}
+
 // TestRunnerSettlesAnAdoptedStepByItsRecordedObservation: workbench-a saw the
 // step finish, recorded what it saw, and went before it settled the step. By
 // the time this replica adopts the Job, the Job controller has deleted the pod

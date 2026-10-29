@@ -46,14 +46,14 @@ baseline exists so that "quietly" stops being a property the repository has.
 
 **Enforcement:** `active`
 **Rules:** `deletion`, `non_fast_forward`, `pull_request`,
-`required_status_checks`; `merge_queue` until release trains are switched on
-([below](#release-trains-replace-the-merge-queue-2026-10-27))
+`required_status_checks`. `merge_queue` was removed when release trains were
+switched on, 2026-10-29 ([below](#release-trains-replace-the-merge-queue-2026-10-27))
 **Asserted by:** the `ruleset-drift` job.
 
 This is the ruleset that makes `main` refuse a direct push and routes every
 change through a PR (CLAUDE.md, "Branch Workflow"). The four asserted rules are
-required to be present; there are no recorded gaps. `merge_queue` is present
-until the switch and deliberately not asserted.
+required to be present; there are no recorded gaps. `merge_queue` was removed
+at the switch and is deliberately not asserted.
 
 The full narrative of the 2026-08-06 double drop and the 2026-08-14 restore is
 in [merge-queue.md](merge-queue.md); the point-in-time evidence is in
@@ -163,10 +163,11 @@ nothing. A release train now batches instead, and the owner's approval of the
 App-authored train pull request is the review that lands it
 ([pipelines.md](../../public/operate/pipelines.md#release-trains)).
 
-**The fast phase (2026-10-28, owner-approved, until the switch).** The
-required context is **`MemQL / memql / push`** (App 4822538) instead of
-`MemQL / memql`, so a release can be cut from `main`'s own push run while pull
-requests merge at once through the bypass; that is the live value read above.
+**The fast phase (2026-10-28, owner-approved, ended the same day).** The
+required context was **`MemQL / memql / push`** (App 4822538) instead of
+`MemQL / memql`, so a release could be cut from `main`'s own push run while pull
+requests merged at once through the bypass. It returned to `MemQL / memql` at
+14:04 UTC on 2026-10-28, which is step 3's context.
 Separately, memql-znas's ruleset gained the same admin bypass
 (`RepositoryRole` 5, `pull_request`) so its pin pull requests can merge. Both
 rulesets were saved before those writes.
@@ -188,6 +189,25 @@ rulesets were saved before those writes.
 (re-send every rule, `merge_queue` included, and add `merge_queue` back to
 `EXPECTED` in `ruleset-drift.sh`), and merge with
 `merge-as-owner.sh --emergency` until the train is fixed.
+
+**Switched on 2026-10-29, with step 2 still to come.**
+
+- Step 1 shipped with the trains change (memql#6339).
+- Step 3: the required context was already `MemQL / memql` (above). The owner
+  removed `merge_queue` in GitHub's ruleset editor at 05:20 UTC, because an
+  agent session's API write was refused by its auto-mode safety check as a
+  CI bypass. The read-back showed every other rule and the admin bypass
+  unchanged, and `ruleset-drift.sh` reports 4 rules asserted, no drift.
+- Step 4: `MEMQL_PIPELINES_TRAINS` was set at 05:21 UTC: `znasllc-io/memql`,
+  departures 09:00 and 15:00 `America/Los_Angeles`, channel `znas-instance`,
+  `maxRebuilds` 2, no `ownerDiscordUserId` yet. The `znas-instance` channel
+  was allowed on the `memql` pipeline (`pipelinesChannelAllow`), because a
+  train refuses to post to a channel its pipeline does not accept.
+- Step 2 shipped with the consolidated 0.31.8 release: the CODEOWNERS
+  catch-all moved from `human-developers` to `human-lead-developers`, today the
+  owner alone (memql#6371), so only the owner's review counts on every path.
+  The owner approves an App-authored train pull request, which the owner did
+  not author; an owner-authored pull request merges through the bypass.
 
 ---
 
@@ -270,7 +290,7 @@ The same split applies to running one script over two rulesets. Both jobs invoke
 baselines**, so each prints its own coverage line naming the ruleset it asserted:
 
 ```
-ruleset 16630577: enforcement active (want active), 5 rule(s) asserted, 0 known-absent, actual: deletion merge_queue non_fast_forward pull_request required_status_checks
+ruleset 16630577: enforcement active (want active), 4 rule(s) asserted, 0 known-absent, actual: deletion non_fast_forward pull_request required_status_checks
 ruleset 19450314: enforcement disabled (want disabled), 1 rule(s) asserted, 0 known-absent, actual: copilot_code_review
 ```
 

@@ -236,6 +236,14 @@ message AppDescriptor {
   // refused a follow-up BEFORE the wire, so the engine never waits on a
   // turn that will not come.
   bool follow_ups = 4;
+  // inference_only reports that this harness runs the app with NO tools
+  // when AppSessionStart.inference_only is set: no shell, no file edits, no
+  // MCP. The engine admits a tool-free model turn in a goal whose execution
+  // destination is Auto only on a machine that says true, because only
+  // then is the turn a model call rather than work on the owner's computer
+  // (spec 2026-10-29, D4). False -- including a Cockpit that predates the
+  // field -- keeps the destination refusal.
+  bool inference_only = 5;
 }
 
 // AppInfo is one local app the cockpit detected. `allowed` is the

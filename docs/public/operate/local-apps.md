@@ -407,6 +407,18 @@ delegated Task through the same executor:
    session. Unset is not engaged. A preference read that **fails** is neither,
    and refuses as `kill_switch_unreadable`: it neither opens a machine the
    owner may have switched off nor tells them they switched it off.
+5. **The goal's execution destination**, for a session inside a work goal.
+   The destination says where a goal's tools run, and an app session on your
+   machine counts as moving the work to your computer: it is refused as
+   `execution_destination_requires_permission` unless you chose the Apps route
+   for that goal or approved the move for that run. One exception: a **tool-free
+   turn** (no images, no inputs) in a goal set to **Auto** runs the app with no
+   tools, so it is a model call like a local model, and it is admitted on a
+   machine whose Cockpit declares that it runs such a turn without tools
+   (`inferenceOnly` on its app descriptor). That is what lets a goal nobody is
+   present to approve -- a pipeline's diagnosis of a failed run -- use your
+   apps. A goal explicitly set to Workbench, a turn with images or inputs, and
+   a whole step handed to an app keep the refusal.
 
 No `agentAuthorization` row and no `computerUseScope` is read, and there is no
 per-task approval or classifier pass: a cluster where no agent was ever granted
@@ -438,12 +450,12 @@ apps reported by a machine.
 | `workspaceRoot` | where the engine names a directory for a handed-over step or Task: one per run. An inference turn (chat or structured) never gets one — it is one session, and the machine chooses. **Unset lets the machine choose** for every session — `AppSessionStart.workspace` is sent empty and the machine runs it in a scratch directory under its own roots. The cockpit still gets to veto a path outside its own roots |
 | `credentialLifetimeSeconds` | default 4h, clamped to 8h at the mint |
 
-> **Pending the cockpit release.** The machine-chooses half of this contract
-> lives in memql-cockpit. Cockpit releases up to v0.16.0 still refuse an
-> **empty** `AppSessionStart.workspace` ("no workspace in AppSessionStart"), so
-> until the release that creates a scratch directory ships, an app session
-> opens only for a step or Task whose owner set a `workspaceRoot` — and an
-> inference turn through the app door fails on the machine.
+> **Older Cockpit releases.** The machine-side implementation lives in the
+> monorepo's `cockpit/internal/worker/appsession/`. Cockpit releases up to
+> v0.16.0 refuse an **empty** `AppSessionStart.workspace` ("no workspace in
+> AppSessionStart"). Those releases require a step or Task whose owner set a
+> `workspaceRoot`; inference turns through the app door require a published
+> Cockpit release with scratch-directory support.
 
 **If no machine with an allowed, signed-in app is online, the task runs
 in-process.** A plan never waits for a laptop to wake up: a delegation design
@@ -558,8 +570,9 @@ No new variables. The path reuses `MEMQL_IDENTITY_VERIFIER_BASE_URL`,
 
 ## The cockpit half
 
-Filed in [`memql-cockpit`](https://github.com/znasllc-io/memql-cockpit) against
-memql#4364: app detection (`claude` / `codex` on PATH, versions, auth state),
+Implemented in the monorepo's
+[`cockpit/` module](https://github.com/znasllc-io/memql/tree/main/cockpit)
+for memql#4364: app detection (`claude` / `codex` on PATH, versions, auth state),
 `apps.allow` in `policy.yaml`, the session runner (process supervision,
 streaming, cancel, resume by app session id), the MCP config writer and its
 cleanup, the Library pull/push with the session credential, and the `open` kind

@@ -447,7 +447,7 @@ func (s *memStore) PipelinesForRepository(_ context.Context, repository string) 
 	defer s.mu.Unlock()
 	var out []Pipeline
 	for _, p := range s.pipelines {
-		if p.Repository == normalizeRepository(repository) && p.Active() {
+		if p.Repository == normalizeRepository(repository) && (p.Active() || p.Status == PipelineQualification) {
 			out = append(out, p)
 		}
 	}
@@ -636,7 +636,9 @@ func (s *memStore) CreatePipeline(_ context.Context, p Pipeline) error {
 		}
 	}
 	p.ID = id
-	p.Status = PipelineActive
+	if p.Status != PipelineQualification {
+		p.Status = PipelineActive
+	}
 	if p.Compute == "" {
 		p.Compute = pipelines.ComputeCluster
 	}
@@ -708,6 +710,7 @@ func (s *memStore) CreateRun(_ context.Context, r Run) error {
 	id := bareID(r.ID)
 	r.ID = id
 	if prev, ok := s.runs[id]; ok {
+		r.Qualification = prev.Qualification
 		r.Status, r.Conclusion, r.CheckRunState, r.CancelRequested = prev.Status, prev.Conclusion, prev.CheckRunState, prev.CancelRequested
 	}
 	s.runs[id] = r
@@ -1070,11 +1073,25 @@ type fakeGitHub struct {
 	tokenErr       error
 	tokenMints     []tokenMint
 
-	createErr error
-	updateErr error
-	created   []checkWrite
-	updated   []checkWrite
-	nextID    int64
+	qualificationAppID               int64
+	qualificationObserveErr          error
+	qualificationMissingCheck        bool
+	qualificationCreateLosesResponse bool
+	createErr                        error
+	beforeCreateCheck                func(githubapp.CheckRun)
+	afterQualificationObservation    func()
+	updateErr                        error
+	created                          []checkWrite
+	updated                          []checkWrite
+	nextID                           int64
+	// Step checks (an external id "<run>:<step>") are kept apart from the
+	// run's own check: stepWrites in order, stepRefs as a listing names them,
+	// stepErr failing every step-check write.
+	stepWrites  []checkWrite
+	stepCreated []checkWrite
+	stepRefs    map[int64]*githubapp.CheckRunRef
+	stepSHAs    map[int64]string // the commit each step check is on; "" for one a test seeds
+	stepErr     error
 
 	repos   map[string]githubapp.RepositoryInfo
 	heads   map[string]headAnswer
@@ -1156,15 +1173,81 @@ func (g *fakeGitHub) InstallationToken(ctx context.Context, credentialID, ownerU
 	return "ghs_" + credentialID, inst, nil
 }
 
+// isStepCheck reports a step's check run, by its external id.
+func isStepCheck(run githubapp.CheckRun) bool {
+	_, _, ok := pipelines.StepFromExternalID(run.ExternalID)
+	return ok
+}
+
+// CheckRunsForCommit lists the step checks this fake holds.
+func (g *fakeGitHub) CheckRunsForCommit(ctx context.Context, token, repository, sha string) ([]githubapp.CheckRunRef, error) {
+	watchGitHubCall(g.t, ctx, "CheckRunsForCommit")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []githubapp.CheckRunRef
+	for id, ref := range g.stepRefs {
+		if on := g.stepSHAs[id]; on != "" && on != sha {
+			continue // GitHub lists one commit's check runs
+		}
+		out = append(out, *ref)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// lastStepWrites is each step check's last write, by name.
+func (g *fakeGitHub) lastStepWrites() map[string]githubapp.CheckRun {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := map[string]githubapp.CheckRun{}
+	for _, w := range g.stepWrites {
+		out[w.Run.Name] = w.Run
+	}
+	return out
+}
+
+// stepCreates are the step checks created, in order.
+func (g *fakeGitHub) stepCreates() []checkWrite {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]checkWrite(nil), g.stepCreated...)
+}
+
 func (g *fakeGitHub) CreateCheckRun(ctx context.Context, token, repository string, run githubapp.CheckRun) (int64, error) {
 	watchGitHubCall(g.t, ctx, "CreateCheckRun")
 	g.mu.Lock()
+	hook := g.beforeCreateCheck
+	g.mu.Unlock()
+	if hook != nil {
+		hook(run)
+	}
+	g.mu.Lock()
 	defer g.mu.Unlock()
+	if isStepCheck(run) {
+		if g.stepErr != nil {
+			return 0, g.stepErr
+		}
+		g.nextID++
+		g.stepWrites = append(g.stepWrites, checkWrite{Token: token, Repository: repository, ID: g.nextID, Run: run})
+		g.stepCreated = append(g.stepCreated, checkWrite{Token: token, Repository: repository, ID: g.nextID, Run: run})
+		if g.stepRefs == nil {
+			g.stepRefs = map[int64]*githubapp.CheckRunRef{}
+		}
+		if g.stepSHAs == nil {
+			g.stepSHAs = map[int64]string{}
+		}
+		g.stepRefs[g.nextID] = &githubapp.CheckRunRef{ID: g.nextID, Name: run.Name, ExternalID: run.ExternalID, Status: run.Status, AppID: 4822538}
+		g.stepSHAs[g.nextID] = run.HeadSHA
+		return g.nextID, nil
+	}
 	if g.createErr != nil {
 		return 0, g.createErr
 	}
 	g.nextID++
 	g.created = append(g.created, checkWrite{Token: token, Repository: repository, ID: g.nextID, Run: run})
+	if g.qualificationCreateLosesResponse {
+		return 0, errors.New("provider response lost after create")
+	}
 	return g.nextID, nil
 }
 
@@ -1172,6 +1255,16 @@ func (g *fakeGitHub) UpdateCheckRun(ctx context.Context, token, repository strin
 	watchGitHubCall(g.t, ctx, "UpdateCheckRun")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if isStepCheck(run) {
+		if g.stepErr != nil {
+			return g.stepErr
+		}
+		g.stepWrites = append(g.stepWrites, checkWrite{Token: token, Repository: repository, ID: id, Run: run})
+		if ref := g.stepRefs[id]; ref != nil {
+			ref.Status = run.Status
+		}
+		return nil
+	}
 	if g.updateErr != nil {
 		return g.updateErr
 	}

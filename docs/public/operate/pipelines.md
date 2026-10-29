@@ -122,6 +122,31 @@ These permissions do not transfer between stages:
 | Approve a release candidate | Publication of its exact verified artifacts to its declared destinations | Selecting or updating an installation |
 | Apply an installation plan | The selected source and saved plan under current installation authority | Choosing a newer release or broadening the plan |
 
+### AI review and failure diagnosis are off until you turn them on
+
+A pipeline runs, reports and gates on its own checks. The two features that ask
+a model are separate owner switches in **Pipelines > Settings > AI**, and both
+are off by default:
+
+| Switch | On | Off |
+| --- | --- | --- |
+| AI review of pull requests | After every check of a pull request passes, a model reviews the change, and a rejection fails the run's check | The run is decided by its checks, as on a pipeline with no reviewer |
+| AI diagnosis of failed runs | The installed maintenance policy may open an AI analysis goal for a run's first failure | The failure reports itself; the run records "AI failure diagnosis is off in Pipelines settings" |
+
+The switches are the global variable `MEMQL_PIPELINES_AI`, a JSON object
+`{"review": bool, "diagnosis": bool}`. An absent, empty or unreadable value,
+or one with a field this engine does not know, reads as both off, so a typo
+never turns a model on. The engine reads it when a review or a diagnosis would
+start, not when the run opens: a change applies to the next review or failure,
+and a review already in flight is never refused for a policy change, because
+the switch is not part of the run's captured policy.
+
+A switch is an owner gate on top of the installed policy, not a replacement for
+it. With review on, a pipeline whose policy names no reviewer still has none;
+with diagnosis on, the maintenance policy still decides whether a failure gets
+an analysis, a person, or nothing. Turning diagnosis off leaves a policy's own
+`human` or `none` decision as it chose.
+
 ### Automated repair is an installed policy
 
 The engine supplies the execution and permission boundaries. The installation's
@@ -759,8 +784,16 @@ Afterwards:
   packages is not a pass of these. A notify stage is never carried: it
   announces the new attempt, which has an outcome of its own. A run with no
   failed or cancelled step (one that passed, or one refused before any step) is
-  refused `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole
-  re-run: one check run reports the whole run.
+  refused `pipeline_nothing_to_rerun`. GitHub's own re-request of the run's
+  check re-runs it whole; a re-request of a [step's check](#a-check-per-step)
+  re-runs what did not pass when the run failed, and the whole run when it
+  passed. **In a release** a failed-only re-run also runs again every step that
+  produces artifacts (one that declares `artifacts` or an image build, or whose
+  earlier receipt named any), so every artifact a candidate pins comes from the
+  attempt it names. It carries nothing once the release's first attempt was
+  opened more than 24 hours before the re-run. The saved release adopts the
+  re-run, and candidate preparation proves each carried step
+  ([release-cutting.md](release-cutting.md#recover-a-failed-build)).
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:pipelines/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
@@ -782,6 +815,69 @@ and steps (their shape, never a command), the needs and secrets they name, the
 check's name, the source's existing pipeline for a reconnect, and a delivery
 suggestion (webhook where GitHub can plausibly reach the cluster, poll
 otherwise). A typed refusal is the answer's `refusal`, not an error.
+
+## Qualifying the first pipeline pull request
+
+A repository's first `pipeline:` configuration can be reviewed on a pull
+request before it exists on the default branch. The source owner can qualify
+that exact revision through `pipelinesPreviewPullRequest` and
+`pipelinesQualifyPullRequest`, also available as generated Go and TypeScript
+SDK methods. This path leaves automatic delivery inactive and opens a genuine
+native pull-request run with full coverage for its applicable PR stages.
+
+The owner needs `execute` on `app:pipelines/connect` and a current GitHub
+connection for the source. The pull request must be open, in the same
+repository, and target its current default branch. A fork cannot borrow the
+source's execution or secret grants. An already active pipeline uses its
+ordinary delivery path instead.
+
+1. Read `pipelinesPreviewPullRequest` with `packageId` and `pullRequest`.
+   Review the PR at the returned head, its base, the manifest digest, the
+   stages, compute needs and requested secret names. Preview writes nothing.
+2. Choose the compute permission, secret-name allowlist and explicit RFC3339
+   expiry for this attempt. Use a new `requestId`, retaining it for retries.
+3. Call `pipelinesQualifyPullRequest` with those choices and the preview's
+   exact `expectedHeadSha`, `expectedBaseSha` and `expectedManifestDigest`.
+   Fresh source, grant and GitHub observations must still agree. A changed
+   head, base or manifest requires a new review, not an automatic refresh.
+4. Follow the returned native run and its App-owned GitHub check. Passing
+   requires real execution and the installed review policy; a local report,
+   manual rehearsal or absent check cannot substitute for that evidence.
+5. After the configuration lands through the repository's approved process,
+   use ordinary `pipelinesConnect` to read the default-branch manifest and
+   enable delivery. Qualification itself changes no repository rules, merges
+   no PR and publishes no release.
+
+The source's pipeline is stored with status `qualification`, which reserves
+the repository without enabling webhooks, polling, schedules, ordinary manual
+runs or release builds. Its run stores an immutable authority binding the
+owner, source, installation and App, PR head and base, manifest, compute,
+secret names, expiry, request identity and installed execution policy. Native
+execution rechecks mutable authority before effects. A process or replica
+change does not broaden that scope or restart completed work.
+
+Repeating the same `requestId` recovers the same attempt and refuses changed
+inputs. A new request after a terminal attempt requires a new ID and fresh
+reviewed inputs. Ordinary **Re-run** does not inherit qualification authority.
+Cancel stops the selected run; disconnect stores `qualification_revoked`,
+preserving its inactive origin so ordinary manual or release commands cannot
+reuse it. Repeating disconnect keeps it revoked. A revoked source requires
+ordinary connect after the configuration reaches the default branch;
+qualification cannot silently reactivate it. While the source remains in
+qualification, a new attempt may review a changed revision, but changing its
+saved pipeline name, compute permission or secret-name allowlist is refused.
+Connecting and qualification remain separate owner decisions.
+
+Check creation records its intent before contacting GitHub. After an uncertain
+response, recovery observes the exact App, commit, name and external run ID;
+it does not repeat the creation request. An incomplete observation or multiple
+matching checks stays unresolved. A missing provider receipt is not proof that
+no check was created, and cannot establish successful qualification.
+
+Keep existing required checks until the native replacement's equivalent
+coverage and real check evidence are verified. Any change to GitHub's required
+contexts is a separate reviewed policy transition; this capability supplies
+execution evidence and cannot perform that transition.
 
 ## In MemQL OS
 
@@ -1047,14 +1143,17 @@ production and publication always retain their own receipts; a reused test does
 not stand in for either. Equal trees with different commit hashes are currently
 checked separately.
 
-**A release run never reuses evidence**, and the selector is not asked about
-one. Candidate preparation accepts only receipts the release run executed
-itself (it refuses a carried `pipeline_passed_earlier` step), and a release
-request cannot adopt a re-run. A release that carried main's receipts could
+**A release run never reuses another event's evidence**, and the selector is
+not asked about one. Candidate preparation accepts a carried
+`pipeline_passed_earlier` step only when it proves the step against an earlier
+attempt of the same release, and a receipt from a push, pull request or
+merge-group run has no such chain. A release that carried main's receipts could
 never be prepared, so its version would be lost: 0.31.4 was lost that way to
 the push run at its commit. Reuse would save a release only its artifact-free
 checks, a few minutes. `TestReleaseRunsExecuteEveryVerificationStep` holds
-this.
+this. A failed release recovers instead by re-running its failed steps, which
+carries passes inside the release's own attempt chain
+([release-cutting.md](release-cutting.md#recover-a-failed-build)).
 
 ### Recovery and maintenance
 
@@ -1119,7 +1218,7 @@ cannot satisfy the required PR or merge-queue check.
 | `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
 | `githubReadToken` | Give a command `MEMQL_GITHUB_READ_TOKEN`, or an image build the BuildKit secret `github_read_token`, for this repository only | false | Cluster container commands and image builds with an installed source repository. Fixed permissions: contents, checks and pull requests read. It cannot write or reach other installation repositories; queued grants refresh before admission and logs redact them |
 | `checkoutHistory` | Set `full` to fetch complete commit ancestry, tags and the comparison base during the trusted checkout | shallow | Cluster container steps only. The command receives history without the installation token; it should scan that local history without fetching again. The existing run deadline and workspace limits bound checkout |
-| `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
+| `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults. A command past its limit fails `pipeline_step_memory_exceeded` | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
 | `cpuMilli` | Explicit CPU request and limit for the cluster command or image-build container, in millicores; 1000 means one CPU. Zero keeps namespace defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (4000 by default) before creating a Job. Scheduling accounts for the whole request; it does not silently fall back to a smaller allocation |
 | `image` | Container image for this step; pin by digest when reproducibility matters | pipeline image | Explicit image on a native step: `pipeline_step_invalid` |
 | `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
@@ -1224,8 +1323,11 @@ of its signed body. The `X-GitHub-Event` header is not covered by the
 signature, so it is a cross-check only, and a delivery whose header disagrees
 with its body is ignored.
 
-A re-requested check run re-runs the run that check run reports; a re-requested
-check suite re-runs the newest run of the pipeline at that commit.
+A re-requested check run re-runs the run that check run reports: a run's own
+check re-runs it whole, and a [step's check](#a-check-per-step), found by its
+external id, re-runs what did not pass when the run failed and the whole run
+when it passed. A re-requested check suite re-runs the newest run of the
+pipeline at that commit.
 
 ### The run key
 
@@ -1521,6 +1623,17 @@ A manifest carries secret **names**, never values:
 - An allowed name with no value on the cluster fails its step
   `pipeline_secret_missing`.
 
+For private GitHub npm dependencies, the optional `NPM_PACKAGES_READ_TOKEN`
+registry entry uses the existing operator seeder; follow
+[Pipeline package-read credential](env-vars.md#pipeline-package-read-credential).
+Allow that exact name in `secretNames` and declare it only on the client step
+that needs it. That step may map it to `NODE_AUTH_TOKEN` for npm. All of the
+step's processes can see its environment, including dependency lifecycle
+scripts. The native allowlist limits which steps receive a credential; it
+does not narrow a classic GitHub token to that repository or package.
+Seeding the value does not connect a pipeline, authorize a qualification or
+prove that the native checks pass.
+
 Values exist only in the request handed to the runner for one step. They are
 never written to a pipeline row, a run row, a work step, a log line or the
 check run, and the log tails a check run shows have every secret value of four
@@ -1684,7 +1797,8 @@ ones, so a backlog of budget-held runs does not hide running work from recovery.
 
 ## The check run
 
-Each run writes one check run on its commit. PRs and merge candidates use
+Each run writes one check run of its own on its commit, and one per step
+([below](#a-check-per-step)). PRs and merge candidates use
 **`MemQL / <name>`**, the context a ruleset requires; `<name>` is the manifest's
 name when the pipeline was connected. Pushes, releases and manual runs append
 `/ push`, `/ release` and `/ manual`, respectively. Scheduled audits append
@@ -1724,6 +1838,51 @@ A stage reads *Passed*, *Failed*, *Cancelled*, *Running*, *Waiting*, *Not run*,
 its longest step's, and `-` is a time nobody measured. The check run's text is
 the last lines of each failed step's output, with secret values masked. A
 refused run shows the refusal and what to do instead of a table.
+
+### A check per step
+
+Every step also gets a check run of its own, so a pull request lists each step
+that passed, failed or is still going, not only the run's verdict. A step's
+check is named after its run's check, then the stage and the step:
+`MemQL / memql / tests / go-unit #2` for a pull request, and
+`MemQL / memql / push / checks / build` for a push. GitHub lists check runs by
+name, so a run's steps sit together, stage by stage.
+
+| A step check | |
+|---|---|
+| **Is required by** | Nothing. The run's own `MemQL / <name>` stays the only context a ruleset, a release source or a [release train](#release-trains) reads; a step check's name always has more segments than any of them |
+| **Appears** | When the step starts, so a later stage's steps appear as it begins; a step a run never started gets none |
+| **Moves** | *In progress*, then *Success*, *Failure*, *Cancelled* or *Skipped*, a little after the step does: a writer per run sends one write a second and keeps only each step's newest state |
+| **Shows** | How the step ended, its message and code, and for a failed step the last lines of its output, masked like the run's check; its start and end times are the step's own |
+| **Links** | The run's page in MemQL OS |
+| **Re-run** | Re-runs what did not pass when the run failed, and the whole run when it passed |
+
+A failed-only re-run writes no check for a step it carries over: the attempt
+that passed it already shows it passed on that commit, and a *Skipped* check of
+the same name would replace the pass. A step that reused another run's
+verification at the commit shows a pass that says where it was verified; its
+name carries its own run's event, so nothing of the other run's is replaced. A
+driver that takes a run over on another replica finds the step checks the run
+already has by their external id, `<run id>:<step key>`, and moves them rather
+than creating a second check of each name.
+
+When a run ends, each step's final state is written, a step that started and
+never ended reading *Cancelled*. The writer keeps trying for ten minutes after
+the run concluded, without holding the run back. If GitHub took no completed
+check at all at that moment, recovery completes the step checks the run left
+open when it republishes the run's own check. A step check left open past both
+stays open.
+
+A step check is a view of the run, written off its path: the run's own check is
+written first, and the step checks only after it landed, under its token. None
+of their failures fails the run or its own check. GitHub's rate limits, a 429
+or a 403 it marks as one, pause the writer for a minute with everything it
+still owes; a missing `checks` permission stops step checks for the run, as it
+already marks the run's check refused; anything else is tried again after a
+few seconds. A step makes two or three writes, paced at one a second per run:
+the per-minute secondary limit, not the hourly budget, is the one that matters,
+and a commit with more than a thousand check runs makes GitHub's own listings
+incomplete, which a manifest of a few hundred steps per event could reach.
 
 ### A run can fail with every step passed
 
@@ -1893,8 +2052,9 @@ failed and no step reported why
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout
-(`pipeline_step_timeout`), an image that will not pull, a clone that fails, a
-cluster that cannot prove its steps isolated -- listed with their remedies in
+(`pipeline_step_timeout`), a step that ran out of memory
+(`pipeline_step_memory_exceeded`), an image that will not pull, a clone that
+fails, a cluster that cannot prove its steps isolated -- listed with their remedies in
 [the substrate's codes](pipelines-substrate.md#codes). Connecting refuses with
 Deployables' codes as well as these
 ([Connecting a pipeline](#connecting-a-pipeline)).

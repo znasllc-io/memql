@@ -49,6 +49,9 @@ func (i *Integration) RunRelease(ctx context.Context, pipelineID, tag string) (R
 	if p == nil {
 		return Run{}, fmt.Errorf("pipelines: you have no pipeline %q", pipelineID)
 	}
+	if p.Status == PipelineQualification || p.Status == PipelineQualificationRevoked {
+		return Run{}, qualificationError("A qualification source authorizes only its exact pull-request request; connect its default-branch manifest before other runs.")
+	}
 	if strings.TrimSpace(p.CredentialID) == "" {
 		return Run{}, fmt.Errorf("pipelines: this source has no GitHub connection; reconnect it before building a release")
 	}

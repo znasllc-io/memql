@@ -40,6 +40,28 @@ type packagesGitHub struct {
 	pkgs PackagesAccess
 }
 
+func (g *packagesGitHub) QualificationCheckAuthority(ctx context.Context, credentialID, ownerUserID, repository string) (string, int64, error) {
+	access, ok := g.pkgs.(interface {
+		RepositoryReviewCheckToken(context.Context, string, string, string, string) (string, int64, error)
+	})
+	if !ok {
+		return "", 0, qualificationError("The source provider cannot verify its check-writing App identity.")
+	}
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		return "", 0, err
+	}
+	return access.RepositoryReviewCheckToken(ctx, credentialID, ownerUserID, owner, name)
+}
+
+func (g *packagesGitHub) FindQualificationCheck(ctx context.Context, token, repository, head, name, external string, appID int64) (int64, error) {
+	c, owner, repo, err := g.target(repository)
+	if err != nil {
+		return 0, err
+	}
+	return c.FindPipelineCheck(ctx, token, owner, repo, head, name, external, appID)
+}
+
 func (g *packagesGitHub) client() (*githubapp.Client, error) {
 	if g == nil || g.pkgs == nil {
 		return nil, githubapp.ErrNotConfigured
@@ -73,6 +95,14 @@ func (g *packagesGitHub) CreateCheckRun(ctx context.Context, token, repository s
 		return 0, err
 	}
 	return c.CreateCheckRun(ctx, token, owner, name, run)
+}
+
+func (g *packagesGitHub) CheckRunsForCommit(ctx context.Context, token, repository, sha string) ([]githubapp.CheckRunRef, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return nil, err
+	}
+	return c.CheckRunsForCommit(ctx, token, owner, name, sha)
 }
 
 func (g *packagesGitHub) UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error {

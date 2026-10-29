@@ -182,12 +182,30 @@ func (i *Integration) Trigger(ctx context.Context, inboundRequestID string) (Tri
 // run reporting that check run, or the newest run of this pipeline at the
 // suite's SHA -- as the next attempt, in the original's mode and event
 // (decision 3).
+//
+// A STEP'S CHECK (step_checks.go) is not the check run its run row records,
+// so it is found by its external id, <run id>:<step key>, and must be at the
+// re-requested commit. Asked from a step of a run that failed, the next
+// attempt re-runs what did not pass, as Re-run failed does; asked from a run
+// that passed, it re-runs the whole run, as the run's own check does.
 func (i *Integration) rerequested(ctx context.Context, d Deps, p Pipeline, t pipelines.Trigger, deliveryID string) (OpenResult, string, error) {
 	var original *Run
+	failedOnly := false
 	if t.CheckRunID > 0 {
 		r, err := d.Store.RunByCheckRun(ctx, t.Repository, t.CheckRunID)
 		if err != nil {
 			return OpenResult{}, "", err
+		}
+		if r == nil {
+			if runID, _, ok := pipelines.StepFromExternalID(t.CheckRunExternalID); ok {
+				if r, err = d.Store.RunByID(ctx, runID); err != nil {
+					return OpenResult{}, "", err
+				}
+				if r != nil && r.SHA != t.SHA {
+					r = nil
+				}
+				failedOnly = r != nil && (r.Conclusion == ConclusionFailure || r.Conclusion == ConclusionCancelled)
+			}
 		}
 		if r == nil {
 			return OpenResult{}, fmt.Sprintf("no run reports check run %d", t.CheckRunID), nil
@@ -215,9 +233,9 @@ func (i *Integration) rerequested(ctx context.Context, d Deps, p Pipeline, t pip
 	if original.RefusalCode == pipelines.CodeForkRefused {
 		return OpenResult{}, "a pull request from a fork is never run, re-requested or not", nil
 	}
-	// GitHub's re-request re-runs the whole check: one check run reports
-	// the whole run, so there is no failed half of it to ask for.
-	opened, err := i.open(ctx, d, p, rerunOf(*original, deliveryID, false))
+	// The run's own check, or a check suite, re-runs the whole run; a step's
+	// check of a failed run re-runs what did not pass (above).
+	opened, err := i.open(ctx, d, p, rerunOf(*original, deliveryID, failedOnly))
 	if errors.Is(err, ErrRunInProgress) {
 		return opened, "the commit's newest run has not finished", nil
 	}

@@ -178,7 +178,8 @@ func (d *Discoverer) probeOllama(ctx context.Context) ([]Info, string) {
 //
 // And the claim is about what this MACHINE returns, not about the
 // runtime's `format` switch: a runner that does not implement `format`
-// answers 501, and modelcall then asks for the JSON in the prompt and
+// answers 501, one that cannot compile a schema into a grammar answers a
+// 400 naming it, and on either modelcall asks for the JSON in the prompt and
 // returns it only when it validates against the schema
 // (modelcall/ollama_schema.go). So a structured call this machine
 // accepts still gets schema-valid JSON or a failure, never prose.

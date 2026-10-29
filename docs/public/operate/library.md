@@ -235,6 +235,36 @@ history honest); no automatic same-file detection for browser uploads --
 identity is explicit here, and key-matched in the watched-folder epic (#4783),
 which uses this same mechanism rather than a second one.
 
+### Reading saved text
+
+Two builtins read a saved file's current text, and both authorize every file
+the same way: the row is read as the caller, read again under the file's
+version gate so the row and its bytes are one version, and held to text
+types. No bytes are fetched before the row is admitted.
+
+- **`libraryReadFile(fileId)`** returns one file's current text, up to 2 MiB.
+- **`libraryReadFileExcerpts(files, patterns, maxBytes)`** returns bounded
+  excerpts of up to eight files under one budget of 1 to 64 KiB. `files` is a
+  list of `{fileId, label}`, and each result echoes its `label` (at most 200
+  bytes). `patterns` are 1 to 32 RE2 expressions of at most 256 bytes each,
+  compiling to at most 1,024 instructions together, each matched against the
+  first 4 KiB of a line. A file that fits its share comes back whole
+  (`complete: true`). A longer one keeps its first lines, the earliest
+  matching lines with three lines before and twelve after while its budget
+  lasts, and its end; `matchedLines` counts every matching line, kept or not,
+  and each omitted range is one marker line such as
+  `[... lines 121-4812 omitted ...]`. A kept line over 2 KiB is cut, and at
+  most the first 64 MiB of a file is read (`scanCapped`). Files are read in
+  ascending size, so a small file returns whole and the larger ones share
+  what it left. A file the caller cannot read is reported as `unavailable`
+  in its own entry, with `libraryReadFile`'s sentence, and does not fail the
+  call; so is a file the call's two-minute scan deadline stops. The version
+  gate covers the row reads and is released before a file's bytes are read.
+
+Neither builtin masks secrets: a pipeline step's log is masked when it is
+captured, and any other file is the caller's own. The failed-run diagnosis
+reads its evidence with `libraryReadFileExcerpts`.
+
 ---
 
 ## Folders
@@ -489,8 +519,8 @@ ordinary Library files owned by the same person, and the one-way invariant does
 not stop applying because the arrangement ended. Nothing reaches the origin
 either: stopping a backup does not delete anything on the machine.
 
-Operator side, in the cockpit repo:
-[docs/watched-folders.md](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/watched-folders.md).
+Operator-side documentation in the monorepo:
+[Cockpit watched folders](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/watched-folders.md).
 
 ---
 

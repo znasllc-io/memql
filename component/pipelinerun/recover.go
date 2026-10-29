@@ -178,18 +178,26 @@ func (i *Integration) republishFinalCheckRuns(ctx context.Context, d Deps) error
 		}
 		log := d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, r.ID))
 		g, seen := grants[bareID(r.PipelineID)]
-		if !seen {
-			p, err := d.Store.PipelineByID(ctx, r.PipelineID)
+		qualified := r.Qualification != nil || r.Trigger == TriggerQualification
+		if qualified {
+			g = grant{}
+		}
+		if !seen || qualified {
+			p, err := d.Store.PipelineByID(memql.ContextWithFreshRead(ctx), r.PipelineID)
 			switch {
 			case err != nil:
 				g.err = err
 			case p != nil:
 				callCtx, done := context.WithTimeout(ctx, githubCallTimeout)
 				g.p = p
-				g.token, g.err = checkRunToken(callCtx, d, *p)
+				if !qualified {
+					g.token, g.err = checkRunToken(callCtx, d, *p)
+				}
 				done()
 			}
-			grants[bareID(r.PipelineID)] = g
+			if !qualified {
+				grants[bareID(r.PipelineID)] = g
+			}
 		}
 		if g.p == nil && g.err == nil {
 			continue // the pipeline is gone: there is no repository to report to
@@ -206,7 +214,12 @@ func (i *Integration) republishFinalCheckRuns(ctx context.Context, d Deps) error
 			continue
 		}
 		callCtx, done := context.WithTimeout(ctx, githubCallTimeout)
-		w := writeCheckRun(callCtx, d, *g.p, r, ReportFor(*g.p, r, steps), g.token, g.err)
+		var w CheckRunWrite
+		if qualified {
+			w = publishCheckRun(callCtx, d, *g.p, r, ReportFor(*g.p, r, steps))
+		} else {
+			w = writeCheckRun(callCtx, d, *g.p, r, ReportFor(*g.p, r, steps), g.token, g.err)
+		}
 		done()
 		if w.Err != nil {
 			log.Warn("pipelines: a concluded run's final check run was not republished; recovery tries again later",
@@ -214,6 +227,11 @@ func (i *Integration) republishFinalCheckRuns(ctx context.Context, d Deps) error
 			i.noteAbort(bareID(r.ID), now)
 		} else {
 			i.forgetAborts(bareID(r.ID))
+			// What failed the run's final check likely failed its steps'
+			// too: close the step checks it left open (step_checks.go).
+			stepCtx, stepDone := context.WithTimeout(ctx, githubCallTimeout)
+			settleStepChecks(stepCtx, d, *g.p, r, steps, g.token)
+			stepDone()
 		}
 		if _, changed := finalCheckRunPatch(w, r); !changed {
 			continue

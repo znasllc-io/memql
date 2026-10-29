@@ -129,6 +129,7 @@ describe("the rules, as sentences", () => {
       "Route composing prompt -> Local only",
       "Rule compiling prompt -> Local only",
       "Embeddings -> Embeddings",
+      "Reasoning work · tagged pipeline -> Local first, in order",
       "Reasoning work -> Local, then best vendor",
       "Agent reply prompt · operator acting -> Local first",
       "Background escalations -> Local first",

@@ -53,6 +53,12 @@ func (i *Integration) reconcileMaintenance(ctx context.Context, d Deps, runID st
 	if action == "analysis" && (r.Attempt != 1 || r.RerunOf != "") {
 		action, reason = "human", "This failed retry needs review of the existing diagnosis before more repair work."
 	}
+	// The owner's AI diagnosis switch (Pipelines > Settings > AI) is off unless
+	// turned on. Off, the failure still reports itself and no model is asked;
+	// a policy's own non-AI decision (none, human) is left as it chose.
+	if action == "analysis" && !d.aiSettings(ctx).Diagnosis {
+		action, reason = "none", aiDiagnosisOffMessage
+	}
 	goalID := ""
 	if action == "analysis" {
 		if template == "" || len(template) > 256 || strings.TrimSpace(template) != template || reason == "" || d.OpenMaintenanceGoal == nil || d.GitHub == nil {

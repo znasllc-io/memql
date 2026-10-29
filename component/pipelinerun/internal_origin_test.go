@@ -147,8 +147,8 @@ func TestOnlyAClusterOwnersDisconnectReachesAnotherOwnersPipeline(t *testing.T) 
 		t.Fatalf("a cluster owner's disconnect: %v", err)
 	}
 	calls := engine.recorded()
-	if len(calls) != 3 {
-		t.Fatalf("calls = %d (%v); want the owner-scoped read, the server-only read, the status write", len(calls), calls)
+	if len(calls) != 4 {
+		t.Fatalf("calls = %d (%v); want the owner-scoped read, the server-only read, the gated fresh read, the status write", len(calls), calls)
 	}
 	if c := calls[0]; constructOf(c.query) != qPipelineForOwner || c.origin.IsInternal() || c.actor == nil || c.actor.UserId != otherID {
 		t.Errorf("first, the caller's own read, unstamped: %s %+v", c.query, c.actor)
@@ -156,7 +156,10 @@ func TestOnlyAClusterOwnersDisconnectReachesAnotherOwnersPipeline(t *testing.T) 
 	if c := calls[1]; constructOf(c.query) != qPipelineByID || !c.origin.IsInternal() || c.actor == nil || c.actor.UserId != "system:pipelines" {
 		t.Errorf("then the server-only read, as the system actor: %s %+v", c.query, c.actor)
 	}
-	if c := calls[2]; c.query != `mutation updatePipeline(pipelineId: "p1", status: "disconnected")` ||
+	if c := calls[2]; constructOf(c.query) != qPipelineByID || !c.origin.IsInternal() || c.actor == nil || c.actor.UserId != "system:pipelines" || !c.fresh {
+		t.Errorf("gated lifecycle/owner fence must reread fresh under server origin: %+v", c)
+	}
+	if c := calls[3]; c.query != `mutation updatePipeline(pipelineId: "p1", status: "disconnected")` ||
 		!c.origin.IsInternal() || c.actor == nil || c.actor.UserId != "v1:identity:user:"+ownerID {
 		t.Errorf("the status alone, under the row owner's authority: %s %+v", c.query, c.actor)
 	}

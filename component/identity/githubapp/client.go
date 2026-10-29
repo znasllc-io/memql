@@ -360,10 +360,17 @@ func (c *Client) doWithHTTP(ctx context.Context, client *http.Client, method, en
 		// The path WITHOUT its query: an endpoint is enough to say which call
 		// failed, and a query string is where a token would be if anybody
 		// ever put one there.
+		limited := rateLimited(resp)
+		if !limited && resp.StatusCode == http.StatusForbidden {
+			// A secondary limit's 403 may carry neither header; its message
+			// names it. Only a bounded prefix is read, and only to classify.
+			prefix, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			limited = strings.Contains(strings.ToLower(string(prefix)), "secondary rate limit")
+		}
 		return resp, &StatusError{
 			Status:      resp.StatusCode,
 			Endpoint:    pathOnly(endpoint),
-			RateLimited: rateLimited(resp),
+			RateLimited: limited,
 		}
 	}
 	if out != nil {
@@ -376,17 +383,20 @@ func (c *Client) doWithHTTP(ctx context.Context, client *http.Client, method, en
 	return resp, nil
 }
 
-// rateLimited reads GitHub's two spellings of "ask again later". The primary
-// limit is a 403 with the remaining count at zero; the secondary limits are a
-// 429. A 403 WITHOUT that header is an ordinary refusal and must not be filed
-// as rate limiting -- it would tell somebody to wait for a permission problem
-// that waiting does not fix.
+// rateLimited reads GitHub's spellings of "ask again later". The primary
+// limit is a 403 with the remaining count at zero; a secondary limit is a 429,
+// or a 403 that says how long to wait (Retry-After) -- and doWithHTTP also
+// reads a 403's message for one that says neither. Any other 403 is an
+// ordinary refusal and must not be filed as rate limiting: it would tell
+// somebody to wait for a permission problem that waiting does not fix, as
+// filing a limit as a refusal would fail a check run that waiting fixes.
 func rateLimited(resp *http.Response) bool {
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return true
 	}
 	return resp.StatusCode == http.StatusForbidden &&
-		strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining")) == "0"
+		(strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining")) == "0" ||
+			strings.TrimSpace(resp.Header.Get("Retry-After")) != "")
 }
 
 func pathOnly(endpoint string) string {

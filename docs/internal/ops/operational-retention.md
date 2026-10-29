@@ -232,6 +232,17 @@ Keep parent key statistics and autovacuum current too. They benefit other reads
 and the one-time backfill; they no longer determine whether recovery must scan
 100,000 completed IDs on every tick.
 
+The computer-use kill switch is the projection's second reader (2026-10-29).
+Its DSL read of one owner's running runs ran past the statement limit for the
+cluster owner, who owns every pipeline run. It now reads the heads at `running`
+plus every queued event's run, each at its latest version, without calling
+`refresh_work_run_heads`, so it never contends for the projector's `NOWAIT`
+lock. It refuses on the same broken states (backfill unfinished, a capture
+trigger missing or disabled) and also when more than 10,000 events wait. A
+stuck projector therefore fails the kill switch visibly, and the pre-dispatch
+gate still refuses that owner's next machine call. The decision record is in the
+[harness decision map](harness-decisions.md#owner-scoped-run-reads-cost-what-they-return-2026-10-29).
+
 ## Current Fleet reads
 
 The Fleet readiness and stale-connection sweeps also encountered eight-second

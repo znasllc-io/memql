@@ -4072,6 +4072,29 @@ QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
 };
 
+/** Preview a first CI configuration on an open pull request without connecting its pipeline. The source owner and current GitHub grant must reach the same repository; fork heads and closed requests refuse. Returns the verified head, base, exact manifest digest, declared stages and requested secret names. This read creates no pipeline, run, check or execution permission. */
+export interface PipelinesPreviewPullRequestArgs {
+  packageId: string;
+  pullRequest: number;
+}
+
+export function buildPipelinesPreviewPullRequest(args: PipelinesPreviewPullRequestArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("pullRequest: " + renderMemQLValue(args.pullRequest));
+  return "builtin pipelinesPreviewPullRequest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesPreviewPullRequest(args: PipelinesPreviewPullRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesPreviewPullRequest = function (this: QueryClient, args: PipelinesPreviewPullRequestArgs = {} as PipelinesPreviewPullRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesPreviewPullRequest", buildPipelinesPreviewPullRequest(args), opts);
+};
+
 /** Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation. */
 export interface PipelinesPublishSARIFArgs {
   runId: string;
@@ -4097,6 +4120,43 @@ QueryClient.prototype.pipelinesPublishSARIF = function (this: QueryClient, args:
   return this.executeNamed("pipelinesPublishSARIF", buildPipelinesPublishSARIF(args), opts);
 };
 
+/** Qualify one reviewed pull-request head before enabling automatic delivery. The owner supplies the previewed head, base and manifest digest, compute consent, secret-name allowlist, explicit expiry and stable request ID. Repeating the request ID recovers its original scope; changed inputs under that ID refuse. Fresh source and GitHub reads must agree before an inactive pipeline can open a full native PR run. The run's durable scope grants one attempt only; ordinary deliveries and reruns do not inherit it. Existing active pipelines are not restated by this operation. Check reporting uses the real native run, and never changes GitHub rules. */
+export interface PipelinesQualifyPullRequestArgs {
+  packageId: string;
+  pullRequest: number;
+  requestId: string;
+  expectedHeadSha: string;
+  expectedBaseSha: string;
+  expectedManifestDigest: string;
+  compute?: string;
+  secretNames?: string[];
+  expiresAt: string;
+}
+
+export function buildPipelinesQualifyPullRequest(args: PipelinesQualifyPullRequestArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("pullRequest: " + renderMemQLValue(args.pullRequest));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("expectedHeadSha: " + renderMemQLValue(args.expectedHeadSha));
+  parts.push("expectedBaseSha: " + renderMemQLValue(args.expectedBaseSha));
+  parts.push("expectedManifestDigest: " + renderMemQLValue(args.expectedManifestDigest));
+  if (args.compute !== undefined) parts.push("compute: " + renderMemQLValue(args.compute));
+  if (args.secretNames !== undefined) parts.push("secretNames: " + renderMemQLValue(args.secretNames));
+  parts.push("expiresAt: " + renderMemQLValue(args.expiresAt));
+  return "builtin pipelinesQualifyPullRequest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesQualifyPullRequest(args: PipelinesQualifyPullRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesQualifyPullRequest = function (this: QueryClient, args: PipelinesQualifyPullRequestArgs = {} as PipelinesQualifyPullRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesQualifyPullRequest", buildPipelinesQualifyPullRequest(args), opts);
+};
+
 /** Read a caller-owned upload receipt, refreshing pending ingestion from GitHub. A terminal receipt survives ordinary artifact retention. This never uploads. */
 export interface PipelinesReadSARIFArgs {
   publicationId: string;
@@ -4118,11 +4178,11 @@ QueryClient.prototype.pipelinesReadSARIF = function (this: QueryClient, args: Pi
   return this.executeNamed("pipelinesReadSARIF", buildPipelinesReadSARIF(args), opts);
 };
 
-/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended. */
+/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. In a release, a step that produces artifacts always runs again, and nothing is carried once the release's first attempt was opened more than 24 hours earlier. The original stays exactly as it ended. */
 export interface PipelinesRerunArgs {
   /** The v1:pipelines:run to re-run. Must be the caller's own. */
   runId: string;
-  /** Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step. */
+  /** Run again only what did not pass: the original's passed steps are carried over, except, in a release, steps that produce artifacts. Absent or false re-runs every step. */
   failedOnly?: boolean;
 }
 

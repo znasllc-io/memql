@@ -224,8 +224,8 @@ $ curl -s https://proxy.golang.org/github.com/znasllc-io/memql/@latest
 ```
 
 Consumers that need current code therefore pin a pseudo-version
-against a commit rather than a release (`memql-cockpit` does exactly
-this today). That works, but it means the module line and the release
+against a commit rather than a release (Cockpit used this before its
+monorepo migration). That works, but it means the module line and the release
 line disagree, and nothing reconciles them.
 
 Cutting `v0.15.0` unfreezes the module line.
@@ -399,26 +399,15 @@ away at the next release; nothing besides operator action is blocking it.
 
 ### Consumers: what this means for the per-module `replace` set
 
-[`memql-cockpit`](https://github.com/znasllc-io/memql-cockpit) consumes
-21 MemQL packages spanning every tier, and today resolves them through a
-per-module `replace` set against a **pinned sibling checkout**
-(memql#3238). Its go.mod records why in detail.
+[Cockpit](cockpit/) is a separate Go module in this repository. `go.work`
+and the per-module `replace` directives in [its go.mod](cockpit/go.mod)
+resolve engine dependencies from the same checkout for development and CI.
+There is no sibling checkout or `.github/memql-pin` dependency.
 
-**That set can be dropped in favour of version pins, and the condition
-is stated rather than assumed:** every module cockpit consumes must be
-published at a resolvable version — which under the lockstep rule means
-one `<dir>/vX.Y.Z` tag per module at each release, cut by the command
-above.
-
-What it should *not* do is drop the sibling `replace` for **local
-development**. That replace is how the cockpit dev loop edits MemQL and
-its client together, and pinning to a published version would trade a
-one-command inner loop for a publish round-trip. The change is to the
-CI/consumer path: with tags published, cockpit's workflows pin versions
-instead of checking out a sibling at `.github/memql-pin`, and the
-per-tier pin-bump PR the split required stops being necessary — the
-failure rows in that go.mod's table only occur *while* modules are
-landing, and after this epic nothing is landing.
+External consumers can use version pins once every module they import has a
+resolvable `<dir>/vX.Y.Z` tag. That does not change Cockpit's same-checkout
+source builds or its independent `cockpit/vX.Y.Z` release artifacts; see
+[Cockpit versioning](cockpit/VERSIONING.md).
 
 ## Pre-1.0 rules (today)
 
@@ -446,7 +435,7 @@ While we are below `1.0.0`:
   and held to `component/language/deprecation` by a build gate.
 - **Patch bumps** are bug fixes that keep the contract identical.
 - MemQL versions **independently** from the other platform repos. The
-  engine may reach `0.14` while memql-cockpit is at `0.10`; that is
+  engine may reach `0.14` while Cockpit is at `0.10`; that is
   expected. Coherence across repos is maintained by the pin chain, not
   by lockstep numbers — see [COMPATIBILITY.md](COMPATIBILITY.md).
 

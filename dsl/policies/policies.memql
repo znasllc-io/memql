@@ -76,6 +76,21 @@ policy localOnly { }
 @fallback("federation:strongest")
 policy federationStrongest { }
 
+/// federationStrongest's chain, walked IN THE ORDER WRITTEN. Named by
+/// pipelineLocalFirst, for work a pipeline started.
+///
+/// It is a policy of its own rather than a flag on federationStrongest because
+/// what differs is not WHERE to look but whether Auto may reorder the looking:
+/// Auto ranks the three general chains per call, and at `reasoning` its fixed
+/// quality puts an app above a local model. The owner wants a pipeline's AI on
+/// the fleet first, then a subscription app, then a vendor, so this chain is
+/// not one Auto ranks (component/router/auto_rank.go). The vendor hop is still
+/// third and still asks the cost ceiling first.
+@primary("fleet:strongest")
+@fallback("app:*")
+@fallback("federation:strongest")
+policy localFirstStrongest { }
+
 /// The cluster's bound embedder, and nothing after it (epic memql#5137).
 ///
 /// A ONE-ENTRY CHAIN IS THE POINT, and it is the one place in this file where

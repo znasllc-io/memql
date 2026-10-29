@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mime"
 	"strings"
@@ -23,34 +24,14 @@ func (i *Integration) handleReadFile(ctx context.Context, args map[string]any, _
 		return nil, fmt.Errorf("choose a saved file")
 	}
 	ctx = memql.ContextWithFreshRead(ctx)
-	read := func() (map[string]any, error) {
-		rows, err := i.historyRows(ctx, "libraryFileById", map[string]any{"fileId": fileID})
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) != 1 || boolField(rows[0], "archived") || stringField(rows[0], "ownerUserId") == "" {
-			return nil, fmt.Errorf("file is unavailable")
-		}
-		return rows[0], nil
-	}
-	row, err := read()
+	row, mediaType, release, unavailable, err := i.readableTextFile(ctx, fileID)
 	if err != nil {
 		return nil, err
 	}
-	release, err := i.fileVersionGate(ctx, stringField(row, "id"))
-	if err != nil {
-		return nil, err
+	if unavailable != "" {
+		return nil, errors.New(unavailable)
 	}
 	defer release()
-	row, err = read()
-	if err != nil {
-		return nil, err
-	}
-	mediaType, _, err := mime.ParseMediaType(stringField(row, "mimeType"))
-	if err != nil || !(strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" ||
-		mediaType == "application/xml" || mediaType == "application/yaml" || mediaType == "image/svg+xml") {
-		return nil, fmt.Errorf("this reader supports saved text files; use a format-specific reader for binary files")
-	}
 	version, _ := intArg(row["versionNumber"])
 	version = max(version, 1)
 	doc := reviewDocument{kind: "file", source: stringField(row, "id"), owner: stringField(row, "ownerUserId"),
@@ -61,4 +42,40 @@ func (i *Integration) handleReadFile(ctx context.Context, args map[string]any, _
 	}
 	return reviewResult(map[string]any{"fileId": memql.BareShortId(doc.source), "name": stringField(row, "name"),
 		"mimeType": mediaType, "version": version, "revision": revision, "content": content})
+}
+
+// readableTextFile resolves a saved text file's current row for both readers:
+// read under the caller, so row admission decides who may see it; read again
+// under the file's version gate, so the row and the bytes read next are one
+// revision; and held to text types. release ends the gate and is set only when
+// the file is readable. unavailable is the sentence for a file this caller
+// cannot read here; err is any other failure.
+func (i *Integration) readableTextFile(ctx context.Context, fileID string) (row map[string]any, mediaType string, release func(), unavailable string, err error) {
+	read := func() (map[string]any, string, error) {
+		rows, err := i.historyRows(ctx, "libraryFileById", map[string]any{"fileId": fileID})
+		if err != nil {
+			return nil, "", err
+		}
+		if len(rows) != 1 || boolField(rows[0], "archived") || stringField(rows[0], "ownerUserId") == "" {
+			return nil, "file is unavailable", nil
+		}
+		return rows[0], "", nil
+	}
+	if row, unavailable, err = read(); err != nil || unavailable != "" {
+		return nil, "", nil, unavailable, err
+	}
+	if release, err = i.fileVersionGate(ctx, stringField(row, "id")); err != nil {
+		return nil, "", nil, "", err
+	}
+	if row, unavailable, err = read(); err != nil || unavailable != "" {
+		release()
+		return nil, "", nil, unavailable, err
+	}
+	mediaType, _, perr := mime.ParseMediaType(stringField(row, "mimeType"))
+	if perr != nil || !(strings.HasPrefix(mediaType, "text/") || mediaType == "application/json" ||
+		mediaType == "application/xml" || mediaType == "application/yaml" || mediaType == "image/svg+xml") {
+		release()
+		return nil, "", nil, "this reader supports saved text files; use a format-specific reader for binary files", nil
+	}
+	return row, mediaType, release, "", nil
 }

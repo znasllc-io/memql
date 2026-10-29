@@ -53,9 +53,15 @@ and the final command on one physical line for copying.
 
 ## Verification
 
+Native `make test` includes this directory's Go test wrapper, which runs the
+offline discovery, renderer, shell-library and menu fixture suites. Missing
+Bash or Python fails that check. Fixtures use temporary homes and inert
+binaries; they never install a published release or enroll this machine.
+
 ```bash
 python3 scripts/install/render-mark.py --check
 python3 scripts/install/ui_test.py
+python3 scripts/install/release_discovery_test.py
 bash scripts/install/lib_test.sh
 bash scripts/install/menubar_test.sh
 shellcheck -x --source-path=scripts/install scripts/install/*.sh
@@ -66,3 +72,26 @@ binary, and native-app state survive. Do not wrap callbacks in `if`, `!`, or
 `||`: Bash disables `errexit` inside those functions. The exit handler stops
 animation, restores the cursor, drains diagnostics, and preserves the failing
 command's exit code. Keep these paths tested on macOS Bash 3.2 and Linux.
+
+## Release discovery and publication
+
+Fleet's Mac/Linux installers and `cockpit/install.sh` share `release-version.py`.
+They read every page of the MemQL release catalog and select the highest stable
+`cockpit/vX.Y.Z` version. Engine tags, drafts and prereleases do not qualify;
+publication order cannot make an older maintenance release become latest.
+A failed or incomplete catalog refuses installation instead of choosing from
+partial results. Explicit version pins bypass discovery. A checkout uses its
+own helper; a piped entry point fetches it from the same raw source base, never
+from the operator's current directory or a leftover temporary helper.
+
+Publication must finish all supported platform assets and checksum manifests
+before the release becomes public. No published Cockpit release means the
+publisher must complete that first release; a tag or source migration alone
+does not make an installable version. There is no fallback to the retired
+repository, an engine release, or an unchecked binary. The standalone installer
+also requires the archive's checksum before installing it.
+
+Published requests use bounded HTTPS transfers. Offline fixtures can supply
+`MEMQL_INSTALL_RELEASE_API=file://...`; an HTTP fixture needs the explicit
+`MEMQL_INSTALL_ALLOW_LOOPBACK_HTTP=1` opt-in and a literal loopback address,
+with redirects refused. This override never changes production defaults.

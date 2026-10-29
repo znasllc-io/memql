@@ -728,6 +728,7 @@ Stored in `v1:platform:globalSecret`, sealed under `MEMQL_MASTER_KEY`.
 |-------------------------------|------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` | `integration`    | Master secret (>=16 bytes) wrapping the identity service's on-disk Ed25519 signing keypair. Required in production.                       |
 | `MEMQL_EMAIL_AZURE_CLIENT_SECRET`   | `oauth_secret`   | Microsoft Graph client secret used by the **email integration**'s GraphSender. Legacy name `AZURE_CLIENT_SECRET` still accepted (fallback). |
+| `NPM_PACKAGES_READ_TOKEN` | `integration` | Optional GitHub Packages read credential for owner-authorized native CI steps. No default, boot requirement or automatic provisioning; see [Pipeline package-read credential](#pipeline-package-read-credential). |
 
 ### Default global variables (manifest)
 
@@ -796,7 +797,7 @@ not a value any tenant can supply. The DSL surface is
 
 ## The env file the seeder reads
 
-`go run ./scripts/secrets seed --env-file <path>` is the whole
+`go run ./scripts/secrets seed --env-file=<path>` is the whole
 concept-seeding surface. It reads a plain `KEY=value` env file, keeps
 only the names the manifest lists, encrypts each secret under
 `MEMQL_MASTER_KEY`, and upserts the row into
@@ -804,9 +805,9 @@ only the names the manifest lists, encrypts each secret under
 against the running MemQL.
 
 ```bash
-# Requires MEMQL_MASTER_KEY in the environment. Default endpoint is
-# https://bff.memql.localhost:443; override with MEMQL_GRPC_ENDPOINT.
-go run ./scripts/secrets seed --env-file .env
+# Requires MEMQL_MASTER_KEY for sealing and MEMQL_OPERATOR_KEY for access.
+# Set MEMQL_GRPC_ENDPOINT to the approved HTTPS BFF endpoint.
+go run ./scripts/secrets seed --env-file=.env
 go run ./scripts/secrets health     # gRPC handshake check: prints "ok"
 ```
 
@@ -828,6 +829,64 @@ In a cloud install:
 - Secrets and variables are seeded once against the cluster's gRPC
   endpoint, after which they live in the database.
 
+### Pipeline package-read credential
+
+The fixed seeder accepts `NPM_PACKAGES_READ_TOKEN` as an optional global
+secret. Registering the name creates no token or stored value, adds no boot
+requirement, and grants no pipeline permission. The existing seeder seals
+the owner-provided value before calling `setGlobalSecret`; that mutation
+expects ciphertext and must never receive a plaintext token as
+`encryptedValue`.
+
+For GitHub's npm registry, use an approved classic personal access token with
+`read:packages` and existing Read access to the package. It does not need
+`repo`, `write:packages` or `delete:packages`. A classic token cannot be bound
+to one package or repository: its package access follows its owner's access.
+Choose an explicit short expiration and authorize the organization for SSO
+only when required. A fine-grained PAT or repository checkout token is not
+the documented npm authentication route. See GitHub's
+[npm registry authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry).
+
+An existing approved credential may be reused only if its owner retains the
+original and approves this native recipient. An Actions secret's name does
+not reveal its value, scope or expiry; GitHub does not export that value.
+The Actions job's temporary `GITHUB_TOKEN` is not a durable native credential.
+
+After that owner approval, use the existing trusted operator environment for
+the target cluster. It already provides `MEMQL_MASTER_KEY` for sealing and
+`MEMQL_OPERATOR_KEY` for authentication; do not copy either into the browser,
+a command argument or a repository. Prepare a private, permission-0600 file
+outside the repository with only the `NPM_PACKAGES_READ_TOKEN` entry, and set
+`PACKAGE_READ_ENV_FILE` to its path. From the reviewed MemQL checkout:
+
+```bash
+go run ./scripts/secrets seed --env-file="$PACKAGE_READ_ENV_FILE"
+```
+
+Other entries are skipped because this input contains no other values. The
+row id is `secret-global-npm-packages-read-token`; a later seed of the same
+name rotates that row through the existing mutation. Verify only name and
+nonsecret metadata afterward. The seeder prints a short fingerprint, so keep
+its output out of shared logs. Remove the temporary input through the
+operator's secret-management workflow. Neither a pod environment variable
+nor a partition secret substitutes for this pipeline's global-secret lookup.
+
+The owner must separately allow the name for the pipeline or exact PR
+qualification, and the intended step must declare it; see
+[Pipeline secrets](pipelines.md#secrets). A successful seed does not prove a
+registry download or native checks. Revoke the GitHub token when it is no
+longer needed, accounting for other consumers if it was reused. Do not rely
+on `globalSecret.active=false` as revocation: the current system-secret
+resolver selects by name without filtering that flag. Removing a native
+allowance prevents future handoff but cannot revoke an already handed-off
+token; GitHub expiry or revocation does that.
+
+The [registry regression](https://github.com/znasllc-io/memql/blob/main/component/envregistry/pipeline_package_secret_test.go)
+checks optionality, boot requirements and default injection; the
+[scanner regression](https://github.com/znasllc-io/memql/blob/main/cmd/envscan/scan/pipeline_package_secret_test.go)
+keeps the external-name exemption exact. These tests do not establish live
+provisioning or package access.
+
 ### Where the env file sits in the bootstrap chain
 
 The bootstrap values (including `MEMQL_MASTER_KEY`) are seeded onto the
@@ -835,7 +894,7 @@ The bootstrap values (including `MEMQL_MASTER_KEY`) are seeded onto the
 reach the pods via `envFrom`, so every pod has the key in env from first
 boot. The env file is only used by the concept-seeding step:
 
-1. `go run ./scripts/secrets seed --env-file <path>` reads it.
+1. `go run ./scripts/secrets seed --env-file=<path>` reads it.
 2. It encrypts each manifest-listed entry under the master key
    (resolved from the seeded `MEMQL_MASTER_KEY` env) and upserts the row
    into the right concept over gRPC against the running MemQL.

@@ -111,6 +111,10 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 		// for each read, and a delivery that never comes twenty minutes.
 		d.notifyPoll = time.Millisecond
 		d.notifyTimeout = 10 * time.Second
+		// The step-check writer at the production pace would take a second a
+		// write; a test waits for it (waitStepChecks) and must not.
+		d.stepCheckPace, d.stepCheckRetry, d.stepCheckLimitPause = time.Microsecond, time.Millisecond, 5*time.Millisecond
+		d.stepCheckWindow, d.stepCheckIdle = 300*time.Millisecond, 5*time.Millisecond
 	})
 	integ.EnableDriver()
 }
@@ -1928,7 +1932,7 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	for i := range prior {
 		prior[i].DefinitionFingerprint = "same-definition"
 	}
-	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2)
+	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2, false)
 	if notify.step.Skip != nil {
 		t.Errorf("a notify step that delivered is sent again, announcing this attempt: %+v", notify.step.Skip)
 	}
@@ -1954,5 +1958,144 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	}
 	if planned.step.Skip.Code != pipelines.CodeNotAffected {
 		t.Errorf("the plan's own skip stands: %+v", planned.step.Skip)
+	}
+}
+
+// TestCarryPassedReleaseRerunsArtifactProducers: a release re-run runs again
+// every step whose earlier pass named artifacts, so each artifact a candidate
+// pins comes from the attempt the candidate names. Other events still carry
+// them.
+func TestCarryPassedReleaseRerunsArtifactProducers(t *testing.T) {
+	for _, release := range []bool{true, false} {
+		track := func(key string) *stepTrack {
+			return &stepTrack{step: pipelines.Step{Key: key, Kind: pipelines.StepCommand}, definition: "same-definition"}
+		}
+		producer, check := track("images.bff"), track("tests.unit")
+		prior := []WorkStep{
+			{Key: "images.bff", Status: WorkStepDone, DefinitionFingerprint: "same-definition", ArtifactFileIDs: []string{"file-1"}},
+			{Key: "tests.unit", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+		}
+		carryPassed([]*stepTrack{producer, check}, prior, 1, release)
+		if check.step.Skip == nil || check.step.Skip.Code != pipelines.CodePassedEarlier {
+			t.Errorf("release=%v: an artifact-free pass is carried: %+v", release, check.step.Skip)
+		}
+		if release && producer.step.Skip != nil {
+			t.Errorf("a release re-run carried an artifact producer: %+v", producer.step.Skip)
+		}
+		if !release && (producer.step.Skip == nil || producer.step.Skip.Code != pipelines.CodePassedEarlier) {
+			t.Errorf("a non-release re-run stopped carrying an artifact producer: %+v", producer.step.Skip)
+		}
+	}
+}
+
+// TestReleaseRerunCarriesNothingPastTheWindow: a failed-only re-run of a
+// release carries passes only while the release's first attempt was opened
+// within releaseCarryWindow of the re-run. Past it, every step runs again.
+func TestReleaseRerunCarriesNothingPastTheWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		want []string
+	}{
+		{"within the window", 23 * time.Hour, []string{"tests.unit"}},
+		{"past the window", 25 * time.Hour, []string{"checks.vet", "tests.lint", "tests.unit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dh := newDriveHarness(t, driveManifest)
+			var failUnit atomic.Bool
+			failUnit.Store(true)
+			// Artifact-free passes: a release re-run never carries a producer,
+			// so only these show the window deciding on its own.
+			dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+				res := passed(req)
+				res.ArtifactFileIDs = nil
+				if req.StepKey == "tests.unit" && failUnit.Load() {
+					res.Status, res.ExitCode = pipelines.OutcomeFailed, 1
+				}
+				return res, nil
+			}
+			first := dh.openRun(t, Opening{Event: pipelines.EventRelease, Mode: pipelines.ModeFull, SHA: shaA, ReleaseTag: "v1.4.0", Trigger: TriggerManual})
+			deliver(t, dh.integ, first)
+			ended, _ := dh.store.run(first.ID)
+			if ended.Conclusion != ConclusionFailure {
+				t.Fatalf("the first attempt concludes %q, want failure", ended.Conclusion)
+			}
+			ended.QueuedAt = ended.QueuedAt.Add(-tc.age)
+			dh.store.addRun(ended)
+			sentBefore := len(dh.exec.sent())
+
+			failUnit.Store(false)
+			next, err := dh.integ.Rerun(personCtx(ownerID), first.ID, true)
+			if err != nil {
+				t.Fatalf("rerun failed steps: %v", err)
+			}
+			deliver(t, dh.integ, next)
+			var keys []string
+			for _, req := range dh.exec.sent()[sentBefore:] {
+				keys = append(keys, req.StepKey)
+			}
+			slices.Sort(keys)
+			if !slices.Equal(keys, tc.want) {
+				t.Fatalf("steps sent to the runner: %v, want %v", keys, tc.want)
+			}
+			if got, _ := dh.store.run(next.ID); got.Conclusion != ConclusionSuccess {
+				t.Fatalf("the re-run concludes %q", got.Conclusion)
+			}
+		})
+	}
+}
+
+// TestCarryPassedReleaseRerunsDeclaredProducers: a release re-run decides a
+// producer by what its step declares and what its receipt named, not only by
+// the Library files an outcome kept. An outcome over its size bound loses its
+// file IDs, never its intents, so the runner never carries a step candidate
+// coverage would refuse.
+func TestCarryPassedReleaseRerunsDeclaredProducers(t *testing.T) {
+	track := func(key string) *stepTrack {
+		return &stepTrack{step: pipelines.Step{Key: key, Kind: pipelines.StepCommand}, definition: "same-definition"}
+	}
+	declared, image, intents, plain := track("tests.editor"), track("images.bff"), track("tests.report"), track("tests.unit")
+	declared.step.Artifacts = []string{".memql-host-reports"}
+	image.step.ImageBuild = &pipelines.ImageBuild{}
+	prior := []WorkStep{
+		{Key: "tests.editor", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+		{Key: "images.bff", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+		{Key: "tests.report", Status: WorkStepDone, DefinitionFingerprint: "same-definition",
+			Result: map[string]any{"metadata": map[string]any{"artifactIntentIds": []any{strings.Repeat("c", 64)}}}},
+		{Key: "tests.unit", Status: WorkStepDone, DefinitionFingerprint: "same-definition"},
+	}
+	carryPassed([]*stepTrack{declared, image, intents, plain}, prior, 1, true)
+	for _, producer := range []*stepTrack{declared, image, intents} {
+		if producer.step.Skip != nil {
+			t.Errorf("%s produces artifacts and was carried into a release re-run: %+v", producer.step.Key, producer.step.Skip)
+		}
+	}
+	if plain.step.Skip == nil || plain.step.Skip.Code != pipelines.CodePassedEarlier {
+		t.Errorf("an artifact-free pass was not carried: %+v", plain.step.Skip)
+	}
+}
+
+// TestReleaseChainFreshStopsAtTheAttemptBound: the runner carries nothing for
+// an attempt candidate coverage would not prove, and coverage stops at 50.
+func TestReleaseChainFreshStopsAtTheAttemptBound(t *testing.T) {
+	for _, tc := range []struct {
+		attempts int
+		want     bool
+	}{{50, true}, {51, false}} {
+		store := newMemStore()
+		var latest Run
+		for n := 1; n <= tc.attempts; n++ {
+			run := Run{ID: fmt.Sprintf("a%d", n), RunKey: "release-key", Attempt: n, Event: pipelines.EventRelease, Mode: pipelines.ModeFull, QueuedAt: testNow}
+			if n > 1 {
+				run.RerunOf = fmt.Sprintf("a%d", n-1)
+			}
+			store.addRun(run)
+			latest = run
+		}
+		dr := &runDriver{d: Deps{Store: store}, run: latest}
+		got, err := dr.releaseChainFresh(context.Background())
+		if err != nil || got != tc.want {
+			t.Errorf("attempt %d: releaseChainFresh = %v, %v; want %v", tc.attempts, got, err, tc.want)
+		}
 	}
 }

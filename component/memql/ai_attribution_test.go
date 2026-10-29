@@ -171,3 +171,20 @@ func TestEmptyAttributionDoesNotShadow(t *testing.T) {
 		t.Fatalf("requestId=%q; an empty stamp overwrote a richer one", req.RequestId)
 	}
 }
+
+// CALL TAGS COME FROM WHERE THE CALL STARTED (spec 2026-10-29, D5). A pipeline's
+// own review stamps its tag on the call; a work run a pipeline opened carries
+// its tag on the run context, rebuilt from the goal on the replica executing
+// it. Both reach the request a rule reads, after any tag the call site set.
+func TestCallTagsFromTheCallerAndTheRunReachTheRequest(t *testing.T) {
+	ctx := ContextWithAICallAttribution(context.Background(), AICallAttribution{Tags: []string{airoute.TagPipeline}})
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "v1:work:run:diagnosis", Tags: []string{airoute.TagPipeline, "x"}})
+	req := applyCallAttribution(ctx, airoute.ResolveRequest{Tags: []string{airoute.TagBackground}})
+	if want := []string{airoute.TagBackground, airoute.TagPipeline, "x"}; !reflect.DeepEqual(req.Tags, want) {
+		t.Fatalf("tags = %v, want %v (the call site's first, each once)", req.Tags, want)
+	}
+	// A tag alone is attribution worth keeping: it is what routes the call.
+	if _, ok := AICallAttributionFromContext(ContextWithAICallAttribution(context.Background(), AICallAttribution{Tags: []string{airoute.TagPipeline}})); !ok {
+		t.Fatal("an attribution carrying only a tag was dropped")
+	}
+}

@@ -54,10 +54,11 @@ type ollamaToolCall struct {
 func (c *ollamaClient) Chat(ctx context.Context, req ChatRequest, emit emitFunc) (Result, error) {
 	resp, err := c.post(ctx, "/api/chat", c.chatBody(req, true))
 	if err != nil {
-		// A runner that does not implement `format` answers 501 before it
+		// A runner that does not implement `format` (501), or cannot compile
+		// this schema into a grammar (400 naming it), answers before it
 		// generates anything; the JSON is then asked for in the prompt and
 		// checked against the schema here (ollama_schema.go).
-		if len(req.Schema) > 0 && len(req.Tools) == 0 && ollamaFormatUnsupported(err) {
+		if len(req.Schema) > 0 && len(req.Tools) == 0 && ollamaSchemaRefused(err) {
 			return c.chatSchemaInPrompt(ctx, req, emit)
 		}
 		return Result{}, err

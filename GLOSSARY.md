@@ -118,8 +118,9 @@ path, or use this detailed reference index. Layout + rules:
 
 ### Cockpit
 - MemQL Cockpit -- the machine-side half of the fleet, installed as the `memql`
-  command -- ships from its own repo, `github.com/znasllc-io/memql-cockpit`,
-  and its product docs live there. It was a terminal IDE + ops console until
+  command -- lives in this repository's [`cockpit/`](cockpit/) module, with
+  independently versioned releases and [machine-side docs](cockpit/docs/).
+  It was a terminal IDE + ops console until
   memql#4549; that surface is retired and this repo's `docs/public/cockpit/`
   went with it. Worker operations are documented here, in
   [the workers runbook](docs/public/operate/workers-runbook.md).

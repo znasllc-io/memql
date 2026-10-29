@@ -22,6 +22,9 @@ type candidateSkippedStep struct {
 	WorkRunID string `json:"workRunId"`
 	StepKey   string `json:"stepKey"`
 	Code      string `json:"code"`
+	// CarriedFrom is present only on a pipeline_passed_earlier skip whose
+	// executing receipt was proven natively (candidate_carried.go).
+	CarriedFrom *candidateCarriedFrom `json:"carriedFrom,omitempty"`
 }
 
 type candidateCoverage struct {
@@ -152,7 +155,18 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 				return out, errors.New("candidate changed its complete run evidence")
 			}
 			if receipt.Status == "skipped" {
-				out.Skipped = append(out.Skipped, candidateSkippedStep{Component: key.component, WorkRunID: key.run, StepKey: receipt.StepKey, Code: receipt.SkipCode})
+				skipped := candidateSkippedStep{Component: key.component, WorkRunID: key.run, StepKey: receipt.StepKey, Code: receipt.SkipCode}
+				// A failed-only release re-run carries passes from earlier
+				// attempts. Each one is proven against the attempt that
+				// executed it, or the candidate is refused here, naming it.
+				if receipt.SkipCode == pl.CodePassedEarlier {
+					from, err := r.carriedFrom(ctx, owner, key.run, receipt)
+					if err != nil {
+						return out, fmt.Errorf("carried step %s: %w", receipt.StepKey, err)
+					}
+					skipped.CarriedFrom = &from
+				}
+				out.Skipped = append(out.Skipped, skipped)
 			}
 		}
 		if !slices.Contains(out.Modes, plan.Mode) {

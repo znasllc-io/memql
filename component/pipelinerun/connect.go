@@ -369,12 +369,30 @@ func (i *Integration) Disconnect(ctx context.Context, pipelineID string) (Pipeli
 	}
 	// The repository's gate, the one every writer of the pipeline row takes.
 	err = d.gate(ctx, RepositoryGateKey(p.Repository), func(gctx context.Context) error {
-		return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Status: ptr(PipelineDisconnected)})
+		current, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return qualificationError("The pipeline no longer exists.")
+		}
+		if !sameID(current.OwnerUserID, caller) && !callerIsClusterOwner(ctx) {
+			return ErrNotOwner
+		}
+		status := PipelineDisconnected
+		if current.Status == PipelineQualification || current.Status == PipelineQualificationRevoked {
+			status = PipelineQualificationRevoked
+		}
+		if err := d.Store.UpdatePipeline(gctx, current.OwnerUserID, current.ID, PipelinePatch{Status: ptr(status)}); err != nil {
+			return err
+		}
+		current.Status = status
+		p = current
+		return nil
 	})
 	if err != nil {
 		return Pipeline{}, err
 	}
-	p.Status = PipelineDisconnected
 	return *p, nil
 }
 
@@ -391,7 +409,7 @@ func alreadyConnected(ctx context.Context, d Deps, repository, packageID string)
 		return nil, err
 	}
 	for _, other := range active {
-		if other.Active() && !sameID(other.PackageID, packageID) {
+		if (other.Active() || other.Status == PipelineQualification) && !sameID(other.PackageID, packageID) {
 			return pipelines.Refuse(pipelines.CodeAlreadyConnected, "",
 				"%s already has a pipeline, connected from another source. A repository has one pipeline, so its checks are reported once per commit.", repository), nil
 		}

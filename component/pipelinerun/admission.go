@@ -78,5 +78,5 @@ func FileRunAdmission(path string) func(time.Time, bool) (bool, error) {
 // write access could name a branch so, and would be admitted on the train
 // allowance; write access is already trusted with the repository).
 func IsTrainRun(r Run) bool {
-	return r.Event == pipelines.EventPullRequest && strings.HasPrefix(r.HeadBranch, pipelines.TrainBranchPrefix)
+	return r.Trigger != TriggerQualification && r.Qualification == nil && r.Event == pipelines.EventPullRequest && strings.HasPrefix(r.HeadBranch, pipelines.TrainBranchPrefix)
 }

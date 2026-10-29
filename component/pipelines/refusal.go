@@ -135,6 +135,12 @@ const (
 	// workspace's size limit, or past the namespace's ephemeral-storage limit
 	// on its containers. The step's doing, as a timeout is, not the cluster's.
 	CodeStepDiskExceeded = "pipeline_step_disk_exceeded"
+	// The kernel's out-of-memory killer stopped a process of the step's
+	// command (the kubelet's OOMKilled): the step container past its memory
+	// limit, its own memoryMiB or the namespace's default. The step's doing,
+	// as its disk is; its exit code stays. Only the pod says OOMKilled, and the
+	// pod goes with its Job, so without this code the step reads as a bare 137.
+	CodeStepMemoryExceeded = "pipeline_step_memory_exceeded"
 )
 
 // The notify stage's (epic memql#5480, D16). Each fails the notify step: a
@@ -210,6 +216,7 @@ var codeClasses = map[string]Class{
 	CodeSARIFUndelivered:    ClassFailure,
 	CodeNotifyUndelivered:   ClassFailure,
 	CodeStepDiskExceeded:    ClassFailure,
+	CodeStepMemoryExceeded:  ClassFailure,
 
 	CodeStageBlocked:  ClassSkip,
 	CodeNotAffected:   ClassSkip,

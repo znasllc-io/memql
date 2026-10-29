@@ -182,7 +182,9 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 // app session is not an agent's shell command, and a cluster where nobody
 // granted one still opens the sessions its owner routed to an app.
 func (e *CockpitAppExecutor) admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin, runID string) *appGateRefusal {
-	return admitAppSession(ctx, e.prefs, e.logger, ownerUserId, pin, runID)
+	// A handed-over step runs the app's tools, so it is never tool-free.
+	_, refusal := admitAppSession(ctx, e.prefs, e.logger, ownerUserId, pin, runID, false)
+	return refusal
 }
 
 // appSessionTarget is the owner and app a request names, or the refusal that

@@ -156,7 +156,7 @@ func TestAttachMeasurementsLeavesEligibilityAlone(t *testing.T) {
 	if !got[0].StructuredOutput || !got[0].Tools {
 		t.Fatal("a failed probe must not withdraw an advertised capability; measurement ranks and gates nothing")
 	}
-	ok, _ := got[0].eligibleFor(FleetNeeds{StructuredOutput: true})
+	ok, _ := FleetModelAdvertisedOnEveryMachineForTest(got[0]).eligibleFor(FleetNeeds{StructuredOutput: true})
 	if !ok {
 		t.Fatal("a model that failed the structured probe is still ELIGIBLE for a structured call this release")
 	}

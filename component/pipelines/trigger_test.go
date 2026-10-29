@@ -102,7 +102,7 @@ func TestClassifyDeliveryReadsEachRecordedDelivery(t *testing.T) {
 		{
 			fixture: "check_run_rerequested.json", header: "check_run",
 			want: Trigger{
-				Rerequest: true, CheckRunID: 30431907812, Repository: "acme-corp/storefront",
+				Rerequest: true, CheckRunID: 30431907812, CheckRunExternalID: "k3x9q2", Repository: "acme-corp/storefront",
 				DefaultBranch: "main", InstallationID: fixtureInstallation, SHA: shaPRPushed,
 			},
 		},

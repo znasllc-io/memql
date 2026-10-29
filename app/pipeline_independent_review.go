@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -15,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/repositoryauthority"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 func pipelineReviewDigest(v any) string {
@@ -25,10 +28,10 @@ func pipelineReviewDigest(v any) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
-func (a *App) pipelineReviewSource(ctx context.Context, p pipelinerun.Pipeline, fence func(context.Context) error) (pipelinerun.ReviewSource, *githubapp.Client, string, error) {
+func (a *App) pipelineReviewSource(ctx context.Context, p pipelinerun.Pipeline, r pipelinerun.Run, fence func(context.Context) error) (pipelinerun.ReviewSource, *githubapp.Client, string, error) {
 	empty := pipelinerun.ReviewSource{}
-	if a.engine == nil || fence == nil || !p.Active() || p.PackageID == "" {
-		return empty, nil, "", errors.New("pipeline review needs its active current source")
+	if a.engine == nil || fence == nil || !pipelinerun.QualificationSourceAllowed(p, r, time.Now().UTC()) || p.PackageID == "" {
+		return empty, nil, "", errors.New("pipeline review needs its active source or exact unexpired pull-request qualification")
 	}
 	if err := fence(ctx); err != nil {
 		return empty, nil, "", err
@@ -98,7 +101,7 @@ func (a *App) nativePipelineReview(ctx context.Context, source pipelinerun.Revie
 // pipelineReviewReader consists solely of native, read-only adapters. It cannot
 // invoke a model, report a check, or grant repository mutation authority.
 type pipelineReviewReader struct {
-	source   func(context.Context, pipelinerun.Pipeline, func(context.Context) error) (pipelinerun.ReviewSource, *githubapp.Client, string, error)
+	source   func(context.Context, pipelinerun.Pipeline, pipelinerun.Run, func(context.Context) error) (pipelinerun.ReviewSource, *githubapp.Client, string, error)
 	prompt   func(string) (map[string]any, error)
 	native   func(context.Context, pipelinerun.ReviewSource, githubapp.MergeGroupMember) (repositoryauthority.NativeReviewMember, bool, error)
 	ordinary func(context.Context, pipelinerun.Pipeline, int, string) (pipelinerun.Run, pipelinerun.IndependentReviewRecord, error)
@@ -118,7 +121,13 @@ func (a *App) capturePipelineIndependentReview(ctx context.Context, p pipelineru
 }
 func capturePipelineIndependentReview(ctx context.Context, p pipelinerun.Pipeline, r pipelinerun.Run, promptName, policyVersion string, fence func(context.Context) error, reads pipelineReviewReader) (pipelinerun.IndependentReviewInput, error) {
 	input := pipelinerun.IndependentReviewInput{PolicyVersion: policyVersion, PromptName: promptName}
-	source, gh, reader, err := reads.source(ctx, p, fence)
+	// An inactive pipeline carries no general review authority. Qualification is
+	// a persisted grant for this exact run; the source adapter and its fresh
+	// driver fence still recheck provider ownership and current grant afterward.
+	if !pipelinerun.QualificationSourceAllowed(p, r, time.Now().UTC()) {
+		return input, errors.New("independent review source has no authority for this run")
+	}
+	source, gh, reader, err := reads.source(ctx, p, r, fence)
 	if err != nil {
 		return input, err
 	}
@@ -136,6 +145,12 @@ func capturePipelineIndependentReview(ctx context.Context, p pipelinerun.Pipelin
 		pr, diff, e := gh.PullRequestReviewDiff(ctx, reader, parts[0], parts[1], r.PullRequest, r.SHA, p.DefaultBranch)
 		if e != nil {
 			return input, e
+		}
+		// Ordinary review can prove a disjoint target advance below. A bounded
+		// qualification instead binds the previewed base exactly; retargeting or
+		// base movement requires a fresh owner request.
+		if r.Qualification != nil && pr.BaseSHA != r.BaseSHA {
+			return input, errors.New("qualified review base no longer matches its approved run")
 		}
 		if pr.HeadRef != r.HeadBranch {
 			return input, errors.New("review PR branch no longer matches its claimed run")
@@ -249,7 +264,7 @@ func capturePipelineIndependentReview(ctx context.Context, p pipelinerun.Pipelin
 	if err = fence(ctx); err != nil {
 		return input, err
 	}
-	current, _, _, err := reads.source(ctx, p, fence)
+	current, _, _, err := reads.source(ctx, p, r, fence)
 	if err != nil {
 		return input, err
 	}
@@ -263,7 +278,7 @@ func (a *App) validatePipelineIndependentReview(ctx context.Context, p pipeliner
 	if err != nil {
 		return err
 	}
-	source, gh, reader, err := a.pipelineReviewSource(ctx, p, fence)
+	source, gh, reader, err := a.pipelineReviewSource(ctx, p, r, fence)
 	if err != nil {
 		return err
 	}
@@ -273,7 +288,7 @@ func (a *App) validatePipelineIndependentReview(ctx context.Context, p pipeliner
 	if err = samePipelineIndependentReview(ctx, input, fresh, gh, reader); err != nil {
 		return err
 	}
-	current, _, _, err := a.pipelineReviewSource(ctx, p, fence)
+	current, _, _, err := a.pipelineReviewSource(ctx, p, r, fence)
 	if err != nil {
 		return err
 	}
@@ -401,6 +416,7 @@ func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelin
 	if err != nil {
 		return out, err
 	}
+	ctx = pipelineCallContext(ctx)
 	const schema = `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`
 	var result memql.StructuredAIResult
 	if input.Projection != nil {
@@ -486,4 +502,18 @@ func reportIndependentPipelineReview(ctx context.Context, pkgs repositoryReviewA
 		return empty, err
 	}
 	return pipelinerun.IndependentReviewReceipt{CheckName: pipelines.IndependentReviewCheckName, HeadSHA: head, ExternalID: external, CheckRunID: id, AppID: source.AppID}, nil
+}
+
+// pipelineCallContext marks a model call the pipeline runner itself makes as
+// pipeline work, so the shipped rule pipelineLocalFirst routes it to the
+// owner's machines first, then an app, then a vendor (spec 2026-10-29, D5).
+// The review renders a captured prompt and builds no request of its own, so
+// the tag rides the call attribution; whatever an outer frame attributed is
+// kept.
+func pipelineCallContext(ctx context.Context) context.Context {
+	a, _ := memql.AICallAttributionFromContext(ctx)
+	if !slices.Contains(a.Tags, airoute.TagPipeline) {
+		a.Tags = append(append([]string(nil), a.Tags...), airoute.TagPipeline)
+	}
+	return memql.ContextWithAICallAttribution(ctx, a)
 }

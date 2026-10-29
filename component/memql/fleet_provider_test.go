@@ -26,7 +26,11 @@ type stubFleet struct {
 
 func (s *stubFleet) Catalog(_ context.Context, actingUserId string) ([]FleetModel, error) {
 	s.lastActor = actingUserId
-	return s.models, nil
+	out := make([]FleetModel, 0, len(s.models))
+	for _, m := range s.models {
+		out = append(out, FleetModelAdvertisedOnEveryMachineForTest(m))
+	}
+	return out, nil
 }
 
 func (s *stubFleet) ModelPreference(_ context.Context, _ string) ([]string, error) {

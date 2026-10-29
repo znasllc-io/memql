@@ -28,8 +28,8 @@ func (f *materializerFleet) Catalog(ctx context.Context, user string) ([]memql.F
 	if !ok || access.UserId != "alice" || user != "alice" {
 		return nil, nil
 	}
-	return []memql.FleetModel{{ModelId: "writer:27b", Params: 27_000_000_000, ContextWindow: 131072, StructuredOutput: true,
-		Machines: []memql.FleetMachine{{RegistrationId: "remote-laptop", Online: f.online}}}}, nil
+	return []memql.FleetModel{memql.FleetModelAdvertisedOnEveryMachineForTest(memql.FleetModel{ModelId: "writer:27b", Params: 27_000_000_000, ContextWindow: 131072, StructuredOutput: true,
+		Machines: []memql.FleetMachine{{RegistrationId: "remote-laptop", Online: f.online}}})}, nil
 }
 func (*materializerFleet) ModelPreference(context.Context, string) ([]string, error) { return nil, nil }
 func (f *materializerFleet) Call(ctx context.Context, req memql.FleetCallRequest) (memql.FleetCallResult, error) {

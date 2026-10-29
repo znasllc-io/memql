@@ -246,11 +246,12 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	// its next source exactly as it does for a laptop that is asleep, and the
 	// refusal's own code says which it was. A forwarded call meets the gate
 	// again on the holder, which reads the switch at the moment it opens.
-	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin, req.RunId); refusal != nil {
-		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
+	toolFreeOnly, gateRefusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin, req.RunId, appTurnToolFree(req))
+	if gateRefusal != nil {
+		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, gateRefusal)
 	}
 
-	w, remote, refusal := a.selectMachine(ctx, owner, req)
+	w, remote, refusal := a.selectMachine(ctx, owner, req, toolFreeOnly)
 	if w != nil {
 		res, _, err := a.callOnWorker(ctx, w, owner, req)
 		return res, err
@@ -291,8 +292,9 @@ func (a *AppInference) ServeForwardedAppCall(ctx context.Context, registrationId
 			LastError: "a forwarded app call needs an acting user and an app this engine drives",
 		}
 	}
-	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin, req.RunId); refusal != nil {
-		return memqlengine.AppCallResult{}, true, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
+	toolFreeOnly, gateRefusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin, req.RunId, appTurnToolFree(req))
+	if gateRefusal != nil {
+		return memqlengine.AppCallResult{}, true, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, gateRefusal)
 	}
 	var w *workerservice.Worker
 	if a.registry != nil {
@@ -311,6 +313,15 @@ func (a *AppInference) ServeForwardedAppCall(ctx context.Context, registrationId
 	if why := appMachineRefusal(w, owner, req.AppId); why != "" {
 		return memqlengine.AppCallResult{}, true, &memqlengine.AppUnavailable{
 			AppId: req.AppId, Considered: map[string]string{registrationId: why}, Total: 1,
+		}
+	}
+	// Judged on THIS replica's live descriptor, never the sender's row: the
+	// machine may have reconnected with another Cockpit since.
+	if toolFreeOnly {
+		if d, ok := w.AppDescriptor(req.AppId); appToolFreeRefusal(d, ok, req.AppId) != "" {
+			return memqlengine.AppCallResult{}, true, &memqlengine.AppUnavailable{
+				AppId: req.AppId, Considered: map[string]string{registrationId: appToolFreeRefusal(d, ok, req.AppId)}, Total: 1,
+			}
 		}
 	}
 	if req.Schema != nil {
@@ -445,7 +456,7 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		// the recording names the calling run and claims nothing on its step
 		// (worker.RecordingOpen.ModelCall).
 		ModelCall:     true,
-		InferenceOnly: len(req.Images) == 0 && len(req.Inputs) == 0,
+		InferenceOnly: appTurnToolFree(req),
 	}
 
 	if spec.InferenceOnly {
@@ -532,7 +543,7 @@ func (e *callerGone) Unwrap() []error { return []error{memqlengine.ErrAppUnavail
 // through the fleet router. When none can, it returns the machines a SIBLING
 // agent holds that could -- in the router's order, for the forward -- and the
 // typed refusal naming what was considered.
-func (a *AppInference) selectMachine(ctx context.Context, owner string, req memqlengine.AppCallRequest) (*workerservice.Worker, []Candidate, *memqlengine.AppUnavailable) {
+func (a *AppInference) selectMachine(ctx context.Context, owner string, req memqlengine.AppCallRequest, toolFreeOnly bool) (*workerservice.Worker, []Candidate, *memqlengine.AppUnavailable) {
 	if a.router == nil || a.registry == nil {
 		return nil, nil, &memqlengine.AppUnavailable{
 			AppId:     req.AppId,
@@ -555,7 +566,7 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 		if w == nil {
 			// Held by another replica: a candidate for the FORWARD, judged
 			// on its row. The holder asks the live registration again.
-			switch why := appCandidateRefusal(cand, owner, req, now); {
+			switch why := appCandidateRefusal(cand, owner, req, now, toolFreeOnly); {
 			case why != "":
 				considered[cand.RegistrationId] = why
 			case !canForwardTo(cand, a.forward, a.selfNodeId):
@@ -573,6 +584,12 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 		if req.Schema != nil {
 			if d, ok := w.AppDescriptor(req.AppId); ok && !d.StructuredResult {
 				considered[cand.RegistrationId] = "its harness (" + d.Harness + ") cannot return a structured answer"
+				continue
+			}
+		}
+		if toolFreeOnly {
+			if d, ok := w.AppDescriptor(req.AppId); appToolFreeRefusal(d, ok, req.AppId) != "" {
+				considered[cand.RegistrationId] = appToolFreeRefusal(d, ok, req.AppId)
 				continue
 			}
 		}

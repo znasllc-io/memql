@@ -38,7 +38,7 @@ import { routeTitle } from "./vocabulary";
 type Page = { kind: "list" } | { kind: "route"; name: string } | { kind: "new" };
 
 /** Shipped chains in the order a person meets them; yours after, by name. */
-const SHIPPED_ORDER = ["localFirst", "fastLocalFirst", "localOnly", "federationStrongest", "embeddingsBinding"];
+const SHIPPED_ORDER = ["localFirst", "fastLocalFirst", "localOnly", "federationStrongest", "localFirstStrongest", "embeddingsBinding"];
 
 export function orderRoutes(routes: readonly TaskPolicy[]): TaskPolicy[] {
   const rank = (r: TaskPolicy) => (r.shipped ? SHIPPED_ORDER.indexOf(r.name) : -1);

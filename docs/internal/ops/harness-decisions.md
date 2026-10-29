@@ -948,6 +948,168 @@ independent instructions and cancellation. The existing driver regression
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
 
+## Pipeline AI runs local first (2026-10-29)
+
+Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a
+failed run's diagnosis, the repository change a diagnosis requests -- runs on
+the fleet's local models first, then a signed-in app, with a paid vendor as the
+balance. On the production installation that day, the diagnosis of a failed
+release parked on `inferenceUnavailable`: the app door refused, two local
+models failed, an embedding model was tried as a chat model, and there was no
+vendor to try. The [spec](../../superpowers/specs/2026-10-29-pipeline-ai-local-first-design.md)
+records the evidence and the owner's decisions; this section maps the paths.
+
+**A runtime that cannot compile the schema** (`cockpit/internal/worker/modelcall/ollama_schema.go`,
+`ollamaSchemaRefused`). Ollama 0.33.3 answered both local models with
+`400 Failed to initialize samplers: failed to parse grammar`; the llama.cpp in
+Ollama 0.40.6 compiles the same schemas. A 400 to a `format` request with no
+tools, whose error names the grammar, now takes the schema-in-prompt path the
+501 already took: one retry on the same machine, the answer held to the whole
+schema, otherwise the call fails. Any other 400 fails as before. Safe because
+Ollama refuses before generating. The held-back answer reports runtime
+progress, so the idle watchdog does not end a slow answer as a stall. Tests:
+`TestStructuredCallTheRuntimeCannotCompileAsksInThePrompt`,
+`TestStructuredCallKeepsOtherBadRequests`,
+`TestTheHeldBackAnswerKeepsTheIdleClockAlive`. Takes effect only on machines
+running a Cockpit release that carries it; upgrading Ollama removes the retry.
+
+**A machine's failure keeps its code** (`component/worker/modelcall_failed.go`).
+The stream's handle, the holder's forward response and the sender each kept a
+failed call's machine code (`runtime_error`, ...) only as text, and the holder
+replaced it with `model_call_failed`, so the decision record said `other`.
+`ModelCallFailed` carries the code with each path's old text shape; the router
+names `runtime_error`, `model_call_failed` and `worker_stopped` in its own words
+and never puts the runtime's text in `considered`. `Code()` repeats a machine's
+code only when it is a stable word (lowercase and underscores, at most forty),
+because the decision line can be read by someone the machine was lent to;
+anything else reads `model_call_failed`
+(`TestAMachineCodeThatIsNotAStableWordIsNotRepeated`). The in-process loopback now
+fails a call the way the real stream does. Tests:
+`TestAFinishedCallWithAnErrorKeepsTheMachinesCode`,
+`TestAMachinesFailureCodeCrossesTheModelHop` (planner to agent over the real
+NodeService envelope), `TestAMachineFailureIsNamedOnTheDecisionLine`.
+
+**Eligibility is decided per online machine** (`FleetModel.eligibleFor`,
+`FleetMachine.serves`). The catalog's model-level flags are a union over every
+registration, offline ones included, and one online machine's pre-#551 Cockpit
+plus old offline registrations claimed tools and structured output for
+`qwen3-embedding:0.6b`. A model is a candidate only through one online machine
+that allows the purpose in its model setup and advertises every capability and
+the context window itself (`fleetcatalog.Project` keeps each machine's
+window). An embedding model never answers a non-embedding call, in the catalog
+and in `ModelAttributes.Satisfies` (owner decision: "never", replacing
+memql#6238's allowance for a model claiming both). Fixtures that set only the
+union use `FleetModelAdvertisedOnEveryMachineForTest`. Tests:
+`TestAnEmbedderIsNeverAChatCandidateEvenWhenAMachineClaimsTools`,
+`TestACapabilityOnlyAnOfflineMachineClaimsServesNothing`,
+`TestSetupAndCapabilityMustHoldOnTheSameMachine`,
+`TestTheContextFloorIsTheServingMachinesWindow`,
+`TestProjectKeepsEachMachinesWindow`, `TestAnEmbeddingModelAnswersEmbeddingCallsOnly`.
+
+**A tool-free app turn in an Auto goal is a model call**
+(`integrations/agent/worker/app_gate.go`, `toolFreeTurnWaivesDestination`).
+Pipeline maintenance opens the diagnosis goal for the owner with no route
+choice, so its destination is Auto, and the gate refused every app session in
+it as a move to the computer. A chat-door turn with no images and no inputs
+already runs the app with no tools. The destination refusal is waived for such
+a turn only when the goal is Auto (owner decision: an explicit Workbench goal
+keeps its refusal), and only on a machine whose app descriptor declares
+`inferenceOnly` (`worker.proto`, set by the Cockpit for `claude-headless` and
+`codex-app-server`, never `codex-mcp`; absent reads false). The agent's local
+selection, its forward and the holder all judge the machine; the holder uses
+its live descriptor; an agent that does not hold the stream reads the claim off
+the registration row through `workerservice.AppDescriptorFromMap`, the one
+decoder both row readers use (the routing store once dropped the key, which
+refused every machine a sibling replica held). A planner or bff sender runs no
+gate and leaves the judgment to the holder. Session-door steps and turns with images or inputs
+keep the refusal. Tests: `TestAToolFreeTurnInAnAutoGoalRunsOnAMachineThatDeclaresIt`,
+`TestAToolFreeTurnSkipsAMachineThatCannotRunWithoutTools`,
+`TestAnAutoGoalStillRefusesATurnWithInputs`,
+`TestAWorkbenchGoalStillRefusesAToolFreeTurn`,
+`TestTheSessionDoorStillNeedsDestinationConsent`,
+`TestAToolFreeTurnIsJudgedOnTheHoldersMachine` (hop; shown load-bearing by
+disabling the holder's check), `TestAnAgentWithoutTheStreamJudgesTheRegistrationRow`
+(hop with an agent sender reading the real row), `TestTheRoutingRowReaderKeepsInferenceOnly`.
+App SELECTION (`SelectAppForCall`) still pins one machine by score without the
+claim: during a Cockpit rollout an app door can be skipped in an Auto goal while
+an updated machine is online; the route moves to its next entry.
+
+**The pipeline rule** (`dsl/rules/rules.memql` `pipelineLocalFirst`,
+`dsl/policies/policies.memql` `localFirstStrongest`, `app/work_call_tags.go`).
+Calls carrying the `pipeline` tag at `reasoning` take fleet:strongest, app:*,
+federation:strongest in the order written; Auto ranks only the three general
+chains. The tag comes from the review's own call attribution
+(`pipelineCallContext`) and from the run context of a work run whose goal has
+`requestedVia: "pipeline"`, read off the goal row on the replica doing the work
+(`integrations/work.GoalCallTags`) by the agent's dispatcher and by the
+planner's remedy, whose reasoning-level replan would otherwise take
+reasoningParks' app-first order; `ResolveFor` adds the run's tags to a request
+built outside the engine. A goal that cannot be read routes by the ordinary
+rules and is logged. A goal a pipeline run opens itself (`agent()`, a compose)
+routes by its own origin. Tests: `TestAPipelineReasoningCallMatchesThePipelineRule`,
+`TestAutoLeavesThePipelineChainInItsWrittenOrder`,
+`TestAFullSizeReviewSkipsTheLocalDoor` (a 1 MiB review's 266,240-token floor
+exceeds a 262,144-token local window), `TestCallTagsFromTheCallerAndTheRunReachTheRequest`,
+`TestExecutionHopCarriesTheRunsCallTags`,
+`TestAGoalThatCannotBeReadLeavesTheRunUntagged`,
+`TestTheIndependentReviewCallIsTaggedPipeline`,
+`TestAPipelineGoalsReplanCarriesThePipelineTag`,
+`TestResolveForAppliesTheRunsCallTags`, and the shipped-rule gates in
+`test/dslconformance/local_first_policies_test.go` and the OS routing tests.
+
+**Not verified here.** No change ran on the production cluster or on a fleet
+machine. The grammar failure was not reproduced on Ollama 0.33.3 itself. The
+app waiver helps only machines on a Cockpit that declares `inferenceOnly`. The
+production installation has no vendor configured, so the third door stays
+empty until the owner configures one. The `inferenceUnavailable` sweep did not
+re-try the parked diagnosis after its `resumeAt`; that is not addressed here.
+
+## First pipeline PR qualification keeps approval on one attempt (2026-10-28)
+
+Ordinary connect reads the default branch, so it cannot test a repository's
+first native CI configuration before that configuration lands. A source owner
+can instead preview an open, same-repository PR and qualify its exact head,
+base and manifest digest with explicit compute permission, secret-name scope,
+expiry and request identity. The typed builtin and generated SDK are the entry
+point; there is no parallel HTTP action or private script granting execution.
+
+The pipeline is created atomically in `qualification` state. That state reserves
+the repository but remains outside automatic delivery, schedules, ordinary
+manual runs and release builds. Its run carries create-only authority binding
+the source, current owner and account, credential, provider repository and
+installation, App identity, PR, execution policy and approved scope. Native
+execution rechecks mutable authority before effects, including after restoring
+the run on another replica. A later ordinary connect reads the default branch
+again; qualification history cannot supply an ordinary delivery's policy or
+deduplication result. Disconnect preserves the inactive origin as
+`qualification_revoked`, including on repeated disconnect; generic disconnected
+pipelines have manual-run behavior that a revoked qualification must not inherit.
+Ordinary rerun cannot copy its approval.
+
+The durable attempt exists before the first GitHub check creation request. An
+uncertain response is recovered by observing the exact head, check name, App
+and external run identity, across a bounded complete result set. Missing,
+ambiguous or incomplete evidence cannot authorize another POST or establish
+success. A crash between intent and the first POST can therefore leave an
+unresolved attempt; cancel it before authorizing a new request ID. This trades
+automatic recovery of that narrow window for an honest effect boundary.
+
+`TestQualificationAuthoritySurvivesRealRowsAndReplacementDriver` exercises the
+actual DSL rows, create-only scope and database gates with a replacement driver;
+its provider and execution substrate remain fixtures.
+`TestQualificationBuiltinsKeepAuthorityAndReceiptsAcrossEngines` checks typed
+builtin dispatch, permission refusal, optional argument defaults and the actual
+engine-to-protobuf JSON receipt through two engines with separate database
+pools. It does not traverse a transport interceptor or a live SDK connection.
+The qualification unit
+suite covers exact-request retries, current authority refusals, ordinary-run
+isolation and uncertain provider receipts. The GitHub adapter tests cover
+pagination, duplicate receipts and incomplete observations, while the app
+capture tests retain source-owner and PR head/base checks. These tests do not
+qualify a deployed integration or any consumer repository. Live runs and
+equivalent coverage must be verified separately. Required-check changes, merge,
+release publication and controller deployment remain separate decisions.
+
 ## A pipeline run says why it failed outside its steps (2026-10-27)
 
 A pipeline's workflow can fail after every step passed. On 2026-10-27 the
@@ -997,6 +1159,147 @@ database; the run page tests in
 `clients/os/test/deployables/pipelines/runPage.test.tsx` cover the notice. A
 live cluster run and a check run accepted by GitHub itself are not verified
 here.
+
+## Failed-run diagnosis reads bounded log excerpts (2026-10-29)
+
+A pipeline run that fails on its first attempt opens one owner-bound analysis
+goal (`work.OpenAnalysisGoal`, key `pipeline-maintenance:<run id>`) running the
+product recipe `znasDeliveryDiagnosis` (memql-znas). On production between
+2026-10-26 and 2026-10-29 it never produced a diagnosis. Apart from the 18 runs
+no model could serve (memql#6375), it refused 34 failures before any model saw
+them: 19 had zero or several failed steps, 9 had no execution journal, 4 had a
+step log over its 64 KB check, and 2 had a failed step with no log. Each refusal
+was an `error(...)`. The failure path (`component/automations/failure_path.go`)
+recognises none of those sentences, makes one `classifySymptom` call, and parks
+the run on a Retry or Abandon question that no retry can change. 49 such
+questions were open.
+
+The evidence behind the change:
+- `StepResult.LogCapped` says only that the live log-store copy hit its line
+  cap. The Library archive is complete up to 64 MiB, so refusing a capped step
+  as "truncated" was wrong.
+- The archive is secret-masked when it is captured, on MemQL's own node for
+  both cluster and fleet steps (`integrations/pipelinesteps/capture.go`). The
+  check-run tail is cut from the same capture, so an excerpt of the archive is
+  masked the way the tail is and needs no secret value.
+- `libraryReadFile` refuses anything over 2 MiB.
+- A body cannot call a builtin once per list item, so reading several logs
+  needs a builtin that reads several files.
+
+The engine adds `libraryReadFileExcerpts`
+(`integrations/library/read_file_excerpts.go`, `excerpt.go`). It reads up to
+eight of the caller's text files, each on `libraryReadFile`'s path
+(`readableTextFile`), under one budget of at most 64 KiB, shared max-min fair in
+ascending stored size. Each excerpt keeps the first lines, the earliest lines
+matching the caller's RE2 patterns with three lines before and twelve after
+while the window budget lasts (`matchedLines` counts them all), and the end of
+the file, with every omitted range marked. The budget bounds the output,
+markers included. A line is held to 64 KiB, matched on its first 4 KiB and
+kept to 2 KiB, and at most 64 MiB is read. A file the caller cannot read, or
+whose bytes fail, is its own `unavailable` entry. A database or gate failure
+fails the call, so the failure path can retry it. The builtin masks nothing and
+grants nothing: `label` is only echoed back.
+
+Any signed-in caller can call the builtin with their own file and patterns, so
+its cost is bounded natively, not by the recipe:
+- patterns compile to at most 1,024 RE2 instructions together;
+- every call has a two-minute scan deadline (`excerptScanTime`), and a file it
+  stops is reported as not excerpted in time;
+- the version gate covers the row reads only and is released before a file's
+  bytes are opened. A version's bytes are never overwritten, so a scan does
+  not hold a gate-pool connection.
+
+The recipe reads the first three failed steps with logs, in `seq` order, as
+48 KiB of excerpts. It lists every failed step and the run's own
+`failureCode`/`failureMessage`, keeps the quote check, the independent review
+and `repositoryChangeRequest`, and treats model answers as proposals only.
+Every stop a retry cannot change returns `{repair: "none", reason}`: the run
+succeeds, the answer validator skips goals a pipeline requested
+(`integrations/work/validator.go`), and no classifier call or question
+follows. The goal still waits for the owner to accept or close it.
+
+Two stop conditions stay errors on purpose, because restoring the source or
+run and retrying can change the outcome:
+- a lost, inactive or mismatched source;
+- a failed run that can no longer be read.
+
+Rejected alternatives (design record
+`docs/superpowers/specs/2026-10-29-failed-run-diagnosis-evidence-design.md`,
+section 8):
+- a pipeline-bound evidence builtin;
+- the check-run tail persisted on step rows, which is only the last 40 lines;
+- a one-file reader;
+- a new terminal failure code;
+- re-masking with re-resolved secrets.
+
+Release order is a hard constraint. On 0.31.7 the recipe's
+`use library.builtins.{ libraryReadFileExcerpts }` does not resolve and strict
+boot refuses the whole bundle. So the recipe deploys only with an engine that
+carries the builtin.
+
+Tests:
+- `TestExcerpt*` and `TestCompileExcerptPatternsRefusesBadInput`
+  (`excerpt_test.go`) cover the algorithm. A seeded property test walks every
+  excerpt back to its file line by line.
+- `TestReadFileExcerpts*` cover malformed input refused before any read, the
+  budget split (including a wrong stored size), and a foreign file reported
+  without a fetch.
+- `ReadFileExcerptsAcrossEngines` in `TestDocumentRevisionWorkflow` is the
+  database-backed two-replica case.
+- memql-znas's `check-delivery-policy.go` drives the recipe through
+  `workflowhost.Run` and compiles every pattern.
+
+Not verified here:
+- a diagnosis on production, which also needs a model that answers;
+- excerpt quality on real failing logs;
+- Retry on a question the old recipe raised. It reruns the failed step under
+  the installed recipe and keeps the old run's prefix.
+
+## A step that ran out of memory says so (2026-10-29)
+
+On 2026-10-29 the second attempt of the `cockpit/v0.21.0` release run failed
+at `tests.go-tests#1` with exit 137 and no failure code. Only the kubelet's
+termination reason tells an out-of-memory kill from a command that exited 137
+itself, and it is written on the pod alone. `Classify` read it into
+`Observation.Detail`, but `decision` copies only the status, exit code and
+failure into the step's result, and the driver's sentence for an exit with no
+failure is *The step's command exited with status 137.* By the time anyone
+looked, the Job and its pod were deleted and no cluster event named the kill,
+so whether the step ran out of memory could not be established.
+
+`stepEnded` (`integrations/pipelinesteps/classify.go`) now fails a non-zero
+exit the kubelet calls `OOMKilled` with `pipeline_step_memory_exceeded` and
+keeps the exit code: 137 when the command itself was killed, the command's own
+code when the kernel killed a process it started and the command exited
+afterwards. The sentence names the memory limit the step container shows on
+the pod -- its `memoryMiB`, or the LimitRange default the API server admitted
+-- and names none when the pod shows none, never another container's. A zero
+exit stays a pass. The failure takes the existing path: the observation
+recorded on the Job (`memql.io/observation`), which an adopting replica
+settles by; the step row's `errorCode` and `errorMessage`; the check run; and
+the OS copy for the code.
+
+Two alternatives were rejected. A field on `pl.StepResult` for the kubelet's
+reason would have needed every reader -- the driver, the check run, the run
+page -- to learn it, where a catalogued code already reaches all of them. A
+note changes no outcome, and the step has failed. The code is
+`ClassFailure`, like `pipeline_step_disk_exceeded`: the step's own doing. It
+is not one of the release train's `EnvironmentalStepCodes`, so it earns no
+automatic retry; whether an intermittent out-of-memory kill should is a
+separate decision.
+
+The out-of-memory rows of `TestClassify`,
+`TestClassifyNamesTheMemoryLimitOnlyWhenThePodSaysIt`,
+`TestClassifyNeverRepeatsTheStepsOwnTerminationMessage` and
+`TestRunnerSaysAStepRanOutOfMemory` (`integrations/pipelinesteps`) cover the
+classification, the limit, the step's termination message never repeated, and
+the result and recorded observation through the runner's fake API server.
+`TestEveryPipelineCodeIsCatalogued` and
+`clients/os/test/deployables/refusals.test.ts` hold the catalogue copies
+together. Not verified: a live cluster's out-of-memory kill through this
+path, and the kubelet's `OOMKilled` for a killed child process (an exit other
+than 137), which is a constructed case. A fleet machine reports no such
+reason, so a fleet step killed for memory still reads as its exit code.
 
 ## Release trains carry main (2026-10-27)
 
@@ -1121,3 +1424,349 @@ App-authored pull request satisfies `require_code_owner_review` together with
 GitHub marks a pull request merged when its head reaches `main` through
 another pull request's merge (memql#6325 marked memql#6318 to memql#6324
 merged).
+
+## A failed release re-runs only what failed (2026-10-28)
+
+On 2026-10-28 the owner lost engine versions 0.31.4 to 0.31.7 to one-step
+release failures. The last was an editor lane whose Chromium download stalled
+on one fleet Mac. A failed release could not be recovered: the saved release
+refused any run but the one it recorded ("native release observation changed
+its execution identity"), and `releasePrepareCandidateWorkflow` refused the
+`pipeline_passed_earlier` receipts a failed-only re-run carries. Each failure
+therefore cost a version bump, a pull request check and a full release run of
+about three hours. Design record:
+`docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md`; the
+connected workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#recover-a-failed-build).
+
+- **Trigger.** The owner re-runs a failed release attempt, usually its failed
+  steps only, from the run page.
+- **Planning** (`carryPassed`, `releaseChainFresh` in
+  `component/pipelinerun/driver.go`). A release re-run never carries a step
+  whose earlier result named artifacts, because a candidate pins artifacts only
+  from the run it names. It carries nothing once the release's first attempt was
+  opened more than 24 hours before the re-run (`releaseCarryWindow`, the
+  evidence-reuse window). A read that does not answer stops the drive; a chain
+  that cannot be followed carries nothing.
+- **Attempt chain** (`releaseAttemptChain` in
+  `component/pipelinerun/release_build.go`). Each observation reports the
+  earlier attempts of the release run key, newest first, through `rerunOf`
+  alone. A missing link, a different run key, an attempt that does not decrease
+  or more than 50 attempts leaves the chain empty. Observation keeps working;
+  nothing can adopt the attempt.
+- **Adoption** (`adoptableBuildRun`, `integrations/release/build_adopt.go`). The
+  saved release replaces its recorded run only with a descendant of a recorded
+  attempt that completed without success, before any candidate or publication.
+  The journal's SQL fence (`build_ledger.go`) admits exactly that change, so a
+  replica holding an older view cannot write an earlier run back. A release
+  blocked by a failed build keeps the `observe` action, which the OS release
+  journey runs on every read; every other block keeps none.
+- **Proof** (`carriedFrom`, `integrations/release/candidate_carried.go`).
+  Coverage proves each carried step: the carrying run is a full release re-run,
+  its chain stays inside the release and reaches attempt 1 within 24 hours, and
+  the nearest earlier attempt that did not carry the step executed it as an
+  artifact-free successful command (`pl.InspectCarriedReleaseReceipt`) with the
+  same definition digest and packages. The recipe accepts
+  `pipeline_passed_earlier` only together with that proof; anything unproven
+  refuses the candidate, naming the step.
+
+Rejected: a candidate whose evidence spans attempts (attempt 1's complete
+evidence includes its failed step, its artifacts would be pinned from a failed
+run, and the candidate format would change), and adopting only full re-runs
+(saves the version bump and pull request check but not the long run; the design
+adopts full re-runs too, which carry nothing). Cross-event reuse stays off for
+releases (#6344): a receipt from a push, pull request or merge-group run has no
+chain inside the release.
+
+Compatibility: `RerunOf` and `Chain` are omitted when empty, so a run without
+re-run facts encodes exactly as before. Journals written earlier keep their
+selection digest, and an older engine still decodes every journal that never
+adopted a re-run; one that did is unreadable to it after a rollback
+(`TestReleaseBuildRunEncodingKeepsEarlierJournals`). The runner's carry rule is
+a subset of what the proof accepts: a step that declares `artifacts` or an
+image build, or whose earlier receipt named an intent or a file, always runs
+again, and the runner stops at the proof's 50-attempt bound.
+
+Invariants: a successful or running recorded attempt is never replaced; a
+prepared, approved or published candidate is never re-pointed; every artifact
+in a candidate comes from the run it names; a carried step is accepted only
+with a native proof tied by digest to a step that executed within the same
+release run key. What survives a retry or a replica change: the chain is read
+natively on every observation, adoption is recorded in the journal under its
+fence, and the proof is recomputed from journal rows at candidate preparation.
+
+Tests: `TestCarriedReleaseReceipt*` and
+`TestReleaseBuildRunEncodingKeepsEarlierJournals` (`component/pipelines`);
+`TestReleaseAttemptChain*`, `TestCarryPassedReleaseRerunsArtifactProducers`,
+`TestCarryPassedReleaseRerunsDeclaredProducers`,
+`TestReleaseChainFreshStopsAtTheAttemptBound` and
+`TestReleaseRerunCarriesNothingPastTheWindow` (`component/pipelinerun`);
+`TestAdoptableBuildRun`, `TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun`
+(including a refused stale write-back), `TestCarriedChain*`,
+`TestCarriedReceipt*` and the proven-carry case of
+`TestCandidateWorkflowChoosesAllowedPlannedSkips` (`integrations/release`, the
+last ones db-gated). Not verified here: a live release re-run on a cluster.
+This change helps only after it ships in an engine release; the release that
+carries it is still prepared under the previous rules.
+
+## A GitHub check per pipeline step (2026-10-28)
+
+The owner asked to see each step of a run on a pull request, not one check for
+the whole run, sectioned by stage (approved 2026-10-28). Every step now writes
+its own check run beside the run's; the connected workflow is in
+[pipelines.md](../../public/operate/pipelines.md#a-check-per-step).
+
+**Names, and why they cannot gate anything.** A step check is named after its
+run's own check plus `/ <stage> / <step>` (`pipelines.StepCheckName`): GitHub
+lists check runs by name, which gives the sections. Push, release and manual
+runs keep their run's suffix, because two runs of different events on one
+commit select different stages and must not overwrite each other's steps.
+Stage and step names cannot hold a slash, so the name always has more
+segments than any context a ruleset, a release source
+(`githubapp.releaseChecks`), the merge queue or a train's boarding asks for by
+exact name; a step check can never satisfy or fail a required context
+(`TestStepCheckName`).
+
+**A writer per drive, off the run's path (the invariant).** A publish writes
+the run's own check first and, only once that landed, hands the drive's writer
+goroutine the token it minted and each step's newest state
+(`offerStepChecks`). The writer sends one write at a time, a second apart,
+keeping only each step's newest state, so neither the merge-gating check, a
+step, nor the run row's conclusion -- which a release train waits on -- ever
+waits on a step check. A step's check is created when the step first leaves
+pending, not when the run opens: sixty creates at once would spend a third of
+GitHub's per-minute secondary write limit, and several runs opening together
+would exceed it. Rejected: creating every check queued at the start (the first
+version, which the independent review measured at ~55 POSTs in one publish),
+and writing inside the publish (it delayed the first step by tens of seconds
+and the final row by up to the two-minute call budget). Tests:
+`TestADrivenRunReportsACheckPerStep`, `TestAFailedStepsCheckShowsItsMaskedOutput`
+(masked with the drive's secret values, like the run's check). The writer
+composes from a copy of the run and pipeline that each offer hands it, never
+from the drive's run row, which only the drive's goroutine touches: the race
+detector caught a version that copied the row while the drive patched it. No
+pipeline step runs this package under `-race`, so that check is a local
+`go test -race ./component/pipelinerun/`.
+
+**Rate limits and refusals.** A rate-limited answer pauses the writer for a
+minute and keeps every state it still owes (`TestARateLimitedStepCheckPausesTheWriter`:
+one limited create, then the rest). `githubapp` now also files a 403 carrying
+`Retry-After`, or a message naming a secondary rate limit, as rate limiting
+(`TestRateLimitIsRecognisedInBothSpellings`): before, such a 403 on a run's
+own final write was recorded `refused` with the missing-permission note and
+never retried, leaving a required check unfinished. A 403 creating a step check
+is the missing permission and stops step checks for the drive
+(`TestAMissingChecksPermissionStopsStepChecks`); a 403 moving a check the
+writer adopted drops that one and creates the run's own. Anything else waits a
+few seconds and is tried again; no failure fails the run
+(`TestAStepCheckThatCannotBeWrittenNeverFailsTheRun`).
+
+**At conclusion, and what survives.** The final publish hands the writer every
+step's final state, a started step that never ended as cancelled; the drive
+returns and the writer keeps trying for ten minutes, then exits. A drive that
+ends without concluding stops its writer (`endStepChecks`), so no goroutine
+outlives a drive that will not finish its steps. When GitHub took no completed
+check at conclusion, recovery's republish of the run's own check also
+completes the step checks the run left open (`settleStepChecks`,
+`TestRecoverySettlesAConcludedRunsOpenStepChecks`). Step check ids live in the
+writer's memory only; no row stores them.
+
+**Steps that did not run here.** A failed-only re-run's carry
+(`pipeline_passed_earlier` with no evidence run) writes no check: attempt 1's
+pass stays on the commit (`TestARerunLeavesCarriedStepsChecksAlone`). A step
+that reused another run's verification shows a pass naming that run
+(`TestReusedEvidenceShowsAsAPass`). A drive that took a run over without
+reading its plan again (`adoptRows`) now keeps the plan's skip, so a carried
+step stays recognised across the hop (`TestATakeoverKeepsACarriedStepsPass`).
+
+**Replicas.** A writer lists its run's existing step checks once, by external
+id, the newest for each step, and moves them rather than creating a second
+(`TestATakeoverAdoptsTheStepChecksAnotherReplicaCreated`, a real two-replica
+hop). A writer whose drive lost its lease stops before its next write. A
+listing that fails, or a commit with more than a thousand check runs (now an
+error, not a silent short list), costs at most duplicates.
+
+**Re-run on a step's check.** GitHub offers Re-run on every check an App
+writes. `check_run.rerequested` for a step's check is resolved by its external
+id at the re-requested commit: a failed run gets a failed-only re-run, a passed
+one a whole re-run (`TestRerequestingAStepCheckRerunsItsRun`).
+
+**Known limits.** A step check stays open when GitHub refused its final write
+for the whole ten-minute window while the run's own check landed, or when the
+agent restarted inside that window. A step that starts and settles between two
+progress reports shows no *In progress* state. A manifest with several hundred
+steps per event could push a busy commit past GitHub's thousand-run listings,
+which release-source verification and merge-queue admission read; no cap is
+enforced.
+
+## Owner-scoped run reads cost what they return (2026-10-29)
+
+On 2026-10-29 around 09:40Z, reads made as the cluster owner in MemQL OS hit
+the eight-second statement limit (SQLSTATE 57014): `workRunsForGoal` twice and
+`workRunningRunsForOwner` once. `workGoalForOwner`, `workApprovalsForOwner` and
+`pipelineRunsForOwner` answered in the same minutes. The goal read is what
+`cancelGoal` (Ask's stop, Nexus's close) and `workAcceptGoalResults` read
+before they act; the running read was the computer-use kill switch's
+selection. Neither failed for want of data: both read the owner's whole run
+history to return a handful of rows.
+
+**Why the history.** Every pipeline run is a `v1:work:run` owned by the
+pipeline's owner, which in production is the cluster owner, and every step
+boundary writes the run again. The run owner lookup index
+(`memory_nodes_work_run_owner_lookup_idx`) was built for one person's runs
+among many system runs; for this owner its range is the history. Two engine
+behaviors met it (`component/memql/latest_scan_lookup.go`):
+
+- The lookup ANDed every required string term into its id scan, so
+  `goalId` -- which no index served -- was read from every version's TOASTed
+  payload in that range.
+- With two served terms ANDed, the planner cannot choose: PostgreSQL ignores a
+  partial index's statistics when it estimates a payload equality, both
+  ranges cost the default 0.5%, and the tie went to the owner index even after
+  ANALYZE. A new index alone would not have fixed the goal read.
+
+**Chosen path.** The lookup now ANDs only terms a lookup index serves, and
+never a coarse one (`payloadLookup.coarse`, the run owner) beside a finer one;
+every other term is decided once per candidate on its latest version. Migration
+`20261029100000_work_run_goal_lookup_index` adds the goal lookup
+(`memory_nodes_work_run_goal_lookup_idx`), so the goal read costs one goal's
+runs. On a 9,600-version fixture the goal read went from 38,621 buffers to 32;
+`workRunsForOwnerGoalSignature`, which ANDed `goalSignature` and `status` the
+same way, from 38,615 to 27,117.
+
+No index bounds "running now": it is a property of a run's latest version,
+every run passes through it, and an index holds every version. An index-only
+walk of every current run id was already measured past the limit cold in
+production ([operational retention](operational-retention.md#bounded-current-run-recovery)).
+The kill switch now reads the recovery projection, `work_run_heads`
+(`runningRunsForOwner` in `integrations/work/recovery_heads.go`), and
+`workRunningRunsForOwner`, which had no other caller, is deleted along with
+its SDK methods.
+
+**Freshness and replicas.** The kill switch does not refresh the projection:
+`refresh_work_run_heads` claims the projector's state row with `NOWAIT`, so a
+refreshing kill switch would fail whenever another replica's sweep was
+projecting. It reads the heads at `running` plus every id in
+`work_run_head_events`, then each candidate's latest version in the same
+statement. A run written after its last projection is a candidate through its
+event, so the answer matches a refreshed projection's. The projection lives in
+the database, so any replica gives the same answer.
+
+**Refusals.** The read refuses while the projection's backfill is unfinished,
+while a capture trigger is missing or disabled, or while more than 10,000
+events wait, because an empty list would read as "nothing to stop". The
+readiness check and the read share one repeatable-read snapshot. A refusal
+fails the kill switch visibly; the pre-dispatch gate refuses the owner's next
+machine call either way.
+
+**Ownership.** The read runs under the owner's borrowed authority, matches the
+owner in both spellings in SQL and admits every row as fetched. It keeps the
+DSL query's 500-run bound and its staged-data ruling is MUST-NOT-GATE: a staged
+run that used the owner's machine must still be stopped.
+
+**Regression evidence.** `TestWorkRunReadsDoNotScanTheOwnersHistory`
+(`component/memql/work_run_goal_lookup_db_test.go`) runs the real queries as
+the cluster owner over an owner-owns-everything history. It pins the lookup
+SQL, the planned buffers and agreement with the concept-wide read.
+`TestLatestScanKeysLookUpOnlyMandatorySetTermsOnALookupField` holds both lookup
+rules on the rendered SQL without a database.
+`TestRunningRunsForOwnerReadsTheProjectionNotTheHistory`
+(`integrations/work/running_runs_db_test.go`) pins the answer, including runs
+only a pending event names, row admission, the three refusals and a bound of
+500 buffers over a 2,400-version history. The kill switch's selection tests
+(`killswitch_test.go`) answer through the same seam. Both database tests need
+`MEMQL_REQUIRE_DB=1`.
+
+**The owner's feeds and the selective reads beside them.** A read narrowed by
+the owner alone still enumerated the owner's whole range. It paid a heap fetch
+per version of the owner's runs, because an expression index allows neither an
+index-only scan nor TimescaleDB's SkipScan, plus one latest payload per run.
+That covered `workRunSummariesForOwner` (Nexus's run list), `workRunsForOwner`
+(the Training app and the procedure learner's pages), the procedure corpus read
+(`workRunsForOwnerGoalSignature`) and the three Library revision reads. Two
+mechanisms now bound them, chosen by measurement on 3,000 runs of 20 TOASTed
+versions:
+
+- **A newest-first walk** for a feed the owner term decides
+  (`latestScanWalk`, `component/memql/latest_scan_walk.go`, over the new
+  `memory_nodes_work_run_owner_walk_idx`). It walks the owner's versions in page
+  order and keeps a version only when no newer one of its run exists, then stops
+  at the page: 4,152 buffers for a page of 50 where the lookup took 97,252. A
+  LATERAL `LIMIT 1` probe was chosen over `NOT EXISTS`, because TimescaleDB
+  excludes chunks for it at run time (10,145 buffers otherwise). The cursor is
+  pushed in as `createdAt <= t AND (createdAt < t OR id > i)`, because the
+  engine's top-level `OR` sent the planner to a sort of the whole range
+  (127,725 buffers for a deep page; 4,431 in this form). The walk is taken only
+  when the filter, with the owner term and the concept assumed, is true for
+  every row. A status or a signature can reject what the walk finds, and with
+  nothing matching the walk cost 402,923 buffers, four times the lookup.
+- **Partial lookup indexes for the selective reads**
+  (`payloadLookup.partial`). `memory_nodes_work_run_signature_lookup_idx` holds
+  only succeeded versions, one entry per finished run, and serves the corpus
+  read because it requires `status == "succeeded"`.
+  `memory_nodes_work_run_revision_lookup_idx` holds only
+  `reviseLibraryDocument` runs and serves the revision reads, which name it.
+  An index over every automation was rejected: a common automation, a
+  pipeline's, would drive some other read with every owner's history. Measured:
+  105 buffers through the signature index and an index-only scan through the
+  revision index.
+
+`TestWorkRunReadsDoNotScanTheOwnersHistory` pages the owner's feed to its end
+on the real SQL, against the concept-wide read and its cursor, with no run
+twice and the run the owner gave away gone. Pages 1, 2 and 12 cost 1,541 to
+2,015 buffers over about 9,600 versions of history, against 27,117 before.
+The test also holds the corpus read to 34 buffers and the revision read to 30.
+`TestLatestScanWalkTakesOnlyReadsItsTermDecides` pins when the walk is taken,
+without a database, and `TestPayloadWalksAreTheMigratedWalkIndexes` holds the
+walk registry to the catalog. Each new index is about 100 bytes per run
+version, except the two partial ones, which hold a slice. The owner lookup
+index now serves only the owner reads the walk does not take; dropping it is a
+later migration, once the walk has served production.
+
+**Not verified, and not fixed.** Nothing here ran against production; it takes
+effect in the engine release after 0.31.7. A page of the owner's feed still
+visits each version of the runs on it, so a page costs its runs times their
+versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
+(the procedure reuse sweep) stays on the owner lookup: its status term can
+reject what a walk finds. The same sweep's `workAutomationStepsForOwner` and
+`workGoalsForOwner` read concepts with no owner index at all, so bounding the
+run read alone would not let the sweep finish.
+
+## Pipeline AI is off until the owner turns it on (2026-10-29)
+
+The owner decided that a pipeline should mostly run by itself: AI review and AI
+failure diagnosis are off by default, with a switch for each in Pipelines >
+Settings > AI. Connected workflow:
+[pipelines.md](../../public/operate/pipelines.md#ai-review-and-failure-diagnosis-are-off-until-you-turn-them-on).
+
+- **Where the switches live.** The global variable `MEMQL_PIPELINES_AI`
+  (`pipelines.AISettingsVariable`, `component/pipelines/ai.go`), JSON
+  `{"review": bool, "diagnosis": bool}`, like `MEMQL_PIPELINES_TRAINS`. The OS
+  writes it through `setGlobalVariable` (row `var-global-memql-pipelines-ai`).
+- **Read at use, not at run open** (`Deps.aiSettings`,
+  `component/pipelinerun/ai_settings.go`). A captured-policy switch would make
+  every flip refuse the reviews in flight ("installed independent review policy
+  changed", the fence in `independent_review.go`), which cost three pull
+  requests a full CI run each on 2026-10-29. Read at use, a flip applies to the
+  next review or failure and never to one already started.
+- **Off is all-off.** Absent, empty, unparseable, or carrying an unknown field
+  reads as both off (`ParseAISettings`, `TestParseAISettingsIsOffUnlessTurnedOn`),
+  and so does a node without a variable reader.
+- **Review gate** (`runDriver.independentReview`). Off answers what a pipeline
+  without a reviewer answers, nothing, so the reviewed workflow returns and the
+  run is decided by its steps: no capture, no model, no `MemQL / review` report
+  (`TestAIReviewOffLeavesTheRunToItsOwnChecks`, `TestAIReviewOnStillReviews`).
+  On, the installed policy's opt-in still decides
+  (`TestIndependentReviewNoOptInAndPublicArgumentsCannotStart`).
+- **Diagnosis gate** (`reconcileMaintenance`). Off turns the policy's
+  `analysis` into `none` with "AI failure diagnosis is off in Pipelines
+  settings.", so no goal opens; the policy's own `none` and `human` stand
+  (`TestAIDiagnosisOffOpensNoGoal`, `TestAIDiagnosisOffLeavesAHumanDispositionAlone`).
+  Recovery's maintenance pass reads the switch again, so a run left `pending`
+  while diagnosis was on is decided under the switch as it is when recovered.
+
+The other review and maintenance tests run with both switches on
+(`bindTestWorkflow`). Not verified here: the OS toggle against a live cluster,
+and a train's pull request with review off (it is an ordinary pull-request run,
+so the same gate applies). Known limit: a reader error reads as off and is not
+reported on the run.

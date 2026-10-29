@@ -4028,7 +4028,9 @@
         ],
         "status": [
           "active",
-          "disconnected"
+          "disconnected",
+          "qualification",
+          "qualification_revoked"
         ]
       }
     },
@@ -4064,6 +4066,7 @@
         "pipelineId",
         "policySnapshot",
         "pullRequest",
+        "qualification",
         "queuedAt",
         "refusalCode",
         "refusalMessage",
@@ -4131,6 +4134,7 @@
         "trigger": [
           "manual",
           "poll",
+          "qualification",
           "rerun",
           "schedule",
           "webhook"

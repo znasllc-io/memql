@@ -339,7 +339,7 @@ MemQL uses a single long-lived branch: `main`.
 
 1. **Every change goes through a branch + PR; `main` refuses direct pushes**
    (a repository ruleset: `pull_request`, `required_status_checks`,
-   `deletion`, `non_fast_forward`, and `merge_queue` until the switch below).
+   `deletion` and `non_fast_forward`; the merge queue went with the switch below).
    **Release trains carry `main`**
    ([pipelines.md](docs/public/operate/pipelines.md#release-trains); design
    record [2026-10-27](docs/superpowers/specs/2026-10-27-release-trains-design.md)):
@@ -354,12 +354,11 @@ MemQL uses a single long-lived branch: `main`.
    happened and what needs the owner. A PR a train drops gets `train:dropped`:
    its session fixes it, pushes, and removes the label. `train:hold` keeps a PR
    off trains. An urgent fix asks the owner for an express train
-   (`pipelinesTrainExpress`). **Until the owner switches trains on** (the
-   record's section 12; steps in
-   [ruleset-baseline.md](docs/internal/ops/ruleset-baseline.md#release-trains-replace-the-merge-queue-2026-10-27)),
-   `main` requires `MemQL / memql / push` instead of `MemQL / memql`, and the
-   owner merges through the bypass below, naming the reason with
-   `--emergency`.
+   (`pipelinesTrainExpress`). **Trains are on since 2026-10-29** (the
+   record's section 12; what was done and what is still to come is in
+   [ruleset-baseline.md](docs/internal/ops/ruleset-baseline.md#release-trains-replace-the-merge-queue-2026-10-27)):
+   `main` requires `MemQL / memql`, the check a train pull request's run
+   reports.
 2. **Emergencies only: the owner's BYPASS, never a settings change.** GitHub
    never lets a PR's author approve it, so the requirement stays on and an
    emergency proceeds through the bypass (`require_code_owner_review: true` +

@@ -66,15 +66,20 @@ function fetch_lib() {
     printf '%s\n' "$tmp"
 }
 
-# Source the shared helper library. A sibling lib.sh (the cloned-repo
-# case) always wins, so a checkout never gains a network dependency.
+# Source the shared helper library. Only an actual driver file may use its
+# sibling lib.sh. A pipe has no source file, even when the current directory
+# contains a lib.sh; that file must never become executable installer input.
+# A checkout still uses its own library without a network dependency.
 # Only the piped case fetches -- into a temp file, checked non-empty
 # BEFORE sourcing, because under `set -e` a bare `source <(curl ...)`
 # turns a failed fetch into a cryptic bash error naming no URL.
 function source_lib() {
-    local lib missing
-    lib="$(dirname "$0")/lib.sh"
-    if [[ ! -f "$lib" ]]; then
+    local lib="" missing from_checkout=no entry="${BASH_SOURCE[0]:-}"
+    if [[ -f "$entry" && "${entry##*/}" == install-mac.sh ]]; then
+        lib="$(dirname "$entry")/lib.sh"
+        [[ ! -f "$lib" ]] || from_checkout=yes
+    fi
+    if [[ "$from_checkout" != yes ]]; then
         lib="$(fetch_lib "${RAW_BASE}/lib.sh")"
         missing="$(missing_lib_functions "$lib")"
         if [[ -n "$missing" && "$RAW_BASE" == http* ]]; then
@@ -85,14 +90,14 @@ function source_lib() {
     fi
     missing="$(missing_lib_functions "$lib")"
     if [[ -n "$missing" ]]; then
-        [[ "$lib" == "$(dirname "$0")/lib.sh" ]] || rm -f "$lib"
+        [[ "$from_checkout" == yes ]] || rm -f "$lib"
         echo "ERROR: this script and its lib.sh come from different versions (lib.sh lacks:${missing})." >&2
         echo "       A cached copy is the usual cause. Nothing was changed; wait a minute and run the same command again." >&2
         exit 4
     fi
     # shellcheck source=lib.sh
     source "$lib"
-    [[ "$lib" == "$(dirname "$0")/lib.sh" ]] || rm -f "$lib"
+    [[ "$from_checkout" == yes ]] || rm -f "$lib"
 }
 source_lib
 
@@ -126,7 +131,7 @@ Options:
                               user account can swap the binary without
                               privilege escalation.
     --version <X.Y.Z>         Install this release instead of the latest:
-                              downloads from releases/download/vX.Y.Z and
+                              downloads from releases/download/cockpit/vX.Y.Z and
                               checks the binary answers to it. "0.16.0" and
                               "v0.16.0" both work. An older release than the
                               installed one is refused (no downgrade).

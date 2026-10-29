@@ -54,12 +54,18 @@ func (dr *runDriver) reviewLocalFence(ctx context.Context, current Run) error {
 	if err != nil {
 		return err
 	}
-	if p == nil || !p.Active() || !sameID(p.OwnerUserID, dr.p.OwnerUserID) || p.Repository != dr.p.Repository || p.PackageID != dr.p.PackageID || p.CredentialID != dr.p.CredentialID || p.InstallationID != dr.p.InstallationID || p.DefaultBranch != dr.p.DefaultBranch {
+	if p == nil || !QualificationSourceAllowed(*p, current, dr.d.now()) || !sameID(p.OwnerUserID, dr.p.OwnerUserID) || p.Repository != dr.p.Repository || p.PackageID != dr.p.PackageID || p.CredentialID != dr.p.CredentialID || p.InstallationID != dr.p.InstallationID || p.DefaultBranch != dr.p.DefaultBranch {
 		return errors.New("independent review pipeline source changed")
 	}
 	return nil
 }
 func (dr *runDriver) independentReview(ctx context.Context) (any, error) {
+	// The owner's AI review switch (Pipelines > Settings > AI) is off unless
+	// turned on. Off answers exactly what a pipeline without a reviewer does:
+	// nothing, so the run is decided by its own checks and no model is asked.
+	if !dr.d.aiSettings(ctx).Review {
+		return nil, nil
+	}
 	deps := dr.d.IndependentReview
 	if deps == nil || deps.Capture == nil || deps.Validate == nil || deps.Review == nil || deps.Report == nil {
 		return nil, errors.New("independent review adapters are unavailable")
@@ -90,6 +96,9 @@ func (dr *runDriver) independentReview(ctx context.Context) (any, error) {
 		}
 		// Captured source is execution evidence, not perpetual permission. A fresh
 		// installed resolver/closure change revokes both model and check effects.
+		if e := dr.qualificationFence(c); e != nil {
+			return e
+		}
 		current, e := capturePipelinePolicy(c, dr.d, dr.p, Opening{Event: dr.run.Event, SHA: dr.run.SHA, BaseSHA: dr.run.BaseSHA, Branch: dr.run.HeadBranch, PullRequest: dr.run.PullRequest, Trigger: dr.run.Trigger})
 		if e != nil {
 			return e
