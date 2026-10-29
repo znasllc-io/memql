@@ -279,9 +279,12 @@ func TestAdmissionRefusalIsTypedButMidCallWithdrawalIsNot(t *testing.T) {
 		if n := sentToolDispatches(wire); n != 0 {
 			t.Fatalf("%d dispatch(es) reached the machine of a refused call", n)
 		}
-		// The sentence the owner reads is the one it always was.
-		if !strings.Contains(err.Error(), "worker_feature_disabled") || !strings.Contains(err.Error(), "Fleet settings") {
-			t.Fatalf("the refusal lost its words: %v", err)
+		// The sentence the owner reads names the switch by the name the engine
+		// uses and the label Fleet draws, so it says where to turn it back on.
+		var refused *RefusedBeforeSendError
+		if !errors.As(err, &refused) || refused.Err == nil ||
+			refused.Err.Error() != "Host commands are off for this machine in Fleet settings (Commands and files)" {
+			t.Fatalf("the refusal's sentence = %v, want it to name Host commands and the Commands and files switch", err)
 		}
 		// Layers above wrap what this returns; the type must survive that.
 		if code, ok := RefusedBeforeSend(fmt.Errorf("dispatching: %w", err)); !ok || code != "worker_feature_disabled" {

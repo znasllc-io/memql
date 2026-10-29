@@ -122,9 +122,21 @@ type ownerFeatureLease struct {
 }
 
 // featureDisabledReason is the one sentence the owner reads, whether the call
-// was refused at admission or cancelled after it.
+// was refused at admission or cancelled after it. It names the feature as the
+// engine's own refusals and MemQL OS do, and the switch by the label Fleet
+// settings draws (clients/os/src/apps/fleet/machines/OwnerFeaturesGroup.tsx),
+// so the owner finds what to turn back on. The code travels beside it
+// (RefusedBeforeSendError.Code), so the sentence does not repeat it.
 func featureDisabledReason(feature OwnerFeature) string {
-	return fmt.Sprintf("%s is disabled for this machine in Fleet settings", feature)
+	switch feature {
+	case FeatureHeadless:
+		return "Host commands are off for this machine in Fleet settings (Commands and files)"
+	case FeatureApps:
+		return "CLIs and apps are off for this machine in Fleet settings"
+	case FeatureComputerUse:
+		return "Computer use is off for this machine in Fleet settings"
+	}
+	return fmt.Sprintf("%s is off for this machine in Fleet settings", feature)
 }
 
 // featureDisabled is the error an admitted call is cancelled with when the

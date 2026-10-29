@@ -1170,3 +1170,151 @@ func TestTheCheckRunCallsAMachineByItsIdWhenItsOwnerGaveItNoName(t *testing.T) {
 		t.Errorf("the concluded check run:\n%s\nwant it to end\n%s", final.Output.Summary, wantAfter)
 	}
 }
+
+// nothingRanHere is a machine's refusal before start that rules the machine out
+// for the rest of the step: its own policy refused, or the wait for it ran out.
+func nothingRanHere(code, machine string) pipelines.StepResult {
+	res := onMachine(nothingRanResult(code, "The machine refused the step before it started."), machine)
+	res.Status, res.NotRetriedHere = pipelines.OutcomeRefused, true
+	return res
+}
+
+// A failover to another machine waits for a busy or offline one at most the
+// longest retry delay, and fails over no further when that runs out. Only a pool
+// step whose installation allows the cloud waits its fleetWaitSeconds instead,
+// because the cluster follows. A fleet step's failover used to wait until the
+// run's ceiling, holding its stage's slot for hours, and a pool step's with no
+// cloud a single second, ending the step on any busy fleet.
+func TestAFailoverWaitsTheLongestDelayWhenNoCloudFollows(t *testing.T) {
+	for _, c := range []struct {
+		name, manifest, policy string
+		wait                   int
+	}{
+		{"a fleet step", retryFleetManifest, "", 120},
+		{"a pool step with no cloud", retryPoolManifest, "{fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 90], otherMachines: true}}", 90},
+		{"a pool step the cloud follows", retryPoolManifest, "{fleetWaitSeconds: 5, cloudFallback: true, retries: {sameMachine: 2, delaysSeconds: [30, 90], otherMachines: true}}", 5},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rh := newRetryHarness(t, c.manifest, true)
+			if c.policy != "" {
+				installComputePolicy(t, rh.driveHarness, c.policy)
+			}
+			rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+				if req.Attempt == 1 {
+					return nothingRanHere(pipelines.CodeNoMachineForNeed, "m1"), nil
+				}
+				return onMachine(passed(req), "m2"), nil
+			}
+			run := rh.openRun(t, prOpening())
+			deliver(t, rh.integ, run)
+
+			if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
+				t.Fatalf("the run ended %s (%s); want success on the other machine", got.Conclusion, got.FailureCode)
+			}
+			sent := rh.exec.sent()
+			if len(sent) != 2 || !reflect.DeepEqual(sent[1].Placement, failoverFrom(c.wait, "m1")) {
+				t.Fatalf("attempt 2 was placed %s, want %s", describe(sentPlacement(sent, 1)), describe(failoverFrom(c.wait, "m1")))
+			}
+		})
+	}
+}
+
+// sentPlacement is the placement of the i'th attempt sent, nil when there is
+// none.
+func sentPlacement(sent []pipelines.StepRequest, i int) *pipelines.AttemptPlacement {
+	if i >= len(sent) {
+		return nil
+	}
+	return sent[i].Placement
+}
+
+// A failover that finds no free machine proves only that the fleet is full: it
+// ran nothing and explains nothing. A step that then has no next attempt ends
+// with the failure that sent it looking, here the third failed fetch on its
+// machine, not with that search's pipeline_no_machine_for_need. The history
+// still lists the search.
+func TestAStepThatOnlyFoundTheFleetFullEndsWithItsRealFailure(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	const fetch = "The machine's git fetch failed before the command ran."
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt <= 3 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, fetch), "m1"), nil
+		}
+		// The failover found no machine: m1 is excluded and none other is free.
+		return pipelines.StepResult{Status: pipelines.OutcomeRefused, ExitCode: -1,
+			Failure:      &pipelines.Failure{Code: pipelines.CodeNoMachineForNeed, Message: "No machine of the owner's could take the step."},
+			Where:        pipelines.Where{Surface: pipelines.PlacementFleet},
+			AttemptClass: pipelines.AttemptNothingRan}, nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if sent := rh.exec.sent(); len(sent) != 4 || !reflect.DeepEqual(sent[3].Placement, failoverFrom(120, "m1")) {
+		t.Fatalf("the executor was handed %d attempts; want three on m1 and a failover from it", len(sent))
+	}
+	updates := rh.work.receiptsOf("build.mac")
+	if len(updates) == 0 {
+		t.Fatal("the step has no receipt")
+	}
+	receipt := updates[len(updates)-1]
+	if argString(receipt.Args, "status") != WorkStepFailed || argString(receipt.Args, "errorCode") != pipelines.CodeCloneFailed ||
+		argString(receipt.Args, "errorMessage") != fetch {
+		t.Errorf("the receipt: %s %s %q; want the third attempt's failed fetch", argString(receipt.Args, "status"),
+			argString(receipt.Args, "errorCode"), argString(receipt.Args, "errorMessage"))
+	}
+	if binding := argObject(receipt.Args, "binding"); binding["workerId"] != "m1" {
+		t.Errorf("the receipt's place = %v, want the machine whose fetch failed", binding)
+	}
+	if records, _ := attemptsOf(receipt); len(records) != 4 || records[3].Code != pipelines.CodeNoMachineForNeed {
+		t.Errorf("the history: %+v; want all four attempts, the search last", records)
+	}
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionFailure {
+		t.Errorf("run = %s", got.Conclusion)
+	}
+	final := rh.lastUpdate(t).Run
+	if !strings.Contains(final.Output.Summary, "- `build.mac`: The machine's git fetch failed before the command ran (`pipeline_clone_failed`).\n") {
+		t.Errorf("the check run's failed step does not give the failed fetch:\n%s", final.Output.Summary)
+	}
+}
+
+// A pool step whose first attempt a machine refused before start for good (its
+// container caps are below what the step declares) is nothing ran there, as the
+// executor reads it. Under a policy that allows the cloud the driver routes
+// around that machine, finds no other, and places the cluster, where the step
+// runs: cloudFallback covers a fleet that failed as well as one that was full.
+func TestAPoolStepRefusedOverAMachinesCapsReachesTheCluster(t *testing.T) {
+	rh := newRetryHarness(t, retryPoolManifest, true)
+	installComputePolicy(t, rh.driveHarness, "{fleetWaitSeconds: 5, cloudFallback: true, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}}")
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		switch {
+		case req.Attempt == 1:
+			return nothingRanHere(pipelines.CodeNoMachineForNeed, "m1"), nil
+		case req.Placement != nil && req.Placement.Surface == pipelines.PlacementFleet:
+			// m1 is excluded and no other machine allows pipeline steps.
+			return pipelines.StepResult{Status: pipelines.OutcomeRefused, ExitCode: -1,
+				Failure:      &pipelines.Failure{Code: pipelines.CodeNoMachineForNeed, Message: "No machine of the owner's could take the step."},
+				Where:        pipelines.Where{Surface: pipelines.PlacementFleet},
+				AttemptClass: pipelines.AttemptNothingRan}, nil
+		}
+		return onTheCluster(passed(req), req), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
+		t.Fatalf("the run ended %s (%s); want success on the cluster", got.Conclusion, got.FailureCode)
+	}
+	sent := rh.exec.sent()
+	want := []*pipelines.AttemptPlacement{nil, failoverFrom(5, "m1"), toCluster}
+	if len(sent) != len(want) {
+		t.Fatalf("the executor was handed %d attempts, want %d", len(sent), len(want))
+	}
+	for i, req := range sent {
+		if !reflect.DeepEqual(req.Placement, want[i]) {
+			t.Errorf("attempt %d was placed %s, want %s", i+1, describe(req.Placement), describe(want[i]))
+		}
+	}
+	if waits := rh.waited(); len(waits) != 0 {
+		t.Errorf("the driver waited %v; another machine and then the cluster follow at once", waits)
+	}
+}

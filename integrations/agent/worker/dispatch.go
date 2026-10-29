@@ -1123,7 +1123,11 @@ func translateResult(callId string, res *memqlv1.ToolResult, err error) Result {
 		// and it must never become worker_disconnected, the code for a call that
 		// may have run -- the code the dispatcher cannot move on from.
 		if code, ok := workerservice.RefusedBeforeSend(err); ok {
-			return Result{OK: false, ErrorCode: code, ErrorMessage: err.Error()}
+			// The code is ErrorCode; the message is the refusal's own words. A
+			// RefusedBeforeSendError reads "code: detail", and a caller that
+			// prints both (a failed step: "(code): message") would say the code
+			// twice. A wrapper's own context, if any, stays.
+			return Result{OK: false, ErrorCode: code, ErrorMessage: strings.TrimPrefix(err.Error(), code+": ")}
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return Result{OK: false, ErrorCode: "timeout", ErrorMessage: "worker call timed out"}

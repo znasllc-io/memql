@@ -27,8 +27,10 @@ import (
 // Dedicated cluster steps go to a workbench replica, whose runner creates or
 // adopts their Kubernetes Job (cluster.go). Dedicated Fleet steps use the
 // owner's opted-in machines (fleet.go). An explicit pool step tries Fleet
-// first; only confirmed pre-start capacity refusal can reach cloud fallback,
-// under its captured installed policy and the runner's live spending gate.
+// first; within its first attempt only the fleet staying full through the
+// preference can reach cloud fallback, and a later attempt reaches the cluster
+// only where the driver places it, under its captured installed policy and the
+// runner's live spending gate.
 // In every case the executor decides first what the step may be
 // given: it refuses what it must not route, and it bounds the step by the
 // lesser of its own timeout and what is left of its run's wall-clock ceiling,
@@ -255,8 +257,9 @@ const (
 	// routeFleet: one of the owner's machines, and nowhere else.
 	routeFleet
 	// routePool: a pool step's own placement -- the fleet first, and the cluster
-	// only after a confirmed pre-start capacity refusal, all inside the one
-	// attempt. Only an attempt with no placement of its own reads this way.
+	// only after the fleet stayed full through the installation's preference,
+	// all inside the one attempt (fleetPreferenceRanOut). Only an attempt with no
+	// placement of its own reads this way.
 	routePool
 )
 
@@ -376,8 +379,9 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 
 // maxPlacementWaitSeconds bounds an attempt's MaxWaitSeconds at the same hour a
 // pool step's fleetWaitSeconds may not pass (above), because the driver passes
-// that value here for a pool step's fleet failover. The run's ceiling bounds
-// every wait regardless.
+// that value here for the failover of a pool step whose policy allows the
+// cloud; every other wait it passes is a retry delay, at most 900 seconds. The
+// run's ceiling bounds every wait regardless.
 const maxPlacementWaitSeconds = 3600
 
 // refusePlacement is the executor's check of WHERE the driver asked one attempt
@@ -437,9 +441,10 @@ func refusePlacement(req pl.StepRequest) (pl.StepResult, bool) {
 	return pl.StepResult{}, false
 }
 
-// runPool changes location only after a positive pre-start refusal. A lost
-// reply, cancellation or failed command is not spare-capacity evidence: trying
-// the cloud then could execute the same command twice. Recovery may adopt the
+// runPool changes location only after the fleet's preference ran out on
+// positive pre-start capacity refusals (fleetPreferenceRanOut). A lost reply,
+// cancellation or failed command is not spare-capacity evidence: trying the
+// cloud then could execute the same command twice. Recovery may adopt the
 // stable cluster job identity but can never replace an uncertain Fleet effect.
 //
 // This is a pool step's FIRST attempt, the one with no placement of its own:
@@ -447,7 +452,9 @@ func refusePlacement(req pl.StepRequest) (pl.StepResult, bool) {
 // the driver placed never comes here (routeOf), because it goes exactly where it
 // says; in particular a fleet attempt must not do this method's fall to the
 // cluster, since the driver is the one deciding, from the journal and the
-// policy, when the cluster is the next place.
+// policy, when the cluster is the next place. That includes this attempt
+// ending on a machine's refusal before start: it is nothing ran, and the
+// driver takes it from there (TestAMachinesRefusalEndsAPoolStepsFirstAttempt).
 func (e *Executor) runPool(ctx context.Context, req pl.StepRequest, run StepRun, timeout time.Duration, runDeadline time.Time) (pl.StepResult, error) {
 	if req.RecoverOnly {
 		return e.runClusterAttempt(ctx, run, timeout, runDeadline), nil
@@ -457,7 +464,7 @@ func (e *Executor) runPool(ctx context.Context, req pl.StepRequest, run StepRun,
 		return noRunnerReached("Pool placement requires a configured Fleet dispatcher. Nothing ran."), nil
 	}
 	res, err := e.fleet.RunStep(ctx, req, run)
-	if err != nil || ctx.Err() != nil || !req.ComputePlacement.CloudFallback || res.Status != pl.OutcomeRefused || res.Failure == nil || res.Failure.Code != pl.CodeNoMachineForNeed {
+	if err != nil || ctx.Err() != nil || !req.ComputePlacement.CloudFallback || !fleetPreferenceRanOut(res) {
 		return res, err
 	}
 	// Queue waiting does not consume the command's execution timeout, but it
@@ -471,6 +478,26 @@ func (e *Executor) runPool(ctx context.Context, req pl.StepRequest, run StepRun,
 	run.DeadlineCode = deadlineCode
 	run.RunDeadline = runDeadline.UTC().Format(time.RFC3339Nano)
 	return e.runClusterAttempt(ctx, run, timeout, runDeadline), nil
+}
+
+// fleetPreferenceRanOut is the one fleet answer that sends a pool step's first
+// attempt on to the cluster inside the attempt: the installation's fleet
+// preference (fleetWaitSeconds) ran out while every dispatch was refused before
+// start for capacity (Fleet.dispatchWhenCapacityAvailable). That answer is the
+// fleet's own, about the fleet as a whole, so it names no machine.
+//
+// A refusal ONE machine made before start, for any other reason (its own
+// policy or container caps, Host commands off, pipelines no longer allowed),
+// names that machine (Fleet.classify). It is nothing ran too, and it ends the
+// attempt: the driver, which holds the step's history, tries that machine again
+// or another one first, and the cluster after them only where the policy allows
+// it (spec section 5, rules 1 to 3). Read as the preference, it would spend
+// cloud on a refusal a delay or another machine could answer, and the step's
+// history would not show the machine that refused. A dispatcher answer that
+// names no machine at all reads as the fleet's: nothing ran either way, and the
+// policy allows the cloud.
+func fleetPreferenceRanOut(res pl.StepResult) bool {
+	return res.Status == pl.OutcomeRefused && res.Failure != nil && res.Failure.Code == pl.CodeNoMachineForNeed && res.Where.WorkerID == ""
 }
 
 // deadlineFor is the step's effective timeout -- the lesser of its own

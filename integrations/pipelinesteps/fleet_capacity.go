@@ -29,14 +29,15 @@ import (
 //     kept whole inside that one attempt).
 //   - An attempt the DRIVER placed on the fleet waits run.MaxWaitSeconds when it
 //     is positive, and then answers nothing ran, not tried here again
-//     (waitRanOut). The driver chose the wait -- the largest retry delay for a
-//     machine it pinned, fleetWaitSeconds for a pool step's failover -- and it
-//     chooses the cloud, so the pool preference deadline and the pool step's
-//     stricter reading of a refusal (below) do not apply to a placed attempt:
-//     applying them as well would cut the wait short with the wrong answer, and
-//     would turn a refusal the driver can route around (pipelines_not_allowed) into
-//     pipeline_executor_error, which it cannot. Zero is no bound beyond the
-//     ceiling, as for a fleet step's first attempt.
+//     (waitRanOut). The driver chose the wait (chooseNext's pinned and failover)
+//     and it chooses the cloud, so the pool preference deadline does not apply
+//     to a placed attempt: applying it as well would cut the wait short with the
+//     wrong answer. Zero is no bound beyond the ceiling, as for a fleet step's
+//     first attempt.
+//
+// A refusal that is not capacity ends the attempt at once, nothing ran, on
+// every route: a pool step's first attempt included, because the driver can
+// route around the machine that refused (TestAPoolStepOverAMachinesCapsReachesTheCluster).
 //
 // None of these waits ever cancels or shortens a command that has started: a
 // wait is for admission, and a started command is bounded by its own timeout.
@@ -108,8 +109,17 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 				return worker.Result{}, &res, nil
 			}
 			if !fleetPoolCapacityRefusal(result) {
-				res := refusedResult(pl.CodeExecutorError, "Fleet refused this request for a reason other than confirmed pre-start capacity. No cloud replacement was started.")
-				return worker.Result{}, &res, nil
+				// VERIFIED, NOT CAPACITY: the dispatcher's own verdict that nothing
+				// started (RefusedBeforeStart, and not the engine's gate, which was
+				// answered above), for a reason no wait for capacity changes (the
+				// machine's own policy or container caps, Host commands off,
+				// pipelines no longer allowed). It is answered as a placed attempt's
+				// is: classify makes it a refusal naming the machine, nothing ran,
+				// and the attempt ends. The driver then tries that machine again or
+				// another, and the cluster where the policy allows (cloudFallback
+				// covers a failed fleet as well as a full one). It does not go on to
+				// the cloud inside this attempt (fleetPreferenceRanOut, runPool).
+				return result, nil, nil
 			}
 			if req.ComputePlacement != nil && req.ComputePlacement.CloudFallback && !f.now().Before(preferenceEnds) {
 				res := refusedResult(pl.CodeNoMachineForNeed, "Fleet preference wait elapsed after confirmed pre-start capacity refusal. No Fleet command was started.")

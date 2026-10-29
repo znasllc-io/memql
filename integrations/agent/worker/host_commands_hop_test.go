@@ -340,11 +340,18 @@ func TestMidCallFeatureWithdrawalIsNeverRepicked(t *testing.T) {
 
 // A refusal before send is named by its own code, and ahead of every generic
 // reading of the error it wraps: a settings read that ran out of time is a
-// refusal that sent nothing, not a call that timed out.
+// refusal that sent nothing, not a call that timed out. The code travels in
+// ErrorCode and the sentence is the refusal's own words, so a caller that
+// prints both (a failed pipeline step does) says the code once.
 func TestTranslateResultNamesARefusalBeforeSendByItsCode(t *testing.T) {
 	refused := translateResult("call", nil, &workerservice.RefusedBeforeSendError{Code: "worker_feature_unavailable", Err: context.DeadlineExceeded})
-	if refused.OK || refused.ErrorCode != "worker_feature_unavailable" || !strings.Contains(refused.ErrorMessage, "worker_feature_unavailable") {
+	if refused.OK || refused.ErrorCode != "worker_feature_unavailable" || refused.ErrorMessage != context.DeadlineExceeded.Error() {
 		t.Fatalf("a refusal before send was read as %+v", refused)
+	}
+	off := translateResult("call", nil, &workerservice.RefusedBeforeSendError{Code: "worker_feature_disabled",
+		Err: errors.New("Host commands are off for this machine in Fleet settings (Commands and files)")})
+	if off.ErrorCode != "worker_feature_disabled" || off.ErrorMessage != "Host commands are off for this machine in Fleet settings (Commands and files)" {
+		t.Fatalf("the Host commands refusal was read as %+v; want its sentence without its code", off)
 	}
 	if !refusedBeforeSend(fmt.Errorf("forwarding: %w", &workerservice.RefusedBeforeSendError{Code: "worker_feature_disabled"})) {
 		t.Fatal("a wrapped refusal before send is not recognised")

@@ -558,10 +558,15 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		// started on any machine -- no candidate, or every one refused before
 		// anything was sent to it, a sibling replica's refusals under codes of
 		// their own included. The machine the dispatcher named, if it named
-		// one, is kept: it is where the step was last looked for.
+		// one, is kept: it is where the step was last looked for. A step with
+		// no needs (a pool step's portable container) is offered by any machine
+		// that allows pipeline steps, so the sentence names no needs then.
+		machines := "allows pipeline steps"
+		if needs != "" {
+			machines = "offers " + needs + " and allows pipeline steps"
+		}
 		return refused(pl.CodeNoMachineForNeed, fmt.Sprintf(
-			"No machine of the owner's that offers %s and allows pipeline steps could take the step (%s): %s",
-			needs, code, msg))
+			"No machine of the owner's that %s could take the step (%s): %s", machines, code, msg))
 	case code == "denied_by_policy":
 		return failed(pl.CodeNoMachineForNeed, fmt.Sprintf(
 			"%s refused the step under its own pipelines policy: %s", machine, msg))

@@ -96,6 +96,7 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 	// A policy built by hand: its zero retries retry nothing, and its delays are
 	// an EMPTY list, which must not be indexed.
 	handBuilt := pipelines.ComputePlacementPolicy{Retries: pipelines.RetryPolicy{SameMachine: 1}}
+	handBuiltOthers := pipelines.ComputePlacementPolicy{Retries: pipelines.RetryPolicy{OtherMachines: true}}
 
 	type want struct {
 		placement *pipelines.AttemptPlacement
@@ -119,11 +120,11 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 		{"twice: M again after 120 s", retryFleetStep, standard,
 			numbered(on("M", nothingRan), on("M", nothingRan)), next(pinnedTo("M", 120), 120*time.Second)},
 		{"three times: any machine but M, at once", retryFleetStep, standard,
-			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan)), next(failoverFrom(0, "M"), 0)},
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan)), next(failoverFrom(120, "M"), 0)},
 		{"M not retried here: any machine but M, at once", retryFleetStep, standard,
-			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(0, "M"), 0)},
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(120, "M"), 0)},
 		{"the wait for pinned M ran out: any machine but M, at once", retryFleetStep, standard,
-			numbered(on("M", nothingRan), notRetried(on("M", nothingRan))), next(failoverFrom(0, "M"), 0)},
+			numbered(on("M", nothingRan), notRetried(on("M", nothingRan))), next(failoverFrom(120, "M"), 0)},
 		{"each new machine has its own count", retryFleetStep, standard,
 			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan), on("N", nothingRan)),
 			next(pinnedTo("N", 120), 30*time.Second)},
@@ -167,11 +168,19 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 		{"pool step, its one cluster attempt spent and the machines exhausted", retryPoolStep, standard,
 			numbered(onCluster(nothingRan), noMachine), stop},
 
-		// Ruling 8: a pool step's failover to another machine waits at most
-		// fleetWaitSeconds for a busy one, and at least a second (0 is no bound).
-		{"pool step's failover waits fleetWaitSeconds", retryPoolStep, standard,
+		// A failover to another machine waits for a busy or offline one at most
+		// the longest retry delay, and at least a second (0 is no bound) -- or, for
+		// a pool step whose policy allows the cloud, fleetWaitSeconds, the
+		// installation's own preference before the cluster that follows.
+		{"pool step's failover waits fleetWaitSeconds when the cloud follows", retryPoolStep, standard,
 			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(60, "M"), 0)},
 		{"pool step's failover waits a second at least", retryPoolStep, noFleetWait,
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(1, "M"), 0)},
+		{"pool step's failover with no cloud to follow waits the longest delay", retryPoolStep, noCloud,
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(120, "M"), 0)},
+		{"fleet step's failover waits the longest delay, not the run's ceiling", retryFleetStep, oneDelay,
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(10, "M"), 0)},
+		{"a hand-built policy with no delays waits a second for a failover", retryFleetStep, handBuiltOthers,
 			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(1, "M"), 0)},
 		{"pool step's pinned retry waits the largest delay", retryPoolStep, standard,
 			numbered(on("M", nothingRan)), next(pinnedTo("M", 120), 30*time.Second)},
@@ -195,7 +204,7 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 		{"outcome unknown, not repeatable", retryFleetStep, standard,
 			numbered(on("M", unknownOutcome)), stop},
 		{"outcome unknown, repeatable: another machine", repeatableStep(retryFleetStep), standard,
-			numbered(on("M", unknownOutcome)), next(failoverFrom(0, "M"), 0)},
+			numbered(on("M", unknownOutcome)), next(failoverFrom(120, "M"), 0)},
 		{"outcome unknown, repeatable, pool: another machine within the Fleet wait", repeatableStep(retryPoolStep), standard,
 			numbered(on("M", unknownOutcome)), next(failoverFrom(60, "M"), 0)},
 		{"after the others: M once", repeatableStep(retryFleetStep), standard,

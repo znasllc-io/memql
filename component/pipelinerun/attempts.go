@@ -440,11 +440,11 @@ func cutText(s string, n int) string {
 // owed retries need sameMachine > 0, rule 2 needs otherMachines, rule 3
 // cloudFallback.
 //
-// THE WAITS a placed attempt carries (AttemptPlacement.MaxWaitSeconds): a pinned
-// machine is waited for at most the largest delay, and at least a second; a
-// pool step's failover to another machine at most fleetWaitSeconds and at least
-// a second (ruling 8: zero would mean no bound); a fleet step's failover, like
-// its first attempt, until the run's ceiling.
+// THE WAITS a placed attempt carries (AttemptPlacement.MaxWaitSeconds), each at
+// least a second because zero would mean no bound: a pinned machine is waited
+// for at most the largest delay; a failover to another machine at most the
+// largest delay too, or, for a pool step whose policy allows the cloud,
+// fleetWaitSeconds (failover says why).
 //
 // The run's ceiling is not this function's: the caller refuses to wait into it
 // or to start an attempt with less than a second of it left (runStep).
@@ -452,22 +452,56 @@ func cutText(s string, n int) string {
 // Regression tests: TestChooseNextFollowsTheRetryOrder (every rule and ruling,
 // row by row) and the driver's own in driver_retry_test.go.
 func chooseNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, history []attemptRecord) (*pipelines.AttemptPlacement, time.Duration, bool) {
-	// Every attempt's placement, recomputed from the records before it: attempt
-	// 1 has none (its manifest placement decides), and each later one is this
-	// function's answer for its prefix (see attemptRecord on why that is
-	// stable). Whether an attempt was a pinned retry or an unpinned failover
-	// decides what its answer proves (ruling 9).
+	sent, ok := sentPlacements(step, policy, history)
+	if !ok {
+		// A history these rules could not have written: nothing in it can be
+		// trusted to choose a place, so the step ends as it stands.
+		return nil, 0, false
+	}
+	return decideNext(step, policy, history, sent)
+}
+
+// sentPlacements is every attempt's placement, recomputed from the records
+// before it: attempt 1 has none (its manifest placement decides), and each later
+// one is chooseNext's answer for its prefix (see attemptRecord on why that is
+// stable). Whether an attempt was a pinned retry or an unpinned failover decides
+// what its answer proves (exhausting). false for a history these rules could not
+// have written.
+func sentPlacements(step pipelines.Step, policy pipelines.ComputePlacementPolicy, history []attemptRecord) ([]*pipelines.AttemptPlacement, bool) {
 	sent := make([]*pipelines.AttemptPlacement, len(history))
 	for k := 1; k < len(history); k++ {
 		placement, _, ok := decideNext(step, policy, history[:k], sent[:k])
 		if !ok {
-			// A history these rules could not have written: nothing in it can be
-			// trusted to choose a place, so the step ends as it stands.
-			return nil, 0, false
+			return nil, false
 		}
 		sent[k] = placement
 	}
-	return decideNext(step, policy, history, sent)
+	return sent, true
+}
+
+// failureToSettle is the attempt whose failure a step that ends now is settled
+// with, when that is not its last attempt: the last attempt only found the
+// fleet exhausted (exhausting), a search for a free machine that ran nothing
+// and explains nothing, and the step failed because of the attempt before it
+// (three failed fetches, say, not "no machine could take the step"). It answers
+// the last attempt before the search that is not one; false when the last
+// attempt is the one to settle with, or the history cannot be read. The
+// search stays in the step's history, and its own resources are acknowledged
+// as any attempt's are.
+//
+// Regression test: TestAStepThatOnlyFoundTheFleetFullEndsWithItsRealFailure.
+func failureToSettle(step pipelines.Step, policy pipelines.ComputePlacementPolicy, history []attemptRecord) (attemptRecord, bool) {
+	n := len(history)
+	sent, ok := sentPlacements(step, policy, history)
+	if !ok || n == 0 || !exhausting(history[n-1], sent[n-1]) {
+		return attemptRecord{}, false
+	}
+	for i := n - 2; i >= 0; i-- {
+		if !exhausting(history[i], sent[i]) {
+			return history[i], true
+		}
+	}
+	return attemptRecord{}, false
 }
 
 // decideNext is chooseNext for one history whose attempts' placements are known.
@@ -707,27 +741,48 @@ func (h attemptHistory) cluster() (*pipelines.AttemptPlacement, bool) {
 // delay and at least a second: a machine that is offline, or still holds the
 // step's previous command, then counts as nothing ran there.
 func (h attemptHistory) pinned(machine string) *pipelines.AttemptPlacement {
-	longest := 0
-	for _, d := range h.policy.Retries.DelaysSeconds {
-		longest = max(longest, d)
-	}
-	return &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet, PinWorker: machine, MaxWaitSeconds: attemptWait(longest)}
+	return &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet, PinWorker: machine, MaxWaitSeconds: attemptWait(h.longestDelay())}
 }
 
-// failover is an attempt on any eligible machine but those tried. A pool step's
-// waits for a busy machine at most fleetWaitSeconds, and at least a second
-// (ruling 8), then counts as nothing ran, which brings rule 3 in. A fleet step's
-// waits as its first attempt does, until the run's ceiling: nothing else can
-// run it.
+// failover is an attempt on any eligible machine but those tried. Its wait for
+// a busy or offline machine is bounded, and when it runs out the attempt counts
+// as nothing ran and not retried there: the fleet is exhausted for the rest of
+// the step (exhausting), and rule 3 or the step's end follows. The bound:
+//
+//   - for a pool step whose policy allows the cloud, fleetWaitSeconds (at least
+//     a second, since zero would mean no bound): the installation's own
+//     preference for the fleet before it spends cloud, as for a first attempt;
+//   - otherwise the longest retry delay (at least a second), the wait a pinned
+//     retry is given. No cloud follows, so the step's choice is a wait on the
+//     fleet or its end. Waiting until the run's ceiling would hold the stage's
+//     slot for hours where the step used to fail at once; waiting a second would
+//     end the step on any fleet that is merely busy. The longest delay is the
+//     wait the installation already chose for a retry here.
+//
+// A failover that meets a fleet busy for longer than that ends the step, which
+// is never worse than no retry (a known limit, harness-decisions.md).
+// Regression tests: TestChooseNextFollowsTheRetryOrder (the failover rows) and
+// TestAFailoverWaitsTheLongestDelayWhenNoCloudFollows.
 func (h attemptHistory) failover() *pipelines.AttemptPlacement {
 	p := &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet}
 	if len(h.tried) > 0 {
 		p.ExcludeWorkers = slices.Clone(h.tried)
 	}
-	if h.pool {
+	if h.pool && h.policy.CloudFallback {
 		p.MaxWaitSeconds = attemptWait(h.policy.FleetWaitSeconds)
+	} else {
+		p.MaxWaitSeconds = attemptWait(h.longestDelay())
 	}
 	return p
+}
+
+// longestDelay is the largest of the policy's retry delays, 0 for none.
+func (h attemptHistory) longestDelay() int {
+	longest := 0
+	for _, d := range h.policy.Retries.DelaysSeconds {
+		longest = max(longest, d)
+	}
+	return longest
 }
 
 // attemptWait is a placed attempt's wait in seconds: at least one, because zero

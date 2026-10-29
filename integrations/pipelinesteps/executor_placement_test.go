@@ -279,6 +279,35 @@ func TestAPlacedFleetAttemptNeverSpillsToTheCluster(t *testing.T) {
 	})
 }
 
+// TestAMachinesRefusalEndsAPoolStepsFirstAttempt: a pool step's first attempt
+// goes on to the cluster inside the attempt only when the fleet as a whole
+// stayed without capacity through the installation's preference, which is the
+// fleet's own answer and names no machine. A refusal one machine made before
+// start (its own limits or policy, Host commands off, pipelines no longer
+// allowed) names that machine and ends the attempt nothing ran: the driver,
+// which holds the step's history, tries the same machine or another before the
+// step spends cloud, and reaches the cluster after them where the policy allows.
+func TestAMachinesRefusalEndsAPoolStepsFirstAttempt(t *testing.T) {
+	refused := refusedResult(pl.CodeNoMachineForNeed,
+		"No machine of the owner's that allows pipeline steps could take the step (denied_by_policy): the limits exceed this machine's caps")
+	refused.Where = pl.Where{Surface: pl.PlacementFleet, WorkerID: "reg-1", MachineName: "MSI Raider"}
+	refused.AttemptClass, refused.NotRetriedHere = pl.AttemptNothingRan, true
+	wb := clusterSucceeds()
+	fleet := &recordingFleet{result: refused}
+	res, err := newTestExecutor(wb, fleet).Execute(context.Background(), poolPlacementStep())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFailure(t, res, pl.OutcomeRefused, pl.CodeNoMachineForNeed)
+	if res.AttemptClass != pl.AttemptNothingRan || !res.NotRetriedHere || res.Where.WorkerID != "reg-1" {
+		t.Errorf("class = %q, notRetriedHere = %v, machine %q; want nothing_ran, not retried on reg-1",
+			res.AttemptClass, res.NotRetriedHere, res.Where.WorkerID)
+	}
+	if cluster, machines := asked(wb, fleet); cluster != 0 || machines != 1 {
+		t.Fatalf("cluster %d, fleet %d: a machine's refusal sent the first attempt to the cloud", cluster, machines)
+	}
+}
+
 // TestPlacementTravelsToTheFleetInTheStepRun: the pin, the exclusions and the
 // wait are copied into the StepRun the fleet reads, as the attempt's own
 // copies (the request is the driver's, and not the fleet's to edit).

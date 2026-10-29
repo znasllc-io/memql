@@ -1199,16 +1199,18 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 // no copy of it is sent. Its resources were confirmed gone before this drive
 // started anything (openWork).
 //
-// THE LOOP STOPS, and the step ends with its last attempt's receipt, when the
-// attempt passed or ended for good (its class), when chooseNext gives the
-// step no more attempts (the policy's limits, MaxStepAttempts), or when the
-// next attempt could not start with a second of the run's ceiling left -- a
-// wait into the ceiling is never begun, and one the process slept past
-// starts nothing. A cancel between attempts settles the step cancelled. A
-// lost lease, an intent or outcome the journal refused, or a cleanup that
-// could not be confirmed stops the drive with nothing more written, and the
-// run stays unfinished for recovery. So does the end of the workflow call that
-// runs the step, during a wait: nothing more is written (beginNextAttempt).
+// THE LOOP STOPS, and the step ends with its last attempt's receipt (or, when
+// that attempt only found the fleet full, the failure before it:
+// endingReceipt), when the attempt passed or ended for good (its class), when
+// chooseNext gives the step no more attempts (the policy's limits,
+// MaxStepAttempts), or when the next attempt could not start with a second of
+// the run's ceiling left -- a wait into the ceiling is never begun, and one the
+// process slept past starts nothing. A cancel between attempts settles the step
+// cancelled. A lost lease, an intent or outcome the journal refused, or a
+// cleanup that could not be confirmed stops the drive with nothing more
+// written, and the run stays unfinished for recovery. So does the end of the
+// workflow call that runs the step, during a wait: nothing more is written
+// (beginNextAttempt).
 //
 // ONE WRITER: every journal write of the step, every attempt's included, is
 // made here, on the step's own goroutine. The workflow's other writers of a
@@ -1292,9 +1294,11 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		next, nextAt, retry := dr.nextAttempt(step, policy, end, rec, history, ceilingAt)
 		if !retry {
 			// The step's receipt: this attempt's, restating the whole history
-			// (settle). A runner's answer releases its resources once recorded;
-			// a timeout, an error or a cancel leaves them to the run's cancel.
-			if dr.settle(ctx, t, rec) && end.kind == endResult {
+			// (settle) -- or, when this attempt only found the fleet full, the
+			// failure before it (endingReceipt). A runner's answer releases this
+			// attempt's resources once recorded; a timeout, an error or a cancel
+			// leaves them to the run's cancel.
+			if dr.settle(ctx, t, dr.endingReceipt(step, policy, history, rec)) && end.kind == endResult {
 				dr.acknowledgeReceipt(ctx, exec, req)
 			}
 			return
@@ -1339,7 +1343,7 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		if !dr.confirmReceiptCleanup(ctx, exec, req) || dr.cleanupFailed.Load() {
 			return
 		}
-		if !dr.beginNextAttempt(ctx, t, next, nextAt, ceilingAt, rec) {
+		if !dr.beginNextAttempt(ctx, t, next, nextAt, ceilingAt, dr.endingReceipt(step, policy, history, rec)) {
 			return
 		}
 	}
@@ -1354,13 +1358,15 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 // nextAttemptAt has come, under every stop the loop has between two attempts
 // (beginNextAttempt). A step chooseNext gives no next attempt, or whose next
 // attempt could not start with a second of the run's ceiling left (this
-// replica's ceiling may be shorter), ends now with the ended attempt's failure,
-// rebuilt from its record. It answers false when the step's goroutine is done.
+// replica's ceiling may be shorter), ends now with the ended attempt's failure
+// (or, after a search that only found the fleet full, the one before it:
+// endingReceipt), rebuilt from its record. It answers false when the step's
+// goroutine is done.
 func (dr *runDriver) continueAttempts(ctx context.Context, t *stepTrack, policy pipelines.ComputePlacementPolicy, ceilingAt time.Time) bool {
 	history := t.snapshot().Attempts
 	nextAt := t.nextAttemptAt
 	t.betweenAttempts, t.nextAttemptAt = false, time.Time{}
-	last := dr.recordReceipt(history[len(history)-1])
+	last := dr.endingReceipt(t.step, policy, history, dr.recordReceipt(history[len(history)-1]))
 	next, _, ok := chooseNext(t.step, policy, history)
 	switch {
 	case !ok:
@@ -1380,8 +1386,9 @@ func (dr *runDriver) continueAttempts(ctx context.Context, t *stepTrack, policy 
 
 // beginNextAttempt waits until the step's next attempt may start and then
 // writes its intent: a new attempt, never a recovery, placed where chooseNext
-// said. last is the receipt of the attempt that just ended, which ends the step
-// when the next cannot start. It answers false when the step's goroutine is
+// said. last is the receipt that ends the step when the next cannot start: the
+// attempt that just ended, or the failure before it when that attempt only found
+// the fleet full (endingReceipt). It answers false when the step's goroutine is
 // done, having written:
 //
 //   - nothing, when the workflow call that runs the step ended during the wait
@@ -1459,13 +1466,26 @@ func (dr *runDriver) attemptReceipt(end stepEnd, ceiling time.Duration, requires
 	return dr.receiptFor(end.result, end.elapsed, requiresVerifiedArtifacts)
 }
 
+// endingReceipt is the receipt a step that ends now settles with: rec, its last
+// attempt's, unless that attempt only found the fleet exhausted, when it is the
+// failure before it, rebuilt from its record (failureToSettle, recordReceipt).
+// Every path that ends a step after an attempt asks it: no next attempt, and
+// the run's ceiling before the next one, here or on a replica that took the
+// run over (continueAttempts).
+func (dr *runDriver) endingReceipt(step pipelines.Step, policy pipelines.ComputePlacementPolicy, history []attemptRecord, rec receipt) receipt {
+	if r, ok := failureToSettle(step, policy, history); ok {
+		return dr.recordReceipt(r)
+	}
+	return rec
+}
+
 // nextAttempt is where the step's next attempt goes and when it may start, or
 // false when the step ends with this attempt. Only a runner's answer that
 // failed is retried, and only as the executor classified it (chooseNext); a
 // timeout, an error and a cancel are final. A next attempt that could not start
 // with a second of the run's ceiling left is no next attempt: the wait is not
-// begun, so the step ends now with this attempt's failure rather than at the
-// ceiling with nothing more to show.
+// begun, so the step ends now with its failure (endingReceipt) rather than at
+// the ceiling with nothing more to show.
 func (dr *runDriver) nextAttempt(step pipelines.Step, policy pipelines.ComputePlacementPolicy, end stepEnd, rec receipt, history []attemptRecord, ceilingAt time.Time) (*pipelines.AttemptPlacement, time.Time, bool) {
 	if end.kind != endResult || rec.status != WorkStepFailed {
 		return nil, time.Time{}, false

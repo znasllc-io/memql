@@ -36,18 +36,22 @@ func TestPoolFallsBackOnlyAfterConfirmedPrestartCapacityRefusal(t *testing.T) {
 		code     string
 		err      error
 		fallback bool
+		machine  string
 	}{
-		{"unavailable before start", pl.OutcomeRefused, pl.CodeNoMachineForNeed, nil, true},
-		{"command completed", pl.OutcomeSucceeded, "", nil, false},
-		{"machine failed after start", pl.OutcomeFailed, pl.CodeNoMachineForNeed, nil, false},
-		{"authority refused", pl.OutcomeRefused, pl.CodeFleetDisabled, nil, false},
-		{"gate failed", pl.OutcomeRefused, pl.CodeExecutorError, nil, false},
-		{"uncertain execution", pl.OutcomeFailed, pl.CodeExecutionUncertain, nil, false},
-		{"transport error", pl.OutcomeRefused, pl.CodeNoMachineForNeed, errors.New("lost response"), false},
-		{"cancelled", pl.OutcomeCancelled, pl.CodeStepCancelled, nil, false},
+		{"unavailable before start", pl.OutcomeRefused, pl.CodeNoMachineForNeed, nil, true, ""},
+		// One machine refused (its policy, its caps, its owner's switch): the
+		// attempt ends nothing ran, and the driver routes around that machine.
+		{"a machine refused before start", pl.OutcomeRefused, pl.CodeNoMachineForNeed, nil, false, "reg-1"},
+		{"command completed", pl.OutcomeSucceeded, "", nil, false, ""},
+		{"machine failed after start", pl.OutcomeFailed, pl.CodeNoMachineForNeed, nil, false, ""},
+		{"authority refused", pl.OutcomeRefused, pl.CodeFleetDisabled, nil, false, ""},
+		{"gate failed", pl.OutcomeRefused, pl.CodeExecutorError, nil, false, ""},
+		{"uncertain execution", pl.OutcomeFailed, pl.CodeExecutionUncertain, nil, false, ""},
+		{"transport error", pl.OutcomeRefused, pl.CodeNoMachineForNeed, errors.New("lost response"), false, ""},
+		{"cancelled", pl.OutcomeCancelled, pl.CodeStepCancelled, nil, false, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fleet := &poolFleet{result: pl.StepResult{Status: tc.status, Failure: &pl.Failure{Code: tc.code}}, err: tc.err}
+			fleet := &poolFleet{result: pl.StepResult{Status: tc.status, Failure: &pl.Failure{Code: tc.code}, Where: pl.Where{WorkerID: tc.machine}}, err: tc.err}
 			// A second host receives only the serialized request: no originating
 			// dispatcher state is available to grant or recover cloud execution.
 			wb := &scriptedWorkbench{step: func(_ int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {

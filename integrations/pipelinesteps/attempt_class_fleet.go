@@ -24,10 +24,12 @@ import (
 //
 // Agent-tagged: the dispatcher's Result is.
 
-// The raw codes a machine answers with. They are the cockpit's
-// (cockpit/internal/worker/tools/pipeline_step.go) and the dispatcher's
-// (integrations/agent/worker); neither exports them, and the existing fleet
-// code spells the capacity ones the same way (fleet_capacity.go).
+// The raw codes a machine answers with. Most are the cockpit's
+// (cockpit/internal/worker/tools/pipeline_step.go); pipelines_not_allowed is the
+// dispatcher's and worker_feature_* the stream session's (integrations/agent/worker,
+// component/worker), which is why they are read apart (engineRefusal). Neither
+// side exports them, and the existing fleet code spells the capacity ones the
+// same way (fleet_capacity.go).
 const (
 	machineCacheUnavailable    = "pipeline_cache_unavailable"
 	machineRuntimeUnavailable  = "pipeline_runtime_unavailable"
@@ -42,9 +44,11 @@ const (
 	machineWorkerDisconnected  = "worker_disconnected"
 )
 
-// machineRefusal reads a machine's own code for the one thing a code can
-// prove: that the command never started there, and whether that machine should
-// not be tried again for this step. Anything else is false, false.
+// machineRefusal reads a MACHINE's own code (its Cockpit's) for the one thing a
+// code can prove: that the command never started there, and whether that
+// machine should not be tried again for this step. Anything else is false,
+// false. Each of these is answered by the Cockpit before the command, so the
+// code is proof on its own, with or without the dispatcher's verdict.
 func machineRefusal(code string) (nothingRan, notRetriedHere bool) {
 	switch code {
 
@@ -66,38 +70,61 @@ func machineRefusal(code string) (nothingRan, notRetriedHere bool) {
 		// Docker, or the declared runtime, was not usable. Checked before the
 		// checkout and before the container is created.
 		return true, false
-	case machineCapacityBusy, machineCapacityFenced, machineCapacityUnavailable:
+	case machineCapacityBusy, machineCapacityFenced:
 		// The machine's one-command-per-OS-user reservation, its disk or memory
-		// headroom, or an operator's fence refused. The capacity wait normally
+		// headroom, or a retained local build refused. The capacity wait normally
 		// absorbs these (dispatchWhenCapacityAvailable); one that reaches the
 		// result is still a refusal before the command ("a capacity refusal that
-		// reached the result", spec section 4).
-		return true, false
-	case machineDeniedByPolicy:
-		// The machine's own pipelines policy refused the repository or the limits,
-		// at the top of the step, before anything else. The dispatcher lists it as
-		// proof of no start (pipelineRefusedBeforeStart). The spec does not say to
-		// stop retrying it, so it is not flagged; the driver's own bounds do.
-		return true, false
-	case machineFeatureUnavailable:
-		// The settings read that decides whether Host commands are allowed could
-		// not be made by the replica holding the machine's stream. Transient, so
-		// the same machine may be tried again (ruling 5). The refusal precedes the
-		// send.
+		// reached the result", spec section 4), and a busy machine frees up.
 		return true, false
 
 	// NOTHING RAN, and that machine is not tried again: what refused will still
-	// be true when a retry's delay is over, so a retry here only spends it.
+	// be true when a retry's delay is over, so a retry here only spends it, and
+	// the driver moves on to the step's other machines at once.
 	//
 	// pipeline_recovery_required is deliberately NOT here. It proves nothing
 	// about whether the command ran, so it is an unknown outcome, decided in
 	// fleetAttemptClass before the dispatcher's flag is read. Do not add it to
 	// this list: that is the mistake the spec's table made.
 
+	case machineDeniedByPolicy:
+		// The machine's own pipelines policy refused the repository or the step's
+		// limits (a step declaring more than its container caps), at the top of
+		// the step, before anything else. The dispatcher lists it as proof of no
+		// start (pipelineRefusedBeforeStart). The policy file does not change
+		// within a retry's delay.
+		return true, true
+	case machineCapacityUnavailable:
+		// The machine could not take its build reservation for a reason that is
+		// not another build: a local model call that may still be running holds
+		// it until the call's own deadline (the inference fence), or a record of
+		// interrupted work needs recovering. Neither ends within a retry's delay.
+		return true, true
+	}
+	return false, false
+}
+
+// engineRefusal reads the codes THIS ENGINE makes when it refuses a dispatch
+// before sending anything: the replica holding the machine's stream
+// (worker_feature_disabled, worker_feature_unavailable) and the dispatcher
+// (pipelines_not_allowed). A code is only a word, and these say nothing a
+// machine vouched for, so they are nothing ran only beside the dispatcher's own
+// verdict (Result.RefusedBeforeStart), which every site that makes them sets.
+// Without it they are a code like any other, read from the result: a reply that
+// carried one unflagged (a sibling of another version, a malformed answer)
+// must not make an ordinary failure retryable. notRetriedHere is whether that
+// machine should not be tried again for this step.
+func engineRefusal(code string) (refused, notRetriedHere bool) {
+	switch code {
+	case machineFeatureUnavailable:
+		// The settings read that decides whether Host commands are allowed could
+		// not be made by the replica holding the machine's stream. Transient, so
+		// the same machine may be tried again. The refusal precedes the send.
+		return true, false
 	case machineFeatureDisabled:
 		// The owner switched Host commands off in Fleet settings, and the machine's
-		// stream session refused before sending anything (Task 2). An owner's
-		// switch does not flip back in a retry delay.
+		// stream session refused before sending anything. An owner's switch does
+		// not flip back in a retry delay.
 		return true, true
 	case machinePipelinesNotAllowed:
 		// The machine's live registration no longer advertises pipelines=allowed
@@ -208,9 +235,11 @@ func fleetAttemptClass(r worker.Result, res pl.StepResult, dispatched bool) (pl.
 		// NOTHING RAN, by the dispatcher's own verdict: no candidate, or every
 		// candidate refused before anything was sent to it, a sibling's refusals
 		// under codes of their own included. Whether the machine it names is
-		// worth another try follows that machine's own code.
-		_, notRetried := machineRefusal(r.ErrorCode)
-		return pl.AttemptNothingRan, notRetried
+		// worth another try follows the refusal's code: a machine's, or one of the
+		// engine's own, which only this verdict lets count.
+		_, machineSays := machineRefusal(r.ErrorCode)
+		_, engineSays := engineRefusal(r.ErrorCode)
+		return pl.AttemptNothingRan, machineSays || engineSays
 	case r.OK:
 		// The command ran to an exit. The exit decides (75 asks to be retried),
 		// except for one thing the exit cannot see: it exited 0 and its artifacts
@@ -224,7 +253,9 @@ func fleetAttemptClass(r worker.Result, res pl.StepResult, dispatched bool) (pl.
 	}
 
 	// The machine answered with a failure, without the dispatcher's verdict
-	// that nothing started.
+	// that nothing started. Only a machine's own code can prove it here; the
+	// engine's refusals (engineRefusal) need the verdict, and fall through to
+	// the result's reading below.
 	if nothingRan, notRetried := machineRefusal(r.ErrorCode); nothingRan {
 		return pl.AttemptNothingRan, notRetried
 	}

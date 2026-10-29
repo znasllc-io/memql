@@ -12,6 +12,7 @@ import (
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	worker "github.com/znasllc-io/memql/integrations/agent/worker"
+	"github.com/znasllc-io/memql/integrations/workbench"
 )
 
 // fleet_attempt_test.go -- what a MACHINE's answer proves about whether the
@@ -64,22 +65,35 @@ func TestFleetAttemptClassTable(t *testing.T) {
 		{"pipeline_runtime_unavailable the dispatcher flagged", nil, machine("pipeline_runtime_unavailable", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
 		// machine | a capacity refusal that reached the result.
 		{"a capacity refusal that reached the result", nil, machine("pipeline_capacity_busy", false), pl.OutcomeFailed, pl.AttemptNothingRan, false},
-		{"pipeline_capacity_unavailable", nil, machine("pipeline_capacity_unavailable", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
-		// The machine's own policy refusing the repository is a refusal before
-		// anything started. The table does not say to stop retrying it.
-		{"denied_by_policy the dispatcher flagged", nil, machine("denied_by_policy", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
-		{"denied_by_policy from a sibling that did not flag it", nil, machine("denied_by_policy", false), pl.OutcomeFailed, pl.AttemptNothingRan, false},
 		// No candidate at all, or a code this engine has never seen: the
 		// dispatcher's verdict is what decides, never the code.
 		{"no machine to route to", nil, machine("no_worker_available", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
 		{"a refusal code nobody has seen", nil, machine("a_code_this_engine_has_never_seen", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
 		// worker_feature_unavailable: the settings read could not be made. It
-		// is transient, so the same machine may be tried again (ruling 5).
+		// is transient, so the same machine may be tried again.
 		{"worker_feature_unavailable", nil, machine("worker_feature_unavailable", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
 
-		// machine | nothing ran, and that machine is not retried.
+		// machine | nothing ran, and that machine is not retried: what refused
+		// will still hold when a retry's delay is over.
 		{"worker_feature_disabled", nil, machine("worker_feature_disabled", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
 		{"pipelines_not_allowed", nil, machine("pipelines_not_allowed", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
+		// The machine's own policy refusing the repository or the step's limits
+		// (over its container caps) is a refusal before anything started, and
+		// its policy file does not change within a retry's delay.
+		{"denied_by_policy the dispatcher flagged", nil, machine("denied_by_policy", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
+		{"denied_by_policy from a sibling that did not flag it", nil, machine("denied_by_policy", false), pl.OutcomeFailed, pl.AttemptNothingRan, true},
+		// The machine could not take its build reservation: a local model call
+		// that may still be running holds it until the call's deadline, or a
+		// record of interrupted work needs recovering.
+		{"pipeline_capacity_unavailable", nil, machine("pipeline_capacity_unavailable", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
+		{"raw pipeline_capacity_unavailable", nil, machine("pipeline_capacity_unavailable", false), pl.OutcomeFailed, pl.AttemptNothingRan, true},
+
+		// machine | the ENGINE's own refusals before send prove nothing on their
+		// own: only beside the dispatcher's verdict are they nothing ran. Without
+		// it they are a code like any other, read from the result: final.
+		{"worker_feature_disabled without the dispatcher's verdict", nil, machine("worker_feature_disabled", false), pl.OutcomeFailed, pl.AttemptFinal, false},
+		{"worker_feature_unavailable without the dispatcher's verdict", nil, machine("worker_feature_unavailable", false), pl.OutcomeFailed, pl.AttemptFinal, false},
+		{"pipelines_not_allowed without the dispatcher's verdict", nil, machine("pipelines_not_allowed", false), pl.OutcomeFailed, pl.AttemptFinal, false},
 
 		// machine | pipeline_recovery_required is an UNKNOWN outcome, never a
 		// fresh start, and that machine is not tried again. The Cockpit answers
@@ -623,21 +637,74 @@ func TestAPlacedPoolAttemptWaitsOnItsOwnBudget(t *testing.T) {
 			t.Errorf("class = %q, notRetriedHere = %v, want nothing_ran and not retried here", res.AttemptClass, res.NotRetriedHere)
 		}
 
-		// The same refusal on the pool step's FIRST attempt is the Codex rule,
-		// kept as it was: a refusal for a reason other than confirmed capacity
-		// is never a licence to go on to the cloud, and reads as an executor
-		// error. It is final -- the driver does not retry it.
+		// The same refusal on the pool step's FIRST attempt reads the same: the
+		// dispatcher verified that nothing started, so the attempt is nothing ran
+		// and the driver decides where the step goes next. It does not go on to
+		// the cloud inside the attempt, which only the fleet staying full through
+		// the installation's preference does.
 		d = &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) { return refusal, nil }}
 		f, _, _, _ = newTestFleet(t, d)
-		res, err = newTestExecutor(&scriptedWorkbench{}, f).Execute(context.Background(), req(nil))
+		wb := &scriptedWorkbench{}
+		res, err = newTestExecutor(wb, f).Execute(context.Background(), req(nil))
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantFailure(t, res, pl.OutcomeRefused, pl.CodeExecutorError)
-		if res.AttemptClass != pl.AttemptFinal {
-			t.Errorf("a pool first attempt's non-capacity refusal: class = %q, want final", res.AttemptClass)
+		wantFailure(t, res, pl.OutcomeRefused, pl.CodeNoMachineForNeed)
+		if res.AttemptClass != pl.AttemptNothingRan || !res.NotRetriedHere || res.Where.WorkerID != "reg-1" {
+			t.Errorf("a pool first attempt's verified refusal: class = %q, notRetriedHere = %v, machine %q; want nothing_ran, not retried on reg-1",
+				res.AttemptClass, res.NotRetriedHere, res.Where.WorkerID)
+		}
+		if n := len(wb.sent(workbench.PipelineStepAction)); n != 0 {
+			t.Errorf("the first attempt went on to the cluster (%d Job(s)) on a machine's refusal", n)
 		}
 	})
+}
+
+// A pool step that declares more than a machine's container caps (Cockpit's
+// default caps are 2048 MiB and 2000 mCPU) is refused by that machine's own
+// policy before anything starts: denied_by_policy, which the dispatcher flags
+// as refused before start. Its first attempt is nothing ran, and that machine is
+// not tried again, since its caps do not change within a retry's delay. Under a
+// policy that allows the cloud the driver then routes around it and, with no
+// other machine, places the cluster (chooseNext's rule 3), which runs the step.
+func TestAPoolStepOverAMachinesCapsReachesTheCluster(t *testing.T) {
+	overCaps := worker.Result{ErrorCode: "denied_by_policy", RefusedBeforeStart: true, WorkerId: "reg-1", MachineName: "MSI Raider", NodeId: "agent-b",
+		ErrorMessage: "pipeline_step: memoryMiB 4096 exceeds this machine's container_memory_mib 2048"}
+	asked := 0
+	d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+		asked++
+		return overCaps, nil
+	}}
+	f, _, _, _ := newTestFleet(t, d)
+	wb := clusterSucceeds()
+	exec := newTestExecutor(wb, f)
+	req := placedPoolRequest()
+	req.Step.MemoryMiB = 4096
+	req.ComputePlacement = &pl.ComputePlacementPolicy{FleetWaitSeconds: 30, CloudFallback: true}
+
+	first, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFailure(t, first, pl.OutcomeRefused, pl.CodeNoMachineForNeed)
+	if first.AttemptClass != pl.AttemptNothingRan || !first.NotRetriedHere || first.Where.WorkerID != "reg-1" {
+		t.Fatalf("attempt 1: class = %q, notRetriedHere = %v, machine %q; want nothing_ran, not retried on reg-1",
+			first.AttemptClass, first.NotRetriedHere, first.Where.WorkerID)
+	}
+	if n := len(wb.sent(workbench.PipelineStepAction)); n != 0 || asked != 1 {
+		t.Fatalf("attempt 1 asked the fleet %d time(s) and made %d Job(s); want the one refusal and no Job", asked, n)
+	}
+
+	// The attempt the driver places next, once the fleet is exhausted.
+	req.Placement = &pl.AttemptPlacement{Surface: pl.PlacementCluster}
+	req.Attempt = 3
+	third, err := exec.Execute(context.Background(), req)
+	if err != nil || third.Status != pl.OutcomeSucceeded || third.Where.Surface != pl.PlacementCluster {
+		t.Fatalf("attempt on the cluster = %+v, %v; want it to run as a Job", third, err)
+	}
+	if n := len(wb.sent(workbench.PipelineStepAction)); n != 1 || asked != 1 {
+		t.Fatalf("the cluster attempt made %d Job(s) and asked the fleet %d time(s) in all; want one Job and no machine", n, asked)
+	}
 }
 
 // A wait for capacity is a wait before anything starts. A command already
@@ -659,5 +726,38 @@ func TestAPlacedWaitNeverShortensAStartedCommand(t *testing.T) {
 	res, err := newTestExecutor(nil, f).Execute(context.Background(), req)
 	if err != nil || res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("Execute = %+v, %v", res, err)
+	}
+}
+
+// A refusal before start reads as one sentence on the step: which machines
+// could not take it (those offering its needs, when it has any), the code once,
+// and the refusal's own words.
+func TestARefusalBeforeStartNamesTheNeedsOnlyWhenThereAreSome(t *testing.T) {
+	const off = "Host commands are off for this machine in Fleet settings (Commands and files)"
+	refusal := worker.Result{ErrorCode: "worker_feature_disabled", ErrorMessage: off, RefusedBeforeStart: true, WorkerId: "reg-1", NodeId: "agent-b"}
+	for _, c := range []struct {
+		name string
+		req  pl.StepRequest
+		want string
+	}{
+		{"a step with needs", fleetReq(),
+			"No machine of the owner's that offers docker, gpu and allows pipeline steps could take the step (worker_feature_disabled): " + off},
+		{"a step with none", placedPoolRequest(),
+			"No machine of the owner's that allows pipeline steps could take the step (worker_feature_disabled): " + off},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) { return refusal, nil }}
+			f, _, _, _ := newTestFleet(t, d)
+			run := fleetRun(c.req)
+			run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+			res, err := f.RunStep(context.Background(), c.req, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantFailure(t, res, pl.OutcomeRefused, pl.CodeNoMachineForNeed)
+			if res.Failure.Message != c.want {
+				t.Errorf("message\n got %q\nwant %q", res.Failure.Message, c.want)
+			}
+		})
 	}
 }

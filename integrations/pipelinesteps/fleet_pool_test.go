@@ -12,6 +12,11 @@ import (
 	worker "github.com/znasllc-io/memql/integrations/agent/worker"
 )
 
+// The pool step's first attempt goes on to the cloud inside the attempt
+// (fleetPreferenceRanOut) only after the preference ran out on capacity. A
+// machine's own policy refusing is nothing ran, names that machine, and ends
+// the attempt for the driver to route around; the engine's gate, an unknown
+// execution, a lost reply and a runtime failure never reach the cloud this way.
 func TestFleetPoolWaitOnlyEndsAfterConfirmedCapacityRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -22,7 +27,7 @@ func TestFleetPoolWaitOnlyEndsAfterConfirmedCapacityRefusal(t *testing.T) {
 		{"busy", worker.Result{ErrorCode: "pipeline_capacity_busy", RefusedBeforeStart: true}, nil, true},
 		{"no compatible machine", worker.Result{ErrorCode: "no_worker_available", RefusedBeforeStart: true}, nil, true},
 		{"engine gate", worker.Result{ErrorCode: "no_worker_available", RefusedBeforeStart: true, RefusedByGate: true}, nil, false},
-		{"worker policy", worker.Result{ErrorCode: "denied_by_policy", RefusedBeforeStart: true}, nil, false},
+		{"worker policy", worker.Result{ErrorCode: "denied_by_policy", RefusedBeforeStart: true, WorkerId: "reg-1"}, nil, false},
 		{"unknown execution", worker.Result{ErrorCode: "worker_disconnected"}, nil, false},
 		{"transport", worker.Result{ErrorCode: "pipeline_capacity_busy", RefusedBeforeStart: true}, errors.New("lost response"), false},
 		{"runtime failure", worker.Result{ErrorCode: "timeout"}, nil, false},
@@ -46,9 +51,12 @@ func TestFleetPoolWaitOnlyEndsAfterConfirmedCapacityRefusal(t *testing.T) {
 			run := fleetRun(req)
 			run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
 			result, err := fleet.RunStep(context.Background(), req, run)
-			fallback := err == nil && result.Status == pl.OutcomeRefused && result.Failure != nil && result.Failure.Code == pl.CodeNoMachineForNeed
+			fallback := err == nil && fleetPreferenceRanOut(result)
 			if fallback != tc.fallback || calls != 1 {
 				t.Fatalf("%s result=%+v error=%v calls=%d", tc.name, result, err, calls)
+			}
+			if tc.name == "worker policy" && (result.AttemptClass != pl.AttemptNothingRan || result.Where.WorkerID != "reg-1") {
+				t.Errorf("a machine's own policy refusal: class %q on %q, want nothing_ran naming the machine", result.AttemptClass, result.Where.WorkerID)
 			}
 		})
 	}
