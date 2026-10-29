@@ -88,18 +88,12 @@ func machineRefusal(code string) (nothingRan, notRetriedHere bool) {
 
 	// NOTHING RAN, and that machine is not tried again: what refused will still
 	// be true when a retry's delay is over, so a retry here only spends it.
+	//
+	// pipeline_recovery_required is deliberately NOT here. It proves nothing
+	// about whether the command ran, so it is an unknown outcome, decided in
+	// fleetAttemptClass before the dispatcher's flag is read. Do not add it to
+	// this list: that is the mistake the spec's table made.
 
-	case machineRecoveryRequired:
-		// The machine's last pipeline command left its reservation dirty and the
-		// machine could not reconcile it (or could not record ownership of this
-		// checkout), so it refuses every command until it is recovered. Caveat,
-		// recorded rather than hidden: the cockpit also answers this code when it
-		// could not record the cleanup of a command that HAS finished
-		// (pipeline_step.go, "could not record completed command cleanup"), where
-		// "nothing ran" is an over-claim. The spec's table classifies the code as
-		// nothing ran, and this follows it; telling the two apart takes a distinct
-		// code from the cockpit.
-		return true, true
 	case machineFeatureDisabled:
 		// The owner switched Host commands off in Fleet settings, and the machine's
 		// stream session refused before sending anything (Task 2). An owner's
@@ -165,6 +159,29 @@ func fleetAttemptClass(r worker.Result, res pl.StepResult, dispatched bool) (pl.
 		// reported as pipeline_executor_error. It names no machine to blame or
 		// retry, and the owner's off switch (kill_switch_engaged) is among them.
 		return pl.AttemptFinal, false
+	case r.ErrorCode == machineRecoveryRequired:
+		// OUTCOME UNKNOWN, and that machine is not tried again. The Cockpit
+		// answers this code BEFORE the command (it could not reconcile a dirty
+		// reservation, or record the ownership of the checkout or of the command
+		// it was about to start) and AFTER it (it could not record the cleanup of
+		// a command that has finished, native or container:
+		// cockpit/internal/worker/tools pipeline_step.go and pipeline_container.go
+		// use the one code for both). The code alone cannot say which, and the
+		// worse reading is the one that must hold: read as "nothing ran" it could
+		// start a command that already ran a second time on another machine, and
+		// a non-repeatable step (a release, a publish) would have run twice. As an
+		// unknown outcome a repeatable step still fails over to another machine
+		// and any other step fails as it does without retries.
+		//
+		// NOT RETRIED HERE: the machine refuses new work until its reservation is
+		// reconciled, so another attempt on it only spends the retry's delay.
+		//
+		// Decided before the dispatcher's verdict because no verdict can improve
+		// it. The dispatcher never flags this code as refused before start, and
+		// pins that (TestOnlyConfirmedContractRefusalsAllowAnotherMachine in
+		// integrations/agent/worker); if a change ever did, the Cockpit's two uses
+		// of the code would still make "nothing ran" unprovable.
+		return pl.AttemptOutcomeUnknown, true
 	case r.RefusedBeforeStart:
 		// NOTHING RAN, by the dispatcher's own verdict: no candidate, or every
 		// candidate refused before anything was sent to it, a sibling's refusals

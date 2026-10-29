@@ -78,10 +78,22 @@ func TestFleetAttemptClassTable(t *testing.T) {
 		{"worker_feature_unavailable", nil, machine("worker_feature_unavailable", true), pl.OutcomeRefused, pl.AttemptNothingRan, false},
 
 		// machine | nothing ran, and that machine is not retried.
-		{"raw pipeline_recovery_required", nil, machine("pipeline_recovery_required", false), pl.OutcomeFailed, pl.AttemptNothingRan, true},
-		{"pipeline_recovery_required the dispatcher flagged", nil, machine("pipeline_recovery_required", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
 		{"worker_feature_disabled", nil, machine("worker_feature_disabled", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
 		{"pipelines_not_allowed", nil, machine("pipelines_not_allowed", true), pl.OutcomeRefused, pl.AttemptNothingRan, true},
+
+		// machine | pipeline_recovery_required is an UNKNOWN outcome, never a
+		// fresh start, and that machine is not tried again. The Cockpit answers
+		// it before the command (a dirty reservation, checkout or command
+		// ownership) AND after it (recording the cleanup of a command that has
+		// finished, native or container), and the code alone cannot say which.
+		// Read as "nothing ran" it could run a command that already ran a second
+		// time on another machine. The machine refuses new work until it is
+		// reconciled, so retrying it would only spend the delay.
+		{"pipeline_recovery_required", nil, machine("pipeline_recovery_required", false), pl.OutcomeFailed, pl.AttemptOutcomeUnknown, true},
+		// The dispatcher never flags it (TestOnlyConfirmedContractRefusalsAllowAnotherMachine
+		// in the worker package pins that), so this row is a promise about the
+		// future: a flag that did arrive would not change what the code can prove.
+		{"pipeline_recovery_required even if a dispatcher flagged it", nil, machine("pipeline_recovery_required", true), pl.OutcomeRefused, pl.AttemptOutcomeUnknown, true},
 
 		// machine | the connection ended after the dispatch left.
 		{"worker_disconnected after the dispatch", nil, machine("worker_disconnected", false), pl.OutcomeFailed, pl.AttemptOutcomeUnknown, false},
