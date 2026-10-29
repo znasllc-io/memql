@@ -113,9 +113,9 @@ type Result struct {
 	// on NO machine (#5494): refused at a gate, no candidate to route to, or
 	// every candidate tried refused before anything was sent to it -- this
 	// replica's own refusals (a stale row, a machine at its cap, one not
-	// allowing pipelines on its connection here) and a sibling's, under
-	// whatever code the sibling answered with, which travels through
-	// verbatim. False means a machine may have started it: the call reached
+	// allowing pipelines on its connection here, one whose owner switched the
+	// feature off since the row was read) and a sibling's, under whatever code
+	// the sibling answered with, which travels through verbatim. False means a machine may have started it: the call reached
 	// one, or a forward's answer was lost after the envelope left this node,
 	// which is indistinguishable from a call that ran.
 	//
@@ -208,7 +208,8 @@ const (
 	// ForwardCompleted -- the call reached the machine. Never re-pick.
 	ForwardCompleted ForwardOutcome = iota
 	// ForwardRefusedBeforeStart -- the remote replica had no usable stream for
-	// the machine, or the machine was at its concurrency cap. Nothing ran.
+	// the machine, the machine was at its concurrency cap, or its owner had
+	// switched the feature off. Nothing ran.
 	ForwardRefusedBeforeStart
 )
 
@@ -390,6 +391,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			platform, _ := req.Args["platform"].(string)
 			plan.RequireNativePlatform(platform)
 		}
+		// A machine whose owner switched Host commands off can only refuse the
+		// step, so a pipeline does not spend an attempt -- or, for a machine a
+		// sibling replica holds, a forward -- finding out what its row already
+		// says. Only a pipeline step is narrowed here: an agent's call is still
+		// offered the machine, which refuses before send, and the owner's own
+		// fallback then decides whether the next machine is tried (fallbackFor).
+		plan.RequireHostCommands()
 	}
 	if err == nil && req.computerPermission != nil {
 		plan.RequireActionContract(permission.Contract, permission.Version)
@@ -666,7 +674,13 @@ func (d *Dispatcher) attemptLocal(
 	} else {
 		activity.end("failed")
 	}
-	if pipelineRefusedBeforeStart(req.Purpose, out, err) || workbenchRefusedBeforeStart(req.Purpose, out, err) {
+	// A refusal the stream session made at ADMISSION (the owner's feature switch
+	// is off, or could not be read) is proof nothing was sent, whatever the
+	// purpose: it is the one dispatch error that is. Any other error here -- a
+	// stream lost mid-call, or a call the owner's switch cancelled while it ran --
+	// leaves the command possibly on the machine and stays ForwardCompleted,
+	// which is what keeps it from being run a second time elsewhere.
+	if refusedBeforeSend(err) || pipelineRefusedBeforeStart(req.Purpose, out, err) || workbenchRefusedBeforeStart(req.Purpose, out, err) {
 		return out, ForwardRefusedBeforeStart
 	}
 	return out, ForwardCompleted
@@ -1000,8 +1014,25 @@ func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch
 	}
 }
 
+// refusedBeforeSend reports whether the replica holding a machine's stream
+// refused the dispatch at admission, before sending anything to the machine
+// (workerservice.RefusedBeforeSendError). It is the only dispatch error that
+// proves nothing ran; see attemptLocal and ForwardHandler, which both ask it.
+func refusedBeforeSend(err error) bool {
+	_, ok := workerservice.RefusedBeforeSend(err)
+	return ok
+}
+
 func translateResult(callId string, res *memqlv1.ToolResult, err error) Result {
 	if err != nil {
+		// A refusal before send keeps its OWN code and is read before any
+		// generic reading of the error: it can wrap a deadline (a settings read
+		// that ran out of time) that would otherwise be reported as a timeout,
+		// and it must never become worker_disconnected, the code for a call that
+		// may have run -- the code the dispatcher cannot move on from.
+		if code, ok := workerservice.RefusedBeforeSend(err); ok {
+			return Result{OK: false, ErrorCode: code, ErrorMessage: err.Error()}
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return Result{OK: false, ErrorCode: "timeout", ErrorMessage: "worker call timed out"}
 		}

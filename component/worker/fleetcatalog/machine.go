@@ -73,6 +73,17 @@ type Candidate struct {
 	Concurrency     map[string]uint32
 	ActiveCount     int
 	ConnectedNodeId string
+	// HostCommandsOff is true only when the owner switched "Host commands" off
+	// for this machine in Fleet settings -- the row's ownerFeatures.headless is
+	// not true. It is read by RoutePlan.RequireHostCommands and by nothing else:
+	// the switch governs commands and files, not model inference or workbenches.
+	//
+	// It is named for the OFF state so that the ZERO VALUE is today's behaviour.
+	// A row that never saved the setting means "on" (OwnerFeaturesFromRow keeps
+	// the owner's existing access), and so does every Candidate a test or
+	// another reader builds without this field; a field named for "on" would
+	// read false there and turn every such machine away.
+	HostCommandsOff bool
 	LastSelectedAt  time.Time
 	LastSeenAt      time.Time
 	RevokedAt       time.Time

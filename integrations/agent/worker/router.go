@@ -27,9 +27,11 @@ package worker
 // rejected.
 //
 // RE-PICK ONLY BEFORE SIDE EFFECTS (design D5). The loop in dispatch.go moves
-// to the next candidate on `worker_busy` and on a stream that went away BEFORE
-// the call started. It never re-picks after the wire carried the dispatch: an
-// exec that lost its stream mid-run may have run, and running it again on
+// to the next candidate on `worker_busy`, on a stream that went away BEFORE
+// the call started, and on a machine whose owner switched the feature off
+// (refused at admission, before anything was sent). It never re-picks after
+// the wire carried the dispatch: an exec that lost its stream mid-run, or was
+// cancelled by the owner's switch, may have run, and running it again on
 // another machine is a second side effect, not a retry.
 
 import (
@@ -567,6 +569,26 @@ func (p *RoutePlan) RequireActionContract(action string, version int) {
 			return ""
 		}
 		return fmt.Sprintf("%s has not reported %s contract %d", candidate.Label(), action, version)
+	})
+}
+
+// RequireHostCommands drops machines whose owner switched "Host commands" off in
+// Fleet settings, naming the setting as the reason so the routing record and
+// no_worker_available say what to turn back on.
+//
+// The row can be up to a heartbeat behind the owner's click, so this is the
+// router's early skip and not the guarantee: the replica holding the machine's
+// stream reads the setting again at admission and refuses before anything is
+// sent (component/worker RefusedBeforeSendError), which the dispatcher treats as
+// a reason to move on. It narrows the machines waiting for a connection as well:
+// a pipeline must not keep waiting for a machine its owner has told not to run
+// commands.
+func (p *RoutePlan) RequireHostCommands() {
+	p.filterCandidates(func(candidate Candidate) string {
+		if candidate.HostCommandsOff {
+			return "Host commands are off in Fleet settings"
+		}
+		return ""
 	})
 }
 

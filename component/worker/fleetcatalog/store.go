@@ -97,6 +97,11 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			LastSelectedAt:   rowTime(row, "lastSelectedAt"),
 			LastSeenAt:       rowTime(row, "lastSeenAt"),
 			RevokedAt:        rowTime(row, "revokedAt"),
+			// The SAME parser the holding replica admits a command with
+			// (ReadOwnerFeaturePolicy), so the router and that replica cannot
+			// disagree about what "off" is: a missing setting is on, and a
+			// malformed one is off.
+			HostCommandsOff: !workerservice.OwnerFeaturesFromRow(row["ownerFeatures"]).Headless,
 		})
 	}
 	return out, nil

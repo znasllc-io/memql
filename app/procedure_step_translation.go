@@ -117,6 +117,14 @@ var procedureTargetUnavailable = map[string]bool{
 	// with the call in flight, or the replica holding it could not be reached.
 	"worker_disconnected": true,
 	"worker_unreachable":  true,
+	// The owner switched the machine's Host commands off, or the replica holding
+	// its stream could not read the setting, and refused at admission with
+	// nothing sent. It arrived as worker_disconnected until the refusal got a
+	// code of its own (so the dispatcher could move a call on), and it belongs
+	// here for the reason that one did: it is the owner's word about the
+	// machine, which says nothing about the procedure.
+	"worker_feature_disabled":    true,
+	"worker_feature_unavailable": true,
 	// The workbench (integrations/workbench): no workbench peer answered, or
 	// the forward to one failed in transit.
 	"no_workbench_peer": true,
