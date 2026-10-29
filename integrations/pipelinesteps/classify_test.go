@@ -95,6 +95,16 @@ func clsDiskEvicted(message string, step ContainerStatus) *Pod {
 	return p
 }
 
+// clsMemoryLimited gives the pod's step container the memory limit a live pod
+// shows: an explicit memoryMiB reservation, or the namespace LimitRange's
+// default, which the API server writes into the pod's spec at admission.
+func clsMemoryLimited(p *Pod, limit string) *Pod {
+	p.Spec.Containers = append(p.Spec.Containers, Container{Name: ContainerStep, Resources: &Resources{
+		Requests: map[string]string{"memory": limit}, Limits: map[string]string{"memory": limit},
+	}})
+	return p
+}
+
 // clsPostgresNoPassword is what postgres:16 started without a password left as
 // its termination message under FallbackToLogsOnError (measured): its own
 // error, several lines of it.
@@ -258,11 +268,31 @@ func TestClassify(t *testing.T) {
 		},
 		{
 			// A container killed with no disruption on its pod was killed for
-			// what the step did: here its memory limit.
-			name: "a plain 137 with no DisruptionTarget is the command's own (OOMKilled)",
+			// what the step did: here its memory limit, which only the
+			// kubelet's reason says. Read as a bare 137 it is the command
+			// failing with nothing saying why, and once the pod is gone nobody
+			// can ask: the code says it, and the exit code stays.
+			name: "a step the kernel stopped for its memory fails pipeline_step_memory_exceeded and keeps its 137",
 			job:  clsJob(1200, backoffExceeded),
-			pod:  clsPod("Failed", []ContainerStatus{clsCloneDone}, clsTerminated("step", 137, "OOMKilled", "", clsStart.Add(40*time.Second))),
-			want: clsWant{phase: PhaseFailed, exitCode: 137, mentions: []string{"OOMKilled"}},
+			pod:  clsMemoryLimited(clsPod("Failed", []ContainerStatus{clsCloneDone}, clsTerminated("step", 137, "OOMKilled", "", clsStart.Add(40*time.Second))), "4Gi"),
+			want: clsWant{phase: PhaseFailed, exitCode: 137, code: pl.CodeStepMemoryExceeded, mentions: []string{"ran out of memory", "exit 137, OOMKilled", "4Gi"}},
+		},
+		{
+			// Constructed: the kernel killed one of the command's processes --
+			// a test binary `go test` started -- and the command itself then
+			// exited 1. The kubelet still names the container OOMKilled.
+			name: "a command that failed after the kernel killed one of its processes for memory ran out of memory",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsMemoryLimited(clsPod("Failed", []ContainerStatus{clsCloneDone}, clsTerminated("step", 1, "OOMKilled", "", clsStart.Add(40*time.Second))), "4Gi"),
+			want: clsWant{phase: PhaseFailed, exitCode: 1, code: pl.CodeStepMemoryExceeded, mentions: []string{"ran out of memory", "exit 1, OOMKilled"}},
+		},
+		{
+			// Constructed: the command recovered from losing a process and
+			// passed. Its exit code is the answer.
+			name: "a command that passed after the kernel killed one of its processes for memory passed",
+			job:  clsJob(1200),
+			pod:  clsPod("Succeeded", []ContainerStatus{clsCloneDone}, clsTerminated("step", 0, "OOMKilled", "", clsStart.Add(40*time.Second))),
+			want: clsWant{phase: PhaseSucceeded, exitCode: 0},
 		},
 		{
 			name: "a plain 137 with no DisruptionTarget is the command's own",
@@ -328,12 +358,12 @@ func TestClassify(t *testing.T) {
 			want: clsWant{phase: PhaseFailed, exitCode: 1},
 		},
 		{
-			// An OOM is the step's memory, not its disk: the kernel's kill, its
-			// own answer (as above), whatever else the pod says.
+			// An OOM is the step's memory, not its disk: the kernel's kill ended
+			// it (as above), whatever else the pod says.
 			name: "an OOM-killed step in a pod evicted for disk is the OOM",
 			job:  clsJob(1200, backoffExceeded),
 			pod:  clsDiskEvicted(`Container step exceeded its local ephemeral storage limit "20Gi". `, clsTerminated("step", 137, "OOMKilled", "", clsStart.Add(40*time.Second))),
-			want: clsWant{phase: PhaseFailed, exitCode: 137, mentions: []string{"OOMKilled"}},
+			want: clsWant{phase: PhaseFailed, exitCode: 137, code: pl.CodeStepMemoryExceeded, mentions: []string{"ran out of memory", "OOMKilled"}},
 		},
 		{
 			// The node running low is the cluster's doing: that eviction marks a
@@ -824,6 +854,7 @@ func TestClassifyNeverRepeatsTheStepsOwnTerminationMessage(t *testing.T) {
 	}{
 		{"a failed step", clsTerminated("step", 3, "Error", "NPM_TOKEN="+planted+"\n", clsStart.Add(4*time.Second)), PhaseFailed, 3},
 		{"a succeeded step", clsTerminated("step", 0, "Completed", planted, clsStart.Add(4*time.Second)), PhaseSucceeded, 0},
+		{"a step stopped for its memory", clsTerminated("step", 137, "OOMKilled", "NPM_TOKEN="+planted+"\n", clsStart.Add(4*time.Second)), PhaseFailed, 137},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := Classify(clsJob(1200), clsPod("Failed", []ContainerStatus{clsCloneDone}, c.step), clsCreated, clsNow, clsConfig(), pl.CodeStepTimeout)
@@ -836,6 +867,44 @@ func TestClassifyNeverRepeatsTheStepsOwnTerminationMessage(t *testing.T) {
 			}
 			if strings.Contains(seen, planted) {
 				t.Errorf("the observation repeats the step's termination message: %q", seen)
+			}
+		})
+	}
+}
+
+// TestClassifyNamesTheMemoryLimitOnlyWhenThePodSaysIt: the limit an
+// out-of-memory failure names is the one the step container was admitted
+// with -- its own memoryMiB, or the LimitRange default the API server wrote
+// into the pod -- never another container's, and a pod that shows none gets
+// no number.
+func TestClassifyNamesTheMemoryLimitOnlyWhenThePodSaysIt(t *testing.T) {
+	ended := clsTerminated("step", 137, "OOMKilled", "", clsStart.Add(40*time.Second))
+	limited := func(c Container) *Pod {
+		p := clsPod("Failed", []ContainerStatus{clsCloneDone}, ended)
+		p.Spec.InitContainers = []Container{c}
+		return p
+	}
+	for _, c := range []struct {
+		name string
+		pod  *Pod
+		want string // "" means no limit is named
+	}{
+		{"the step's own reservation", clsMemoryLimited(clsPod("Failed", []ContainerStatus{clsCloneDone}, ended), "6144Mi"), "6144Mi"},
+		{"the namespace default", clsMemoryLimited(clsPod("Failed", []ContainerStatus{clsCloneDone}, ended), "4Gi"), "4Gi"},
+		{"a pod that shows no limit", clsPod("Failed", []ContainerStatus{clsCloneDone}, ended), ""},
+		{"a service's limit is not the step's", limited(Container{Name: ServicePrefix + "db", Resources: &Resources{Limits: map[string]string{"memory": "1Gi"}}}), ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := Classify(clsJob(1200, clsCond("FailureTarget", "BackoffLimitExceeded", "Job has reached the specified backoff limit")), c.pod, clsCreated, clsNow, clsConfig(), "")
+			if got.Failure == nil || got.Failure.Code != pl.CodeStepMemoryExceeded {
+				t.Fatalf("failure = %+v, want %s", got.Failure, pl.CodeStepMemoryExceeded)
+			}
+			msg := got.Failure.Message
+			if c.want != "" && !strings.Contains(msg, c.want) {
+				t.Errorf("%q does not name the limit %s", msg, c.want)
+			}
+			if c.want == "" && (strings.Contains(msg, "limit") || strings.Contains(msg, "1Gi")) {
+				t.Errorf("%q names a limit the step container does not show", msg)
 			}
 		})
 	}

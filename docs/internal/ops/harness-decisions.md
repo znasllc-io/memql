@@ -1255,6 +1255,52 @@ Not verified here:
 - Retry on a question the old recipe raised. It reruns the failed step under
   the installed recipe and keeps the old run's prefix.
 
+## A step that ran out of memory says so (2026-10-29)
+
+On 2026-10-29 the second attempt of the `cockpit/v0.21.0` release run failed
+at `tests.go-tests#1` with exit 137 and no failure code. Only the kubelet's
+termination reason tells an out-of-memory kill from a command that exited 137
+itself, and it is written on the pod alone. `Classify` read it into
+`Observation.Detail`, but `decision` copies only the status, exit code and
+failure into the step's result, and the driver's sentence for an exit with no
+failure is *The step's command exited with status 137.* By the time anyone
+looked, the Job and its pod were deleted and no cluster event named the kill,
+so whether the step ran out of memory could not be established.
+
+`stepEnded` (`integrations/pipelinesteps/classify.go`) now fails a non-zero
+exit the kubelet calls `OOMKilled` with `pipeline_step_memory_exceeded` and
+keeps the exit code: 137 when the command itself was killed, the command's own
+code when the kernel killed a process it started and the command exited
+afterwards. The sentence names the memory limit the step container shows on
+the pod -- its `memoryMiB`, or the LimitRange default the API server admitted
+-- and names none when the pod shows none, never another container's. A zero
+exit stays a pass. The failure takes the existing path: the observation
+recorded on the Job (`memql.io/observation`), which an adopting replica
+settles by; the step row's `errorCode` and `errorMessage`; the check run; and
+the OS copy for the code.
+
+Two alternatives were rejected. A field on `pl.StepResult` for the kubelet's
+reason would have needed every reader -- the driver, the check run, the run
+page -- to learn it, where a catalogued code already reaches all of them. A
+note changes no outcome, and the step has failed. The code is
+`ClassFailure`, like `pipeline_step_disk_exceeded`: the step's own doing. It
+is not one of the release train's `EnvironmentalStepCodes`, so it earns no
+automatic retry; whether an intermittent out-of-memory kill should is a
+separate decision.
+
+The out-of-memory rows of `TestClassify`,
+`TestClassifyNamesTheMemoryLimitOnlyWhenThePodSaysIt`,
+`TestClassifyNeverRepeatsTheStepsOwnTerminationMessage` and
+`TestRunnerSaysAStepRanOutOfMemory` (`integrations/pipelinesteps`) cover the
+classification, the limit, the step's termination message never repeated, and
+the result and recorded observation through the runner's fake API server.
+`TestEveryPipelineCodeIsCatalogued` and
+`clients/os/test/deployables/refusals.test.ts` hold the catalogue copies
+together. Not verified: a live cluster's out-of-memory kill through this
+path, and the kubelet's `OOMKilled` for a killed child process (an exit other
+than 137), which is a constructed case. A fleet machine reports no such
+reason, so a fleet step killed for memory still reads as its exit code.
+
 ## Release trains carry main (2026-10-27)
 
 Every pull request to this repository is opened under the owner's account, so

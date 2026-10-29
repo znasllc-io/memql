@@ -23,7 +23,9 @@ const (
 	// PhaseSucceeded: the command exited 0. Terminal.
 	PhaseSucceeded
 	// PhaseFailed: terminal. Failure says why, except when the command itself
-	// exited non-zero: then the exit code is the whole answer.
+	// exited non-zero: then the exit code is the whole answer -- unless the
+	// kernel's out-of-memory killer ended it, which Failure names beside the
+	// exit code (stepEnded).
 	PhaseFailed
 )
 
@@ -33,11 +35,14 @@ type Observation struct {
 	// ExitCode is the command's exit status when it ended on its own, else -1.
 	// A step that never started has none, and neither does one its deadline or
 	// the cluster stopped: whatever status the kill left is not the command's
-	// answer.
+	// answer. An out-of-memory kill is its own end: the memory is the
+	// command's.
 	ExitCode int
 	// Failure is the typed reason a step failed for something other than its
 	// command: a code from the seam's catalogue and the sentence the check run
-	// shows. It is nil for a command that exited non-zero.
+	// shows. It is nil for a command that exited non-zero, except one the
+	// kernel's out-of-memory killer ended (pl.CodeStepMemoryExceeded): its exit
+	// code alone cannot say that, and the pod that can is deleted with its Job.
 	Failure *pl.Failure
 	// Detail is one sentence for the step's log: what the step is doing or
 	// waiting on, or how it ended.
@@ -79,7 +84,9 @@ var localStorageEviction = regexp.MustCompile(`^(Usage of EmptyDir volume "[^"]*
 //  3. The Job is past its deadline: deadlineCode -- unless the command ended
 //     before the deadline, when its own answer stands.
 //  4. The step container ended: exit 0 succeeded; any other exit failed, with
-//     no code, because the exit code is the answer.
+//     no code, because the exit code is the answer -- unless the kubelet says
+//     OOMKilled: the step ran out of memory (pl.CodeStepMemoryExceeded), its
+//     exit code kept.
 //  5. The Job completed: succeeded.
 //  6. Something in the pod means the step can never run: an image that
 //     cannot be pulled (pl.CodeImagePullFailed), a container that cannot be
@@ -129,7 +136,7 @@ func Classify(job Job, pod *Pod, created, now time.Time, cfg Config, deadlineCod
 		return failed(code, deadlineSentence(job))
 	}
 	if stepEnd != nil {
-		return stepEnded(stepEnd)
+		return stepEnded(stepEnd, pod)
 	}
 	if jobCondition(job, "", "Complete") != nil {
 		return Observation{Phase: PhaseSucceeded, ExitCode: 0, Detail: "the step's Job completed"}
@@ -166,12 +173,47 @@ func failed(code, message string) Observation {
 // container's termination message: that is whatever the command wrote to
 // /dev/termination-log, which can be a secret it was given, and Detail is
 // logged unmasked. The reason is the kubelet's (OOMKilled, StartError).
-func stepEnded(t *ContainerStateTerminated) Observation {
+//
+// A non-zero exit the kubelet calls OOMKilled is the one exit that says why:
+// the kernel's out-of-memory killer took a process of the command -- the
+// command itself (137), or one it started, after which it exited as it chose.
+// It fails pl.CodeStepMemoryExceeded and keeps its exit code. The code is
+// there because OOMKilled is written only on the pod, which goes with its
+// Job, and the step's result and the Job's recorded observation carry an exit
+// code and a failure but no reason: as a bare 137, a memory kill could not be
+// told from a command that exited 137 itself once anyone looked. A zero exit
+// stays a pass: the command survived losing the process.
+func stepEnded(t *ContainerStateTerminated, pod *Pod) Observation {
 	detail := "the step " + exitPhrase(t)
 	if t.ExitCode == 0 {
 		return Observation{Phase: PhaseSucceeded, ExitCode: 0, Detail: detail}
 	}
+	if t.Reason == "OOMKilled" {
+		message := fmt.Sprintf("the step ran out of memory: the kernel killed a process of its command (exit %d, OOMKilled)", t.ExitCode)
+		if limit := stepMemoryLimit(pod); limit != "" {
+			message += "; its container's limit is " + limit + ", shared by every process the command starts"
+		}
+		return Observation{Phase: PhaseFailed, ExitCode: int(t.ExitCode),
+			Failure: &pl.Failure{Code: pl.CodeStepMemoryExceeded, Message: message}, Detail: message}
+	}
 	return Observation{Phase: PhaseFailed, ExitCode: int(t.ExitCode), Detail: detail}
+}
+
+// stepMemoryLimit is the memory limit the step container was admitted with,
+// as its pod shows it: the step's own memoryMiB reservation, or the namespace
+// LimitRange's default, which the API server writes into the pod at
+// admission. Empty when the pod shows none -- a service's or the clone's limit
+// is not the step's.
+func stepMemoryLimit(pod *Pod) string {
+	if pod == nil {
+		return ""
+	}
+	for _, c := range pod.Spec.Containers {
+		if c.Name == ContainerStep && c.Resources != nil {
+			return strings.TrimSpace(c.Resources.Limits["memory"])
+		}
+	}
+	return ""
 }
 
 // jobDeadline is the instant the Job controller enforces the deadline at,
@@ -205,8 +247,8 @@ func diskEvicted(pod *Pod) bool {
 // endedOnItsOwn says the step container ended other than as an eviction ends
 // it. An eviction for disk kills at once (measured: 137, "Error", the moment
 // the pod is marked), so any other exit -- or the kernel's OOM kill, which is
-// the command's own memory -- is the command's answer, and a container still
-// running or never started has given none.
+// the command's own memory and which stepEnded names -- is the command's
+// answer, and a container still running or never started has given none.
 func endedOnItsOwn(t *ContainerStateTerminated) bool {
 	return t != nil && (t.ExitCode != 137 || t.Reason == "OOMKilled")
 }

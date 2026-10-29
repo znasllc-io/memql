@@ -1193,7 +1193,7 @@ cannot satisfy the required PR or merge-queue check.
 | `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
 | `githubReadToken` | Give a command `MEMQL_GITHUB_READ_TOKEN`, or an image build the BuildKit secret `github_read_token`, for this repository only | false | Cluster container commands and image builds with an installed source repository. Fixed permissions: contents, checks and pull requests read. It cannot write or reach other installation repositories; queued grants refresh before admission and logs redact them |
 | `checkoutHistory` | Set `full` to fetch complete commit ancestry, tags and the comparison base during the trusted checkout | shallow | Cluster container steps only. The command receives history without the installation token; it should scan that local history without fetching again. The existing run deadline and workspace limits bound checkout |
-| `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
+| `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults. A command past its limit fails `pipeline_step_memory_exceeded` | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
 | `cpuMilli` | Explicit CPU request and limit for the cluster command or image-build container, in millicores; 1000 means one CPU. Zero keeps namespace defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (4000 by default) before creating a Job. Scheduling accounts for the whole request; it does not silently fall back to a smaller allocation |
 | `image` | Container image for this step; pin by digest when reproducibility matters | pipeline image | Explicit image on a native step: `pipeline_step_invalid` |
 | `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
@@ -2027,8 +2027,9 @@ failed and no step reported why
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout
-(`pipeline_step_timeout`), an image that will not pull, a clone that fails, a
-cluster that cannot prove its steps isolated -- listed with their remedies in
+(`pipeline_step_timeout`), a step that ran out of memory
+(`pipeline_step_memory_exceeded`), an image that will not pull, a clone that
+fails, a cluster that cannot prove its steps isolated -- listed with their remedies in
 [the substrate's codes](pipelines-substrate.md#codes). Connecting refuses with
 Deployables' codes as well as these
 ([Connecting a pipeline](#connecting-a-pipeline)).
