@@ -989,6 +989,7 @@ func descriptorsAsMaps(descriptors []AppDescriptor) []map[string]any {
 			"harness":          d.Harness,
 			"structuredResult": d.StructuredResult,
 			"followUps":        d.FollowUps,
+			"inferenceOnly":    d.InferenceOnly,
 		})
 	}
 	return out
@@ -1087,18 +1088,8 @@ func (g *workerFieldGetter) appDescriptors(key string) []AppDescriptor {
 		if stru == nil {
 			continue
 		}
-		m := stru.AsMap()
-		id, _ := m["id"].(string)
-		harness, _ := m["harness"].(string)
-		structured, _ := m["structuredResult"].(bool)
-		followUps, _ := m["followUps"].(bool)
-		d := AppDescriptor{
-			Id:               strings.TrimSpace(id),
-			Harness:          strings.TrimSpace(harness),
-			StructuredResult: structured,
-			FollowUps:        followUps,
-		}
-		if !d.Valid() {
+		d, ok := AppDescriptorFromMap(stru.AsMap())
+		if !ok {
 			continue
 		}
 		out = append(out, d)

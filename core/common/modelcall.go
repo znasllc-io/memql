@@ -111,6 +111,11 @@ type RunContext struct {
 	// this context, never carried in memory from the node that took the
 	// request. The zero value routes by the rules.
 	Routing RouteChoice
+	// Tags are call tags every model call of this run carries for the rules
+	// (core/airoute's Tag* words), derived on the replica executing the run
+	// from where its goal came from -- never carried in memory from the node
+	// that opened it. A run a pipeline opened carries "pipeline".
+	Tags []string
 }
 
 type StepContinuation struct {

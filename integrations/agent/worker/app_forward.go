@@ -703,7 +703,11 @@ func canForwardTo(c Candidate, forward *ForwardRouter, self string) bool {
 // to appId, or "". It is appMachineRefusal's question asked of the row, for a
 // machine this node has no live handle on; the holder asks the live
 // registration again before anything opens.
-func appCandidateRefusal(c Candidate, owner string, req memqlengine.AppCallRequest, now time.Time) string {
+//
+// toolFreeOnly is the gate's condition on a tool-free turn in an Auto goal
+// (admitAppSession): the row must declare the app runs without tools. The
+// holder asks its live descriptor again before anything opens.
+func appCandidateRefusal(c Candidate, owner string, req memqlengine.AppCallRequest, now time.Time, toolFreeOnly bool) string {
 	if strings.TrimSpace(c.OwnerUserId) != "" && !sameSubject(c.OwnerUserId, owner) {
 		return "it is not " + strings.TrimSpace(owner) + "'s machine; an app session runs only on its owner's machines"
 	}
@@ -724,6 +728,10 @@ func appCandidateRefusal(c Candidate, owner string, req memqlengine.AppCallReque
 		if d, ok := descriptorFor(c.AppDescriptors, req.AppId); ok && !d.StructuredResult {
 			return "its harness (" + d.Harness + ") cannot return a structured answer"
 		}
+	}
+	if toolFreeOnly {
+		d, ok := descriptorFor(c.AppDescriptors, req.AppId)
+		return appToolFreeRefusal(d, ok, req.AppId)
 	}
 	return ""
 }
@@ -960,7 +968,9 @@ func (a *RemoteAppInference) Call(ctx context.Context, req memqlengine.AppCallRe
 		if req.RegistrationId != "" && c.RegistrationId != req.RegistrationId {
 			continue
 		}
-		if why := appCandidateRefusal(c, owner, req, now); why != "" {
+		// No gate runs on this node, so the destination is unknown here and
+		// the holder decides whether the turn needs a tool-free machine.
+		if why := appCandidateRefusal(c, owner, req, now, false); why != "" {
 			considered[c.RegistrationId] = why
 			continue
 		}

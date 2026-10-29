@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -626,4 +628,22 @@ func TestANonPlannerSweepLeaderAnnouncesAStrandedRemedy(t *testing.T) {
 			t.Fatalf("the sweep wrote a remedy wait a live claimant may hold %d times", n)
 		}
 	})
+}
+
+// A pipeline goal's replan is pipeline work too (spec 2026-10-29, D5): the
+// planner rebuilds the run context from the rows, and the goal's
+// `requestedVia` gives its call the pipeline tag, so the reasoning-level
+// replan routes local first instead of reasoningParks' app-first order.
+func TestAPipelineGoalsReplanCarriesThePipelineTag(t *testing.T) {
+	for via, want := range map[string][]string{"pipeline": {airoute.TagPipeline}, "ask": nil} {
+		row := remedyWaitRow(waitKindReplan)
+		remedy := &signallingRemedy{}
+		i, eng := plannerReplica(t, remedy, &pkClaims{}, row)
+		eng.reply("workGoalForOwner", map[string]any{"id": "v1:work:goal:g1", "requestedVia": via})
+		i.serveRemedy(context.Background(), remedy, waitKindReplan, remedyRunId, "u-alice", rowString(rowMap(row, "waitingOn"), "since"), i.clock().Add(remedyTimeout))
+		calls := remedy.settled(t, 1)
+		if len(calls) != 1 || !reflect.DeepEqual(calls[0].run.Tags, want) {
+			t.Fatalf("requestedVia %q: replan run context tags = %+v, want %v", via, calls, want)
+		}
+	}
 }

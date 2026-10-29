@@ -1270,7 +1270,15 @@ type AppDescriptor struct {
 	// AppSessionControl{action: "message"}. A machine that says false is
 	// refused a follow-up BEFORE the wire, so the engine never waits on a
 	// turn that will not come.
-	FollowUps     bool `protobuf:"varint,4,opt,name=follow_ups,json=followUps,proto3" json:"follow_ups,omitempty"`
+	FollowUps bool `protobuf:"varint,4,opt,name=follow_ups,json=followUps,proto3" json:"follow_ups,omitempty"`
+	// inference_only reports that this harness runs the app with NO tools
+	// when AppSessionStart.inference_only is set: no shell, no file edits, no
+	// MCP. The engine admits a tool-free model turn in a goal whose execution
+	// destination is Auto only on a machine that says true, because only
+	// then is the turn a model call rather than work on the owner's computer
+	// (spec 2026-10-29, D4). False -- including a Cockpit that predates the
+	// field -- keeps the destination refusal.
+	InferenceOnly bool `protobuf:"varint,5,opt,name=inference_only,json=inferenceOnly,proto3" json:"inference_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1329,6 +1337,13 @@ func (x *AppDescriptor) GetStructuredResult() bool {
 func (x *AppDescriptor) GetFollowUps() bool {
 	if x != nil {
 		return x.FollowUps
+	}
+	return false
+}
+
+func (x *AppDescriptor) GetInferenceOnly() bool {
+	if x != nil {
+		return x.InferenceOnly
 	}
 	return false
 }
@@ -6188,13 +6203,14 @@ const file_worker_proto_rawDesc = "" +
 	"totalBytes\x12\x1f\n" +
 	"\vmodels_done\x18\a \x01(\rR\n" +
 	"modelsDone\x12!\n" +
-	"\fmodels_total\x18\b \x01(\rR\vmodelsTotal\"\x85\x01\n" +
+	"\fmodels_total\x18\b \x01(\rR\vmodelsTotal\"\xac\x01\n" +
 	"\rAppDescriptor\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aharness\x18\x02 \x01(\tR\aharness\x12+\n" +
 	"\x11structured_result\x18\x03 \x01(\bR\x10structuredResult\x12\x1d\n" +
 	"\n" +
-	"follow_ups\x18\x04 \x01(\bR\tfollowUps\"\x8e\x01\n" +
+	"follow_ups\x18\x04 \x01(\bR\tfollowUps\x12%\n" +
+	"\x0einference_only\x18\x05 \x01(\bR\rinferenceOnly\"\x8e\x01\n" +
 	"\aAppInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +

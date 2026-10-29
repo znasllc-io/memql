@@ -141,7 +141,11 @@ type FleetModelCapabilities struct {
 
 // FleetMachine is one machine behind a catalog entry.
 type FleetMachine struct {
-	Capabilities   FleetModelCapabilities
+	Capabilities FleetModelCapabilities
+	// ContextWindow is the window THIS machine advertised for the model, zero
+	// when it advertised none. The model's ContextWindow is the largest over
+	// every machine, offline ones included, so a floor is checked here.
+	ContextWindow  int
 	ModelSetup     ModelSetup
 	RegistrationId string
 	Name           string
@@ -743,56 +747,84 @@ func (m FleetModel) eligibleForSelector(selector string, needs FleetNeeds) (bool
 }
 
 // eligibleFor reports whether a model can serve a call with these needs, and
-// names the miss when it cannot. It mirrors ModelAttributes.Satisfies on the
-// agent side -- the same questions asked of the CATALOG rather than of one
-// machine's label, which is what the wildcard resolver needs.
+// names the miss when it cannot.
+//
+// IT IS DECIDED ON ONE ONLINE MACHINE AT A TIME, and the model passes only
+// through a machine that passes every question at once -- the same questions,
+// in the same order, that ModelAttributes.Satisfies asks of that machine's
+// label when the dispatcher picks it. The model-level flags are a UNION over
+// every registration behind the model, offline ones included (fleetcatalog's
+// Project keeps them so an asleep model stays visible), and answering from
+// the union is how a model came to be offered for a call no machine that
+// could take it was able to serve. On 2026-10-28 a pipeline diagnosis fell
+// through to qwen3-embedding:0.6b because one online machine's older Cockpit
+// and a dozen old offline registrations claimed tools and structured output
+// for it; every machine then refused it, one wasted door later. The union
+// stays on the model for display and ordering, never for this.
+//
+// The miss reported is the first online machine's, which for a one-machine
+// model is the whole story and for a fleet is the most common one.
 func (m FleetModel) eligibleFor(n FleetNeeds) (bool, string) {
 	if !m.Online() {
 		return false, "no machine offering it is online"
 	}
 	purpose := ModelPurpose(n.StructuredOutput, n.Tools, n.Vision, n.Embeddings, n.AudioIn, n.AudioOut, n.ImageGen)
-	allowed := false
+	miss := ""
 	for _, machine := range m.Machines {
-		if machine.Online && machine.ModelSetup.Allows(m.ModelId, purpose, n.MinContextWindow) {
-			allowed = true
-			break
+		if !machine.Online {
+			continue
+		}
+		ok, why := machine.serves(m.ModelId, purpose, n)
+		if ok {
+			return true, ""
+		}
+		if miss == "" {
+			miss = why
 		}
 	}
-	if len(m.Machines) > 0 && !allowed {
+	return false, miss
+}
+
+// serves asks one machine every question a call puts to it.
+func (mm FleetMachine) serves(modelId, purpose string, n FleetNeeds) (bool, string) {
+	if !mm.ModelSetup.Allows(modelId, purpose, n.MinContextWindow) {
 		return false, "not selected for this purpose on an online machine"
 	}
-	// AN EMBEDDING MODEL ANSWERS NOTHING BUT EMBEDDINGS (memql#6238). A
-	// model that advertises embeddings and nothing a conversation needs can
-	// only embed: the fallback chain once handed a structured review to
-	// qwen3-embedding:0.6b, which answered "does not support chat". The
-	// label grammar has no chat attribute, so the absence of every answering
-	// capability is what says it.
-	if !n.Embeddings && m.Embeddings && !m.Tools && !m.StructuredOutput && !m.Vision {
+	c := mm.Capabilities
+	// AN EMBEDDING MODEL ANSWERS NOTHING BUT EMBEDDINGS (memql#6238), WHATEVER
+	// ELSE A MACHINE CLAIMS FOR IT. The current Cockpit claims tools and
+	// structured output only for a model Ollama lists as `completion`
+	// (memql-cockpit#551), so an embedder that also claims them is labelled by
+	// an older Cockpit -- the very label that sent a review, and on 2026-10-28
+	// a diagnosis, to a model that answered "does not support chat". The owner
+	// chose "never" over the earlier allowance for a model claiming both
+	// (spec 2026-10-29, D3).
+	if !n.Embeddings && c.Embeddings {
 		return false, "an embedding model answers embedding calls only"
 	}
-	if n.StructuredOutput && !m.StructuredOutput {
+	if n.StructuredOutput && !c.StructuredOutput {
 		return false, "does not advertise structured output"
 	}
-	if n.Embeddings && !m.Embeddings {
+	if n.Embeddings && !c.Embeddings {
 		return false, "does not advertise embeddings"
 	}
-	if n.Tools && !m.Tools {
+	if n.Tools && !c.Tools {
 		return false, "does not advertise tool calling"
 	}
-	if n.Vision && !m.Vision {
+	if n.Vision && !c.Vision {
 		return false, "does not advertise vision"
 	}
-	if n.AudioIn && !m.AudioIn {
+	if n.AudioIn && !c.AudioIn {
 		return false, "does not advertise audio input"
 	}
-	if n.AudioOut && !m.AudioOut {
+	if n.AudioOut && !c.AudioOut {
 		return false, "does not advertise audio output"
 	}
-	if n.ImageGen && !m.ImageGen {
+	if n.ImageGen && !c.ImageGen {
 		return false, "does not advertise image generation"
 	}
-	if n.MinContextWindow > 0 && m.ContextWindow < n.MinContextWindow {
-		return false, fmt.Sprintf("context window %d is under the floor %d", m.ContextWindow, n.MinContextWindow)
+	if n.MinContextWindow > 0 && mm.ContextWindow < n.MinContextWindow {
+		return false, fmt.Sprintf("context window %d is under the floor %d", mm.ContextWindow, n.MinContextWindow)
 	}
 	return true, ""
 }

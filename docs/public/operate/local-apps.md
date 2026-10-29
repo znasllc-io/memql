@@ -407,6 +407,18 @@ delegated Task through the same executor:
    session. Unset is not engaged. A preference read that **fails** is neither,
    and refuses as `kill_switch_unreadable`: it neither opens a machine the
    owner may have switched off nor tells them they switched it off.
+5. **The goal's execution destination**, for a session inside a work goal.
+   The destination says where a goal's tools run, and an app session on your
+   machine counts as moving the work to your computer: it is refused as
+   `execution_destination_requires_permission` unless you chose the Apps route
+   for that goal or approved the move for that run. One exception: a **tool-free
+   turn** (no images, no inputs) in a goal set to **Auto** runs the app with no
+   tools, so it is a model call like a local model, and it is admitted on a
+   machine whose Cockpit declares that it runs such a turn without tools
+   (`inferenceOnly` on its app descriptor). That is what lets a goal nobody is
+   present to approve -- a pipeline's diagnosis of a failed run -- use your
+   apps. A goal explicitly set to Workbench, a turn with images or inputs, and
+   a whole step handed to an app keep the refusal.
 
 No `agentAuthorization` row and no `computerUseScope` is read, and there is no
 per-task approval or classifier pass: a cluster where no agent was ever granted

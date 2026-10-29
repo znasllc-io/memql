@@ -19,7 +19,7 @@ type contextFleet struct {
 }
 
 func (f *contextFleet) Catalog(context.Context, string) ([]memql.FleetModel, error) {
-	return f.models, nil
+	return advertisedOnEveryMachine(f.models), nil
 }
 func (f *contextFleet) ModelPreference(context.Context, string) ([]string, error) { return nil, nil }
 func (f *contextFleet) Call(_ context.Context, req memql.FleetCallRequest) (memql.FleetCallResult, error) {

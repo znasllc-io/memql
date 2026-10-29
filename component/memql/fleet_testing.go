@@ -66,6 +66,30 @@ func (r *ProviderRegistry) RegisterWithParamsForTest(name, providerType, model s
 	r.markDeclared(name)
 }
 
+// FleetModelAdvertisedOnEveryMachineForTest is the catalog fleetcatalog's
+// Project builds when every machine behind a model reports the same label:
+// each machine carries the model's advertised capabilities and window.
+//
+// Eligibility is decided per online machine (FleetModel.eligibleFor), so a
+// fixture that sets only the model-level union describes machines that
+// advertise nothing. A machine that already carries attributes is left as it
+// is, so a fixture can still make one machine differ from the rest.
+func FleetModelAdvertisedOnEveryMachineForTest(m FleetModel) FleetModel {
+	machines := make([]FleetMachine, len(m.Machines))
+	for i, mm := range m.Machines {
+		if mm.Capabilities == (FleetModelCapabilities{}) && mm.ContextWindow == 0 {
+			mm.Capabilities = FleetModelCapabilities{
+				Vision: m.Vision, AudioIn: m.AudioIn, AudioOut: m.AudioOut, ImageGen: m.ImageGen,
+				Embeddings: m.Embeddings, Tools: m.Tools, StructuredOutput: m.StructuredOutput,
+			}
+			mm.ContextWindow = m.ContextWindow
+		}
+		machines[i] = mm
+	}
+	m.Machines = machines
+	return m
+}
+
 // NewPolicyRegistryForTest builds a policy registry from name -> provider
 // chain, where the first entry is the @primary and the rest are @fallback in
 // try order -- the same reading ProviderChain() gives a parsed policy.

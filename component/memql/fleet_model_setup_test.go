@@ -75,12 +75,13 @@ func TestModelSetupRoutingIsExplicitAndHandlesCompoundNeeds(t *testing.T) {
 }
 
 func TestModelSetupRestrictsProviderAvailabilityOnTheServingMachine(t *testing.T) {
-	m := FleetModel{ModelId: "chat", Tools: true, ContextWindow: 131072, Machines: []FleetMachine{{Online: true, ModelSetup: ModelSetup{Revision: "one", Choices: map[string]string{"conversation": "chat", "tools": "other"}}}}}
+	m := FleetModelAdvertisedOnEveryMachineForTest(FleetModel{ModelId: "chat", Tools: true, ContextWindow: 131072, Machines: []FleetMachine{{Online: true, ModelSetup: ModelSetup{Revision: "one", Choices: map[string]string{"conversation": "chat", "tools": "other"}}}}})
 	ok, _ := m.eligibleFor(FleetNeeds{Tools: true})
 	require.False(t, ok)
 	ok, _ = m.eligibleFor(FleetNeeds{})
 	require.True(t, ok)
 	m.Machines = append(m.Machines, FleetMachine{Online: false, ModelSetup: ModelSetup{Revision: "two", Choices: map[string]string{"tools": "chat"}}})
+	m = FleetModelAdvertisedOnEveryMachineForTest(m)
 	ok, _ = m.eligibleFor(FleetNeeds{Tools: true})
 	require.False(t, ok, "an offline sibling's selection cannot make the online machine eligible")
 	m.Machines[1].Online = true

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 )
 
 // A structured call on a runner that does not implement `format`
@@ -26,7 +29,8 @@ type noFormatRunner struct {
 	mu       sync.Mutex
 	requests []map[string]any
 	answer   string
-	status   int // what a request with `format` gets; 501 unless set
+	status   int    // what a request with `format` gets; 501 unless set
+	refusal  string // the body that refusal carries; the 501's unless set
 }
 
 func (r *noFormatRunner) serve(t *testing.T) *httptest.Server {
@@ -46,7 +50,11 @@ func (r *noFormatRunner) serve(t *testing.T) *httptest.Server {
 				status = http.StatusNotImplemented
 			}
 			w.WriteHeader(status)
-			fmt.Fprint(w, `{"error":"structured output is unavailable"}`)
+			refusal := r.refusal
+			if refusal == "" {
+				refusal = `{"error":"structured output is unavailable"}`
+			}
+			fmt.Fprint(w, refusal)
 			return
 		}
 		content, _ := json.Marshal(r.answer)
@@ -115,6 +123,46 @@ func TestStructuredCallOnARunnerWithoutFormatAsksInThePrompt(t *testing.T) {
 	}
 }
 
+// grammarRefusal is what Ollama 0.33.3 answered on two machines for a
+// structured call whose schema its llama.cpp could not compile into a
+// sampling grammar (2026-10-28): llama-server's 400, wrapped by Ollama.
+const grammarRefusal = `{"error":"{\"error\":{\"code\":400,\"message\":\"Failed to initialize samplers: failed to parse grammar\",\"type\":\"invalid_request_error\"}}"}`
+
+func TestStructuredCallTheRuntimeCannotCompileAsksInThePrompt(t *testing.T) {
+	runner := &noFormatRunner{answer: `{"reply":"ok"}`, status: http.StatusBadRequest, refusal: grammarRefusal}
+	got, emits, err := structuredCall(t, runner, reviewRequest())
+	if err != nil {
+		t.Fatalf("a schema the runtime cannot compile must be asked for in the prompt: %v", err)
+	}
+	if got != `{"reply":"ok"}` || emits != 1 {
+		t.Fatalf("the validated JSON must go out once, whole: %q in %d emits", got, emits)
+	}
+	sent := runner.sent()
+	if len(sent) != 2 {
+		t.Fatalf("one request with format, then one without: %d requests", len(sent))
+	}
+	if _, ok := sent[1]["format"]; ok {
+		t.Fatal("the second request must not send format again")
+	}
+	messages, _ := sent[1]["messages"].([]any)
+	system, _ := messages[0].(map[string]any)
+	if content, _ := system["content"].(string); !strings.Contains(content, schemaInstruction) {
+		t.Fatalf("the schema must reach the model in the system message: %q", content)
+	}
+}
+
+func TestStructuredCallKeepsOtherBadRequests(t *testing.T) {
+	// A 400 that is not about the grammar -- the model cannot chat at all --
+	// would fail the same way without format, so it is passed on as it was.
+	runner := &noFormatRunner{answer: `{"reply":"ok"}`, status: http.StatusBadRequest, refusal: `{"error":"\"qwen3-embedding:0.6b\" does not support chat"}`}
+	if _, _, err := structuredCall(t, runner, reviewRequest()); err == nil || !strings.Contains(err.Error(), "returned 400") {
+		t.Fatalf("a 400 that names no grammar must fail as it did: %v", err)
+	}
+	if len(runner.sent()) != 1 {
+		t.Fatal("only a refusal of the schema itself is asked again")
+	}
+}
+
 func TestStructuredCallFindsTheJSONInAFenceOrAroundProse(t *testing.T) {
 	for name, answer := range map[string]string{
 		"fenced":      "```json\n{\"reply\":\"ok\"}\n```",
@@ -158,7 +206,7 @@ func TestStructuredCallKeepsOtherRefusals(t *testing.T) {
 		t.Fatalf("a 500 must fail as it did: %v", err)
 	}
 	if len(runner.sent()) != 1 {
-		t.Fatal("only a 501 is asked again")
+		t.Fatal("only a refusal of the schema itself is asked again, never a 500")
 	}
 	// With tools offered the turn may answer with a call instead of JSON,
 	// so it is not asked again either.
@@ -184,5 +232,48 @@ func TestStructuredCallWithNoSystemMessageGainsOne(t *testing.T) {
 	}
 	if len(req.Messages) != 1 {
 		t.Fatal("the caller's messages must not be changed")
+	}
+}
+
+// The schema-in-prompt fallback holds the answer back until it validates, so
+// its tokens never reach the stream; they must still count as the runtime
+// working, or the idle watchdog ends a slow answer as a stall. A thinking
+// model writing a long JSON answer at `reasoning` -- the case the grammar
+// fallback exists for -- is exactly that slow answer.
+func TestTheHeldBackAnswerKeepsTheIdleClockAlive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if _, hasFormat := body["format"]; hasFormat {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, grammarRefusal)
+			return
+		}
+		flusher := w.(http.Flusher)
+		fmt.Fprintln(w, `{"message":{"thinking":"private thought"}}`)
+		flusher.Flush()
+		for _, piece := range []string{`{"re`, `ply"`, `:"`, `o`, `k`, `"`, `}`} {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(300 * time.Millisecond):
+			}
+			content, _ := json.Marshal(piece)
+			fmt.Fprintf(w, "{\"message\":{\"content\":%s}}\n", content)
+			flusher.Flush()
+		}
+		fmt.Fprintln(w, `{"message":{"content":""},"done":true,"done_reason":"stop"}`)
+	}))
+	defer srv.Close()
+	m := managerFor(inventoryWith(ollamaModel(srv.URL, "m", models.Attributes{MaxConcurrent: 1, StructuredOutput: true, ContextWindow: 8192})))
+	rec := newRecorder()
+	st := start("held-back", "m", KindChat)
+	st.ResponseFormatSchema = []byte(`{"type":"object","required":["reply"],"properties":{"reply":{"type":"string"}}}`)
+	st.Limits.IdleTimeoutSeconds = 1
+	m.Start(context.Background(), rec, st)
+	end := rec.wait(t)
+	if end.GetFinishReason() != FinishStop || rec.content() != `{"reply":"ok"}` {
+		t.Fatalf("finish=%q code=%q error=%q content=%q: a held-back answer still being written is not a stall",
+			end.GetFinishReason(), end.GetErrorCode(), end.GetError(), rec.content())
 	}
 }

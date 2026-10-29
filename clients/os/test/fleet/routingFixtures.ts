@@ -98,6 +98,7 @@ export function shippedRules(): Row[] {
     ruleRow({ name: "backgroundEscalation", when: { tag: "backgroundEscalation" }, level: "strong", locked: true, precedence: 50 }),
     ruleRow({ name: "operatorReasoning", when: { prompt: "agentReply", role: "operator" }, level: "reasoning", locked: true, precedence: 60 }),
     ruleRow({ name: "reasoningParks", when: { level: "reasoning" }, policy: "federationStrongest", onUnavailable: "park", locked: true, precedence: 100 }),
+    ruleRow({ name: "pipelineLocalFirst", when: { level: "reasoning", tag: "pipeline" }, policy: "localFirstStrongest", onUnavailable: "park", locked: true, precedence: 105 }),
     ruleRow({ name: "documentResearchHarness", when: { prompt: "libraryRevisionResearch" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 150 }),
     ruleRow({ name: "documentAppResearch", when: { prompt: "libraryRevisionAppResearch" }, policy: "researchApps", onUnavailable: "park", locked: true, precedence: 151 }),
     ruleRow({ name: "documentResearchIntent", when: { prompt: "libraryRevisionIntent" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 152 }),

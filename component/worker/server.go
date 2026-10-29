@@ -2024,7 +2024,9 @@ func (s *streamSession) handleModelCallEnd(end *memqlv1.ModelCallEnd) {
 	}
 	var err error
 	if outcome.Error != "" {
-		err = fmt.Errorf("worker: model call failed: %s", outcome.Error)
+		// Typed, so the machine's code reaches the decision record
+		// (modelcall_failed.go).
+		err = &ModelCallFailed{ErrorCode: outcome.ErrorCode, Message: outcome.Error}
 	}
 	handle.finish(outcome, err)
 }

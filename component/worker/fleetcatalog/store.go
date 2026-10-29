@@ -291,17 +291,8 @@ func rowAppDescriptors(row map[string]any, key string) []workerservice.AppDescri
 		if !ok {
 			continue
 		}
-		id, _ := m["id"].(string)
-		harness, _ := m["harness"].(string)
-		structured, _ := m["structuredResult"].(bool)
-		followUps, _ := m["followUps"].(bool)
-		d := workerservice.AppDescriptor{
-			Id:               strings.TrimSpace(id),
-			Harness:          strings.TrimSpace(harness),
-			StructuredResult: structured,
-			FollowUps:        followUps,
-		}
-		if !d.Valid() {
+		d, valid := workerservice.AppDescriptorFromMap(m)
+		if !valid {
 			continue
 		}
 		out = append(out, d)

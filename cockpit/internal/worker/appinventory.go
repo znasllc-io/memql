@@ -135,6 +135,7 @@ func appDescriptorsToProto(inventory []apps.Info) []*memqlv1.AppDescriptor {
 			Harness:          a.Harness,
 			StructuredResult: a.StructuredResult,
 			FollowUps:        a.FollowUps,
+			InferenceOnly:    a.InferenceOnly,
 		})
 	}
 	return out

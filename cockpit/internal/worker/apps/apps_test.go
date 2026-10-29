@@ -104,6 +104,28 @@ func TestSpecs_CodexFloorIsTheFallbackHarness(t *testing.T) {
 	}
 }
 
+// TestInferenceOnlyIsDeclaredOnlyByHarnessesThatHonourIt. An inference-only
+// turn (AppSessionStart.inference_only) runs the app with no tools, and the
+// engine lets such a turn into a goal set to Auto only on a machine that says
+// so (spec 2026-10-29, D4). The Claude Code harness drops every tool
+// (`--tools ""`) and the Codex app-server turns shell, patch, multi-agent and
+// web search off; the Codex mcp-server floor has no such switch, so claiming
+// it there would let a goal's model call run commands on somebody's computer.
+func TestInferenceOnlyIsDeclaredOnlyByHarnessesThatHonourIt(t *testing.T) {
+	claude, _ := SpecFor(IDClaudeCode)
+	if !claude.InferenceOnly {
+		t.Error("claude-headless honours inference-only turns and must say so")
+	}
+	codex, _ := SpecFor(IDCodex)
+	if codex.InferenceOnly {
+		t.Error("the codex-mcp floor cannot run without tools; claiming it is an over-claim")
+	}
+	upgraded, _, _ := codex.harnessUpgrade()
+	if !upgraded.InferenceOnly {
+		t.Error("the codex app-server honours inference-only turns and must say so")
+	}
+}
+
 // TestSpec_HarnessUpgrade_NamesTheProbeAndTheAnswer. The upgrade is data
 // in this file rather than in detect.go so the two halves -- which word
 // the machine may earn, and which command decides -- cannot drift apart:

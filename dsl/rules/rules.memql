@@ -108,6 +108,31 @@ rule operatorReasoning { }
 @locked
 rule reasoningParks { }
 
+/// Work a pipeline started runs on the owner's own machines first, then on a
+/// signed-in app, then on the strongest vendor, in that order (spec
+/// 2026-10-29, D5).
+///
+/// The call carries the `pipeline` tag when the pipeline runner makes it --
+/// its independent review -- and on every model call of a work run whose goal
+/// arrived through a pipeline: a failed run's diagnosis and the repository
+/// change it requests. Before this rule those calls took reasoningParks'
+/// chain, which Auto ranks with an app above a local model at `reasoning`, so
+/// a review went to an app first even when a local model was idle.
+///
+/// IT IS LOCKED AND OUTRANKS reasoningParks because nothing else can: a locked
+/// rule evaluates before every unlocked one, so an owner's own rule could
+/// never re-route a reasoning call. It parks for reasoningParks' reason -- a
+/// degraded reasoning answer is a confident wrong one. The context floor
+/// still decides the local door call by call: a review rendered near its
+/// 1 MiB bound asks for more context than a local model holds and goes
+/// straight to the app.
+@when(level="reasoning", tag="pipeline")
+@policy("localFirstStrongest")
+@precedence(105)
+@onUnavailable("park")
+@locked
+rule pipelineLocalFirst { }
+
 /// Embeddings go to the bound embedder and nowhere else, and park when there
 /// is none (epic memql#5137).
 ///

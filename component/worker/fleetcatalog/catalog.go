@@ -181,6 +181,10 @@ func Project(machines []Candidate, now time.Time) []memqlengine.FleetModel {
 					ImageGen: attrs.ImageGen, Embeddings: attrs.Embeddings, Tools: attrs.Tools,
 					StructuredOutput: attrs.StructuredOutput,
 				},
+				// The machine's own window: eligibility checks a call's
+				// floor against the machine that would serve it, never the
+				// largest window an asleep machine once reported.
+				ContextWindow:  attrs.ContextWindow,
 				RegistrationId: m.RegistrationId,
 				ModelSetup:     m.ModelSetup,
 				Name:           m.Name,

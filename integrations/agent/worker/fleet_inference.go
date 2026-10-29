@@ -370,10 +370,17 @@ func (f *FleetInference) attempt(
 			fmt.Errorf("%s refused before start: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
 	}
 	if !out.Ok() {
-		return memqlengine.FleetCallResult{}, ForwardCompleted,
-			fmt.Errorf("%s: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
+		return memqlengine.FleetCallResult{}, ForwardCompleted, forwardedFailure(cand, out)
 	}
 	return resultFromEnd(cand, req.ActingUserId, out.End), ForwardCompleted, nil
+}
+
+// forwardedFailure is a call the machine on another replica started and then
+// failed, typed so the machine's code reaches the decision record
+// (component/worker/modelcall_failed.go). Its text is the one this path has
+// always printed.
+func forwardedFailure(cand Candidate, out ModelForwardOutcome) error {
+	return &workerservice.ModelCallFailed{Forwarded: true, Machine: cand.Label(), ErrorCode: out.ErrorCode, Message: out.ErrorMessage}
 }
 
 // Ok reports a clean terminal answer.
@@ -425,8 +432,7 @@ func (f *FleetInference) attemptLocal(
 					fmt.Errorf("%s refused before start: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
 			}
 			if !out.Ok() {
-				return memqlengine.FleetCallResult{}, ForwardCompleted,
-					fmt.Errorf("%s: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
+				return memqlengine.FleetCallResult{}, ForwardCompleted, forwardedFailure(cand, out)
 			}
 			return resultFromEnd(cand, req.ActingUserId, out.End), ForwardCompleted, nil
 		}
@@ -502,7 +508,7 @@ func (f *FleetInference) attemptLocal(
 	}
 	if outcome.Error != "" {
 		return memqlengine.FleetCallResult{}, ForwardCompleted,
-			fmt.Errorf("%s: %s", cand.Label(), outcome.Error)
+			&workerservice.ModelCallFailed{Forwarded: true, Machine: cand.Label(), ErrorCode: outcome.ErrorCode, Message: outcome.Error}
 	}
 	return resultFromEnd(cand, req.ActingUserId, modelOutcomeEnd("", outcome)), ForwardCompleted, nil
 }

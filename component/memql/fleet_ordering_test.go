@@ -349,9 +349,9 @@ func TestASelectorMissNamesTheModelsConsidered(t *testing.T) {
 
 func TestEligibilityAsksTheSameQuestionsSatisfiesDoes(t *testing.T) {
 	m := onlineModel("llama3.1:8b", true)
-	m.Embeddings = true
 	m.Tools = true
 	m.ContextWindow = 8192
+	m = FleetModelAdvertisedOnEveryMachineForTest(m)
 
 	for _, tt := range []struct {
 		name  string
@@ -361,7 +361,7 @@ func TestEligibilityAsksTheSameQuestionsSatisfiesDoes(t *testing.T) {
 	}{
 		{"nothing", FleetNeeds{}, true, ""},
 		{"structured", FleetNeeds{StructuredOutput: true}, true, ""},
-		{"embeddings", FleetNeeds{Embeddings: true}, true, ""},
+		{"embeddings", FleetNeeds{Embeddings: true}, false, "does not advertise embeddings"},
 		{"tools", FleetNeeds{Tools: true}, true, ""},
 		{"window under the floor", FleetNeeds{MinContextWindow: 131072}, false, "context window 8192 is under the floor 131072"},
 	} {
@@ -377,6 +377,7 @@ func TestEligibilityAsksTheSameQuestionsSatisfiesDoes(t *testing.T) {
 	embedder := onlineModel("qwen3-embedding:0.6b", false)
 	embedder.Embeddings = true
 	embedder.ContextWindow = 32768
+	embedder = FleetModelAdvertisedOnEveryMachineForTest(embedder)
 	for _, tt := range []struct {
 		name  string
 		needs FleetNeeds
@@ -397,5 +398,65 @@ func TestEligibilityAsksTheSameQuestionsSatisfiesDoes(t *testing.T) {
 	offline.Machines = []FleetMachine{{RegistrationId: "laptop", Online: false}}
 	if ok, why := offline.eligibleFor(FleetNeeds{}); ok || why != "no machine offering it is online" {
 		t.Errorf("offline: ok=%v why=%q", ok, why)
+	}
+}
+
+// ELIGIBILITY IS DECIDED ON THE MACHINE THAT WOULD SERVE THE CALL (2026-10-28).
+// The model-level flags are a union over every registration behind a model,
+// offline ones included, so a pipeline diagnosis was offered to an embedder
+// because one machine's older Cockpit -- and old offline registrations --
+// claimed it could take tools and structured output. Every machine then
+// refused it, one wasted door later.
+
+func machineWith(id string, online bool, ctxWindow int, caps FleetModelCapabilities) FleetMachine {
+	return FleetMachine{RegistrationId: id, Name: id, Online: online, ContextWindow: ctxWindow, Capabilities: caps}
+}
+
+func TestAnEmbedderIsNeverAChatCandidateEvenWhenAMachineClaimsTools(t *testing.T) {
+	m := FleetModel{ModelId: "qwen3-embedding:0.6b", ContextWindow: 32768, Embeddings: true, Tools: true, StructuredOutput: true,
+		Machines: []FleetMachine{
+			machineWith("old-cockpit", true, 32768, FleetModelCapabilities{Embeddings: true, Tools: true, StructuredOutput: true}),
+			machineWith("current-cockpit", true, 32768, FleetModelCapabilities{Embeddings: true}),
+		}}
+	for _, needs := range []FleetNeeds{{}, {StructuredOutput: true}, {Tools: true}} {
+		if ok, why := m.eligibleFor(needs); ok || why != "an embedding model answers embedding calls only" {
+			t.Errorf("%+v: ok=%v why=%q, want the embedder refused", needs, ok, why)
+		}
+	}
+	if ok, why := m.eligibleFor(FleetNeeds{Embeddings: true}); !ok {
+		t.Fatalf("an embedder still takes an embedding call: %q", why)
+	}
+}
+
+func TestACapabilityOnlyAnOfflineMachineClaimsServesNothing(t *testing.T) {
+	m := FleetModel{ModelId: "llama3.1:8b", ContextWindow: 131072, StructuredOutput: true,
+		Machines: []FleetMachine{
+			machineWith("asleep", false, 131072, FleetModelCapabilities{StructuredOutput: true}),
+			machineWith("awake", true, 131072, FleetModelCapabilities{}),
+		}}
+	if ok, why := m.eligibleFor(FleetNeeds{StructuredOutput: true}); ok || why != "does not advertise structured output" {
+		t.Fatalf("ok=%v why=%q, want the online machine's miss", ok, why)
+	}
+}
+
+func TestSetupAndCapabilityMustHoldOnTheSameMachine(t *testing.T) {
+	const model = "llama3.1:8b"
+	forbids := machineWith("forbids", true, 32768, FleetModelCapabilities{StructuredOutput: true})
+	forbids.ModelSetup = ModelSetup{Revision: "r1", Choices: map[string]string{"conversation": model}}
+	allows := machineWith("allows", true, 32768, FleetModelCapabilities{})
+	m := FleetModel{ModelId: model, ContextWindow: 32768, StructuredOutput: true, Machines: []FleetMachine{forbids, allows}}
+	if ok, _ := m.eligibleFor(FleetNeeds{StructuredOutput: true}); ok {
+		t.Fatal("no single machine both allows the purpose and advertises structured output")
+	}
+}
+
+func TestTheContextFloorIsTheServingMachinesWindow(t *testing.T) {
+	m := FleetModel{ModelId: "qwen3.8:27b", ContextWindow: 262144, StructuredOutput: true,
+		Machines: []FleetMachine{
+			machineWith("asleep", false, 262144, FleetModelCapabilities{StructuredOutput: true}),
+			machineWith("awake", true, 32768, FleetModelCapabilities{StructuredOutput: true}),
+		}}
+	if ok, why := m.eligibleFor(FleetNeeds{StructuredOutput: true, MinContextWindow: 40000}); ok || why != "context window 32768 is under the floor 40000" {
+		t.Fatalf("ok=%v why=%q, want the awake machine's window", ok, why)
 	}
 }

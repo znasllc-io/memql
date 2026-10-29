@@ -19,7 +19,18 @@ type stubFleetInference struct {
 }
 
 func (s *stubFleetInference) Catalog(context.Context, string) ([]memql.FleetModel, error) {
-	return s.models, nil
+	return advertisedOnEveryMachine(s.models), nil
+}
+
+// advertisedOnEveryMachine gives each fixture machine its model's advertised
+// attributes, the catalog Project builds when every machine reports the same
+// label: eligibility is decided per online machine.
+func advertisedOnEveryMachine(models []memql.FleetModel) []memql.FleetModel {
+	out := make([]memql.FleetModel, 0, len(models))
+	for _, m := range models {
+		out = append(out, memql.FleetModelAdvertisedOnEveryMachineForTest(m))
+	}
+	return out
 }
 
 func (s *stubFleetInference) ModelPreference(context.Context, string) ([]string, error) {

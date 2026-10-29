@@ -87,9 +87,12 @@ func TestAnEmbeddingModelAnswersEmbeddingCallsOnly(t *testing.T) {
 	if ok, why := embedder.Satisfies(ModelNeeds{Embeddings: true}); !ok {
 		t.Fatalf("an embedder takes an embedding call: %q", why)
 	}
+	// NEVER, even when the label claims it can answer (spec 2026-10-29, D3):
+	// only a Cockpit older than memql-cockpit#551 pairs embeddings with tools
+	// or structured output, and that label is the defect.
 	both := ParseModelAttributes("ctx=8192,embeddings=1,structured=1,tools=1")
-	if ok, why := both.Satisfies(ModelNeeds{}); !ok {
-		t.Fatalf("a model that also advertises an answering capability still answers: %q", why)
+	if ok, why := both.Satisfies(ModelNeeds{StructuredOutput: true}); ok || !strings.Contains(why, "embedding model") {
+		t.Fatalf("an embedder that claims tools must still not take a chat: ok=%v why=%q", ok, why)
 	}
 }
 

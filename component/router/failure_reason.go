@@ -45,10 +45,17 @@ var failureWords = map[string]string{
 	memql.AppRefusalCode:              "the app could not answer",
 	memql.AppVisionStagingRefusalCode: "the images could not be placed in the session workspace",
 	memql.RefusalCodeNoLocalModel:     "no machine could serve the model",
-	"rate_limit":                      "rate limited",
-	"timeout":                         "timed out",
-	"auth":                            "the credentials were refused",
-	"upstream":                        "the provider failed",
+	// A machine's own codes for a call it started and then failed (the
+	// Cockpit's modelcall codes, carried by component/worker's
+	// ModelCallFailed). Before they were carried, a runtime refusing a
+	// schema read `other` here.
+	"runtime_error":     "the machine's model runtime failed the call",
+	"model_call_failed": "the machine's model call failed",
+	"worker_stopped":    "the machine's worker stopped before the call finished",
+	"rate_limit":        "rate limited",
+	"timeout":           "timed out",
+	"auth":              "the credentials were refused",
+	"upstream":          "the provider failed",
 }
 
 // FailureReason is the `considered` line for a source that failed when it was

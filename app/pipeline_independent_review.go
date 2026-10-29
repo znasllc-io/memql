@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -15,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/repositoryauthority"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 func pipelineReviewDigest(v any) string {
@@ -401,6 +403,7 @@ func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelin
 	if err != nil {
 		return out, err
 	}
+	ctx = pipelineCallContext(ctx)
 	const schema = `{"type":"object","additionalProperties":false,"required":["approved","reason"],"properties":{"approved":{"type":"boolean"},"reason":{"type":"string","minLength":1,"maxLength":4000}}}`
 	var result memql.StructuredAIResult
 	if input.Projection != nil {
@@ -486,4 +489,18 @@ func reportIndependentPipelineReview(ctx context.Context, pkgs repositoryReviewA
 		return empty, err
 	}
 	return pipelinerun.IndependentReviewReceipt{CheckName: pipelines.IndependentReviewCheckName, HeadSHA: head, ExternalID: external, CheckRunID: id, AppID: source.AppID}, nil
+}
+
+// pipelineCallContext marks a model call the pipeline runner itself makes as
+// pipeline work, so the shipped rule pipelineLocalFirst routes it to the
+// owner's machines first, then an app, then a vendor (spec 2026-10-29, D5).
+// The review renders a captured prompt and builds no request of its own, so
+// the tag rides the call attribution; whatever an outer frame attributed is
+// kept.
+func pipelineCallContext(ctx context.Context) context.Context {
+	a, _ := memql.AICallAttributionFromContext(ctx)
+	if !slices.Contains(a.Tags, airoute.TagPipeline) {
+		a.Tags = append(append([]string(nil), a.Tags...), airoute.TagPipeline)
+	}
+	return memql.ContextWithAICallAttribution(ctx, a)
 }

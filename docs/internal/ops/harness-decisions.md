@@ -948,6 +948,122 @@ independent instructions and cancellation. The existing driver regression
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
 
+## Pipeline AI runs local first (2026-10-29)
+
+Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a
+failed run's diagnosis, the repository change a diagnosis requests -- runs on
+the fleet's local models first, then a signed-in app, with a paid vendor as the
+balance. On the production installation that day, the diagnosis of a failed
+release parked on `inferenceUnavailable`: the app door refused, two local
+models failed, an embedding model was tried as a chat model, and there was no
+vendor to try. The [spec](../../superpowers/specs/2026-10-29-pipeline-ai-local-first-design.md)
+records the evidence and the owner's decisions; this section maps the paths.
+
+**A runtime that cannot compile the schema** (`cockpit/internal/worker/modelcall/ollama_schema.go`,
+`ollamaSchemaRefused`). Ollama 0.33.3 answered both local models with
+`400 Failed to initialize samplers: failed to parse grammar`; the llama.cpp in
+Ollama 0.40.6 compiles the same schemas. A 400 to a `format` request with no
+tools, whose error names the grammar, now takes the schema-in-prompt path the
+501 already took: one retry on the same machine, the answer held to the whole
+schema, otherwise the call fails. Any other 400 fails as before. Safe because
+Ollama refuses before generating. The held-back answer reports runtime
+progress, so the idle watchdog does not end a slow answer as a stall. Tests:
+`TestStructuredCallTheRuntimeCannotCompileAsksInThePrompt`,
+`TestStructuredCallKeepsOtherBadRequests`,
+`TestTheHeldBackAnswerKeepsTheIdleClockAlive`. Takes effect only on machines
+running a Cockpit release that carries it; upgrading Ollama removes the retry.
+
+**A machine's failure keeps its code** (`component/worker/modelcall_failed.go`).
+The stream's handle, the holder's forward response and the sender each kept a
+failed call's machine code (`runtime_error`, ...) only as text, and the holder
+replaced it with `model_call_failed`, so the decision record said `other`.
+`ModelCallFailed` carries the code with each path's old text shape; the router
+names `runtime_error`, `model_call_failed` and `worker_stopped` in its own words
+and never puts the runtime's text in `considered`. `Code()` repeats a machine's
+code only when it is a stable word (lowercase and underscores, at most forty),
+because the decision line can be read by someone the machine was lent to;
+anything else reads `model_call_failed`
+(`TestAMachineCodeThatIsNotAStableWordIsNotRepeated`). The in-process loopback now
+fails a call the way the real stream does. Tests:
+`TestAFinishedCallWithAnErrorKeepsTheMachinesCode`,
+`TestAMachinesFailureCodeCrossesTheModelHop` (planner to agent over the real
+NodeService envelope), `TestAMachineFailureIsNamedOnTheDecisionLine`.
+
+**Eligibility is decided per online machine** (`FleetModel.eligibleFor`,
+`FleetMachine.serves`). The catalog's model-level flags are a union over every
+registration, offline ones included, and one online machine's pre-#551 Cockpit
+plus old offline registrations claimed tools and structured output for
+`qwen3-embedding:0.6b`. A model is a candidate only through one online machine
+that allows the purpose in its model setup and advertises every capability and
+the context window itself (`fleetcatalog.Project` keeps each machine's
+window). An embedding model never answers a non-embedding call, in the catalog
+and in `ModelAttributes.Satisfies` (owner decision: "never", replacing
+memql#6238's allowance for a model claiming both). Fixtures that set only the
+union use `FleetModelAdvertisedOnEveryMachineForTest`. Tests:
+`TestAnEmbedderIsNeverAChatCandidateEvenWhenAMachineClaimsTools`,
+`TestACapabilityOnlyAnOfflineMachineClaimsServesNothing`,
+`TestSetupAndCapabilityMustHoldOnTheSameMachine`,
+`TestTheContextFloorIsTheServingMachinesWindow`,
+`TestProjectKeepsEachMachinesWindow`, `TestAnEmbeddingModelAnswersEmbeddingCallsOnly`.
+
+**A tool-free app turn in an Auto goal is a model call**
+(`integrations/agent/worker/app_gate.go`, `toolFreeTurnWaivesDestination`).
+Pipeline maintenance opens the diagnosis goal for the owner with no route
+choice, so its destination is Auto, and the gate refused every app session in
+it as a move to the computer. A chat-door turn with no images and no inputs
+already runs the app with no tools. The destination refusal is waived for such
+a turn only when the goal is Auto (owner decision: an explicit Workbench goal
+keeps its refusal), and only on a machine whose app descriptor declares
+`inferenceOnly` (`worker.proto`, set by the Cockpit for `claude-headless` and
+`codex-app-server`, never `codex-mcp`; absent reads false). The agent's local
+selection, its forward and the holder all judge the machine; the holder uses
+its live descriptor; an agent that does not hold the stream reads the claim off
+the registration row through `workerservice.AppDescriptorFromMap`, the one
+decoder both row readers use (the routing store once dropped the key, which
+refused every machine a sibling replica held). A planner or bff sender runs no
+gate and leaves the judgment to the holder. Session-door steps and turns with images or inputs
+keep the refusal. Tests: `TestAToolFreeTurnInAnAutoGoalRunsOnAMachineThatDeclaresIt`,
+`TestAToolFreeTurnSkipsAMachineThatCannotRunWithoutTools`,
+`TestAnAutoGoalStillRefusesATurnWithInputs`,
+`TestAWorkbenchGoalStillRefusesAToolFreeTurn`,
+`TestTheSessionDoorStillNeedsDestinationConsent`,
+`TestAToolFreeTurnIsJudgedOnTheHoldersMachine` (hop; shown load-bearing by
+disabling the holder's check), `TestAnAgentWithoutTheStreamJudgesTheRegistrationRow`
+(hop with an agent sender reading the real row), `TestTheRoutingRowReaderKeepsInferenceOnly`.
+App SELECTION (`SelectAppForCall`) still pins one machine by score without the
+claim: during a Cockpit rollout an app door can be skipped in an Auto goal while
+an updated machine is online; the route moves to its next entry.
+
+**The pipeline rule** (`dsl/rules/rules.memql` `pipelineLocalFirst`,
+`dsl/policies/policies.memql` `localFirstStrongest`, `app/work_call_tags.go`).
+Calls carrying the `pipeline` tag at `reasoning` take fleet:strongest, app:*,
+federation:strongest in the order written; Auto ranks only the three general
+chains. The tag comes from the review's own call attribution
+(`pipelineCallContext`) and from the run context of a work run whose goal has
+`requestedVia: "pipeline"`, read off the goal row on the replica doing the work
+(`integrations/work.GoalCallTags`) by the agent's dispatcher and by the
+planner's remedy, whose reasoning-level replan would otherwise take
+reasoningParks' app-first order; `ResolveFor` adds the run's tags to a request
+built outside the engine. A goal that cannot be read routes by the ordinary
+rules and is logged. A goal a pipeline run opens itself (`agent()`, a compose)
+routes by its own origin. Tests: `TestAPipelineReasoningCallMatchesThePipelineRule`,
+`TestAutoLeavesThePipelineChainInItsWrittenOrder`,
+`TestAFullSizeReviewSkipsTheLocalDoor` (a 1 MiB review's 266,240-token floor
+exceeds a 262,144-token local window), `TestCallTagsFromTheCallerAndTheRunReachTheRequest`,
+`TestExecutionHopCarriesTheRunsCallTags`,
+`TestAGoalThatCannotBeReadLeavesTheRunUntagged`,
+`TestTheIndependentReviewCallIsTaggedPipeline`,
+`TestAPipelineGoalsReplanCarriesThePipelineTag`,
+`TestResolveForAppliesTheRunsCallTags`, and the shipped-rule gates in
+`test/dslconformance/local_first_policies_test.go` and the OS routing tests.
+
+**Not verified here.** No change ran on the production cluster or on a fleet
+machine. The grammar failure was not reproduced on Ollama 0.33.3 itself. The
+app waiver helps only machines on a Cockpit that declares `inferenceOnly`. The
+production installation has no vendor configured, so the third door stays
+empty until the owner configures one. The `inferenceUnavailable` sweep did not
+re-try the parked diagnosis after its `resumeAt`; that is not addressed here.
+
 ## A pipeline run says why it failed outside its steps (2026-10-27)
 
 A pipeline's workflow can fail after every step passed. On 2026-10-27 the
