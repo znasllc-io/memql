@@ -948,6 +948,52 @@ independent instructions and cancellation. The existing driver regression
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
 
+## First pipeline PR qualification keeps approval on one attempt (2026-10-28)
+
+Ordinary connect reads the default branch, so it cannot test a repository's
+first native CI configuration before that configuration lands. A source owner
+can instead preview an open, same-repository PR and qualify its exact head,
+base and manifest digest with explicit compute permission, secret-name scope,
+expiry and request identity. The typed builtin and generated SDK are the entry
+point; there is no parallel HTTP action or private script granting execution.
+
+The pipeline is created atomically in `qualification` state. That state reserves
+the repository but remains outside automatic delivery, schedules, ordinary
+manual runs and release builds. Its run carries create-only authority binding
+the source, current owner and account, credential, provider repository and
+installation, App identity, PR, execution policy and approved scope. Native
+execution rechecks mutable authority before effects, including after restoring
+the run on another replica. A later ordinary connect reads the default branch
+again; qualification history cannot supply an ordinary delivery's policy or
+deduplication result. Disconnect preserves the inactive origin as
+`qualification_revoked`, including on repeated disconnect; generic disconnected
+pipelines have manual-run behavior that a revoked qualification must not inherit.
+Ordinary rerun cannot copy its approval.
+
+The durable attempt exists before the first GitHub check creation request. An
+uncertain response is recovered by observing the exact head, check name, App
+and external run identity, across a bounded complete result set. Missing,
+ambiguous or incomplete evidence cannot authorize another POST or establish
+success. A crash between intent and the first POST can therefore leave an
+unresolved attempt; cancel it before authorizing a new request ID. This trades
+automatic recovery of that narrow window for an honest effect boundary.
+
+`TestQualificationAuthoritySurvivesRealRowsAndReplacementDriver` exercises the
+actual DSL rows, create-only scope and database gates with a replacement driver;
+its provider and execution substrate remain fixtures.
+`TestQualificationBuiltinsKeepAuthorityAndReceiptsAcrossEngines` checks typed
+builtin dispatch, permission refusal, optional argument defaults and the actual
+engine-to-protobuf JSON receipt through two engines with separate database
+pools. It does not traverse a transport interceptor or a live SDK connection.
+The qualification unit
+suite covers exact-request retries, current authority refusals, ordinary-run
+isolation and uncertain provider receipts. The GitHub adapter tests cover
+pagination, duplicate receipts and incomplete observations, while the app
+capture tests retain source-owner and PR head/base checks. These tests do not
+qualify a deployed integration or any consumer repository. Live runs and
+equivalent coverage must be verified separately. Required-check changes, merge,
+release publication and controller deployment remain separate decisions.
+
 ## A pipeline run says why it failed outside its steps (2026-10-27)
 
 A pipeline's workflow can fail after every step passed. On 2026-10-27 the

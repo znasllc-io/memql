@@ -406,6 +406,14 @@ func (dr *runDriver) heartbeat(ctx context.Context) {
 		if dr.lease.isLost() || !dr.renew(ctx) {
 			return
 		}
+		if dr.run.Qualification != nil && !dr.lease.isCancelled() {
+			checkCtx, done := context.WithTimeout(ctx, githubCallTimeout)
+			err := dr.qualificationFence(checkCtx)
+			done()
+			if err != nil && !errors.Is(err, errQualificationCheckPending) {
+				dr.lease.cancel()
+			}
+		}
 	}
 }
 

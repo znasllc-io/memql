@@ -83,11 +83,11 @@ func TestOpenPullRequestsReadsEachHeadAndWhereItCameFrom(t *testing.T) {
 		t.Fatalf("pulls: %v", err)
 	}
 	want := []PullRequestHead{
-		{Number: 7, Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7"},
-		{Number: 8, Title: "From a fork", HeadSHA: "head8", HeadRef: "patch-1", HeadRepository: "stranger/widget", BaseSHA: "base8"},
+		{Number: 7, Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7", BaseRef: "main", BaseRepository: "acme/widget"},
+		{Number: 8, Title: "From a fork", HeadSHA: "head8", HeadRef: "patch-1", HeadRepository: "stranger/widget", BaseSHA: "base8", BaseRef: "main"},
 		// A DELETED head repository answers empty: the caller cannot tell it
 		// from a fork, and must not read it as this repository.
-		{Number: 9, Title: "Its fork was deleted", HeadSHA: "head9", HeadRef: "gone", HeadRepository: "", BaseSHA: "base9"},
+		{Number: 9, Title: "Its fork was deleted", HeadSHA: "head9", HeadRef: "gone", HeadRepository: "", BaseSHA: "base9", BaseRef: "main"},
 	}
 	if len(prs) != len(want) {
 		t.Fatalf("want %d pull requests, got %+v", len(want), prs)
@@ -119,7 +119,7 @@ func TestPullRequestReadsOneHeadByItsNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull request: %v", err)
 	}
-	if want := (PullRequestHead{Number: 7, State: "open", Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7"}); got != want {
+	if want := (PullRequestHead{Number: 7, State: "open", Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7", BaseRef: "main", BaseRepository: "acme/widget"}); got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 	if auth := hub.seen()[0].Header.Get("Authorization"); auth != "Bearer "+installToken {

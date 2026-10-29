@@ -78,6 +78,13 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 			p.Repository, shortSHA(run.SHA), err)
 	}
 
+	if run.Qualification != nil {
+		q, err := readQualification(run.Qualification)
+		digest, digestErr := manifestDigest(tree)
+		if err != nil || digestErr != nil || digest != q.ManifestDigest {
+			return pipelines.Plan{}, pipelines.Refuse(qualificationRefusal, "qualification", "The fetched manifest differs from the reviewed qualification.")
+		}
+	}
 	manifest, err := packages.ReadManifest(tree)
 	if err != nil {
 		var refusal *packages.Refusal

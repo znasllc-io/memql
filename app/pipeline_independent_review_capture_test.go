@@ -45,7 +45,7 @@ func captureBlob(text string) string {
 }
 func newIndependentCaptureFixture(t *testing.T) *independentCaptureFixture {
 	f := &independentCaptureFixture{t: t, base: reviewSHA(1), mergeBase: reviewSHA(1), compareStatus: "ahead", saved: map[int]pipelinerun.IndependentReviewRecord{}}
-	f.p = pipelinerun.Pipeline{ID: "pipeline", OwnerUserID: "owner", PackageID: "source", CredentialID: "credential", Repository: "acme/repo", DefaultBranch: "main", InstallationID: 123}
+	f.p = pipelinerun.Pipeline{ID: "pipeline", OwnerUserID: "owner", PackageID: "source", CredentialID: "credential", Repository: "acme/repo", DefaultBranch: "main", InstallationID: 123, Status: pipelinerun.PipelineActive}
 	f.source = pipelinerun.ReviewSource{PipelineID: f.p.ID, OwnerUserID: f.p.OwnerUserID, SourceID: f.p.PackageID, CredentialID: f.p.CredentialID, Repository: f.p.Repository, Branch: "main", InstallationID: 123, RepositoryID: 21, AppID: 42}
 	f.files = map[string]map[string]string{
 		reviewSHA(1): {"native.txt": "old native", "ordinary.txt": "old ordinary"},
@@ -63,7 +63,7 @@ func (f *independentCaptureFixture) run(number int) pipelinerun.Run {
 }
 func (f *independentCaptureFixture) reads() pipelineReviewReader {
 	return pipelineReviewReader{
-		source: func(ctx context.Context, p pipelinerun.Pipeline, fence func(context.Context) error) (pipelinerun.ReviewSource, *githubapp.Client, string, error) {
+		source: func(ctx context.Context, p pipelinerun.Pipeline, r pipelinerun.Run, fence func(context.Context) error) (pipelinerun.ReviewSource, *githubapp.Client, string, error) {
 			if err := fence(ctx); err != nil {
 				return pipelinerun.ReviewSource{}, nil, "", err
 			}

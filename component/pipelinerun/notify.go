@@ -187,6 +187,10 @@ func (dr *runDriver) runNotify(ctx context.Context, t *stepTrack) {
 		if len(ids) > 0 && (dr.lease.isLost() || dr.lease.isCancelled()) {
 			break
 		}
+		if err := dr.qualificationFence(ctx); err != nil {
+			finish(failReceipt(qualificationRefusal, dr.mask(err.Error())))
+			return
+		}
 		if err := dr.d.Store.StageNotification(ctx, req); err != nil {
 			fail(stagingFailed(target.name, len(ids), len(requests), oneLine(mask(err.Error()))))
 			return

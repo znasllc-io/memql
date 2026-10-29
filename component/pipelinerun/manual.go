@@ -58,6 +58,9 @@ func (i *Integration) RunLatest(ctx context.Context, pipelineID, branch string) 
 		return Run{}, fmt.Errorf("pipelines: you have no pipeline %q", pipelineID)
 	}
 
+	if p.Status == PipelineQualification || p.Status == PipelineQualificationRevoked {
+		return Run{}, qualificationError("A qualification source authorizes only its exact pull-request request; connect its default-branch manifest before other runs.")
+	}
 	if strings.TrimSpace(p.CredentialID) == "" {
 		return Run{}, fmt.Errorf("pipelines: this source has no GitHub connection; reconnect it before running a rehearsal")
 	}

@@ -157,7 +157,21 @@ type CheckRunWrite struct {
 // verifying the grant still reaches the repository -- and dies with the call.
 // Both are calls to GitHub, so it is never called under a gate.
 func publishCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipelines.RunReport) CheckRunWrite {
-	token, err := checkRunToken(ctx, d, p)
+	var token string
+	var err error
+	if r.Qualification != nil || r.Trigger == TriggerQualification {
+		token, err = qualificationCheckDestination(ctx, d, p, r)
+		// A stale/expired proposal may be reported as failed or cancelled, never
+		// newly promoted to success by recovery after its authority disappeared.
+		if err == nil && report.Conclusion == ConclusionSuccess {
+			dr := &runDriver{d: d, p: p, run: r}
+			if fenceErr := dr.qualificationFence(ctx); fenceErr != nil {
+				err = fenceErr
+			}
+		}
+	} else {
+		token, err = checkRunToken(ctx, d, p)
+	}
 	return writeCheckRun(ctx, d, p, r, report, token, err)
 }
 
@@ -180,6 +194,13 @@ func checkRunToken(ctx context.Context, d Deps, p Pipeline) (string, error) {
 // minted: a failed mint (tokenErr) is the write's answer, unavailable, with no
 // call made.
 func writeCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipelines.RunReport, token string, tokenErr error) CheckRunWrite {
+	return writeCheckRunAttempt(ctx, d, p, r, report, token, tokenErr, false)
+}
+
+// Only the initial qualification opener may create a check, after its run's
+// immutable intent is durable. Every recovery observes the exact external ID;
+// absent/ambiguous evidence stays unavailable and never causes another POST.
+func writeCheckRunAttempt(ctx context.Context, d Deps, p Pipeline, r Run, report pipelines.RunReport, token string, tokenErr error, initialQualification bool) CheckRunWrite {
 	// Stored pipelines predate manifest admission, and opening may already
 	// have minted its token. Guard both creation and update at the effect.
 	if pipelines.ReservedPipelineCheckName(p.Name) {
@@ -191,6 +212,27 @@ func writeCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipeli
 	}
 	if tokenErr != nil {
 		return CheckRunWrite{State: CheckRunUnavailable, Err: tokenErr}
+	}
+	if r.Qualification != nil && r.CheckRunID == 0 && !initialQualification {
+		q, err := readQualification(r.Qualification)
+		if err != nil {
+			return CheckRunWrite{State: CheckRunUnavailable, Err: err}
+		}
+		provider, ok := d.GitHub.(qualificationGitHub)
+		if !ok {
+			return CheckRunWrite{State: CheckRunUnavailable, Err: qualificationError("Qualification check observation is unavailable.")}
+		}
+		id, err := provider.FindQualificationCheck(ctx, token, p.Repository, r.SHA, pipelines.CheckRunName(q.Name), r.ID, q.AppID)
+		if err != nil {
+			return CheckRunWrite{State: CheckRunUnavailable, Err: err}
+		}
+		if id == 0 {
+			return CheckRunWrite{State: CheckRunUnavailable, Err: qualificationError("The initial qualification check creation is unresolved; no replacement check was created.")}
+		}
+		r.CheckRunID = id
+		answer := writeCheckRunAttempt(ctx, d, p, r, report, token, nil, false)
+		answer.ID = id
+		return answer
 	}
 	run := ComposeCheckRun(d.OSOrigin(), p, r, report)
 	if r.CheckRunID > 0 {

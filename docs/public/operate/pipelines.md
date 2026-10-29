@@ -783,6 +783,69 @@ check's name, the source's existing pipeline for a reconnect, and a delivery
 suggestion (webhook where GitHub can plausibly reach the cluster, poll
 otherwise). A typed refusal is the answer's `refusal`, not an error.
 
+## Qualifying the first pipeline pull request
+
+A repository's first `pipeline:` configuration can be reviewed on a pull
+request before it exists on the default branch. The source owner can qualify
+that exact revision through `pipelinesPreviewPullRequest` and
+`pipelinesQualifyPullRequest`, also available as generated Go and TypeScript
+SDK methods. This path leaves automatic delivery inactive and opens a genuine
+native pull-request run with full coverage for its applicable PR stages.
+
+The owner needs `execute` on `app:pipelines/connect` and a current GitHub
+connection for the source. The pull request must be open, in the same
+repository, and target its current default branch. A fork cannot borrow the
+source's execution or secret grants. An already active pipeline uses its
+ordinary delivery path instead.
+
+1. Read `pipelinesPreviewPullRequest` with `packageId` and `pullRequest`.
+   Review the PR at the returned head, its base, the manifest digest, the
+   stages, compute needs and requested secret names. Preview writes nothing.
+2. Choose the compute permission, secret-name allowlist and explicit RFC3339
+   expiry for this attempt. Use a new `requestId`, retaining it for retries.
+3. Call `pipelinesQualifyPullRequest` with those choices and the preview's
+   exact `expectedHeadSha`, `expectedBaseSha` and `expectedManifestDigest`.
+   Fresh source, grant and GitHub observations must still agree. A changed
+   head, base or manifest requires a new review, not an automatic refresh.
+4. Follow the returned native run and its App-owned GitHub check. Passing
+   requires real execution and the installed review policy; a local report,
+   manual rehearsal or absent check cannot substitute for that evidence.
+5. After the configuration lands through the repository's approved process,
+   use ordinary `pipelinesConnect` to read the default-branch manifest and
+   enable delivery. Qualification itself changes no repository rules, merges
+   no PR and publishes no release.
+
+The source's pipeline is stored with status `qualification`, which reserves
+the repository without enabling webhooks, polling, schedules, ordinary manual
+runs or release builds. Its run stores an immutable authority binding the
+owner, source, installation and App, PR head and base, manifest, compute,
+secret names, expiry, request identity and installed execution policy. Native
+execution rechecks mutable authority before effects. A process or replica
+change does not broaden that scope or restart completed work.
+
+Repeating the same `requestId` recovers the same attempt and refuses changed
+inputs. A new request after a terminal attempt requires a new ID and fresh
+reviewed inputs. Ordinary **Re-run** does not inherit qualification authority.
+Cancel stops the selected run; disconnect stores `qualification_revoked`,
+preserving its inactive origin so ordinary manual or release commands cannot
+reuse it. Repeating disconnect keeps it revoked. A revoked source requires
+ordinary connect after the configuration reaches the default branch;
+qualification cannot silently reactivate it. While the source remains in
+qualification, a new attempt may review a changed revision, but changing its
+saved pipeline name, compute permission or secret-name allowlist is refused.
+Connecting and qualification remain separate owner decisions.
+
+Check creation records its intent before contacting GitHub. After an uncertain
+response, recovery observes the exact App, commit, name and external run ID;
+it does not repeat the creation request. An incomplete observation or multiple
+matching checks stays unresolved. A missing provider receipt is not proof that
+no check was created, and cannot establish successful qualification.
+
+Keep existing required checks until the native replacement's equivalent
+coverage and real check evidence are verified. Any change to GitHub's required
+contexts is a separate reviewed policy transition; this capability supplies
+execution evidence and cannot perform that transition.
+
 ## In MemQL OS
 
 The **Pipelines** app owns **Overview**, **Repositories**, **Changes**,
