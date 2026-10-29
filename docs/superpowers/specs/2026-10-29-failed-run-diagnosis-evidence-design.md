@@ -21,7 +21,7 @@ to the owner in the brainstorm of 2026-10-29 and answered.
 
 ## 1. Why
 
-The analysis runs' approvals on production (memql.znas.io, engine 0.31.7),
+The analysis runs' approvals on the production installation (engine 0.31.7),
 2026-10-26 to 2026-10-29, as counted by the session that started this work:
 
 | Refusal | Runs |
