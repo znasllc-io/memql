@@ -1731,3 +1731,42 @@ versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
 reject what a walk finds. The same sweep's `workAutomationStepsForOwner` and
 `workGoalsForOwner` read concepts with no owner index at all, so bounding the
 run read alone would not let the sweep finish.
+
+## Pipeline AI is off until the owner turns it on (2026-10-29)
+
+The owner decided that a pipeline should mostly run by itself: AI review and AI
+failure diagnosis are off by default, with a switch for each in Pipelines >
+Settings > AI. Connected workflow:
+[pipelines.md](../../public/operate/pipelines.md#ai-review-and-failure-diagnosis-are-off-until-you-turn-them-on).
+
+- **Where the switches live.** The global variable `MEMQL_PIPELINES_AI`
+  (`pipelines.AISettingsVariable`, `component/pipelines/ai.go`), JSON
+  `{"review": bool, "diagnosis": bool}`, like `MEMQL_PIPELINES_TRAINS`. The OS
+  writes it through `setGlobalVariable` (row `var-global-memql-pipelines-ai`).
+- **Read at use, not at run open** (`Deps.aiSettings`,
+  `component/pipelinerun/ai_settings.go`). A captured-policy switch would make
+  every flip refuse the reviews in flight ("installed independent review policy
+  changed", the fence in `independent_review.go`), which cost three pull
+  requests a full CI run each on 2026-10-29. Read at use, a flip applies to the
+  next review or failure and never to one already started.
+- **Off is all-off.** Absent, empty, unparseable, or carrying an unknown field
+  reads as both off (`ParseAISettings`, `TestParseAISettingsIsOffUnlessTurnedOn`),
+  and so does a node without a variable reader.
+- **Review gate** (`runDriver.independentReview`). Off answers what a pipeline
+  without a reviewer answers, nothing, so the reviewed workflow returns and the
+  run is decided by its steps: no capture, no model, no `MemQL / review` report
+  (`TestAIReviewOffLeavesTheRunToItsOwnChecks`, `TestAIReviewOnStillReviews`).
+  On, the installed policy's opt-in still decides
+  (`TestIndependentReviewNoOptInAndPublicArgumentsCannotStart`).
+- **Diagnosis gate** (`reconcileMaintenance`). Off turns the policy's
+  `analysis` into `none` with "AI failure diagnosis is off in Pipelines
+  settings.", so no goal opens; the policy's own `none` and `human` stand
+  (`TestAIDiagnosisOffOpensNoGoal`, `TestAIDiagnosisOffLeavesAHumanDispositionAlone`).
+  Recovery's maintenance pass reads the switch again, so a run left `pending`
+  while diagnosis was on is decided under the switch as it is when recovered.
+
+The other review and maintenance tests run with both switches on
+(`bindTestWorkflow`). Not verified here: the OS toggle against a live cluster,
+and a train's pull request with review off (it is an ordinary pull-request run,
+so the same gate applies). Known limit: a reader error reads as off and is not
+reported on the run.

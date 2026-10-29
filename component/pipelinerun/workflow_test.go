@@ -70,6 +70,11 @@ func bindTestWorkflow(d *Deps, a *automations.Automation) {
 		if name == PolicyResolverVariable {
 			return "testDeliveryProfile", nil
 		}
+		// The review and maintenance tests exercise the AI paths, so both
+		// switches are on here; ai_settings_test.go holds the off default.
+		if name == pipelines.AISettingsVariable {
+			return `{"review":true,"diagnosis":true}`, nil
+		}
 		return "", nil
 	}
 	d.WorkflowSource = func(kind, name string) (string, error) {

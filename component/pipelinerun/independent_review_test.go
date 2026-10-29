@@ -202,6 +202,12 @@ func TestIndependentReviewNoOptInAndPublicArgumentsCannotStart(t *testing.T) {
 	dr := preparedSelectionDriver(t, dh, r)
 	f := &independentReviewFixture{}
 	dr.d.IndependentReview = f.dependencies()
+	// With the owner's AI review switch off (the default) nothing starts at all.
+	if out, err := dr.independentReview(context.Background()); err != nil || out != nil || f.model != 0 {
+		t.Fatal("AI review ran while switched off")
+	}
+	// Switched on, the installed policy's missing opt-in still refuses.
+	withAISettings(&dr.d, `{"review":true}`)
 	if _, err := dr.independentReview(context.Background()); err == nil {
 		t.Fatal("default policy enabled review")
 	}

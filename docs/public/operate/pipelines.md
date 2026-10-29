@@ -122,6 +122,31 @@ These permissions do not transfer between stages:
 | Approve a release candidate | Publication of its exact verified artifacts to its declared destinations | Selecting or updating an installation |
 | Apply an installation plan | The selected source and saved plan under current installation authority | Choosing a newer release or broadening the plan |
 
+### AI review and failure diagnosis are off until you turn them on
+
+A pipeline runs, reports and gates on its own checks. The two features that ask
+a model are separate owner switches in **Pipelines > Settings > AI**, and both
+are off by default:
+
+| Switch | On | Off |
+| --- | --- | --- |
+| AI review of pull requests | After every check of a pull request passes, a model reviews the change, and a rejection fails the run's check | The run is decided by its checks, as on a pipeline with no reviewer |
+| AI diagnosis of failed runs | The installed maintenance policy may open an AI analysis goal for a run's first failure | The failure reports itself; the run records "AI failure diagnosis is off in Pipelines settings" |
+
+The switches are the global variable `MEMQL_PIPELINES_AI`, a JSON object
+`{"review": bool, "diagnosis": bool}`. An absent, empty or unreadable value,
+or one with a field this engine does not know, reads as both off, so a typo
+never turns a model on. The engine reads it when a review or a diagnosis would
+start, not when the run opens: a change applies to the next review or failure,
+and a review already in flight is never refused for a policy change, because
+the switch is not part of the run's captured policy.
+
+A switch is an owner gate on top of the installed policy, not a replacement for
+it. With review on, a pipeline whose policy names no reviewer still has none;
+with diagnosis on, the maintenance policy still decides whether a failure gets
+an analysis, a person, or nothing. Turning diagnosis off leaves a policy's own
+`human` or `none` decision as it chose.
+
 ### Automated repair is an installed policy
 
 The engine supplies the execution and permission boundaries. The installation's

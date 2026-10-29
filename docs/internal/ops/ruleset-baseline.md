@@ -203,15 +203,11 @@ rulesets were saved before those writes.
   `maxRebuilds` 2, no `ownerDiscordUserId` yet. The `znas-instance` channel
   was allowed on the `memql` pipeline (`pipelinesChannelAllow`), because a
   train refuses to post to a channel its pipeline does not accept.
-- Step 2 is deferred, so `jmendivilznas` (in `human-developers`) is still a
-  code owner of every path outside the `human-lead-developers` overrides.
-  The CODEOWNERS change (memql#6371) failed the pipeline's independent
-  review: from the diff alone the reviewer could not establish the
-  App-authored train path that replaces an owner-authored pull request's
-  missing code-owner approval. It returns once a train has landed, with that
-  train as evidence. Trains do not wait for it: the owner is in both
-  CODEOWNERS teams, so the owner's approval of a train pull request is
-  already a code-owner review.
+- Step 2 shipped with the consolidated 0.31.8 release: the CODEOWNERS
+  catch-all moved from `human-developers` to `human-lead-developers`, today the
+  owner alone (memql#6371), so only the owner's review counts on every path.
+  The owner approves an App-authored train pull request, which the owner did
+  not author; an owner-authored pull request merges through the bypass.
 
 ---
 
