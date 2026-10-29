@@ -92,7 +92,7 @@ function machineRow(over: Record<string, unknown> = {}): Row {
   } as Row;
 }
 
-const ALLOWED = machineRow({ labels: { pipelines: "allowed" }, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 4 } } });
+const ALLOWED = machineRow({ labels: { pipelines: "allowed" }, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 5 } } });
 
 /**
  * The Deployables fake, answering the machines read too.

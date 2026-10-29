@@ -24,9 +24,12 @@ import { isRevoked, type MachineRow } from "../../fleet/rows";
 export const PIPELINES_LABEL = "pipelines";
 export const PIPELINES_ALLOWED = "allowed";
 
-// Exact protocol generation, shared with the engine router. Contract 4 streams
-// artifacts with verified terminal receipts; older workers cannot execute the step.
-export const PIPELINE_STEP_CONTRACT = 4;
+// Exact protocol generation, shared with the engine router
+// (PipelineStepContract in integrations/agent/worker/pipeline_purpose.go; the
+// connect-flow test reads that file and pins the two together). Contract 5 adds
+// enforced container CPU/memory bounds and shared host admission to contract 4's
+// verified artifact streaming; older workers cannot execute the step.
+export const PIPELINE_STEP_CONTRACT = 5;
 
 /** Whether a machine implements the required contract and consents through its own reported policy. */
 export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract">): boolean {
