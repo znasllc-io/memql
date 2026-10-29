@@ -5357,6 +5357,32 @@ func PipelinesPreviewBuild(args PipelinesPreviewArgs) string {
 	return b.String()
 }
 
+// PipelinesPreviewPullRequest -- Preview a first CI configuration on an open pull request without connecting its pipeline. The source owner and current GitHub grant must reach the same repository; fork heads and closed requests refuse. Returns the verified head, base, exact manifest digest, declared stages and requested secret names. This read creates no pipeline, run, check or execution permission.
+type PipelinesPreviewPullRequestArgs struct {
+	PackageId   string
+	PullRequest int
+}
+
+// PipelinesPreviewPullRequest calls the engine builtin pipelinesPreviewPullRequest.
+func (qc *QueryClient) PipelinesPreviewPullRequest(ctx context.Context, args PipelinesPreviewPullRequestArgs) (*Result, error) {
+	call := PipelinesPreviewPullRequestBuild(args)
+	return qc.executeNamed(ctx, "pipelinesPreviewPullRequest", call)
+}
+
+func PipelinesPreviewPullRequestBuild(args PipelinesPreviewPullRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesPreviewPullRequest(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("pullRequest: ")
+	b.WriteString(fmt.Sprintf("%v", args.PullRequest))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesPublishSARIF -- Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation.
 type PipelinesPublishSARIFArgs struct {
 	RunId   string
@@ -5385,6 +5411,78 @@ func PipelinesPublishSARIFBuild(args PipelinesPublishSARIFArgs) string {
 	}
 	b.WriteString("path: ")
 	b.WriteString(quoteMemQL(args.Path))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesQualifyPullRequest -- Qualify one reviewed pull-request head before enabling automatic delivery. The owner supplies the previewed head, base and manifest digest, compute consent, secret-name allowlist, explicit expiry and stable request ID. Repeating the request ID recovers its original scope; changed inputs under that ID refuse. Fresh source and GitHub reads must agree before an inactive pipeline can open a full native PR run. The run's durable scope grants one attempt only; ordinary deliveries and reruns do not inherit it. Existing active pipelines are not restated by this operation. Check reporting uses the real native run, and never changes GitHub rules.
+type PipelinesQualifyPullRequestArgs struct {
+	PackageId              string
+	PullRequest            int
+	RequestId              string
+	ExpectedHeadSha        string
+	ExpectedBaseSha        string
+	ExpectedManifestDigest string
+	Compute                string
+	SecretNames            []string
+	ExpiresAt              string
+}
+
+// PipelinesQualifyPullRequest calls the engine builtin pipelinesQualifyPullRequest.
+func (qc *QueryClient) PipelinesQualifyPullRequest(ctx context.Context, args PipelinesQualifyPullRequestArgs) (*Result, error) {
+	call := PipelinesQualifyPullRequestBuild(args)
+	return qc.executeNamed(ctx, "pipelinesQualifyPullRequest", call)
+}
+
+func PipelinesQualifyPullRequestBuild(args PipelinesQualifyPullRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesQualifyPullRequest(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("pullRequest: ")
+	b.WriteString(fmt.Sprintf("%v", args.PullRequest))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedHeadSha: ")
+	b.WriteString(quoteMemQL(args.ExpectedHeadSha))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedBaseSha: ")
+	b.WriteString(quoteMemQL(args.ExpectedBaseSha))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedManifestDigest: ")
+	b.WriteString(quoteMemQL(args.ExpectedManifestDigest))
+	if args.Compute != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("compute: ")
+		b.WriteString(quoteMemQL(args.Compute))
+	}
+	if args.SecretNames != nil {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("secretNames: ")
+		b.WriteString(renderMemQLValue(args.SecretNames))
+	}
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
 	b.WriteString(")")
 	return b.String()
 }

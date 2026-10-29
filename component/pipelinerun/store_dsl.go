@@ -519,6 +519,9 @@ func (s *dslStore) CreatePipeline(ctx context.Context, p Pipeline) error {
 		"compute":        string(compute),
 		"secretNames":    stringList(p.SecretNames),
 	}
+	if p.Status == PipelineQualification {
+		args["status"] = PipelineQualification
+	}
 	setIfSet(args, "defaultBranch", p.DefaultBranch)
 	if len(p.ChannelIDs) > 0 {
 		args["channelIds"] = stringList(p.ChannelIDs)
@@ -598,6 +601,9 @@ func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
 	setIfSet(args, "baseSha", strings.ToLower(strings.TrimSpace(r.BaseSHA)))
 	setIfSet(args, "title", r.Title)
 	setIfSet(args, "version", r.Version)
+	if r.Qualification != nil {
+		args["qualification"] = r.Qualification
+	}
 	if r.PolicySnapshot != nil {
 		args["policySnapshot"] = r.PolicySnapshot
 	}
@@ -1155,6 +1161,7 @@ func pipelineFromRow(row map[string]any) Pipeline {
 
 func runFromRow(row map[string]any) Run {
 	policySnapshot, _ := row["policySnapshot"].(map[string]any)
+	qualification, _ := row["qualification"].(map[string]any)
 	selectionFacts, _ := row["selectionFacts"].(map[string]any)
 	reviewEvidence, _ := row["reviewEvidence"].(map[string]any)
 	r := Run{
@@ -1164,6 +1171,7 @@ func runFromRow(row map[string]any) Run {
 		MaintenanceGoalID:  rowString(row, "maintenanceGoalId"),
 		MaintenanceMessage: rowString(row, "maintenanceMessage"),
 		PolicySnapshot:     policySnapshot,
+		Qualification:      qualification,
 		ID:                 bareID(rowString(row, "id")),
 		OwnerUserID:        rowString(row, "ownerUserId"),
 		AccountID:          bareID(rowString(row, "accountId")),

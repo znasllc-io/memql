@@ -37,11 +37,12 @@ const (
 	ConclusionRefused   = "refused"
 
 	// What opened a run row.
-	TriggerWebhook  = "webhook"
-	TriggerPoll     = "poll"
-	TriggerSchedule = "schedule"
-	TriggerManual   = "manual"
-	TriggerRerun    = "rerun"
+	TriggerWebhook       = "webhook"
+	TriggerPoll          = "poll"
+	TriggerSchedule      = "schedule"
+	TriggerManual        = "manual"
+	TriggerRerun         = "rerun"
+	TriggerQualification = "qualification"
 
 	// Whether the run's GitHub check run exists. Pending is the value a run
 	// is opened with before any write was attempted; refused is GitHub's
@@ -58,8 +59,10 @@ const (
 	DeliveryPoll    = "poll"
 
 	// Pipeline status.
-	PipelineActive       = "active"
-	PipelineDisconnected = "disconnected"
+	PipelineActive               = "active"
+	PipelineDisconnected         = "disconnected"
+	PipelineQualification        = "qualification"
+	PipelineQualificationRevoked = "qualification_revoked"
 )
 
 // Step statuses, in the vocabulary pipelines.StepReport (and so the check
@@ -221,6 +224,8 @@ type Run struct {
 	// PolicySnapshot freezes the installed delivery policy and its complete
 	// reachable source. It grants no repository or execution authority.
 	PolicySnapshot map[string]any
+	// Qualification is immutable, run-bound owner authority; never copied to reruns.
+	Qualification map[string]any
 	// SelectionFacts is the immutable, source-bound provider observation used
 	// by an opted-in stage resolver. It grants no repository write authority.
 	ReviewEvidence     map[string]any

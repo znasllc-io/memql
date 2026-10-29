@@ -28,7 +28,8 @@ import (
 
 // Opening is what one cause asks a pipeline to open.
 type Opening struct {
-	Event pipelines.Event
+	Qualification *PullRequestQualification
+	Event         pipelines.Event
 	// Mode is the event's mode when empty (modeForEvent); a re-run
 	// carries its original's.
 	Mode        pipelines.Mode
@@ -65,7 +66,7 @@ type Opening struct {
 // replica, and its RerunOf for attempt/dedup semantics. Ordinary manual starts
 // still recover the existing attempt instead of opening another one.
 func (o Opening) isRerun() bool {
-	return o.Trigger == TriggerRerun ||
+	return o.Qualification != nil || o.Trigger == TriggerRerun ||
 		(o.Trigger == TriggerManual && o.Event == pipelines.EventRelease && strings.TrimSpace(o.RerunOf) != "")
 }
 
@@ -112,6 +113,9 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	if d.Store == nil {
 		return OpenResult{}, errNoStore
 	}
+	if (p.Status == PipelineQualification || p.Status == PipelineQualificationRevoked) && o.Qualification == nil {
+		return OpenResult{}, qualificationError("This source has no ordinary delivery authority; connect its default-branch manifest first.")
+	}
 	sha := strings.ToLower(strings.TrimSpace(o.SHA))
 	if sha == "" {
 		return OpenResult{}, fmt.Errorf("pipelines: a run of %s needs a commit, and none was named", p.Repository)
@@ -128,7 +132,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		var latest *Run
 		for index := range prior {
 			r := &prior[index]
-			if r.Event != o.Event || r.PolicySnapshot == nil {
+			if r.Qualification != nil || r.Trigger == TriggerQualification || r.Event != o.Event || r.PolicySnapshot == nil {
 				continue
 			}
 			if o.Event == pipelines.EventSchedule {
@@ -212,7 +216,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	// attempt (headBackFor names it), and frees no other.
 	var tokenErr error
 	headBackFor := ""
-	if superseded, ok := supersededNewest(runs, o); ok {
+	if superseded, ok := supersededNewest(ordinaryRuns(runs), o); ok {
 		if token == "" {
 			token, tokenErr = checkRunToken(ctx, d, p)
 		}
@@ -220,7 +224,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			headBackFor = superseded.ID
 		}
 	}
-	if old, attempts := newestAttempt(runs); attempts > 0 && !o.isRerun() && o.Event == pipelines.EventMergeGroup && old.CancelledBy == queueInvalidatedBy && (old.CancelRequested || old.Conclusion == ConclusionCancelled) {
+	if old, attempts := newestAttempt(ordinaryRuns(runs)); attempts > 0 && !o.isRerun() && o.Event == pipelines.EventMergeGroup && old.CancelledBy == queueInvalidatedBy && (old.CancelRequested || old.Conclusion == ConclusionCancelled) {
 		if token == "" {
 			token, tokenErr = checkRunToken(ctx, d, p)
 		}
@@ -237,10 +241,64 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	}
 	// Before the run exists, so a run another opener creates meanwhile is
 	// never this opening's to stop (supersede.go).
-	earlier := supersedable(ctx, d, p, o, mode)
+	var earlier []Run
+	if o.Qualification == nil {
+		earlier = supersedable(ctx, d, p, o, mode)
+	}
 
+	// Refresh mutable provider/source authority after policy capture and before
+	// taking the opening gate. Only the single check POST runs under that gate;
+	// a further local source/expiry fence runs there immediately before intent.
+	if o.Qualification != nil {
+		q := *o.Qualification
+		q.PolicyVersion = policy.Version
+		_, token, err = qualificationProviderFence(ctx, d, p, q)
+		if err != nil {
+			return OpenResult{}, err
+		}
+	}
 	var result OpenResult
-	err = d.gate(ctx, OpenGateKey(key), func(gctx context.Context) error {
+	var initialReceipt *CheckRunWrite
+	gateKey := OpenGateKey(key)
+	if o.Qualification != nil {
+		gateKey = OpenGateKey("qualification:" + p.ID)
+	}
+	err = d.gate(ctx, gateKey, func(gctx context.Context) error {
+		if o.Qualification != nil {
+			prior, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), qualificationRunID(p.ID, o.Qualification.RequestID))
+			if err != nil {
+				return err
+			}
+			if prior != nil {
+				q, err := readQualification(prior.Qualification)
+				if err != nil || q.RequestDigest != o.Qualification.RequestDigest {
+					return qualificationError("requestId already names a different qualification.")
+				}
+				current, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
+				if err != nil {
+					return err
+				}
+				if current == nil {
+					return qualificationError("The qualification pipeline no longer exists.")
+				}
+				if err := ValidateQualification(*current, *prior, d.now()); err != nil {
+					return err
+				}
+				result = OpenResult{Run: *prior}
+				return nil
+			}
+		}
+		if o.Qualification != nil {
+			// A changed head does not silently grant a parallel attempt while
+			// the previous exact proposal is still stopping or unresolved.
+			unfinished, err := d.Store.RunsUnfinishedForPullRequest(memql.ContextWithFreshRead(gctx), p.ID, o.PullRequest)
+			if err != nil {
+				return err
+			}
+			if len(unfinished) != 0 {
+				return ErrRunInProgress
+			}
+		}
 		keyed, err := d.Store.RunsForKey(memql.ContextWithFreshRead(gctx), key)
 		if err != nil {
 			return err
@@ -296,6 +354,13 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			Status:           StatusQueued,
 			QueuedAt:         now,
 		}
+		if o.Qualification != nil {
+			q := *o.Qualification
+			q.PolicyVersion = policy.Version
+			run.ID = qualificationRunID(p.ID, q.RequestID)
+			run.Qualification = q.object()
+			run.CheckRunState = CheckRunUnavailable
+		}
 		if o.Fork {
 			// D6: a stranger's code is refused, never queued -- and the
 			// check run FAILS (decision 15), because neutral would satisfy
@@ -313,22 +378,82 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 				return err
 			}
 		}
-		w := writeCheckRun(gctx, d, p, run, ReportFor(p, run, nil), token, tokenErr)
-		run.CheckRunID, run.CheckRunState = w.ID, w.State
-		if w.Note != nil {
-			run.Notes = withNote(run.Notes, *w.Note)
+		// Persist qualification intent before its irreversible provider write. If
+		// the create response is lost, later calls observe only; they never POST again.
+		if o.Qualification != nil {
+			if err := d.Store.CreateRun(gctx, run); err != nil {
+				return err
+			}
+		}
+		// A queued intent is visible to cancellation before the provider POST.
+		// Refuse if already stopped; a concurrent stop during POST is reconciled
+		// against a fresh lifecycle read after releasing this opening gate.
+		w := CheckRunWrite{State: CheckRunUnavailable}
+		canCreate := true
+		if o.Qualification != nil {
+			current, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), run.ID)
+			if err != nil {
+				return err
+			}
+			if current == nil {
+				return ErrRunNotFound
+			}
+			canCreate = !current.Finished() && !current.CancelRequested
+			if !canCreate {
+				run = *current
+			}
+		}
+		if canCreate {
+			w = writeCheckRunAttempt(gctx, d, p, run, ReportFor(p, run, nil), token, tokenErr, o.Qualification != nil)
 		}
 		if w.Err != nil {
 			d.Logger.Warn("pipelines: the run opens without a written check run",
 				"component", "pipelinerun", logger.Subject(RunConcept, run.ID), "pipeline", p.ID,
 				"repository", p.Repository, "checkRunState", w.State, "error", w.Err)
 		}
-		if err := d.Store.CreateRun(gctx, run); err != nil {
-			return err
+		if o.Qualification != nil {
+			initialReceipt = &w
+		} else {
+			run.CheckRunID, run.CheckRunState = w.ID, w.State
+			if w.Note != nil {
+				run.Notes = withNote(run.Notes, *w.Note)
+			}
+			if err := d.Store.CreateRun(gctx, run); err != nil {
+				return err
+			}
 		}
 		result = OpenResult{Run: run, Opened: true}
 		return nil
 	})
+	if err == nil && initialReceipt != nil {
+		// Never nest the opening and lifecycle gates. If cancellation or another
+		// replica progressed while POST was in flight, the queued report cannot
+		// certify that newer lifecycle; preserve its ID but require reconciliation.
+		err = d.gate(ctx, RunGateKey(result.Run.ID), func(gctx context.Context) error {
+			current, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), result.Run.ID)
+			if err != nil {
+				return err
+			}
+			if current == nil {
+				return ErrRunNotFound
+			}
+			patch, changed := initialReceipt.Patch(*current)
+			if current.Status != StatusQueued || current.CancelRequested {
+				patch.CheckRunState, changed = ptr(CheckRunUnavailable), true
+			}
+			if changed {
+				if err := d.Store.UpdateRun(gctx, current.OwnerUserID, current.ID, patch); err != nil {
+					return err
+				}
+				applyRunPatch(current, patch)
+			}
+			result.Run = *current
+			return nil
+		})
+		if err == nil && result.Run.Finished() {
+			reportConclusion(ctx, d, d.gate, result.Run)
+		}
+	}
 	if err == nil && result.Opened {
 		// The gate is released: only now may GitHub be asked for the pull
 		// request's head and a run be asked to stop. A failed mint is no token.
@@ -368,6 +493,10 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 // opening of the head that came back, or one a newer push superseded since),
 // the answer said nothing about it, and that attempt answers as usual.
 func answeredBy(runs []Run, o Opening, headBackFor string) (Run, bool) {
+	if o.Qualification != nil {
+		return Run{}, false
+	}
+	runs = ordinaryRuns(runs)
 	newest, attempts := newestAttempt(runs)
 	if attempts == 0 {
 		return Run{}, false
@@ -389,6 +518,19 @@ func answeredBy(runs []Run, o Opening, headBackFor string) (Run, bool) {
 		}
 	}
 	return Run{}, false
+}
+
+// Qualification authority never answers an ordinary delivery after Connect.
+// Keep these rows in the complete history for attempt numbering, but exclude
+// them from ordinary policy reuse, dedup and supersession answers.
+func ordinaryRuns(runs []Run) []Run {
+	var ordinary []Run
+	for _, r := range runs {
+		if r.Qualification == nil && r.Trigger != TriggerQualification {
+			ordinary = append(ordinary, r)
+		}
+	}
+	return ordinary
 }
 
 // onlyForkRefusals reports whether every run of a key is a fork's refusal --

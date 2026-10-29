@@ -305,7 +305,7 @@ func (dr *runDriver) runRepositoryChange(ctx context.Context, t *stepTrack) {
 		if !dr.stillHolds(callCtx) || dr.lease.isCancelled() {
 			return errors.New("repository maintenance driver no longer holds its run")
 		}
-		return nil
+		return dr.qualificationFence(callCtx)
 	}
 	result, err := dr.i.repositoryChange(callCtx, dr.runID, *t.step.RepositoryChange, holds)
 	if dr.lease.isLost() {

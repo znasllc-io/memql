@@ -78,6 +78,8 @@ type PullRequestHead struct {
 	HeadRef        string
 	HeadRepository string
 	BaseSHA        string
+	BaseRef        string
+	BaseRepository string
 }
 
 // pullRequestPayload is one pull request as GitHub sends it, cut to what a
@@ -98,7 +100,11 @@ type pullRequestPayload struct {
 		} `json:"repo"`
 	} `json:"head"`
 	Base struct {
-		SHA string `json:"sha"`
+		SHA  string `json:"sha"`
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"base"`
 }
 
@@ -107,9 +113,14 @@ type pullRequestPayload struct {
 // repository deleted -- the caller cannot tell such a head from a fork's, and
 // must not read it as this repository's.
 func (pr pullRequestPayload) head() PullRequestHead {
-	head := PullRequestHead{Number: pr.Number, Title: pr.Title, Author: pr.User.Login, State: pr.State, HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref, BaseSHA: pr.Base.SHA}
+	head := PullRequestHead{Number: pr.Number, Title: pr.Title, Author: pr.User.Login, State: pr.State, HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref, BaseSHA: pr.Base.SHA, BaseRef: pr.Base.Ref}
 	if pr.Head.Repo != nil {
 		head.HeadRepository = pr.Head.Repo.FullName
+	}
+	// Missing provider base identity stays missing. Qualification must not infer
+	// a target repository or branch from the URL it happened to query.
+	if pr.Base.Repo != nil {
+		head.BaseRepository = pr.Base.Repo.FullName
 	}
 	return head
 }

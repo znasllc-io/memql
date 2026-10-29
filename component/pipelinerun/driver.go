@@ -407,7 +407,19 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 			"This run's pipeline no longer exists, so nothing can run it. Connect the source's pipeline again and re-run.")), true
 	}
 	requestedRelease := dr.run.Event == pipelines.EventRelease && dr.run.Trigger == TriggerManual
-	if !p.Active() && dr.run.Status == StatusQueued && dr.run.Event != pipelines.EventManual && !requestedRelease {
+	if (p.Status == PipelineQualification || p.Status == PipelineQualificationRevoked) && dr.run.Qualification == nil {
+		return refusedWith(pipelines.Refuse(qualificationRefusal, "qualification", "This source authorizes only a bounded qualification run.")), true
+	}
+	if dr.run.Qualification != nil || dr.run.Trigger == TriggerQualification {
+		if err := dr.qualificationFence(ctx); err != nil {
+			if errors.Is(err, errQualificationCheckPending) {
+				dr.abort("observing initial qualification check", err)
+				return verdict{}, false
+			}
+			return refusedWith(pipelines.Refuse(qualificationRefusal, "qualification", "%v", err)), true
+		}
+	}
+	if !p.Active() && dr.run.Qualification == nil && dr.run.Status == StatusQueued && dr.run.Event != pipelines.EventManual && !requestedRelease {
 		// A run already started runs to its end; one that has not, does not.
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline was disconnected before the run started, so it was not run. Reconnect the pipeline to run this commit again.")), true
@@ -490,6 +502,9 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 }
 
 func (dr *runDriver) emptyPlanVerdict() verdict {
+	if dr.run.Qualification != nil {
+		return failedOutsideSteps(qualificationRefusal, "Qualification selected no pull-request steps, so execution coverage was not proven.")
+	}
 	if strings.TrimSpace(dr.run.WorkRunID) != "" || dr.run.RerunFailedOnly {
 		return failedOutsideSteps(pipelines.CodeNodeLost,
 			"The pipeline DSL selected no stages for a run with an existing work plan, so its original checks cannot be proven. Re-run the pipeline.")
@@ -1112,6 +1127,10 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		return
 	}
 	step := t.step
+	if err := dr.qualificationFence(ctx); err != nil {
+		dr.settle(ctx, t, failReceipt(qualificationRefusal, err.Error()))
+		return
+	}
 	switch {
 	case step.Skip != nil:
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
@@ -1163,9 +1182,30 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		return
 	}
 
+	// Secret resolution and journaling may wait; refresh mutable authority at
+	// the actual executor boundary, rather than relying on the earlier read.
+	if err := dr.qualificationFence(ctx); err != nil {
+		dr.settle(ctx, t, failReceipt(qualificationRefusal, err.Error()))
+		return
+	}
 	ceiling := pipelines.ParseRunCeiling(os.Getenv(pipelines.EnvRunCeiling))
 	req := dr.request(t, secrets)
-	end := dr.execStep(exec, req, dr.stepDeadline(ceiling))
+	deadline := dr.stepDeadline(ceiling)
+	if dr.run.Qualification != nil {
+		q, err := readQualification(dr.run.Qualification)
+		if err != nil {
+			dr.settle(ctx, t, failReceipt(qualificationRefusal, err.Error()))
+			return
+		}
+		if remaining := q.ExpiresAt.Sub(dr.d.now()); remaining < deadline {
+			deadline = remaining
+		}
+	}
+	if dr.run.Qualification != nil && deadline <= 0 {
+		dr.settle(ctx, t, failReceipt(qualificationRefusal, "The qualification expired before executor handoff."))
+		return
+	}
+	end := dr.execStep(exec, req, deadline)
 	switch end.kind {
 	case endLost:
 		return
@@ -1625,9 +1665,12 @@ func (dr *runDriver) verdictOfSteps() verdict {
 			}
 		}
 	}
+	executed := false
 	for _, t := range dr.tracks {
 		s := t.snapshot()
 		switch s.Status {
+		case StepSucceeded:
+			executed = true
 		case StepFailed, StepRefused, StepCancelled:
 			return verdict{conclusion: ConclusionFailure, workCode: s.Code, workMessage: "Failed at " + s.Stage + ": " + s.Key}
 		case StepSkipped:
@@ -1641,6 +1684,9 @@ func (dr *runDriver) verdictOfSteps() verdict {
 			return failedOutsideSteps("", "Step "+s.Key+" never reported how it ended.")
 		}
 	}
+	if dr.run.Qualification != nil && !executed {
+		return failedOutsideSteps(qualificationRefusal, "Qualification executed no pull-request steps, so execution coverage was not proven.")
+	}
 	return verdict{conclusion: ConclusionSuccess}
 }
 
@@ -1653,6 +1699,11 @@ func (dr *runDriver) verdictOfSteps() verdict {
 // reconciliation if ownership changes while a request is in flight. A
 // successful FULL run then teaches the pipeline its packages' timings. It answers whether the run is concluded.
 func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
+	if v.conclusion == ConclusionSuccess {
+		if err := dr.qualificationFence(ctx); err != nil {
+			v = refusedWith(pipelines.Refuse(qualificationRefusal, "qualification", "%v", err))
+		}
+	}
 	if !dr.stillHolds(ctx) {
 		return false
 	}

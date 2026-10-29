@@ -4072,6 +4072,29 @@ QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
 };
 
+/** Preview a first CI configuration on an open pull request without connecting its pipeline. The source owner and current GitHub grant must reach the same repository; fork heads and closed requests refuse. Returns the verified head, base, exact manifest digest, declared stages and requested secret names. This read creates no pipeline, run, check or execution permission. */
+export interface PipelinesPreviewPullRequestArgs {
+  packageId: string;
+  pullRequest: number;
+}
+
+export function buildPipelinesPreviewPullRequest(args: PipelinesPreviewPullRequestArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("pullRequest: " + renderMemQLValue(args.pullRequest));
+  return "builtin pipelinesPreviewPullRequest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesPreviewPullRequest(args: PipelinesPreviewPullRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesPreviewPullRequest = function (this: QueryClient, args: PipelinesPreviewPullRequestArgs = {} as PipelinesPreviewPullRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesPreviewPullRequest", buildPipelinesPreviewPullRequest(args), opts);
+};
+
 /** Publish one retained SARIF artifact from a successful scanner in the caller's native pipeline, including a run that is still active or failed elsewhere. Source/ref/bytes come from verified journal and storage receipts, never from a caller-supplied URL or report. Returns publicationId, state, uploadId and sha256. Only complete proves ingestion; accepted is pending. Calling again observes the same upload. An uncertain or rejected upload is retained for inspection and never silently posted again. Report selection, polling and failure handling belong to the calling automation. */
 export interface PipelinesPublishSARIFArgs {
   runId: string;
@@ -4095,6 +4118,43 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelinesPublishSARIF = function (this: QueryClient, args: PipelinesPublishSARIFArgs = {} as PipelinesPublishSARIFArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelinesPublishSARIF", buildPipelinesPublishSARIF(args), opts);
+};
+
+/** Qualify one reviewed pull-request head before enabling automatic delivery. The owner supplies the previewed head, base and manifest digest, compute consent, secret-name allowlist, explicit expiry and stable request ID. Repeating the request ID recovers its original scope; changed inputs under that ID refuse. Fresh source and GitHub reads must agree before an inactive pipeline can open a full native PR run. The run's durable scope grants one attempt only; ordinary deliveries and reruns do not inherit it. Existing active pipelines are not restated by this operation. Check reporting uses the real native run, and never changes GitHub rules. */
+export interface PipelinesQualifyPullRequestArgs {
+  packageId: string;
+  pullRequest: number;
+  requestId: string;
+  expectedHeadSha: string;
+  expectedBaseSha: string;
+  expectedManifestDigest: string;
+  compute?: string;
+  secretNames?: string[];
+  expiresAt: string;
+}
+
+export function buildPipelinesQualifyPullRequest(args: PipelinesQualifyPullRequestArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("pullRequest: " + renderMemQLValue(args.pullRequest));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("expectedHeadSha: " + renderMemQLValue(args.expectedHeadSha));
+  parts.push("expectedBaseSha: " + renderMemQLValue(args.expectedBaseSha));
+  parts.push("expectedManifestDigest: " + renderMemQLValue(args.expectedManifestDigest));
+  if (args.compute !== undefined) parts.push("compute: " + renderMemQLValue(args.compute));
+  if (args.secretNames !== undefined) parts.push("secretNames: " + renderMemQLValue(args.secretNames));
+  parts.push("expiresAt: " + renderMemQLValue(args.expiresAt));
+  return "builtin pipelinesQualifyPullRequest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesQualifyPullRequest(args: PipelinesQualifyPullRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesQualifyPullRequest = function (this: QueryClient, args: PipelinesQualifyPullRequestArgs = {} as PipelinesQualifyPullRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesQualifyPullRequest", buildPipelinesQualifyPullRequest(args), opts);
 };
 
 /** Read a caller-owned upload receipt, refreshing pending ingestion from GitHub. A terminal receipt survives ordinary artifact retention. This never uploads. */

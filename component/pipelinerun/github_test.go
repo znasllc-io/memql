@@ -230,7 +230,7 @@ func TestThePortReadsOnePullRequestsHeadByItsNumber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PullRequestHead: %v", err)
 	}
-	if want := (githubapp.PullRequestHead{Number: 42, State: "open", Title: "Show the cart count", HeadSHA: shaC, HeadRef: "cart-badge", HeadRepository: "acme/shop", BaseSHA: shaBase}); head != want {
+	if want := (githubapp.PullRequestHead{Number: 42, State: "open", Title: "Show the cart count", HeadSHA: shaC, HeadRef: "cart-badge", HeadRepository: "acme/shop", BaseSHA: shaBase, BaseRef: "main"}); head != want {
 		t.Errorf("head = %+v, want %+v", head, want)
 	}
 	if deleted, err := port.PullRequestHead(context.Background(), "ghs_t", "acme/shop", 7); err != nil || deleted.HeadRepository != "" || deleted.HeadSHA != shaA {

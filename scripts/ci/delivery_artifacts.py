@@ -181,7 +181,12 @@ class Fixture:
                        "scope": "disposable blob/OCI publication and durable receipts; not an installed rollout"}
 
     def run(self, argv, timeout=120, env=None, log=None, check=True):
-        timeout = min(timeout, max(1, self.deadline - time.monotonic()))
+        timeout = min(timeout, self.deadline - time.monotonic())
+        if timeout <= 0:
+            message = "fixture overall deadline exhausted before command startup"
+            if log:
+                (self.output / log).write_text(message + "\n")
+            raise RuntimeError(message)
         proc = subprocess.Popen(argv, cwd=self.root, env=env or self.environment,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         try:
@@ -277,7 +282,11 @@ class Fixture:
         if not re.fullmatch("[a-f0-9]{40}", commit):
             raise ValueError("qualification requires an immutable source commit")
         _, changes = self.run(["git", "status", "--porcelain"])
-        _, go_version = self.run(["go", "version"])
+        # An empty native attempt cache can make this provision the module's
+        # selected Go toolchain. Allow the existing setup budget, clipped by
+        # run() to the overall deadline, and retain diagnostics before any
+        # provider or test starts. This does not retry a failed prerequisite.
+        _, go_version = self.run(["go", "version"], timeout=600, log="go-version.log")
         _, docker_version = self.docker("version", "--format", "{{.Client.Version}} / {{.Server.Version}}")
         self.report.update(commit=commit, dirty=bool(changes.strip()), images={
             k: getattr(args, k) for k in ("database_image", "blob_image", "registry_image", "artifact_image")})

@@ -57,6 +57,9 @@ func (i *Integration) Rerun(ctx context.Context, runID string, failedOnly bool) 
 	if original == nil {
 		return Run{}, fmt.Errorf("pipelines: you have no run %q", runID)
 	}
+	if original.Qualification != nil || original.Trigger == TriggerQualification {
+		return Run{}, qualificationError("Qualification retries require a fresh explicit qualification request; ordinary rerun cannot borrow its authority.")
+	}
 	if original.RefusalCode == pipelines.CodeForkRefused {
 		return Run{}, pipelines.Refuse(pipelines.CodeForkRefused, "",
 			"A pull request from a fork is never run, and running it again would not change that.")
@@ -67,6 +70,9 @@ func (i *Integration) Rerun(ctx context.Context, runID string, failedOnly bool) 
 	}
 	if p == nil {
 		return Run{}, fmt.Errorf("pipelines: run %q names a pipeline that no longer exists", runID)
+	}
+	if p.Status == PipelineQualification || p.Status == PipelineQualificationRevoked {
+		return Run{}, qualificationError("A qualification source cannot authorize ordinary reruns; connect its default-branch manifest first.")
 	}
 	if !p.Active() && original.Event != pipelines.EventManual && original.Event != pipelines.EventRelease {
 		return Run{}, pipelines.Refuse(pipelines.CodeDisconnected, "",

@@ -36,6 +36,9 @@
 /// the pipeline active again and moves connectedAt, while the poll's heads and the timing table
 /// survive. compute defaults to `cluster` here, on the create, because nothing about a laptop is a
 /// default (plan decision 8).
+/// First-PR qualification supplies status qualification at this same atomic insert; it never
+/// creates an active row and then disconnects it. Only the native owner-bound opener uses that
+/// state, and the ordinary connect path still defaults to active after checking the default head.
 ///
 /// @serverOnly rather than actor.userId scoping: the row is only true after component/pipelinerun
 /// has minted a token through the caller's grant and read a `pipeline:` block at the repository's
@@ -55,6 +58,7 @@ mutation pipeline createPipeline {
     credentialId    string!
     delivery        string!
     compute         string
+    status          string
     secretNames     []string
     channelIds      []string
   }
@@ -64,7 +68,7 @@ mutation pipeline createPipeline {
       id: args.pipelineId
       ownerUserId: actor.userId
       compute: args.compute ?? "cluster"
-      status: "active"
+      status: args.status ?? "active"
       connectedAt: now
     }
   }
@@ -109,12 +113,13 @@ mutation pipeline updatePipeline {
 ///
 /// @createOnly on the lifecycle fields the DRIVER owns after this write: should a second open ever
 /// land on an existing run's id, it must not put a completed or claimed run back to queued.
+/// The qualification authority is create-only too: a retry cannot rewrite its approved scope.
 ///
 /// @serverOnly: a run row is the cluster's claim that GitHub asked for a check at this SHA, and a
 /// client-opened run would put a check run on a commit nobody pushed; actor.userId scoping would
 /// attribute that claim correctly and refuse nothing. The owner is stamped from actor.userId, the
 /// pipeline owner's borrowed authority.
-@createOnly("status", "conclusion", "checkRunState", "cancelRequested")
+@createOnly("status", "conclusion", "checkRunState", "cancelRequested", "qualification")
 @serverOnly
 @actor
 mutation run createPipelineRun {
@@ -140,6 +145,7 @@ mutation run createPipelineRun {
     title           string
     version         string
     policySnapshot  object
+    qualification   object
     status          string!
     conclusion      string
     refusalCode     string
@@ -153,7 +159,7 @@ mutation run createPipelineRun {
     durationMs      int
   }
   insert {
-    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, inboundRequestId, pullRequest, headBranch, releaseTag, baseSha, title, version, policySnapshot, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs }
+    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, inboundRequestId, pullRequest, headBranch, releaseTag, baseSha, title, version, policySnapshot, qualification, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs }
     stamp {
       id: args.runId
       ownerUserId: actor.userId

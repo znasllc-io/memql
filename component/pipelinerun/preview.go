@@ -138,37 +138,7 @@ func (i *Integration) Preview(ctx context.Context, packageID string) (PreviewRes
 		return res, nil
 	}
 
-	spec := insp.manifest.Pipeline
-	res.Name = insp.manifest.Name
-	res.CheckName = pipelines.CheckRunName(res.Name)
-	res.Schedule = spec.Schedule
-	needs, secrets := map[string]bool{}, map[string]bool{}
-	for _, st := range spec.Stages {
-		stage := PreviewStage{Name: st.Name, On: append([]string(nil), st.On...), Channel: st.Channel}
-		for _, sp := range st.Steps {
-			step := PreviewStep{
-				Execution: pipelines.ExecutionOf(sp.Execution), Platform: pipelines.PlatformOf(spec, sp), RequiresFleet: pipelines.PlacementOf(sp) == pipelines.PlacementFleet,
-				Name: sp.Name, Packages: sp.Packages, Only: sp.Only, Shards: sp.Shards,
-				Secrets: sp.SecretNames(), Services: append([]string(nil), sp.Services...),
-			}
-			if sp.When != nil {
-				step.Bucket = sp.When.Bucket
-			}
-			for need, on := range sp.Needs {
-				if on {
-					step.Needs = append(step.Needs, need)
-					needs[need] = true
-				}
-			}
-			sort.Strings(step.Needs)
-			for _, name := range sp.SecretNames() {
-				secrets[name] = true
-			}
-			stage.Steps = append(stage.Steps, step)
-		}
-		res.Stages = append(res.Stages, stage)
-	}
-	res.Needs, res.Secrets = sortedKeys(needs), sortedKeys(secrets)
+	populatePreview(&res, insp.manifest)
 	return res, nil
 }
 
@@ -243,4 +213,38 @@ func nonNil(list []string) []string {
 		return []string{}
 	}
 	return list
+}
+
+func populatePreview(res *PreviewResult, manifest *packages.Manifest) {
+	spec := manifest.Pipeline
+	res.Name = manifest.Name
+	res.CheckName = pipelines.CheckRunName(res.Name)
+	res.Schedule = spec.Schedule
+	needs, secrets := map[string]bool{}, map[string]bool{}
+	for _, st := range spec.Stages {
+		stage := PreviewStage{Name: st.Name, On: append([]string(nil), st.On...), Channel: st.Channel}
+		for _, sp := range st.Steps {
+			step := PreviewStep{
+				Execution: pipelines.ExecutionOf(sp.Execution), Platform: pipelines.PlatformOf(spec, sp), RequiresFleet: pipelines.PlacementOf(sp) == pipelines.PlacementFleet,
+				Name: sp.Name, Packages: sp.Packages, Only: sp.Only, Shards: sp.Shards,
+				Secrets: sp.SecretNames(), Services: append([]string(nil), sp.Services...),
+			}
+			if sp.When != nil {
+				step.Bucket = sp.When.Bucket
+			}
+			for need, on := range sp.Needs {
+				if on {
+					step.Needs = append(step.Needs, need)
+					needs[need] = true
+				}
+			}
+			sort.Strings(step.Needs)
+			for _, name := range sp.SecretNames() {
+				secrets[name] = true
+			}
+			stage.Steps = append(stage.Steps, step)
+		}
+		res.Stages = append(res.Stages, stage)
+	}
+	res.Needs, res.Secrets = sortedKeys(needs), sortedKeys(secrets)
 }
