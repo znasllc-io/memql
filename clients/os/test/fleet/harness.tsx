@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
-import { vi } from "vitest";
-import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { vi, type Mock } from "vitest";
+import { QueryClient, Result, type QueryCallOptions, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useAddMachineFlow } from "../../src/apps/fleet/addMachine/useAddMachineFlow";
 import { MachinesSection } from "../../src/apps/fleet/machines/MachinesSection";
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
+import { parseCall } from "../callArgs";
 
 // The Fleet's test harness: a connection-shaped double, and the session the
 // app reads its actor and cluster domain from.
@@ -18,6 +19,33 @@ import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/
 // under test actually lives. `subscriptions: null` is a supported shape (the
 // collection guards for it and simply has no liveness), which is what lets a
 // jsdom test seed a live list without a server.
+//
+// ===========================================================================
+// EVERY READ IS THE SDK'S OWN GENERATED METHOD, ANSWERED AT `executeNamed`
+// ===========================================================================
+// A generated method lives on QueryClient.prototype and calls
+// `this.executeNamed`. A surface that takes one off `connection.query` and
+// calls it bare throws "Cannot read properties of undefined (reading
+// 'executeNamed')" in the browser, and a double answering with
+// `vi.fn(async () => ...)` closures, which never read `this`, passes that call.
+// That is how Fleet > Routing > History shipped a crash through a green suite
+// (memql#6319).
+//
+// So each name the double answers is `vi.fn(QueryClient.prototype.<name>)`
+// (generatedQuery, below): the generated method itself, behind a spy that runs
+// it with the caller's `this`, so `toHaveBeenCalledWith` still reads the
+// argument object the surface passed. The method renders its call and hands it
+// to `executeNamed`, which answers from the arguments read back off that text
+// (test/callArgs.ts) -- what reached the wire, not what the surface meant to
+// send. The client sits on QueryClient.prototype, as the Training and
+// Deployables doubles do, so a generated method the double does not answer is
+// still a method, as it is on the real client: its call reaches `executeNamed`
+// and is refused there, naming it.
+//
+// A test that replaces one method's implementation (`mockRejectedValueOnce`, a
+// held promise) answers that call without the generated method; that is what
+// such a test is about. Pass an answer in `fakeConnection`'s second argument
+// when the call itself is under test.
 
 export function rowsResult(rows: Row[]): Result {
   // Result reads its rows off `data` -- the envelope the engine returns for a
@@ -135,10 +163,10 @@ export interface FakeQuery {
    *
    * NEITHER IS LIVE and neither is a graph row: both are virtual projections
    * computed per request, so they are plain on-demand reads rather than seeds
-   * behind a subscription. They are here because a `FakeQuery` missing them
-   * makes the whole section unmountable -- `useInference` calls
-   * `connection.query.fleetModels(...)` and an absent key is a TypeError, not
-   * an empty read -- which is why nothing mounted that section until the acts
+   * behind a subscription. They are here because the section reads nothing
+   * without them -- `useInference` calls `connection.query.fleetModels(...)`,
+   * and a name the double does not answer is refused at `executeNamed`, not
+   * read as empty -- which is why nothing mounted that section until the acts
    * sweep needed to (memql#5159).
    */
   fleetModels: ReturnType<typeof vi.fn>;
@@ -176,6 +204,54 @@ export interface FakeQuery {
   /** Who the owner may lend a machine to. On demand, never live: a virtual
    *  row computed per request, read once each time the share dialog opens. */
   fleetShareDirectory: ReturnType<typeof vi.fn>;
+  /** What every generated method above sends: `(name, MemQL text, options)`. */
+  executeNamed: ReturnType<typeof vi.fn>;
+}
+
+/** A name the Fleet double answers. */
+type FleetRead = Exclude<keyof FakeQuery, "executeNamed">;
+
+/** What a generated method's call is answered with, from the arguments its
+ *  builder rendered (parseCall) and the options it was called with. */
+export type Answer = (args: Record<string, unknown>, opts?: QueryCallOptions) => Promise<Result>;
+
+/** Answers for names the SDK generates, keyed by name. */
+export type Answers = Partial<Record<keyof QueryClient & string, Answer>>;
+
+/**
+ * A query client whose every answered name is the SDK's generated method,
+ * answered at `executeNamed` (see the banner above).
+ *
+ * A NAME THE SDK DOES NOT GENERATE IS NOT ANSWERED HERE: there is no generated
+ * method to run, so it stays a closure on the double, with a comment saying
+ * why, and this refuses it rather than spying on nothing.
+ */
+export function generatedQuery<K extends keyof QueryClient & string>(
+  answers: Partial<Record<K, Answer>>,
+): QueryClient & Record<K | "executeNamed", Mock> {
+  const answered = answers as Partial<Record<string, Answer>>;
+  const client: Record<string, unknown> = {
+    // NOT ASYNC: the answer's own promise comes back, so a read settles on the
+    // microtask it did when a closure was the method. An async wrapper adds
+    // ticks, and the routing suites' settle() counts them.
+    executeNamed: vi.fn((name: string, call: string, opts?: QueryCallOptions): Promise<Result> => {
+      const answer = answered[name];
+      if (answer === undefined) return Promise.reject(new Error(`the Fleet double does not answer ${name}`));
+      try {
+        return answer(parseCall(call).args, opts);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }),
+  };
+  const generated = QueryClient.prototype as unknown as Record<string, unknown>;
+  for (const [name, answer] of Object.entries(answered)) {
+    if (answer === undefined) continue;
+    const method = generated[name];
+    if (typeof method !== "function") throw new Error(`the SDK generates no ${name}; answer it with a closure`);
+    client[name] = vi.fn(method as (...args: unknown[]) => unknown);
+  }
+  return Object.setPrototypeOf(client, QueryClient.prototype) as QueryClient & Record<K | "executeNamed", Mock>;
 }
 
 // The subscription seam, faithful to the one bit of it a collection uses:
@@ -235,73 +311,77 @@ function fakeSubscriptions(): FakeSubscriptions {
   };
 }
 
-export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {}): FakeConnection {
-  const read = (key: keyof FakeQuery) => vi.fn(async () => rowsResult(seed[key] ?? []));
+/**
+ * The Fleet's connection double over `seed`, the rows each read answers.
+ *
+ * `more` answers further generated names, and replaces an answer here of the
+ * same name: the routing double (routingFixtures.ts) adds its builtins this
+ * way, so they run through the same `executeNamed`.
+ */
+export function fakeConnection(seed: Partial<Record<FleetRead, Row[]>> = {}, more: Answers = {}): FakeConnection {
+  const read = (key: FleetRead): Answer => async () => rowsResult(seed[key] ?? []);
   // A BUILTIN'S seed, answered in the builtin wire shape (see builtinReply).
-  const builtin = (key: keyof FakeQuery) => vi.fn(async () => builtinReply(key, seed[key] ?? []));
+  const builtin = (key: FleetRead): Answer => async () => builtinReply(key, seed[key] ?? []);
+  const answers: Record<FleetRead, Answer> = {
+    myWorkersWithStatus: read("myWorkersWithStatus"),
+    myRoutingPolicies: read("myRoutingPolicies"),
+    myWorkspaces: read("myWorkspaces"),
+    clusterNodes: read("clusterNodes"),
+    invocationsForWorker: read("invocationsForWorker"),
+    firstMachineActivity: read("firstMachineActivity"),
+    myModelCallsOnMachine: read("myModelCallsOnMachine"),
+
+    machineActivity: read("machineActivity"),
+    activeMachineActivity: read("activeMachineActivity"),
+    machineActivityById: read("machineActivityById"),
+    workerInvocationById: read("workerInvocationById"),
+    createGoal: read("createGoal"),
+
+    modelPullsForWorker: read("modelPullsForWorker"),
+    fleetModels: builtin("fleetModels"),
+    inferenceStatus: builtin("inferenceStatus"),
+    delegationPolicyForUser: read("delegationPolicyForUser"),
+    appSessionsForUser: read("appSessionsForUser"),
+    liveAppSessionsForUser: read("liveAppSessionsForUser"),
+    appSessionById: read("appSessionById"),
+    renameWorker: async () => rowsResult([]),
+    setWorkerOperatorLabels: async () => rowsResult([]),
+    // The removal builtin answers a RECEIPT row (epic memql#5327, design
+    // D2): a removal is two writes -- the registration and the credential --
+    // and the surface has to be able to say which of them landed.
+    fleetRevokeMachine: async () =>
+      builtinReply("fleetRevokeMachine", [
+        {
+          machineId: "v1:worker:registration:live",
+          registrationState: "revoked",
+          credentialState: "revoked",
+          alreadyRevoked: false,
+          sentence:
+            "Removed. The machine is out of the fleet and its credential no longer connects.",
+        },
+      ]),
+    createRoutingPolicy: async () => rowsResult([]),
+    updateRoutingPolicy: async () => rowsResult([]),
+    setDelegationPolicy: async () => rowsResult([]),
+    fleetModelPull: async () => builtinReply("fleetModelPull", []),
+    fleetRecommended: builtin("fleetRecommended"),
+    fleetModelSetup: builtin("fleetModelSetup"),
+    activeEmbedderBinding: async () => rowsResult(seed.activeEmbedderBinding ?? []),
+    fleetSetModelSetup: builtin("fleetSetModelSetup"),
+    measurementsForMachine: read("measurementsForMachine"),
+    // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
+    // only the shaped queries and the mutations answer flat rows.
+    fleetSharingLedger: builtin("fleetSharingLedger"),
+    fleetPullRecommended: async () => builtinReply("fleetPullRecommended", []),
+    fleetModelProbe: async () => builtinReply("fleetModelProbe", []),
+    fleetSetSharing: async (args) =>
+      builtinReply("fleetSetSharing", [sharingReceiptRow(args as Parameters<typeof sharingReceiptRow>[0])]),
+    fleetSetOwnerFeatures: async () => builtinReply("fleetSetOwnerFeatures", []),
+    fleetShareDirectory: async () =>
+      builtinReply("fleetShareDirectory", seed.fleetShareDirectory ?? [shareDirectoryRow()]),
+  };
   return {
-    query: {
-      myWorkersWithStatus: read("myWorkersWithStatus"),
-      myRoutingPolicies: read("myRoutingPolicies"),
-      myWorkspaces: read("myWorkspaces"),
-      clusterNodes: read("clusterNodes"),
-      invocationsForWorker: read("invocationsForWorker"),
-      firstMachineActivity: read("firstMachineActivity"),
-      myModelCallsOnMachine: read("myModelCallsOnMachine"),
-
-      machineActivity: read("machineActivity"),
-      activeMachineActivity: read("activeMachineActivity"),
-      machineActivityById: read("machineActivityById"),
-      workerInvocationById: read("workerInvocationById"),
-      createGoal: read("createGoal"),
-
-      modelPullsForWorker: read("modelPullsForWorker"),
-      fleetModels: builtin("fleetModels"),
-      inferenceStatus: builtin("inferenceStatus"),
-      delegationPolicyForUser: read("delegationPolicyForUser"),
-      appSessionsForUser: read("appSessionsForUser"),
-      liveAppSessionsForUser: read("liveAppSessionsForUser"),
-      appSessionById: read("appSessionById"),
-      renameWorker: vi.fn(async () => rowsResult([])),
-      setWorkerOperatorLabels: vi.fn(async () => rowsResult([])),
-      // The removal builtin answers a RECEIPT row (epic memql#5327, design
-      // D2): a removal is two writes -- the registration and the credential --
-      // and the surface has to be able to say which of them landed.
-      fleetRevokeMachine: vi.fn(async () =>
-        builtinReply("fleetRevokeMachine", [
-          {
-            machineId: "v1:worker:registration:live",
-            registrationState: "revoked",
-            credentialState: "revoked",
-            alreadyRevoked: false,
-            sentence:
-              "Removed. The machine is out of the fleet and its credential no longer connects.",
-          },
-        ]),
-      ),
-      createRoutingPolicy: vi.fn(async () => rowsResult([])),
-      updateRoutingPolicy: vi.fn(async () => rowsResult([])),
-      setDelegationPolicy: vi.fn(async () => rowsResult([])),
-      fleetModelPull: vi.fn(async () => builtinReply("fleetModelPull", [])),
-      fleetRecommended: builtin("fleetRecommended"),
-      fleetModelSetup: builtin("fleetModelSetup"),
-      activeEmbedderBinding: vi.fn(async () => rowsResult(seed.activeEmbedderBinding ?? [])),
-      fleetSetModelSetup: builtin("fleetSetModelSetup"),
-      measurementsForMachine: read("measurementsForMachine"),
-      // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
-      // only the shaped queries and the mutations answer flat rows.
-      fleetSharingLedger: builtin("fleetSharingLedger"),
-      fleetPullRecommended: vi.fn(async () => builtinReply("fleetPullRecommended", [])),
-      fleetModelProbe: vi.fn(async () => builtinReply("fleetModelProbe", [])),
-      fleetSetSharing: vi.fn(
-        async (args: { registrationId: string; mode: string; userIds?: string[]; groupIds?: string[] }) =>
-          builtinReply("fleetSetSharing", [sharingReceiptRow(args)]),
-      ),
-      fleetSetOwnerFeatures: vi.fn(async () => builtinReply("fleetSetOwnerFeatures", [])),
-      fleetShareDirectory: vi.fn(async () =>
-        builtinReply("fleetShareDirectory", seed.fleetShareDirectory ?? [shareDirectoryRow()]),
-      ),
-    },
+    query: generatedQuery({ ...answers, ...more }),
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },
   };

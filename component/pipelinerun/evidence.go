@@ -12,8 +12,14 @@ import (
 
 // reuseVerification is invoked only before a new work journal opens. Recovery
 // keeps the saved evidence references and does not ask newer runs for a verdict.
+//
+// A release run never reuses, and the installed policy is not asked for it.
+// Candidate preparation (releasePrepareCandidateWorkflow) accepts only receipts
+// the release run executed itself, and a release request cannot adopt a re-run,
+// so one carried receipt makes the version unreleasable. Reuse saves a release
+// only its artifact-free checks; executing them is the cheaper failure.
 func (dr *runDriver) reuseVerification(ctx context.Context) bool {
-	if dr.run.PolicySnapshot == nil || dr.run.Event == pipelines.EventSchedule || dr.run.RerunOf != "" {
+	if dr.run.PolicySnapshot == nil || dr.run.Event == pipelines.EventSchedule || dr.run.Event == pipelines.EventRelease || dr.run.RerunOf != "" {
 		return true
 	}
 	eligible := false

@@ -1,0 +1,1128 @@
+package pipelinerun
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"testing/fstest"
+	"time"
+
+	"github.com/znasllc-io/memql/component/identity/githubapp"
+	"github.com/znasllc-io/memql/component/pipelines"
+)
+
+// baseSHA is main's head in the train tests.
+const baseSHA = "3333333333333333333333333333333333333333"
+
+// trainRemote is GitHub for a train: the run driver's fake (embedded) plus
+// the train calls, each held to the gate discipline like every other fake
+// GitHub call.
+type trainRemote struct {
+	*fakeGitHub
+	mu         sync.Mutex
+	open       map[int]*githubapp.TrainPullRequest
+	checks     map[string]string
+	files      map[string]map[string][]byte
+	branchFile map[string]map[string][]byte
+	branches   map[string]string
+	branchBase map[string]string
+	conflicts  map[string]bool
+	merged     []string
+	trainPRs   map[int]*trainPR
+	nextPR     int
+	reviews    map[int][]githubapp.PullRequestReview
+	prFiles    map[int][]string
+	comments   map[int][]string
+	login      string
+	seq        int
+	// checkName is the only check name the fake answers for, as GitHub
+	// answers only for the name asked; empty answers every name.
+	checkName string
+	// appID is the App the train's token names; checkApps is the App each
+	// head's check came from, ours unless a test says otherwise.
+	appID     int64
+	checkApps map[string]int64
+	// shaFiles are the files a commit changed, where a test pins them to a
+	// commit rather than to a pull request's current head; headTree is the
+	// Go tree the train's head holds.
+	shaFiles map[string][]string
+	headTree fstest.MapFS
+	// raceMerge makes the next merge lose a race: another tick merged the
+	// pull request first, so GitHub answers 405.
+	raceMerge bool
+	// branchHistory is every commit each branch has pointed at.
+	branchHistory map[string][]string
+	// tokenErr fails every token mint: the owner's connection lost the
+	// repository, say.
+	tokenErr error
+}
+
+const trainAppID = 4822538
+
+// checkFromApp makes sha's check one another App wrote.
+func (r *trainRemote) checkFromApp(sha string, app int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.checkApps[sha] = app
+}
+
+type trainPR struct {
+	head, base, title, body string
+	open, merged            bool
+	landedAs                string
+}
+
+func newTrainRemote(g *fakeGitHub) *trainRemote {
+	return &trainRemote{
+		fakeGitHub: g, open: map[int]*githubapp.TrainPullRequest{}, checks: map[string]string{},
+		files: map[string]map[string][]byte{}, branchFile: map[string]map[string][]byte{}, branches: map[string]string{},
+		branchBase: map[string]string{}, conflicts: map[string]bool{}, trainPRs: map[int]*trainPR{}, nextPR: 100,
+		reviews: map[int][]githubapp.PullRequestReview{}, prFiles: map[int][]string{}, comments: map[int][]string{}, login: "ada-gh",
+		appID: trainAppID, checkApps: map[string]int64{}, shaFiles: map[string][]string{}, branchHistory: map[string][]string{},
+	}
+}
+
+func (r *trainRemote) nextSHA(prefix string) string {
+	r.seq++
+	return fmt.Sprintf("%s%036d", prefix, r.seq)
+}
+
+func (r *trainRemote) addPR(n int, head string, check string, opts ...func(*githubapp.TrainPullRequest)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pr := &githubapp.TrainPullRequest{Number: n, Title: fmt.Sprintf("Change %d", n), HeadSHA: head, HeadRef: fmt.Sprintf("claude/change-%d", n),
+		HeadRepository: repoName, BaseRef: "main", Author: "znas-io", URL: fmt.Sprintf("https://github.com/acme/shop/pull/%d", n)}
+	for _, o := range opts {
+		o(pr)
+	}
+	r.open[n] = pr
+	if check != "" {
+		r.checks[head] = check
+	}
+}
+
+func (r *trainRemote) TrainToken(ctx context.Context, credential, user, repository string) (string, int64, int64, error) {
+	watchGitHubCall(r.t, ctx, "TrainToken")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tokenErr != nil {
+		return "", 0, 0, r.tokenErr
+	}
+	return "writer-token", 7, r.appID, nil
+}
+
+func (r *trainRemote) TrainPullRequests(ctx context.Context, token, repository, base string) ([]githubapp.TrainPullRequest, error) {
+	watchGitHubCall(r.t, ctx, "TrainPullRequests")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []githubapp.TrainPullRequest
+	for _, pr := range r.open {
+		if pr.BaseRef == base {
+			copy := *pr
+			copy.Labels = append([]string(nil), pr.Labels...)
+			out = append(out, copy)
+		}
+	}
+	// GitHub lists a train's own open pull request among them, as the App's.
+	for n, pr := range r.trainPRs {
+		if pr.open && pr.base == base {
+			out = append(out, githubapp.TrainPullRequest{Number: n, Title: pr.title, HeadSHA: r.branches[pr.head], HeadRef: pr.head,
+				HeadRepository: repoName, BaseRef: pr.base, Author: "memql[bot]", URL: fmt.Sprintf("https://github.com/acme/shop/pull/%d", n)})
+		}
+	}
+	return out, nil
+}
+
+// setBranch moves a branch and remembers every value it takes.
+func (r *trainRemote) setBranch(name, sha string) {
+	r.branches[name] = sha
+	r.branchHistory[name] = append(r.branchHistory[name], sha)
+}
+
+func (r *trainRemote) CheckRunConclusion(ctx context.Context, token, repository, sha, name string, appID int64) (string, string, error) {
+	watchGitHubCall(r.t, ctx, "CheckRunConclusion")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.checks[sha]
+	if !ok || (r.checkName != "" && name != r.checkName) {
+		return "", "", nil
+	}
+	from, set := r.checkApps[sha]
+	if !set {
+		from = r.appID
+	}
+	if appID > 0 && from != appID {
+		return "", "", nil
+	}
+	if c == "" {
+		return "in_progress", "", nil
+	}
+	return "completed", c, nil
+}
+
+func (r *trainRemote) CreateBranchRef(ctx context.Context, token, repository, branch, sha string) error {
+	watchGitHubCall(r.t, ctx, "CreateBranchRef")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.branches[branch]; ok {
+		return &githubapp.StatusError{Status: http.StatusUnprocessableEntity, Endpoint: "/git/refs"}
+	}
+	r.setBranch(branch, sha)
+	r.branchBase[branch] = sha
+	return nil
+}
+
+func (r *trainRemote) ResetBranchRef(ctx context.Context, token, repository, branch, sha string) error {
+	watchGitHubCall(r.t, ctx, "ResetBranchRef")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.setBranch(branch, sha)
+	r.branchBase[branch] = sha
+	delete(r.branchFile, branch)
+	return nil
+}
+
+func (r *trainRemote) DeleteBranchRef(ctx context.Context, token, repository, branch string) error {
+	watchGitHubCall(r.t, ctx, "DeleteBranchRef")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.branches, branch)
+	// GitHub closes an open pull request whose head branch is deleted.
+	for _, pr := range r.trainPRs {
+		if pr.head == branch && pr.open {
+			pr.open = false
+		}
+	}
+	return nil
+}
+
+func (r *trainRemote) MergeIntoBranch(ctx context.Context, token, repository, base, headSHA, message string) (githubapp.MergeOutcome, error) {
+	watchGitHubCall(r.t, ctx, "MergeIntoBranch")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.conflicts[headSHA] {
+		return githubapp.MergeOutcome{Conflict: true}, nil
+	}
+	sha := r.nextSHA("m")
+	r.setBranch(base, sha)
+	r.merged = append(r.merged, base+" <- "+headSHA)
+	return githubapp.MergeOutcome{SHA: sha}, nil
+}
+
+func (r *trainRemote) FileAtRef(ctx context.Context, token, repository, ref, path string) ([]byte, error) {
+	watchGitHubCall(r.t, ctx, "FileAtRef")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if b, ok := r.branchFile[ref][path]; ok {
+		return b, nil
+	}
+	if b, ok := r.files[ref][path]; ok {
+		return b, nil
+	}
+	if base, ok := r.branchBase[ref]; ok {
+		if b, ok := r.files[base][path]; ok {
+			return b, nil
+		}
+	}
+	return nil, &githubapp.StatusError{Status: http.StatusNotFound, Endpoint: "/contents/" + path}
+}
+
+func (r *trainRemote) PutBranchFile(ctx context.Context, token, repository, branch, path, message string, content []byte) (string, error) {
+	watchGitHubCall(r.t, ctx, "PutBranchFile")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.branchFile[branch] == nil {
+		r.branchFile[branch] = map[string][]byte{}
+	}
+	r.branchFile[branch][path] = content
+	sha := r.nextSHA("c")
+	r.setBranch(branch, sha)
+	// The commit holds the file: a branch moved to it reads it there.
+	r.files[sha] = map[string][]byte{path: content}
+	return sha, nil
+}
+
+func (r *trainRemote) CreateTrainPullRequest(ctx context.Context, token, repository, head, base, title, body string) (int, string, error) {
+	watchGitHubCall(r.t, ctx, "CreateTrainPullRequest")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, pr := range r.trainPRs {
+		if pr.open && pr.head == head {
+			return 0, "", &githubapp.StatusError{Status: http.StatusUnprocessableEntity, Endpoint: "/pulls"}
+		}
+	}
+	r.nextPR++
+	r.trainPRs[r.nextPR] = &trainPR{head: head, base: base, title: title, body: body, open: true}
+	return r.nextPR, fmt.Sprintf("https://github.com/acme/shop/pull/%d", r.nextPR), nil
+}
+
+func (r *trainRemote) EditPullRequestBody(ctx context.Context, token, repository string, number int, body string) error {
+	watchGitHubCall(r.t, ctx, "EditPullRequestBody")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if pr := r.trainPRs[number]; pr != nil {
+		pr.body = body
+	}
+	return nil
+}
+
+func (r *trainRemote) PullRequestReviews(ctx context.Context, token, repository string, number int) ([]githubapp.PullRequestReview, error) {
+	watchGitHubCall(r.t, ctx, "PullRequestReviews")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]githubapp.PullRequestReview(nil), r.reviews[number]...), nil
+}
+
+// CompareFiles answers the files changed at head: shaFiles when a test set
+// them for that commit, else the files of the pull request whose head it is.
+func (r *trainRemote) CompareFiles(ctx context.Context, token, repository, base, head string) ([]string, bool, error) {
+	watchGitHubCall(r.t, ctx, "CompareFiles")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if files, ok := r.shaFiles[head]; ok {
+		return append([]string(nil), files...), true, nil
+	}
+	for n, pr := range r.open {
+		if pr.HeadSHA == head {
+			return append([]string(nil), r.prFiles[n]...), true, nil
+		}
+	}
+	return nil, true, nil
+}
+
+// Tree serves headTree at any commit when a test set one: the train's head
+// is a merge commit the fake names as it goes.
+func (r *trainRemote) Tree(ctx context.Context, token, repository, sha string, keep func(string) bool, maxBytes int64) (fs.FS, error) {
+	if r.headTree == nil {
+		return r.fakeGitHub.Tree(ctx, token, repository, sha, keep, maxBytes)
+	}
+	watchGitHubCall(r.t, ctx, "Tree")
+	out := fstest.MapFS{}
+	for name, f := range r.headTree {
+		if keep == nil || keep(name) {
+			out[name] = &fstest.MapFile{Data: slices.Clone(f.Data)}
+		}
+	}
+	return out, nil
+}
+
+func (r *trainRemote) MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error) {
+	watchGitHubCall(r.t, ctx, "MergePullRequest")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pr := r.trainPRs[number]
+	if pr != nil && pr.open && r.raceMerge {
+		r.raceMerge = false
+		pr.open, pr.merged, pr.landedAs = false, true, r.nextSHA("l")
+	}
+	if pr == nil || !pr.open {
+		return "", &githubapp.StatusError{Status: http.StatusMethodNotAllowed, Endpoint: "/merge"}
+	}
+	if r.branches[pr.head] != headSHA {
+		return "", &githubapp.StatusError{Status: http.StatusConflict, Endpoint: "/merge"}
+	}
+	pr.open, pr.merged, pr.landedAs = false, true, r.nextSHA("l")
+	return pr.landedAs, nil
+}
+
+func (r *trainRemote) CommentOnPullRequest(ctx context.Context, token, repository string, number int, body string) error {
+	watchGitHubCall(r.t, ctx, "CommentOnPullRequest")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.comments[number] = append(r.comments[number], body)
+	return nil
+}
+
+func (r *trainRemote) AddPullRequestLabels(ctx context.Context, token, repository string, number int, labels []string) error {
+	watchGitHubCall(r.t, ctx, "AddPullRequestLabels")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if pr := r.open[number]; pr != nil {
+		pr.Labels = append(pr.Labels, labels...)
+	}
+	return nil
+}
+
+func (r *trainRemote) PullRequestState(ctx context.Context, token, repository string, number int) (githubapp.PullRequestObservation, error) {
+	watchGitHubCall(r.t, ctx, "PullRequestState")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	pr := r.trainPRs[number]
+	if pr == nil {
+		return githubapp.PullRequestObservation{}, &githubapp.StatusError{Status: http.StatusNotFound, Endpoint: "/pulls"}
+	}
+	state := "closed"
+	if pr.open {
+		state = "open"
+	}
+	return githubapp.PullRequestObservation{Number: number, State: state, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
+}
+
+func (r *trainRemote) OwnerLogin(ctx context.Context, credential, user, repository string) (string, error) {
+	watchGitHubCall(r.t, ctx, "OwnerLogin")
+	return r.login, nil
+}
+
+// trainHarness is a pipeline with a Discord channel, a release train set to
+// depart at 09:00 and 15:00 UTC, and a clock the test moves.
+type trainHarness struct {
+	*harness
+	remote   *trainRemote
+	clock    time.Time
+	settings string
+	p        Pipeline
+}
+
+const trainSettingsJSON = `{"repositories":{"acme/shop":{"enabled":true,"departures":["09:00","15:00"],"timeZone":"UTC","channel":"releases","ownerDiscordUserId":"123456789012345678"}}}`
+
+func newTrainHarness(t *testing.T) *trainHarness {
+	t.Helper()
+	h := newHarness(t)
+	th := &trainHarness{harness: h, remote: newTrainRemote(h.github), clock: time.Date(2026, 10, 28, 9, 0, 30, 0, time.UTC), settings: trainSettingsJSON}
+	h.store.work = newFakeWork()
+	th.p = testPipeline(DeliveryWebhook)
+	th.p.ChannelIDs = []string{"ch1"}
+	th.remote.checkName = pipelines.CheckRunName(th.p.Name)
+	h.store.addPipeline(th.p)
+	h.store.mu.Lock()
+	h.store.putChannel(Channel{ID: "ch1", OwnerUserID: th.p.OwnerUserID, Name: "releases", Kind: channelDiscord, SecretRef: "RELEASES_WEBHOOK", Status: channelActive})
+	h.store.mu.Unlock()
+	h.github.mu.Lock()
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: baseSHA}
+	h.github.mu.Unlock()
+	th.remote.files[baseSHA] = map[string][]byte{"VERSION": []byte("0.31.4\n"), "go.mod": []byte("module github.com/acme/shop\n\ngo 1.26\n")}
+	// The train head's Go tree: component/memql imports core/num, so a change
+	// to core/num reaches component/memql's tests.
+	th.remote.headTree = fstest.MapFS{
+		"go.mod":               {Data: []byte("module github.com/acme/shop\n\ngo 1.26\n")},
+		"core/num/num.go":      {Data: []byte("package num\n")},
+		"component/memql/x.go": {Data: []byte("package memql\n\nimport _ \"github.com/acme/shop/core/num\"\n")},
+		"component/other/o.go": {Data: []byte("package other\n")},
+	}
+	h.integ = New(Deps{
+		Store:    h.store,
+		GitHub:   th.remote,
+		Gate:     h.gate.run,
+		OSOrigin: func() string { return testOSOrigin },
+		NodeID:   "agent-a",
+		Now:      func() time.Time { return th.clock },
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		SystemVariable: func(_ context.Context, name string) (string, error) {
+			if name == pipelines.TrainSettingsVariable {
+				return th.settings, nil
+			}
+			return "", nil
+		},
+	})
+	return th
+}
+
+func (th *trainHarness) tick(t *testing.T) TrainTickResult {
+	t.Helper()
+	res, err := th.integ.TrainTick(automationCtx())
+	if err != nil {
+		t.Fatalf("TrainTick: %v", err)
+	}
+	return res
+}
+
+func (th *trainHarness) train(t *testing.T) Train {
+	t.Helper()
+	tr, err := th.store.LatestTrain(context.Background(), th.p.ID)
+	if err != nil || tr == nil {
+		t.Fatalf("no train: %v", err)
+	}
+	return *tr
+}
+
+func (th *trainHarness) messages() []string {
+	th.store.mu.Lock()
+	defer th.store.mu.Unlock()
+	var out []string
+	for _, n := range th.store.staged {
+		if strings.HasPrefix(n.RequestedBy, trainRequestedByPrefix) {
+			out = append(out, n.Body)
+		}
+	}
+	return out
+}
+
+// runFor puts the train pull request's run at sha, concluded, with failed
+// steps when the conclusion is a failure.
+func (th *trainHarness) runFor(t *testing.T, tr Train, conclusion string, failed ...map[string]any) Run {
+	t.Helper()
+	r := Run{ID: "run-" + tr.HeadSHA[:8], OwnerUserID: th.p.OwnerUserID, PipelineID: th.p.ID, Repository: repoName, SHA: tr.HeadSHA,
+		Mode: pipelines.ModeAffected, Event: pipelines.EventPullRequest, RunKey: "k-" + tr.HeadSHA, Attempt: 1, Trigger: TriggerWebhook,
+		PullRequest: tr.PullRequest, HeadBranch: tr.Branch, Status: StatusCompleted, Conclusion: conclusion, WorkRunID: "work-" + tr.HeadSHA[:8],
+		QueuedAt: th.clock}
+	th.store.addRun(r)
+	for i, step := range failed {
+		step["runId"] = r.WorkRunID
+		th.store.work.mu.Lock()
+		th.store.work.steps[fmt.Sprintf("%s-%d", r.WorkRunID, i)] = step
+		th.store.work.mu.Unlock()
+	}
+	return r
+}
+
+func TestTrainDepartsAtTheScheduledTime(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(9, shaB, "success", func(pr *githubapp.TrainPullRequest) { pr.Draft = true })
+
+	th.tick(t)
+	tr := th.train(t)
+	if tr.State != TrainRunning || tr.Departure != TrainDepartureScheduled || tr.Branch != "train/2026-10-28-1" {
+		t.Fatalf("train = %+v", tr)
+	}
+	if len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 || tr.OnBoard[0].SHA != shaA {
+		t.Errorf("on board %+v, want #7 at its head", tr.OnBoard)
+	}
+	if len(tr.LeftOff) != 1 || tr.LeftOff[0].Number != 9 || !strings.Contains(tr.LeftOff[0].Reason, "draft") {
+		t.Errorf("left off %+v, want #9 as a draft", tr.LeftOff)
+	}
+	if tr.BaseSHA != baseSHA || tr.Version != "0.31.5" || tr.PullRequest == 0 || tr.HeadSHA == "" {
+		t.Errorf("base %s version %s pr %d head %s", tr.BaseSHA, tr.Version, tr.PullRequest, tr.HeadSHA)
+	}
+	if got, err := th.remote.FileAtRef(automationCtx(), "", repoName, tr.HeadSHA, "VERSION"); err != nil || string(got) != "0.31.5\n" {
+		t.Errorf("VERSION at the train's head = %q, %v; want the patch bump", got, err)
+	}
+	pr := th.remote.trainPRs[tr.PullRequest]
+	if pr == nil || pr.head != tr.Branch || pr.base != "main" || !strings.Contains(pr.body, "#7") {
+		t.Errorf("train pull request %+v", pr)
+	}
+	if msgs := th.messages(); len(msgs) != 1 || !strings.Contains(msgs[0], "left with 1 pull request") {
+		t.Errorf("messages %v, want one departure", msgs)
+	}
+}
+
+func TestNoDepartureWithoutReadyPullRequests(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(9, shaB, "")
+	th.tick(t)
+	tr := th.train(t)
+	if tr.State != TrainCancelled || !strings.Contains(tr.HeldReason, "No pull request was ready") || tr.PullRequest != 0 {
+		t.Errorf("an empty departure: %+v", tr)
+	}
+	if len(th.remote.trainPRs) != 0 || len(th.messages()) != 0 {
+		t.Errorf("an empty departure opened %d pull requests and sent %d messages", len(th.remote.trainPRs), len(th.messages()))
+	}
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if again := th.train(t); again.ID != tr.ID {
+		t.Errorf("a second tick in the same departure built another train")
+	}
+}
+
+func TestConflictingPullRequestIsLeftOffWithAComment(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.conflicts[shaA] = true
+	th.tick(t)
+	tr := th.train(t)
+	if len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 8 {
+		t.Errorf("on board %+v, want only #8", tr.OnBoard)
+	}
+	if len(tr.LeftOff) != 1 || tr.LeftOff[0].Number != 7 || !strings.Contains(tr.LeftOff[0].Reason, "conflict") {
+		t.Errorf("left off %+v, want #7 for its conflict", tr.LeftOff)
+	}
+	if c := th.remote.comments[7]; len(c) != 1 || !strings.Contains(c[0], tr.Branch) {
+		t.Errorf("comments on #7: %v", c)
+	}
+}
+
+func TestTrainMergesTheBoardedCommitNotTheNewHead(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	// A session pushes to #7 while the train runs.
+	th.remote.mu.Lock()
+	th.remote.open[7].HeadSHA = shaB
+	th.remote.mu.Unlock()
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	again := th.train(t)
+	if again.HeadSHA != tr.HeadSHA || again.OnBoard[0].SHA != shaA || again.State != TrainRunning {
+		t.Errorf("a new push to a boarded pull request changed the running train: %+v", again)
+	}
+	if len(th.remote.merged) != 1 || th.remote.merged[0] != pipelines.TrainScratchBranch(tr.Branch)+" <- "+shaA {
+		t.Errorf("merged %v, want only the boarded commit", th.remote.merged)
+	}
+}
+
+func TestTwoTicksBuildOneTrain(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = th.integ.TrainTick(automationCtx())
+		}()
+	}
+	wg.Wait()
+	if n := len(th.remote.trainPRs); n != 1 {
+		t.Errorf("two ticks opened %d train pull requests, want 1", n)
+	}
+	th.store.mu.Lock()
+	creates := len(th.store.trainCreates)
+	th.store.mu.Unlock()
+	if creates != 1 {
+		t.Errorf("two ticks created %d train rows, want 1", creates)
+	}
+}
+
+func TestFailedTrainRetriesATimeoutOnce(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	original := th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#3", "status": WorkStepFailed, "errorCode": pipelines.CodeStepTimeout,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if !got.Retried || got.State != TrainRunning {
+		t.Fatalf("after a timeout: %+v", got)
+	}
+	var rerun *Run
+	th.store.mu.Lock()
+	for _, r := range th.store.runs {
+		if r.RerunOf == original.ID {
+			copy := r
+			rerun = &copy
+		}
+	}
+	th.store.mu.Unlock()
+	if rerun == nil || !rerun.RerunFailedOnly {
+		t.Errorf("no failed-only re-run of %s: %+v", original.ID, rerun)
+	}
+}
+
+func TestFailedTrainDropsTheSingleSuspect(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"docs/a.md"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if len(got.Dropped) != 1 || got.Dropped[0].Number != 7 || got.Rebuilds != 1 {
+		t.Fatalf("dropped %+v rebuilds %d, want #7 and one rebuild", got.Dropped, got.Rebuilds)
+	}
+	if got.State != TrainRunning || len(got.OnBoard) != 1 || got.OnBoard[0].Number != 8 || got.HeadSHA == tr.HeadSHA {
+		t.Errorf("the rebuilt train: %+v", got)
+	}
+	if c := th.remote.comments[7]; len(c) == 0 || !strings.Contains(c[len(c)-1], "tests.go-unit#2") {
+		t.Errorf("comments on #7: %v", c)
+	}
+	th.remote.mu.Lock()
+	labels := th.remote.open[7].Labels
+	th.remote.mu.Unlock()
+	if !strings.Contains(strings.Join(labels, ","), pipelines.TrainDroppedLabel) {
+		t.Errorf("#7 labels %v, want %s", labels, pipelines.TrainDroppedLabel)
+	}
+	var dropped bool
+	for _, m := range th.messages() {
+		dropped = dropped || strings.Contains(m, "Dropped #7")
+	}
+	if !dropped {
+		t.Errorf("no Dropped message in %v", th.messages())
+	}
+}
+
+func TestMainFailingTheSameStepHoldsTheTrain(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "vulnerabilities.go-vulnerabilities", "status": WorkStepFailed})
+	push := Run{ID: "push-1", OwnerUserID: th.p.OwnerUserID, PipelineID: th.p.ID, Repository: repoName, SHA: baseSHA, Mode: pipelines.ModeFull,
+		Event: pipelines.EventPush, RunKey: "push-k", Attempt: 1, Trigger: TriggerWebhook, Status: StatusCompleted, Conclusion: ConclusionFailure,
+		WorkRunID: "work-push", QueuedAt: th.clock.Add(-time.Hour)}
+	th.store.addRun(push)
+	th.store.work.mu.Lock()
+	th.store.work.steps["work-push-0"] = map[string]any{"runId": "work-push", "key": "vulnerabilities.go-vulnerabilities", "status": WorkStepFailed}
+	th.store.work.mu.Unlock()
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainHeld || !strings.Contains(got.HeldReason, "main fails vulnerabilities.go-vulnerabilities too") {
+		t.Fatalf("train = %+v", got)
+	}
+	var held bool
+	for _, m := range th.messages() {
+		held = held || (strings.Contains(m, "is held") && strings.Contains(m, "<@123456789012345678>"))
+	}
+	if !held {
+		t.Errorf("no ACTION NEEDED held message mentioning the owner in %v", th.messages())
+	}
+}
+
+func TestClosingAHeldTrainCancelsIt(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "checks.lint", "status": WorkStepFailed})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainHeld {
+		t.Fatalf("a failure nobody can be blamed for holds the train: %+v", got)
+	}
+	th.remote.mu.Lock()
+	th.remote.trainPRs[tr.PullRequest].open = false
+	th.remote.mu.Unlock()
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainCancelled {
+		t.Errorf("closing the train pull request left the train %q", got.State)
+	}
+}
+
+func TestTrainMessagesAreSentOnce(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	for range 3 {
+		th.clock = th.clock.Add(time.Minute)
+		th.tick(t)
+	}
+	if n := len(th.messages()); n != 1 {
+		t.Errorf("%d messages after four ticks of one running train, want the one departure", n)
+	}
+}
+
+func TestTickRefusesAClientCaller(t *testing.T) {
+	th := newTrainHarness(t)
+	if _, err := th.integ.TrainTick(personCtx(ownerID)); err == nil {
+		t.Fatal("a person's call ran the train tick")
+	}
+}
+
+// TestBoardingReadsThePipelinesOwnCheck: a pull request boards on its
+// pipeline's own check, MemQL / <pipeline name> -- the harness pipeline is
+// "shop" -- and not on a check name written into the train.
+func TestBoardingReadsThePipelinesOwnCheck(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	if tr := th.train(t); len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
+		t.Fatalf("a pull request whose MemQL / shop check passed did not board: state %s, left off %+v", tr.State, tr.LeftOff)
+	}
+}
+
+// TestAForkNeverBoards: a fork's pull request is refused a pipeline run of its
+// own, so a train must never carry it into one. A check of the right name on
+// a fork's head can come from anything that writes checks -- another App, or
+// a workflow the fork itself adds -- and boarding it would run the fork's code
+// in this repository's train run, with the pipeline's secrets.
+func TestAForkNeverBoards(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(9, "4444444444444444444444444444444444444444", "success", func(pr *githubapp.TrainPullRequest) {
+		pr.HeadRepository = "mallory/shop"
+	})
+	th.remote.addPR(11, "5555555555555555555555555555555555555555", "success", func(pr *githubapp.TrainPullRequest) {
+		pr.HeadRepository = "" // a deleted fork
+	})
+	th.tick(t)
+	tr := th.train(t)
+	if len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
+		t.Fatalf("on board %+v, want only #7", tr.OnBoard)
+	}
+	reasons := map[int]string{}
+	for _, sk := range tr.LeftOff {
+		reasons[sk.Number] = sk.Reason
+	}
+	for _, n := range []int{9, 11} {
+		if !strings.Contains(reasons[n], "fork") {
+			t.Errorf("#%d left off for %q, want a reason naming the fork", n, reasons[n])
+		}
+	}
+}
+
+// trainLeftOnGitHub reports whether a finished train left anything open: its
+// pull request, or its branch.
+func (th *trainHarness) trainLeftOnGitHub(tr Train) (prOpen, branchLeft bool, comments []string) {
+	th.remote.mu.Lock()
+	defer th.remote.mu.Unlock()
+	if pr := th.remote.trainPRs[tr.PullRequest]; pr != nil {
+		prOpen = pr.open
+	}
+	_, branchLeft = th.remote.branches[tr.Branch]
+	return prOpen, branchLeft, append([]string(nil), th.remote.comments[tr.PullRequest]...)
+}
+
+// TestARebuildWithNothingLeftClosesItsPullRequest: dropping the only pull
+// request on board leaves nothing to rebuild with, so the train is cancelled
+// -- and its pull request must not stay open for the owner to approve.
+func TestARebuildWithNothingLeftClosesItsPullRequest(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainCancelled {
+		t.Fatalf("state %s, want cancelled: nothing is left to board", got.State)
+	}
+	prOpen, branchLeft, comments := th.trainLeftOnGitHub(got)
+	if prOpen || branchLeft {
+		t.Errorf("the cancelled train left its pull request open=%v, branch=%v", prOpen, branchLeft)
+	}
+	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1], "will not land") {
+		t.Errorf("comments on the train pull request: %v", comments)
+	}
+	var said bool
+	for _, m := range th.messages() {
+		said = said || strings.Contains(m, "was cancelled")
+	}
+	if !said {
+		t.Errorf("the owner saw this train leave and was never told it was cancelled: %v", th.messages())
+	}
+}
+
+// TestBoardingCountsOnlyTheAppsOwnCheck: the check a pull request boards on
+// is the one this pipeline's App wrote. Another App -- or a workflow -- can
+// write a check of the same name, and its verdict is not the pipeline's.
+func TestBoardingCountsOnlyTheAppsOwnCheck(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.checkFromApp(shaB, 999)
+	th.tick(t)
+	tr := th.train(t)
+	if len(tr.OnBoard) != 1 || tr.OnBoard[0].Number != 7 {
+		t.Fatalf("on board %+v, want only #7: #8's check came from another App", tr.OnBoard)
+	}
+}
+
+// TestACancelledRunHoldsAndDropsNobody: a cancelled step ran nothing to a
+// verdict -- a person cancelled the run, or the run hit its ceiling -- so it
+// is evidence against no pull request. The train holds for the owner.
+func TestACancelledRunHoldsAndDropsNobody(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionCancelled, map[string]any{"key": "tests.go-unit#2", "status": WorkStepCancelled,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainHeld || len(got.Dropped) != 0 || !strings.Contains(got.HeldReason, "cancelled") {
+		t.Fatalf("state %s, dropped %+v, reason %q; want held for the cancelled run, nobody dropped", got.State, got.Dropped, got.HeldReason)
+	}
+}
+
+// TestACancelledStepNamesNoSuspect: in a failed run, only a step that FAILED
+// is evidence. A step cancelled beside it keeps its packages but proved
+// nothing about them.
+func TestACancelledStepNamesNoSuspect(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure,
+		map[string]any{"key": "checks.lint", "status": WorkStepFailed},
+		map[string]any{"key": "tests.go-unit#2", "status": WorkStepCancelled,
+			"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainHeld || len(got.Dropped) != 0 {
+		t.Fatalf("state %s, dropped %+v; want held: the only failed step names no package", got.State, got.Dropped)
+	}
+}
+
+// TestReRunningAHeldTrainsRunResumesIt: the held message tells the owner to
+// re-run a cancelled run, so a newer attempt at the train's head must bring
+// the train back: a passing re-run asks for approval.
+func TestReRunningAHeldTrainsRunResumesIt(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	first := th.runFor(t, tr, ConclusionCancelled)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	held := th.train(t)
+	if held.State != TrainHeld || held.RunID != first.ID {
+		t.Fatalf("state %s run %q; want held on %s", held.State, held.RunID, first.ID)
+	}
+	again := first
+	again.ID, again.Attempt, again.Conclusion, again.QueuedAt = first.ID+"-2", 2, ConclusionSuccess, th.clock
+	th.store.addRun(again)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainAwaitingApproval || got.RunID != again.ID {
+		t.Fatalf("state %s run %q; want awaiting approval on the re-run %s", got.State, got.RunID, again.ID)
+	}
+}
+
+// TestHeldAndDroppedMessagesLinkTheRun: the owner decides from the message,
+// so a held or dropped train's message links the run that failed.
+func TestHeldAndDroppedMessagesLinkTheRun(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"docs/a.md"}
+	th.tick(t)
+	tr := th.train(t)
+	failed := th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	var linked bool
+	for _, m := range th.messages() {
+		if strings.Contains(m, "Dropped #7") && strings.Contains(m, "pipelineRun="+failed.ID) {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Errorf("the dropped message does not link run %s: %v", failed.ID, th.messages())
+	}
+}
+
+// TestADependencyMakesTwoSuspects: #8 changed core/num, which
+// component/memql imports, so #8 can have broken component/memql's tests as
+// surely as #7, which changed component/memql itself. Neither is singled out,
+// so the train holds rather than blaming #7.
+func TestADependencyMakesTwoSuspects(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"core/num/num.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainHeld || len(got.Dropped) != 0 {
+		t.Fatalf("state %s, dropped %+v; want held: #8 reaches component/memql through core/num", got.State, got.Dropped)
+	}
+}
+
+// TestTriageReadsTheBoardedCommitsFiles (Review Focus 1): #7 boarded with a
+// docs change and pushed a component/memql change while the train ran. The
+// train tested the boarded commit, so #7 cannot have broken component/memql's
+// tests, and #8 is the one to drop.
+func TestTriageReadsTheBoardedCommitsFiles(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.shaFiles[shaA] = []string{"docs/a.md"}
+	th.remote.prFiles[8] = []string{"component/memql/x.go"}
+	th.tick(t)
+	tr := th.train(t)
+	th.remote.mu.Lock()
+	th.remote.open[7].HeadSHA = "6666666666666666666666666666666666666666"
+	th.remote.prFiles[7] = []string{"component/memql/y.go"}
+	th.remote.mu.Unlock()
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if len(got.Dropped) != 1 || got.Dropped[0].Number != 8 {
+		t.Fatalf("dropped %+v (state %s, reason %q); want #8: #7's boarded commit changed only docs", got.Dropped, got.State, got.HeldReason)
+	}
+}
+
+// TestClosingARunningTrainsPullRequestCancelsIt: the owner closed the train
+// pull request while its run was going. The train is cancelled at once and
+// its branch deleted; nothing later rebuilds it onto the closed pull request.
+func TestClosingARunningTrainsPullRequestCancelsIt(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	tr := th.train(t)
+	th.remote.mu.Lock()
+	th.remote.trainPRs[tr.PullRequest].open = false
+	th.remote.mu.Unlock()
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainCancelled {
+		t.Fatalf("state %s, want cancelled", got.State)
+	}
+	if _, branchLeft, _ := th.trainLeftOnGitHub(got); branchLeft {
+		t.Error("the cancelled train's branch was left behind")
+	}
+}
+
+// TestABoardedPullRequestThatLeftRebuildsTheWaitingTrain: a pull request on a
+// waiting train was closed, or put back to draft. Approving the train would
+// land it anyway, so the train is rebuilt without it and asks again.
+func TestABoardedPullRequestThatLeftRebuildsTheWaitingTrain(t *testing.T) {
+	for name, leave := range map[string]func(r *trainRemote){
+		"closed":   func(r *trainRemote) { delete(r.open, 8) },
+		"draft":    func(r *trainRemote) { r.open[8].Draft = true },
+		"retarget": func(r *trainRemote) { r.open[8].BaseRef = "release/1.2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			th, _ := awaitingTrain(t)
+			th.remote.mu.Lock()
+			leave(th.remote)
+			th.remote.mu.Unlock()
+			th.clock = th.clock.Add(time.Minute)
+			th.tick(t)
+			got := th.train(t)
+			if got.State != TrainRunning || got.Rebuilds != 1 || len(got.OnBoard) != 1 || got.OnBoard[0].Number != 7 {
+				t.Fatalf("state %s rebuilds %d on board %+v; want rebuilt with #7 alone", got.State, got.Rebuilds, got.OnBoard)
+			}
+		})
+	}
+}
+
+// TestABuildAdoptsTheTrainPullRequestAlreadyOpen: a build died after GitHub
+// opened its pull request and before the train recorded it. The reclaimed
+// build adopts the open pull request instead of failing to open a second one
+// every ten minutes.
+func TestABuildAdoptsTheTrainPullRequestAlreadyOpen(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	const branch = "train/2026-10-28-1"
+	th.remote.mu.Lock()
+	th.remote.trainPRs[150] = &trainPR{head: branch, base: "main", title: "Train " + branch, open: true}
+	th.remote.setBranch(branch, "9999999999999999999999999999999999999999")
+	th.remote.mu.Unlock()
+	stale := th.clock.Add(-11 * time.Minute)
+	if err := th.store.CreateTrain(context.Background(), th.p.OwnerUserID, Train{ID: TrainIDFor(th.p.ID, branch), OwnerUserID: th.p.OwnerUserID,
+		PipelineID: th.p.ID, Repository: th.p.Repository, Branch: branch, Departure: TrainDepartureScheduled, State: TrainBuilding,
+		DepartedAt: stale, UpdatedAt: stale}); err != nil {
+		t.Fatal(err)
+	}
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainRunning || got.PullRequest != 150 {
+		t.Fatalf("state %s pull request %d; want running on the adopted #150", got.State, got.PullRequest)
+	}
+	th.remote.mu.Lock()
+	n := len(th.remote.trainPRs)
+	th.remote.mu.Unlock()
+	if n != 1 {
+		t.Errorf("%d train pull requests, want the one adopted", n)
+	}
+}
+
+// TestATrainBranchNeverPointsAtMain: GitHub may treat a pull request whose
+// head reaches its base as merged, so the train branch only ever takes a
+// finished train head: the merges and the version bump happen on a scratch
+// ref, on the first build and on every rebuild.
+func TestATrainBranchNeverPointsAtMain(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.remote.addPR(8, shaB, "success")
+	th.remote.prFiles[7] = []string{"component/memql/x.go"}
+	th.remote.prFiles[8] = []string{"docs/a.md"}
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionFailure, map[string]any{"key": "tests.go-unit#2", "status": WorkStepFailed,
+		"call": map[string]any{"packages": []any{"github.com/acme/shop/component/memql"}}})
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.Rebuilds != 1 || got.State != TrainRunning {
+		t.Fatalf("state %s rebuilds %d; want a rebuild", got.State, got.Rebuilds)
+	}
+	th.remote.mu.Lock()
+	history := append([]string(nil), th.remote.branchHistory[tr.Branch]...)
+	th.remote.mu.Unlock()
+	for _, sha := range history {
+		if sha == baseSHA {
+			t.Fatalf("the train branch pointed at main's head: %v", history)
+		}
+	}
+	if len(history) != 2 {
+		t.Errorf("the train branch moved %d times (%v), want once per build", len(history), history)
+	}
+}
+
+func (th *trainHarness) stuckMessages() []string {
+	var out []string
+	for _, m := range th.messages() {
+		if strings.Contains(m, "is stuck") {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// TestATrainWithNoRunTellsTheOwner: the train pull request opened and no run
+// ever started for its head -- a missed webhook, a pipeline that no longer
+// takes pull request events. The train would wait forever, so after twenty
+// minutes the owner is told, once.
+func TestATrainWithNoRunTellsTheOwner(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	th.clock = th.clock.Add(10 * time.Minute)
+	th.tick(t)
+	if n := len(th.stuckMessages()); n != 0 {
+		t.Fatalf("%d stuck messages after ten minutes, want none yet", n)
+	}
+	for range 3 {
+		th.clock = th.clock.Add(6 * time.Minute)
+		th.tick(t)
+	}
+	stuck := th.stuckMessages()
+	if len(stuck) != 1 || !strings.Contains(stuck[0], "No run has started") || !strings.Contains(stuck[0], "<@123456789012345678>") {
+		t.Fatalf("stuck messages %v, want one ACTION NEEDED naming the missing run", stuck)
+	}
+}
+
+// TestAStepThatKeepsFailingTellsTheOwner: every tick's step fails the same
+// way -- here the owner's GitHub connection no longer mints the train's
+// token. The log alone says so every minute; after fifteen minutes of it the
+// owner is told, once.
+func TestAStepThatKeepsFailingTellsTheOwner(t *testing.T) {
+	th := newTrainHarness(t)
+	th.remote.addPR(7, shaA, "success")
+	th.tick(t)
+	th.remote.mu.Lock()
+	th.remote.tokenErr = errors.New("repository_write_not_authorized: this GitHub identity can read the repository but cannot authorize changes")
+	th.remote.mu.Unlock()
+	for range 3 {
+		th.clock = th.clock.Add(4 * time.Minute)
+		th.tick(t)
+	}
+	// The first failure was at minute 4, so minute 12 is eight minutes of it.
+	if n := len(th.stuckMessages()); n != 0 {
+		t.Fatalf("%d stuck messages after eight minutes of errors, want none yet", n)
+	}
+	for range 4 {
+		th.clock = th.clock.Add(2 * time.Minute)
+		th.tick(t)
+	}
+	stuck := th.stuckMessages()
+	if len(stuck) != 1 || !strings.Contains(stuck[0], "cannot authorize changes") {
+		t.Fatalf("stuck messages %v, want one naming the failing step", stuck)
+	}
+}

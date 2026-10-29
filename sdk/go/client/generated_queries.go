@@ -6992,6 +6992,31 @@ func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	return b.String()
 }
 
+// PipelineTrainsForOwner -- The caller's release trains, most recently departed first, optionally narrowed to one pipeline.
+//
+// Bound concept: v1:pipelines:train (machine-readable: BoundConcepts["pipelineTrainsForOwner"] in generated_concepts.go).
+type PipelineTrainsForOwnerArgs struct {
+	// The pipeline to narrow to. Absent lists every pipeline's trains.
+	PipelineId string
+}
+
+// PipelineTrainsForOwner calls the engine query pipelineTrainsForOwner.
+func (qc *QueryClient) PipelineTrainsForOwner(ctx context.Context, args PipelineTrainsForOwnerArgs) (*Result, error) {
+	call := PipelineTrainsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineTrainsForOwner", call)
+}
+
+func PipelineTrainsForOwnerBuild(args PipelineTrainsForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineTrainsForOwner(")
+	if args.PipelineId != "" {
+		b.WriteString("pipelineId: ")
+		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesForOwner -- Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable.
 //
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.go).

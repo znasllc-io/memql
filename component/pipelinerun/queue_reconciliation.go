@@ -59,7 +59,7 @@ func (i *Integration) reconcileQueueRun(ctx context.Context, d Deps, r Run) (boo
 	sha, _, readErr := d.GitHub.CommitForRef(callCtx, token, p.Repository, ref)
 	state := "unknown"
 	switch {
-	case githubapp.StatusOf(readErr) == 404:
+	case githubapp.IsMissingRef(readErr):
 		state = "absent"
 	case readErr == nil && strings.EqualFold(sha, r.SHA):
 		state = "present"

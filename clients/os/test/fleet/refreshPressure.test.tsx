@@ -7,9 +7,9 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 it("continuous worker updates let the directory read finish and request one fresh follow-up", async () => {
   vi.useFakeTimers();
-  const connection = fakeConnection(); h.connection = connection;
   const pending: { signal: AbortSignal; resolve: (result: ReturnType<typeof rowsResult>) => void }[] = [];
-  connection.query.fleetShareDirectory = vi.fn((_args: unknown, opts: { signal: AbortSignal }) => new Promise(resolve => pending.push({ signal: opts.signal, resolve })));
+  const connection = fakeConnection({}, { fleetShareDirectory: (_args, opts) => new Promise(resolve => pending.push({ signal: opts!.signal!, resolve })) });
+  h.connection = connection;
   const { result, unmount } = renderHook(() => useShareDirectory("machine"));
   for (let i = 0; i < 30; i++) {
     await act(async () => { connection.subscriptions.emit("v1:worker:registration", { id: "machine" }); vi.advanceTimersByTime(150); });

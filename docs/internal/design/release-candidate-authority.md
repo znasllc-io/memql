@@ -104,7 +104,10 @@ match its originally recorded selection code and reason. The installed recipe
 permits only `pipeline_not_affected` (an empty planned selection in a full run),
 while preserving that skip in the complete evidence set. It refuses carried
 `pipeline_passed_earlier` receipts until the original execution chain is
-verified, and unplanned or blocked skips fail natively. A successful aggregate
+verified, and unplanned or blocked skips fail natively. A release run never
+reuses another run's evidence (`reuseVerification` in
+`component/pipelinerun/evidence.go`), so only a failed-only re-run can present a
+carried receipt. A successful aggregate
 cannot silently replace missing individual receipts. Existing runs without
 typed declarations require fresh qualification; missing type is not inferred.
 

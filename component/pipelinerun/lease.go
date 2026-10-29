@@ -261,7 +261,7 @@ func (i *Integration) claim(ctx context.Context, d Deps, runID string) (Run, boo
 			return nil
 		}
 		if r.Status == StatusQueued && r.StartedAt.IsZero() && !r.CancelRequested && d.AdmitRun != nil {
-			allowed, err := d.AdmitRun(now)
+			allowed, err := d.AdmitRun(now, IsTrainRun(*r))
 			if err != nil {
 				return fmt.Errorf("pipelines: new run admission is unavailable; run remains queued: %w", err)
 			}

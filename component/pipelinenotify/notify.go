@@ -190,14 +190,19 @@ func EmailMessage(n Notification) (subject, body string, err error) {
 // off rather than refusing: it says nothing of the run, and never that it
 // passed.
 
+// Content and Users are empty, and so absent, on every run message: only a
+// train's action-needed message (train.go) carries a mention, because a
+// mention inside an embed never notifies anyone.
 type discordPayload struct {
 	Username        string          `json:"username"`
+	Content         string          `json:"content,omitempty"`
 	AllowedMentions discordMentions `json:"allowed_mentions"`
 	Embeds          []discordEmbed  `json:"embeds"`
 }
 
 type discordMentions struct {
 	Parse []string `json:"parse"`
+	Users []string `json:"users,omitempty"`
 }
 
 type discordEmbed struct {

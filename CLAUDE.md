@@ -62,8 +62,9 @@ and [work context and recovery](docs/public/ai/work-context-and-recovery.md).
 `make install-deps` checks them and installs protoc, its Go plugins and PyYAML
 for the `python3` first on PATH; for Homebrew's externally managed Python it
 waits for the owner's PEP 668 opt-in (`PIP_BREAK_SYSTEM_PACKAGES=1`) or an
-activated virtualenv. Tests in `make test` that run `scripts/ci`'s Python FAIL
-without PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
+activated virtualenv. Tests in `make test` that run `scripts/ci`'s Python or
+the connection gate's (`scripts/deploy/conn-headroom-check.sh`) FAIL without
+PyYAML, naming the interpreter and that fix (`scripts/ci/pyyaml`).
 
 ```bash
 # --- k3d + ArgoCD: the ONLY supported local run path ---
@@ -338,49 +339,54 @@ MemQL uses a single long-lived branch: `main`.
 
 1. **Every change goes through a branch + PR; `main` refuses direct pushes**
    (a repository ruleset: `pull_request`, `required_status_checks`,
-   `merge_queue`, `deletion`, `non_fast_forward`). Branch, push, open the PR,
-   let CI go green, then **enqueue it**:
-
-   ```bash
-   gh pr merge <n> --repo znasllc-io/memql   # bare: no strategy, no --delete-branch
-   ```
-
-   `--delete-branch` is REFUSED (the queue deletes the branch itself) and
-   `--merge` is ignored (the queue's `merge_method` is already `MERGE`). The
-   command ENQUEUES: the PR sits `OPEN` with `mergedAt: null` for minutes under
-   the 5-minute `ALLGREEN` batch window, and re-running answers `is already
-   queued to merge`, which is confirmation. A queued PR that goes `DIRTY` stays
-   there: rebase on `origin/main` and force-push. **The strict up-to-date
-   policy is OFF by decision** (memql#5481; recorded, with the command that
-   verifies it, in [ruleset-baseline.md](docs/internal/ops/ruleset-baseline.md)):
-   the queue builds and tests the exact tree that lands, so a sibling merge no
-   longer forces `update-branch`. **The owner bypass below skips the queue**,
-   so for it the base still matters: `merge-as-owner.sh` MEASURES the drift
-   (`compare/<base>...<head>`, printed by `--check` as a `base` line) and
-   refuses on a non-zero count or an unreadable comparison; forcing with
-   `--admin` lands a tree CI never tested against the current base. It measures
-   rather than reading `mergeStateStatus`, which names only the STRONGEST
-   blocker: every PR here is `BLOCKED` on a code-owner review its author may
-   not give, and that hides any staleness.
-2. **Merging your own PR: the owner uses the BYPASS, never a settings change.**
-   GitHub never lets a PR's author approve it, so the requirement stays on and
-   the owner proceeds through the bypass (`require_code_owner_review: true` +
+   `deletion`, `non_fast_forward`, and `merge_queue` until the switch below).
+   **Release trains carry `main`**
+   ([pipelines.md](docs/public/operate/pipelines.md#release-trains); design
+   record [2026-10-27](docs/superpowers/specs/2026-10-27-release-trains-design.md)):
+   a session branches, pushes, opens the PR, gets its `MemQL / memql` check
+   green, and **stops -- it never merges, and never reviews or approves a pull
+   request**: sessions act on GitHub under the owner's account, so a session's
+   approval of a train pull request would land code the owner has not seen.
+   At each departure (twice a day, per
+   `MEMQL_PIPELINES_TRAINS`) the MemQL app merges every ready PR onto one
+   `train/<date>-<n>` branch, runs the pipeline once and opens a train PR; the
+   owner's GitHub approval of that PR is what lands it, and Discord says what
+   happened and what needs the owner. A PR a train drops gets `train:dropped`:
+   its session fixes it, pushes, and removes the label. `train:hold` keeps a PR
+   off trains. An urgent fix asks the owner for an express train
+   (`pipelinesTrainExpress`). **Until the owner switches trains on** (the
+   record's section 12; steps in
+   [ruleset-baseline.md](docs/internal/ops/ruleset-baseline.md#release-trains-replace-the-merge-queue-2026-10-27)),
+   `main` requires `MemQL / memql / push` instead of `MemQL / memql`, and the
+   owner merges through the bypass below, naming the reason with
+   `--emergency`.
+2. **Emergencies only: the owner's BYPASS, never a settings change.** GitHub
+   never lets a PR's author approve it, so the requirement stays on and an
+   emergency proceeds through the bypass (`require_code_owner_review: true` +
    `bypass_actors: RepositoryRole(admin), pull_request`):
 
    ```bash
-   scripts/dev/merge-as-owner.sh --pr=<n> --check   # policy + readiness, merges nothing
-   scripts/dev/merge-as-owner.sh --pr=<n>           # merge
+   scripts/dev/merge-as-owner.sh --pr=<n> --check                          # policy + readiness, merges nothing
+   scripts/dev/merge-as-owner.sh --pr=<n> --emergency="<why it cannot wait>"   # posts the reason, then merges
    ```
 
-   The script requires a successful check from every context the live ruleset
-   requires, including **`MemQL / memql` bound to GitHub App 4822538**. It
-   refuses a red, pending, cancelled, skipped or absent required check; absence
-   is not success (the historical `ci-required` gap allowed memql#5709 to merge
-   while its tests were still pending). The App binding and newest matching
-   attempt are verified independently. Non-required failures remain visible
-   as `failed (not required)` and their logs still deserve review. If the
-   required-check list cannot be read, the script refuses on every failed or
-   running check. Do not "fix" this by lowering `require_code_owner_review`.
+   The script refuses a merge without `--emergency` and posts the reason on the
+   PR before it merges, so the trail says why `main` moved outside a train. It
+   requires a successful check from every context the live ruleset requires,
+   bound to **GitHub App 4822538**, and refuses a red, pending, cancelled,
+   skipped or absent required check; absence is not success (the historical
+   `ci-required` gap allowed memql#5709 to merge while its tests were still
+   pending). The App binding and newest matching attempt are verified
+   independently. Non-required failures remain visible as `failed (not
+   required)` and their logs still deserve review. If the required-check list
+   cannot be read, the script refuses on every failed or running check. It
+   MEASURES the drift from the base (`compare/<base>...<head>`, printed by
+   `--check` as a `base` line) and refuses on a non-zero count or an unreadable
+   comparison; forcing with `--admin` lands a tree CI never tested against the
+   current base. It measures rather than reading `mergeStateStatus`, which names
+   only the STRONGEST blocker: every owner PR is `BLOCKED` on a code-owner
+   review its author may not give, and that hides any staleness. Do not "fix"
+   any of this by lowering `require_code_owner_review`.
 3. **Pre-release -- no backwards-compat shims or deprecation windows, EXCEPT in
    the DSL.** For Go seams, wire contracts, gRPC messages and env vars: fix
    MemQL and the consumer at once and delete what is no longer needed. The

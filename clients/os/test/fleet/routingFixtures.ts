@@ -1,7 +1,7 @@
-import { vi, type Mock } from "vitest";
-import { QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
+import type { Mock } from "vitest";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { builtinReply, fakeConnection, machineRow } from "./harness";
+import { builtinReply, fakeConnection, machineRow, type Answer, type Answers } from "./harness";
 
 // The routing surfaces' connection double -- shared by the suite
 // (routingHarness.tsx) and the browser QA harness (qa/main.tsx), so a
@@ -10,7 +10,10 @@ import { builtinReply, fakeConnection, machineRow } from "./harness";
 //
 // The double: the Fleet harness's reads (machines,
 // the machine-choice row, inferenceStatus) plus the routing builtins, each
-// answering in the builtin wire shape the engine sends (builtinReply).
+// answering in the builtin wire shape the engine sends (builtinReply). Every
+// one is the SDK's generated method, answered at `executeNamed` from the
+// arguments it rendered, as the Fleet harness explains: a surface that calls
+// one bare fails here as it fails in the browser.
 //
 // The routes and rules live in ONE revisioned document on the engine
 // (router_policy_revision), so this double keeps one `revision` and bumps it
@@ -158,7 +161,9 @@ export function shippedRouteModes(): Row[] {
   ];
 }
 
-/** The routing builtins this double answers, as the spies a suite asserts on. */
+/** The routing builtins this double answers, as the spies a suite asserts on:
+ *  each is the generated method, so it records the arguments it was called
+ *  with and sends what it rendered on to `executeNamed`. */
 export interface RoutingCalls {
   routerListPolicies: Mock;
   routingPolicySave: Mock;
@@ -183,7 +188,9 @@ export interface RoutingCalls {
   activeEmbedderBinding: Mock;
 }
 
-export function routingConnection(seed: { machines?: Row[]; federationConfigured?: boolean; routes?: Row[]; rules?: Row[]; decisions?: Row[]; modes?: Row[]; balance?: Row; budget?: Row; capacity?: Row[]; embedder?: string } = {}) {
+/** The routing double over `seed`. `more` answers further generated names, as
+ *  `fakeConnection`'s second argument does. */
+export function routingConnection(seed: { machines?: Row[]; federationConfigured?: boolean; routes?: Row[]; rules?: Row[]; decisions?: Row[]; modes?: Row[]; balance?: Row; budget?: Row; capacity?: Row[]; embedder?: string } = {}, more: Answers = {}) {
   const state: RoutingState = {
     revision: 7,
     routes: seed.routes ?? shippedRoutes(),
@@ -198,11 +205,6 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
     saveError: null,
     ruleSaveError: null,
   };
-  const connection = fakeConnection({
-    myWorkersWithStatus: seed.machines ?? [studioMachine()],
-    myRoutingPolicies: [],
-    inferenceStatus: [{ id: "inferenceStatus", federationConfigured: seed.federationConfigured ?? false, eligible: true }],
-  });
   const withRevision = (rows: Row[]) => rows.map((r) => ({ ...r, revision: state.revision }));
   // THE ENGINE'S ONE REVISION, ENFORCED AS THE ENGINE ENFORCES IT
   // (component/memql/policy_customization.go, routing_configuration_rules.go):
@@ -213,10 +215,9 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
   const stale = (args: Record<string, unknown>, words: string) => {
     if (args.expectedRevision !== state.revision) throw new Error(words.replace("%d", String(args.expectedRevision)));
   };
-  const q = connection.query as unknown as Record<string, unknown>;
-  Object.assign(q, {
-    routerListPolicies: vi.fn(async () => builtinReply("routerListPolicies", withRevision(state.routes))),
-    routingPolicySave: vi.fn(async (args: Record<string, unknown>) => {
+  const answers: Record<Exclude<keyof RoutingCalls, "executeNamed">, Answer> = {
+    routerListPolicies: async () => builtinReply("routerListPolicies", withRevision(state.routes)),
+    routingPolicySave: async (args) => {
       if (state.saveError) throw state.saveError;
       stale(args, "routing policies changed since revision %d; refresh and review before saving");
       state.revision += 1;
@@ -229,8 +230,8 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
         : routeRow(name, primary, fallbacks, { shipped: false, description: args.description as string, defaultChain: [] });
       state.routes = held ? state.routes.map((r) => (r.name === name ? next : r)) : [...state.routes, next];
       return builtinReply("routingPolicySave", [{ id: "saved", name, revision: state.revision, status: "saved" }]);
-    }),
-    routingPolicyReset: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    routingPolicyReset: async (args) => {
       stale(args, "routing policies changed since revision %d; refresh and review before saving");
       state.revision += 1;
       state.routes = state.routes.map((r) => {
@@ -239,14 +240,14 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
         return { ...r, primary: shipped[0] ?? "", fallbacks: shipped.slice(1), chain: shipped, customized: false };
       });
       return builtinReply("routingPolicyReset", [{ id: "reset", name: args.name as string, revision: state.revision, status: "reset" }]);
-    }),
-    routingRules: vi.fn(async () => builtinReply("routingRules", withRevision(state.rules))),
-    routingRuleValidate: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    routingRules: async () => builtinReply("routingRules", withRevision(state.rules)),
+    routingRuleValidate: async (args) => {
       // The engine checks the revision only when the draft names one.
       if (args.expectedRevision !== undefined && args.expectedRevision !== null) stale(args, "routing changed since this draft was opened; cancel and refresh before editing");
       return builtinReply("routingRuleValidate", [{ id: "validation", validationOnly: true, revision: state.revision, considered: 0, changed: 0 }]);
-    }),
-    routingRuleSave: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    routingRuleSave: async (args) => {
       if (state.ruleSaveError) throw state.ruleSaveError;
       stale(args, "routing configuration changed; refresh and validate again");
       state.revision += 1;
@@ -254,29 +255,19 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
       const next = ruleRow({ ...(held ?? {}), name: args.name as string, when: (args.conditions as Row) ?? {}, policy: args.policy as string, precedence: args.precedence as number, level: (args.level as string) ?? "", onUnavailable: (args.onUnavailable as string) ?? "degrade", locked: false });
       state.rules = [...state.rules.filter((r) => r.name !== args.name), next];
       return builtinReply("routingRuleSave", [{ ...next, revision: state.revision }]);
-    }),
-    routingRuleRemove: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    routingRuleRemove: async (args) => {
       stale(args, "routing configuration changed; refresh before removing");
       state.revision += 1;
       state.rules = state.rules.filter((r) => r.name !== args.name);
       return builtinReply("routingRuleRemove", [{ id: "removed", name: args.name as string, status: "removed" }]);
-    }),
-    routingRuleDescribe: vi.fn(async () => builtinReply("routingRuleDescribe", [ruleRow({ name: "planningIsLocal", when: { tag: "planning" }, policy: "localOnly", precedence: 20, problem: "" })])),
-    // THE GENERATED METHOD ITSELF, answered at `executeNamed` below. Every
-    // method on QueryClient.prototype calls `this.executeNamed`, so a surface
-    // that takes one off its client and calls it bare fails here exactly as
-    // it fails in the browser ("Cannot read properties of undefined (reading
-    // 'executeNamed')"). A closure that never read `this` let the History tab
-    // ship that crash through a green suite.
-    routerDecisionsRecent: vi.fn(QueryClient.prototype.routerDecisionsRecent),
-    executeNamed: vi.fn(async (name: string) => {
-      if (name === "routerDecisionsRecent") return builtinReply("routerDecisionsRecent", state.decisions);
-      throw new Error(`the routing double does not answer ${name} at executeNamed`);
-    }),
+    },
+    routingRuleDescribe: async () => builtinReply("routingRuleDescribe", [ruleRow({ name: "planningIsLocal", when: { tag: "planning" }, policy: "localOnly", precedence: 20, problem: "" })]),
+    routerDecisionsRecent: async () => builtinReply("routerDecisionsRecent", state.decisions),
     // ROUTES (design record 2026-10-18-routes-design.md): one object per read,
     // sharing the routing document's revision with chains and rules.
-    routesForActor: vi.fn(async () => builtinReply("routesForActor", [{ id: "routesForActor", routes: state.modes, revision: state.revision }])),
-    routeSave: vi.fn(async (args: Record<string, unknown>) => {
+    routesForActor: async () => builtinReply("routesForActor", [{ id: "routesForActor", routes: state.modes, revision: state.revision }]),
+    routeSave: async (args) => {
       if (state.saveError) throw state.saveError;
       const id = typeof args.id === "string" ? args.id : "";
       const jobs = routeJobs(args.fast as string[], args.strong as string[], args.reasoning as string[]);
@@ -292,41 +283,50 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
         return builtinReply("routeSave", [created]);
       }
       return builtinReply("routeSave", [state.modes.find((m) => m.id === id)!]);
-    }),
-    routeDelete: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    routeDelete: async (args) => {
       state.modes = state.modes.filter((m) => m.id !== args.id);
       return builtinReply("routeDelete", []);
-    }),
-    routeReset: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    routeReset: async (args) => {
       if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
       state.revision += 1;
       const shipped = shippedRouteModes().find((m) => m.id === args.id)!;
       state.modes = state.modes.map((m) => (m.id === args.id ? { ...m, jobs: shipped.jobs, customized: false } : m));
       return builtinReply("routeReset", [state.modes.find((m) => m.id === args.id)!]);
-    }),
-    autoBalance: vi.fn(async () => builtinReply("autoBalance", [{ id: "autoBalance", ...state.balance, revision: state.revision }])),
-    autoBalanceSave: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    autoBalance: async () => builtinReply("autoBalance", [{ id: "autoBalance", ...state.balance, revision: state.revision }]),
+    autoBalanceSave: async (args) => {
       if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
       state.revision += 1;
       const recommended = state.balance.recommended as Row;
       const next = { speed: args.speed, cost: args.cost, quality: args.quality };
       state.balance = { ...state.balance, ...next, customized: next.speed !== recommended.speed || next.cost !== recommended.cost || next.quality !== recommended.quality };
       return builtinReply("autoBalanceSave", [{ id: "autoBalance", ...state.balance, revision: state.revision }]);
-    }),
-    autoBalanceReset: vi.fn(async (args: Record<string, unknown>) => {
+    },
+    autoBalanceReset: async (args) => {
       if (args.revision !== state.revision) throw new Error(`routing changed since revision ${String(args.revision)}; refresh and review before saving`);
       state.revision += 1;
       state.balance = { ...state.balance, ...(state.balance.recommended as Row), customized: false };
       return builtinReply("autoBalanceReset", [{ id: "autoBalance", ...state.balance, revision: state.revision }]);
-    }),
-    myBudget: vi.fn(async () => builtinReply("myBudget", [{ id: "myBudget", ...state.budget }])),
-    fleetCapacity: vi.fn(async () => builtinReply("fleetCapacity", [{ id: "fleetCapacity", machines: state.capacity }])),
-    activeEmbedderBinding: vi.fn(async () =>
+    },
+    myBudget: async () => builtinReply("myBudget", [{ id: "myBudget", ...state.budget }]),
+    fleetCapacity: async () => builtinReply("fleetCapacity", [{ id: "fleetCapacity", machines: state.capacity }]),
+    activeEmbedderBinding: async () =>
       builtinReply("activeEmbedderBinding", state.embedder === "" ? [] : [{ id: "primary", providerRef: `fleet:${state.embedder}`, activatedAt: "2026-10-18T10:00:00Z" }]),
-    ),
-  });
-  const query = new Proxy(q, {
+  };
+  const connection = fakeConnection(
+    {
+      myWorkersWithStatus: seed.machines ?? [studioMachine()],
+      myRoutingPolicies: [],
+      inferenceStatus: [{ id: "inferenceStatus", federationConfigured: seed.federationConfigured ?? false, eligible: true }],
+    },
+    { ...answers, ...more },
+  );
+  // A MISSING BUILTIN IS ABSENT, not refused: the generated method is on the
+  // client's prototype, so the proxy hides it the way an SDK without it would.
+  const query = new Proxy(connection.query, {
     get: (target, prop) => (typeof prop === "string" && state.missing.has(prop) ? undefined : Reflect.get(target, prop)),
   });
-  return { connection: { ...connection, query: query as unknown as typeof connection.query }, state, calls: q as unknown as RoutingCalls };
+  return { connection: { ...connection, query }, state, calls: connection.query as unknown as RoutingCalls };
 }

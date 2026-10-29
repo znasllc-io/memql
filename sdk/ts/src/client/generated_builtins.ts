@@ -4212,6 +4212,31 @@ QueryClient.prototype.pipelinesStatus = function (this: QueryClient, args: Pipel
   return this.executeNamed("pipelinesStatus", buildPipelinesStatus(args), opts);
 };
 
+/** Start an express release train for one of the caller's repositories, carrying only the named pull requests: the same checks and the same approval as a scheduled train, off schedule. Only the pipeline's owner may start one. It replaces a train that is waiting for approval or held, whose pull requests board the next train, and is refused while a train is building or running. */
+export interface PipelinesTrainExpressArgs {
+  /** The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS. */
+  repository: string;
+  /** The pull request numbers the express train carries. Each must be ready to board: open, not a draft, its MemQL / memql check passed, no train:hold or train:dropped label. */
+  pullRequests: number[];
+}
+
+export function buildPipelinesTrainExpress(args: PipelinesTrainExpressArgs): string {
+  const parts: string[] = [];
+  parts.push("repository: " + renderMemQLValue(args.repository));
+  parts.push("pullRequests: " + renderMemQLValue(args.pullRequests));
+  return "builtin pipelinesTrainExpress(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesTrainExpress(args: PipelinesTrainExpressArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesTrainExpress = function (this: QueryClient, args: PipelinesTrainExpressArgs = {} as PipelinesTrainExpressArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesTrainExpress", buildPipelinesTrainExpress(args), opts);
+};
+
 /** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
 export interface ProviderAuthStatusArgs {
 }

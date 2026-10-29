@@ -45,13 +45,15 @@ baseline exists so that "quietly" stops being a property the repository has.
 ## Ruleset 16630577 — `default`
 
 **Enforcement:** `active`
-**Rules:** `deletion`, `merge_queue`, `non_fast_forward`, `pull_request`,
-`required_status_checks`
+**Rules:** `deletion`, `non_fast_forward`, `pull_request`,
+`required_status_checks`; `merge_queue` until release trains are switched on
+([below](#release-trains-replace-the-merge-queue-2026-10-27))
 **Asserted by:** the `ruleset-drift` job.
 
 This is the ruleset that makes `main` refuse a direct push and routes every
-change through a PR (CLAUDE.md, "Branch Workflow"). All five rules are required
-to be present; there are no recorded gaps.
+change through a PR (CLAUDE.md, "Branch Workflow"). The four asserted rules are
+required to be present; there are no recorded gaps. `merge_queue` is present
+until the switch and deliberately not asserted.
 
 The full narrative of the 2026-08-06 double drop and the 2026-08-14 restore is
 in [merge-queue.md](merge-queue.md); the point-in-time evidence is in
@@ -150,6 +152,42 @@ queue values directly:
 gh api repos/znasllc-io/memql/rulesets/16630577 \
   --jq '.rules[] | select(.type=="required_status_checks" or .type=="merge_queue")'
 ```
+
+### Release trains replace the merge queue (2026-10-27)
+
+**Decided by the owner on 2026-10-27** (design record
+`docs/superpowers/specs/2026-10-27-release-trains-design.md`, sections 8 and
+12). Every pull request here is the owner's own, so none can be approved and
+each merged through the bypass, which skips the queue: the queue batched
+nothing. A release train now batches instead, and the owner's approval of the
+App-authored train pull request is the review that lands it
+([pipelines.md](../../public/operate/pipelines.md#release-trains)).
+
+**The fast phase (2026-10-28, owner-approved, until the switch).** The
+required context is **`MemQL / memql / push`** (App 4822538) instead of
+`MemQL / memql`, so a release can be cut from `main`'s own push run while pull
+requests merge at once through the bypass; that is the live value read above.
+Separately, memql-znas's ruleset gained the same admin bypass
+(`RepositoryRole` 5, `pull_request`) so its pin pull requests can merge. Both
+rulesets were saved before those writes.
+
+**The switch** (spec section 12, step 1), in this order:
+
+1. `ruleset-drift.sh` stops asserting `merge_queue` (done in the trains
+   change), so removing the rule does not turn the daily audit red.
+2. CODEOWNERS gives every path to the owner alone, so only the owner's review
+   counts.
+3. The ruleset is re-read, then written once with every rule re-sent: the
+   required context back to **`MemQL / memql`** (App 4822538), which the train
+   pull request's run reports, and `merge_queue` removed. `pull_request` keeps
+   `require_code_owner_review: true` and the admin bypass stays, for
+   `merge-as-owner.sh --emergency` only. Read the result back.
+4. `MEMQL_PIPELINES_TRAINS` turns trains on for `znasllc-io/memql`.
+
+**Fallback** (step 2): turn the train setting off, restore the saved ruleset
+(re-send every rule, `merge_queue` included, and add `merge_queue` back to
+`EXPECTED` in `ruleset-drift.sh`), and merge with
+`merge-as-owner.sh --emergency` until the train is fixed.
 
 ---
 

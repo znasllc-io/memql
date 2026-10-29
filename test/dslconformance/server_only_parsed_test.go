@@ -1798,6 +1798,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:                     true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:                  true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:                  true,
+		// Release trains (design record 2026-10-27): the coordinator reads and
+		// writes the train record on a scheduled tick with no person behind it.
+		{Path: "pipelines/queries.memql", Name: "pipelineTrainsForPipeline"}: true,
+		{Path: "pipelines/mutations.memql", Name: "createPipelineTrain"}:     true,
+		{Path: "pipelines/mutations.memql", Name: "updatePipelineTrain"}:     true,
 
 		// epic memql#5480, pipelines delivery. THE CHANNEL'S TWO WRITES carry a
 		// credential's REFERENCE: a channel names the globalSecret the notify

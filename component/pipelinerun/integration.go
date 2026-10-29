@@ -74,7 +74,9 @@ type Deps struct {
 	// must be a bounded local read: claim calls it inside the shared row gate.
 	// False or an error keeps the run queued, without starting its deadline.
 	// Recovery of started runs and cancellation never depend on this gate.
-	AdmitRun func(time.Time) (bool, error)
+	// The bool says whether the run is a release train's (IsTrainRun), which
+	// the cost guard may admit on its own allowance.
+	AdmitRun func(time.Time, bool) (bool, error)
 	// Secrets resolves a globalSecret value for the driver (Task 10b).
 	Secrets Secrets
 	// Journal writes a pipeline run's v1:work goal, run and steps (Task 10b).
@@ -144,6 +146,12 @@ type Integration struct {
 	// piece of a run's state that lives in memory, and only for as long as
 	// this replica holds the run's lease (driver.go).
 	drives driveRegistry
+
+	// trainStalls is how long each pipeline's train step has kept failing on
+	// this replica (train.go, noteTrainStall). In memory on purpose: it only
+	// decides when to tell the owner, the lease keeps the tick on one agent,
+	// and a replica change restarts the count rather than losing the train.
+	trainStalls trainStallClock
 }
 
 // New builds the integration over deps. The plug-in factory (capabilities.go)

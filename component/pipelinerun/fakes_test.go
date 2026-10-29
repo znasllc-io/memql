@@ -67,6 +67,11 @@ type memStore struct {
 	channelUpdates  []channelUpdate
 	staged          []NotificationRequest
 
+	// trains is the release trains by bare id, and their writes in order.
+	trains       map[string]Train
+	trainCreates []Train
+	trainUpdates []trainUpdate
+
 	// Injected failures.
 	failCreateRun error
 	failUpdateRun error
@@ -147,8 +152,134 @@ func newMemStore() *memStore {
 	return &memStore{
 		packages: map[string]PackageSource{}, pipelines: map[string]Pipeline{}, runs: map[string]Run{},
 		deliveries: map[string]InboundDelivery{}, channels: map[string]Channel{}, files: map[string]libraryFile{},
-		outbound: map[string]outboundRow{}, fresh: map[string][]bool{},
+		outbound: map[string]outboundRow{}, fresh: map[string][]bool{}, trains: map[string]Train{},
 	}
+}
+
+// LatestTrain is pipelineTrainsForPipeline's first row: the pipeline's train
+// that departed last, whoever owns it.
+func (s *memStore) LatestTrain(ctx context.Context, pipelineID string) (*Train, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noteFresh(ctx, "LatestTrain")
+	var latest *Train
+	for _, t := range s.trains {
+		if t.PipelineID != bareID(pipelineID) {
+			continue
+		}
+		if latest == nil || t.DepartedAt.After(latest.DepartedAt) {
+			copy := cloneTrain(t)
+			latest = &copy
+		}
+	}
+	return latest, nil
+}
+
+// TrainsSince is the pipeline's trains that departed at or after since.
+func (s *memStore) TrainsSince(_ context.Context, pipelineID string, since time.Time) ([]Train, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Train
+	for _, t := range s.trains {
+		if t.PipelineID == bareID(pipelineID) && !t.DepartedAt.Before(since) {
+			out = append(out, cloneTrain(t))
+		}
+	}
+	slices.SortFunc(out, func(a, b Train) int { return b.DepartedAt.Compare(a.DepartedAt) })
+	return out, nil
+}
+
+// CreateTrain is createPipelineTrain: @createOnly("state"), so a second create
+// on an existing id keeps that train's state, rebuilds and retry.
+func (s *memStore) CreateTrain(_ context.Context, owner string, t Train) error {
+	if strings.TrimSpace(owner) == "" {
+		return errors.New("memStore: a train is written only under its owner")
+	}
+	if bareID(t.ID) == "" {
+		return errors.New("memStore: a train needs an id")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t = cloneTrain(t)
+	t.ID, t.PipelineID, t.OwnerUserID = bareID(t.ID), bareID(t.PipelineID), owner
+	if existing, ok := s.trains[t.ID]; ok {
+		t.State, t.Rebuilds, t.Retried = existing.State, existing.Rebuilds, existing.Retried
+	} else {
+		t.Rebuilds, t.Retried = 0, false
+	}
+	s.trains[t.ID] = t
+	s.trainCreates = append(s.trainCreates, t)
+	return nil
+}
+
+// UpdateTrain is updatePipelineTrain: the named fields, on a train that
+// exists.
+func (s *memStore) UpdateTrain(_ context.Context, owner, trainID string, patch TrainPatch) error {
+	if strings.TrimSpace(owner) == "" {
+		return errors.New("memStore: a train is written only under its owner")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.trains[bareID(trainID)]
+	if !ok {
+		return fmt.Errorf("memStore: no train %q", trainID)
+	}
+	setS := func(dst *string, v *string) {
+		if v != nil {
+			*dst = *v
+		}
+	}
+	setS(&t.State, patch.State)
+	setS(&t.Version, patch.Version)
+	setS(&t.BaseSHA, patch.BaseSHA)
+	setS(&t.HeadSHA, patch.HeadSHA)
+	setS(&t.PullRequestURL, patch.PullRequestURL)
+	setS(&t.RunID, patch.RunID)
+	setS(&t.ApprovedBy, patch.ApprovedBy)
+	setS(&t.ApprovedSHA, patch.ApprovedSHA)
+	setS(&t.LandedSHA, patch.LandedSHA)
+	setS(&t.HeldReason, patch.HeldReason)
+	if patch.OnBoard != nil {
+		t.OnBoard = slices.Clone(*patch.OnBoard)
+	}
+	if patch.LeftOff != nil {
+		t.LeftOff = slices.Clone(*patch.LeftOff)
+	}
+	if patch.Dropped != nil {
+		t.Dropped = slices.Clone(*patch.Dropped)
+	}
+	if patch.PullRequest != nil {
+		t.PullRequest = *patch.PullRequest
+	}
+	if patch.Rebuilds != nil {
+		t.Rebuilds = *patch.Rebuilds
+	}
+	if patch.Retried != nil {
+		t.Retried = *patch.Retried
+	}
+	if patch.Notified != nil {
+		t.Notified = slices.Clone(*patch.Notified)
+	}
+	if patch.UpdatedAt != nil {
+		t.UpdatedAt = *patch.UpdatedAt
+	}
+	s.trains[t.ID] = t
+	s.trainUpdates = append(s.trainUpdates, trainUpdate{Owner: owner, ID: t.ID, Patch: patch})
+	return nil
+}
+
+type trainUpdate struct {
+	Owner, ID string
+	Patch     TrainPatch
+}
+
+func cloneTrain(t Train) Train {
+	t.Requested = slices.Clone(t.Requested)
+	t.OnBoard = slices.Clone(t.OnBoard)
+	t.LeftOff = slices.Clone(t.LeftOff)
+	t.Dropped = slices.Clone(t.Dropped)
+	t.Notified = slices.Clone(t.Notified)
+	return t
 }
 
 // noteFresh records whether a call to method asked for a fresh read. Callers
@@ -1144,7 +1275,10 @@ func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string
 	defer g.mu.Unlock()
 	c, ok := g.commits[repository+"@"+ref]
 	if !ok {
-		return "", "", &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/commits/" + ref}
+		// GitHub answers a ref that names no commit with 422 ("No commit found
+		// for SHA"), not 404. The fake answers the same, so a caller that reads
+		// only 404 as absence fails here as it does against GitHub.
+		return "", "", &githubapp.StatusError{Status: 422, Endpoint: "/repos/" + repository + "/commits/" + ref}
 	}
 	return c.SHA, c.Message, nil
 }

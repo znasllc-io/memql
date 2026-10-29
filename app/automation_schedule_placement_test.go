@@ -71,6 +71,28 @@ func TestPipelinesPollRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, pipelinesPollAutomation, "agent")
 }
 
+// The release train re-runs a failed train's steps through the same opening a
+// person's re-run uses, which only an agent's driver picks up (design record
+// 2026-10-27).
+func TestReleaseTrainsTickOnlyOnElectedAgent(t *testing.T) {
+	assertPlacedOnlyOn(t, "tickPipelineTrains", "agent")
+}
+
+// Two ticks at once on the leased agent would each comment, label and open a
+// re-run before either compare-and-swap lands, so a tick still running when
+// the next minute fires is skipped (@mode(single)).
+func TestReleaseTrainsTickNeverOverlaps(t *testing.T) {
+	for _, def := range placementDefinitions(t) {
+		if def.Name == "tickPipelineTrains" {
+			if def.Mode == nil || def.Mode.Kind != automations.ModeSingle {
+				t.Fatalf("tickPipelineTrains mode = %+v, want single", def.Mode)
+			}
+			return
+		}
+	}
+	t.Fatal("tickPipelineTrains is not loaded")
+}
+
 func TestPipelineArtifactRetentionRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, "sweepPipelineArtifacts", "agent")
 }

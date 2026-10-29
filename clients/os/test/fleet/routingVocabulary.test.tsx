@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readTheBarNow } from "../readTheBar";
 import type { ReactNode } from "react";
+import type { Answers } from "./harness";
 
 // ONE VOCABULARY (routing design brief, section 1): Source, Route, Rule,
 // Level. The engine's words -- policy, door, task rule, federation, lane --
@@ -24,6 +25,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 const { renderRouting, routingConnection, routeRow, ruleRow, settle, shippedRoutes, shippedRules } = await import("./routingHarness");
+const { builtinReply } = await import("./harness");
 const { retiredWordsIn } = await import("../../src/apps/fleet/routing/vocabulary");
 const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
@@ -88,7 +90,7 @@ function pressBar(group: () => HTMLElement, name: string | RegExp) {
 // dsl/rules/rules.memql rather than from a literal that could leave out the
 // very rule whose words leak (it did: `policyCompilerLocalOnly` matches the
 // prompt `composeRoutingPolicy`).
-function use() {
+function use(more: Answers = {}) {
   const made = routingConnection({
     routes: [...shippedRoutes().map((r) => (r.name === "localFirst" ? routeRow("localFirst", "fleet:strongest", ["app:*", "federation:cheapest", "policy:federationStrongest"], { customized: true }) : r))],
     rules: [...shippedRulesFromDsl(), ruleRow({ name: "nightlyIsCheap", when: { tag: "nightly" }, policy: "federationStrongest", precedence: 10, onUnavailable: "park" })],
@@ -124,7 +126,7 @@ function use() {
         ],
       },
     ],
-  });
+  }, more);
   h.connection = made.connection;
 }
 
@@ -251,10 +253,9 @@ describe("Settings keeps the vendors and the levels, in the same words", () => {
   }
 
   it.each(["providers", "levels", "rules", "decisions"])("Settings > %s", async (sectionId) => {
-    use();
+    use({ providerAuthStatus: async () => builtinReply("providerAuthStatus", []) });
     installSeededAccess("owner");
     const conn = h.connection as { query: Record<string, unknown>; onStatusChange?: unknown };
-    conn.query.providerAuthStatus = vi.fn(async () => ({ rows: () => [] }));
     // Settings' connection history listens to the socket's status.
     conn.onStatusChange = () => () => {};
     render(wrap(<SettingsApp sectionId={sectionId} navigate={vi.fn()} askContext={vi.fn()} />));

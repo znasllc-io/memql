@@ -158,6 +158,21 @@ builtin pipelinesPoll {
 builtin pipelinesSchedule {
 }
 
+@executor("integration.pipelines.trainTick")
+@description("The release train's one-minute step (design record docs/superpowers/specs/2026-10-27-release-trains-design.md). Only the train automation reaches it: a call without internal origin is refused before anything is read. For each repository MEMQL_PIPELINES_TRAINS enables, take one step of its newest train: depart at a scheduled time, build the train branch from main and the ready pull requests, watch the train pull request's run, retry an environmental failure once, drop the one pull request a failure points to, hold for the owner, or land a train the pipeline owner approved on GitHub. A train never lands without that approval.")
+builtin pipelinesTrainTick {
+}
+
+@sdk
+@executor("integration.pipelines.trainExpress")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/rerun")
+@description("Start an express release train for one of the caller's repositories, carrying only the named pull requests: the same checks and the same approval as a scheduled train, off schedule. Only the pipeline's owner may start one. It replaces a train that is waiting for approval or held, whose pull requests board the next train, and is refused while a train is building or running.")
+builtin pipelinesTrainExpress {
+  repository    string!  @description("The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS.")
+  pullRequests  []int!   @description("The pull request numbers the express train carries. Each must be ready to board: open, not a draft, its MemQL / memql check passed, no train:hold or train:dropped label.")
+}
+
 /// Read pipeline configuration and each workbench's last runner isolation verdict.
 /// This read never starts a build or an isolation probe. Restricted to cluster operators.
 @sdk

@@ -108,9 +108,15 @@ EXPECTED_ENFORCEMENT="${RULESET_DRIFT_ENFORCEMENT:-active}"
 #
 # Keep it sorted; the comparison is set-based but a sorted list keeps diffs
 # readable and stops two people adding the same rule twice.
+#
+# merge_queue is NOT asserted (2026-10-27): release trains batch what the
+# queue batched, and switching main to trains removes the rule (design record
+# docs/superpowers/specs/2026-10-27-release-trains-design.md, section 8). It
+# is still present until that switch, and a present rule this list does not
+# name is neither drift nor a gap, so the audit passes on both sides of the
+# switch. Restoring the queue as a fallback means adding it back here.
 EXPECTED=(
     deletion
-    merge_queue
     non_fast_forward
     pull_request
     required_status_checks

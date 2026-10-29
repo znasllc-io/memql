@@ -213,6 +213,90 @@ mutation run updatePipelineRun {
   }
 }
 
+/// Open a release train: one departure's row, written when the coordinator starts building it.
+///
+/// @createOnly on state: a second create landing on an existing train's id must not put a running,
+/// landed or cancelled train back to building.
+///
+/// @serverOnly: a train row is the cluster's record of what it is about to merge into main on the
+/// owner's approval, and a client-written one could claim pull requests on board that never passed
+/// or a head the owner never saw; actor.userId scoping would attribute that claim correctly and
+/// refuse nothing. The owner is stamped from actor.userId, the pipeline owner's borrowed authority.
+@createOnly("state")
+@serverOnly
+@actor
+mutation train createPipelineTrain {
+  args {
+    trainId         string!
+    pipelineId      string!
+    accountId       string
+    repository      string!
+    branch          string!
+    departure       string!
+    state           string!
+    requested       []int
+    replaces        string
+    onBoard         []object
+    leftOff         []object
+    dropped         []object
+    version         string
+    baseSha         string
+    headSha         string
+    pullRequest     int
+    pullRequestUrl  string
+    runId           string
+    notified        []string
+    departedAt      string!
+    updatedAt       string
+  }
+  insert {
+    accept { pipelineId, accountId, repository, branch, departure, state, requested, replaces, onBoard, leftOff, dropped, version, baseSha, headSha, pullRequest, pullRequestUrl, runId, notified, departedAt, updatedAt }
+    stamp {
+      id: args.trainId
+      ownerUserId: actor.userId
+      rebuilds: 0
+      retried: false
+    }
+  }
+}
+
+/// Advance a release train: its state, what is on board, the run, the approval, the landing. A
+/// read-merge with no defaults: the coordinator writes only the fields a transition changes.
+///
+/// @serverOnly: the state is what lands commits on main -- a client that could write `landing` or an
+/// approvedSha would skip the owner's approval, which is the one decision a train never makes for
+/// them; actor.userId scoping would refuse nothing, since the owner is the caller it would admit.
+@serverOnly
+mutation train updatePipelineTrain {
+  args {
+    trainId         string!
+    state           string
+    onBoard         []object
+    leftOff         []object
+    dropped         []object
+    version         string
+    baseSha         string
+    headSha         string
+    pullRequest     int
+    pullRequestUrl  string
+    runId           string
+    rebuilds        int
+    retried         bool
+    approvedBy      string
+    approvedSha     string
+    landedSha       string
+    heldReason      string
+    notified        []string
+    updatedAt       string
+  }
+  update {
+    accept { state, onBoard, leftOff, dropped, version, baseSha, headSha, pullRequest, pullRequestUrl, runId, rebuilds, retried, approvedBy, approvedSha, landedSha, heldReason, notified, updatedAt }
+    stamp {
+      id: args.trainId
+    }
+  }
+}
+
 /// Create a notification channel (D16, memql#5480) at a caller-chosen id. The owner is stamped from the
 /// actor, which under the borrowed authority is the person saving it.
 ///

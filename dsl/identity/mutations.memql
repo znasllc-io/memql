@@ -3193,22 +3193,24 @@ mutation invitation recordUserInvitationDelivery {
   }
 }
 
-/// Bind a pending user invitation to the browser that FIRST opened its link
-/// (memql#4601).
+/// Bind a pending user invitation to the browser in which its invitee pressed
+/// Continue (memql#4601).
 ///
 /// The invitation arrives by email, which means that on its own its holder is
 /// anybody who can read the mailbox -- a forwarded message, a shared alias, a
 /// mail scanner that follows links. This stamps the SHA-256 digest of the nonce
-/// handed to the opening browser as a cookie, and the accept path then completes
-/// only for a browser that presents the preimage. It is magicLinkRequest's
-/// device binding (design D2, memql#4302) applied one credential over.
+/// handed to that browser as a cookie, and the accept path then completes only
+/// for a browser that presents the preimage. It is magicLinkRequest's device
+/// binding (design D2, memql#4302) applied one credential over. It runs on the
+/// Continue POST, never on the page's GET: opening the link bound it once, and
+/// a scanner or link preview that fetched first took the invitation.
 ///
-/// FIRST TOUCH ONLY, AND THE NO-OVERWRITE RULE IS THE WHOLE CONTROL. A row a
-/// second browser can re-bind is an unbound row: the forwardee opens the link,
-/// takes the binding, and the accept then completes for THEM while the person
-/// the invitation names is locked out of their own invitation. So "do not
-/// overwrite" is not idempotence hygiene, it is the property the field exists
-/// for, and every caller has to preserve it.
+/// FIRST WRITE ONLY, AND THE NO-OVERWRITE RULE IS THE WHOLE CONTROL. A row a
+/// second browser can re-bind is an unbound row: the forwardee presses
+/// Continue, takes the binding, and the accept then completes for THEM while
+/// the person the invitation names is locked out of their own invitation. So
+/// "do not overwrite" is not idempotence hygiene, it is the property the field
+/// exists for, and every caller has to preserve it.
 ///
 /// IT IS NOT ENFORCED HERE, and it cannot be. A mutation body has no predicate
 /// to hang a compare-and-swap on -- `update{}` is a read-merge-write, ZERO
@@ -3228,7 +3230,7 @@ mutation invitation recordUserInvitationDelivery {
 /// hold, and then accept it. A self-scoped filter passes them, because they
 /// legitimately are an authenticated user. And the legitimate caller cannot be
 /// scoped at all, for markUserInvitationAccepted's reason one construct down:
-/// the toucher of a /join link is unauthenticated by construction, so
+/// the person pressing Continue on an invitation has no account yet, so
 /// actor.userId is empty for every honest call.
 @serverOnly
 mutation invitation bindUserInvitation {

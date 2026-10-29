@@ -110,9 +110,23 @@ func runDrift(t *testing.T, rules string, ghFails bool) (string, int) {
 	return out.String(), code
 }
 
-// currentRules is what the live ruleset reports today -- all five expected
-// rules, merge_queue included since it was re-enabled on 2026-08-14.
+// currentRules is what the live ruleset reports today: the four asserted
+// rules plus merge_queue, which stays until release trains are switched on.
 const currentRules = "deletion merge_queue non_fast_forward pull_request required_status_checks"
+
+// TestDriftPassesOnceTrainsReplaceTheQueue: release trains batch what the
+// merge queue batched, so switching main to trains removes the merge_queue
+// rule (design record 2026-10-27-release-trains-design.md, section 8). The
+// production baseline must pass both before the switch, with the queue still
+// present, and after it -- a daily audit that goes red at the switch is a
+// check people learn to ignore.
+func TestDriftPassesOnceTrainsReplaceTheQueue(t *testing.T) {
+	for _, rules := range []string{currentRules, "deletion non_fast_forward pull_request required_status_checks"} {
+		if out, code := runDrift(t, rules, false); code != 0 {
+			t.Errorf("rules %q: exit %d, want 0\n%s", rules, code, out)
+		}
+	}
+}
 
 // TestDriftPassesAndWarnsOnAKnownGap covers the arm whose handling was the whole
 // design question -- an expected rule recorded as absent must PASS and WARN.
