@@ -96,12 +96,26 @@ var eitherSurfaceRows = []classRow{
 }
 
 func TestAttemptClassTable(t *testing.T) {
+	pullFailure := &pl.Failure{Code: pl.CodeImagePullFailed, Message: "x"}
 	rows := append([]classRow{
 		// cluster | the Job never started the command.
-		{"cluster", "the image could not be pulled", failedResult(pl.CodeImagePullFailed, "x"), pl.AttemptNothingRan},
 		{"cluster", "a service stopped before the step", failedResult(pl.CodeServiceFailed, "x"), pl.AttemptNothingRan},
 		{"cluster", "no node could schedule the pod", failedResult(pl.CodeJobUnschedulable, "x"), pl.AttemptNothingRan},
 		{"cluster", "the Job's clone failed", failedResult(pl.CodeCloneFailed, "x"), pl.AttemptNothingRan},
+
+		// cluster | an image that cannot be pulled is nothing ran only when the
+		// RESULT proves the step's own container never started. The classifier
+		// reports a pull failure of ANY container of the pod, a service's
+		// sidecar included, and does so even while the step is running (the
+		// kubelet pulls a restarted sidecar's image again), so the code proves
+		// nothing alone. The proof is StartedAt, which the runner takes from the
+		// step container (stepTimes) and leaves empty until it starts; the exit
+		// status is -1 in both cases and proves nothing.
+		{"cluster", "an image could not be pulled and the step never started", failedResult(pl.CodeImagePullFailed, "x"), pl.AttemptNothingRan},
+		{"cluster", "an image could not be pulled while the step was running", pl.StepResult{
+			Status: pl.OutcomeFailed, ExitCode: -1, StartedAt: "2026-10-04T12:00:05Z", Failure: pullFailure}, pl.AttemptOutcomeUnknown},
+		{"cluster", "a pull failure that carries an exit status is not a pull failure of a step that never ran", pl.StepResult{
+			Status: pl.OutcomeFailed, ExitCode: 0, Failure: pullFailure}, pl.AttemptOutcomeUnknown},
 
 		// cluster | pipeline_runner_unavailable, as a RUNNER reports it or as it
 		// arrives any other way (it is all this function can see), is an unknown
@@ -507,6 +521,56 @@ func TestAClusterRunnerUnavailableIsNothingRanOnlyWhenTheAgentMadeIt(t *testing.
 			}
 			if c.saysNot != "" && strings.Contains(res.Failure.Message, c.saysNot) {
 				t.Errorf("failure %q says %q about a step whose class is %s", res.Failure.Message, c.saysNot, c.want)
+			}
+		})
+	}
+}
+
+// TestAnImagePullFailureIsNothingRanOnlyWhenTheStepNeverStarted drives the
+// REAL classifier and the REAL settling of its verdict (Classify, then
+// step.decision, which fills StartedAt from stepTimes), so the rule in
+// clusterAttemptClass rests on what the runner records and not on a reading of
+// it. Three pods, all reported as pipeline_image_pull_failed with exit -1; only
+// StartedAt tells them apart.
+func TestAnImagePullFailureIsNothingRanOnlyWhenTheStepNeverStarted(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		pod         *Pod
+		wantStarted bool
+		want        pl.AttemptClass
+	}{
+		{"the step's own image cannot be pulled",
+			clsPod("Pending", []ContainerStatus{clsCloneDone},
+				clsWaiting("step", "ghcr.io/acme/toolchain:does-not-exist", "ErrImagePull", "not found")),
+			false, pl.AttemptNothingRan},
+		{"a service's image cannot be pulled before the step starts",
+			clsPod("Pending", []ContainerStatus{clsCloneDone, clsWaiting("svc-db", "redis:7.9-nope", "ErrImagePull", "not found")}, clsStepInit),
+			false, pl.AttemptNothingRan},
+		{"a service that restarted cannot pull its image again while the step is running",
+			// The sidecar started, the step started after it, and the sidecar was
+			// restarted (imagePullPolicy Always) and cannot reach the registry.
+			// Classify checks the pull state of every container before it asks
+			// whether the step is running, so this is reported as a pull failure
+			// of a command that is running.
+			clsPod("Running", []ContainerStatus{clsCloneDone, clsWaiting("svc-db", "redis:7", "ImagePullBackOff", "Back-off pulling image")}, clsRunning("step")),
+			true, pl.AttemptOutcomeUnknown},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			job := clsJob(1200)
+			obs := Classify(job, c.pod, clsCreated, clsNow, clsConfig(), pl.CodeStepTimeout)
+			if obs.Phase != PhaseFailed || obs.Failure == nil || obs.Failure.Code != pl.CodeImagePullFailed {
+				t.Fatalf("Classify = phase %s, failure %+v; this test is about a pull failure the runner reports", clsPhaseNames[obs.Phase], obs.Failure)
+			}
+			if obs.ExitCode != -1 {
+				t.Errorf("exit code = %d, want -1 in every case: it is no signal of whether the command started", obs.ExitCode)
+			}
+			s := &step{r: &Runner{now: func() time.Time { return clsNow }}, run: StepRun{TimeoutSeconds: 1200, DeadlineCode: pl.CodeStepTimeout}}
+			dec := s.decision(obs, c.pod, job)
+			if started := dec.StartedAt != ""; started != c.wantStarted {
+				t.Fatalf("the runner recorded StartedAt %q, want it set = %v: it is how the agent tells the step never started", dec.StartedAt, c.wantStarted)
+			}
+			if got := clusterAttemptClass(dec); got != c.want {
+				t.Errorf("clusterAttemptClass = %q, want %q", got, c.want)
 			}
 		})
 	}

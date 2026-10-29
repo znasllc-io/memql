@@ -41,13 +41,18 @@ import (
 // make an ordinary failure retryable. The two places a runner's outcome enters
 // the agent drop any class it carries (fromARunner, executor_cluster.go).
 //
-// WHAT A CODE CANNOT SAY. pipeline_runner_unavailable looks like "the command
-// never started" and is read from more than the code: it depends on WHO MADE IT.
-// The agent makes it when it cannot hand a step to anything (noRunnerReached,
-// below), before any runner took the step: nothing ran. A runner makes it where
-// the step's Job exists or may exist: unknown. A class decided from a code that
-// does not prove it is how a non-repeatable step runs twice, so it is spelled out
-// at its case.
+// WHAT A CODE CANNOT SAY. Two cluster codes look like "the command never
+// started" and are not always. They are read here from more than the code:
+//
+//   - pipeline_runner_unavailable depends on WHO MADE IT. The agent makes it
+//     when it cannot hand a step to anything (noRunnerReached, below), before any
+//     runner took the step: nothing ran. A runner makes it where the step's Job
+//     exists or may exist: unknown.
+//   - pipeline_image_pull_failed depends on WHETHER THE STEP'S OWN CONTAINER
+//     STARTED, which the result records in StartedAt.
+//
+// A class decided from a code that does not prove it is how a non-repeatable step
+// runs twice, so each is spelled out at its case.
 
 // clusterAttemptClass is the class of an attempt read from its result alone:
 // the whole answer for a Job, and the part of a machine's answer that does not
@@ -83,21 +88,43 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 	// NOTHING RAN -- the cluster could not start the command.
 
 	case pl.CodeImagePullFailed:
-		// The kubelet could not pull the image; the container was never created.
-		return pl.AttemptNothingRan
+		// NOTHING RAN only when the result proves the STEP'S OWN container never
+		// started; otherwise UNKNOWN. The classifier (Classify, podFailure)
+		// reports a pull failure of ANY container of the pod, a service's sidecar
+		// included, and does so even while the step is running: the kubelet pulls
+		// a sidecar's image again each time it restarts it (imagePullPolicy
+		// Always), and Classify asks whether the step is running only AFTER it
+		// has checked every container's pull state. So a registry that fails for a
+		// restarted sidecar reports this code about a command that is running.
+		//
+		// The exit status cannot tell the two apart (-1 in both: no exit was
+		// observed). StartedAt can: the runner takes it from the step container's
+		// own state (stepTimes) and it stays empty until that container starts.
+		// A pull failure with an exit status could not have come from Classify at
+		// all, so it is not trusted either. Missing the proof costs a retry that
+		// only a repeatable step would have been given; having it wrong could run
+		// a command twice.
+		if res.StartedAt == "" && res.ExitCode < 0 {
+			return pl.AttemptNothingRan
+		}
+		return pl.AttemptOutcomeUnknown
 	case pl.CodeServiceFailed:
-		// A declared service stopped BEFORE the step started (the classifier reads
-		// it only then: the kubelet stops every service once the step ends, so a
-		// stopped service afterwards is not a failure). The command never started.
+		// A declared service stopped BEFORE the step started: the classifier reads
+		// it only while the step container is not running (podFailure's gate, and
+		// a terminated step is read before anything else). Unlike a pull failure,
+		// then, it cannot be reported about a running command. The command never
+		// started.
 		return pl.AttemptNothingRan
 	case pl.CodeJobUnschedulable:
-		// No node could take the pod within the schedule timeout; nothing was
-		// created that could run.
+		// No node could take the pod within the schedule timeout (PodScheduled is
+		// false): nothing was bound to a node, so nothing ran.
 		return pl.AttemptNothingRan
 	case pl.CodeCloneFailed:
-		// The checkout failed before the command (the Job's clone retries its
-		// fetch itself first; a machine's fetch is retried by the driver). Also
-		// what a clone token that could not be minted reads as, on a machine.
+		// The clone init container exited non-zero. The step container starts only
+		// after every init container has completed, so it never started. (The Job's
+		// clone retries its fetch itself first; a machine's fetch is retried by the
+		// driver.) Also what a clone token that could not be minted reads as, on a
+		// machine.
 		return pl.AttemptNothingRan
 	case pl.CodeNoMachineForNeed:
 		// Only ever made when the dispatcher PROVED no machine started the
