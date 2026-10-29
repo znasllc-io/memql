@@ -245,17 +245,21 @@ types. No bytes are fetched before the row is admitted.
 - **`libraryReadFile(fileId)`** returns one file's current text, up to 2 MiB.
 - **`libraryReadFileExcerpts(files, patterns, maxBytes)`** returns bounded
   excerpts of up to eight files under one budget of 1 to 64 KiB. `files` is a
-  list of `{fileId, label}`, and each result echoes its `label`; `patterns`
-  are 1 to 32 RE2 expressions, each matched against one line. A file that
-  fits its share comes back whole (`complete: true`). A longer one keeps its
-  first lines, every matching line with three lines before and twelve after,
-  and its end, and each omitted range is one marker line such as
+  list of `{fileId, label}`, and each result echoes its `label` (at most 200
+  bytes). `patterns` are 1 to 32 RE2 expressions of at most 256 bytes each,
+  compiling to at most 1,024 instructions together, each matched against the
+  first 4 KiB of a line. A file that fits its share comes back whole
+  (`complete: true`). A longer one keeps its first lines, the earliest
+  matching lines with three lines before and twelve after while its budget
+  lasts, and its end; `matchedLines` counts every matching line, kept or not,
+  and each omitted range is one marker line such as
   `[... lines 121-4812 omitted ...]`. A kept line over 2 KiB is cut, and at
   most the first 64 MiB of a file is read (`scanCapped`). Files are read in
   ascending size, so a small file returns whole and the larger ones share
   what it left. A file the caller cannot read is reported as `unavailable`
   in its own entry, with `libraryReadFile`'s sentence, and does not fail the
-  call.
+  call; so is a file the call's two-minute scan deadline stops. The version
+  gate covers the row reads and is released before a file's bytes are read.
 
 Neither builtin masks secrets: a pipeline step's log is masked when it is
 captured, and any other file is the caller's own. The failed-run diagnosis

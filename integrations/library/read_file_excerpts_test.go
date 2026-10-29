@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -17,6 +18,7 @@ import (
 type urlBlobStreamer struct {
 	data    map[string][]byte
 	streams int
+	onOpen  func()
 }
 
 func (f *urlBlobStreamer) DownloadStreamURL(_ context.Context, url string) (io.ReadCloser, error) {
@@ -25,6 +27,9 @@ func (f *urlBlobStreamer) DownloadStreamURL(_ context.Context, url string) (io.R
 		return nil, fmt.Errorf("no object at %s", url)
 	}
 	f.streams++
+	if f.onOpen != nil {
+		f.onOpen()
+	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
@@ -154,5 +159,42 @@ func TestReadFileExcerptsReportsAnUnavailableFileWithoutFailingTheCall(t *testin
 	}
 	if fetcher.streams != 1 {
 		t.Fatalf("%d streams opened; only the readable file's bytes may be read", fetcher.streams)
+	}
+}
+
+// The version gate covers the row reads only: a version's bytes never change,
+// and a scan that held the gate would hold a gate-pool connection for its length.
+func TestReadFileExcerptsReleasesTheGateBeforeReadingBytes(t *testing.T) {
+	i, _, fetcher := excerptStub("user-a", map[string][]byte{"log-1": []byte("FAIL\n")}, nil)
+	held := false
+	i.fileVersionGate = func(context.Context, string) (func(), error) {
+		held = true
+		return func() { held = false }, nil
+	}
+	fetcher.onOpen = func() {
+		if held {
+			t.Error("bytes were opened while the file's version gate was held")
+		}
+	}
+	rows, err := i.handleReadFileExcerpts(revisionActor("user-a", auth.RoleReader), map[string]any{
+		"files": []any{map[string]any{"fileId": "log-1", "label": "a"}}, "patterns": []any{"FAIL"}, "maxBytes": 4096,
+	}, 0)
+	if entries := excerptEntries(t, rows, err); entries[0]["excerpt"] != "FAIL\n" || held {
+		t.Fatalf("excerpt %v, gate held after the call: %v", entries[0], held)
+	}
+}
+
+func TestReadFileExcerptsReportsAFileThatRanOutOfTime(t *testing.T) {
+	i, _, _ := excerptStub("user-a", map[string][]byte{"log-1": []byte("FAIL one\n"), "log-2": []byte("FAIL two\n")}, nil)
+	defer func(d time.Duration) { excerptScanTime = d }(excerptScanTime)
+	excerptScanTime = time.Nanosecond
+	rows, err := i.handleReadFileExcerpts(revisionActor("user-a", auth.RoleReader), map[string]any{
+		"files":    []any{map[string]any{"fileId": "log-1", "label": "a"}, map[string]any{"fileId": "log-2", "label": "b"}},
+		"patterns": []any{"FAIL"}, "maxBytes": 4096,
+	}, 0)
+	for _, e := range excerptEntries(t, rows, err) {
+		if e["unavailable"] != "this file could not be excerpted in time" || e["excerpt"] != nil {
+			t.Fatalf("a scan past its time answered %v", e)
+		}
 	}
 }

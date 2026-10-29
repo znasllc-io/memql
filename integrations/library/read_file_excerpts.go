@@ -2,10 +2,12 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -30,11 +32,22 @@ import (
 // size, each given what is left divided by the files still unread, so a small
 // file comes back whole and the larger ones share what it did not use. The
 // stored size only orders the reads (an unlocked read under the caller); no
-// excerpt exceeds its share whatever the bytes turn out to be. Gates are taken
-// one file at a time, never several at once.
+// excerpt exceeds its share whatever the bytes turn out to be.
+//
+// THE VERSION GATE COVERS THE ROW READS ONLY. It is taken one file at a time
+// and released before the file's bytes are opened: a version's bytes are never
+// overwritten (a new version is a new blob), so the row read under the gate
+// already names exactly the bytes to read, and a scan that held the gate would
+// hold a gate-pool connection for as long as a caller's file and patterns make
+// it last. The scan has a deadline of its own (excerptScanTime) for the same
+// reason: any signed-in caller chooses both. A file the deadline stops is
+// reported as not excerpted in time, which a retry would not change.
 //
 // The label is echoed so a recipe can pair a result with what it asked for
 // without comparing identifiers. It confers nothing.
+// excerptScanTime bounds the scanning of one call's files, all of them.
+var excerptScanTime = 2 * time.Minute
+
 func (i *Integration) handleReadFileExcerpts(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if _, ok := auth.SubjectFromContext(ctx); !ok {
 		return nil, fmt.Errorf("sign in to read a saved file")
@@ -73,10 +86,12 @@ func (i *Integration) handleReadFileExcerpts(ctx context.Context, args map[strin
 		order[k] = k
 	}
 	sort.SliceStable(order, func(a, b int) bool { return files[order[a]].size < files[order[b]].size })
+	scanCtx, cancel := context.WithTimeout(ctx, excerptScanTime)
+	defer cancel()
 	results := make([]map[string]any, len(files))
 	remaining := maxBytes
 	for done, k := range order {
-		entry, used, err := i.excerptOne(ctx, files[k].fileID, patterns, remaining/(len(order)-done))
+		entry, used, err := i.excerptOne(ctx, scanCtx, files[k].fileID, patterns, remaining/(len(order)-done))
 		if err != nil {
 			return nil, err
 		}
@@ -87,9 +102,10 @@ func (i *Integration) handleReadFileExcerpts(ctx context.Context, args map[strin
 	return reviewResult(map[string]any{"files": results})
 }
 
-// excerptOne reads one file's excerpt within share. It returns the entry and
-// the bytes it used; an unavailable file uses none.
-func (i *Integration) excerptOne(ctx context.Context, fileID string, patterns []*regexp.Regexp, share int) (map[string]any, int, error) {
+// excerptOne reads one file's excerpt within share: its row under ctx, its
+// bytes under scanCtx. It returns the entry and the bytes it used; an
+// unavailable file uses none.
+func (i *Integration) excerptOne(ctx, scanCtx context.Context, fileID string, patterns []*regexp.Regexp, share int) (map[string]any, int, error) {
 	row, _, release, unavailable, err := i.readableTextFile(ctx, fileID)
 	if err != nil {
 		return nil, 0, err
@@ -97,14 +113,23 @@ func (i *Integration) excerptOne(ctx context.Context, fileID string, patterns []
 	if unavailable != "" {
 		return map[string]any{"fileId": fileID, "unavailable": unavailable}, 0, nil
 	}
-	defer release()
-	stream, err := i.openFileBytes(ctx, stringField(row, "ownerUserId"), stringField(row, "blobUrl"))
+	release()
+	const late = "this file could not be excerpted in time"
+	if scanCtx.Err() != nil {
+		return map[string]any{"fileId": fileID, "unavailable": late}, 0, ctx.Err()
+	}
+	stream, err := i.openFileBytes(scanCtx, stringField(row, "ownerUserId"), stringField(row, "blobUrl"))
 	if err != nil {
-		return map[string]any{"fileId": fileID, "unavailable": "could not read this saved version"}, 0, nil
+		return map[string]any{"fileId": fileID, "unavailable": "could not read this saved version"}, 0, ctx.Err()
 	}
 	defer stream.Close()
-	ex, err := excerptText(stream, patterns, share)
-	if err != nil {
+	ex, err := excerptText(scanCtx, stream, patterns, share)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return nil, 0, ctx.Err()
+	case errors.Is(err, context.DeadlineExceeded) || (err != nil && scanCtx.Err() != nil):
+		return map[string]any{"fileId": fileID, "unavailable": late}, 0, nil
+	case err != nil:
 		return map[string]any{"fileId": fileID, "unavailable": "could not read this saved version"}, 0, nil
 	}
 	version, _ := intArg(row["versionNumber"])

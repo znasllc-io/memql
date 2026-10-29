@@ -1028,14 +1028,24 @@ The engine adds `libraryReadFileExcerpts`
 (`integrations/library/read_file_excerpts.go`, `excerpt.go`). It reads up to
 eight of the caller's text files, each on `libraryReadFile`'s path
 (`readableTextFile`), under one budget of at most 64 KiB, shared max-min fair in
-ascending stored size. Each excerpt keeps the first lines, each line matching
-the caller's RE2 patterns with three lines before and twelve after, and the end
-of the file, with every omitted range marked. The budget bounds the output,
-markers included. A line is held to 64 KiB and kept to 2 KiB, and at most
-64 MiB is read. A file the caller cannot read, or whose bytes fail, is its own
-`unavailable` entry. A database or gate failure fails the call, so the failure
-path can retry it. The builtin masks nothing and grants nothing: `label` is
-only echoed back.
+ascending stored size. Each excerpt keeps the first lines, the earliest lines
+matching the caller's RE2 patterns with three lines before and twelve after
+while the window budget lasts (`matchedLines` counts them all), and the end of
+the file, with every omitted range marked. The budget bounds the output,
+markers included. A line is held to 64 KiB, matched on its first 4 KiB and
+kept to 2 KiB, and at most 64 MiB is read. A file the caller cannot read, or
+whose bytes fail, is its own `unavailable` entry. A database or gate failure
+fails the call, so the failure path can retry it. The builtin masks nothing and
+grants nothing: `label` is only echoed back.
+
+Any signed-in caller can call the builtin with their own file and patterns, so
+its cost is bounded natively, not by the recipe:
+- patterns compile to at most 1,024 RE2 instructions together;
+- every call has a two-minute scan deadline (`excerptScanTime`), and a file it
+  stops is reported as not excerpted in time;
+- the version gate covers the row reads only and is released before a file's
+  bytes are opened. A version's bytes are never overwritten, so a scan does
+  not hold a gate-pool connection.
 
 The recipe reads the first three failed steps with logs, in `seq` order, as
 48 KiB of excerpts. It lists every failed step and the run's own

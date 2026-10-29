@@ -1,6 +1,8 @@
 package library
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -31,7 +33,7 @@ func mustExcerptPatterns(t *testing.T, raw ...string) []*regexp.Regexp {
 
 func mustExcerpt(t *testing.T, input string, share int, raw ...string) textExcerpt {
 	t.Helper()
-	ex, err := excerptText(strings.NewReader(input), mustExcerptPatterns(t, raw...), share)
+	ex, err := excerptText(context.Background(), strings.NewReader(input), mustExcerptPatterns(t, raw...), share)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +76,41 @@ func TestCompileExcerptPatternsRefusesBadInput(t *testing.T) {
 	patterns, err := compileExcerptPatterns([]string{"--- FAIL", "^FAIL", "(?i)^error:"})
 	if err != nil || len(patterns) != 3 {
 		t.Fatalf("valid patterns: %v, %d compiled", err, len(patterns))
+	}
+}
+
+// A caller's patterns are matched against every line of up to 64 MiB, so their
+// compiled size is bounded as well as their length: 256 bytes can compile to
+// tens of thousands of instructions.
+func TestCompileExcerptPatternsRefusesAnExpensivePattern(t *testing.T) {
+	expensive := strings.Repeat("(?:.{0,30}){30}", 17) + "y"
+	if len(expensive) != 256 {
+		t.Fatalf("fixture is %d bytes", len(expensive))
+	}
+	if _, err := compileExcerptPatterns([]string{expensive}); err == nil {
+		t.Fatal("a pattern compiling to thousands of instructions was accepted")
+	}
+	diagnosis := []string{"--- FAIL", "^FAIL", "^panic: ", "fatal error: ", "[.]go:[0-9]+:[0-9]+: ", "_test[.]go:[0-9]+: ",
+		"Error Trace:", "error TS[0-9]+:", "^ *(FAIL|×|✗) ", "AssertionError", "^Error: ", ": [*][*][*] ",
+		"^ERROR", "failed to solve", "Traceback [(]most recent call last[)]", "exit (status|code):? [1-9]", "(?i)^error:"}
+	if _, err := compileExcerptPatterns(diagnosis); err != nil {
+		t.Fatalf("a failure-diagnosis pattern set was refused: %v", err)
+	}
+}
+
+func TestExcerptMatchesOnlyTheStartOfALongLine(t *testing.T) {
+	input := strings.Repeat("x", 5000) + "FAIL late\n" + "FAIL early " + strings.Repeat("x", 5000) + "\n"
+	if ex := mustExcerpt(t, input, 1024, "FAIL"); ex.MatchedLines != 1 {
+		t.Fatalf("%d lines matched; only a match in a line's first 4 KiB counts", ex.MatchedLines)
+	}
+}
+
+func TestExcerptStopsWhenItsContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	input := lines(5000, func(i int) string { return fmt.Sprintf("line %d", i) })
+	if _, err := excerptText(ctx, strings.NewReader(input), mustExcerptPatterns(t, "FAIL"), 4096); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled scan answered %v", err)
 	}
 }
 
@@ -179,7 +216,7 @@ func TestExcerptCutsALineLongerThanTwoKiB(t *testing.T) {
 
 func TestExcerptStopsAtTheScanLimitAndSaysSo(t *testing.T) {
 	input := lines(40000, func(i int) string { return fmt.Sprintf("line %050d", i) })
-	ex, err := excerptTextLimited(strings.NewReader(input), mustExcerptPatterns(t, "^FAIL"), 4096, 1<<20)
+	ex, err := excerptTextLimited(context.Background(), strings.NewReader(input), mustExcerptPatterns(t, "^FAIL"), 4096, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}

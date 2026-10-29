@@ -147,16 +147,23 @@ comparing identifiers.
      which is at least the quarter reserved.
 - A line kept by two parts is kept once. Between two kept lines that are not
   adjacent, one marker line names the omitted range:
-  `[... lines 121-4812 omitted (4692 lines) ...]`. Markers count toward the
-  share.
+  `[... lines 121-4812 omitted ...]`. Markers count toward the share.
 - A kept line over 2 KiB is cut on a rune boundary with
   `[... N bytes cut ...]`. NUL bytes are dropped and invalid UTF-8 becomes
   U+FFFD, so the excerpt can be stored in jsonb.
 - At most the first 64 MiB (the step-log archive cap) is read; `scanCapped`
   says when a file is longer, and the tail is then the end of what was read.
 
-The reader streams: memory is bounded by about twice the share, whatever the
-file's size.
+The reader streams: memory is bounded by about three times the share plus
+one held line (64 KiB), whatever the file's size.
+
+**Cost bounds (added after the whole-branch review).** Any signed-in caller can
+call the builtin with their own file and patterns, so it bounds its own cost:
+the patterns compile to at most 1,024 RE2 instructions together, a line is
+matched against only its first 4 KiB, every call has a two-minute scan
+deadline (a file it stops is unavailable, "this file could not be excerpted in
+time"), and the version gate is released before a file's bytes are opened,
+since a version's bytes are never overwritten. A label is at most 200 bytes.
 
 ### One budget across files
 
