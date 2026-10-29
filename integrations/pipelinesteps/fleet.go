@@ -206,8 +206,8 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 		return refusedResult(pl.CodeStepInvalid, "Pool execution requires a portable container command without host needs."), nil
 	}
 	if f == nil || f.dispatch == nil {
-		return failedResult(pl.CodeRunnerUnavailable,
-			"This agent node has no dispatcher to reach the owner's machines with. Nothing ran."), nil
+		// Made by the agent before any machine was asked: nothing ran (noRunnerReached).
+		return noRunnerReached("This agent node has no dispatcher to reach the owner's machines with. Nothing ran."), nil
 	}
 	if req.RecoverOnly || run.RecoverOnly {
 		return failedResult(pl.CodeExecutionUncertain, "The previous fleet attempt has no durable result. No replacement command was sent; reconcile the original attempt first."), nil
@@ -277,7 +277,11 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 		return *stopped, nil
 	}
 	if err != nil {
-		return failedResult(pl.CodeRunnerUnavailable,
+		// An error from the dispatcher is returned before anything is sent to a
+		// machine (it answers a nil dispatcher, or the owner's authority could not
+		// be asserted; every other refusal comes back as a Result), so nothing ran
+		// (noRunnerReached).
+		return noRunnerReached(
 			cutBytes(mask("The agent's dispatcher could not take the step: "+err.Error()), failureMaxBytes)), nil
 	}
 

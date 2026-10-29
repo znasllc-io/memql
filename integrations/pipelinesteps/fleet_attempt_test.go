@@ -165,6 +165,21 @@ func TestFleetAttemptsThatNeverReachedAMachine(t *testing.T) {
 			t.Errorf("class = %q, want nothing_ran", res.AttemptClass)
 		}
 	})
+	t.Run("a dispatcher that could not take the step", func(t *testing.T) {
+		// The real dispatcher returns an error only before it sends anything (a
+		// nil dispatcher; the owner's authority could not be asserted); every
+		// other refusal comes back as a Result. Made by the agent, before any
+		// machine was asked: nothing ran.
+		d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+			return worker.Result{}, errors.New("agent.worker: dispatcher not initialized")
+		}}
+		f, _, _, _ := newTestFleet(t, d)
+		res := runFleet(t, f, fleetReq())
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
+		if res.AttemptClass != pl.AttemptNothingRan || res.NotRetriedHere {
+			t.Errorf("class = %q notRetriedHere = %v, want nothing_ran", res.AttemptClass, res.NotRetriedHere)
+		}
+	})
 	t.Run("a recover-only attempt", func(t *testing.T) {
 		// A previous driver may have started the command and left no result.
 		d := &fakeDispatcher{}

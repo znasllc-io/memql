@@ -3,6 +3,7 @@ package pipelinesteps
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -100,8 +101,17 @@ func TestAttemptClassTable(t *testing.T) {
 		{"cluster", "the image could not be pulled", failedResult(pl.CodeImagePullFailed, "x"), pl.AttemptNothingRan},
 		{"cluster", "a service stopped before the step", failedResult(pl.CodeServiceFailed, "x"), pl.AttemptNothingRan},
 		{"cluster", "no node could schedule the pod", failedResult(pl.CodeJobUnschedulable, "x"), pl.AttemptNothingRan},
-		{"cluster", "no workbench replica took the step", failedResult(pl.CodeRunnerUnavailable, "x"), pl.AttemptNothingRan},
 		{"cluster", "the Job's clone failed", failedResult(pl.CodeCloneFailed, "x"), pl.AttemptNothingRan},
+
+		// cluster | pipeline_runner_unavailable, as a RUNNER reports it or as it
+		// arrives any other way (it is all this function can see), is an unknown
+		// outcome: a runner answers it where the step's Job exists or may exist
+		// (a Run that could not read the Job it had never seen, an unreadable
+		// queued record on a recovery, a Job it could not claim or whose log it
+		// could not open), and the Job is not held back by its claim. The agent's
+		// own refusal before any runner took the step is classified where the
+		// agent makes it (noRunnerReached; the Execute-level tests below).
+		{"cluster", "a runner reported that it could not take the step", failedResult(pl.CodeRunnerUnavailable, "x"), pl.AttemptOutcomeUnknown},
 		// cluster | the node under the pod went away: the command may have run.
 		{"cluster", "the node was lost", failedResult(pl.CodeNodeLost, "x"), pl.AttemptOutcomeUnknown},
 		// The spec lists pipeline_artifact_unavailable for a MACHINE only. A
@@ -162,6 +172,22 @@ func TestExecuteClassifiesWhatTheClusterAnswered(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a class a runner sent on a finished status is not believed either", func(t *testing.T) {
+		// The second place a runner's outcome enters: the status the agent reads
+		// when the reply to the forward was lost.
+		forged := exitedWith(1)
+		forged.AttemptClass, forged.NotRetriedHere = pl.AttemptNothingRan, true
+		wb := &scriptedWorkbench{}
+		wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return finishedResponse(forged), "workbench-b", nil
+		}
+		e := newTestExecutor(wb, &fakeFleet{})
+		res := awaitResult(t, executeAndCommitAsync(e, context.Background(), exRequest()), "the status said finished")
+		if res.AttemptClass != pl.AttemptFinal || res.NotRetriedHere {
+			t.Errorf("class = %q, notRetriedHere = %v: the runner's own word was kept", res.AttemptClass, res.NotRetriedHere)
+		}
+	})
 
 	t.Run("a class a runner sent is not believed", func(t *testing.T) {
 		// The class is the AGENT's reading of the failure. A reply that
@@ -367,5 +393,121 @@ func TestAClusterForwardCarriesNoMachineNarrowing(t *testing.T) {
 	run := stepRunOf(t, forwards[0])
 	if run.PinWorker != "" || len(run.ExcludeWorkers) != 0 || run.MaxWaitSeconds != 0 {
 		t.Errorf("a cluster attempt's StepRun names machines: %+v", run)
+	}
+}
+
+// TestAClusterRunnerUnavailableIsNothingRanOnlyWhenTheAgentMadeIt: the same
+// code, pipeline_runner_unavailable, is nothing ran when the AGENT makes it
+// before any runner took the step, and an unknown outcome in every other way
+// it can arrive. A runner makes it where the step's Job exists or may exist
+// (see the table above), and a Job runs without the runner's claim, so reading
+// it as nothing ran would send a second Job for a command that may already be
+// running: a non-repeatable step would run twice.
+func TestAClusterRunnerUnavailableIsNothingRanOnlyWhenTheAgentMadeIt(t *testing.T) {
+	runnerSaid := failedResult(pl.CodeRunnerUnavailable, "the Kubernetes API server could not be asked for the step's Job: connection refused")
+	notConfigured := &nodev1.WorkbenchForwardResponse{ErrorCode: workbench.ErrCodePipelinesNotConfigured, ErrorMessage: "no runner"}
+
+	for _, c := range []struct {
+		name string
+		run  func(t *testing.T) pl.StepResult
+		want pl.AttemptClass
+		// says is in the failure's sentence; saysNot must not be: a sentence
+		// that says "Nothing ran." about a step whose class is unknown would
+		// tell the owner the opposite of the record.
+		says, saysNot string
+	}{
+		// MADE BY THE AGENT, before any runner took the step.
+		{"the agent has no route to a workbench", func(t *testing.T) pl.StepResult {
+			res, err := newTestExecutor(nil, nil).Execute(context.Background(), exRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.AttemptNothingRan, "Nothing ran", ""},
+		{"no replica was reachable, and none ever took the step", func(t *testing.T) pl.StepResult {
+			var clock *exClock
+			unreachable := func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				clock.advance(10 * time.Second) // each try costs the executor's clock ten seconds
+				return nil, "", workbench.ErrNoWorkbenchPeer
+			}
+			wb := &scriptedWorkbench{step: unreachable, status: unreachable}
+			e := newTestExecutor(wb, nil)
+			clock = withClock(e)
+			e.noPeerPatience = 30 * time.Second
+			return awaitResult(t, executeAndCommitAsync(e, context.Background(), exRequest()), "no replica was ever reachable")
+		}, pl.AttemptNothingRan, "Nothing ran", ""},
+		{"a step that needs a machine, on a node with no fleet dispatcher", func(t *testing.T) pl.StepResult {
+			req := exRequest()
+			req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker"}
+			req.Step.Execution, req.Step.Image = pl.ExecutionNative, ""
+			res, err := newTestExecutor(&scriptedWorkbench{}, nil).Execute(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.AttemptNothingRan, "Nothing ran", ""},
+		{"a pool step's first attempt, on a node with no fleet dispatcher", func(t *testing.T) pl.StepResult {
+			res, err := newTestExecutor(&scriptedWorkbench{}, nil).Execute(context.Background(), poolRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.AttemptNothingRan, "Nothing ran", ""},
+		{"the first replica to answer has no runner", func(t *testing.T) pl.StepResult {
+			wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return notConfigured, "workbench-a", nil
+			}}
+			res, err := newTestExecutor(wb, nil).Execute(context.Background(), exRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.AttemptNothingRan, "Nothing ran", ""},
+
+		// NOT MADE BY THE AGENT BEFORE ANY RUNNER TOOK THE STEP.
+		{"a replica with no runner answers after another replica took the step and was lost", func(t *testing.T) pl.StepResult {
+			// The first replica may have made the Job before it went away; the
+			// re-forward then lands on a replica that cannot run steps. That
+			// replica ran nothing, but the step did not start there.
+			wb := &scriptedWorkbench{step: func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				if n == 1 {
+					return nil, "workbench-a", workbench.ErrWorkbenchPeerLost
+				}
+				return notConfigured, "workbench-b", nil
+			}}
+			res, err := newTestExecutor(wb, nil).Execute(context.Background(), exRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.AttemptOutcomeUnknown, "", "Nothing ran"},
+		{"a runner reported it in its reply to the forward", func(t *testing.T) pl.StepResult {
+			res, err := newTestExecutor(clusterAnswer(runnerSaid), nil).Execute(context.Background(), exRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.AttemptOutcomeUnknown, "", ""},
+		{"a runner reported it in a finished status", func(t *testing.T) pl.StepResult {
+			wb := &scriptedWorkbench{}
+			wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return finishedResponse(runnerSaid), "workbench-b", nil
+			}
+			return awaitResult(t, executeAndCommitAsync(newTestExecutor(wb, nil), context.Background(), exRequest()), "the status said finished")
+		}, pl.AttemptOutcomeUnknown, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := c.run(t)
+			wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
+			if res.AttemptClass != c.want || res.NotRetriedHere {
+				t.Errorf("class = %q, notRetriedHere = %v, want %q and false", res.AttemptClass, res.NotRetriedHere, c.want)
+			}
+			if c.says != "" && !strings.Contains(res.Failure.Message, c.says) {
+				t.Errorf("failure %q, want it to say %q", res.Failure.Message, c.says)
+			}
+			if c.saysNot != "" && strings.Contains(res.Failure.Message, c.saysNot) {
+				t.Errorf("failure %q says %q about a step whose class is %s", res.Failure.Message, c.saysNot, c.want)
+			}
+		})
 	}
 }

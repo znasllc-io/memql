@@ -92,7 +92,8 @@ type clusterStep struct {
 func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Duration, runDeadline time.Time) pl.StepResult {
 	job := JobName(run.RunID, run.StepKey, run.Attempt)
 	if e.fwd == nil {
-		return withWhere(failedResult(pl.CodeRunnerUnavailable,
+		// Made by the agent before any runner was asked: nothing ran (noRunnerReached).
+		return withWhere(noRunnerReached(
 			"This agent node has no route to a workbench replica (MEMQL_WORKBENCH_REMOTE is not set, or the "+
 				"workbench integration is missing), so a cluster step cannot be handed to a runner. Nothing ran."),
 			pl.Where{Surface: surfaceCluster, JobName: job})
@@ -222,11 +223,16 @@ func (s *clusterStep) ended(ctx context.Context, end forwardEnd) (pl.StepResult,
 		slog.String("jobName", s.job), slog.String("nodeId", end.servedBy))
 	switch {
 	case end.err == nil:
+		// Whether some replica took or answered the step BEFORE this reply: the
+		// one fact that tells a replica with no runner answering a step nobody
+		// has run (nothing ran) from one answering a step another replica may
+		// have started (answer).
+		tookBefore := s.reached
 		s.reached, s.noPeerSince = true, time.Time{}
 		if end.servedBy != "" {
 			s.servedBy = end.servedBy
 		}
-		return s.answer(ctx, end.resp, end.servedBy), true
+		return s.answer(ctx, end.resp, end.servedBy, tookBefore), true
 	case ctx.Err() != nil:
 		return s.where(stoppedResult(ctx)), true
 	case errors.Is(end.err, workbench.ErrWorkbenchPeerLost):
@@ -252,18 +258,32 @@ func (s *clusterStep) noPeerTooLong() (pl.StepResult, bool) {
 	if s.reached || s.noPeerSince.IsZero() || s.e.now().Sub(s.noPeerSince) < s.e.noPeerPatience {
 		return pl.StepResult{}, false
 	}
-	return s.where(failedResult(pl.CodeRunnerUnavailable, fmt.Sprintf(
+	// Made by the agent, and only when no replica ever took or answered the step
+	// (the gate above): nothing ran (noRunnerReached).
+	return s.where(noRunnerReached(fmt.Sprintf(
 		"No workbench replica has been reachable for %s, so the step was never handed to a runner. Nothing ran.",
 		s.e.noPeerPatience))), true
 }
 
-// answer reads a replica's reply to the step forward.
-func (s *clusterStep) answer(ctx context.Context, resp *nodev1.WorkbenchForwardResponse, servedBy string) pl.StepResult {
+// answer reads a replica's reply to the step forward. tookBefore says some
+// replica had taken or answered the step before this reply.
+func (s *clusterStep) answer(ctx context.Context, resp *nodev1.WorkbenchForwardResponse, servedBy string, tookBefore bool) pl.StepResult {
 	if code := resp.GetErrorCode(); code != "" {
 		if code == workbench.ErrCodePipelinesNotConfigured {
-			return s.where(failedResult(pl.CodeRunnerUnavailable, fmt.Sprintf(
-				"The workbench replica %s has no pipeline runner, so it could not run the step (%s). Nothing ran.",
-				servedBy, resp.GetErrorMessage())))
+			says := fmt.Sprintf("The workbench replica %s has no pipeline runner, so it could not run the step (%s).",
+				servedBy, resp.GetErrorMessage())
+			if tookBefore {
+				// This replica ran nothing, but it is not the first to be asked: a
+				// replica that took the step and was lost may have made its Job. Not
+				// made "before any runner took the step", so the class stays what a
+				// runner-unavailable reads as (unknown), and the sentence does not
+				// claim otherwise.
+				return s.where(failedResult(pl.CodeRunnerUnavailable,
+					says+" Another replica had already taken the step, so whether it ran is unknown."))
+			}
+			// The first replica to answer cannot run steps, and no replica took the
+			// step before it: nothing ran (noRunnerReached).
+			return s.where(noRunnerReached(says + " Nothing ran."))
 		}
 		return s.where(failedResult(pl.CodeExecutorError, fmt.Sprintf(
 			"The workbench replica %s refused the step (%s): %s", servedBy, code, resp.GetErrorMessage())))
@@ -498,7 +518,7 @@ func decodeOutcome(payload []byte) (pl.StepResult, error) {
 	if !isOutcome(res.Status) {
 		return pl.StepResult{}, fmt.Errorf("its status %q is not one an outcome has", res.Status)
 	}
-	return res, nil
+	return fromARunner(res), nil
 }
 
 // statusOutcome is a finished status's outcome, when it carries one.
@@ -506,7 +526,20 @@ func statusOutcome(reply StatusReply) (pl.StepResult, bool) {
 	if reply.Result == nil || !isOutcome(reply.Result.Status) {
 		return pl.StepResult{}, false
 	}
-	return *reply.Result, true
+	return fromARunner(*reply.Result), true
+}
+
+// fromARunner is an outcome as the agent takes it from a workbench replica,
+// without the class fields. A runner does not classify: the agent does, from the
+// result (runClusterAttempt), and the class files read a class already on a
+// result as the agent's own word (noRunnerReached). So a class that arrived on
+// the wire -- from a replica of another version, or one that simply put it
+// there -- is dropped at the only two places a runner's outcome enters (the
+// reply to the forward, and a finished status), and cannot make an ordinary
+// failure retryable.
+func fromARunner(res pl.StepResult) pl.StepResult {
+	res.AttemptClass, res.NotRetriedHere = "", false
+	return res
 }
 
 func isOutcome(o pl.Outcome) bool {

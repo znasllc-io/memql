@@ -38,7 +38,16 @@ import (
 // result alone) and in attempt_class_fleet.go (a machine's reading, which also
 // needs the dispatcher's own word), by Executor.Execute, never taken from a
 // runner's reply: a reply from a replica of another version must not be able to
-// make an ordinary failure retryable.
+// make an ordinary failure retryable. The two places a runner's outcome enters
+// the agent drop any class it carries (fromARunner, executor_cluster.go).
+//
+// WHAT A CODE CANNOT SAY. pipeline_runner_unavailable looks like "the command
+// never started" and is read from more than the code: it depends on WHO MADE IT.
+// The agent makes it when it cannot hand a step to anything (noRunnerReached,
+// below), before any runner took the step: nothing ran. A runner makes it where
+// the step's Job exists or may exist: unknown. A class decided from a code that
+// does not prove it is how a non-repeatable step runs twice, so it is spelled out
+// at its case.
 
 // clusterAttemptClass is the class of an attempt read from its result alone:
 // the whole answer for a Job, and the part of a machine's answer that does not
@@ -85,11 +94,6 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 		// No node could take the pod within the schedule timeout; nothing was
 		// created that could run.
 		return pl.AttemptNothingRan
-	case pl.CodeRunnerUnavailable:
-		// No workbench replica could be reached, or the one reached has no
-		// pipeline runner: the step was never handed to a runner. (The fleet's
-		// "no dispatcher on this node" says the same of a machine.)
-		return pl.AttemptNothingRan
 	case pl.CodeCloneFailed:
 		// The checkout failed before the command (the Job's clone retries its
 		// fetch itself first; a machine's fetch is retried by the driver). Also
@@ -104,6 +108,30 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 
 	// OUTCOME UNKNOWN -- the command may have run, and nothing says how it ended.
 
+	case pl.CodeRunnerUnavailable:
+		// UNKNOWN here: a result that reaches this function with this code was
+		// reported by a runner, or arrived in a way the agent cannot vouch for. A
+		// runner answers it where the step's Job exists or may exist:
+		//
+		//   - a new Run starts without having seen the Job, so a failed read of it
+		//     answers this code (a re-forward after a lost replica or a stale
+		//     heartbeat, and a recovery while Job N may be running);
+		//   - a recovery whose queued record cannot be read (the attempt may
+		//     already have executed);
+		//   - adopting a Job that exists: the claim of it fails (ten transient
+		//     errors, or one that is not), or its log archive cannot be opened.
+		//
+		// The Job does not wait for the runner's claim (it is suspended only under
+		// Kueue), and a runner that reports leaves it in place (the agent's
+		// acknowledgement, or a cancel, deletes it), so a command can be running
+		// while the runner says it cannot take the step. The next attempt would
+		// then make a new Job (its name includes the attempt) and run the command
+		// twice. Other runner sites answer it before any Job exists, but the code
+		// does not say which; a distinct code would let them read as nothing ran.
+		//
+		// The agent's own refusal, made before any runner took the step, is nothing
+		// ran, and is classified where it is made (noRunnerReached).
+		return pl.AttemptOutcomeUnknown
 	case pl.CodeNodeLost:
 		// The node under the Job went away, or the cluster stopped the pod (a
 		// drain, a preemption, an eviction): the command may have been running,
@@ -136,4 +164,34 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 	// A refusal (the executor would not start the step), a secret failure, and
 	// any code nobody classified: final (D3).
 	return pl.AttemptFinal
+}
+
+// noRunnerReached is the failure the AGENT makes when it could not hand a step
+// to anything that could run it, before any workbench runner or machine took
+// the step: nothing ran. It is the one kind of pipeline_runner_unavailable that
+// proves it, which is why the class is decided HERE, where the agent makes the
+// result, and not read back from the code (clusterAttemptClass says why the code
+// alone cannot): the same code from a runner means its Job may exist.
+//
+// The agent makes it in exactly these places, each before the step reached a
+// runner or a machine:
+//
+//   - executor_cluster.go, runCluster: this node has no route to a workbench
+//     replica at all;
+//   - executor_cluster.go, noPeerTooLong: no replica was reachable for the whole
+//     patience, and none ever took or answered the step (the gate is !s.reached);
+//   - executor_cluster.go, answer: a replica said it has no pipeline runner, and
+//     no replica had taken the step before it (a replica that answers so AFTER
+//     another took the step and was lost is not this: the first may have made the
+//     Job);
+//   - executor.go, runFleet and runPool: this node has no fleet dispatcher;
+//   - fleet.go, runStep: the same, and a dispatcher that could not take the step,
+//     which is an error before anything is sent.
+//
+// A result that arrives from a runner is stripped of any class on the way in, so
+// a class on a result here can only have been set by the agent's own code.
+func noRunnerReached(message string) pl.StepResult {
+	res := failedResult(pl.CodeRunnerUnavailable, message)
+	res.AttemptClass = pl.AttemptNothingRan
+	return res
 }

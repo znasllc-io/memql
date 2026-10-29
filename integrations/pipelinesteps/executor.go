@@ -298,7 +298,8 @@ func (e *Executor) runFleet(ctx context.Context, req pl.StepRequest, run StepRun
 		if len(req.Step.Needs) > 0 {
 			what = fmt.Sprintf("The step needs %s, which only one of the owner's machines can meet", strings.Join(req.Step.Needs, ", "))
 		}
-		return failedResult(pl.CodeRunnerUnavailable, what+", and this agent node has no fleet dispatcher to reach one. Nothing ran."), nil
+		// Made by the agent before any machine was asked: nothing ran (noRunnerReached).
+		return noRunnerReached(what + ", and this agent node has no fleet dispatcher to reach one. Nothing ran."), nil
 	}
 	// The fleet classifies what it was answered (Fleet.RunStep): it alone holds
 	// the dispatcher's word on whether anything started.
@@ -306,12 +307,19 @@ func (e *Executor) runFleet(ctx context.Context, req pl.StepRequest, run StepRun
 }
 
 // runClusterAttempt runs an attempt as a Job and classifies the answer here.
-// The class is the AGENT's reading of the result, set over whatever the runner
-// sent: a reply from a replica of another version, or one that put a class of
-// its own on the wire, must not be able to make an ordinary failure retryable.
+// The class is the AGENT's reading, never a runner's: every outcome a runner
+// reported arrives bare, because the two places one enters drop the class fields
+// (fromARunner), so a reply from a replica of another version, or one that put a
+// class of its own on the wire, cannot make an ordinary failure retryable. A
+// failure the agent made itself before any runner took the step arrives already
+// classified (noRunnerReached, whose doc lists the sites and says why the class is
+// decided where it is made); what is still bare is read from its result
+// (clusterAttemptClass).
 func (e *Executor) runClusterAttempt(ctx context.Context, run StepRun, timeout time.Duration, runDeadline time.Time) pl.StepResult {
 	res := e.runCluster(ctx, run, timeout, runDeadline)
-	res.AttemptClass, res.NotRetriedHere = clusterAttemptClass(res), false
+	if res.AttemptClass == "" {
+		res.AttemptClass = clusterAttemptClass(res)
+	}
 	return res
 }
 
@@ -445,7 +453,8 @@ func (e *Executor) runPool(ctx context.Context, req pl.StepRequest, run StepRun,
 		return e.runClusterAttempt(ctx, run, timeout, runDeadline), nil
 	}
 	if e.fleet == nil {
-		return failedResult(pl.CodeRunnerUnavailable, "Pool placement requires a configured Fleet dispatcher. Nothing ran."), nil
+		// Made by the agent before any machine or Job was asked: nothing ran (noRunnerReached).
+		return noRunnerReached("Pool placement requires a configured Fleet dispatcher. Nothing ran."), nil
 	}
 	res, err := e.fleet.RunStep(ctx, req, run)
 	if err != nil || ctx.Err() != nil || !req.ComputePlacement.CloudFallback || res.Status != pl.OutcomeRefused || res.Failure == nil || res.Failure.Code != pl.CodeNoMachineForNeed {
