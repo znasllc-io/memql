@@ -43,6 +43,7 @@ import { PipelineChannelsSettings } from "./pipelines/ChannelsSettings";
 import { RunsSection } from "./pipelines/RunsSection";
 import { useConnectFlow } from "./pipelines/connect/useConnectFlow";
 import { DeliveryOverview, ChangesSection } from "../pipelines/DeliveryOverview";
+import { PipelinesAISettings } from "../pipelines/PipelinesAISettings";
 import { ReleasesSection } from "../cluster/releases/ReleasesSection";
 import { PipelinesSection } from "../settings/PipelinesSection";
 import { holds } from "../../system/roles";
@@ -88,6 +89,10 @@ const DEPLOYABLES_LOG_CONCEPTS = [
   Concepts.PIPELINES_RUN,
 ] as const;
 
+/** Pipelines > Settings' sibling views, one `LocalTabs` row under its Head. */
+const PIPELINE_SETTINGS_TABS = [["infrastructure", "Infrastructure"], ["connections", "Connections"], ["ai", "AI"]] as const;
+type PipelineSettingsTab = (typeof PIPELINE_SETTINGS_TABS)[number][0];
+
 export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0]) {
   return <SourceConnectionsProvider><DeployablesAppContent {...props} /></SourceConnectionsProvider>;
 }
@@ -114,7 +119,7 @@ function DeployablesAppContent({
     if (options === undefined) requestedNavigate(destination); else requestedNavigate(destination, options);
   };
   const [addingRepository, setAddingRepository] = useState(false);
-  const [settingsTab, setSettingsTab] = useState("infrastructure");
+  const [settingsTab, setSettingsTab] = useState<PipelineSettingsTab>("infrastructure");
   // Injectable for tests, which is the whole reason the parameter exists --
   // nothing in the shell passes one.
   const settingsStore = useMemo(() => store ?? new LocalDeployablesSettingsStore(), [store]);
@@ -526,7 +531,7 @@ function DeployablesAppContent({
     <RetainedSection active={sectionId === "runs"}>{runsContent}</RetainedSection>
     <RetainedSection active={sectionId === "releases"}><ReleasesSection visible={windowVisible && sectionId === "releases"} openRequest={releaseOpenRequest} runs={runs?.snapshot.rows ?? []} runsFresh={runs?.snapshot.state === "live" && !runs.snapshot.error} onOpenRun={runsReachable ? openRun : undefined} onOpenRepository={pipelineReach.sections.includes("repositories") ? openSource : undefined} /></RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
-    <RetainedSection active={sectionId === "settings"}><div className="os-app-stack"><Head title="Settings" /><LocalTabs label="Pipeline settings" value={settingsTab} onChange={setSettingsTab} options={[["infrastructure", "Infrastructure"], ["connections", "Connections"]]} />{settingsTab === "infrastructure" ? <PipelinesSection heading={false} intent={intent} consumeIntent={consumeIntent} /> : settingsContent}</div></RetainedSection>
+    <RetainedSection active={sectionId === "settings"}><div className="os-app-stack"><Head title="Settings" /><LocalTabs label="Pipeline settings" value={settingsTab} onChange={setSettingsTab} options={PIPELINE_SETTINGS_TABS} />{settingsTab === "infrastructure" ? <PipelinesSection heading={false} intent={intent} consumeIntent={consumeIntent} /> : settingsTab === "ai" ? <PipelinesAISettings /> : settingsContent}</div></RetainedSection>
   </ActivePane>;
   return <ActivePane active={windowVisible}>
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
