@@ -381,12 +381,14 @@ through the preference sends the first attempt on to the cluster inside itself.
 
 A later attempt naming the fleet without a pin waits for a busy or offline
 machine at most `max(delaysSeconds)`, or `max(1, fleetWaitSeconds)` for a
-`pool` step whose policy allows the cloud, then counts as nothing ran and not
-retried there, so rule 3 applies or the step fails. Corrected during
-implementation, twice: a wait of 0 means no bound beyond the run's ceiling, so
-the first version's fleet-step failover held its stage's slot until the
-ceiling, and its `max(1, fleetWaitSeconds)` for every pool step waited one
-second when no cloud followed, which ended the step on any busy fleet. Every
+`pool` step whose policy allows the cloud and whose one cluster attempt is still
+ahead, then counts as nothing ran and not retried there, so rule 3 applies or
+the step fails. Corrected during implementation, three times: a wait of 0 means
+no bound beyond the run's ceiling, so the first version's fleet-step failover
+held its stage's slot until the ceiling; its `max(1, fleetWaitSeconds)` for
+every pool step waited one second when no cloud followed, which ended the step
+on any busy fleet; and a pool step whose one cluster attempt was already spent
+still waited `fleetWaitSeconds`, although no cloud could follow. Every
 wait is at least a second. A pinned dispatch to a machine that is offline or
 still busy waits for it at most `max(delaysSeconds)`, then counts as nothing
 ran there and is not retried there. A `cluster` step's retries stay on the

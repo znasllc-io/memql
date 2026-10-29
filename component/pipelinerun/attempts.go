@@ -749,11 +749,13 @@ func (h attemptHistory) pinned(machine string) *pipelines.AttemptPlacement {
 // as nothing ran and not retried there: the fleet is exhausted for the rest of
 // the step (exhausting), and rule 3 or the step's end follows. The bound:
 //
-//   - for a pool step whose policy allows the cloud, fleetWaitSeconds (at least
-//     a second, since zero would mean no bound): the installation's own
+//   - for a pool step whose cluster attempt is still ahead (its policy allows
+//     the cloud and the cluster has not been a place), fleetWaitSeconds (at
+//     least a second, since zero would mean no bound): the installation's own
 //     preference for the fleet before it spends cloud, as for a first attempt;
 //   - otherwise the longest retry delay (at least a second), the wait a pinned
-//     retry is given. No cloud follows, so the step's choice is a wait on the
+//     retry is given. No cloud follows -- the policy allows none, or the step's
+//     one cluster attempt is spent -- so the step's choice is a wait on the
 //     fleet or its end. Waiting until the run's ceiling would hold the stage's
 //     slot for hours where the step used to fail at once; waiting a second would
 //     end the step on any fleet that is merely busy. The longest delay is the
@@ -768,7 +770,7 @@ func (h attemptHistory) failover() *pipelines.AttemptPlacement {
 	if len(h.tried) > 0 {
 		p.ExcludeWorkers = slices.Clone(h.tried)
 	}
-	if h.pool && h.policy.CloudFallback {
+	if h.pool && h.policy.CloudFallback && !h.clusterUsed {
 		p.MaxWaitSeconds = attemptWait(h.policy.FleetWaitSeconds)
 	} else {
 		p.MaxWaitSeconds = attemptWait(h.longestDelay())

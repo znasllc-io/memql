@@ -161,11 +161,15 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 		// A pool step reaches the cluster once, whatever ended the attempt there
 		// (the owner's cost bound). Its first attempt can end on the cluster inside
 		// itself (the Fleet preference ran out): that was its one cluster attempt,
-		// and its retries go to the machines it never tried, then stop.
+		// and its retries go to the machines it never tried, then stop. No cloud
+		// follows them, so they wait the longest delay, as with no cloud at all,
+		// and not fleetWaitSeconds, which can be as short as a second.
 		{"pool step, its first attempt fell back to the cluster: the machines, not the cluster", retryPoolStep, standard,
-			numbered(onCluster(nothingRan)), next(failoverFrom(60), 0)},
+			numbered(onCluster(nothingRan)), next(failoverFrom(120), 0)},
 		{"pool step, exit 75 on the cluster: the machines, not the cluster", retryPoolStep, standard,
-			numbered(onCluster(retryRequested)), next(failoverFrom(60), 0)},
+			numbered(onCluster(retryRequested)), next(failoverFrom(120), 0)},
+		{"pool step, its one cluster attempt spent: the failover waits the longest delay, not a second", retryPoolStep, noFleetWait,
+			numbered(onCluster(nothingRan)), next(failoverFrom(120), 0)},
 		{"pool step, its one cluster attempt spent and the machines exhausted", retryPoolStep, standard,
 			numbered(onCluster(nothingRan), noMachine), stop},
 
@@ -245,10 +249,10 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 		{"the zero policy retries no unknown outcome on the cluster", repeatableStep(retryClusterStep), pipelines.ComputePlacementPolicy{},
 			numbered(onCluster(unknownOutcome)), stop},
 		// A repeatable pool step whose unknown outcome was on the cluster tries
-		// the machines it has not tried, and then stops: it never goes back to
-		// the cluster.
+		// the machines it has not tried, waiting the longest delay since no cloud
+		// follows, and then stops: it never goes back to the cluster.
 		{"a repeatable pool step's unknown outcome on the cluster: an untried machine", repeatableStep(retryPoolStep), standard,
-			numbered(onCluster(unknownOutcome)), next(failoverFrom(60), 0)},
+			numbered(onCluster(unknownOutcome)), next(failoverFrom(120), 0)},
 		{"then, the machines exhausted, nothing: never a second cluster attempt", repeatableStep(retryPoolStep), standard,
 			numbered(onCluster(unknownOutcome), noMachine), stop},
 		{"nor after an untried machine's own retries", repeatableStep(retryPoolStep), standard,

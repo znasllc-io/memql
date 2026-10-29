@@ -841,8 +841,9 @@ retains a durable activity witness when its runtime outcome is uncertain, so a
 process exit cannot make potentially active inference appear idle. The witness
 ends at the call's own deadline (one an older Cockpit wrote, 30 minutes after it
 was written), so a cancelled call keeps the machine from steps only until then;
-until it ends the machine answers `pipeline_capacity_unavailable`, and the step
-moves on to another machine. These locks coordinate admission; they do not
+until it ends the machine answers `pipeline_capacity_unavailable`: a fleet step,
+or any later attempt, moves on to another machine, and a pool step's first
+attempt waits for the fleet as it does for a busy one. These locks coordinate admission; they do not
 impose hard CPU or memory limits on native commands or coordinate another OS
 account.
 
@@ -1157,7 +1158,7 @@ Nothing waits forever, and each party waits longer than the one inside it:
 | The seam's driver | the run's ceiling plus 10 minutes | `pipeline_run_ceiling` |
 | The driver, between a step's attempts | 8 attempts, the installation's retry limits, or a next attempt that would start with less than a second of the run's ceiling left | the step fails with its last attempt's failure, or, when that attempt only found no free machine, with the one before it |
 | A fleet dispatch | the effective timeout plus 5 minutes | by then the machine has stopped the command at the timeout, and the step failed with its deadline code |
-| A retry's wait for a busy or offline machine | the longest retry delay, at least one second, for a pinned machine and for a move to another machine; `fleetWaitSeconds`, at least one second, for a pool step's move to another machine when its installation allows the cloud | nothing ran there; after a move, no other machine is tried for the step, and the cluster follows where the policy allows it, else the step fails |
+| A retry's wait for a busy or offline machine | the longest retry delay, at least one second, for a pinned machine and for a move to another machine; `fleetWaitSeconds`, at least one second, for a pool step's move to another machine when its installation allows the cloud and the step has not yet had its one cluster attempt | nothing ran there; after a move, no other machine is tried for the step, and the cluster follows where the policy allows it, else the step fails |
 
 ---
 

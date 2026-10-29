@@ -718,9 +718,12 @@ func TestATakeoverOfAnInFlightFleetAttempt(t *testing.T) {
 				t.Errorf("the row's history = %+v, next %s; attempt 1's recovery is recorded outcome unknown, on the fleet", records, next)
 			}
 			if repeatable {
-				if len(sent) != 3 || sent[2].Attempt != 2 || sent[2].RecoverOnly ||
-					!reflect.DeepEqual(sent[2].Placement, &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet}) {
-					t.Fatalf("the runner was handed %d requests; want a fresh attempt 2 placed on any eligible machine", len(sent))
+				// The move to another machine waits for a busy one at most the
+				// longest retry delay: a fleet step has no cloud to follow.
+				want := &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet,
+					MaxWaitSeconds: slices.Max(pipelines.DefaultRetryPolicy().DelaysSeconds)}
+				if len(sent) != 3 || sent[2].Attempt != 2 || sent[2].RecoverOnly || !reflect.DeepEqual(sent[2].Placement, want) {
+					t.Fatalf("the runner was handed %d requests; want a fresh attempt 2 placed on any eligible machine, %+v", len(sent), want)
 				}
 				if taken.Conclusion != ConclusionSuccess || taken.DriverNodeID != bNode {
 					t.Errorf("run = %s by %q, want success by agent-b", taken.Conclusion, taken.DriverNodeID)

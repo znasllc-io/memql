@@ -1173,16 +1173,20 @@ A runtime's terminal response is separate from answer validity and delivery.
 The activity witness clears after confirmed completion even when schema
 validation or delivery fails, preserving that original error. Cancellation,
 truncation and a reply lost before completion leave the witness fenced until
-the time it records: the call's own deadline, after which the runtime is no
-longer working for it, or 30 minutes after it began for a context with no
-deadline (no Cockpit limit bounds a local call, so the bound is chosen). A
+the time it records: the call's own deadline, at which its request is cut off
+(that the runtime then stops is not verified; see below), or 30 minutes after it
+began for a context with no deadline (no Cockpit limit bounds a local call, so the bound is chosen). A
 fence only success cleared turned one routine cancel into a machine refusing
 pipeline steps, workbenches and model calls until someone removed the file by
 hand. Past its time the witness reads as absent; a reader that excludes every
 writer (it holds `inference.lock`, or `pipeline.lock` exclusively) removes it,
 and the workbench, which shares `pipeline.lock` with model calls, only ignores
 it, because a path-based removal there could remove a record a call has just
-written. A witness with no time (an older Cockpit's, or a write that did not
+written. The local build guard (`scripts/lib/host_build_guard.py`, which
+`make dev` runs) reads the same end and removes nothing, as it removes no
+record (`test_inference_witness_past_its_end_admits_a_build_and_is_kept`,
+`test_inference_witness_with_no_time_ends_the_bound_after_it_was_written`). A
+witness with no time (an older Cockpit's, or a write that did not
 complete) ends 30 minutes after its file was written, so an upgrade clears it; a
 symlink or directory is never read or removed. The headroom checks still
 measure what is actually free, so a generation still finishing after its
@@ -1281,7 +1285,9 @@ obvious choices:
 - Waits, each at least a second because zero would mean no bound: a pinned
   machine at most the largest delay; a failover to another machine at most the
   largest delay too, or `fleetWaitSeconds` for a pool step whose policy allows
-  the cloud, because the cluster follows it. A fleet step's failover used to
+  the cloud and whose one cluster attempt is still ahead, because the cluster
+  follows it; once that attempt is spent, the largest delay. A fleet step's
+  failover used to
   wait until the run's ceiling, holding its stage's slot for hours where the
   step had failed at once, and a pool step's with no cloud one second, which
   ended the step on any busy fleet. No wait shortens a started command.
@@ -1511,6 +1517,15 @@ tag).
   because a pool step does not require the fleet. With the workbench
   unreachable, the step stops the drive for recovery instead of retrying on the
   fleet. The step's final acknowledgement already depends on it the same way.
+- A step settled with an earlier attempt's record (after a takeover, or after a
+  last attempt that only found the fleet exhausted) reads failed even when that
+  attempt was refused: the record keeps the attempt's class and code, not its
+  outcome. Its code, words, place and log are that attempt's own; the check run
+  says "failed" where the attempt said "refused".
+- A pool step whose installation allows no cloud keeps waiting for the fleet,
+  up to the run's ceiling, while no machine can take its first attempt, and
+  that includes when the owner has no eligible machine at all. A fleet step's
+  first attempt is answered at once in that case.
 
 **Not verified.** These tests prove the source contract and in-process replica
 hops. Live fleet-to-cloud failover and a production maintenance window for the

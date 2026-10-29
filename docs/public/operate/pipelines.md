@@ -1640,13 +1640,15 @@ rule 3.
 A `fleet` step stays on the owner's machines, so a macOS step's failover ends at
 the Macs. A `cluster` step retries on the cluster only. A `pool` step reaches
 the cluster at most once, whatever ended its attempt there. Its first attempt
-waits for a busy fleet up to `fleetWaitSeconds` and then goes on to the cluster
-when `cloudFallback` allows (without it, it waits on); a machine that refuses it
-for another reason (its limits or policy, Host commands off) ends that attempt
-with nothing run, and the order above takes over. A retry pinned to one machine
-waits for it, busy or offline, at most the longest delay, and so does a move to
-another machine, except a pool step's when its installation allows the cloud,
-which waits at most `fleetWaitSeconds`. Each waits at least a second. A wait
+waits while no machine can take it (all busy, fenced, offline or without their
+runtime, or none eligible at all) up to `fleetWaitSeconds`, then goes on to the
+cluster when `cloudFallback` allows; without it, it waits on, up to the run's
+ceiling. A machine that refuses it for another reason (its limits or policy,
+Host commands off) ends that attempt with nothing run, and the order above takes
+over. A retry pinned to one machine waits for it, busy or offline, at most the
+longest delay, and so does a move to another machine, except a pool step's while
+its one cluster attempt is still ahead (its installation allows the cloud), which
+waits at most `fleetWaitSeconds`. Each waits at least a second. A wait
 that runs out counts as nothing ran, and after a move no other machine is tried:
 the cluster follows where the policy allows it, and otherwise the step fails.
 Every attempt counts against the run's ceiling, and no step makes more than 8.
