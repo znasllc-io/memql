@@ -357,7 +357,14 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 		Ok:        waitErr == nil && outcome.Error == "",
 	}
 	if waitErr != nil {
+		// The machine's own code when it sent one (runtime_error, timeout,
+		// ...), so the sender's decision record names the cause rather than
+		// this generic word (component/worker/modelcall_failed.go).
 		resp.ErrorCode = "model_call_failed"
+		var failed *workerservice.ModelCallFailed
+		if errors.As(waitErr, &failed) && strings.TrimSpace(failed.Code()) != "" {
+			resp.ErrorCode = failed.Code()
+		}
 		resp.ErrorMessage = waitErr.Error()
 		if end.GetFinishReason() == "" {
 			end.FinishReason = workerservice.ModelFinishError
