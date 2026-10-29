@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  attemptCountWords, attemptSentence, attemptWords, dayLabel, durationWords, isAccountedBelow, refusalPhrase, runOutcome, runTitle, shownAttempts,
-  stepLabel, stepWord, triggerWords, whereWords,
+  HOST_COMMANDS_SWITCH, andList, attemptCountWords, attemptSentence, attemptWords, dayLabel, durationWords, hostCommandsOffFix, hostCommandsOffReason,
+  hostCommandsOffWords, isAccountedBelow, refusalPhrase, runOutcome, runTitle, shownAttempts, stepLabel, stepWord, triggerWords, whereWords,
 } from "../../../src/apps/deployables/pipelines/words";
+import { machineFeatureStates } from "../../../src/apps/fleet/machines/features";
+import { machineFromRow } from "../../../src/apps/fleet/rows";
 import { run, step } from "./fixtures";
 
 describe("the pipelines vocabulary", () => {
@@ -175,5 +177,40 @@ describe("a step's attempts in words", () => {
     // A code alone, with no copy and no message, is not shown as a word.
     const bare = step("build.mac", { status: "running", binding: { attempts: [{ attempt: 1, code: "pipeline_from_the_future" }] } });
     expect(attemptSentence(bare, bare.attempts[0]!, machineName)).toBe("Attempt 1: Failed.");
+  });
+});
+
+describe("when Host commands is off", () => {
+  it("names the machines and the switch to turn on, in the owner's words", () => {
+    expect(hostCommandsOffWords(["MSI Raider"])).toBe("Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings.");
+    expect(hostCommandsOffWords(["MSI Raider", "CyberPC"])).toBe("Host commands are off for MSI Raider and CyberPC. Turn on Commands and files in each machine's Fleet settings.");
+    expect(hostCommandsOffWords(["MSI Raider", "CyberPC", "studio-mac"])).toBe(
+      "Host commands are off for MSI Raider, CyberPC and studio-mac. Turn on Commands and files in each machine's Fleet settings.",
+    );
+    // Never the policy file: it is not what is wrong.
+    expect(hostCommandsOffWords(["MSI Raider"])).not.toContain("policy.yaml");
+    // The two halves a sentence can continue: the reason, and the fix with no full stop.
+    expect(hostCommandsOffReason(["MSI Raider", "CyberPC"])).toBe("Host commands are off for MSI Raider and CyberPC.");
+    expect(hostCommandsOffFix(["MSI Raider"])).toBe("Turn on Commands and files in its Fleet settings");
+    expect(hostCommandsOffFix(["MSI Raider", "CyberPC"])).toBe("Turn on Commands and files in each machine's Fleet settings");
+  });
+
+  // THE POINTER IS THE LABEL FLEET DRAWS. The engine's router calls the owner's
+  // switch Host commands, and the machine's Settings in Fleet call it Commands
+  // and files; copy that sent somebody to a name that is not on the screen would
+  // point at nothing, so the pointer is read from one constant and held to the
+  // Fleet label here.
+  it("points at the switch by the label Fleet gives it", () => {
+    const machine = machineFromRow({ id: "v1:worker:registration:m1", ownerUserId: "u-me", name: "m1", capabilities: ["HEADLESS"], ownerFeatures: { headless: false } } as never);
+    const feature = machineFeatureStates(machine, new Date()).find((f) => f.key === "headless");
+    expect(feature?.label).toBe(HOST_COMMANDS_SWITCH);
+    expect(feature?.answer).toBe("Disabled");
+  });
+
+  it("joins names as a list", () => {
+    expect(andList([])).toBe("");
+    expect(andList(["a"])).toBe("a");
+    expect(andList(["a", "b"])).toBe("a and b");
+    expect(andList(["a", "b", "c"])).toBe("a, b and c");
   });
 });

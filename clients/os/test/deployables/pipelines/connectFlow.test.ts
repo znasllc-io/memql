@@ -9,6 +9,8 @@ import {
   computeOf,
   deliveryCaption,
   fleetAvailable,
+  fleetHostCommandsOff,
+  fleetNotOffered,
   fleetReason,
   movementOf,
   needersOf,
@@ -431,6 +433,38 @@ describe("the fleet", () => {
     expect(allowsPipelines({ ...reading, ownerFeatures: { headless: false, apps: true, computerUse: true, updatedAt: "" } })).toBe(false);
   });
 
+  // WHEN HOST COMMANDS IS THE ONLY REASON A MACHINE TAKES NO STEP, SAY SO. A
+  // machine whose own policy allows pipelines, which its owner then switched
+  // Host commands off for, is the one case the policy copy blames the wrong
+  // thing for: the fix is a switch in Fleet. Only such a machine is named.
+  describe("a machine kept out only by its owner's Host commands switch", () => {
+    const off = { ownerFeatures: { headless: false } };
+    const names = (rows: ReturnType<typeof machine>[], owner = "u-me") => fleetHostCommandsOff(rows, owner);
+
+    it("is named, by the name Fleet shows", () => {
+      expect(names([machine({ ...off, displayName: "MSI Raider" })])).toEqual(["MSI Raider"]);
+      // The name it reported when the owner gave it none, and its id when it reported none.
+      expect(names([machine({ ...off, displayName: "", name: "studio-mac" })])).toEqual(["studio-mac"]);
+      expect(names([machine({ ...off, displayName: "", name: "", id: "v1:worker:registration:m9" })])).toEqual(["v1:worker:registration:m9"]);
+      expect(names([machine({ ...off, id: "v1:worker:registration:m1", displayName: "MSI Raider" }), machine({ ...off, id: "v1:worker:registration:m2", displayName: "CyberPC" })]))
+        .toEqual(["MSI Raider", "CyberPC"]);
+    });
+
+    it("is not named when something else keeps it out too, or it is not the owner's, or it is gone", () => {
+      // Policy is not allowing it: fixing the switch would not help, and the copy about the policy stands.
+      expect(names([machine({ ...off, labels: {} })])).toEqual([]);
+      expect(names([machine({ ...off, labels: { pipelines: "denied" } })])).toEqual([]);
+      expect(names([machine({ ...off, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 4 } } })])).toEqual([]);
+      expect(names([machine({ ...off, revokedAt: "2026-10-01T00:00:00Z" })])).toEqual([]);
+      expect(names([machine({ ...off, ownerUserId: "v1:identity:user:someone-else" })])).toEqual([]);
+      expect(names([machine({ ...off })], "")).toEqual([]);
+    });
+
+    it("is not named while its owner has Host commands on, or never said", () => {
+      expect(names([machine(), machine({ ownerFeatures: { headless: true } }), machine({ ownerFeatures: undefined }), machine({ ownerFeatures: { apps: false } })])).toEqual([]);
+    });
+  });
+
   it("is not offered by a revoked machine, another label, an operator's label or somebody else's machine", () => {
     expect(fleetAvailable([machine({ revokedAt: "2026-10-01T00:00:00Z" })], "u-me")).toBe(false);
     expect(fleetAvailable([machine({ labels: { pipelines: "denied" } })], "u-me")).toBe(false);
@@ -469,6 +503,27 @@ describe("words", () => {
       "No compatible worker allows pipelines. Update Cockpit and allow pipeline work in its policy.yaml, or change these steps to use cluster containers without host requirements.",
     );
     expect(fleetReason(["os-checks needs docker"])).toContain("cluster containers without host requirements");
+  });
+
+  // RULING: when Host commands off is why a machine takes no step, the remedy
+  // says so and points at the switch, and does not blame the policy file. The
+  // policy wording above stays for every case where the policy is the cause.
+  it("names Host commands as the remedy when that is what keeps a machine out, and leaves the policy wording for the rest", () => {
+    expect(needsRemedy(["os-checks needs docker"], ["MSI Raider"])).toBe(
+      "Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings, or change these steps to use cluster containers without host requirements.",
+    );
+    expect(needsRemedy(["os-checks needs docker"], ["MSI Raider", "CyberPC"])).not.toContain("policy.yaml");
+    expect(needsRemedy(["os-checks needs docker"], [])).toContain("policy.yaml");
+    expect(fleetNotOffered([])).toBe("Your fleet is offered once one of your machines allows pipelines in its policy.yaml.");
+    expect(fleetNotOffered(["MSI Raider"])).toBe(
+      "Your fleet is not offered. Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings.",
+    );
+  });
+
+  it("carries the machines Host commands is off for into Compute", () => {
+    const withOff = facts({ fleet: { known: true, available: false, hostCommandsOff: ["MSI Raider"] } });
+    expect(computeOf(withOff, preview())).toMatchObject({ options: [], hostCommandsOff: ["MSI Raider"] });
+    expect(computeOf(facts(), preview()).hostCommandsOff).toEqual([]);
   });
 
   it("says what each delivery does, and what polling cannot see", () => {

@@ -1006,9 +1006,29 @@ connection failures do not become a claim of read-only access or empty history.
   step: unrevoked, contract 5, its own `pipelines` label, and the owner has not
   switched Host commands off (`ownerFeatures.headless`, read as the engine reads
   it: a setting never saved is on, a malformed one is off). The connect flow
-  and Settings > Pipelines read the one rule. Their remedy copy still blames
-  `policy.yaml` when Host commands is the blocker -- a wording choice the design
-  docs do not settle, left as it was.
+  and Settings > Pipelines read the one rule.
+- **WHEN THE SWITCH IS WHAT KEEPS A MACHINE OUT, THE COPY SAYS SO.** A machine
+  whose own policy allows pipelines and whose owner switched Host commands off
+  needs a switch in Fleet, not a policy edit, so `machinesWithHostCommandsOff`
+  names the machines that switch ALONE keeps out (a machine its policy also
+  refuses is not named: turning the switch on would change nothing for it) and
+  the copy points at it instead of `policy.yaml` -- Compute's remedy and its
+  "your fleet is not offered" caption (`needsRemedy`, `fleetNotOffered`), and
+  Settings > Pipelines' fleet line (`fleetSentence`), which says it only when
+  no machine takes steps: while another does, a machine its owner switched off
+  is a choice and not a problem. Every case where the policy is the cause keeps
+  its wording and its pinned test. **THE ENGINE'S "HOST COMMANDS" IS FLEET'S
+  "COMMANDS AND FILES"**: the router and its refusals say Host commands, and
+  the machine's Settings (Owner-only features) label the same switch Commands
+  and files. The copy says both, once each -- "Host commands are off for MSI
+  Raider. Turn on Commands and files in its Fleet settings" -- so the owner who
+  read the engine's words on a failed step can find the control. The control's
+  label is one constant, `HOST_COMMANDS_SWITCH`, held to Fleet's label by
+  `words.test.ts`. Rendered with `pipeline-connect-host-commands-off`
+  (`&click=Connect pipeline`) and `settings-pipelines-host-commands-off`. Fleet's
+  own per-machine "Pipeline steps" fact still reports the machine's POLICY ("Allowed
+  by this machine's policy") and is untouched; "Commands and files: Disabled"
+  stands beside it.
 - **NOTHING HERE IS A SECOND COPY OF A RUN'S STATE OR OF ITS RULES.** The
   words are `pipelines/words.ts` (the check run's own words), the bar is the
   pure `pipelines/acts.ts` (an act the engine would refuse is absent: no re-run

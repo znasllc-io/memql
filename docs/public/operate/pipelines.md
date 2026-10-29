@@ -837,10 +837,15 @@ release publication or installation authority.
   with three steps. **Repository** reads `memql-package.yaml` at the default
   branch's head with `pipelinesPreview`, so the stages show before anything is
   confirmed. **Compute** offers *Cluster* and, only when one of your machines
-  reports `pipelines=allowed` and has not had Host commands switched off in
-  Fleet settings, *Cluster and your fleet* -- the fleet alone
+  reports `pipelines=allowed` and has not had Host commands switched off (the
+  machine's **Commands and files** setting in Fleet), *Cluster and your fleet*
+  -- the fleet alone
   when a step names a need, which the cluster refuses -- and waits for a
-  choice, because running steps on your own machines is consent. **Confirm**
+  choice, because running steps on your own machines is consent. When that
+  switch is the only thing keeping a machine out, Compute and **Settings →
+  Pipelines** say so (*Host commands are off for MSI Raider. Turn on Commands
+  and files in its Fleet settings.*) in place of pointing at the policy file.
+  **Confirm**
   names the check, the stages and the secrets the steps read, and asks how
   changes arrive. A refusal lands at the stop it is about, with its remedy: a
   fleet code at Compute, a secret code at Confirm, everything else at

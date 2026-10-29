@@ -1,10 +1,10 @@
 import type { ActionBarTone } from "../../../../kit/ActionBar";
 import type { StopState } from "../../../../kit/Rail";
 import type { MachineRow } from "../../../fleet/rows";
-import { machinesAllowingPipelines } from "../fleet";
+import { machinesAllowingPipelines, machinesWithHostCommandsOff } from "../fleet";
 import type { PipelinePreview, PreviewStep, Problem } from "../calls";
 import type { Compute, Delivery, PipelineRow } from "../rows";
-import { computeWords, deliveryWords, shortSha } from "../words";
+import { andList, computeWords, deliveryWords, hostCommandsOffFix, hostCommandsOffReason, hostCommandsOffWords, shortSha } from "../words";
 
 // WHAT THE CONNECT RAIL KNOWS, as functions over values (epic memql#5479,
 // issue memql#5502; design record D14).
@@ -91,6 +91,12 @@ export interface FleetReading {
   known: boolean;
   /** A machine of the viewer's, not revoked, reports `pipelines=allowed`. */
   available: boolean;
+  /**
+   * The names of the viewer's machines that Host commands being off ALONE keeps
+   * out (`machinesWithHostCommandsOff`): what Compute says when no machine can
+   * take a step, in place of blaming the policy file. Absent is none.
+   */
+  hostCommandsOff?: readonly string[];
 }
 
 /** What a pipeline restates when it is connected again. */
@@ -127,12 +133,6 @@ export interface ConnectFacts {
 // ---------------------------------------------------------------------------
 // Words
 // ---------------------------------------------------------------------------
-
-/** "a", "a and b", "a, b and c". */
-export function andList(items: readonly string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
 
 /**
  * When a stage runs, in words.
@@ -213,10 +213,29 @@ export function fleetReason(needers: readonly string[]): string {
     "To keep every step in this cluster, use cluster containers without host requirements.";
 }
 
-/** What to do when steps need a machine and none of the viewer's allows pipelines. */
-export function needsRemedy(_needers: readonly string[]): string {
+/**
+ * What to do when steps need a machine and none of the viewer's allows pipelines.
+ *
+ * WHEN HOST COMMANDS IS WHAT KEEPS A MACHINE OUT, SAY SO. A machine whose own
+ * policy allows pipelines and whose owner turned Host commands off needs a switch
+ * in Fleet, not a policy edit: the policy wording would send the owner to a file
+ * that is fine. The names are those `machinesWithHostCommandsOff` found, machines
+ * kept out by that switch ALONE, so the policy wording stands for every other
+ * cause -- a machine its policy refuses is never named here, and neither is one
+ * that both refuse. The way out that keeps steps in the cluster is the same either way.
+ */
+export function needsRemedy(_needers: readonly string[], hostCommandsOff: readonly string[] = []): string {
+  if (hostCommandsOff.length > 0) {
+    return `${hostCommandsOffReason(hostCommandsOff)} ${hostCommandsOffFix(hostCommandsOff)}, or change these steps to use cluster containers without host requirements.`;
+  }
   return "No compatible worker allows pipelines. Update Cockpit and allow pipeline work in its policy.yaml, " +
     "or change these steps to use cluster containers without host requirements.";
+}
+
+/** Why Compute offers no fleet when nothing needs one: the policy, or -- for a machine only its switch keeps out -- Host commands. */
+export function fleetNotOffered(hostCommandsOff: readonly string[] = []): string {
+  if (hostCommandsOff.length > 0) return `Your fleet is not offered. ${hostCommandsOffWords(hostCommandsOff)}`;
+  return "Your fleet is offered once one of your machines allows pipelines in its policy.yaml.";
 }
 
 /** The two answers Compute can take, in the person's words. */
@@ -271,6 +290,14 @@ export function fleetAvailable(
   ownerUserId: string,
 ): boolean {
   return machinesAllowingPipelines(machines, ownerUserId) > 0;
+}
+
+/** The viewer's machines kept out of steps only by Host commands being off, by name (`machinesWithHostCommandsOff`). */
+export function fleetHostCommandsOff(
+  machines: readonly Pick<MachineRow, "id" | "name" | "displayName" | "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract" | "ownerFeatures">[],
+  ownerUserId: string,
+): string[] {
+  return machinesWithHostCommandsOff(machines, ownerUserId);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +366,8 @@ export interface ComputeReading {
   answered: boolean;
   /** "<step> needs <need>", for every step that names one. */
   needers: string[];
+  /** The machines Host commands being off alone keeps out (`FleetReading.hostCommandsOff`); empty when none, or the fleet is not known. */
+  hostCommandsOff: readonly string[];
 }
 
 export interface Reading {
@@ -389,12 +418,13 @@ export function computeOf(f: Pick<ConnectFacts, "fleet" | "answers" | "existing"
   // anything is saved without it.
   const held = f.answers.compute ?? (preview.existing ?? f.existing)?.compute ?? null;
   const preselected: Compute = needs ? "cluster_and_fleet" : "cluster";
+  const hostCommandsOff = f.fleet.hostCommandsOff ?? [];
   if (options === null) {
-    return { options, value: held ?? preselected, answered: !needs && held === "cluster", needers };
+    return { options, value: held ?? preselected, answered: !needs && held === "cluster", needers, hostCommandsOff };
   }
-  if (held !== null && options.includes(held)) return { options, value: held, answered: true, needers };
-  if (held === null && options.length === 1 && options[0] === "cluster") return { options, value: "cluster", answered: true, needers };
-  return { options, value: preselected, answered: false, needers };
+  if (held !== null && options.includes(held)) return { options, value: held, answered: true, needers, hostCommandsOff };
+  if (held === null && options.length === 1 && options[0] === "cluster") return { options, value: "cluster", answered: true, needers, hostCommandsOff };
+  return { options, value: preselected, answered: false, needers, hostCommandsOff };
 }
 
 /** How changes arrive: the person's choice, else a reconnect's, else the cluster's suggestion. */

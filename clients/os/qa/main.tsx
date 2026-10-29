@@ -58,6 +58,8 @@ import { installQaConnection } from "./connectionShim";
 import {
   ALLOWED_MACHINE,
   FAILED_LOG,
+  HOST_COMMANDS_OFF_MACHINE,
+  PIPELINES_HOST_COMMANDS_SEED,
   PIPELINES_NO_RUNS_SEED,
   PIPELINES_RETRIES_SEED,
   PIPELINES_SEED,
@@ -1043,6 +1045,18 @@ const VIEWS: Record<
     connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [ALLOWED_MACHINE] }),
     wrap: (el) => el,
     render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("configured", { githubApp: true, repository: true, runner: true })} />,
+  },
+  // Host commands switched off for the one machine that would take the step: the
+  // Compute stop names the switch (`&click=Connect pipeline`) and so does the line here.
+  "pipeline-connect-host-commands-off": {
+    connect: () => pipelinesConnection(PIPELINES_HOST_COMMANDS_SEED, { machines: [HOST_COMMANDS_OFF_MACHINE] }),
+    wrap: pipelinesWrap,
+    render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} />,
+  },
+  "settings-pipelines-host-commands-off": {
+    connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [HOST_COMMANDS_OFF_MACHINE] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("partial", { githubApp: true, repository: false, runner: true })} />,
   },
   "settings-pipelines-unreported": {
     connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),

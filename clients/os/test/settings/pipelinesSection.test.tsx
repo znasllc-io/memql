@@ -240,6 +240,19 @@ describe("the pipelines reading", () => {
     expect(fleetSentence(1)).toBe("1 of your machines allows pipelines.");
     expect(fleetSentence(0)).toMatch(/^None of your machines allows pipelines yet/);
   });
+
+  // RULING: when Host commands off is why none of the owner's machines takes a
+  // step, the line says so and points at the switch. When another machine takes
+  // them, a machine the owner switched off is a choice, not a problem, and is not
+  // mentioned.
+  it("names Host commands in the fleet line only when it is why no machine allows pipelines", () => {
+    expect(fleetSentence(0, ["MSI Raider"])).toBe(
+      "None of your machines allows pipelines yet, so a step that needs one cannot run. Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings.",
+    );
+    expect(fleetSentence(0, [])).toBe("None of your machines allows pipelines yet, so a step that needs one cannot run.");
+    expect(fleetSentence(2, ["MSI Raider"])).toBe("2 of your machines allow pipelines.");
+    expect(fleetSentence(1, ["MSI Raider"])).toBe("1 of your machines allows pipelines.");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -268,6 +281,17 @@ describe("Settings > Pipelines", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open Repositories" }));
     expect(JSON.parse(screen.getByTestId("windows").textContent ?? "[]")).toEqual([["pipelines", "repositories"]]);
+  });
+
+  it("says in the fleet line that Host commands is off when that is why no machine allows pipelines", async () => {
+    connect({
+      githubApp: { configured: true, slug: "memql-znas" },
+      machines: [machine("m1", { displayName: "MSI Raider", ownerFeatures: { headless: false } }), machine("m2", { labels: {}, ownerFeatures: { headless: false } })],
+    });
+    mount(pipelines("partial", { githubApp: true, repository: false, runner: true }));
+    expect(await screen.findByText(
+      "None of your machines allows pipelines yet, so a step that needs one cannot run. Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings.",
+    )).toBeTruthy();
   });
 
   it("says not known rather than not done when the cluster has not said which", async () => {

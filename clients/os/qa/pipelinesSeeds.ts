@@ -341,6 +341,27 @@ export const ALLOWED_MACHINE = {
   lastSeenAt: new Date().toISOString(),
 } as unknown as Row;
 
+/** The shop's manifest with a step that needs Docker: it can run only on one of the viewer's machines. */
+export const PREVIEW_NEEDS_DOCKER = {
+  ...(PREVIEW as unknown as Record<string, unknown>),
+  stages: [
+    { name: "checks", on: [], channel: "", steps: [previewStep("vet"), previewStep("lint")] },
+    { name: "tests", on: [], channel: "", steps: [previewStep("go-tests", { packages: "affected", shards: 2 }), previewStep("os", { bucket: "os", needs: ["docker"] })] },
+    { name: "deploy", on: ["push"], channel: "", steps: [previewStep("ship", { secrets: ["SHOP_TOKEN"] })] },
+  ],
+  needs: ["docker"],
+} as unknown as Row;
+
+/** A machine of the viewer's whose own policy allows pipeline steps and whose owner switched Host commands off in Fleet. */
+export const HOST_COMMANDS_OFF_MACHINE = {
+  ...(ALLOWED_MACHINE as unknown as Record<string, unknown>),
+  id: "v1:worker:registration:m-raider",
+  name: "msi-raider",
+  displayName: "MSI Raider",
+  capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 5 } },
+  ownerFeatures: { headless: false },
+} as unknown as Row;
+
 /** The shop's source with no pipeline yet: what Connect pipeline opens over. */
 export const PIPELINES_UNCONNECTED_SEED: FakeSeed = {
   packages: PACKAGES.slice(0, 1),
@@ -348,6 +369,9 @@ export const PIPELINES_UNCONNECTED_SEED: FakeSeed = {
   pipelineRuns: [],
   pipelinePreview: PREVIEW,
 };
+
+/** The shop's unconnected source whose manifest has a step that needs a machine of the viewer's. */
+export const PIPELINES_HOST_COMMANDS_SEED: FakeSeed = { ...PIPELINES_UNCONNECTED_SEED, pipelinePreview: PREVIEW_NEEDS_DOCKER };
 
 /** Pipelines on two of the list seed's sources, for the Overview map's Checks nodes. */
 export function mapPipelines(): Pick<FakeSeed, "pipelines" | "pipelineRuns"> {

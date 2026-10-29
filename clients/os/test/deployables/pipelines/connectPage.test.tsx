@@ -93,6 +93,8 @@ function machineRow(over: Record<string, unknown> = {}): Row {
 }
 
 const ALLOWED = machineRow({ labels: { pipelines: "allowed" }, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 5 } } });
+/** A machine whose own policy allows pipelines and whose owner switched Host commands off in Fleet. */
+const HOST_COMMANDS_OFF = { ...ALLOWED, id: "v1:worker:registration:m-raider", displayName: "MSI Raider", ownerFeatures: { headless: false } } as Row;
 
 /**
  * The Deployables fake, answering the machines read too.
@@ -385,6 +387,58 @@ describe("Connect pipeline", () => {
     expect(chosen()).toBe("");
     expect(screen.getByText(/These steps use your fleet: os-checks needs docker\./)).toBeTruthy();
     expect(floorWord()).toBe("Choose where steps run");
+  });
+
+  // RULING: Host commands off is a SWITCH the owner can turn on, so when it is why
+  // no machine takes the step the page says so and points at it -- it does not
+  // send somebody to a policy file that is fine.
+  it("names Host commands, not the policy file, when that is why no machine of yours can take the step", async () => {
+    const connection = connectionFor({ pipelinePreview: previewRow({ ...NEEDS }) }, { machines: [HOST_COMMANDS_OFF] });
+    mount(connection);
+
+    expect(await screen.findByText("os-checks needs docker.")).toBeTruthy();
+    expect(
+      screen.getByText("Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings, or change these steps to use cluster containers without host requirements."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/policy\.yaml/)).toBeNull();
+    expect(railAnswer("Compute")).toBe("None of your machines allows pipelines");
+    expect(floorWord()).toBe("A step needs one of your machines");
+    expect(act_("Read again")).toBeTruthy();
+
+    // Turning the switch on reaches the page by itself, through the machines
+    // feed, and Compute becomes the question.
+    await emit(connection, WORKER_REGISTRATION_CONCEPT, { ...HOST_COMMANDS_OFF, ownerFeatures: { headless: true } }, "NODE_UPDATED");
+    await waitFor(() => expect(choiceNames()).toEqual(["Cluster and your fleet"]));
+    expect(screen.queryByText(/Host commands are off/)).toBeNull();
+  });
+
+  it("keeps the policy wording when the policy is a cause too, or the only one", async () => {
+    // Policy not allowing it, switch also off: turning the switch on would not help, and only policy is named.
+    mount(connectionFor({ pipelinePreview: previewRow({ ...NEEDS }) }, { machines: [{ ...HOST_COMMANDS_OFF, labels: {} } as Row] }));
+    expect(await screen.findByText(/No compatible worker allows pipelines\. Update Cockpit and allow pipeline work in its policy\.yaml/)).toBeTruthy();
+    expect(screen.queryByText(/Host commands are off/)).toBeNull();
+  });
+
+  it("names only the machines the switch alone keeps out", async () => {
+    mount(connectionFor({ pipelinePreview: previewRow({ ...NEEDS }) }, { machines: [
+      HOST_COMMANDS_OFF,
+      // Kept out by its policy: not named, and not why the fleet is empty for the others.
+      machineRow({ id: "v1:worker:registration:m-policy", displayName: "Policy Mac", labels: {}, ownerFeatures: { headless: false } }),
+      // Allowed and on: this one would make the fleet available, so it is not in this state at all.
+    ] }));
+    expect(await screen.findByText(/^Host commands are off for MSI Raider\. Turn on Commands and files in its Fleet settings, or change these steps/)).toBeTruthy();
+    expect(screen.queryByText(/Policy Mac/)).toBeNull();
+  });
+
+  it("says why your fleet is not offered when nothing needs it and Host commands is off", async () => {
+    mount(connectionFor({ pipelinePreview: previewRow() }, { machines: [HOST_COMMANDS_OFF] }));
+    await screen.findByText("go-tests, 4 shards");
+    await press("Continue");
+    await waitFor(() => expect(fact("Where steps run")).toBe("Cluster only"));
+    await click(railLine("Compute"));
+    expect(choiceNames()).toEqual(["Cluster"]);
+    expect(screen.getByText("Your fleet is not offered. Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings.")).toBeTruthy();
+    expect(screen.queryByText(/policy\.yaml/)).toBeNull();
   });
 
   it("defaults how changes arrive to the cluster's suggestion, and connects with the manifest's secret names", async () => {

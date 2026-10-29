@@ -1,5 +1,5 @@
 import { ownsMachine } from "../../fleet/machines/sharing";
-import { isRevoked, type MachineRow } from "../../fleet/rows";
+import { isRevoked, machineName, type MachineRow } from "../../fleet/rows";
 
 // WHICH MACHINES TAKE A PIPELINE STEP (epic memql#5479; design record,
 // "Compute confirmed reads only what is enforced"). One rule, read by the
@@ -31,6 +31,11 @@ export const PIPELINES_ALLOWED = "allowed";
 // verified artifact streaming; older workers cannot execute the step.
 export const PIPELINE_STEP_CONTRACT = 5;
 
+/** Whether a machine implements the contract and consents through its own reported policy: everything but the owner's switch. */
+function meetsPipelinePolicy(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract">): boolean {
+  return !isRevoked(machine) && machine.pipelineContract === PIPELINE_STEP_CONTRACT && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED;
+}
+
 /**
  * Whether a machine implements the required contract, consents through its own
  * reported policy, and has not had Host commands switched off by its owner.
@@ -46,10 +51,7 @@ export const PIPELINE_STEP_CONTRACT = 5;
  * `ownerFeatures` at all is on, like a router candidate built without one.
  */
 export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract" | "ownerFeatures">): boolean {
-  return !isRevoked(machine)
-    && machine.pipelineContract === PIPELINE_STEP_CONTRACT
-    && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED
-    && machine.ownerFeatures?.headless !== false;
+  return meetsPipelinePolicy(machine) && machine.ownerFeatures?.headless !== false;
 }
 
 /** How many of `ownerUserId`'s own machines allow pipelines. */
@@ -58,4 +60,21 @@ export function machinesAllowingPipelines(
   ownerUserId: string,
 ): number {
   return machines.filter((m) => ownsMachine(m, ownerUserId) && allowsPipelines(m)).length;
+}
+
+/**
+ * The names of `ownerUserId`'s own machines kept out of pipeline steps ONLY by
+ * their owner's Host commands switch: the policy allows pipelines and the
+ * contract is met, and the one thing left is the switch.
+ *
+ * ONLY, because the copy that names these tells the owner to turn the switch on,
+ * which would change nothing for a machine its policy also refuses. Such a machine
+ * is left to the policy wording. The names are the ones Fleet shows
+ * (`machineName`), in the feed's order.
+ */
+export function machinesWithHostCommandsOff(
+  machines: readonly Pick<MachineRow, "id" | "name" | "displayName" | "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract" | "ownerFeatures">[],
+  ownerUserId: string,
+): string[] {
+  return machines.filter((m) => ownsMachine(m, ownerUserId) && meetsPipelinePolicy(m) && m.ownerFeatures?.headless === false).map(machineName);
 }

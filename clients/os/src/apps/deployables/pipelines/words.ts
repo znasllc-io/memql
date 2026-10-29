@@ -48,6 +48,46 @@ export function joinWords(...parts: readonly string[]): string {
   return parts.filter((p) => p.trim() !== "").join(", ");
 }
 
+/** "a", "a and b", "a, b and c". */
+export function andList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The switch the engine's router calls "Host commands": the machine's
+ * **Commands and files**, under Owner-only features in its Settings in Fleet.
+ *
+ * THE POINTER IS THE LABEL FLEET DRAWS, because copy that sent somebody to a name
+ * that is not on the screen would point at nothing. One constant, held to the
+ * Fleet label by `words.test.ts`, so a rename there fails here.
+ */
+export const HOST_COMMANDS_SWITCH = "Commands and files";
+
+/**
+ * Why a machine whose own policy allows pipelines still takes no step: its
+ * owner switched Host commands off. A pipeline step is a command on the machine,
+ * so the router skips it, and the fix is a switch in Fleet, not the policy file.
+ *
+ * "Host commands" first, because that is what the engine's own refusal says and
+ * so what the owner may already have read on a failed step; the switch by its
+ * label second, because that is what the owner will find in Fleet. Said in two
+ * halves so a caller can continue the second ("..., or change these steps"):
+ * the reason, and the fix without its full stop.
+ */
+export function hostCommandsOffReason(machines: readonly string[]): string {
+  return `Host commands are off for ${andList(machines)}.`;
+}
+
+export function hostCommandsOffFix(machines: readonly string[]): string {
+  return `Turn on ${HOST_COMMANDS_SWITCH} in ${machines.length === 1 ? "its" : "each machine's"} Fleet settings`;
+}
+
+/** The reason and the fix as two sentences; the sentence it sits in says what follows from it (a step cannot run, the fleet is not offered). */
+export function hostCommandsOffWords(machines: readonly string[]): string {
+  return `${hostCommandsOffReason(machines)} ${hostCommandsOffFix(machines)}.`;
+}
+
 /**
  * The short phrase a refusal reads as on a row. The page renders the full
  * copy; a row has room for this. A manifest's refusals share one phrase,
