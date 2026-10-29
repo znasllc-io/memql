@@ -78,6 +78,11 @@ observations. The PR review an hour later went to the app door and passed.
 
 ## Decisions
 
+Approved by the owner on 2026-10-29, with two choices made explicitly: an
+embedding model is never a chat candidate, even when an old Cockpit claims it
+can chat (D3); and a tool-free app turn skips the destination check in Auto
+goals only, so an explicit Workbench goal keeps today's refusal (D4).
+
 | # | Change | Where |
 |---|---|---|
 | D1 | A structured call whose schema the runtime cannot compile into a grammar falls back to the existing schema-in-prompt path: one retry on the same machine, answer returned only when it validates against the full schema, otherwise the call fails as today. "Cannot compile" means `/api/chat` answered 400 to a request carrying `format` and no tools, with "grammar" in the error, which Ollama answers before generating anything. Any other 400 fails as today. | Cockpit `modelcall` |
