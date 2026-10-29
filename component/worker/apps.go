@@ -272,6 +272,10 @@ type AppDescriptor struct {
 	Harness          string `json:"harness"`
 	StructuredResult bool   `json:"structuredResult"`
 	FollowUps        bool   `json:"followUps"`
+	// InferenceOnly is the machine's claim that this harness runs the app
+	// with no tools for an inference-only turn (worker.proto). Absent reads
+	// false, which is what a Cockpit that predates it means.
+	InferenceOnly bool `json:"inferenceOnly"`
 }
 
 // IsKnownHarness reports whether h is a protocol this engine understands.
@@ -313,6 +317,7 @@ func AppDescriptorsFromProto(in []*memqlv1.AppDescriptor) []AppDescriptor {
 			Harness:          truncate(strings.TrimSpace(d.GetHarness()), maxAppFieldLen),
 			StructuredResult: d.GetStructuredResult(),
 			FollowUps:        d.GetFollowUps(),
+			InferenceOnly:    d.GetInferenceOnly(),
 		}
 		if !desc.Valid() {
 			continue

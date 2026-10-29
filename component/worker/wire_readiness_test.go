@@ -35,6 +35,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // roundTrip marshals and unmarshals through the wire, so a test asserts on
@@ -318,6 +319,35 @@ func TestRegisterCarriesAppDescriptors(t *testing.T) {
 	if byId[AppIdCodex].Harness != HarnessCodexMCP {
 		t.Errorf("codex harness: want %s, got %s", HarnessCodexMCP, byId[AppIdCodex].Harness)
 	}
+}
+
+// The inference-only claim survives the wire and the registration row; an
+// absent field reads false, which is what a Cockpit that predates it means
+// (spec 2026-10-29, D4).
+func TestInferenceOnlySurvivesTheRegistrationRow(t *testing.T) {
+	descs := AppDescriptorsFromProto([]*memqlv1.AppDescriptor{
+		{Id: AppIdClaudeCode, Harness: HarnessClaudeHeadless, StructuredResult: true, InferenceOnly: true},
+		{Id: AppIdCodex, Harness: HarnessCodexMCP},
+	})
+	if len(descs) != 2 || !descs[0].InferenceOnly || descs[1].InferenceOnly {
+		t.Fatalf("from the wire: %+v", descs)
+	}
+	payload, err := structpb.NewStruct(map[string]any{"appDescriptors": toAnySlice(descriptorsAsMaps(descs))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := newWorkerFieldGetter(&memqlv1.MemoryNode{Payload: payload}).appDescriptors("appDescriptors")
+	if len(back) != 2 || !back[0].InferenceOnly || back[1].InferenceOnly {
+		t.Fatalf("from the row: %+v", back)
+	}
+}
+
+func toAnySlice(maps []map[string]any) []any {
+	out := make([]any, 0, len(maps))
+	for _, m := range maps {
+		out = append(out, m)
+	}
+	return out
 }
 
 // THE NEGATIVE CONTROL. An id or a harness word the engine does not know is

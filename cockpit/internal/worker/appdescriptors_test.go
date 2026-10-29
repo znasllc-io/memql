@@ -42,6 +42,18 @@ func TestAppDescriptorsToProto(t *testing.T) {
 	}
 }
 
+// The inference-only claim rides the descriptor, so the engine can tell a
+// machine that runs a tool-free turn without tools from one that cannot.
+func TestDescriptorsCarryInferenceOnly(t *testing.T) {
+	got := appDescriptorsToProto([]apps.Info{
+		{Id: apps.IDClaudeCode, Harness: apps.HarnessClaudeHeadless, StructuredResult: true, FollowUps: true, InferenceOnly: true},
+		{Id: apps.IDCodex, Harness: apps.HarnessCodexMCP, FollowUps: true},
+	})
+	if len(got) != 2 || !got[0].GetInferenceOnly() || got[1].GetInferenceOnly() {
+		t.Fatalf("descriptors = %+v, want inference-only on claude-code only", got)
+	}
+}
+
 // An inventory entry with no harness word is left out rather than sent
 // with an empty one: the engine drops a descriptor whose harness it does
 // not know, but an empty word is a claim this machine never meant to make.
