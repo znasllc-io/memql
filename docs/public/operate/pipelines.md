@@ -1901,8 +1901,9 @@ While a step waits for its next attempt the check already says so. The driver
 publishes as soon as the attempt's outcome is stored, before the wait, so the
 check never promises a retry the step's row does not hold. The GitHub call comes
 out of the wait; a failover to another machine has no wait, so for it the call
-delays the next attempt, by one round trip that a GitHub outage bounds at two
-minutes:
+delays the next attempt. A GitHub outage bounds each call at two minutes, and
+publishes go one at a time, so several steps retrying at once can queue behind
+each other:
 
 ```text
 - `tests.go-tests#1`: Retrying: attempt 1 failed (`pipeline_clone_failed` on MSI Raider); attempt 2 starts after 30s.
@@ -1947,8 +1948,16 @@ Mode affected · Pull request #42 · Commit 3f9c2ab
 
 ### Run failure
 
-Pipeline workflow failed: every_door_shut: no door to a model is open for this call (`pipeline_executor_error`)
+Pipeline workflow failed: failed when called: every_door_shut: no door to a model is open for this call (`pipeline_executor_error`)
 ```
+
+When the independent review's model call fails, the line carries only a stable
+code and the router's own words (*failed when called: upstream: the provider
+failed*, *failed when called: timeout: timed out*), never a machine's name, a
+path or a request id: the check run is public on GitHub for a public
+repository. The original error is logged at warn level with the work run as its
+subject, so the owner reads it in [Logs](logs.md); the run's own record carries
+the worded text.
 
 A failed step keeps the title, and the run's own reason is listed before the
 failed steps. The run page says *The run failed outside its steps* above the

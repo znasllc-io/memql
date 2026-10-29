@@ -1316,9 +1316,16 @@ the first eight characters of its registration id, never the name the machine
 reported, which is usually its hostname. `pipelines.MachineWords`
 (`component/pipelines/machine_words.go`) is the one place that rule is written;
 the attempt lines and the dispatcher's and router's refusal sentences, which a
-failed step quotes whole, all call it. When Host commands off is the only reason
-a machine cannot take pipeline steps, MemQL OS names it and points at the Fleet
-switch, not at `policy.yaml`.
+failed step quotes whole, all call it, and the `pipelines_not_allowed` sentence
+takes its contract number from `PipelineStepContract`. The independent review's
+failed model call reaches the run-failure line as a stable code and the
+router's own words (`router.FailureReason`, for example *failed when called:
+every_door_shut: no door to a model is open for this call*), never as its text
+(`TestAFailedReviewModelCallIsReportedByItsCodeNotItsText`). The original is
+logged at warn level with the work run as its subject, and the router's call
+ledger keeps the provider's own message. When Host commands off is the
+only reason a machine cannot take pipeline steps, MemQL OS names it and points
+at the Fleet switch, not at `policy.yaml`.
 
 **Queue priority and scheduled scans.** Each attempt is a new Job with its
 event's Kueue priority class, set when it is created and never changed, so an
@@ -1399,13 +1406,13 @@ in `clients/os/test/deployables/pipelines/`, and the exit-75 cases in
   runs one step at a time.
 - A step wrongly marked repeatable can run twice, and a dishonest exit 75 is
   retried within the limits; review owns both.
+- A failover to another machine waits for the check run's *Retrying* publish:
+  one GitHub call, bounded at two minutes in an outage, and publishes go one at
+  a time, so several steps retrying at once can queue behind each other.
 - The model and app door texts (`fleet_inference.go`, `fleet_context_allocation.go`
   in `integrations/agent/worker`) keep a machine's reported name, because they
-  serve the owner's own screens. The one model call a pipeline makes, the
-  independent review, reaches the check run as a code and the router's own
-  words (`router.FailureReason`), never as its text
-  (`TestAFailedReviewModelCallIsReportedByItsCodeNotItsText`). Words a machine's
-  own Cockpit composes are quoted as they arrive.
+  serve the owner's own screens, and words a machine's own Cockpit composes are
+  quoted as they arrive.
 
 **Not verified.** These tests prove the source contract and in-process replica
 hops. Live fleet-to-cloud failover and a production maintenance window for the
