@@ -17,7 +17,7 @@ import (
 )
 
 // executor_cluster.go -- a step with no need, run as a Kubernetes Job by a
-// workbench replica (epic memql#5478, #5493; Review Focus 2).
+// workbench replica (epic memql#5478, #5493).
 //
 // The agent forwards the StepRun to any healthy workbench replica, whose
 // runner creates the step's Job -- or finds it: every name the runner uses is

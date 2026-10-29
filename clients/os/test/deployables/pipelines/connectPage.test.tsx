@@ -389,9 +389,9 @@ describe("Connect pipeline", () => {
     expect(floorWord()).toBe("Choose where steps run");
   });
 
-  // RULING: Host commands off is a SWITCH the owner can turn on, so when it is why
-  // no machine takes the step the page says so and points at it -- it does not
-  // send somebody to a policy file that is fine.
+  // Host commands off is a SWITCH the owner can turn on, so when it is why no
+  // machine takes the step the page says so and points at it -- it does not send
+  // somebody to a policy file that is fine.
   it("names Host commands, not the policy file, when that is why no machine of yours can take the step", async () => {
     const connection = connectionFor({ pipelinePreview: previewRow({ ...NEEDS }) }, { machines: [HOST_COMMANDS_OFF] });
     mount(connection);

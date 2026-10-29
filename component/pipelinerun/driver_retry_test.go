@@ -260,7 +260,7 @@ func attemptsOf(c journalCall) ([]attemptRecord, time.Time) {
 // fetch failed) passes on its second, pinned to the same machine. Each attempt's
 // intent is journaled before it is sent and attempt 1's outcome before attempt 2
 // starts, the row reads running between them, and attempt 1's resources are
-// acknowledged before attempt 2 is sent (ruling 13).
+// acknowledged before attempt 2 is sent, so the two never hold one slot.
 func TestARetriedStepPassesOnItsSecondAttempt(t *testing.T) {
 	rh := newRetryHarness(t, retryFleetManifest, true)
 	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
@@ -396,9 +396,9 @@ func TestAFailingStepStopsAtTheEngineCap(t *testing.T) {
 	}
 }
 
-// Review Focus 2: a cancel during the wait between two attempts settles the
-// step cancelled at once -- no further attempt is sent, and the receipt restates
-// the history without the time of an attempt that will never start.
+// A cancel during the wait between two attempts settles the step cancelled at
+// once -- no further attempt is sent, and the receipt restates the history
+// without the time of an attempt that will never start.
 func TestCancelDuringARetryWaitSettlesCancelled(t *testing.T) {
 	rh := newRetryHarness(t, retryFleetManifest, true)
 	waiting := make(chan time.Duration, 1)
@@ -497,10 +497,9 @@ func TestARetryWaitEndsWithItsWorkflowCall(t *testing.T) {
 	}
 }
 
-// Review Focus 3: every attempt counts against the run's ceiling. A retry whose
-// wait would end with less than a second of the run left is never started, and
-// neither is one whose wait outlasted the run: the step keeps attempt 1's
-// failure.
+// Every attempt counts against the run's ceiling. A retry whose wait would end
+// with less than a second of the run left is never started, and neither is one
+// whose wait outlasted the run: the step keeps attempt 1's failure.
 func TestRunCeilingStopsTheRetries(t *testing.T) {
 	t.Setenv(pipelines.EnvRunCeiling, "5")
 	const ceiling = 5 * time.Minute
@@ -582,10 +581,10 @@ func TestRunCeilingStopsTheRetries(t *testing.T) {
 	})
 }
 
-// Review Focus 1: an attempt's record is masked as its receipt is. Attempt 1's
-// runner echoed a resolved secret into its message, its Job name and its log
-// file id; the binding shows the mask everywhere, and attempt 2 is still handed
-// the value (masking is what is written, never what is sent).
+// An attempt's record is masked as its receipt is. Attempt 1's runner echoed a
+// resolved secret into its message, its Job name and its log file id; the
+// binding shows the mask everywhere, and attempt 2 is still handed the value
+// (masking is what is written, never what is sent).
 func TestAttemptRecordsAreMasked(t *testing.T) {
 	rh := newRetryHarness(t, retryClusterManifest, false)
 	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
@@ -704,7 +703,7 @@ pipeline:
           repeatable: true
 `
 
-// Ruling 18: a repeatable cluster step whose node went away under its Job
+// A repeatable cluster step whose node went away under its Job
 // (pipeline_node_lost: the command may have run) is tried again on the cluster,
 // once the first attempt's Job is confirmed gone -- so two copies of it never
 // run at once.
@@ -755,10 +754,10 @@ func TestARepeatableClusterStepRetriesAnUnknownOutcomeOnTheCluster(t *testing.T)
 	}
 }
 
-// Ruling 13: the next attempt starts only once the previous attempt's
-// resources are confirmed gone. When the acknowledgement cannot confirm it, the
-// step is not retried and the run stays unfinished for recovery, its row saying
-// what attempt 1 proved and when attempt 2 may start.
+// The next attempt starts only once the previous attempt's resources are
+// confirmed gone. When the acknowledgement cannot confirm it, the step is not
+// retried and the run stays unfinished for recovery, its row saying what
+// attempt 1 proved and when attempt 2 may start.
 func TestAnUnconfirmedCleanupStopsTheRetries(t *testing.T) {
 	rh := newRetryHarness(t, retryClusterManifest, false)
 	rh.exec.ackErrors = map[string]error{"checks.vet": errors.New("foreground deletion still pending")}

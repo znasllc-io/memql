@@ -47,8 +47,7 @@ import (
 // one step (secrets.go). They are never written to a row and never logged;
 // everything the runner reports back that a person reads -- a failure's
 // message, a note, the log tail the check run quotes -- is masked with every
-// value this drive resolved before it is written or published (Review Focus
-// 5).
+// value this drive resolved before it is written or published.
 
 const (
 	// maxConcurrentSteps bounds one stage's steps in flight at once.

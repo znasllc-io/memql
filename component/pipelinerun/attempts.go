@@ -13,16 +13,16 @@ import (
 // attempts.go -- a step's attempts: the record each one leaves on the step's
 // row, and where the next one goes (spec
 // 2026-10-28-pipeline-fleet-first-retries-failover-design.md, sections 3 and 5,
-// with the rulings recorded at each decision below). The loop that runs them
-// is runStep's (driver.go).
+// with the decisions made during implementation stated where each is made).
+// The loop that runs them is runStep's (driver.go).
 //
 // THE HISTORY LIVES IN THE STEP'S BINDING, an open object, under two keys:
 // `attempts`, every ended attempt's record in order, and `nextAttemptAt`, the
 // RFC3339 time the next attempt may start, present only on the version written
 // between two attempts (Step.Retrying). Not a concept field, so an engine
 // rollback cannot leave rows carrying a field the older concept does not
-// declare; and not the step's `resumeAt` field (ruling 2), which the work
-// spine's own sweeps read for parked work.
+// declare; and not the step's `resumeAt` field, which the work spine's own
+// sweeps read for parked work: a retry's wait is not parked work.
 //
 // THE BINDING IS REPLACED WHOLE on every write that names it (the journal's
 // read-merge is shallow), so every write restates the whole history: the next
@@ -203,11 +203,12 @@ func attemptsBinding(base map[string]any, history []attemptRecord, next time.Tim
 // place and times straight from the runner.
 //
 // Where the runner named no place, the record is placed by attemptSurface. A
-// PINNED attempt that named no machine belongs to the machine it was pinned to
-// (ruling 12): its wait for that machine ran out before any answered, or it was
-// refused before dispatch, and either way that machine is the one to count, or
-// to mark not retried here. Times the runner did not report are the driver's
-// own: when it handed the attempt over, and when the answer came.
+// PINNED attempt that named no machine belongs to the machine it was pinned to:
+// its wait for that machine ran out before any answered, or it was refused
+// before dispatch, and either way that machine is the one to count, or to mark
+// not retried here. Left unattributed, the ladder could pin it again. Times the
+// runner did not report are the driver's own: when it handed the attempt over,
+// and when the answer came.
 func (dr *runDriver) attemptOf(req pipelines.StepRequest, end stepEnd, rec receipt, began time.Time) attemptRecord {
 	masks := dr.maskValues()
 	text := func(s string) string {
@@ -407,7 +408,7 @@ func cutText(s string, n int) string {
 //  1. an eligible machine not yet tried (rule 2's step);
 //  2. P again: ONCE when P is a machine; up to sameMachine times, after the same
 //     delays as rule 1, when P is the cluster and the step's placement is the
-//     cluster (ruling 18, as amended);
+//     cluster (a pool step's one cluster attempt is never repeated);
 //  3. rule 3;
 //  4. otherwise the step fails.
 //
@@ -416,10 +417,10 @@ func cutText(s string, n int) string {
 // machine still holding the old command refuses the next one (which counts as
 // nothing ran), and that guard is worth one more try. On the cluster the
 // driver itself confirms the previous attempt's Job, Secret and pods are gone
-// before it sends the next attempt (ruling 13, runStep), so a repeatable step
-// cannot overlap itself there however often it is retried; and since nearly
-// every cluster failure is an unknown outcome (rulings 14 and 15), a step that
-// can run nowhere else would otherwise have no retries left.
+// before it sends the next attempt (runStep), so a repeatable step cannot
+// overlap itself there however often it is retried; and since nearly every
+// cluster failure is an unknown outcome (attempt_class.go says why), a step
+// that can run nowhere else would otherwise have no retries left.
 //
 // A POOL STEP REACHES THE CLUSTER ONCE, whatever ended the attempt there: the
 // cluster is the one place an attempt spends cloud, and the owner chose to
@@ -449,8 +450,8 @@ func cutText(s string, n int) string {
 // The run's ceiling is not this function's: the caller refuses to wait into it
 // or to start an attempt with less than a second of it left (runStep).
 //
-// Regression tests: TestChooseNextFollowsTheRetryOrder (every rule and ruling,
-// row by row) and the driver's own in driver_retry_test.go.
+// Regression tests: TestChooseNextFollowsTheRetryOrder (every rule and every
+// decision above, row by row) and the driver's own in driver_retry_test.go.
 func chooseNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, history []attemptRecord) (*pipelines.AttemptPlacement, time.Duration, bool) {
 	sent, ok := sentPlacements(step, policy, history)
 	if !ok {
@@ -530,8 +531,8 @@ func decideNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, hi
 	if last.Class != pipelines.AttemptOutcomeUnknown && !exhausting(last, sent[n-1]) {
 		// Rule 1. Not after an unknown outcome, whose same-place retry is an
 		// owed one below, and not after an attempt that found the fleet
-		// exhausted: ruling 9 sends that one straight to rule 3, and the machine
-		// it may name (the last one busy) is never pinned.
+		// exhausted: that one goes straight to rule 3, and the machine it may
+		// name (the last one busy) is never pinned.
 		if placement, delay, ok := h.samePlace(last); ok {
 			return placement, delay, true
 		}
@@ -542,7 +543,7 @@ func decideNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, hi
 	if placement, ok := h.owedRetry(); ok { // an unknown outcome's "P again", P a machine: once
 		return placement, 0, true
 	}
-	if placement, delay, ok := h.owedCluster(); ok { // an unknown outcome's "P again", P the cluster (ruling 18)
+	if placement, delay, ok := h.owedCluster(); ok { // an unknown outcome's "P again", P the cluster
 		return placement, delay, true
 	}
 	if placement, ok := h.cluster(); ok { // rule 3
@@ -555,9 +556,9 @@ func decideNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, hi
 // UNPINNED failover the driver placed on the fleet that came back nothing ran,
 // either not retried here (its wait for a busy machine ran out, or the only
 // candidates refused for good) or naming no machine at all (no candidate was
-// left once the tried ones were excluded). Ruling 9: the fleet is exhausted for
-// now, and stays so for the rest of the step's attempts -- trying it again
-// would spend the same wait to the same answer.
+// left once the tried ones were excluded). The fleet is exhausted for now, and
+// stays so for the rest of the step's attempts -- trying it again would spend
+// the same wait to the same answer.
 //
 // A first attempt is not one of these: it was not placed, and a refusal there
 // names the one machine to move away from (rule 2). Nor is a pinned attempt,
@@ -590,7 +591,7 @@ type attemptHistory struct {
 	at map[string]int
 	// clusterUsed: the cluster has been a place. clusterOwed: the latest
 	// attempt on the cluster ended with an unknown outcome, so a cluster step's
-	// cluster is owed its retries (ruling 18) until one runs there.
+	// cluster is owed its retries until one runs there.
 	clusterUsed bool
 	clusterOwed bool
 	// exhausted: an attempt found the fleet exhausted (exhausting).
@@ -709,15 +710,14 @@ func (h attemptHistory) owedRetry() (*pipelines.AttemptPlacement, bool) {
 	return h.pinned(h.owed[0]), true
 }
 
-// owedCluster is an unknown outcome's "P again" when P is the cluster (ruling
-// 18, as amended): for a step whose placement is the cluster, its only place,
-// the cluster again while it has had fewer than sameMachine retries, after the
-// same delays as rule 1, its count shared with rule 1's. Each such attempt is
-// sent only once the previous one's Job, Secret and pods are confirmed gone
-// (runStep), which is what makes more than one safe here. Never for a pool
-// step: it spends cloud at most once, by the owner's choice, so an unknown
-// outcome on the cluster leaves it the machines it has not tried, and then
-// nothing.
+// owedCluster is an unknown outcome's "P again" when P is the cluster: for a
+// step whose placement is the cluster, its only place, the cluster again while
+// it has had fewer than sameMachine retries, after the same delays as rule 1,
+// its count shared with rule 1's. Each such attempt is sent only once the
+// previous one's Job, Secret and pods are confirmed gone (runStep), which is
+// what makes more than one safe here. Never for a pool step: it spends cloud
+// at most once, by the owner's choice, so an unknown outcome on the cluster
+// leaves it the machines it has not tried, and then nothing.
 func (h attemptHistory) owedCluster() (*pipelines.AttemptPlacement, time.Duration, bool) {
 	if !h.repeatable || !h.clusterPlaced || !h.clusterOwed {
 		return nil, 0, false

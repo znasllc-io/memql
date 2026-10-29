@@ -505,9 +505,9 @@ describe("words", () => {
     expect(fleetReason(["os-checks needs docker"])).toContain("cluster containers without host requirements");
   });
 
-  // RULING: when Host commands off is why a machine takes no step, the remedy
-  // says so and points at the switch, and does not blame the policy file. The
-  // policy wording above stays for every case where the policy is the cause.
+  // When Host commands off is why a machine takes no step, the remedy says so and
+  // points at the switch, and does not blame the policy file. The policy wording
+  // above stays for every case where the policy is the cause.
   it("names Host commands as the remedy when that is what keeps a machine out, and leaves the policy wording for the rest", () => {
     expect(needsRemedy(["os-checks needs docker"], ["MSI Raider"])).toBe(
       "Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings, or change these steps to use cluster containers without host requirements.",

@@ -241,9 +241,9 @@ describe("the pipelines reading", () => {
     expect(fleetSentence(0)).toMatch(/^None of your machines allows pipelines yet/);
   });
 
-  // RULING: when Host commands off is why none of the owner's machines takes a
-  // step, the line says so and points at the switch. When another machine takes
-  // them, a machine the owner switched off is a choice, not a problem, and is not
+  // When Host commands off is why none of the owner's machines takes a step, the
+  // line says so and points at the switch. When another machine takes them, a
+  // machine the owner switched off is a choice, not a problem, and is not
   // mentioned.
   it("names Host commands in the fleet line only when it is why no machine allows pipelines", () => {
     expect(fleetSentence(0, ["MSI Raider"])).toBe(

@@ -442,11 +442,11 @@ func TestClusterPlacementRefusedForAFleetOnlyStep(t *testing.T) {
 	}
 }
 
-// TestPinnedBusyMachineWaitIsBounded (Review Focus 5): two steps pin the same
-// busy machine. The first attempt waits as long as the run's ceiling allows,
-// because nothing else can run the step; a retry the driver pinned to one
-// machine waits at most the wait it was given, then counts as nothing ran and
-// is not tried here again, so the ladder moves on.
+// TestPinnedBusyMachineWaitIsBounded: two steps pin the same busy machine. The
+// first attempt waits as long as the run's ceiling allows, because nothing else
+// can run the step; a retry the driver pinned to one machine waits at most the
+// wait it was given, then counts as nothing ran and is not tried here again, so
+// the ladder moves on.
 func TestPinnedBusyMachineWaitIsBounded(t *testing.T) {
 	now, calls := exNow, 0
 	d := busyMachine(&now, &calls)
@@ -541,14 +541,14 @@ func TestAPlacedAttemptDoesNotWaitForAMachineThatIsNotACandidate(t *testing.T) {
 	}
 }
 
-// TestAPlacedPoolAttemptWaitsOnItsOwnBudget (ruling A): a pool step's FIRST
-// attempt keeps Codex's behaviour -- the policy's fleetWaitSeconds, then the
-// cloud -- and an attempt the driver placed on the fleet does not, because the
-// driver already decided the wait (it passes fleetWaitSeconds as the
-// placement's MaxWaitSeconds) and the cloud (it is the driver's to name).
-// Applying the preference deadline to a placed attempt as well would cut its
-// wait short with the wrong answer, and would turn a machine's refusal that
-// the driver can route around into a pipeline_executor_error it cannot.
+// TestAPlacedPoolAttemptWaitsOnItsOwnBudget: a pool step's FIRST attempt keeps
+// Codex's behaviour -- the policy's fleetWaitSeconds, then the cloud -- and an
+// attempt the driver placed on the fleet does not, because the driver already
+// decided the wait (it passes fleetWaitSeconds as the placement's
+// MaxWaitSeconds when the cloud follows) and the cloud (it is the driver's to
+// name). Applying the preference deadline to a placed attempt as well would
+// cut its wait short with the wrong answer. A machine's refusal that is not
+// capacity reads alike on both: nothing ran, for the driver to route around.
 func TestAPlacedPoolAttemptWaitsOnItsOwnBudget(t *testing.T) {
 	req := func(placement *pl.AttemptPlacement) pl.StepRequest {
 		r := placedPoolRequest()

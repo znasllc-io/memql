@@ -378,8 +378,9 @@ func transientCheckRunFailure(w CheckRunWrite) bool {
 
 // report is every step of a driven run as the check run reports it, each log
 // tail and message MASKED with every secret value the drive resolved before
-// CheckOutput ever reads them (Review Focus 5): a step can only echo its own
-// values, and masking with all of them costs nothing. So are the code and the
+// CheckOutput ever reads them, because the check run is public for a public
+// repository: a step can only echo its own values, and masking with all of
+// them costs nothing. So are the code and the
 // place of each attempt: a record was masked when it was made, with the values
 // known then, and a value another step resolved since could not have been.
 func (dr *runDriver) report() []pipelines.StepReport {

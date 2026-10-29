@@ -197,9 +197,10 @@ func TestThePipelineBlockParsesIntoTheSpec(t *testing.T) {
 	}
 }
 
-// TestASemanticMistakeInThePipelineStillParses is Review Focus 4's parse
-// half: a need nobody offers, a timeout that is no duration and a bucket
-// nobody declared are the PIPELINE's refusals, raised when a run compiles.
+// TestASemanticMistakeInThePipelineStillParses is the parse half of where a
+// semantic mistake is caught: a need nobody offers, a timeout that is no
+// duration and a bucket nobody declared are the PIPELINE's refusals, raised
+// when a run compiles.
 // Here they are values like any other, and the manifest parses.
 func TestASemanticMistakeInThePipelineStillParses(t *testing.T) {
 	src := strings.Replace(pipelineManifest, "needs: { docker: true }", "needs: { quantum: true }", 1)

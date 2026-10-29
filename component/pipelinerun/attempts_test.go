@@ -11,8 +11,9 @@ import (
 )
 
 // attempts_test.go -- where a step's next attempt goes (spec 2026-10-28
-// fleet-first retries, section 5, as the controller's rulings amend it) and the
-// record each attempt leaves in the step's binding (section 3).
+// fleet-first retries, section 5, with the corrections made during
+// implementation) and the record each attempt leaves in the step's binding
+// (section 3).
 
 // The steps the table retries: one per placement, as the compiler leaves them.
 var (
@@ -133,8 +134,8 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 		{"no other machines once M is spent", retryFleetStep, noOtherMachines,
 			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan)), stop},
 
-		// Ruling 9: an unpinned failover that comes back nothing ran and not
-		// retried here, or naming no machine at all, found the fleet exhausted.
+		// An unpinned failover that comes back nothing ran and not retried
+		// here, or naming no machine at all, found the fleet exhausted.
 		// A fleet step stops there; the machine a spent wait names is never
 		// pinned, because it was only the last one busy.
 		{"fleet step, every eligible machine tried", retryFleetStep, standard,
@@ -224,12 +225,13 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 			numbered(on("M", unknownOutcome), noMachine, on("M", retryRequested)), next(pinnedTo("M", 120), 120*time.Second)},
 		{"a machine that needs recovering is not retried after its unknown outcome", repeatableStep(retryPoolStep), standard,
 			numbered(notRetried(on("M", unknownOutcome)), noMachine), next(toCluster, 0)},
-		// Ruling 18 (as amended): an unknown outcome on the cluster is retried
-		// there, up to sameMachine with the same delays, for a repeatable step
-		// whose placement IS the cluster -- it has no other place -- each only once
-		// the previous attempt's Job is confirmed gone, so it cannot overlap
-		// itself. Almost every cluster failure is an unknown outcome (rulings 14
-		// and 15), so without this such a step would have no retries left.
+		// An unknown outcome on the cluster is retried there, up to sameMachine
+		// with the same delays, for a repeatable step whose placement IS the
+		// cluster -- it has no other place -- each only once the previous
+		// attempt's Job is confirmed gone, so it cannot overlap itself. Almost
+		// every cluster failure is an unknown outcome (the runner reports while
+		// the Job is alive), so without this such a step would have no retries
+		// left.
 		{"a repeatable cluster step's unknown outcome: the cluster again after 30 s", repeatableStep(retryClusterStep), standard,
 			numbered(onCluster(unknownOutcome)), next(toCluster, 30*time.Second)},
 		{"twice unknown on the cluster: again after 120 s", repeatableStep(retryClusterStep), standard,

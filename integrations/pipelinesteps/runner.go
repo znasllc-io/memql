@@ -96,7 +96,7 @@ const (
 	// followLineMax is the longest piece of a log line the runner holds at
 	// once: a longer line reaches the capture cut into pieces of at most
 	// this size, each stamped like the line, so a step that prints one
-	// endless line cannot make the workbench hold it whole (Review Focus 5).
+	// endless line cannot make the workbench hold it whole.
 	followLineMax = 1 << 20
 	// apiAttempts is how many times the runner makes a call it cannot do
 	// without -- reading the Job, creating it, claiming it -- while the API
@@ -820,10 +820,10 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 				}
 				return s.failed(pl.CodeRunnerUnavailable, "the rejected Job's queued state could not be recorded: "+apiMessage(err)), Job{}, true
 			}
-			// The ceiling is full (Review Focus 4): wait for a slot, as long
-			// as the step is wanted and its run's ceiling allows, and say so
-			// once. The API server answered, so the failures that may pass
-			// start counting again.
+			// The ceiling is full: wait for a slot, as long as the step is
+			// wanted and its run's ceiling allows, and say so once. The API
+			// server answered, so the failures that may pass start counting
+			// again.
 			s.creationAttempts = 0
 			if !s.quotaNoted {
 				s.quotaNoted = true

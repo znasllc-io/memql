@@ -2155,7 +2155,7 @@ func TestTimingsMergeOnlyAfterASuccessfulFullRun(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Review Focus 5: a secret value goes to the runner and nowhere else
+// A secret value goes to the runner and nowhere else
 // ---------------------------------------------------------------------------
 
 func TestASecretValueIsNeverWrittenPublishedOrLogged(t *testing.T) {
@@ -2225,7 +2225,7 @@ func TestASecretValueIsNeverWrittenPublishedOrLogged(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Review Focus 3: a 403 on every check-run write never stops a run
+// A 403 on every check-run write never stops a run
 // ---------------------------------------------------------------------------
 
 func TestARunWhoseEveryCheckRunWriteIsRefusedStillRuns(t *testing.T) {
