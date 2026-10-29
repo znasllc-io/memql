@@ -1117,9 +1117,21 @@ func (t *stepTrack) set(s StepState) {
 
 // setAttempts records the step's attempt history in its state, a copy of
 // history's.
+//
+// IT ENDS THE WORD THAT ANOTHER ATTEMPT FOLLOWS (Retrying, RetryAfter). That
+// word was set for the outcome of the attempt before the one whose record has
+// just arrived, and runStep leaves it up while that next attempt runs; once the
+// next attempt's record is in the history the word is about an outcome nobody
+// is waiting on any more. Left up, a progress another step publishes before
+// this step's receipt (or before the outcome that sends it round again is
+// durable) says attempt N failed and attempt N+1 follows, for a step that may
+// be about to pass. The order "outcome durable, then setRetrying" is unchanged:
+// the word is set again, about the new record, only after the next Retrying is
+// written. Covered by TestARecordedAttemptEndsTheWordThatAnotherFollows.
 func (t *stepTrack) setAttempts(history []attemptRecord) {
 	t.mu.Lock()
 	t.state.Attempts = slices.Clone(history)
+	t.state.Retrying, t.state.RetryAfter = false, 0
 	t.mu.Unlock()
 }
 
@@ -1305,12 +1317,17 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		// only here, once the outcome is DURABLE (a Retrying the journal refused
 		// returned above, so the check run never promises a retry the row does not
 		// hold), and before the cleanup and the wait, so GitHub's latency comes out
-		// of the wait rather than adding to it. Retrying stays set while the next
-		// attempt runs, and its wording claims only what stays true (retrySentence),
-		// because nothing publishes again when that attempt begins: a publish there
-		// would delay the attempt itself by a GitHub round trip. A takeover does not
-		// restate it before the step settles; the row's history, which the OS reads,
-		// is not affected. Covered by TestTheCheckRunSaysAStepIsRetryingWhileItWaits.
+		// of the wait rather than adding to it. A failover to another machine has no
+		// wait, so for it the publish delays the next attempt directly, by one GitHub
+		// round trip: bounded by githubCallTimeout (2 minutes) during a GitHub outage,
+		// and a cost only a step that is going again pays. Retrying stays set while
+		// the next attempt runs, and its wording claims only what stays true
+		// (retrySentence), because nothing publishes again when that attempt begins:
+		// a publish there would delay the attempt itself by a GitHub round trip. It
+		// ends when that attempt's record arrives (setAttempts) or with the receipt
+		// (settle). A takeover does not restate it before the step settles; the row's
+		// history, which the OS reads, is not affected. Covered by
+		// TestTheCheckRunSaysAStepIsRetryingWhileItWaits.
 		t.setRetrying(max(nextAt.Sub(dr.d.now()), 0))
 		dr.progress(ctx)
 		// Its resources, before the next attempt can claim the same slot or

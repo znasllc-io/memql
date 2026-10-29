@@ -445,6 +445,55 @@ func TestAStepReportSaysRetryingOnlyWhileItIs(t *testing.T) {
 	}
 }
 
+// The word that another attempt follows belongs to the outcome it was set for.
+// runStep sets it once attempt N's outcome is durable and leaves it up while
+// attempt N+1 runs (nothing publishes again when that attempt begins); the
+// moment attempt N+1 ends, its record supersedes the outcome the word was about,
+// and a progress another step publishes before the receipt or the next outcome
+// is written must not still say attempt N+1 failed and attempt N+2 follows --
+// least of all for a step that is about to pass. Driven through the track, which
+// is what runStep calls, because the static Report test cannot see the order.
+func TestARecordedAttemptEndsTheWordThatAnotherFollows(t *testing.T) {
+	first := attemptRecord{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementCluster}
+	second := attemptRecord{Attempt: 2, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeNodeLost, Surface: pipelines.PlacementCluster}
+	track := &stepTrack{state: StepState{Key: "build.mac", Stage: "build", Name: "mac", Status: StepRunning}}
+	summaryOf := func() string {
+		_, summary, _ := pipelines.CheckOutput(pipelines.RunReport{
+			Status: "in_progress", Steps: []pipelines.StepReport{track.snapshot().Report()},
+		})
+		return summary
+	}
+
+	track.setAttempts([]attemptRecord{first})
+	track.setRetrying(30 * time.Second)
+	if got := track.snapshot().Report(); !got.Retrying || got.RetryAfter != 30*time.Second {
+		t.Fatalf("after attempt 1's outcome is durable the step is retrying in 30s: %+v", got)
+	}
+	if !strings.Contains(summaryOf(), "Retrying: attempt 1 failed") {
+		t.Fatalf("the check run says so while attempt 2 runs:\n%s", summaryOf())
+	}
+
+	// Attempt 2 ended: its record arrives before its receipt (a step that passed)
+	// or before the next outcome is durable (a step that goes again).
+	track.setAttempts([]attemptRecord{first, second})
+	if got := track.snapshot().Report(); got.Retrying || got.RetryAfter != 0 {
+		t.Errorf("a step whose latest attempt has ended and whose next is not yet recorded is retrying: %+v", got)
+	}
+	if summary := summaryOf(); strings.Contains(summary, "Retrying") {
+		t.Errorf("the check run still says the step is retrying:\n%s", summary)
+	}
+
+	// The next durable outcome says it again, about the attempt it is for.
+	track.setRetrying(2 * time.Minute)
+	got := track.snapshot().Report()
+	if !got.Retrying || got.RetryAfter != 2*time.Minute || len(got.Attempts) != 2 {
+		t.Errorf("after attempt 2's outcome is durable the step is retrying in 2m with both attempts: %+v", got)
+	}
+	if !strings.Contains(summaryOf(), "Retrying: attempt 2 failed") {
+		t.Errorf("the check run names the attempt that just failed:\n%s", summaryOf())
+	}
+}
+
 // A check run is read on GitHub, so the driver masks what it quotes with every
 // secret it resolved: an attempt's text as the step's message and log are, even
 // though each record was masked once when it was made (a value another step

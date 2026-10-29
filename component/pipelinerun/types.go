@@ -354,12 +354,14 @@ type StepState struct {
 	Attempts []attemptRecord
 	// Retrying: the step has had an attempt fail and is going again. The driver
 	// sets it, with RetryAfter, when it has durably recorded an attempt's
-	// outcome with another to follow (runStep), and settle clears it with the
-	// receipt. It is NOT inferred from Attempts being non-empty: a step's last
-	// record is written to Attempts an instant before its receipt, and a step
-	// that is about to pass or fail for good must not read as retrying to a
-	// progress published in that instant. RetryAfter is the wait the driver
-	// scheduled before that attempt.
+	// outcome with another to follow (runStep). It stays set while that next
+	// attempt runs, and ends when that attempt's record is added to Attempts
+	// (setAttempts) -- the record supersedes the outcome the flag was set for --
+	// or with the receipt (settle). It is NOT inferred from Attempts being
+	// non-empty: a step's last record is written to Attempts an instant before
+	// its receipt, and a step that is about to pass or fail for good must not
+	// read as retrying to a progress published in that instant. RetryAfter is
+	// the wait the driver scheduled before that attempt.
 	Retrying   bool
 	RetryAfter time.Duration
 }
