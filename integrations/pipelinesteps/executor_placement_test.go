@@ -406,3 +406,44 @@ func TestAFleetAttemptWithoutADispatcherSaysWhatItWasPlacedOn(t *testing.T) {
 		})
 	}
 }
+
+// TestAPolicyOnADedicatedStepChangesNoRoute: retries apply to every step, so
+// the driver now hands the installed policy to a cluster step and a fleet step
+// as well as to a pool step (spec section 6). Only a pool step may read the
+// policy's other half, the Fleet wait and the leave to spend cloud; if any
+// path read it for another step, a fleet step the owner's machines could not
+// take would quietly become a cloud Job, which is spending the owner never
+// allowed, or a cluster step would go and ask the machines first. The routes
+// below are the ones the same steps take with no policy at all.
+func TestAPolicyOnADedicatedStepChangesNoRoute(t *testing.T) {
+	policy := &pl.ComputePlacementPolicy{FleetWaitSeconds: 30, CloudFallback: true, Retries: pl.DefaultRetryPolicy()}
+
+	t.Run("a cluster step still goes to the cluster alone", func(t *testing.T) {
+		req := clusterPlacementStep()
+		req.ComputePlacement = policy
+		wb := clusterSucceeds()
+		fleet := &recordingFleet{result: pl.StepResult{Status: pl.OutcomeSucceeded}}
+		res, err := newTestExecutor(wb, fleet).Execute(context.Background(), req)
+		if err != nil || res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("Execute = %+v, %v", res, err)
+		}
+		if cluster, machines := asked(wb, fleet); cluster != 1 || machines != 0 {
+			t.Fatalf("cluster %d, fleet %d, want the cluster once and no machine", cluster, machines)
+		}
+	})
+
+	t.Run("a fleet step that no machine can take ends there, and never becomes a Job", func(t *testing.T) {
+		req := fleetPlacementStep()
+		req.ComputePlacement = policy
+		wb := clusterSucceeds()
+		fleet := &recordingFleet{result: refusedResult(pl.CodeNoMachineForNeed, "every machine refused before start")}
+		res, err := newTestExecutor(wb, fleet).Execute(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantFailure(t, res, pl.OutcomeRefused, pl.CodeNoMachineForNeed)
+		if cluster, machines := asked(wb, fleet); cluster != 0 || machines != 1 {
+			t.Fatalf("cluster %d, fleet %d: a fleet step reached the cloud because the policy allowed it for pool steps", cluster, machines)
+		}
+	})
+}

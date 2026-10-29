@@ -20,7 +20,15 @@
         "result": {
           "output": {
             "cloudFallback": false,
-            "fleetWaitSeconds": 0
+            "fleetWaitSeconds": 0,
+            "retries": {
+              "delaysSeconds": [
+                30,
+                120
+              ],
+              "otherMachines": true,
+              "sameMachine": 2
+            }
           },
           "status": "completed"
         }
@@ -45,7 +53,15 @@
         "result": {
           "output": {
             "cloudFallback": false,
-            "fleetWaitSeconds": 0
+            "fleetWaitSeconds": 0,
+            "retries": {
+              "delaysSeconds": [
+                30,
+                120
+              ],
+              "otherMachines": true,
+              "sameMachine": 2
+            }
           },
           "status": "completed"
         }

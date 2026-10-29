@@ -184,13 +184,34 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 	if refusal != nil {
 		return plan, refusal
 	}
+	// The installed compute policy, read once per drive whenever the plan has a
+	// command step. It used to be read for a pool step alone, because only the
+	// capacity half of it mattered and only to a pool step; its retry limits apply
+	// to EVERY command step (spec D6), so any command step asks for it.
+	//
+	// A command step that is skipped asks too, on purpose. A replica that takes
+	// the run over compiles the plan again, and a moving input (a changed-files
+	// compare that fails the second time and so selects everything) can skip a
+	// different set of steps. The policy is bound into every command step's
+	// recovery definition (definitionOf), and a resumed run whose definitions
+	// disagree is refused, so whether the policy is read must follow the plan's
+	// step kinds, which do not move, and not its skips, which can. Steps the
+	// driver delivers itself (a notification, a report, a repository change)
+	// reach no executor and read no policy.
+	//
+	// The cost of asking is that a policy that cannot be read
+	// (parseComputePlacement) now refuses every run with a command step, before a
+	// work run or an effect exists, instead of only a run with a pool step. It is
+	// the failure an installation already gets for a bad pool policy, and the
+	// refusal names the field. TestEveryRunGetsAPolicyEvenWithoutPoolSteps pins
+	// the read, the refusal and the skipped case.
 	for _, step := range plan.Steps() {
-		if step.Placement != pipelines.PlacementPool {
+		if step.Kind != pipelines.StepCommand {
 			continue
 		}
 		placement, err := dr.selectComputePlacement(ctx)
 		if err != nil {
-			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "computePlacement", "The installed pipeline compute policy could not select capacity: %v", err)
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "computePlacement", "The installed pipeline compute policy could not be read: %v", err)
 		}
 		dr.computePlacement = placement
 		break

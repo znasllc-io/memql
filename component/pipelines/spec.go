@@ -27,6 +27,12 @@ type Spec struct {
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 	// Services are the sidecars a step may name, by name.
 	Services map[string]Service `yaml:"services,omitempty" json:"services,omitempty"`
+	// Repeatable is the default of this pipeline's command steps for "running the
+	// command again is harmless" (StepSpec.Repeatable): a step that says nothing
+	// takes it, and a step's own repeatable overrides it. Absent means false. A
+	// plain bool is enough here because the pipeline has nothing above it to
+	// override.
+	Repeatable bool `yaml:"repeatable,omitempty" json:"repeatable,omitempty"`
 	// Caches names the default caches a step inherits (go, npm).
 	Caches []string    `yaml:"caches,omitempty" json:"caches,omitempty"`
 	Select *Select     `yaml:"select,omitempty" json:"select,omitempty"`
@@ -90,7 +96,18 @@ type StepSpec struct {
 	// Verification opts a deterministic, input-only command into exact-commit
 	// evidence reuse. It receives a stable verification environment, not event,
 	// release-version or run identity variables, and cannot produce artifacts.
+	// It implies Repeatable: such a command only recomputes an answer.
 	Verification bool `yaml:"verification,omitempty" json:"verification,omitempty"`
+	// Repeatable declares that running this command again is harmless (spec D5),
+	// which lets the driver run it again when an attempt's outcome is unknown. A
+	// pointer so a step can say false over a pipeline's true, and so that
+	// explicit false survives the JSON and YAML round trips an analysis report
+	// makes (as Caches does for an empty list); nil takes the pipeline's value.
+	// verification: true implies it, and declaring it false beside
+	// verification: true is refused as a contradiction. A report or repository
+	// change refuses it too: the driver delivers those itself, so it would be
+	// ignored in silence.
+	Repeatable *bool `yaml:"repeatable,omitempty" json:"repeatable,omitempty"`
 	// GitHubReadToken explicitly grants a cluster command or image build a short-lived,
 	// read-only token for this repository. Ordinary commands receive none.
 	GitHubReadToken bool `yaml:"githubReadToken,omitempty" json:"githubReadToken,omitempty"`

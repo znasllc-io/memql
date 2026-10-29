@@ -247,7 +247,12 @@ type runDriver struct {
 	cleanupFailed atomic.Bool
 	facts         requestFacts
 
-	workflow         *workflowProgram
+	workflow *workflowProgram
+	// computePlacement is the installed compute policy, read once per drive
+	// (readPlan) for any plan with a command step and nil for one without. Its
+	// capacity half serves a pool step; its retry limits serve every command step.
+	// It is bound into each command step's recovery definition (definitionOf) and
+	// copied into each command step's request (request).
 	computePlacement *pipelines.ComputePlacementPolicy
 	stages           []stageTracks
 	tracks           []*stepTrack
@@ -1316,10 +1321,15 @@ func (dr *runDriver) setFacts() {
 func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.StepRequest {
 	f := dr.facts
 	// A step receives its own value: an executor cannot mutate the captured
-	// placement decision observed by a sibling step or a resumed driver.
+	// placement decision observed by a sibling step or a resumed driver (Clone
+	// copies the retry delays too; they are a slice). Every command step is handed
+	// the policy, not only a pool step, because its retry limits apply to all of
+	// them; the executor reads the capacity half for a pool step alone
+	// (TestAPolicyOnADedicatedStepChangesNoRoute). Recovery binds the policy for
+	// the same steps (definitionForRun), so what is sent is what is bound.
 	var placement *pipelines.ComputePlacementPolicy
-	if dr.computePlacement != nil && t.step.Placement == pipelines.PlacementPool {
-		copy := *dr.computePlacement
+	if dr.computePlacement != nil && t.step.Kind == pipelines.StepCommand {
+		copy := dr.computePlacement.Clone()
 		placement = &copy
 	}
 	return pipelines.StepRequest{

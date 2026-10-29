@@ -339,6 +339,79 @@ func TestANotifyStageCarriesItsLinks(t *testing.T) {
 	}
 }
 
+// The manifest decoder refuses a key it does not know (KnownFields), so
+// `repeatable:` is legal only because the spec declares it, and a spelling or
+// tag mistake on the field would fail every run of every repository that uses
+// it, not just warn. A step's explicit false has to survive the analysis
+// report too: it is a statement over the pipeline's true, not an absence.
+func TestPipelineRepeatableSurvivesManifestTransport(t *testing.T) {
+	raw := []byte(`formatVersion: 1
+name: repeatable-contract
+pipeline:
+  repeatable: true
+  image: toolchain@sha256:test
+  stages:
+    - name: checks
+      steps:
+        - name: lint
+          run: make lint
+        - name: publish
+          run: make publish
+          repeatable: false
+`)
+	parsed, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("a manifest declaring repeatable was refused: %v", err)
+	}
+	if !parsed.Pipeline.Repeatable || parsed.Pipeline.Stages[0].Steps[0].Repeatable != nil ||
+		parsed.Pipeline.Stages[0].Steps[1].Repeatable == nil || *parsed.Pipeline.Stages[0].Steps[1].Repeatable {
+		t.Fatalf("repeatable was not read as written: pipeline %v, steps %v and %v",
+			parsed.Pipeline.Repeatable, parsed.Pipeline.Stages[0].Steps[0].Repeatable, parsed.Pipeline.Stages[0].Steps[1].Repeatable)
+	}
+	for _, transport := range []string{"json", "yaml"} {
+		t.Run(transport, func(t *testing.T) {
+			var decoded Manifest
+			if transport == "json" {
+				wire, err := json.Marshal(parsed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(wire, &decoded); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				wire, err := yaml.Marshal(parsed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				roundTrip, err := ParseManifest(wire)
+				if err != nil {
+					t.Fatal(err)
+				}
+				decoded = *roundTrip
+			}
+			plan, refusal := pipelines.Compile(decoded.Pipeline, pipelines.CompileInput{
+				Mode: pipelines.ModeFull, Event: pipelines.EventPush, Compute: pipelines.ComputeCluster,
+			})
+			if refusal != nil {
+				t.Fatal(refusal)
+			}
+			steps := plan.Steps()
+			if len(steps) != 2 || !steps[0].Repeatable || steps[1].Repeatable {
+				t.Fatalf("repeatable changed across %s: lint (inherits true) %v, publish (says false) %v",
+					transport, steps[0].Repeatable, steps[1].Repeatable)
+			}
+		})
+	}
+
+	// A near miss is still a typo, and still refused: the new field did not
+	// loosen the decoder.
+	typo := strings.Replace(string(raw), "repeatable: true", "repeatabel: true", 1)
+	if _, err := ParseManifest([]byte(typo)); err == nil || !strings.Contains(err.Error(), "repeatabel") {
+		t.Fatalf("a misspelled key was accepted or not named: %v", err)
+	}
+}
+
 func TestPipelineWorkflowSurvivesManifestTransport(t *testing.T) {
 	raw := strings.Replace(pipelineManifest, "pipeline:\n", "pipeline:\n  workflow: organizationChecks\n", 1)
 	m, err := ParseManifest([]byte(raw))

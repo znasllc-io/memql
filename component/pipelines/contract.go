@@ -1,5 +1,7 @@
 package pipelines
 
+import "slices"
+
 // Mode is how much of the suite a run executes (design record D1, D5).
 type Mode string
 
@@ -114,6 +116,20 @@ type Step struct {
 	CPUMilli         int               `json:"cpuMilli,omitempty"`
 	ImageBuild       *ImageBuild       `json:"imageBuild,omitempty"`
 	MemoryMiB        int               `json:"memoryMiB,omitempty"`
+	// Repeatable says that running this step's command again is harmless, so the
+	// driver may run it again after an attempt whose outcome it cannot know (a
+	// connection that dropped after the command was sent, a node that went away
+	// under the Job). A step that does not say so fails as it always did, because
+	// a second copy of a command that may already have run could publish twice or
+	// spend twice (spec D5). The manifest declares it (a pipeline default and a
+	// step override, resolved at compile time) and verification: true implies it.
+	//
+	// It is the author's word that repeating is safe and nothing more: it never
+	// widens the installation's retry limits (RetryPolicy) and never lets a step
+	// reach a place its placement or the installed policy did not allow (spec
+	// D7). An attempt that provably did not start, and a command that exits
+	// ExitRetryRequested, are retried without it.
+	Repeatable bool `json:"repeatable,omitempty"`
 	// RunAfterFailure is inherited from the stage and bound into the durable
 	// execution fingerprint, so recovery cannot change failure behavior.
 	RunAfterFailure bool   `json:"runAfterFailure,omitempty"`
@@ -159,8 +175,11 @@ type Step struct {
 // NodeService as JSON, so it carries plain data only.
 type StepRequest struct {
 	// ComputePlacement comes from the installed delivery-policy snapshot, never
-	// the tested repository. It selects capacity only for a pool-placed step;
-	// machine consent, resource limits and cloud admission remain mandatory.
+	// the tested repository. Every command step carries it, because its Retries
+	// limit the driver's retries of any step. Its capacity half (FleetWaitSeconds,
+	// CloudFallback) selects capacity only for a pool-placed step, and the
+	// executor reads it for no other; machine consent, resource limits and cloud
+	// admission remain mandatory.
 	ComputePlacement *ComputePlacementPolicy `json:"computePlacement,omitempty"`
 	// Placement is where the driver sends THIS attempt (AttemptPlacement). Nil is
 	// the step's own placement: how every step's first attempt goes. Unlike
@@ -212,12 +231,63 @@ type StepRequest struct {
 	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
-// ComputePlacementPolicy is the installation's choice of how long to prefer
-// compatible Fleet capacity before considering a budget-admitted cloud job.
-// A false CloudFallback keeps waiting for Fleet within the existing run bound.
+// ComputePlacementPolicy is the installation's captured delivery policy for
+// where, and how hard, a run's steps are tried. It comes from the installed
+// source and never from the tested repository, and it is captured with the run,
+// so every replica that drives or takes over the run applies the same numbers
+// (spec D6). It has two halves with different reach:
+//
+//   - FleetWaitSeconds and CloudFallback choose capacity for a pool-placed step
+//     only: how long to prefer compatible Fleet capacity before considering a
+//     budget-admitted cloud job. A false CloudFallback keeps waiting for Fleet
+//     within the existing run bound.
+//   - Retries limits the driver's retries of EVERY command step.
 type ComputePlacementPolicy struct {
-	FleetWaitSeconds int  `json:"fleetWaitSeconds"`
-	CloudFallback    bool `json:"cloudFallback"`
+	FleetWaitSeconds int         `json:"fleetWaitSeconds"`
+	CloudFallback    bool        `json:"cloudFallback"`
+	Retries          RetryPolicy `json:"retries"`
+}
+
+// Clone returns a policy that shares no storage with p. The retry delays are a
+// slice, so a plain struct copy would still alias them: the driver hands each
+// step's request its own copy, and an executor that edits what it was handed
+// must not change what a sibling step, or a replica that takes the run over,
+// reads.
+func (p ComputePlacementPolicy) Clone() ComputePlacementPolicy {
+	p.Retries.DelaysSeconds = slices.Clone(p.Retries.DelaysSeconds)
+	return p
+}
+
+// RetryPolicy is how hard the installation lets the driver retry one step (spec
+// D6 and section 6). A manifest and a command can ask for a retry (repeatable,
+// exit ExitRetryRequested) but cannot widen these limits: they are the
+// installation's decision about time and spend, and MaxStepAttempts bounds a
+// step's attempts whatever they say.
+//
+// The zero value retries nothing, which is what a policy built by hand should
+// mean. The portable limits are DefaultRetryPolicy, and the policy reader fills
+// them in when an installed policy names no retries at all.
+type RetryPolicy struct {
+	// SameMachine is how many times one place is tried again after an attempt
+	// there provably did not start, or its command asked for a retry: a machine
+	// for a fleet or pool step, the cluster for a cluster step. 0 to 3.
+	SameMachine int `json:"sameMachine"`
+	// DelaysSeconds is the wait before each of those retries, in order; the last
+	// value repeats for any further one. One to three values, each 0 to 900.
+	DelaysSeconds []int `json:"delaysSeconds"`
+	// OtherMachines lets a fleet or pool step go on to an eligible machine it has
+	// not tried once the same place is spent. It never reaches the cloud: a pool
+	// step's move to the cluster is CloudFallback's, a separate switch.
+	OtherMachines bool `json:"otherMachines"`
+}
+
+// DefaultRetryPolicy is the portable limits: two retries in the same place after
+// 30 and then 120 seconds, then any other machine. It sends no step anywhere its
+// placement and CloudFallback did not already allow. Each call returns its own
+// slice, so a caller that edits its delays cannot change the default another run
+// reads.
+func DefaultRetryPolicy() RetryPolicy {
+	return RetryPolicy{SameMachine: 2, DelaysSeconds: []int{30, 120}, OtherMachines: true}
 }
 
 // AttemptPlacement is where the driver sends one attempt of a step, and the

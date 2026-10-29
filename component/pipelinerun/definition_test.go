@@ -28,8 +28,11 @@ func TestVerificationFingerprintPreservesTheLiveDriver(t *testing.T) {
 	if verification == "" || verification == full {
 		t.Fatal("verification must normalize the run-only facts while retaining an execution definition")
 	}
+	// The same facts with the run-only ones zeroed, in the evidence's own scope:
+	// the recovery fingerprint also binds the installed policy, which evidence
+	// must not (TestRetryPolicyIsPartOfTheRecoveryDefinition).
 	want := &runDriver{d: dr.d, p: dr.p, run: Run{SHA: shaA}, workflow: dr.workflow}
-	if verification != want.definitionOf(step) {
+	if verification != want.definitionForRun(step, want.run, evidenceScope) {
 		t.Fatal("verification changed more than the event, branch, mode, version and inbound request")
 	}
 	want.run.SHA = shaB
