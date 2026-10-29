@@ -12,8 +12,14 @@
 # running at all. A team absorbs that: another member reviews. It also survives
 # the org growing, which a list of usernames does not.
 
-# Default owner for everything else.
-*                        @znasllc-io/human-developers
+# RELEASE TRAINS GIVE EVERY PATH TO THE OWNER (2026-10-29, the switch in
+# docs/internal/ops/ruleset-baseline.md, step 2). Pull requests no longer
+# merge one at a time: a train lands them through ONE App-authored pull
+# request, which the owner can approve because they did not author it. So
+# only the owner's review should count, and the catch-all moves from
+# human-developers to human-lead-developers, today the owner alone. It stays
+# a team for the reason above.
+*                        @znasllc-io/human-lead-developers
 
 # CI / workflows / supply-chain
 /.github/                @znasllc-io/human-lead-developers
