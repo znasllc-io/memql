@@ -46,6 +46,7 @@ package memql
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -69,6 +70,10 @@ type AICallAttribution struct {
 	// Touches is the call's footprint: the concept ids or knowledge-domain
 	// ids the call is about. A rule matches it with startsWith semantics.
 	Touches []string
+	// Tags are call tags a rule may branch on, for a caller whose call site
+	// builds no request of its own -- the pipeline runner's independent review
+	// renders a captured prompt, so it says "pipeline" here.
+	Tags []string
 }
 
 type aiCallAttributionKey struct{}
@@ -83,7 +88,7 @@ func ContextWithAICallAttribution(ctx context.Context, a AICallAttribution) cont
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if strings.TrimSpace(a.RequestId) == "" && strings.TrimSpace(a.AgentId) == "" && len(a.Touches) == 0 {
+	if strings.TrimSpace(a.RequestId) == "" && strings.TrimSpace(a.AgentId) == "" && len(a.Touches) == 0 && len(a.Tags) == 0 {
 		return ctx
 	}
 	return context.WithValue(ctx, aiCallAttributionKey{}, a)
@@ -122,6 +127,13 @@ func applyCallAttribution(ctx context.Context, req airoute.ResolveRequest) airou
 		// Copied rather than aliased: the request travels onto a decision
 		// record that outlives the caller's slice.
 		req.Touches = append([]string(nil), stamped.Touches...)
+	}
+	// TAGS ARE ADDED, not filled: a call site's own tag (background, say) and
+	// the tag of where the call started (pipeline) are both true of it, and a
+	// rule may need either. The call site's come first, each tag once.
+	req.Tags = appendTags(req.Tags, stamped.Tags)
+	if inRun {
+		req.Tags = appendTags(req.Tags, run.Tags)
 	}
 
 	// THE RUN AND STEP ARE THE SESSION DOOR'S HINGE (design D7) and nothing
@@ -178,4 +190,21 @@ func firstNonBlank(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// appendTags is have followed by every tag of add it does not already hold, as
+// a new slice so the request never aliases a caller's or a run context's.
+func appendTags(have, add []string) []string {
+	if len(add) == 0 {
+		return have
+	}
+	out := append([]string(nil), have...)
+	for _, tag := range add {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || slices.Contains(out, tag) {
+			continue
+		}
+		out = append(out, tag)
+	}
+	return out
 }

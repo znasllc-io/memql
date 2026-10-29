@@ -49,6 +49,7 @@ var shippedPolicies = []string{
 	"fastLocalFirst",
 	"localOnly",
 	"federationStrongest",
+	"localFirstStrongest",
 	"embeddingsBinding",
 	"researchApps",
 }
@@ -70,6 +71,7 @@ var shippedRules = map[string]string{
 	"backgroundEscalation":     "localFirst",
 	"operatorReasoning":        "localFirst",
 	"reasoningParks":           "federationStrongest",
+	"pipelineLocalFirst":       "localFirstStrongest",
 	"embeddingsBound":          "embeddingsBinding",
 	"compilerLocalOnly":        "localOnly",
 	"policyCompilerLocalOnly":  "localOnly",

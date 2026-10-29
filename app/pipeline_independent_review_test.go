@@ -3,13 +3,16 @@ package app
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 func ordinaryReportInput(p *reviewReportProtocol) pipelinerun.IndependentReviewInput {
@@ -98,5 +101,16 @@ func TestPipelineGroupReportUsesSameProviderCheckForTypedMemberKinds(t *testing.
 			require.NoError(t, err)
 			require.Equal(t, 1, p.groupWrites)
 		})
+	}
+}
+
+// The pipeline runner's own review call is pipeline work (spec 2026-10-29,
+// D5), and stamping the tag keeps whatever an outer frame attributed.
+func TestTheIndependentReviewCallIsTaggedPipeline(t *testing.T) {
+	ctx := memql.ContextWithAICallAttribution(context.Background(), memql.AICallAttribution{RequestId: "review-1"})
+	ctx = pipelineCallContext(pipelineCallContext(ctx))
+	a, ok := memql.AICallAttributionFromContext(ctx)
+	if !ok || a.RequestId != "review-1" || !reflect.DeepEqual(a.Tags, []string{airoute.TagPipeline}) {
+		t.Fatalf("attribution = %+v, want the request kept and the tag once", a)
 	}
 }

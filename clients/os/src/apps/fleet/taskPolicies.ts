@@ -42,6 +42,7 @@ const SHIPPED_DESCRIPTIONS: Record<string, string> = {
   fastLocalFirst: "A quick local model first, then a signed-in app, then a vendor.",
   localOnly: "Stays on your machines. When none can serve, the rule decides whether to wait.",
   federationStrongest: "A strong local model, then a signed-in app, then the strongest vendor. Vendors bill per call.",
+  localFirstStrongest: "For pipeline work: your machines first, then a signed-in app, then the strongest vendor, always in that order. Vendors bill per call.",
   embeddingsBinding: "The cluster's active embedding model, so new vectors match the index. Changing it needs an embedding migration.",
 };
 export function policyDescription(policy: TaskPolicy): string {

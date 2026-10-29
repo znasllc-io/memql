@@ -83,6 +83,11 @@ const (
 	// TagBackgroundEscalation is the one stronger continuation the background
 	// lane swaps to when the cheap tier is stuck on a turn.
 	TagBackgroundEscalation = "backgroundEscalation"
+	// TagPipeline is work a pipeline started: its independent review, and
+	// every model call of a work run whose goal arrived through a pipeline
+	// (a failed run's diagnosis, the repository change it requests). The
+	// shipped rule pipelineLocalFirst routes it local first, in order.
+	TagPipeline = "pipeline"
 )
 
 // ResolveRequest carries everything a rule may branch on and everything the

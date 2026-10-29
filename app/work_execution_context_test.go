@@ -449,3 +449,35 @@ func TestLeasedHumanResumeClaimCannotServeANewerAnswerOrRerun(t *testing.T) {
 		t.Fatal("answer lease served a new rerun")
 	}
 }
+
+// A WORK RUN A PIPELINE OPENED CARRIES THE PIPELINE TAG ON THE REPLICA THAT
+// EXECUTES IT (spec 2026-10-29, D5). Nothing from the replica that opened the
+// goal is on this context: the tag is read off the goal row here.
+func TestExecutionHopCarriesTheRunsCallTags(t *testing.T) {
+	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "live"}
+	ctx, err := workExecutionContext(context.Background(), j, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = withRunCallTags(ctx, pipelineCallTags(map[string]any{"requestedVia": "pipeline"}))
+	run, ok := common.RunFromContext(ctx)
+	if !ok || !reflect.DeepEqual(run.Tags, []string{airoute.TagPipeline}) || run.RunId != "r" {
+		t.Fatalf("run context = %+v, want the pipeline tag beside the run", run)
+	}
+	for _, via := range []any{"ask", "", nil} {
+		if tags := pipelineCallTags(map[string]any{"requestedVia": via}); len(tags) != 0 {
+			t.Errorf("requestedVia %v tagged %v", via, tags)
+		}
+	}
+}
+
+// A goal row that cannot be read refuses nothing: the run executes with the
+// ordinary rules, and the dispatcher says why.
+func TestAGoalThatCannotBeReadLeavesTheRunUntagged(t *testing.T) {
+	tags, err := goalCallTags(context.Background(), func(context.Context, string) (*memql.ExecuteResult, error) {
+		return nil, errors.New("database unavailable")
+	}, "g")
+	if err == nil || len(tags) != 0 {
+		t.Fatalf("tags=%v err=%v, want no tags and the error", tags, err)
+	}
+}

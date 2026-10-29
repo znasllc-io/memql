@@ -207,7 +207,8 @@ actually served.
 
 ## The shipped rules
 
-Eight, all `@locked`.
+The general ones, all `@locked`. The rest of `dsl/rules/rules.memql` pins
+particular prompts (the rule compiler, document research) to local models.
 
 | Rule | Condition | Level | Policy | Exhausted |
 |---|---|---|---|---|
@@ -217,6 +218,7 @@ Eight, all `@locked`.
 | `backgroundEscalation` | `tag="backgroundEscalation"` | `strong` | `localFirst` | degrade |
 | `operatorReasoning` | `prompt="agentReply", role="operator"` | `reasoning` | `localFirst` | degrade |
 | `reasoningParks` | `level="reasoning"` | -- | `federationStrongest` | **park** |
+| `pipelineLocalFirst` | `level="reasoning", tag="pipeline"` | -- | `localFirstStrongest` | **park** |
 | `embeddingsBound` | `level="embeddings"` | -- | `embeddingsBinding` | **park** |
 | `compilerLocalOnly` | `prompt="compileRule"` | -- | `localOnly` | **park** |
 
@@ -227,6 +229,23 @@ smaller model's answer than a card telling them to open a laptop. A call that
 park: a degraded reasoning call does not return a worse answer, it returns a
 confident answer produced by a model that could not do the work, and nothing
 downstream can tell the difference.
+
+### Pipeline work runs local first
+
+A pipeline's AI -- the independent PR review, a failed run's diagnosis, the
+repository change a diagnosis requests -- carries the `pipeline` tag: the review
+because the pipeline runner makes the call, the others because their work goal
+arrived through a pipeline (`requestedVia: "pipeline"`, read off the goal by the
+replica executing the run). `pipelineLocalFirst` outranks `reasoningParks` for
+those calls and names `localFirstStrongest`: the strongest local model that can
+hold the call, then a signed-in app, then the strongest vendor, **in that
+order**. `federationStrongest` has the same entries but is one of the chains
+Auto ranks, and at `reasoning` Auto puts an app above a local model.
+
+The context floor still decides the local door per call. A review renders at
+most 1 MiB, which is a floor of 266,240 tokens: no 262,144-token local model
+holds it, so a full-size review goes straight to the app, and a small one runs
+locally. When nothing can serve the call the work parks.
 
 ### What `@locked` means
 

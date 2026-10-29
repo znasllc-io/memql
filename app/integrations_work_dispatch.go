@@ -172,6 +172,14 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 		d.failRun(ctx, req, "source_journal_refused", err.Error())
 		return
 	}
+	// Where the goal came from decides a call tag (work_call_tags.go): a
+	// pipeline's goals route local first. Read here, on the executing replica.
+	if tags, err := goalCallTags(ctx, d.app.engine.Execute, journal.GoalId); err != nil {
+		log.Warn("work run dispatch: could not read the run's goal; its model calls route by the ordinary rules",
+			"component", "work.dispatch", "run", req.RunId, "goal", journal.GoalId, "error", err)
+	} else {
+		ctx = withRunCallTags(ctx, tags)
+	}
 
 	template, err := loadWorkTemplate(ctx, d.app.engine, d.app.automationLoader, journal)
 	if err != nil {
