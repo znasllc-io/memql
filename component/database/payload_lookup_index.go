@@ -29,23 +29,40 @@ import (
 // transaction per chunk on a hypertable, and a re-inspection of every chunk
 // before the migration reports success.
 
+// lookupEquality is one payload field equal to one string: a further partial
+// condition on a lookup index, so it holds a small slice of a large concept
+// (component/memql's payloadLookup.partial says when a read may use one).
+type lookupEquality struct {
+	field, value string
+}
+
 // payloadLookupIndexPredicates renders the partial predicate as Postgres
 // deparses it on the root, and as TimescaleDB folds it when it copies the index
-// onto a chunk.
-func payloadLookupIndexPredicates(concepts []string) (root, folded string) {
+// onto a chunk. Measured on TimescaleDB 2.27 (PostgreSQL 16): a further
+// equality joins the concept list as `((<concepts>) AND ((payload ->>
+// '<field>'::text) = '<value>'::text))`, and only the array is folded.
+func payloadLookupIndexPredicates(concepts []string, partial ...lookupEquality) (root, folded string) {
 	quoted := make([]string, len(concepts))
 	for i, concept := range concepts {
 		quoted[i] = "'" + concept + "'::text"
 	}
 	root = "(concept = ANY (ARRAY[" + strings.Join(quoted, ", ") + "]))"
 	folded = "(concept = ANY ('{" + strings.Join(concepts, ",") + "}'::text[]))"
-	return root, folded
+	if len(partial) == 0 {
+		return root, folded
+	}
+	conditions := make([]string, len(partial))
+	for i, equality := range partial {
+		conditions[i] = "((payload ->> '" + equality.field + "'::text) = '" + equality.value + "'::text)"
+	}
+	rest := " AND " + strings.Join(conditions, " AND ")
+	return "(" + root + rest + ")", "(" + folded + rest + ")"
 }
 
 // payloadLookupIndexMatches reports whether an index is exactly the lookup
 // index for field over concepts, on the root or on a chunk.
-func payloadLookupIndexMatches(field string, concepts []string) func(indexFacts) bool {
-	root, folded := payloadLookupIndexPredicates(concepts)
+func payloadLookupIndexMatches(field string, concepts []string, partial ...lookupEquality) func(indexFacts) bool {
+	root, folded := payloadLookupIndexPredicates(concepts, partial...)
 	return func(f indexFacts) bool {
 		return f.Method == "btree" && f.Partial && f.Expression &&
 			(f.Predicate == root || f.Predicate == folded) &&
@@ -57,8 +74,8 @@ func payloadLookupIndexMatches(field string, concepts []string) func(indexFacts)
 
 // ensurePayloadLookupIndex builds the lookup index for field over concepts
 // under name, or verifies the one already there.
-func ensurePayloadLookupIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, name, field string, concepts []string) error {
-	root, _ := payloadLookupIndexPredicates(concepts)
+func ensurePayloadLookupIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, name, field string, concepts []string, partial ...lookupEquality) error {
+	root, _ := payloadLookupIndexPredicates(concepts, partial...)
 	return ensureNamedWorkIndex(ctx, db, logger, table, name,
-		`((payload->>'`+field+`'),concept,id,"createdAt" DESC)`, root, payloadLookupIndexMatches(field, concepts))
+		`((payload->>'`+field+`'),concept,id,"createdAt" DESC)`, root, payloadLookupIndexMatches(field, concepts, partial...))
 }

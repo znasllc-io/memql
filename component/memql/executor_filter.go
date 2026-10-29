@@ -496,6 +496,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 	// A closure rather than one mutated builder: the window below can widen and
 	// re-scan, and a bun query carries both its LIMIT and the destination slice,
 	// so each attempt needs a fresh builder and a fresh slice.
+	walk := e.latestScanWalk(ctx, expr, timestamp, sorter)
 	buildScan := func(rows *[]memorynodes.MemoryNode, limit int) *bun.SelectQuery {
 		// The collapse. `memory_nodes_id_created_at_desc_idx` is `(id,
 		// "createdAt" DESC)`, exactly this ordering, so the subquery reads the
@@ -522,7 +523,17 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		}
 
 		q := db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", latest)
-		if keys := e.latestScanKeys(expr, timestamp); keys != nil {
+		if walk != nil {
+			// A read whose coarse lookup term decides it, newest first: walk
+			// the term's versions in page order and stop at the page
+			// (latest_scan_walk.go). The filter runs on the latest versions
+			// the walk keeps, above its fence, and the order below is the
+			// walk's own, so the LIMIT stops the walk.
+			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", walk)
+			if filter.sql != "" {
+				q = q.Where(filter.sql, filter.args...)
+			}
+		} else if keys := e.latestScanKeys(expr, timestamp); keys != nil {
 			// Collapse covering-index keys before reading payloads. Heartbeats
 			// may give a few machines hundreds of thousands of versions; the
 			// old predicate scanned every historical JSON payload on every poll.

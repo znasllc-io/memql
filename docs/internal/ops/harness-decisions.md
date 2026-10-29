@@ -1200,11 +1200,57 @@ only a pending event names, row admission, the three refusals and a bound of
 (`killswitch_test.go`) answer through the same seam. Both database tests need
 `MEMQL_REQUIRE_DB=1`.
 
+**The owner's feeds and the selective reads beside them.** A read narrowed by
+the owner alone still enumerated the owner's whole range. It paid a heap fetch
+per version of the owner's runs, because an expression index allows neither an
+index-only scan nor TimescaleDB's SkipScan, plus one latest payload per run.
+That covered `workRunSummariesForOwner` (Nexus's run list), `workRunsForOwner`
+(the Training app and the procedure learner's pages), the procedure corpus read
+(`workRunsForOwnerGoalSignature`) and the three Library revision reads. Two
+mechanisms now bound them, chosen by measurement on 3,000 runs of 20 TOASTed
+versions:
+
+- **A newest-first walk** for a feed the owner term decides
+  (`latestScanWalk`, `component/memql/latest_scan_walk.go`, over the new
+  `memory_nodes_work_run_owner_walk_idx`). It walks the owner's versions in page
+  order and keeps a version only when no newer one of its run exists, then stops
+  at the page: 4,152 buffers for a page of 50 where the lookup took 97,252. A
+  LATERAL `LIMIT 1` probe was chosen over `NOT EXISTS`, because TimescaleDB
+  excludes chunks for it at run time (10,145 buffers otherwise). The cursor is
+  pushed in as `createdAt <= t AND (createdAt < t OR id > i)`, because the
+  engine's top-level `OR` sent the planner to a sort of the whole range
+  (127,725 buffers for a deep page; 4,431 in this form). The walk is taken only
+  when the filter, with the owner term and the concept assumed, is true for
+  every row. A status or a signature can reject what the walk finds, and with
+  nothing matching the walk cost 402,923 buffers, four times the lookup.
+- **Partial lookup indexes for the selective reads**
+  (`payloadLookup.partial`). `memory_nodes_work_run_signature_lookup_idx` holds
+  only succeeded versions, one entry per finished run, and serves the corpus
+  read because it requires `status == "succeeded"`.
+  `memory_nodes_work_run_revision_lookup_idx` holds only
+  `reviseLibraryDocument` runs and serves the revision reads, which name it.
+  An index over every automation was rejected: a common automation, a
+  pipeline's, would drive some other read with every owner's history. Measured:
+  105 buffers through the signature index and an index-only scan through the
+  revision index.
+
+`TestWorkRunReadsDoNotScanTheOwnersHistory` pages the owner's feed to its end
+on the real SQL, against the concept-wide read and its cursor, with no run
+twice and the run the owner gave away gone. Pages 1, 2 and 12 cost 1,541 to
+2,015 buffers over about 9,600 versions of history, against 27,117 before.
+The test also holds the corpus read to 34 buffers and the revision read to 30.
+`TestLatestScanWalkTakesOnlyReadsItsTermDecides` pins when the walk is taken,
+without a database, and `TestPayloadWalksAreTheMigratedWalkIndexes` holds the
+walk registry to the catalog. Each new index is about 100 bytes per run
+version, except the two partial ones, which hold a slice. The owner lookup
+index now serves only the owner reads the walk does not take; dropping it is a
+later migration, once the walk has served production.
+
 **Not verified, and not fixed.** Nothing here ran against production; it takes
-effect in the engine release after 0.31.7. An owner-only read still enumerates
-the owner's whole range: `workRunSummariesForOwner` (Nexus's run list),
-`workRunsForOwner`, `workSignedRunsForOwner`, the procedure corpus read and the
-document revision reads cost one heap fetch per version of the owner's runs
-plus one latest payload per run. Expression indexes allow neither index-only
-scans nor TimescaleDB's SkipScan. That class needs its own design and is not
-claimed bounded here.
+effect in the engine release after 0.31.7. A page of the owner's feed still
+visits each version of the runs on it, so a page costs its runs times their
+versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
+(the procedure reuse sweep) stays on the owner lookup: its status term can
+reject what a walk finds. The same sweep's `workAutomationStepsForOwner` and
+`workGoalsForOwner` read concepts with no owner index at all, so bounding the
+run read alone would not let the sweep finish.

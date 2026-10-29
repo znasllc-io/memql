@@ -22,9 +22,12 @@ const (
 )
 
 var (
-	EnsureWorkJournalLookupIndex   = ensureWorkJournalLookupIndex
-	EnsureEmailDigestLookupIndexes = ensureEmailDigestLookupIndexes
-	EnsureEmailProviderLookupIndex = ensureEmailProviderLookupIndex
-	EnsureWorkRunOwnerLookupIndex  = ensureWorkRunOwnerLookupIndex
-	EnsureWorkRunGoalLookupIndex   = ensureWorkRunGoalLookupIndex
+	EnsureWorkJournalLookupIndex      = ensureWorkJournalLookupIndex
+	EnsureEmailDigestLookupIndexes    = ensureEmailDigestLookupIndexes
+	EnsureEmailProviderLookupIndex    = ensureEmailProviderLookupIndex
+	EnsureWorkRunOwnerLookupIndex     = ensureWorkRunOwnerLookupIndex
+	EnsureWorkRunGoalLookupIndex      = ensureWorkRunGoalLookupIndex
+	EnsureWorkRunOwnerWalkIndex       = ensureWorkRunOwnerWalkIndex
+	EnsureWorkRunSignatureLookupIndex = ensureWorkRunSignatureLookupIndex
+	EnsureWorkRunRevisionLookupIndex  = ensureWorkRunRevisionLookupIndex
 )

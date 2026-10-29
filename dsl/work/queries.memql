@@ -184,6 +184,11 @@ query goal workGoalForOwner {
   shape   workGoalFull
 }
 
+// workRunsForOwner and workRunSummariesForOwner are walked newest first through the owner walk
+// index, so a page costs the page and not the owner's history (component/memql latestScanWalk). The
+// walk is taken because the owner term decides these filters; a further condition here would move
+// them back to the owner lookup, which reads every version the owner ever wrote (2026-10-29).
+
 /// The caller's runs, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side, and the
 /// concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not
 /// handed anybody else's work the way an undeclared concept would.
@@ -237,6 +242,10 @@ query run workRunsForGoal {
   sort    "row.createdAt", "desc"
   shape   workRunFull
 }
+
+// Served by the run signature lookup index, which holds only succeeded versions: the read may use it
+// because it requires `row.status == "succeeded"` (component/memql payloadLookup.partial). Without
+// that condition it would fall back to the owner's whole history.
 
 /// The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read
 /// (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds
@@ -525,6 +534,10 @@ query approval workApprovalsForOwnedRun {
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
  shape workApprovalFull
 }
+
+// The three revision reads below are served by the run revision lookup index, which holds only the
+// reviseLibraryDocument automation's runs: they may use it because each requires that automation by
+// its literal name (component/memql payloadLookup.partial). Without it they cost the owner's history.
 
 /// Recover this person's latest document review across editor windows and restarts.
 /// Returns only an owned request identifier; Library checks the backing document

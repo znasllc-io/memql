@@ -28,6 +28,7 @@ func TestTheIndexMigrationsAreGoRegisteredOnceUnderTheirFileNames(t *testing.T) 
 		memoryNodesConceptIndexMigrationName, memoryNodesConceptIndexVerifiedMigrationName,
 		workJournalLookupMigrationName, emailDigestLookupMigrationName,
 		workRunOwnerLookupMigrationName, workRunGoalLookupMigrationName,
+		workRunOwnerWalkMigrationName, workRunSignatureLookupMigrationName, workRunRevisionLookupMigrationName,
 	} {
 		version, comment, _ := strings.Cut(name, "_")
 		got := byVersion[version]

@@ -118,7 +118,8 @@ func payloadLookupTermOf(n *ComparisonExpression) (payloadLookupTerm, bool) {
 // owner index, with the goal term as a per-version filter. Leaving the coarse
 // term to the filter leaves the planner one index to use. A coarse term alone
 // still starts a lookup -- one person's runs among many system runs, the read
-// its index was built for.
+// its index was built for -- unless the read is a newest-first feed the term
+// decides, which latestScanWalk walks to its page instead.
 //
 // TestWorkRunReadsDoNotScanTheOwnersHistory holds both rules to the real SQL.
 //
@@ -134,11 +135,19 @@ func (e *MemQLEngine) latestLookupKeys(concept string, terms []payloadLookupTerm
 	db := e.database()
 	lookup := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).Column("id").Distinct().
 		Where("concept = ?", concept)
-	for _, term := range drivers {
+	for _, driver := range drivers {
+		term := driver.term
 		if len(term.values) == 1 {
 			lookup = lookup.Where("(payload->>?) = ?", term.field, term.values[0])
 		} else {
 			lookup = lookup.Where("(payload->>?) IN (?)", term.field, bun.In(term.values))
+		}
+		// A partial index is usable only when the query implies its
+		// predicate, so its equalities are spelled out. The read requires
+		// each of them (payloadLookupFor), and the index answers them for
+		// free: none is read from a payload.
+		for _, equality := range driver.lookup.partial {
+			lookup = lookup.Where("(payload->>?) = ?", equality.field, equality.value)
 		}
 	}
 	// An id never changes across versions, so an id term holds for every
@@ -159,19 +168,26 @@ func (e *MemQLEngine) latestLookupKeys(concept string, terms []payloadLookupTerm
 		Join(latest, args...)
 }
 
+// lookupDriver is a required term a lookup reads its range through, with the
+// index that serves it.
+type lookupDriver struct {
+	term   payloadLookupTerm
+	lookup payloadLookup
+}
+
 // lookupDrivers is the required terms a lookup reads its range through: the
 // ones a lookup index serves, the fine-grained in preference to the coarse
 // (see latestLookupKeys). Empty when no index serves any of them.
-func lookupDrivers(concept string, terms []payloadLookupTerm) []payloadLookupTerm {
-	var fine, coarse []payloadLookupTerm
+func lookupDrivers(concept string, terms []payloadLookupTerm) []lookupDriver {
+	var fine, coarse []lookupDriver
 	for _, term := range terms {
-		lookup, served := payloadLookupFor(concept, term.field)
+		lookup, served := payloadLookupFor(concept, term, terms)
 		switch {
 		case !served:
 		case lookup.coarse:
-			coarse = append(coarse, term)
+			coarse = append(coarse, lookupDriver{term, lookup})
 		default:
-			fine = append(fine, term)
+			fine = append(fine, lookupDriver{term, lookup})
 		}
 	}
 	if len(fine) > 0 {
