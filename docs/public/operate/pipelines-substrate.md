@@ -907,8 +907,9 @@ together, behind a global hold ([Operator run admission](pipelines.md#operator-r
    step of a run still going when the engine changes finds no eligible machine.
 3. Deploy the engine.
 4. Upgrade every machine's Cockpit.
-5. Verify one run.
-6. Release the hold.
+5. Release the hold. An allowance admits every queued run, so a hold cannot let
+   exactly one through.
+6. Watch the first run that takes a fleet step. If it fails, hold again.
 
 Build the contract-5 Cockpit before the window: a release pipeline whose macOS
 steps run on your machines needs them while they still match the engine.

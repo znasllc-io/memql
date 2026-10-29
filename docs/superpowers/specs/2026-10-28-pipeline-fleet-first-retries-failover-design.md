@@ -196,8 +196,8 @@ repository's pre-release rule forbids compatibility shims on Go wire contracts
 (CLAUDE.md, Branch Workflow 3). So contract 5 switches in lockstep, as the
 Codex work intended. The rollout holds new runs with the cost guard's operator
 hold, lets in-flight runs finish, deploys the engine and upgrades every
-machine's Cockpit together, verifies one run, and releases the hold (section
-12). Rejected: the version-acceptance shim above.
+machine's Cockpit together, releases the hold and watches the first run
+(section 12). Rejected: the version-acceptance shim above.
 
 ### D11 -- Two PRs; the manifest and the installation follow the deploy
 
@@ -205,7 +205,8 @@ Production's engine compiles each pull request's `memql-package.yaml`, and the
 manifest decoder refuses unknown keys (`KnownFields(true)`). A manifest using
 `placement: pool` or `repeatable:` would fail every run until production runs
 this engine. So this PR changes no manifest key; a follow-up PR moves the
-portable checks to `pool` and marks them repeatable after the deploy.
+portable checks that are not verification steps to `pool` and marks them
+repeatable after the deploy (section 12).
 
 ### D12 -- Out of scope
 
@@ -547,12 +548,19 @@ comments at each decision.
    `operatorHold`; let in-flight runs finish; deploy the engine (memql-znas pin,
    manual ArgoCD sync); upgrade Cockpit on all four machines (CyberPC also
    needs `pipelines.allow: true`; Black MacBook Pro when the owner turns
-   pipelines back on); verify one run; release the hold. After the deploy,
+   pipelines back on); release the hold and watch the first run, holding again
+   if it fails. (Corrected during implementation: a hold cannot let exactly one
+   run through, because an allowance admits every queued run.) After the deploy,
    dry-run the installed policy: a policy phase that errors now refuses every
    run with a command step (section 6).
 4. **memql follow-up PR:** `memql-package.yaml` moves the portable checks to
    `pool` (from `codex/fleet-first-manifest`) and marks them repeatable;
-   release-publishing steps stay non-repeatable.
+   release-publishing steps stay non-repeatable. It cannot move a
+   `verification: true` step: reusable verification requires `placement:
+   cluster` (`component/pipelines/verification.go`). Twenty steps carry it, the
+   Go and database tests and the node builds and tests among them, so moving
+   those waits on an owner decision: give up evidence reuse for them, or extend
+   reusable verification to evidence a machine produced.
 5. **memql-znas follow-up PR:** the stored resolver moves to the fleet-first
    profile with `retries`, and the cost guard to admission version 2.
 

@@ -1353,9 +1353,16 @@ the same values. Placement does not change until a manifest marks a step `pool`,
 which follows the deploy because an older engine's strict manifest decoder
 refuses the key. Worker contract 5 is exact, so the engine and every machine's
 Cockpit switch together: operator hold; let in-flight runs finish; deploy the
-engine; upgrade every Cockpit; verify one run; release the hold. The contract-5
-Cockpit release is cut while production still runs the old engine, because its
-macOS steps need today's machines.
+engine; upgrade every Cockpit; release the hold and watch the first run,
+holding again if it fails. A hold cannot let exactly one run through (an
+allowance admits every queued run), so the check follows the release. The
+contract-5 Cockpit release is cut while production still runs the old engine,
+because its macOS steps need today's machines. The manifest change cannot move
+a `verification: true` step: reusable verification requires `placement:
+cluster` (`component/pipelines/verification.go`). Twenty steps carry it, the Go
+and database tests and the node builds and tests among them, so moving those
+waits on an owner decision: give up evidence reuse for them, or extend reusable
+verification to evidence a machine produced.
 
 **Regression tests.** Classification (`integrations/pipelinesteps`):
 `TestAttemptClassTable`, `TestFleetAttemptClassTable`,
