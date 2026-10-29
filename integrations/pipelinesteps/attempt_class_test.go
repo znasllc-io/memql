@@ -96,26 +96,30 @@ var eitherSurfaceRows = []classRow{
 }
 
 func TestAttemptClassTable(t *testing.T) {
-	pullFailure := &pl.Failure{Code: pl.CodeImagePullFailed, Message: "x"}
 	rows := append([]classRow{
-		// cluster | the Job never started the command.
-		{"cluster", "a service stopped before the step", failedResult(pl.CodeServiceFailed, "x"), pl.AttemptNothingRan},
-		{"cluster", "no node could schedule the pod", failedResult(pl.CodeJobUnschedulable, "x"), pl.AttemptNothingRan},
+		// cluster | the clone failed: the one cluster verdict of this kind that is
+		// still nothing ran, because a failed clone leaves the pod terminal (the
+		// Job's restartPolicy is Never and its backoffLimit 0; see
+		// TestACloneFailureLeavesThePodTerminal), so nothing can start the step
+		// container after the report.
 		{"cluster", "the Job's clone failed", failedResult(pl.CodeCloneFailed, "x"), pl.AttemptNothingRan},
 
-		// cluster | an image that cannot be pulled is nothing ran only when the
-		// RESULT proves the step's own container never started. The classifier
-		// reports a pull failure of ANY container of the pod, a service's
-		// sidecar included, and does so even while the step is running (the
-		// kubelet pulls a restarted sidecar's image again), so the code proves
-		// nothing alone. The proof is StartedAt, which the runner takes from the
-		// step container (stepTimes) and leaves empty until it starts; the exit
-		// status is -1 in both cases and proves nothing.
-		{"cluster", "an image could not be pulled and the step never started", failedResult(pl.CodeImagePullFailed, "x"), pl.AttemptNothingRan},
+		// cluster | the other verdicts that read "the command never started" are
+		// reported while the Job and its pod are still ALIVE (the runner only
+		// annotates the Job; the agent's acknowledgement or a cancel deletes it).
+		// The kubelet keeps retrying a failed pull and restarting service sidecars,
+		// and the scheduler keeps trying to place a pod, so the step's command can
+		// start AFTER the report: always an unknown outcome, whatever the pod
+		// looked like when it was read. StartedAt (empty while the step container
+		// has not started) and the exit status (-1 either way) are no proof, so a
+		// row that sets them reads the same.
+		{"cluster", "an image could not be pulled", failedResult(pl.CodeImagePullFailed, "x"), pl.AttemptOutcomeUnknown},
+		{"cluster", "an image could not be pulled and the step had not started when the verdict was read", pl.StepResult{
+			Status: pl.OutcomeFailed, ExitCode: -1, StartedAt: "", Failure: &pl.Failure{Code: pl.CodeImagePullFailed, Message: "x"}}, pl.AttemptOutcomeUnknown},
 		{"cluster", "an image could not be pulled while the step was running", pl.StepResult{
-			Status: pl.OutcomeFailed, ExitCode: -1, StartedAt: "2026-10-04T12:00:05Z", Failure: pullFailure}, pl.AttemptOutcomeUnknown},
-		{"cluster", "a pull failure that carries an exit status is not a pull failure of a step that never ran", pl.StepResult{
-			Status: pl.OutcomeFailed, ExitCode: 0, Failure: pullFailure}, pl.AttemptOutcomeUnknown},
+			Status: pl.OutcomeFailed, ExitCode: -1, StartedAt: "2026-10-04T12:00:05Z", Failure: &pl.Failure{Code: pl.CodeImagePullFailed, Message: "x"}}, pl.AttemptOutcomeUnknown},
+		{"cluster", "a service stopped before the step", failedResult(pl.CodeServiceFailed, "x"), pl.AttemptOutcomeUnknown},
+		{"cluster", "no node could schedule the pod", failedResult(pl.CodeJobUnschedulable, "x"), pl.AttemptOutcomeUnknown},
 
 		// cluster | pipeline_runner_unavailable, as a RUNNER reports it or as it
 		// arrives any other way (it is all this function can see), is an unknown
@@ -165,7 +169,10 @@ func TestExecuteClassifiesWhatTheClusterAnswered(t *testing.T) {
 		answer pl.StepResult
 		want   pl.AttemptClass
 	}{
-		{"a Job that could not start its command", failedResult(pl.CodeImagePullFailed, "pull"), pl.AttemptNothingRan},
+		{"a Job whose clone failed", failedResult(pl.CodeCloneFailed, "clone"), pl.AttemptNothingRan},
+		{"a Job whose image could not be pulled", failedResult(pl.CodeImagePullFailed, "pull"), pl.AttemptOutcomeUnknown},
+		{"a Job whose service stopped before the step", failedResult(pl.CodeServiceFailed, "service"), pl.AttemptOutcomeUnknown},
+		{"a Job whose pod no node could schedule", failedResult(pl.CodeJobUnschedulable, "pod"), pl.AttemptOutcomeUnknown},
 		{"a command that asked to run again", exitedWith(75), pl.AttemptRetryRequested},
 		{"a node lost under the step", failedResult(pl.CodeNodeLost, "lost"), pl.AttemptOutcomeUnknown},
 		{"an ordinary failure", exitedWith(1), pl.AttemptFinal},
@@ -632,52 +639,113 @@ func TestARecoveryIsAnUnknownOutcomeAtEverySiteThatMakesRunnerUnavailable(t *tes
 	}
 }
 
-// TestAnImagePullFailureIsNothingRanOnlyWhenTheStepNeverStarted drives the
-// REAL classifier and the REAL settling of its verdict (Classify, then
-// step.decision, which fills StartedAt from stepTimes), so the rule in
-// clusterAttemptClass rests on what the runner records and not on a reading of
-// it. Three pods, all reported as pipeline_image_pull_failed with exit -1; only
-// StartedAt tells them apart.
-func TestAnImagePullFailureIsNothingRanOnlyWhenTheStepNeverStarted(t *testing.T) {
+// TestAClusterVerdictMadeWhileTheJobIsAliveIsAnUnknownOutcome drives the REAL
+// classifier and the REAL settling of its verdict (Classify, then step.decision)
+// on a pod for each cluster verdict that reads "the command never started", and
+// then the class. A runner reports these while the Job and its pod are still
+// alive -- settling only annotates the Job; the agent's acknowledgement or a
+// cancel deletes it -- and the cluster keeps working on the pod meanwhile: the
+// kubelet retries a failed pull with back-off and restarts a service's sidecar,
+// and the scheduler keeps trying to place an unschedulable pod. Any of them can
+// succeed AFTER the report, and the step's command then starts. So a pull
+// failure, a service failure and an unschedulable pod are always an unknown
+// outcome, however the pod looked when it was read. The failed clone is the
+// contrast: it leaves the pod terminal, so nothing can start afterwards.
+//
+// This test replaces the round-1 test that read the step container's StartedAt.
+// With these three always unknown the class no longer reads StartedAt, so a test
+// that pinned it would pin a dead path; this one asserts the class for every pod
+// shape instead, including the one where StartedAt is empty (the step had not
+// started when the verdict was read), which is the case the old rule trusted.
+func TestAClusterVerdictMadeWhileTheJobIsAliveIsAnUnknownOutcome(t *testing.T) {
+	unschedulable := &Pod{
+		Metadata: ObjectMeta{Name: "mp-a7a72726d5075767e0b6d115-w4pdd"},
+		Status: PodStatus{Phase: "Pending", Conditions: []PodCondition{{
+			Type: "PodScheduled", Status: "False", Reason: "Unschedulable",
+			Message: "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector.",
+		}}},
+	}
 	for _, c := range []struct {
-		name        string
-		pod         *Pod
-		wantStarted bool
-		want        pl.AttemptClass
+		name string
+		pod  *Pod
+		now  time.Time
+		code string
+		want pl.AttemptClass
 	}{
-		{"the step's own image cannot be pulled",
+		{"the step's own image cannot be pulled (the step has not started)",
 			clsPod("Pending", []ContainerStatus{clsCloneDone},
 				clsWaiting("step", "ghcr.io/acme/toolchain:does-not-exist", "ErrImagePull", "not found")),
-			false, pl.AttemptNothingRan},
+			clsNow, pl.CodeImagePullFailed, pl.AttemptOutcomeUnknown},
 		{"a service's image cannot be pulled before the step starts",
 			clsPod("Pending", []ContainerStatus{clsCloneDone, clsWaiting("svc-db", "redis:7.9-nope", "ErrImagePull", "not found")}, clsStepInit),
-			false, pl.AttemptNothingRan},
+			clsNow, pl.CodeImagePullFailed, pl.AttemptOutcomeUnknown},
 		{"a service that restarted cannot pull its image again while the step is running",
-			// The sidecar started, the step started after it, and the sidecar was
-			// restarted (imagePullPolicy Always) and cannot reach the registry.
-			// Classify checks the pull state of every container before it asks
-			// whether the step is running, so this is reported as a pull failure
-			// of a command that is running.
 			clsPod("Running", []ContainerStatus{clsCloneDone, clsWaiting("svc-db", "redis:7", "ImagePullBackOff", "Back-off pulling image")}, clsRunning("step")),
-			true, pl.AttemptOutcomeUnknown},
+			clsNow, pl.CodeImagePullFailed, pl.AttemptOutcomeUnknown},
+		{"a service stopped before the step started",
+			clsPod("Pending", []ContainerStatus{clsCloneDone, clsTerminated("svc-db", 1, "Error", "", clsStart.Add(2*time.Second))}, clsStepInit),
+			clsNow, pl.CodeServiceFailed, pl.AttemptOutcomeUnknown},
+		{"no node could schedule the pod",
+			unschedulable, clsCreated.Add(10*time.Minute + time.Second), pl.CodeJobUnschedulable, pl.AttemptOutcomeUnknown},
+
+		// The contrast: the clone is an init container the step container waits
+		// for, and its failure leaves the pod terminal.
+		{"the clone failed",
+			clsPod("Failed", []ContainerStatus{clsTerminated("clone", 128, "Error", "fatal: not our ref", clsStart.Add(time.Second)), clsSvcInit}, clsStepInit),
+			clsNow, pl.CodeCloneFailed, pl.AttemptNothingRan},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			job := clsJob(1200)
-			obs := Classify(job, c.pod, clsCreated, clsNow, clsConfig(), pl.CodeStepTimeout)
-			if obs.Phase != PhaseFailed || obs.Failure == nil || obs.Failure.Code != pl.CodeImagePullFailed {
-				t.Fatalf("Classify = phase %s, failure %+v; this test is about a pull failure the runner reports", clsPhaseNames[obs.Phase], obs.Failure)
-			}
-			if obs.ExitCode != -1 {
-				t.Errorf("exit code = %d, want -1 in every case: it is no signal of whether the command started", obs.ExitCode)
+			obs := Classify(job, c.pod, clsCreated, c.now, clsConfig(), pl.CodeStepTimeout)
+			if obs.Phase != PhaseFailed || obs.Failure == nil || obs.Failure.Code != c.code {
+				t.Fatalf("Classify = phase %s, failure %+v; this test is about the %s verdict the runner reports", clsPhaseNames[obs.Phase], obs.Failure, c.code)
 			}
 			s := &step{r: &Runner{now: func() time.Time { return clsNow }}, run: StepRun{TimeoutSeconds: 1200, DeadlineCode: pl.CodeStepTimeout}}
 			dec := s.decision(obs, c.pod, job)
-			if started := dec.StartedAt != ""; started != c.wantStarted {
-				t.Fatalf("the runner recorded StartedAt %q, want it set = %v: it is how the agent tells the step never started", dec.StartedAt, c.wantStarted)
-			}
 			if got := clusterAttemptClass(dec); got != c.want {
-				t.Errorf("clusterAttemptClass = %q, want %q", got, c.want)
+				t.Errorf("clusterAttemptClass(%s, StartedAt %q) = %q, want %q", describeResult(dec), dec.StartedAt, got, c.want)
 			}
 		})
+	}
+}
+
+// TestACloneFailureLeavesThePodTerminal pins the one condition on which a failed
+// clone is still "nothing ran" on the cluster. A clone that failed can only be
+// retried into a step that runs if the pod or the Job lets it be: with the pod's
+// restartPolicy Never a failed init container is not restarted and the pod
+// fails, and with the Job's backoffLimit 0 the Job controller makes no
+// replacement pod, so the step container, which starts only after every init
+// container has completed, never starts. BuildJob sets both; if either changes,
+// pipeline_clone_failed must be read as unknown with the rest
+// (clusterAttemptClass says so beside its case).
+func TestACloneFailureLeavesThePodTerminal(t *testing.T) {
+	job, err := BuildJob(testConfig(), testRun(), testJobName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Spec.RestartPolicy; got != "Never" {
+		t.Errorf("the pod's restartPolicy is %q, want Never: a failed clone would be restarted, and could then run the step", got)
+	}
+	if got := job.Spec.BackoffLimit; got == nil || *got != 0 {
+		t.Errorf("the Job's backoffLimit is %v, want 0: a failed pod would be replaced, and the new pod could run the step", got)
+	}
+	var clone *Container
+	for i, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == ContainerClone {
+			clone = &job.Spec.Template.Spec.InitContainers[i]
+		}
+	}
+	if clone == nil {
+		t.Fatal("the pod has no clone init container")
+	}
+	if clone.RestartPolicy != nil {
+		t.Errorf("the clone's restartPolicy is %q: it is a sidecar, and the step container would start without waiting for it to complete", *clone.RestartPolicy)
+	}
+	var stepIsAContainer bool
+	for _, c := range job.Spec.Template.Spec.Containers {
+		stepIsAContainer = stepIsAContainer || c.Name == ContainerStep
+	}
+	if !stepIsAContainer {
+		t.Error("the step is not a main container of the pod, so it is not held back by its init containers")
 	}
 }

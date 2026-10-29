@@ -41,15 +41,21 @@ import (
 // make an ordinary failure retryable. The two places a runner's outcome enters
 // the agent drop any class it carries (fromARunner, executor_cluster.go).
 //
-// WHAT A CODE CANNOT SAY. Two cluster codes look like "the command never
-// started" and are not always. They are read here from more than the code:
+// WHAT A CODE CANNOT SAY. On the cluster, a verdict that reads "the command never
+// started" is weaker than it sounds, for two reasons.
 //
-//   - pipeline_runner_unavailable depends on WHO MADE IT. The agent makes it
-//     when it cannot hand a step to anything (noRunnerReached, below), before any
-//     runner took the step: nothing ran. A runner makes it where the step's Job
-//     exists or may exist: unknown.
-//   - pipeline_image_pull_failed depends on WHETHER THE STEP'S OWN CONTAINER
-//     STARTED, which the result records in StartedAt.
+//   - WHEN the runner reports it. The runner reports a verdict while the Job and
+//     its pod are still ALIVE: settling only annotates the Job, and it is deleted by
+//     the agent's acknowledgement or a cancel, never by the runner reporting. The
+//     cluster keeps working on the pod meanwhile (the kubelet retries a failed
+//     pull and restarts service sidecars; the scheduler keeps trying to place a
+//     pod), so the step's command can start AFTER the report. A pull failure, a
+//     service failure and an unschedulable pod are therefore ALWAYS an unknown
+//     outcome. A failed clone is the exception, because it leaves the pod terminal.
+//   - WHO MADE IT. pipeline_runner_unavailable is nothing ran only when the agent
+//     made it (noRunnerReached, below), before any runner took the step, and not on
+//     a recovery. A runner makes it where the step's Job exists or may exist:
+//     unknown.
 //
 // A class decided from a code that does not prove it is how a non-repeatable step
 // runs twice, so each is spelled out at its case.
@@ -85,46 +91,24 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 	}
 	switch res.Failure.Code {
 
-	// NOTHING RAN -- the cluster could not start the command.
+	// NOTHING RAN -- the command cannot have started, and nothing can start it.
 
-	case pl.CodeImagePullFailed:
-		// NOTHING RAN only when the result proves the STEP'S OWN container never
-		// started; otherwise UNKNOWN. The classifier (Classify, podFailure)
-		// reports a pull failure of ANY container of the pod, a service's sidecar
-		// included, and does so even while the step is running: the kubelet pulls
-		// a sidecar's image again each time it restarts it (imagePullPolicy
-		// Always), and Classify asks whether the step is running only AFTER it
-		// has checked every container's pull state. So a registry that fails for a
-		// restarted sidecar reports this code about a command that is running.
-		//
-		// The exit status cannot tell the two apart (-1 in both: no exit was
-		// observed). StartedAt can: the runner takes it from the step container's
-		// own state (stepTimes) and it stays empty until that container starts.
-		// A pull failure with an exit status could not have come from Classify at
-		// all, so it is not trusted either. Missing the proof costs a retry that
-		// only a repeatable step would have been given; having it wrong could run
-		// a command twice.
-		if res.StartedAt == "" && res.ExitCode < 0 {
-			return pl.AttemptNothingRan
-		}
-		return pl.AttemptOutcomeUnknown
-	case pl.CodeServiceFailed:
-		// A declared service stopped BEFORE the step started: the classifier reads
-		// it only while the step container is not running (podFailure's gate, and
-		// a terminated step is read before anything else). Unlike a pull failure,
-		// then, it cannot be reported about a running command. The command never
-		// started.
-		return pl.AttemptNothingRan
-	case pl.CodeJobUnschedulable:
-		// No node could take the pod within the schedule timeout (PodScheduled is
-		// false): nothing was bound to a node, so nothing ran.
-		return pl.AttemptNothingRan
 	case pl.CodeCloneFailed:
-		// The clone init container exited non-zero. The step container starts only
-		// after every init container has completed, so it never started. (The Job's
-		// clone retries its fetch itself first; a machine's fetch is retried by the
-		// driver.) Also what a clone token that could not be minted reads as, on a
-		// machine.
+		// The clone init container exited non-zero, and that leaves the pod
+		// TERMINAL, which is why this is the one cluster verdict of its kind that
+		// is still nothing ran. The clone is an ordinary init container (not a
+		// sidecar), and the step container starts only after every init container
+		// has completed. BuildJob sets the pod's restartPolicy to Never, so a failed
+		// init container is not restarted and the pod fails, and the Job's
+		// backoffLimit to 0, so the Job controller makes no replacement pod (the
+		// classifier's measured case shows the Job failing BackoffLimitExceeded).
+		// Nothing the kubelet or the scheduler does afterwards can start the step
+		// container. TestACloneFailureLeavesThePodTerminal pins those settings; if
+		// either changes, this case becomes unknown with the three below.
+		//
+		// (The Job's clone retries its fetch itself first; a machine's fetch is
+		// retried by the driver.) Also what a clone token that could not be minted
+		// reads as, on a machine, where nothing was sent at all.
 		return pl.AttemptNothingRan
 	case pl.CodeNoMachineForNeed:
 		// Only ever made when the dispatcher PROVED no machine started the
@@ -135,6 +119,31 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 
 	// OUTCOME UNKNOWN -- the command may have run, and nothing says how it ended.
 
+	case pl.CodeImagePullFailed, pl.CodeServiceFailed, pl.CodeJobUnschedulable:
+		// UNKNOWN, always. The runner reports these while the Job and its pod are
+		// still ALIVE: settling an outcome only annotates the Job (settle, persist),
+		// and the Job is deleted by the agent's acknowledgement or a cancel
+		// (Runner.Ack, CancelRun), never by the runner reporting. In that window the
+		// cluster keeps working on the pod: the kubelet retries a failed pull with
+		// back-off and restarts a service's sidecar (imagePullPolicy Always), and
+		// the scheduler keeps trying to place an unschedulable pod. Any of them can
+		// succeed AFTER the report, and the step's command then starts. So "nothing
+		// ran" cannot be proved from the report, whatever the pod looked like when
+		// it was read. Two things that look like proof are not:
+		//
+		//   - the step container's StartedAt being empty (an earlier rule trusted it
+		//     for a pull failure): it says the step had not started THEN, not that
+		//     it will not;
+		//   - the classifier's own gates (a service failure is read only while the
+		//     step is not running; an unschedulable pod is bound to no node): they
+		//     are true of the snapshot, not of what follows it.
+		//
+		// A pull failure is also reported about ANY container of the pod, a
+		// service's sidecar included, even while the step is running, so for it the
+		// command may already have been running when it was read. Missing the proof
+		// costs a retry that only a repeatable step would have been given; having it
+		// wrong could run a command twice.
+		return pl.AttemptOutcomeUnknown
 	case pl.CodeRunnerUnavailable:
 		// UNKNOWN here: a result that reaches this function with this code was
 		// reported by a runner, or arrived in a way the agent cannot vouch for. A
