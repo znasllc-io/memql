@@ -1,5 +1,7 @@
 package worker
 
+import workerservice "github.com/znasllc-io/memql/component/worker"
+
 // app_gate_refusal.go -- the app gate's named refusals, in the file both the
 // agent build and the planner build compile.
 //
@@ -60,4 +62,16 @@ func isAppGateCode(code string) bool {
 		return true
 	}
 	return false
+}
+
+// appToolFreeRefusal says why a machine cannot carry a turn the destination
+// admitted only because it runs without tools, or "" when it can. It is here,
+// in the file every build compiles, because a planner's forward judges the
+// rows it forwards to as well as the agent judges its live machines; the
+// waiver itself is toolFreeTurnWaivesDestination (app_gate.go).
+func appToolFreeRefusal(d workerservice.AppDescriptor, known bool, appId string) string {
+	if known && d.InferenceOnly {
+		return ""
+	}
+	return "its Cockpit cannot run " + appId + " without tools, and this goal has not been given your computer"
 }

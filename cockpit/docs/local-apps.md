@@ -272,9 +272,18 @@ binary's size and mtime, so an upgrade takes effect at once. The session runner
 and the inventory ask the same question the same way, so what a session drives
 and what the machine advertises cannot disagree. The answer rides `Register` as
 one **app descriptor** per app — the harness word, and whether it can return a
-structured answer and take a follow-up — so the engine never asks this machine
-for a protocol it cannot speak, and never sends a structured call to a
-`codex-mcp` that cannot constrain one. Descriptors are bound at `Register`: a
+structured answer, take a follow-up, and run a turn with **no tools** — so the
+engine never asks this machine for a protocol it cannot speak, and never sends
+a structured call to a `codex-mcp` that cannot constrain one.
+
+**An inference-only turn runs the app with no tools.** When a turn carries no
+images and no inputs, the engine marks it inference-only and the harness drops
+every tool: Claude Code runs with `--tools ""` and an empty strict MCP config,
+and the Codex app-server turns its shell, patch, multi-agent and web-search
+features off. `codex-mcp` has no such switch, so its descriptor never claims
+it. The claim (`inferenceOnly`) is what lets such a turn answer inside a goal
+whose execution destination is Auto: without tools it is a model call, not work
+on your computer. A Cockpit that predates the claim keeps the engine's refusal. Descriptors are bound at `Register`: a
 harness gained mid-connection (a Codex upgraded to one with the app-server) is
 advertised on the next reconnect.
 

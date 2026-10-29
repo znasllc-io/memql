@@ -580,3 +580,102 @@ func TestDestinationConsentClosesBothAppDoorsBeforeStarting(t *testing.T) {
 		t.Fatal("computer app started without permission")
 	}
 }
+
+// A TOOL-FREE TURN IN AN AUTO GOAL IS A MODEL CALL (spec 2026-10-29, D4).
+//
+// On 2026-10-28 a failed run's diagnosis -- a goal pipeline maintenance opened,
+// with nobody present to choose a route -- had its app door refused
+// "This goal is set to auto ... request permission before moving this work",
+// although a chat-door turn with no images and no inputs runs the app with no
+// tools at all, exactly as harmless to the computer as a local model, which
+// the gate never asks about. The waiver is that narrow: Auto only, tool-free
+// only, and only on a machine whose Cockpit says it runs such a turn without
+// tools.
+
+func (f *appGateFixture) declareToolFree(on bool) {
+	f.machine.SetAppDescriptors([]workerservice.AppDescriptor{{
+		Id: workerservice.AppIdClaudeCode, Harness: workerservice.HarnessClaudeHeadless,
+		StructuredResult: true, FollowUps: true, InferenceOnly: on,
+	}})
+}
+
+func autoGoalTurn() memqlengine.AppCallRequest {
+	req := chatTurn()
+	req.RunId = "goal-run"
+	return req
+}
+
+func TestAToolFreeTurnInAnAutoGoalRunsOnAMachineThatDeclaresIt(t *testing.T) {
+	for name, call := range map[string]func(*appGateFixture) error{
+		"chat door": func(f *appGateFixture) error {
+			_, err := f.inference(nil).Call(context.Background(), autoGoalTurn())
+			return err
+		},
+		"forwarded": func(f *appGateFixture) error {
+			_, _, err := f.inference(nil).ServeForwardedAppCall(context.Background(), "reg-app", autoGoalTurn())
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAppGateFixture(t, "user-1")
+			f.store.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "auto", To: "computer"}
+			f.declareToolFree(true)
+			if err := call(f); !reachedMachine(err) {
+				t.Fatalf("a tool-free turn in an Auto goal must reach a machine that runs it without tools: %v", err)
+			}
+			started := f.capture.started()
+			if len(started) != 1 || !started[0].InferenceOnly {
+				t.Fatalf("the turn must start inference-only: %+v", started)
+			}
+		})
+	}
+}
+
+func TestAToolFreeTurnSkipsAMachineThatCannotRunWithoutTools(t *testing.T) {
+	for _, declared := range []bool{false, true} {
+		f := newAppGateFixture(t, "user-1")
+		f.store.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "auto", To: "computer"}
+		if declared {
+			f.declareToolFree(false) // a descriptor that says no
+		} // else no descriptor at all: a Cockpit that predates the field
+		_, err := f.inference(nil).Call(context.Background(), autoGoalTurn())
+		if err == nil || !errors.Is(err, memqlengine.ErrAppUnavailable) || !strings.Contains(err.Error(), "without tools") {
+			t.Fatalf("descriptor=%v: a machine that cannot run the turn without tools must be passed over by name: %v", declared, err)
+		}
+		if len(f.capture.started()) != 0 {
+			t.Fatalf("descriptor=%v: a session started on a machine that may run tools", declared)
+		}
+	}
+}
+
+func TestAnAutoGoalStillRefusesATurnWithInputs(t *testing.T) {
+	f := newAppGateFixture(t, "user-1")
+	f.store.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "auto", To: "computer"}
+	f.declareToolFree(true)
+	req := autoGoalTurn()
+	req.Inputs = []string{"v1:library:artifact:a1"}
+	if _, err := f.inference(nil).Call(context.Background(), req); refusalCode(err) != AppGateDestination {
+		t.Fatalf("a turn that lands files in the workspace is not inference-only: %v", err)
+	}
+	if len(f.capture.started()) != 0 {
+		t.Fatal("a session started without destination consent")
+	}
+}
+
+func TestAWorkbenchGoalStillRefusesAToolFreeTurn(t *testing.T) {
+	f := newAppGateFixture(t, "user-1")
+	f.store.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "workbench", To: "computer"}
+	f.declareToolFree(true)
+	if _, err := f.inference(nil).Call(context.Background(), autoGoalTurn()); refusalCode(err) != AppGateDestination {
+		t.Fatalf("an explicit Workbench goal keeps its refusal (owner decision): %v", err)
+	}
+}
+
+func TestTheSessionDoorStillNeedsDestinationConsent(t *testing.T) {
+	f := newAppGateFixture(t, "user-1")
+	f.store.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "auto", To: "computer"}
+	f.declareToolFree(true)
+	if _, err := f.executor(t, nil).Run(context.Background(), handedOverStep(), nil); refusalCode(err) != AppGateDestination {
+		t.Fatalf("a whole step handed to an app runs its tools, so it keeps the gate: %v", err)
+	}
+}

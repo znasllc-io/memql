@@ -776,3 +776,39 @@ func TestAppAnswerStreamsAcrossReplicaBeforeSessionCompletion(t *testing.T) {
 		t.Fatal("forwarded stream did not cancel")
 	}
 }
+
+// THE HOLDER JUDGES A TOOL-FREE TURN ON ITS OWN MACHINE (spec 2026-10-29, D4).
+// The planner's row says the laptop's Cockpit runs a turn without tools; the
+// stream the holder actually holds says otherwise -- an older Cockpit
+// reconnected since the row was written. The holder's live descriptor decides,
+// before anything opens, and the planner carries nothing the holder trusts in
+// its place.
+func TestAToolFreeTurnIsJudgedOnTheHoldersMachine(t *testing.T) {
+	h := newAppHop(t)
+	h.holderStore.destinationErr = &memqlengine.ExecutionDestinationRequired{From: "auto", To: "computer"}
+	declared := workerservice.AppDescriptor{Id: workerservice.AppIdClaudeCode, Harness: workerservice.HarnessClaudeHeadless,
+		StructuredResult: true, FollowUps: true, InferenceOnly: true}
+	row := laptopRow()
+	row.AppDescriptors = []workerservice.AppDescriptor{declared}
+	h.senderStore.machines = []Candidate{row}
+	ctx, cancel := plannerCtx(t)
+	defer cancel()
+	turn := memqlengine.AppCallRequest{ActingUserId: hopOwner, AppId: workerservice.AppIdClaudeCode, RunId: "v1:work:run:goal-1",
+		Messages: []common.ChatMessage{{Role: "user", Content: "diagnose"}}}
+
+	_, err := h.remote.Call(ctx, turn)
+	if err == nil || !strings.Contains(err.Error(), "without tools") {
+		t.Fatalf("the holder's own machine says it cannot run the turn without tools, and that decides: %v", err)
+	}
+	if sessions, _ := h.harness.sessions(); len(sessions) != 0 {
+		t.Fatal("a session opened on a machine that may run its tools")
+	}
+
+	h.registry.WorkerById(hopMachine).SetAppDescriptors([]workerservice.AppDescriptor{declared})
+	if _, err := h.remote.Call(ctx, turn); err != nil {
+		t.Fatalf("a machine that declares tool-free turns takes it: %v", err)
+	}
+	if sessions, _ := h.harness.sessions(); len(sessions) != 1 || !sessions[0].InferenceOnly {
+		t.Fatalf("the turn must open inference-only on the holder: %+v", sessions)
+	}
+}
