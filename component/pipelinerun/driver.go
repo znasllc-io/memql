@@ -204,7 +204,12 @@ func (i *Integration) claimAndDrive(runID string) {
 		i: i, d: d, lease: l, runID: runID, run: run, claimID: run.DriverLeaseID,
 		log: d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, runID), "node", d.NodeID),
 	}
-	switch dr.drive(ctx) {
+	outcome := dr.drive(ctx)
+	// A writer whose run concluded drains on; any other ends with the drive
+	// -- a lease lost, a run left unfinished for recovery -- so no writer
+	// outlives a drive that will not finish its steps (step_checks.go).
+	dr.endStepChecks()
+	switch outcome {
 	case driveConcluded:
 		i.forgetAborts(runID)
 	case driveAborted:
@@ -235,7 +240,8 @@ type runDriver struct {
 	log     *slog.Logger
 
 	// run is the row as this drive last wrote or read it. Only the drive's
-	// own goroutine touches it; a step's goroutine reads facts instead.
+	// own goroutine touches it; a step's goroutine reads facts instead, and
+	// the step-check writer the copy each offer hands it (step_checks.go).
 	run          Run
 	p            Pipeline
 	havePipeline bool
@@ -263,6 +269,9 @@ type runDriver struct {
 
 	timingsMu sync.Mutex
 	observed  map[string]float64
+
+	// steps is this drive's step checks (step_checks.go).
+	steps stepChecks
 }
 
 // work is the run's work-journal handle; nil (every method a no-op) until the
@@ -655,8 +664,62 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 		dr.abort("reading the steps of the attempt this run re-runs", err)
 		return false
 	}
-	carryPassed(dr.tracks, rows, max(original.Attempt, 1))
+	release := dr.run.Event == pipelines.EventRelease
+	if release {
+		inWindow, err := dr.releaseChainFresh(ctx)
+		if err != nil {
+			dr.abort("reading the attempts this release re-run descends from", err)
+			return false
+		}
+		if !inWindow {
+			dr.log.Warn("pipelines: a release re-run past its 24-hour window, or without an unbroken attempt chain, runs every step",
+				"rerunOf", originalID)
+			return true
+		}
+	}
+	carryPassed(dr.tracks, rows, max(original.Attempt, 1), release)
 	return true
+}
+
+// releaseCarryWindow is how old a release may be and still carry passes into a
+// re-run: the age of its first attempt when the re-run opened. It matches
+// evidence reuse's freshness window (evidence.go). Past it, a re-run checks
+// everything again: a release's code does not move, but a vulnerability
+// scan's advisory database does
+// (docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md).
+const releaseCarryWindow = 24 * time.Hour
+
+// releaseChainFresh walks this release attempt's rerunOf links back to attempt
+// 1 and answers whether attempt 1 was opened within releaseCarryWindow of this
+// attempt. Every carried pass is younger than attempt 1, so one comparison
+// bounds them all. A read that did not answer stops the drive, as in
+// carryFromOriginal; a chain that cannot be followed inside the release run
+// key, or an attempt past maxReleaseAttempts, answers false, and the re-run
+// then runs every step. Both bounds match candidate coverage's, so the runner
+// never carries a pass coverage would refuse.
+func (dr *runDriver) releaseChainFresh(ctx context.Context) (bool, error) {
+	if dr.run.Attempt > maxReleaseAttempts {
+		return false, nil
+	}
+	fresh := memql.ContextWithFreshRead(ctx)
+	current := dr.run
+	for hops := 0; current.Attempt > 1; hops++ {
+		if hops >= maxReleaseAttempts {
+			return false, nil
+		}
+		prev, err := dr.d.Store.RunByID(fresh, bareID(current.RerunOf))
+		if err != nil {
+			return false, err
+		}
+		if prev == nil || prev.RunKey != dr.run.RunKey || prev.Attempt >= current.Attempt {
+			return false, nil
+		}
+		current = *prev
+	}
+	if current.Attempt != 1 {
+		return false, nil
+	}
+	return !current.QueuedAt.Before(dr.run.QueuedAt.Add(-releaseCarryWindow)), nil
 }
 
 // carryPassed marks a planned step skipped pipeline_passed_earlier when the
@@ -669,7 +732,13 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 // A NOTIFY STEP IS NEVER CARRIED. What it delivered announced the attempt it
 // ran in; this attempt has an outcome of its own -- most often, that the
 // pipeline recovered -- and a carried notification would leave it unsaid.
-func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
+//
+// IN A RELEASE, A STEP THAT PRODUCED ARTIFACTS RUNS AGAIN. A candidate pins
+// artifacts only from the run it names, so a carried producer would leave its
+// images and files on an attempt the candidate cannot cover. Candidate
+// coverage proves each carried release pass against the attempt that executed
+// it (integrations/release/candidate_carried.go).
+func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int, release bool) {
 	// Report publications bind the producing run, so a new attempt must produce
 	// its own scanner artifacts instead of carrying a skip from an older run.
 	producers := map[string]bool{}
@@ -692,6 +761,9 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 		if !ok || t.step.Skip != nil || t.step.Kind != pipelines.StepCommand || producers[t.step.Key] {
 			continue
 		}
+		if release && releaseProducer(t.step, row) {
+			continue
+		}
 		passed := row.Status == WorkStepDone
 		carried := row.Status == WorkStepSkipped && row.Skip != nil && row.Skip.Code == pipelines.CodePassedEarlier
 		if !passed && !carried {
@@ -709,6 +781,27 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 		}
 		t.step.Skip = &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: reason}
 	}
+}
+
+// releaseProducer reports a step a release re-run must run again because it
+// produces artifacts, judged by what the step declares and by what its earlier
+// receipt named. Library file IDs alone are not enough: an outcome over its
+// size bound loses them but never its intent IDs, and a row carried by an
+// older engine names none. Candidate coverage refuses a carried step whose
+// executing receipt named any intent (pipelines.InspectCarriedReleaseReceipt),
+// so the runner must not carry one.
+func releaseProducer(step pipelines.Step, row WorkStep) bool {
+	if len(step.Artifacts) > 0 || step.ImageBuild != nil || len(row.ArtifactFileIDs) > 0 {
+		return true
+	}
+	meta, _ := row.Result["metadata"].(map[string]any)
+	switch ids := meta["artifactIntentIds"].(type) {
+	case []any:
+		return len(ids) > 0
+	case []string:
+		return len(ids) > 0
+	}
+	return false
 }
 
 // decls are the plan's steps as the journal declares them, in plan order: an
@@ -847,6 +940,14 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			attempt:    max(row.Attempt, 1),
 			sent:       row.Status == WorkStepRunning,
 			state:      StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
+		}
+		if row.Skip != nil {
+			// The skip the plan declared -- a failed-only re-run's carry among
+			// them -- so a drive that took the run over still knows a step is
+			// carried before its receipt settles (step_checks.go writes no
+			// check for one).
+			skip := *row.Skip
+			t.step.Skip = &skip
 		}
 		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))

@@ -88,10 +88,11 @@ func TestVerificationReusesOnlyFreshExactDefinitionReceipts(t *testing.T) {
 }
 
 // A release run executes every verification step itself, whatever the
-// installed policy admits. Candidate preparation refuses a carried
-// pipeline_passed_earlier receipt and a release request cannot adopt a re-run,
-// so a release that reused main's receipts could never be released: 0.31.4
-// was lost that way to the push run at its commit.
+// installed policy admits. Candidate preparation accepts a carried
+// pipeline_passed_earlier receipt only with a proof from an earlier attempt of
+// the same release, which a receipt reused from main has not got, so a release
+// that reused main's receipts could never be released: 0.31.4 was lost that
+// way to the push run at its commit.
 func TestReleaseRunsExecuteEveryVerificationStep(t *testing.T) {
 	for _, producer := range []Opening{
 		pushOpening(),

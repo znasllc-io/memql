@@ -1121,3 +1121,177 @@ App-authored pull request satisfies `require_code_owner_review` together with
 GitHub marks a pull request merged when its head reaches `main` through
 another pull request's merge (memql#6325 marked memql#6318 to memql#6324
 merged).
+
+## A failed release re-runs only what failed (2026-10-28)
+
+On 2026-10-28 the owner lost engine versions 0.31.4 to 0.31.7 to one-step
+release failures. The last was an editor lane whose Chromium download stalled
+on one fleet Mac. A failed release could not be recovered: the saved release
+refused any run but the one it recorded ("native release observation changed
+its execution identity"), and `releasePrepareCandidateWorkflow` refused the
+`pipeline_passed_earlier` receipts a failed-only re-run carries. Each failure
+therefore cost a version bump, a pull request check and a full release run of
+about three hours. Design record:
+`docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md`; the
+connected workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#recover-a-failed-build).
+
+- **Trigger.** The owner re-runs a failed release attempt, usually its failed
+  steps only, from the run page.
+- **Planning** (`carryPassed`, `releaseChainFresh` in
+  `component/pipelinerun/driver.go`). A release re-run never carries a step
+  whose earlier result named artifacts, because a candidate pins artifacts only
+  from the run it names. It carries nothing once the release's first attempt was
+  opened more than 24 hours before the re-run (`releaseCarryWindow`, the
+  evidence-reuse window). A read that does not answer stops the drive; a chain
+  that cannot be followed carries nothing.
+- **Attempt chain** (`releaseAttemptChain` in
+  `component/pipelinerun/release_build.go`). Each observation reports the
+  earlier attempts of the release run key, newest first, through `rerunOf`
+  alone. A missing link, a different run key, an attempt that does not decrease
+  or more than 50 attempts leaves the chain empty. Observation keeps working;
+  nothing can adopt the attempt.
+- **Adoption** (`adoptableBuildRun`, `integrations/release/build_adopt.go`). The
+  saved release replaces its recorded run only with a descendant of a recorded
+  attempt that completed without success, before any candidate or publication.
+  The journal's SQL fence (`build_ledger.go`) admits exactly that change, so a
+  replica holding an older view cannot write an earlier run back. A release
+  blocked by a failed build keeps the `observe` action, which the OS release
+  journey runs on every read; every other block keeps none.
+- **Proof** (`carriedFrom`, `integrations/release/candidate_carried.go`).
+  Coverage proves each carried step: the carrying run is a full release re-run,
+  its chain stays inside the release and reaches attempt 1 within 24 hours, and
+  the nearest earlier attempt that did not carry the step executed it as an
+  artifact-free successful command (`pl.InspectCarriedReleaseReceipt`) with the
+  same definition digest and packages. The recipe accepts
+  `pipeline_passed_earlier` only together with that proof; anything unproven
+  refuses the candidate, naming the step.
+
+Rejected: a candidate whose evidence spans attempts (attempt 1's complete
+evidence includes its failed step, its artifacts would be pinned from a failed
+run, and the candidate format would change), and adopting only full re-runs
+(saves the version bump and pull request check but not the long run; the design
+adopts full re-runs too, which carry nothing). Cross-event reuse stays off for
+releases (#6344): a receipt from a push, pull request or merge-group run has no
+chain inside the release.
+
+Compatibility: `RerunOf` and `Chain` are omitted when empty, so a run without
+re-run facts encodes exactly as before. Journals written earlier keep their
+selection digest, and an older engine still decodes every journal that never
+adopted a re-run; one that did is unreadable to it after a rollback
+(`TestReleaseBuildRunEncodingKeepsEarlierJournals`). The runner's carry rule is
+a subset of what the proof accepts: a step that declares `artifacts` or an
+image build, or whose earlier receipt named an intent or a file, always runs
+again, and the runner stops at the proof's 50-attempt bound.
+
+Invariants: a successful or running recorded attempt is never replaced; a
+prepared, approved or published candidate is never re-pointed; every artifact
+in a candidate comes from the run it names; a carried step is accepted only
+with a native proof tied by digest to a step that executed within the same
+release run key. What survives a retry or a replica change: the chain is read
+natively on every observation, adoption is recorded in the journal under its
+fence, and the proof is recomputed from journal rows at candidate preparation.
+
+Tests: `TestCarriedReleaseReceipt*` and
+`TestReleaseBuildRunEncodingKeepsEarlierJournals` (`component/pipelines`);
+`TestReleaseAttemptChain*`, `TestCarryPassedReleaseRerunsArtifactProducers`,
+`TestCarryPassedReleaseRerunsDeclaredProducers`,
+`TestReleaseChainFreshStopsAtTheAttemptBound` and
+`TestReleaseRerunCarriesNothingPastTheWindow` (`component/pipelinerun`);
+`TestAdoptableBuildRun`, `TestReleaseBuildAdoptsAFailedOnlyRerunOfItsRun`
+(including a refused stale write-back), `TestCarriedChain*`,
+`TestCarriedReceipt*` and the proven-carry case of
+`TestCandidateWorkflowChoosesAllowedPlannedSkips` (`integrations/release`, the
+last ones db-gated). Not verified here: a live release re-run on a cluster.
+This change helps only after it ships in an engine release; the release that
+carries it is still prepared under the previous rules.
+
+## A GitHub check per pipeline step (2026-10-28)
+
+The owner asked to see each step of a run on a pull request, not one check for
+the whole run, sectioned by stage (approved 2026-10-28). Every step now writes
+its own check run beside the run's; the connected workflow is in
+[pipelines.md](../../public/operate/pipelines.md#a-check-per-step).
+
+**Names, and why they cannot gate anything.** A step check is named after its
+run's own check plus `/ <stage> / <step>` (`pipelines.StepCheckName`): GitHub
+lists check runs by name, which gives the sections. Push, release and manual
+runs keep their run's suffix, because two runs of different events on one
+commit select different stages and must not overwrite each other's steps.
+Stage and step names cannot hold a slash, so the name always has more
+segments than any context a ruleset, a release source
+(`githubapp.releaseChecks`), the merge queue or a train's boarding asks for by
+exact name; a step check can never satisfy or fail a required context
+(`TestStepCheckName`).
+
+**A writer per drive, off the run's path (the invariant).** A publish writes
+the run's own check first and, only once that landed, hands the drive's writer
+goroutine the token it minted and each step's newest state
+(`offerStepChecks`). The writer sends one write at a time, a second apart,
+keeping only each step's newest state, so neither the merge-gating check, a
+step, nor the run row's conclusion -- which a release train waits on -- ever
+waits on a step check. A step's check is created when the step first leaves
+pending, not when the run opens: sixty creates at once would spend a third of
+GitHub's per-minute secondary write limit, and several runs opening together
+would exceed it. Rejected: creating every check queued at the start (the first
+version, which the independent review measured at ~55 POSTs in one publish),
+and writing inside the publish (it delayed the first step by tens of seconds
+and the final row by up to the two-minute call budget). Tests:
+`TestADrivenRunReportsACheckPerStep`, `TestAFailedStepsCheckShowsItsMaskedOutput`
+(masked with the drive's secret values, like the run's check). The writer
+composes from a copy of the run and pipeline that each offer hands it, never
+from the drive's run row, which only the drive's goroutine touches: the race
+detector caught a version that copied the row while the drive patched it. No
+pipeline step runs this package under `-race`, so that check is a local
+`go test -race ./component/pipelinerun/`.
+
+**Rate limits and refusals.** A rate-limited answer pauses the writer for a
+minute and keeps every state it still owes (`TestARateLimitedStepCheckPausesTheWriter`:
+one limited create, then the rest). `githubapp` now also files a 403 carrying
+`Retry-After`, or a message naming a secondary rate limit, as rate limiting
+(`TestRateLimitIsRecognisedInBothSpellings`): before, such a 403 on a run's
+own final write was recorded `refused` with the missing-permission note and
+never retried, leaving a required check unfinished. A 403 creating a step check
+is the missing permission and stops step checks for the drive
+(`TestAMissingChecksPermissionStopsStepChecks`); a 403 moving a check the
+writer adopted drops that one and creates the run's own. Anything else waits a
+few seconds and is tried again; no failure fails the run
+(`TestAStepCheckThatCannotBeWrittenNeverFailsTheRun`).
+
+**At conclusion, and what survives.** The final publish hands the writer every
+step's final state, a started step that never ended as cancelled; the drive
+returns and the writer keeps trying for ten minutes, then exits. A drive that
+ends without concluding stops its writer (`endStepChecks`), so no goroutine
+outlives a drive that will not finish its steps. When GitHub took no completed
+check at conclusion, recovery's republish of the run's own check also
+completes the step checks the run left open (`settleStepChecks`,
+`TestRecoverySettlesAConcludedRunsOpenStepChecks`). Step check ids live in the
+writer's memory only; no row stores them.
+
+**Steps that did not run here.** A failed-only re-run's carry
+(`pipeline_passed_earlier` with no evidence run) writes no check: attempt 1's
+pass stays on the commit (`TestARerunLeavesCarriedStepsChecksAlone`). A step
+that reused another run's verification shows a pass naming that run
+(`TestReusedEvidenceShowsAsAPass`). A drive that took a run over without
+reading its plan again (`adoptRows`) now keeps the plan's skip, so a carried
+step stays recognised across the hop (`TestATakeoverKeepsACarriedStepsPass`).
+
+**Replicas.** A writer lists its run's existing step checks once, by external
+id, the newest for each step, and moves them rather than creating a second
+(`TestATakeoverAdoptsTheStepChecksAnotherReplicaCreated`, a real two-replica
+hop). A writer whose drive lost its lease stops before its next write. A
+listing that fails, or a commit with more than a thousand check runs (now an
+error, not a silent short list), costs at most duplicates.
+
+**Re-run on a step's check.** GitHub offers Re-run on every check an App
+writes. `check_run.rerequested` for a step's check is resolved by its external
+id at the re-requested commit: a failed run gets a failed-only re-run, a passed
+one a whole re-run (`TestRerequestingAStepCheckRerunsItsRun`).
+
+**Known limits.** A step check stays open when GitHub refused its final write
+for the whole ten-minute window while the run's own check landed, or when the
+agent restarted inside that window. A step that starts and settles between two
+progress reports shows no *In progress* state. A manifest with several hundred
+steps per event could push a busy commit past GitHub's thousand-run listings,
+which release-source verification and merge-queue admission read; no cap is
+enforced.

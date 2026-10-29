@@ -153,6 +153,38 @@ func (g *fakeGitHub) writesFor(repository string) []checkWrite {
 	return out
 }
 
+// runCheckWrites is writesFor without the per-step checks: the writes of
+// every check run created for a run rather than for one of its steps. A step
+// check's external id is "<run id>:<step key>" (pipelines.StepFromExternalID).
+func (g *fakeGitHub) runCheckWrites(repository string) []checkWrite {
+	run, _ := g.splitCheckWrites(repository)
+	return run
+}
+
+// stepCheckWrites is the per-step checks' writes alone.
+func (g *fakeGitHub) stepCheckWrites(repository string) []checkWrite {
+	_, step := g.splitCheckWrites(repository)
+	return step
+}
+
+func (g *fakeGitHub) splitCheckWrites(repository string) (run, step []checkWrite) {
+	all := g.writesFor(repository)
+	isStep := map[int64]bool{}
+	for _, w := range all {
+		if _, _, ok := pipelines.StepFromExternalID(w.Run.ExternalID); w.Create && ok {
+			isStep[w.ID] = true
+		}
+	}
+	for _, w := range all {
+		if isStep[w.ID] {
+			step = append(step, w)
+		} else {
+			run = append(run, w)
+		}
+	}
+	return run, step
+}
+
 // checkRun is every write to one check run, in order.
 func (g *fakeGitHub) checkRun(id int64) []checkWrite {
 	g.mu.Lock()
@@ -261,6 +293,36 @@ func (h githubAt) UpdateCheckRun(_ context.Context, token, repository string, id
 	}
 	g.writes = append(g.writes, checkWrite{Node: h.node, Repository: repository, ID: id, Run: run})
 	return nil
+}
+
+// CheckRunsForCommit lists the check runs created on sha, each with the status
+// of its newest write, the way GitHub lists one commit's check runs. A driver
+// that takes a run over reads it to adopt the step checks already created.
+func (h githubAt) CheckRunsForCommit(_ context.Context, token, repository, sha string) ([]githubapp.CheckRunRef, error) {
+	g := h.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, err := g.repo(token, repository); err != nil {
+		return nil, err
+	}
+	var out []githubapp.CheckRunRef
+	at := map[int64]int{}
+	for _, w := range g.writes {
+		if w.Repository != repository {
+			continue
+		}
+		if w.Create {
+			if w.Run.HeadSHA == sha {
+				at[w.ID] = len(out)
+				out = append(out, githubapp.CheckRunRef{ID: w.ID, Name: w.Run.Name, ExternalID: w.Run.ExternalID, Status: w.Run.Status})
+			}
+			continue
+		}
+		if i, ok := at[w.ID]; ok && w.Run.Status != "" {
+			out[i].Status = w.Run.Status
+		}
+	}
+	return out, nil
 }
 
 func (h githubAt) Repository(_ context.Context, token, repository string) (githubapp.RepositoryInfo, error) {

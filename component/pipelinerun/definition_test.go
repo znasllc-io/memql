@@ -159,7 +159,7 @@ func TestResumeRefusesMissingDuplicateAndReorderedDefinitions(t *testing.T) {
 func TestFailedOnlyRerunDoesNotCarryAChangedOrUnprovenDefinition(t *testing.T) {
 	for _, recorded := range []string{"", "different"} {
 		track := &stepTrack{step: pipelines.Step{Key: "build.one"}, definition: "current"}
-		carryPassed([]*stepTrack{track}, []WorkStep{{Key: track.step.Key, Status: WorkStepDone, DefinitionFingerprint: recorded}}, 1)
+		carryPassed([]*stepTrack{track}, []WorkStep{{Key: track.step.Key, Status: WorkStepDone, DefinitionFingerprint: recorded}}, 1, false)
 		if track.step.Skip != nil {
 			t.Fatal("previous success authorized a changed or unknown command")
 		}

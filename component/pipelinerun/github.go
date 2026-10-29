@@ -75,6 +75,14 @@ func (g *packagesGitHub) CreateCheckRun(ctx context.Context, token, repository s
 	return c.CreateCheckRun(ctx, token, owner, name, run)
 }
 
+func (g *packagesGitHub) CheckRunsForCommit(ctx context.Context, token, repository, sha string) ([]githubapp.CheckRunRef, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return nil, err
+	}
+	return c.CheckRunsForCommit(ctx, token, owner, name, sha)
+}
+
 func (g *packagesGitHub) UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error {
 	c, owner, name, err := g.target(repository)
 	if err != nil {

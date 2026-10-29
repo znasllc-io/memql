@@ -361,4 +361,16 @@ func TestCandidateWorkflowChoosesAllowedPlannedSkips(t *testing.T) {
 			}
 		})
 	}
+	// A carried pass qualifies only with the native proof candidate coverage
+	// attaches (candidate_carried.go); the bare code above stays refused.
+	t.Run("pipeline_passed_earlier with a proven carry", func(t *testing.T) {
+		p, c, _, evidence := candidatePreparationFixture(t, db)
+		evidence.skips = []candidateSkippedStep{{Component: "engine", WorkRunID: c.Evidence[0].WorkRunID, StepKey: "test.full", Code: pl.CodePassedEarlier,
+			CarriedFrom: &candidateCarriedFrom{PipelineRunID: "attempt-1", WorkRunID: "work-1", Attempt: 1, ReceiptDigest: "sha256:" + strings.Repeat("a", 64)}}}
+		record, err := p.prepare(ownerCtx(), c)
+		if err != nil || record.State != "ready" {
+			t.Fatal("a proven carried pass did not qualify", err)
+		}
+		cleanupCandidate(t, db, record.ID)
+	})
 }

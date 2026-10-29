@@ -286,9 +286,12 @@ automation releasePrepareCandidateWorkflow {
     builtin releaseCandidateRefuse()
   }
   // Empty package selections are explicitly planned skips, not executed tests.
-  // A carried earlier attempt requires its original receipt chain and is not
-  // accepted by this recipe. Blocked or undeclared skips fail natively.
-  if facts.skipped.any(item => item.code != "pipeline_not_affected") {
+  // A pass a failed-only re-run carried from an earlier attempt of the same
+  // release qualifies only with carriedFrom, the receipt chain coverage proved
+  // natively (integrations/release/candidate_carried.go). Blocked or
+  // undeclared skips fail natively.
+  if facts.skipped.any(item => item.code != "pipeline_not_affected"
+    && !(item.code == "pipeline_passed_earlier" && item.carriedFrom != nil)) {
     builtin releaseCandidateRefuse()
   }
   builtin releaseCandidateCheckVersions()

@@ -214,6 +214,11 @@ func (i *Integration) republishFinalCheckRuns(ctx context.Context, d Deps) error
 			i.noteAbort(bareID(r.ID), now)
 		} else {
 			i.forgetAborts(bareID(r.ID))
+			// What failed the run's final check likely failed its steps'
+			// too: close the step checks it left open (step_checks.go).
+			stepCtx, stepDone := context.WithTimeout(ctx, githubCallTimeout)
+			settleStepChecks(stepCtx, d, *g.p, r, steps, g.token)
+			stepDone()
 		}
 		if _, changed := finalCheckRunPatch(w, r); !changed {
 			continue

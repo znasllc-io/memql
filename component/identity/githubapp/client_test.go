@@ -612,23 +612,36 @@ func TestRevokeGrantTreatsAMissingGrantAsSuccess(t *testing.T) {
 func TestRateLimitIsRecognisedInBothSpellings(t *testing.T) {
 	now := time.Now().UTC()
 	cases := []struct {
-		name   string
-		status int
-		header string
-		want   bool
+		name       string
+		status     int
+		header     string
+		retryAfter string
+		body       string
+		want       bool
 	}{
-		{"429 is a secondary limit", http.StatusTooManyRequests, "", true},
-		{"403 with nothing remaining is the primary limit", http.StatusForbidden, "0", true},
-		{"a plain 403 is an ordinary refusal", http.StatusForbidden, "", false},
-		{"a 403 with quota left is an ordinary refusal", http.StatusForbidden, "4999", false},
+		{"429 is a secondary limit", http.StatusTooManyRequests, "", "", "", true},
+		{"403 with nothing remaining is the primary limit", http.StatusForbidden, "0", "", "", true},
+		// GitHub documents a secondary limit as "a 403 or 429", with Retry-After
+		// when it can say how long, and a message naming it either way: a run's
+		// check refused for one is waited out, not filed as a missing
+		// permission.
+		{"403 with Retry-After is a secondary limit", http.StatusForbidden, "", "60", "", true},
+		{"403 naming a secondary rate limit is one", http.StatusForbidden, "", "",
+			`{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}`, true},
+		{"a plain 403 is an ordinary refusal", http.StatusForbidden, "", "", "", false},
+		{"a 403 with quota left is an ordinary refusal", http.StatusForbidden, "4999", "", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			hub := newHub()
-			hub.on("/user/installations", func(*http.Request) (int, string) { return tc.status, `{"message":"no"}` })
+			body := tc.body
+			if body == "" {
+				body = `{"message":"no"}`
+			}
+			hub.on("/user/installations", func(*http.Request) (int, string) { return tc.status, body })
 			// The header has to come back on the response, which the fake's
 			// json helper does not do, so this route is wired by hand.
-			c := New(testConfig(t), WithHTTPClient(&http.Client{Transport: headerHub{hub: hub, header: tc.header}}),
+			c := New(testConfig(t), WithHTTPClient(&http.Client{Transport: headerHub{hub: hub, header: tc.header, retryAfter: tc.retryAfter}}),
 				WithClock(func() time.Time { return now }))
 			_, err := c.UserInstallations(context.Background(), "ghu_LIVE")
 			if got := IsRateLimited(err); got != tc.want {
@@ -638,16 +651,21 @@ func TestRateLimitIsRecognisedInBothSpellings(t *testing.T) {
 	}
 }
 
-// headerHub adds X-RateLimit-Remaining to whatever the inner fake answers.
+// headerHub adds X-RateLimit-Remaining, and Retry-After, to whatever the
+// inner fake answers.
 type headerHub struct {
-	hub    *fakeHub
-	header string
+	hub        *fakeHub
+	header     string
+	retryAfter string
 }
 
 func (h headerHub) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := h.hub.RoundTrip(req)
 	if err == nil && h.header != "" {
 		resp.Header.Set("X-RateLimit-Remaining", h.header)
+	}
+	if err == nil && h.retryAfter != "" {
+		resp.Header.Set("Retry-After", h.retryAfter)
 	}
 	return resp, err
 }

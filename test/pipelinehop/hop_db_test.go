@@ -202,7 +202,8 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 
 		// GitHub: the check run created queued where the run was opened, and
 		// moved by the agent that drove it -- in progress, then completed.
-		writes := c.github.writesFor(s.name)
+		// The per-step checks are asserted apart, below.
+		writes := c.github.runCheckWrites(s.name)
 		if len(writes) < 3 {
 			t.Fatalf("GitHub saw %d check-run writes for %s; want a create and at least two updates\n%s", len(writes), s.name, c.diagnose(s, run.ID))
 		}
@@ -229,8 +230,17 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 			t.Errorf("the last check-run write is %s/%s; want completed/success", last.Status, last.Conclusion)
 		}
 
-		t.Logf("run %s: first version %+v carried from %s, %d versions, every later one held by %s; check run %d created by %s and written %d times; runner handed %v",
-			run.ID, versions[0], nodeA, len(versions), nodeB, run.CheckRunID, writes[0].Node, len(writes), keysOf(reqs))
+		// The per-step checks are the driving agent's alone: the node that
+		// opened the run creates its check and never a step's, because the
+		// step-check writer lives in the drive.
+		for _, w := range c.github.stepCheckWrites(s.name) {
+			if w.Node != nodeB || w.Run.HeadSHA != "" && w.Run.HeadSHA != head {
+				t.Errorf("step check %d (%s) was written by %s on %q; want %s, the agent driving the run, on %s", w.ID, w.Run.Name, w.Node, w.Run.HeadSHA, nodeB, head)
+			}
+		}
+
+		t.Logf("run %s: first version %+v carried from %s, %d versions, every later one held by %s; check run %d created by %s and written %d times; %d step-check write(s); runner handed %v",
+			run.ID, versions[0], nodeA, len(versions), nodeB, run.CheckRunID, writes[0].Node, len(writes), len(c.github.stepCheckWrites(s.name)), keysOf(reqs))
 
 		// The plan was read where the run was driven, at the run's commit,
 		// and the change compared against the pull request's base.
@@ -352,7 +362,7 @@ func TestAGitHubDeliveryIsOpenedOnTheBffAndDrivenOnTheAgent(t *testing.T) {
 			t.Errorf("the run concluded %s by %q; want success by %s", done.Conclusion, done.DriverNodeID, nodeB)
 		}
 		var creates []checkWrite
-		for _, w := range c.github.writesFor(s.name) {
+		for _, w := range c.github.runCheckWrites(s.name) {
 			if w.Create {
 				creates = append(creates, w)
 			}

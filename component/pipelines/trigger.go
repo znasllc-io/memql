@@ -10,20 +10,23 @@ import (
 
 // Trigger is what one signed GitHub delivery asks for (design record D4-D6).
 type Trigger struct {
-	Event          Event  // "" for a rerequest
-	Rerequest      bool   // check_run or check_suite rerequested
-	CheckRunID     int64  // check_run.id for a check_run rerequest
-	Repository     string // "owner/name", lower-cased
-	DefaultBranch  string
-	InstallationID int64
-	SHA            string // head commit; "" for a release until resolved
-	BaseSHA        string // pull_request.base.sha, merge_group.base_sha, push.before
-	Branch         string // head branch name (no refs/heads/)
-	PullRequest    int
-	Fork           bool   // the head lives in another repository (D6)
-	HeadRepository string // "owner/name" of the head, for the refusal text
-	Title          string // first line of the commit message, the PR title, or the release name
-	ReleaseTag     string
+	Event      Event // "" for a rerequest
+	Rerequest  bool  // check_run or check_suite rerequested
+	CheckRunID int64 // check_run.id for a check_run rerequest
+	// CheckRunExternalID is check_run.external_id: how a step's check names
+	// its run, which no run row records by check run id (step_check.go).
+	CheckRunExternalID string
+	Repository         string // "owner/name", lower-cased
+	DefaultBranch      string
+	InstallationID     int64
+	SHA                string // head commit; "" for a release until resolved
+	BaseSHA            string // pull_request.base.sha, merge_group.base_sha, push.before
+	Branch             string // head branch name (no refs/heads/)
+	PullRequest        int
+	Fork               bool   // the head lives in another repository (D6)
+	HeadRepository     string // "owner/name" of the head, for the refusal text
+	Title              string // first line of the commit message, the PR title, or the release name
+	ReleaseTag         string
 }
 
 // Ignored is a delivery that asks this pipeline for nothing, with why.
@@ -178,8 +181,9 @@ type (
 		HeadCommit *ghCommit `json:"head_commit"`
 	}
 	ghCheckRun struct {
-		ID      *int64  `json:"id"`
-		HeadSHA *string `json:"head_sha"`
+		ID         *int64  `json:"id"`
+		HeadSHA    *string `json:"head_sha"`
+		ExternalID *string `json:"external_id"`
 	}
 	ghCheckSuite struct {
 		HeadSHA *string `json:"head_sha"`
@@ -279,7 +283,7 @@ func classifyCheckRun(top map[string]json.RawMessage, action string) (Trigger, *
 	if cr.ID == nil || *cr.ID <= 0 {
 		return Trigger{}, nil, errors.New("check_run.id is missing")
 	}
-	t.Rerequest, t.CheckRunID = true, *cr.ID
+	t.Rerequest, t.CheckRunID, t.CheckRunExternalID = true, *cr.ID, deref(cr.ExternalID)
 	if t.SHA, err = requireSHA("check_run.head_sha", cr.HeadSHA); err != nil {
 		return Trigger{}, nil, err
 	}
