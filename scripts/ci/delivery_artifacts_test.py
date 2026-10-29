@@ -7,7 +7,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location("delivery_artifacts", Path(__file__).with_name("delivery_artifacts.py"))
 fixture = importlib.util.module_from_spec(spec)
@@ -15,6 +15,87 @@ spec.loader.exec_module(fixture)
 
 
 class ArtifactFixtureTest(unittest.TestCase):
+    def test_go_prerequisite_budget_and_failure_evidence(self):
+        # The mock models elapsed setup time without sleeping for minutes or
+        # downloading a toolchain. Only success reaches the next prerequisite.
+        for name, remaining, duration, code, expected, allowance in (
+                ("slow setup", 1800, 121, 0, StopIteration, 600),
+                ("remaining budget", 150, 121, 0, StopIteration, 150),
+                ("setup error", 1800, 1, 17, RuntimeError, 600),
+                ("setup timeout", 1800, 601, 0, fixture.subprocess.TimeoutExpired, 600),
+                ("overall timeout", 90, 121, 0, fixture.subprocess.TimeoutExpired, 90)):
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
+                run = fixture.Fixture(Path(directory), directory)
+                run.deadline = 100 + remaining
+                diagnostic = b"go: provisioning selected toolchain\n"
+                go = Mock(pid=123, returncode=code)
+                waits = []
+
+                def communicate(timeout=None):
+                    waits.append(timeout)
+                    if len(waits) == 1 and duration > timeout:
+                        raise fixture.subprocess.TimeoutExpired(["go", "version"], timeout)
+                    return diagnostic, None
+
+                go.communicate.side_effect = communicate
+                commands = []
+
+                def popen(argv, **kwargs):
+                    commands.append(argv)
+                    if argv[0] == "git":
+                        raw = b"a" * 40 + b"\n" if argv[1] == "rev-parse" else b""
+                        process = Mock(returncode=0)
+                        process.communicate.return_value = raw, None
+                        return process
+                    self.assertEqual(argv, ["go", "version"])
+                    self.assertEqual(kwargs["stderr"], fixture.subprocess.STDOUT)
+                    return go
+
+                with patch.object(fixture.time, "monotonic", return_value=100), \
+                        patch.object(fixture.subprocess, "Popen", side_effect=popen), \
+                        patch.object(fixture.os, "killpg") as kill, \
+                        patch.object(run, "docker", side_effect=StopIteration("next prerequisite")) as docker:
+                    with self.assertRaises(expected):
+                        run.qualify(None)
+                self.assertEqual(waits[0], allowance)
+                self.assertEqual((run.output / "go-version.log").read_bytes(), diagnostic)
+                self.assertEqual(commands, [["git", "rev-parse", "HEAD"],
+                                            ["git", "status", "--porcelain"], ["go", "version"]])
+                self.assertEqual(run.containers, [])
+                self.assertEqual(run.report["tests"], [])
+                if expected is StopIteration:
+                    docker.assert_called_once_with("version", "--format", "{{.Client.Version}} / {{.Server.Version}}")
+                else:
+                    docker.assert_not_called()
+                if expected is fixture.subprocess.TimeoutExpired:
+                    self.assertEqual(waits, [allowance, 5])
+                    kill.assert_called_once_with(go.pid, fixture.signal.SIGTERM)
+                else:
+                    self.assertEqual(waits, [allowance])
+                    kill.assert_not_called()
+
+    def test_exhausted_overall_budget_refuses_go_before_startup(self):
+        for now in (200, 201):
+            with self.subTest(now=now), tempfile.TemporaryDirectory() as directory:
+                run = fixture.Fixture(Path(directory), directory)
+                run.deadline = 200
+                processes = []
+                for raw in (b"a" * 40 + b"\n", b""):
+                    process = Mock(returncode=0)
+                    process.communicate.return_value = raw, None
+                    processes.append(process)
+                with patch.object(fixture.time, "monotonic", side_effect=[100, 199, now]), \
+                        patch.object(fixture.subprocess, "Popen", side_effect=processes) as popen, \
+                        patch.object(run, "docker") as docker:
+                    with self.assertRaisesRegex(RuntimeError, "overall deadline exhausted"):
+                        run.qualify(None)
+                self.assertEqual([call.args[0] for call in popen.call_args_list],
+                                 [["git", "rev-parse", "HEAD"], ["git", "status", "--porcelain"]])
+                docker.assert_not_called()
+                self.assertIn("overall deadline exhausted", (run.output / "go-version.log").read_text())
+                self.assertEqual(run.containers, [])
+                self.assertEqual(run.report["tests"], [])
+
     def test_artifact_cache_must_match_requested_platform(self):
         for cached_arch, want_pull in (("amd64", True), ("arm64", False)):
             with self.subTest(cached_arch=cached_arch), tempfile.TemporaryDirectory() as directory:
