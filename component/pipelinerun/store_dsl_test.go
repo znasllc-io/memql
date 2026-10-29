@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -544,10 +545,16 @@ func TestRowsAreReadBackBareAndTyped(t *testing.T) {
 // A resumed driver reads its predecessor's step rows through the work spine's
 // own server-only read, as the pipelines system actor, with the BARE run id
 // the journal addresses them by; what it keeps of each is what workStepFull
-// projects -- the call the driver declared and the receipt's fields.
+// projects -- the call the driver declared, the receipt's fields, and the
+// binding, where the step's attempts and the time of the next one are kept.
 func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 	engine := newRecordingEngine()
+	binding := map[string]any{
+		"attempts":      []any{map[string]any{"attempt": float64(1), "class": "nothing_ran", "code": pipelines.CodeRunnerUnavailable}},
+		"nextAttemptAt": "2026-10-03T12:00:30Z",
+	}
 	engine.answers[qWorkStepsForRun] = []any{map[string]any{
+		"binding":      binding,
 		"id":           "v1:work:step:s1",
 		"key":          "tests.go#2",
 		"seq":          float64(3),
@@ -573,6 +580,13 @@ func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 		got.DurationMs != want.DurationMs || got.ErrorCode != want.ErrorCode || got.ErrorMessage != want.ErrorMessage ||
 		got.Stage != want.Stage || got.Name != want.Name || got.Reason != want.Reason || !slices.Equal(got.Packages, want.Packages) {
 		t.Errorf("step = %+v, want %+v", got, want)
+	}
+	if !reflect.DeepEqual(got.Binding, binding) {
+		t.Errorf("the binding a takeover continues the step's attempts from = %v, want %v", got.Binding, binding)
+	}
+	if records, next := attemptsFromBinding(got.Binding); len(records) != 1 || records[0].Attempt != 1 ||
+		!next.Equal(time.Date(2026, 10, 3, 12, 0, 30, 0, time.UTC)) {
+		t.Errorf("the attempts read back = %+v, next %s", records, next)
 	}
 	calls := engine.recorded()
 	if len(calls) != 1 || calls[0].query != `query workStepsForRun(runId: "w1")` {

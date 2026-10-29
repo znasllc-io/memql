@@ -105,23 +105,24 @@ func TestARetriedStepIsOneRowOverRealRows(t *testing.T) {
 	installExecutor(t, exec)
 
 	// The step's row, read back through the work spine's own server-only read
-	// at its latest version, as a replica taking the run over reads it.
+	// at its latest version, as a replica taking the run over reads it. It
+	// answers its failure rather than failing the test: the retry timer below
+	// calls it on the step's own goroutine, where t.Fatalf must never run.
 	var (
 		mu      sync.Mutex
 		runID   string
 		between []map[string]any
 	)
-	stepRows := func() []map[string]any {
+	stepRows := func() ([]map[string]any, error) {
 		mu.Lock()
 		id := runID
 		mu.Unlock()
-		run := mustRun(t, store, id)
-		rows, err := ds.systemRead(memqlengine.ContextWithFreshRead(auth.ContextWithSystemActor(context.Background(), "retry-test")),
-			qWorkStepsForRun, map[string]any{"runId": bareID(run.WorkRunID)})
-		if err != nil {
-			t.Errorf("workStepsForRun: %v", err)
+		run, err := store.RunByID(memqlengine.ContextWithFreshRead(context.Background()), id)
+		if err != nil || run == nil {
+			return nil, fmt.Errorf("pipelineRunById %s: %+v %v", id, run, err)
 		}
-		return rows
+		return ds.systemRead(memqlengine.ContextWithFreshRead(auth.ContextWithSystemActor(context.Background(), "retry-test")),
+			qWorkStepsForRun, map[string]any{"runId": bareID(run.WorkRunID)})
 	}
 
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -137,7 +138,10 @@ func TestARetriedStepIsOneRowOverRealRows(t *testing.T) {
 		// The wait between the attempts reads the row as it stands then, and
 		// ends at once: the policy's 30 seconds are not slept.
 		retryTimer: func(time.Duration) <-chan time.Time {
-			rows := stepRows()
+			rows, err := stepRows()
+			if err != nil {
+				t.Errorf("reading the step between its attempts: %v", err)
+			}
 			mu.Lock()
 			between = rows
 			mu.Unlock()
@@ -191,7 +195,10 @@ func TestARetriedStepIsOneRowOverRealRows(t *testing.T) {
 		}
 	}
 
-	after := stepRows()
+	after, err := stepRows()
+	if err != nil {
+		t.Fatalf("workStepsForRun: %v", err)
+	}
 	if len(after) != 1 {
 		t.Fatalf("the work run has %d step rows after the retry, want one: an attempt is a version of the step's row", len(after))
 	}

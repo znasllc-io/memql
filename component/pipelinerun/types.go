@@ -102,9 +102,9 @@ const (
 )
 
 // WorkStep is one v1:work:step of a pipeline's work run, at its latest
-// version: what a resumed driver reads to keep the steps that finished and to
-// re-send the one that was running. The journal writes these rows; this
-// package only reads them.
+// version: what a resumed driver reads to keep the steps that finished, to
+// re-send the attempt that was running, and to continue a step left between
+// two attempts. The journal writes these rows; this package only reads them.
 type WorkStep struct {
 	PipelineKind pipelines.StepKind
 	Result       map[string]any
@@ -137,6 +137,12 @@ type WorkStep struct {
 	// artifacts, as the driver wrote them (already masked): what a resumed
 	// run's notification lists for a step its predecessor ran.
 	ArtifactFileIDs []string
+	// Binding is the row's binding as stored. For a step the executor was
+	// handed it holds the step's attempt history and, between two attempts, when
+	// the next may start (attemptsFromBinding, attempts.go): what a replica
+	// taking the run over reads to learn which attempt was in flight or which
+	// one is due. Read as the engine parses it; nil when the row has none.
+	Binding map[string]any
 }
 
 // Finished reports whether the row carries the step's receipt.
@@ -342,7 +348,9 @@ type StepState struct {
 	// attempt the executor was handed, in order, once that attempt ended,
 	// masked as the step's receipt is. While a step waits between attempts its
 	// Status stays running and this says why. Empty for a step that never
-	// reached the executor; a resumed drive starts it empty.
+	// reached the executor. A resumed drive reads it back off the step's row
+	// (resume, adoptRows), so the history a previous driver began is continued,
+	// and every receipt this drive writes restates it.
 	Attempts []attemptRecord
 }
 

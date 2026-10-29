@@ -1303,8 +1303,9 @@ func outboundStatusFromRow(row map[string]any) OutboundStatus {
 
 // workStepFromRow reads a v1:work:step through workStepFull. The call is the
 // driver's own declaration ({construct, name, stage, packages}); the result
-// carries a skipped or cancelled step's reason; and the receipt names the
-// Library files the step's artifacts became.
+// carries a skipped or cancelled step's reason; the receipt names the Library
+// files the step's artifacts became; and the binding keeps the step's attempts,
+// which a takeover continues from.
 func workStepFromRow(row map[string]any) WorkStep {
 	s := WorkStep{
 		Key:             rowString(row, "key"),
@@ -1330,6 +1331,9 @@ func workStepFromRow(row map[string]any) WorkStep {
 	if result, ok := row["result"].(map[string]any); ok {
 		s.Result = result
 		s.Reason = rowString(result, "reason")
+	}
+	if binding, ok := row["binding"].(map[string]any); ok {
+		s.Binding = binding
 	}
 	return s
 }

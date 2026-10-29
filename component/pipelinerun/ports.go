@@ -131,7 +131,8 @@ type Store interface {
 	// the readiness report asks only whether ANY repository is connected.
 	PipelinesActive(ctx context.Context) ([]Pipeline, error)
 	// WorkSteps is every v1:work:step of one work run at its latest version
-	// (dsl/work's workStepsForRun): what a resumed driver keeps and re-sends.
+	// (dsl/work's workStepsForRun): what a resumed driver keeps, re-sends, or
+	// continues at the next attempt.
 	WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error)
 	// PreviousRuns is one pipeline's runs of one event, newest queued first and
 	// at most twenty, in every status (pipelineRunsForPipelineEvent): what a

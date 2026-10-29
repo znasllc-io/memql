@@ -192,6 +192,82 @@ func isRFC3339(s string) bool {
 	return err == nil
 }
 
+// ---------------------------------------------------------------------------
+// Where a step's attempts stand on its row
+// ---------------------------------------------------------------------------
+
+// rowAttempts is what a running step's row says of its attempts, read by a
+// replica taking the run over (resume, adoptRows).
+type rowAttempts struct {
+	// records is the history: every attempt that ended, in order.
+	records []attemptRecord
+	// ended: the attempt the row names is the history's last. Its outcome was
+	// recorded with another attempt to come (Step.Retrying), and that one has
+	// not begun. Otherwise the row's attempt began -- its intent is on the row --
+	// and nothing says how it ended.
+	ended bool
+	// next is when the next attempt may start, for an ended attempt: the zero
+	// time when the row names none.
+	next time.Time
+}
+
+// attemptsOfRow reads a running step's row. ok is false when its history does
+// not lead to the attempt the row names: records numbered other than 1, 2, 3...
+// in order, or ending neither at the row's attempt (that attempt ended) nor just
+// before it (that attempt is in flight). Every write of the row keeps that shape
+// -- attempt N's intent carries the records of attempts 1 to N-1, its outcome
+// adds record N -- so a history without it was not written by these rules, and
+// nothing in it can say which attempt to send, or where.
+func attemptsOfRow(row WorkStep) (rowAttempts, bool) {
+	records, next := attemptsFromBinding(row.Binding)
+	for i, r := range records {
+		if r.Attempt != i+1 {
+			return rowAttempts{}, false
+		}
+	}
+	switch attempt := max(row.Attempt, 1); len(records) {
+	case attempt:
+		return rowAttempts{records: records, ended: true, next: next}, true
+	case attempt - 1:
+		return rowAttempts{records: records}, true
+	}
+	return rowAttempts{}, false
+}
+
+// placementOf is where an attempt was sent, recomputed from the records of
+// every attempt before it exactly as the driver that sent it chose it
+// (chooseNext): nil for a first attempt, which goes where the step's manifest
+// placed it. false when those records could not have sent another attempt.
+func placementOf(step pipelines.Step, policy pipelines.ComputePlacementPolicy, before []attemptRecord) (*pipelines.AttemptPlacement, bool) {
+	if len(before) == 0 {
+		return nil, true
+	}
+	placement, _, ok := chooseNext(step, policy, before)
+	return placement, ok
+}
+
+// recordReceipt is the receipt an ended attempt would have ended its step with,
+// rebuilt from its record. A replica that took the run over between two attempts
+// holds that attempt's record, not the executor's answer, and a step that may
+// not go on (its attempts were had, or its run's ceiling is too close) ends with
+// its last attempt's failure: its code and words, where it ran, its log, and how
+// long it took. What the record does not keep -- the answer's exit code and log
+// tail -- is not restated. Every string was masked when the record was made, and
+// is masked again with this drive's values, as a receipt's strings are.
+func (dr *runDriver) recordReceipt(r attemptRecord) receipt {
+	masks := dr.maskValues()
+	mask := func(s string) string { return pipelines.MaskSecrets(strings.TrimSpace(s), masks) }
+	rec := failReceipt(mask(r.Code), mask(r.Message))
+	rec.logFileID = mask(r.LogFileID)
+	rec.binding = bindingOf(pipelines.Where{Surface: r.Surface, NodeID: r.NodeID, JobName: r.JobName, WorkerID: r.WorkerID}, mask)
+	started, startErr := time.Parse(time.RFC3339, r.StartedAt)
+	finished, finishErr := time.Parse(time.RFC3339, r.FinishedAt)
+	if startErr == nil && finishErr == nil && !finished.Before(started) {
+		rec.durationMs = max(finished.Sub(started).Milliseconds(), 1)
+	}
+	return rec
+}
+
 // attemptClassOf is the class the driver retries from: the executor's, when it
 // is one this engine knows, and AttemptFinal otherwise -- an empty class
 // included, so an older executor's answer, or one nothing classified, is never

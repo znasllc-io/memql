@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/component/workjournal"
 )
 
 // driver_retry_test.go -- the driver's attempt loop (spec 2026-10-28 fleet-first
@@ -139,6 +142,74 @@ func installComputePolicy(t *testing.T, dh *driveHarness, policy string) {
 func nothingRanResult(code, message string) pipelines.StepResult {
 	return pipelines.StepResult{Status: pipelines.OutcomeFailed, ExitCode: -1,
 		Failure: &pipelines.Failure{Code: code, Message: message}, AttemptClass: pipelines.AttemptNothingRan}
+}
+
+// noRouteResult is the one cluster ending that proves the command never started:
+// the agent's own refusal, made before any runner took the step
+// (noRunnerReached, integrations/pipelinesteps). Every ending a runner reports
+// leaves a Job that may yet start the command, and reads outcome unknown.
+func noRouteResult() pipelines.StepResult {
+	return nothingRanResult(pipelines.CodeRunnerUnavailable, "This agent node has no route to a workbench replica. Nothing ran.")
+}
+
+// fleetRecoveryResult is what the fleet answers a recovery of an attempt on a
+// machine (integrations/pipelinesteps: Executor.runFleet, classified by
+// Execute): a machine holds no Job to re-attach to, so nothing is sent, and
+// whether the command ran is unknown.
+func fleetRecoveryResult() pipelines.StepResult {
+	return pipelines.StepResult{Status: pipelines.OutcomeFailed, ExitCode: -1,
+		Failure: &pipelines.Failure{Code: pipelines.CodeExecutionUncertain,
+			Message: "A previous driver may have started this fleet command, and no durable result was recorded. Reconcile its outcome before authorizing new work; no replacement command was sent."},
+		AttemptClass: pipelines.AttemptOutcomeUnknown}
+}
+
+// driveIntoTheWait has agent-a drive run until its step waits between two
+// attempts, and returns then. The wait's timer is fire: agent-a stays in the
+// wait until fire delivers (never, when fire is nil) or its lease's stop ends it.
+func (rh *retryHarness) driveIntoTheWait(t *testing.T, run Run, fire <-chan time.Time) {
+	t.Helper()
+	waiting := make(chan struct{})
+	var once sync.Once
+	rh.mu.Lock()
+	rh.timer = func(time.Duration) <-chan time.Time {
+		once.Do(func() { close(waiting) })
+		return fire
+	}
+	rh.mu.Unlock()
+	rh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, run))
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("agent-a never began waiting for the step's next attempt")
+	}
+}
+
+// replica is another agent replica over rh's rows, on its own clock, its waits
+// between attempts answered by timer -- at once, when timer is nil.
+func (rh *retryHarness) replica(node string, now func() time.Time, timer func(time.Duration) <-chan time.Time) *Integration {
+	if timer == nil {
+		timer = func(time.Duration) <-chan time.Time {
+			fired := make(chan time.Time, 1)
+			fired <- now()
+			return fired
+		}
+	}
+	peer := rh.peer(node)
+	peer.Configure(func(d *Deps) {
+		d.Now = now
+		d.retryTimer = timer
+	})
+	return peer
+}
+
+// stopRenewing ages runID's lease as a replica's that stopped renewing it: the
+// run is another replica's to take over.
+func (dh *driveHarness) stopRenewing(runID string) {
+	dh.store.mu.Lock()
+	r := dh.store.runs[runID]
+	r.DriverHeartbeatAt = testNow.Add(-3 * time.Minute)
+	dh.store.runs[runID] = r
+	dh.store.mu.Unlock()
 }
 
 // onMachine is res as the fleet answers it: run on one machine of the owner's.
@@ -369,6 +440,59 @@ func TestCancelDuringARetryWaitSettlesCancelled(t *testing.T) {
 	}
 	if cancels := rh.exec.cancelled(); !slices.Equal(cancels, []string{run.ID}) {
 		t.Errorf("the runner is told to stop the run once: %v", cancels)
+	}
+}
+
+// The wait between two attempts belongs to the workflow call that runs the
+// step: when that call ends -- the workflow stopping around it -- the wait ends
+// with it, and the step writes nothing more. Not the next attempt's intent,
+// which would fail on the ended call and read as a journal outage: the row
+// still says when the next attempt is due, for whichever drive carries the run
+// on.
+func TestARetryWaitEndsWithItsWorkflowCall(t *testing.T) {
+	work := newFakeWork()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	waiting := make(chan struct{})
+	dr := &runDriver{lease: newLease("r1"), log: quiet, d: Deps{
+		Now:    func() time.Time { return testNow },
+		Logger: quiet,
+		retryTimer: func(time.Duration) <-chan time.Time {
+			close(waiting)
+			return make(chan time.Time) // never fires: only the call's end can end this wait
+		},
+	}}
+	dr.workRun.Store(workjournal.New(work, quiet, "agent-a").Reopen(ownerID, "goal-1", "run-1",
+		[]workjournal.StepDecl{{Key: "build.mac", Kind: workjournal.KindDeterministic, StepType: "exec"}}, testNow))
+	track := &stepTrack{step: pipelines.Step{Key: "build.mac", Kind: pipelines.StepCommand}, attempt: 1}
+	track.setAttempts([]attemptRecord{{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	began := make(chan bool, 1)
+	go func() {
+		began <- dr.beginNextAttempt(ctx, track, pinnedTo("msi-raider", 120), testNow.Add(30*time.Second), testNow.Add(time.Hour),
+			failReceipt(pipelines.CodeCloneFailed, "The fetch failed."))
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the step never began waiting for its next attempt")
+	}
+	cancel()
+	select {
+	case ok := <-began:
+		if ok {
+			t.Error("the next attempt began after the workflow call that runs the step ended")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the wait between two attempts outlived the workflow call that runs the step")
+	}
+	if calls := work.recorded(); len(calls) != 0 {
+		t.Errorf("the step wrote %d journal calls after its call ended: %+v", len(calls), calls)
+	}
+	if track.attempt != 1 || dr.journalFailed.Load() || dr.lease.isLost() {
+		t.Errorf("attempt %d, journal failed %v, lease lost %v; the step stops where it stood, and nothing reads as a journal outage",
+			track.attempt, dr.journalFailed.Load(), dr.lease.isLost())
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -1644,6 +1645,457 @@ pipeline:
 	}
 	if got, _ := dh.store.run(run.ID); got.Conclusion != ConclusionSuccess || got.DriverNodeID != "agent-b" {
 		t.Errorf("run = %s by %q", got.Conclusion, got.DriverNodeID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A takeover in the middle of a step's attempts
+// ---------------------------------------------------------------------------
+//
+// A replica that takes a run over reads where each step's attempts stand off the
+// step's row (spec 2026-10-28 fleet-first retries, section 3): attempt N begun
+// and no record of it (sent again as a recovery of attempt N), attempt N recorded
+// and N+1 not begun (continued at N+1 once its time has come), or finished (the
+// receipt kept). The history and the time of the next attempt survive on the row,
+// so nothing the first replica learned is lost or done twice.
+
+// resume reads where each step's attempts stand off its row, and refuses a
+// history that does not lead to the attempt the row names -- one with a gap,
+// out of order, ahead of the row's attempt or behind it -- because such a
+// history cannot say which attempt to send, or where.
+func TestResumeReadsWhereEachStepsAttemptsStand(t *testing.T) {
+	step := pipelines.Step{Key: "build.mac", Stage: "build", Name: "mac", Kind: pipelines.StepCommand,
+		Placement: pipelines.PlacementFleet, Execution: pipelines.ExecutionNative, Platform: "darwin/arm64", Run: "make mac"}
+	ended := func(n int) attemptRecord {
+		return attemptRecord{Attempt: n, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed,
+			Surface: pipelines.PlacementFleet, WorkerID: "msi-raider"}
+	}
+	due := testNow.Add(30 * time.Second)
+	row := func(status string, attempt int, next time.Time, history ...attemptRecord) WorkStep {
+		return WorkStep{Key: step.Key, Status: status, Attempt: attempt, Binding: attemptsBinding(nil, history, next)}
+	}
+	cases := []struct {
+		name      string
+		row       WorkStep
+		diverges  bool
+		sent      bool
+		between   bool
+		placement *pipelines.AttemptPlacement
+		next      time.Time
+		history   int
+	}{
+		{name: "attempt 1 begun, nothing recorded", row: row(WorkStepRunning, 1, time.Time{}), sent: true},
+		{name: "attempt 2 begun after attempt 1 ended", row: row(WorkStepRunning, 2, time.Time{}, ended(1)),
+			sent: true, placement: pinnedTo("msi-raider", 120), history: 1},
+		{name: "attempt 1 ended, attempt 2 due", row: row(WorkStepRunning, 1, due, ended(1)),
+			between: true, next: due, history: 1},
+		{name: "attempt 2 ended, attempt 3 due", row: row(WorkStepRunning, 2, due, ended(1), ended(2)),
+			between: true, placement: pinnedTo("msi-raider", 120), next: due, history: 2},
+		{name: "a finished step keeps its receipt and its history", row: row(WorkStepFailed, 2, time.Time{}, ended(1), ended(2)), history: 2},
+		{name: "a gap in the history", row: row(WorkStepRunning, 3, time.Time{}, ended(1), ended(3)), diverges: true},
+		{name: "a history out of order", row: row(WorkStepRunning, 3, time.Time{}, ended(2), ended(1)), diverges: true},
+		{name: "a history ahead of the row's attempt", row: row(WorkStepRunning, 1, due, ended(1), ended(2)), diverges: true},
+		{name: "a history behind the row's attempt", row: row(WorkStepRunning, 3, time.Time{}, ended(1)), diverges: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dr := &runDriver{run: Run{SHA: shaA}, d: Deps{EngineRevision: func() string { return "test-engine-revision" }},
+				computePlacement: &pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy()}}
+			dr.buildTracks(pipelines.Plan{Stages: []pipelines.PlanStage{{Name: "build", Steps: []pipelines.Step{step}}}})
+			r := c.row
+			r.DefinitionFingerprint = dr.definitionOf(step)
+			why := dr.resume([]WorkStep{r})
+			if c.diverges {
+				if why == "" || !strings.Contains(why, step.Key) {
+					t.Fatalf("a history that does not lead to the row's attempt was accepted: %q", why)
+				}
+				return
+			}
+			if why != "" {
+				t.Fatalf("the row and the plan agree: %s", why)
+			}
+			track := dr.tracks[0]
+			if track.attempt != c.row.Attempt || track.sent != c.sent || track.betweenAttempts != c.between ||
+				!reflect.DeepEqual(track.placement, c.placement) || !track.nextAttemptAt.Equal(c.next) || len(track.snapshot().Attempts) != c.history {
+				t.Errorf("track: attempt %d, sent %v, between %v, placed %s, next %s, %d records; want attempt %d, sent %v, between %v, placed %s, next %s, %d records",
+					track.attempt, track.sent, track.betweenAttempts, describe(track.placement), track.nextAttemptAt, len(track.snapshot().Attempts),
+					c.row.Attempt, c.sent, c.between, describe(c.placement), c.next, c.history)
+			}
+			if req := dr.request(track, nil); req.RecoverOnly != c.sent || req.Attempt != c.row.Attempt {
+				t.Errorf("the request is attempt %d, recover-only %v", req.Attempt, req.RecoverOnly)
+			}
+		})
+	}
+}
+
+// A replica that takes a run over while a step waits between two attempts
+// continues at the NEXT attempt. The row records attempt 1's outcome, so attempt
+// 1 is not sent again -- not even as a recovery -- and its record is kept:
+// attempt 2's intent restates it and the receipt holds both. Attempt 2 goes where
+// the replica that wrote the outcome would have sent it (back to the same
+// machine, pinned) and starts at once, its time having passed, after attempt 1's
+// resources are confirmed gone again. The replica that lost the run learns it
+// from its own heartbeat in the middle of its wait, and writes nothing more.
+func TestResumeBetweenAttemptsContinuesAtTheNextAttempt(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	// agent-a renews often, on a clock agent-b reads as long stale: a replica
+	// whose renewals no longer count. Its first renewal after agent-b's claim is
+	// what tells it the run is gone, while it waits.
+	rh.integ.Configure(func(d *Deps) { d.HeartbeatEvery = 5 * time.Millisecond })
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		rh.note("execute %d", req.Attempt)
+		if req.Attempt == 1 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The machine's git fetch failed before the command ran."), "msi-raider"), nil
+		}
+		return onMachine(passed(req), "msi-raider"), nil
+	}
+	run := rh.openRun(t, prOpening())
+	rh.driveIntoTheWait(t, run, nil) // agent-a's timer never fires
+
+	var (
+		mu     sync.Mutex
+		waited []time.Duration
+	)
+	other := rh.replica("agent-b", func() time.Time { return testNow.Add(leaseStaleAfter + time.Minute) }, func(d time.Duration) <-chan time.Time {
+		mu.Lock()
+		waited = append(waited, d)
+		mu.Unlock()
+		fired := make(chan time.Time, 1)
+		fired <- testNow
+		return fired
+	})
+	if err := other.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	waitDrives(t, other)
+	waitDrives(t, rh.integ) // agent-a's wait ends when its heartbeat finds agent-b's claim
+
+	got, _ := rh.store.run(run.ID)
+	if got.Status != StatusCompleted || got.Conclusion != ConclusionSuccess || got.DriverNodeID != "agent-b" {
+		t.Fatalf("agent-b concludes the run: %s/%s by %q (%s %q)", got.Status, got.Conclusion, got.DriverNodeID, got.FailureCode, got.FailureMessage)
+	}
+	sent := rh.exec.sent()
+	if len(sent) != 2 {
+		t.Fatalf("the executor was handed %d requests, want attempt 1 by agent-a and attempt 2 by agent-b", len(sent))
+	}
+	if next := sent[1]; next.Attempt != 2 || next.RecoverOnly || !reflect.DeepEqual(next.Placement, pinnedTo("msi-raider", 120)) {
+		t.Errorf("agent-b sent attempt %d, recover-only %v, placed %s; want a fresh attempt 2 pinned to msi-raider",
+			next.Attempt, next.RecoverOnly, describe(next.Placement))
+	}
+	mu.Lock()
+	if len(waited) != 0 {
+		t.Errorf("agent-b waited %v for an attempt whose time had passed", waited)
+	}
+	mu.Unlock()
+	if order := rh.events(); !slices.Equal(order, []string{"execute 1", "acknowledge 1", "acknowledge 1", "execute 2", "acknowledge 2"}) {
+		t.Errorf("the order was %v; agent-b confirms attempt 1's resources gone again before it sends attempt 2", order)
+	}
+
+	const key = "build.mac"
+	intents := rh.intentsOf(key)
+	if len(intents) != 2 {
+		t.Fatalf("%d intents, want attempt 1's and attempt 2's: an attempt whose outcome is recorded is not begun again", len(intents))
+	}
+	if fmt.Sprint(intents[1].Args["attempt"]) != "2" {
+		t.Errorf("agent-b's intent names attempt %v, want 2", intents[1].Args["attempt"])
+	}
+	if records, next := attemptsOf(intents[1]); len(records) != 1 || records[0].Attempt != 1 || records[0].Code != pipelines.CodeCloneFailed ||
+		records[0].WorkerID != "msi-raider" || !next.IsZero() {
+		t.Errorf("attempt 2's intent restates attempt 1 and names no next attempt: %+v, next %s", records, next)
+	}
+	updates := rh.work.receiptsOf(key)
+	if len(updates) != 2 || argString(updates[0].Args, "status") != WorkStepRunning || argString(updates[1].Args, "status") != WorkStepDone {
+		t.Fatalf("the step's updates = %+v; want agent-a's outcome of attempt 1, then agent-b's receipt", updates)
+	}
+	if records, next := attemptsOf(updates[1]); len(records) != 2 || records[0].Code != pipelines.CodeCloneFailed ||
+		records[1].Attempt != 2 || records[1].Class != "" || !next.IsZero() {
+		t.Errorf("the receipt holds both attempts and no next one: %+v, next %s", records, next)
+	}
+	if row := rh.work.stepRow(key); row["status"] != WorkStepDone || fmt.Sprint(row["attempt"]) != "2" {
+		t.Errorf("the row reads %v at attempt %v, want done at 2", row["status"], row["attempt"])
+	}
+}
+
+// The next attempt of a step a takeover continues starts when the row says it
+// may, and not sooner: agent-b reads attempt 2's time off the row and waits out
+// what is left of it -- twenty of the policy's thirty seconds -- before it sends
+// anything. agent-a, whose wait ends after the run became agent-b's, finds its
+// next write refused and writes nothing more.
+func TestResumeWaitsForNextAttemptAt(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt == 1 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The machine's git fetch failed before the command ran."), "msi-raider"), nil
+		}
+		return onMachine(passed(req), "msi-raider"), nil
+	}
+	run := rh.openRun(t, prOpening())
+	release := make(chan time.Time)
+	rh.driveIntoTheWait(t, run, release)
+	rh.stopRenewing(run.ID)
+
+	clock := &driveClock{at: testNow.Add(10 * time.Second)}
+	waiting := make(chan time.Duration, 1)
+	fire := make(chan time.Time, 1)
+	other := rh.replica("agent-b", clock.now, func(d time.Duration) <-chan time.Time {
+		waiting <- d
+		return fire
+	})
+	if err := other.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	select {
+	case d := <-waiting:
+		if d != 20*time.Second {
+			t.Errorf("agent-b waits %s; attempt 2 is due 30 s after attempt 1's outcome, 20 s after agent-b's now", d)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("agent-b never began waiting for attempt 2")
+	}
+	if n := len(rh.exec.sent()); n != 1 {
+		t.Errorf("the executor was handed %d requests before attempt 2's time; want attempt 1's alone", n)
+	}
+	clock.set(testNow.Add(30 * time.Second))
+	fire <- clock.now()
+	waitDrives(t, other)
+	close(release) // agent-a's wait ends only now, after the run became agent-b's
+	waitDrives(t, rh.integ)
+
+	sent := rh.exec.sent()
+	if len(sent) != 2 || sent[1].Attempt != 2 || sent[1].RecoverOnly || !reflect.DeepEqual(sent[1].Placement, pinnedTo("msi-raider", 120)) {
+		t.Fatalf("the executor was handed %d requests; want agent-b's fresh attempt 2, pinned to msi-raider, after attempt 1", len(sent))
+	}
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess || got.DriverNodeID != "agent-b" {
+		t.Errorf("run = %s by %q", got.Conclusion, got.DriverNodeID)
+	}
+	if intents, updates := rh.intentsOf("build.mac"), rh.work.receiptsOf("build.mac"); len(intents) != 2 || len(updates) != 2 {
+		t.Errorf("%d intents and %d updates of the step; want one intent per attempt, agent-a's outcome and agent-b's receipt -- agent-a's late intent must be refused", len(intents), len(updates))
+	}
+}
+
+// A replica that takes a run over while a step's SECOND attempt is in flight
+// sends that attempt again as a recovery: attempt 2 -- not attempt 1, whose
+// outcome the row records, and not a fresh attempt 3 -- placed where it was sent
+// (pinned to the machine attempt 1 ran on), and with the history kept: its
+// intent restates attempt 1 and the receipt holds both. The fleet cannot
+// re-attach to a command on a machine, so it answers the recovery outcome
+// unknown, and a step that is not repeatable ends there.
+func TestResumeOfAnInFlightAttemptIsRecoverOnly(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	release := make(chan struct{})
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		switch {
+		case req.RecoverOnly:
+			return fleetRecoveryResult(), nil
+		case req.Attempt == 1:
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The machine's git fetch failed before the command ran."), "msi-raider"), nil
+		}
+		<-release // agent-a's attempt 2, in flight when agent-a stops
+		return onMachine(passed(req), "msi-raider"), nil
+	}
+	run := rh.openRun(t, prOpening())
+	rh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, run))
+	rh.awaitEntered(t, "build.mac", "build.mac") // attempt 1, then attempt 2 in flight
+	rh.stopRenewing(run.ID)
+
+	other := rh.replica("agent-b", func() time.Time { return testNow }, nil)
+	if err := other.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	waitDrives(t, other)
+	close(release)
+	waitDrives(t, rh.integ)
+
+	sent := rh.exec.sent()
+	if len(sent) != 3 {
+		t.Fatalf("the executor was handed %d requests, want agent-a's attempts 1 and 2, then agent-b's recovery of attempt 2", len(sent))
+	}
+	if recovery := sent[2]; recovery.Attempt != 2 || !recovery.RecoverOnly || !reflect.DeepEqual(recovery.Placement, pinnedTo("msi-raider", 120)) {
+		t.Errorf("agent-b sent attempt %d, recover-only %v, placed %s; want a recovery of attempt 2, placed as agent-a placed it (pinned to msi-raider)",
+			recovery.Attempt, recovery.RecoverOnly, describe(recovery.Placement))
+	}
+	const key = "build.mac"
+	intents := rh.intentsOf(key)
+	if len(intents) != 3 || fmt.Sprint(intents[2].Args["attempt"]) != "2" {
+		t.Fatalf("%d intents; want attempts 1 and 2 by agent-a, then attempt 2 again by agent-b", len(intents))
+	}
+	if records, _ := attemptsOf(intents[2]); len(records) != 1 || records[0].Attempt != 1 || records[0].Code != pipelines.CodeCloneFailed {
+		t.Errorf("agent-b's intent restates attempt 1, rather than erasing it: %+v", records)
+	}
+	updates := rh.work.receiptsOf(key)
+	if len(updates) != 2 || argString(updates[1].Args, "status") != WorkStepFailed || argString(updates[1].Args, "errorCode") != pipelines.CodeExecutionUncertain {
+		t.Fatalf("the step's updates = %+v; want agent-a's outcome of attempt 1, then a failed receipt pipeline_execution_uncertain", updates)
+	}
+	records, next := attemptsOf(updates[1])
+	if len(records) != 2 || records[0].Code != pipelines.CodeCloneFailed || records[1].Attempt != 2 ||
+		records[1].Class != pipelines.AttemptOutcomeUnknown || records[1].WorkerID != "msi-raider" || !next.IsZero() {
+		t.Errorf("the receipt holds attempt 1 and the recovered attempt 2 on the machine it was pinned to: %+v, next %s", records, next)
+	}
+	if row := rh.work.stepRow(key); row["status"] != WorkStepFailed || fmt.Sprint(row["attempt"]) != "2" {
+		t.Errorf("the row reads %v at attempt %v, want failed at 2", row["status"], row["attempt"])
+	}
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionFailure || got.DriverNodeID != "agent-b" {
+		t.Errorf("run = %s by %q", got.Conclusion, got.DriverNodeID)
+	}
+}
+
+// A step left between two attempts may still hold its last attempt's
+// resources: the replica that recorded the outcome can stop before it confirms
+// them gone, or fail to. The replica taking over confirms them before it starts
+// anything, and sends no next attempt until it can -- a Job of attempt 1 still
+// holding its slot, or still able to start its command, must never run beside
+// attempt 2. One that cannot confirm them leaves the run unfinished, its row as
+// it was, for the next replica to try.
+func TestAResumedRetryConfirmsTheEndedAttemptsCleanupFirst(t *testing.T) {
+	rh := newRetryHarness(t, retryClusterManifest, false)
+	rh.exec.ackErrors = map[string]error{"checks.vet": errors.New("foreground deletion still pending")}
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		rh.note("execute %d", req.Attempt)
+		if req.Attempt == 1 {
+			return noRouteResult(), nil
+		}
+		return onTheCluster(passed(req), req), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run) // agent-a records attempt 1's outcome, cannot confirm its Job gone, and stops
+
+	const key = "checks.vet"
+	b := rh.replica("agent-b", func() time.Time { return testNow.Add(leaseStaleAfter + time.Second) }, nil)
+	if err := b.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	waitDrives(t, b)
+	if n := len(rh.exec.sent()); n != 1 {
+		t.Fatalf("agent-b sent %d requests while attempt 1's Job could not be confirmed gone; want none", n-1)
+	}
+	if got, _ := rh.store.run(run.ID); got.Status == StatusCompleted {
+		t.Fatalf("the run concluded %s; a run whose cleanup is unconfirmed stays unfinished for recovery", got.Conclusion)
+	}
+	if intents, updates := rh.intentsOf(key), rh.work.receiptsOf(key); len(intents) != 1 || len(updates) != 1 {
+		t.Fatalf("%d intents and %d updates; agent-b writes nothing of the step until attempt 1's resources are confirmed gone", len(intents), len(updates))
+	}
+
+	rh.exec.mu.Lock()
+	rh.exec.ackErrors = nil
+	rh.exec.mu.Unlock()
+	c := rh.replica("agent-c", func() time.Time { return testNow.Add(2*leaseStaleAfter + 2*time.Second) }, nil)
+	if err := c.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	waitDrives(t, c)
+
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess || got.DriverNodeID != "agent-c" {
+		t.Fatalf("agent-c concludes the run: %s by %q (%s %q)", got.Conclusion, got.DriverNodeID, got.FailureCode, got.FailureMessage)
+	}
+	sent := rh.exec.sent()
+	if len(sent) != 2 || sent[1].Attempt != 2 || sent[1].RecoverOnly || !reflect.DeepEqual(sent[1].Placement, toCluster) {
+		t.Fatalf("the executor was handed %d requests; want attempt 1, then agent-c's fresh attempt 2 on the cluster", len(sent))
+	}
+	if order := rh.events(); !slices.Equal(order, []string{"execute 1", "acknowledge 1", "acknowledge 1", "acknowledge 1", "execute 2", "acknowledge 2"}) {
+		t.Errorf("the order was %v; attempt 1's Job is confirmed gone (by agent-c, after agent-a and agent-b could not) before attempt 2 is sent", order)
+	}
+	updates := rh.work.receiptsOf(key)
+	if len(updates) != 2 || argString(updates[1].Args, "status") != WorkStepDone {
+		t.Fatalf("the step's updates = %+v; want agent-a's outcome of attempt 1, then agent-c's receipt", updates)
+	}
+	if records, _ := attemptsOf(updates[1]); len(records) != 2 || records[0].Code != pipelines.CodeRunnerUnavailable || records[1].Attempt != 2 {
+		t.Errorf("the receipt holds both attempts: %+v", records)
+	}
+}
+
+// A run a takeover ends without carrying it on -- asked to stop, or its plan,
+// read again, not the plan its work began -- settles a step its rows left
+// between two attempts from what the row says of them: the receipt restates the
+// history and names no next attempt (the one the row promised will never
+// start), and the row keeps the attempt the step had reached rather than
+// reading as attempt 1. The runner is told to stop the run: this replica
+// confirmed nothing of the last attempt's resources.
+func TestARunEndedOnResumeRestatesItsStepsAttempts(t *testing.T) {
+	for _, ending := range []string{"cancelled", "plan changed"} {
+		t.Run(ending, func(t *testing.T) {
+			rh := newRetryHarness(t, retryClusterManifest, false)
+			rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+				if req.Attempt > 2 {
+					t.Errorf("attempt %d was sent", req.Attempt)
+				}
+				return noRouteResult(), nil
+			}
+			// agent-a's first wait ends at once; it stops in its second, between
+			// attempts 2 and 3.
+			release := make(chan time.Time)
+			second := make(chan struct{})
+			var waits atomic.Int64
+			rh.timer = func(time.Duration) <-chan time.Time {
+				if waits.Add(1) == 1 {
+					fired := make(chan time.Time, 1)
+					fired <- testNow
+					return fired
+				}
+				close(second)
+				return release
+			}
+			run := rh.openRun(t, prOpening())
+			rh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, run))
+			select {
+			case <-second:
+			case <-time.After(10 * time.Second):
+				t.Fatal("agent-a never began waiting for attempt 3")
+			}
+			rh.stopRenewing(run.ID)
+			if ending == "cancelled" {
+				rh.store.mu.Lock()
+				r := rh.store.runs[run.ID]
+				r.CancelRequested, r.CancelledBy = true, "v1:identity:user:"+ownerID
+				rh.store.runs[run.ID] = r
+				rh.store.mu.Unlock()
+			} else {
+				rh.setTree(shaA, strings.Replace(retryClusterManifest, "run: go vet ./...", "run: go vet -race ./...", 1))
+			}
+			other := rh.replica("agent-b", func() time.Time { return testNow }, nil)
+			if err := other.RecoverRuns(context.Background()); err != nil {
+				t.Fatalf("recover: %v", err)
+			}
+			waitDrives(t, other)
+			close(release)
+			waitDrives(t, rh.integ)
+
+			wantStatus, wantConclusion := WorkStepCancelled, ConclusionCancelled
+			if ending != "cancelled" {
+				wantStatus, wantConclusion = WorkStepFailed, ConclusionFailure
+			}
+			if got, _ := rh.store.run(run.ID); got.Conclusion != wantConclusion || got.DriverNodeID != "agent-b" {
+				t.Fatalf("run = %s by %q, want %s by agent-b", got.Conclusion, got.DriverNodeID, wantConclusion)
+			}
+			const key = "checks.vet"
+			updates := rh.work.receiptsOf(key)
+			if len(updates) != 3 {
+				t.Fatalf("%d updates of the step; want agent-a's outcomes of attempts 1 and 2, then agent-b's receipt", len(updates))
+			}
+			receipt := updates[2].Args
+			if argString(receipt, "status") != wantStatus || (ending != "cancelled" && argString(receipt, "errorCode") != pipelines.CodeNodeLost) {
+				t.Errorf("the receipt: %s %s", argString(receipt, "status"), argString(receipt, "errorCode"))
+			}
+			binding := argObject(receipt, "binding")
+			if records, _ := attemptsFromBinding(binding); len(records) != 2 || records[0].Attempt != 1 || records[1].Attempt != 2 {
+				t.Errorf("the receipt restates both attempts: %+v", records)
+			}
+			if _, stale := binding[bindingNextAttemptAt]; stale || binding == nil {
+				t.Errorf("the receipt's binding %v must name the history and no next attempt: the binding is replaced whole, and one left out keeps the stored time of an attempt that will never start", binding)
+			}
+			row := rh.work.stepRow(key)
+			if fmt.Sprint(row["attempt"]) != "2" || !strings.HasSuffix(argString(row, "idempotencyKey"), ":"+key+":2") {
+				t.Errorf("the row reads attempt %v (%v); the step had reached attempt 2", row["attempt"], row["idempotencyKey"])
+			}
+			if _, stale := argObject(row, "binding")[bindingNextAttemptAt]; stale {
+				t.Errorf("the row still says when an attempt that will never start is due: %v", row["binding"])
+			}
+			if cancels := rh.exec.cancelled(); !slices.Equal(cancels, []string{run.ID}) {
+				t.Errorf("the runner is told to stop the run once: %v", cancels)
+			}
+			if n := len(rh.exec.sent()); n != 2 {
+				t.Errorf("the executor was handed %d requests, want agent-a's two attempts alone", n)
+			}
+		})
 	}
 }
 
