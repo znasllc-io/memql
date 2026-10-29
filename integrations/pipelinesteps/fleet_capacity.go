@@ -233,7 +233,7 @@ func waitRanOut(run *StepRun, last worker.Result) pl.StepResult {
 	res := refusedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
 		"The wait of %s that the driver allowed for the owner's machines ran out while none could take the step (last answer: %s). "+
 			"No command was started.", time.Duration(run.MaxWaitSeconds)*time.Second, last.ErrorCode))
-	res.Where = pl.Where{Surface: surfaceFleet, WorkerID: last.WorkerId, NodeID: last.NodeId, MachineLabels: maps.Clone(last.Labels)}
+	res.Where = pl.Where{Surface: surfaceFleet, WorkerID: last.WorkerId, MachineName: last.MachineName, NodeID: last.NodeId, MachineLabels: maps.Clone(last.Labels)}
 	res.AttemptClass, res.NotRetriedHere = pl.AttemptNothingRan, true
 	return res
 }

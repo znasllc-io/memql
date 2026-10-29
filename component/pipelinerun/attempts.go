@@ -66,10 +66,10 @@ const maxAttemptWaitSeconds = 3600
 // revision and the policy (definitionOf), so a replica that takes the run over
 // recomputes the same placements from the same records.
 type attemptRecord struct {
-	Attempt                                                                             int
-	Class                                                                               pipelines.AttemptClass
-	Code, Message, Surface, WorkerID, NodeID, JobName, StartedAt, FinishedAt, LogFileID string
-	NotRetriedHere                                                                      bool
+	Attempt                                                                                          int
+	Class                                                                                            pipelines.AttemptClass
+	Code, Message, Surface, WorkerID, MachineName, NodeID, JobName, StartedAt, FinishedAt, LogFileID string
+	NotRetriedHere                                                                                   bool
 }
 
 // asMap is the record as the binding stores it. A field with nothing to say is
@@ -78,7 +78,7 @@ func (a attemptRecord) asMap() map[string]any {
 	out := map[string]any{"attempt": a.Attempt}
 	for key, value := range map[string]string{
 		"class": string(a.Class), "code": a.Code, "message": a.Message, "surface": a.Surface,
-		"workerId": a.WorkerID, "nodeId": a.NodeID, "jobName": a.JobName,
+		"workerId": a.WorkerID, "machineName": a.MachineName, "nodeId": a.NodeID, "jobName": a.JobName,
 		"startedAt": a.StartedAt, "finishedAt": a.FinishedAt, "logFileId": a.LogFileID,
 	} {
 		if value != "" {
@@ -92,22 +92,34 @@ func (a attemptRecord) asMap() map[string]any {
 }
 
 // machineIDChars is how much of a machine's registration id the check run calls
-// it by. The id is a UUID, so its first eight characters name a machine the way
-// a short hash names a commit.
+// it by when no name was recorded. The id is a UUID, so its first eight
+// characters name a machine the way a short hash names a commit.
 const machineIDChars = 8
 
-// whereWords is where the attempt ran, in the words the check run says it in.
-// The record keeps the machine's registration id and nothing of its name, which
-// is a Fleet setting only the OS's machines feed reads, so the check run calls a
-// machine by its id's first characters and the run page -- which has the names --
-// says the name. That is a limit of this change, not a decision about wording:
-// naming the machine needs a lookup under the pipeline owner's authority on
-// every publish, which nothing here has yet.
-func (a attemptRecord) whereWords() string {
+// whereWords is where the attempt ran, in the words the check run says it in:
+// the cluster, or a machine by the name its owner sees in Fleet.
+//
+// THE NAME COMES FROM THE DISPATCHER, which stamps it on the result beside the
+// registration id (worker.Result.MachineName) and the driver keeps it in the
+// record (MachineName): the driver itself holds no machine's name, which is a
+// Fleet setting. known is the names this step's other attempts recorded, by bare
+// registration id: an attempt the dispatcher could only attribute to its pin
+// (no machine answered, so none was named) takes the name its machine was
+// recorded under, so one machine is not called two things in one list. Only a
+// machine no attempt of the step recorded a name for -- a row written before
+// names were recorded -- falls back to the first characters of its id, and a
+// fleet that named no machine is "your fleet".
+func (a attemptRecord) whereWords(known map[string]string) string {
 	switch {
 	case a.Surface == pipelines.PlacementCluster:
 		return "the cluster"
 	case a.WorkerID != "":
+		if name := strings.TrimSpace(a.MachineName); name != "" {
+			return name
+		}
+		if name := known[bareID(a.WorkerID)]; name != "" {
+			return name
+		}
 		return "machine " + cutText(bareID(a.WorkerID), machineIDChars)
 	case a.Surface == pipelines.PlacementFleet:
 		// The fleet named no machine: nothing was available to take the attempt.
@@ -123,9 +135,15 @@ func attemptReports(records []attemptRecord) []pipelines.AttemptReport {
 	if len(records) == 0 {
 		return nil
 	}
+	known := map[string]string{}
+	for _, r := range records {
+		if name := strings.TrimSpace(r.MachineName); name != "" && r.WorkerID != "" {
+			known[bareID(r.WorkerID)] = name
+		}
+	}
 	out := make([]pipelines.AttemptReport, 0, len(records))
 	for _, r := range records {
-		out = append(out, pipelines.AttemptReport{Attempt: r.Attempt, Code: r.Code, Where: r.whereWords()})
+		out = append(out, pipelines.AttemptReport{Attempt: r.Attempt, Code: r.Code, Where: r.whereWords(known)})
 	}
 	return out
 }
@@ -140,7 +158,7 @@ func attemptsFromBinding(b map[string]any) ([]attemptRecord, time.Time) {
 		records = append(records, attemptRecord{
 			Attempt: rowInt(o, "attempt"), Class: pipelines.AttemptClass(rowString(o, "class")),
 			Code: rowString(o, "code"), Message: rowString(o, "message"), Surface: rowString(o, "surface"),
-			WorkerID: rowString(o, "workerId"), NodeID: rowString(o, "nodeId"), JobName: rowString(o, "jobName"),
+			WorkerID: rowString(o, "workerId"), MachineName: rowString(o, "machineName"), NodeID: rowString(o, "nodeId"), JobName: rowString(o, "jobName"),
 			StartedAt: rowString(o, "startedAt"), FinishedAt: rowString(o, "finishedAt"), LogFileID: rowString(o, "logFileId"),
 			NotRetriedHere: rowBool(o, "notRetriedHere"),
 		})
@@ -218,7 +236,13 @@ func (dr *runDriver) attemptOf(req pipelines.StepRequest, end stepEnd, rec recei
 	a.Surface = attemptSurface(req, text(where.Surface))
 	if a.Surface == pipelines.PlacementFleet {
 		a.WorkerID = text(where.WorkerID)
-		if a.WorkerID == "" && req.Placement != nil {
+		if a.WorkerID != "" {
+			// The name the dispatcher gave the machine it named. An attempt that is
+			// attributed to its pin below was answered by no machine, so no name came
+			// with it; the check run takes the name another attempt of this step
+			// recorded for the same machine (attemptReports).
+			a.MachineName = text(where.MachineName)
+		} else if req.Placement != nil {
 			a.WorkerID = text(req.Placement.PinWorker)
 		}
 	}

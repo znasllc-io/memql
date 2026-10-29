@@ -379,12 +379,20 @@ type Failure struct {
 }
 
 // Where says where a step ran.
+//
+// MachineName is the machine's label as its owner sees it in Fleet (its display
+// name, else the name it reported): what a person reads in the check run in
+// place of WorkerID, which is a registration id. A fleet attempt carries it
+// beside WorkerID; the cluster, and a result recorded before it existed, carry
+// none, and a reader then falls back to the id. Additive: nothing the driver
+// decides from reads it.
 type Where struct {
 	// Surface is "cluster" or "fleet".
 	Surface       string            `json:"surface"`
 	NodeID        string            `json:"nodeId,omitempty"`
 	JobName       string            `json:"jobName,omitempty"`
 	WorkerID      string            `json:"workerId,omitempty"`
+	MachineName   string            `json:"machineName,omitempty"`
 	MachineLabels map[string]string `json:"machineLabels,omitempty"`
 }
 

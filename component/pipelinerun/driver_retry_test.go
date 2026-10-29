@@ -791,11 +791,19 @@ func TestAnUnconfirmedCleanupStopsTheRetries(t *testing.T) {
 }
 
 // retryingMachine is the registration a retried step's first attempt ran on, and
-// what the check run calls it: the first eight characters of its id.
+// retryingMachineName what the check run calls it: the name its owner sees in Fleet,
+// which the dispatcher records with the id.
 const (
 	retryingMachine     = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
-	retryingMachineName = "machine 3f9c2ab0"
+	retryingMachineName = "MSI Raider"
 )
+
+// named is res as the fleet answers it when the dispatcher also says what the
+// machine is called.
+func named(res pipelines.StepResult, name string) pipelines.StepResult {
+	res.Where.MachineName = name
+	return res
+}
 
 // While a step waits for its next attempt the check run says so. Nothing
 // published a thing during the wait before, so a person reading the check saw a
@@ -806,9 +814,9 @@ func TestTheCheckRunSaysAStepIsRetryingWhileItWaits(t *testing.T) {
 	rh := newRetryHarness(t, retryFleetManifest, true)
 	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 		if req.Attempt == 1 {
-			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The machine's git fetch failed before the command ran."), retryingMachine), nil
+			return named(onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The machine's git fetch failed before the command ran."), retryingMachine), retryingMachineName), nil
 		}
-		return onMachine(passed(req), retryingMachine), nil
+		return named(onMachine(passed(req), retryingMachine), retryingMachineName), nil
 	}
 	run := rh.openRun(t, prOpening())
 	fire := make(chan time.Time)
@@ -879,12 +887,13 @@ func TestTheCheckRunSaysAFailoverFollows(t *testing.T) {
 	rh := newRetryHarness(t, retryFleetManifest, true)
 	installComputePolicy(t, rh.driveHarness, "{fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 0, delaysSeconds: [30], otherMachines: true}}")
 	machines := []string{retryingMachine, other}
+	names := map[string]string{retryingMachine: retryingMachineName, other: "CyberPC"}
 	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 		machine := machineFor(req.Placement, machines)
 		if req.Attempt == 1 {
-			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), machine), nil
+			return named(onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), machine), names[machine]), nil
 		}
-		return onMachine(passed(req), machine), nil
+		return named(onMachine(passed(req), machine), names[machine]), nil
 	}
 	run := rh.openRun(t, prOpening())
 	deliver(t, rh.integ, run)
@@ -913,9 +922,9 @@ func TestARepublishedFinalReportKeepsTheStepsAttempts(t *testing.T) {
 	rh := newRetryHarness(t, retryFleetManifest, true)
 	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 		if req.Attempt == 1 {
-			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), retryingMachine), nil
+			return named(onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), retryingMachine), retryingMachineName), nil
 		}
-		return onMachine(passed(req), retryingMachine), nil
+		return named(onMachine(passed(req), retryingMachine), retryingMachineName), nil
 	}
 	run := rh.openRun(t, prOpening())
 	deliver(t, rh.integ, run)
@@ -1075,5 +1084,60 @@ func TestARetrysPublishAndTheWorkflowsProgressNeverOverlap(t *testing.T) {
 	}
 	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
 		t.Errorf("the run ended %s; want success", got.Conclusion)
+	}
+}
+
+const retryFleetSecretManifest = `formatVersion: 1
+name: shop
+pipeline:
+  stages:
+    - name: build
+      steps:
+        - name: mac
+          placement: fleet
+          execution: native
+          platform: darwin/arm64
+          run: make mac
+          secrets: [SHOP_TOKEN]
+`
+
+// A machine's name is text the machine's owner chose, and a step's secrets are
+// masked wherever the driver writes or says anything: the record, the journal,
+// the log and the check run, as every other string of an attempt is.
+func TestAMachineNameIsMaskedLikeTheRestOfAnAttemptsRecord(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetSecretManifest, true)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt == 1 {
+			return named(onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), retryingMachine), "box-"+shopSecret), nil
+		}
+		return named(onMachine(passed(req), retryingMachine), "box-"+shopSecret), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
+		t.Fatalf("run = %s; want success on attempt 2", got.Conclusion)
+	}
+	for _, c := range rh.work.recorded() {
+		if strings.Contains(c.Raw, shopSecret) {
+			t.Errorf("a journal write carries the value: %s", c.Raw)
+		}
+	}
+	updates := rh.work.receiptsOf("build.mac")
+	if len(updates) != 2 {
+		t.Fatalf("%d updates, want attempt 1's outcome and the receipt", len(updates))
+	}
+	for _, u := range updates {
+		if records, _ := attemptsOf(u); len(records) == 0 || records[0].MachineName != "box-***" {
+			t.Errorf("attempt 1's record = %+v; want the name masked and kept", records)
+		}
+	}
+	for _, w := range rh.github.updatedRuns() {
+		if w.Run.Output != nil && strings.Contains(w.Run.Output.Summary, shopSecret) {
+			t.Errorf("the check run carries the value:\n%s", w.Run.Output.Summary)
+		}
+	}
+	if final := rh.lastUpdate(t).Run; !strings.Contains(final.Output.Summary, "Attempt 1: `pipeline_clone_failed` on box-\\*\\*\\*.") {
+		t.Errorf("the concluded check run names the masked machine:\n%s", final.Output.Summary)
 	}
 }

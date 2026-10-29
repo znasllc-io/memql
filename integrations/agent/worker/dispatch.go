@@ -108,6 +108,13 @@ type Result struct {
 	WorkerId string
 	NodeId   string
 	Labels   map[string]string
+	// MachineName is the label the machine's owner sees for WorkerId in Fleet:
+	// its display name, else the name its Cockpit reported (Candidate.Label).
+	// It is set beside WorkerId, from the same candidate, so a caller that must
+	// SAY where a step ran -- a check run read on GitHub -- says "MSI Raider" and
+	// not a registration id. Empty exactly when WorkerId is, and when the row
+	// names the machine neither way.
+	MachineName string
 
 	// RefusedBeforeStart is the dispatcher's own verdict that the call started
 	// on NO machine (#5494): refused at a gate, no candidate to route to, or
@@ -581,9 +588,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 // attempt runs one candidate. It returns ForwardRefusedBeforeStart only when
 // it is CERTAIN nothing executed on the machine.
 //
-// Whatever came back names the machine (Result.WorkerId / NodeId / Labels):
-// the candidate it was attempted on, and the replica holding its stream --
-// this one for a local dispatch, the forward's target otherwise. NodeId falls
+// Whatever came back names the machine (Result.WorkerId / MachineName / NodeId /
+// Labels): the candidate it was attempted on, and the replica holding its stream --
+// this one for a local dispatch, the forward's target otherwise. MachineName is
+// the candidate's label as the owner sees it in Fleet, stamped here and not read
+// off the reply, so a forwarded attempt names its machine as a local one does and
+// the forward's wire carries nothing new. NodeId falls
 // back to the row's connectedNodeId only on a single-node install with no node
 // id of its own, where the row is the one place an id is written.
 func (d *Dispatcher) attempt(
@@ -610,6 +620,7 @@ func (d *Dispatcher) attempt(
 	// and forwarded alike, a sibling's own refusal codes included.
 	res.RefusedBeforeStart = outcome == ForwardRefusedBeforeStart
 	res.WorkerId = cand.RegistrationId
+	res.MachineName = cand.Label()
 	res.NodeId = nodeId
 	res.Labels = maps.Clone(cand.Labels)
 	return res, outcome

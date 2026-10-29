@@ -332,7 +332,7 @@ func busyMachine(now *time.Time, calls *int) *fakeDispatcher {
 		*calls++
 		*now = now.Add(time.Second)
 		return worker.Result{ErrorCode: "pipeline_capacity_busy", ErrorMessage: "another pipeline command holds the machine",
-			RefusedBeforeStart: true, WorkerId: "reg-1", NodeId: "agent-b"}, nil
+			RefusedBeforeStart: true, WorkerId: "reg-1", MachineName: "MSI Raider", NodeId: "agent-b"}, nil
 	}}
 }
 
@@ -603,8 +603,8 @@ func TestAPlacedPoolAttemptWaitsOnItsOwnBudget(t *testing.T) {
 		if res.AttemptClass != pl.AttemptNothingRan || !res.NotRetriedHere {
 			t.Errorf("class = %q, notRetriedHere = %v, want nothing_ran and not retried here, so rule 3 can name the cluster", res.AttemptClass, res.NotRetriedHere)
 		}
-		if res.Where.WorkerID != "reg-1" {
-			t.Errorf("Where.WorkerID = %q, want the machine that stayed busy", res.Where.WorkerID)
+		if res.Where.WorkerID != "reg-1" || res.Where.MachineName != "MSI Raider" {
+			t.Errorf("Where = %q (%q), want the machine that stayed busy, by id and by name", res.Where.WorkerID, res.Where.MachineName)
 		}
 	})
 

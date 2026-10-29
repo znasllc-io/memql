@@ -39,6 +39,11 @@ func TestPipelineCapacityCandidateSurvivesOtherPreStartRefusalsAcrossReplicas(t 
 					if result.WorkerId != workerID || result.NodeId != nodeID || !reflect.DeepEqual(result.Labels, pipelineLabels()) {
 						t.Fatalf("refusal credited to the wrong machine: %+v", result)
 					}
+					// The fixtures' machines report their id as their name, which a row with no
+					// display name is called by: a refusal names the machine it came from too.
+					if result.MachineName != workerID {
+						t.Fatalf("refusal names %q, want the machine %q", result.MachineName, workerID)
+					}
 					row := h.store.lastInvocation(t)
 					if row.WorkerId != workerID || row.Routing["attempts"] != 2 || row.Routing["selectedBy"] != selectedBy {
 						t.Fatalf("wrong recorded candidate or attempt count: %+v", row)

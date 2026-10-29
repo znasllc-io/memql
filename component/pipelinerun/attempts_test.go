@@ -307,7 +307,7 @@ func TestChooseNextSharesNothingWithItsHistory(t *testing.T) {
 func TestAttemptRecordsRoundTripThroughTheBinding(t *testing.T) {
 	records := []attemptRecord{
 		{Attempt: 1, Class: nothingRan, Code: "pipeline_clone_failed", Message: "The fetch failed.", Surface: "fleet",
-			WorkerID: "reg-msi", NodeID: "agent-0", StartedAt: "2026-10-03T12:00:00Z", FinishedAt: "2026-10-03T12:00:05Z",
+			WorkerID: "reg-msi", MachineName: "MSI Raider", NodeID: "agent-0", StartedAt: "2026-10-03T12:00:00Z", FinishedAt: "2026-10-03T12:00:05Z",
 			LogFileID: "file-log-1", NotRetriedHere: true},
 		{Attempt: 2, Surface: "cluster", NodeID: "workbench-0", JobName: "job-2"},
 	}
@@ -331,7 +331,7 @@ func TestAttemptRecordsRoundTripThroughTheBinding(t *testing.T) {
 
 	// The second record wrote no blank: a field nobody reported is left out.
 	second := records[1].asMap()
-	for _, key := range []string{"class", "code", "message", "workerId", "notRetriedHere", "logFileId", "startedAt"} {
+	for _, key := range []string{"class", "code", "message", "workerId", "machineName", "notRetriedHere", "logFileId", "startedAt"} {
 		if _, written := second[key]; written {
 			t.Errorf("%s written blank: %v", key, second)
 		}
@@ -380,23 +380,31 @@ func describe(p *pipelines.AttemptPlacement) string {
 // the OS's machines feed holds -- so a machine is its id's first eight
 // characters and the cluster is the cluster.
 func TestAStepReportCarriesItsAttempts(t *testing.T) {
-	const machine = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
+	const machine, other = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c", "7a1b2c3d-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
 	history := []attemptRecord{
-		{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementFleet, WorkerID: machine},
+		// The machine's name, as its owner sees it in Fleet, which the dispatcher
+		// recorded with the id: the name is what the check run says.
+		{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementFleet, WorkerID: machine, MachineName: "MSI Raider"},
 		{Attempt: 2, Class: pipelines.AttemptOutcomeUnknown, Code: pipelines.CodeNodeLost, Surface: pipelines.PlacementCluster, JobName: "job-1"},
-		// The fleet named no machine; a canonical id is the same machine as its bare one.
+		// The fleet named no machine.
 		{Attempt: 3, Class: pipelines.AttemptNothingRan, Surface: pipelines.PlacementFleet},
-		{Attempt: 4, Class: pipelines.AttemptRetryRequested, Surface: pipelines.PlacementFleet, WorkerID: "v1:worker:registration:" + machine},
+		// A machine no attempt of the step recorded a name for -- a row written before
+		// names were recorded -- is called by the first eight characters of its id,
+		// and only then; a canonical id is the same machine as its bare one.
+		{Attempt: 4, Class: pipelines.AttemptRetryRequested, Surface: pipelines.PlacementFleet, WorkerID: "v1:worker:registration:" + other},
+		// A name with only whitespace is no name.
+		{Attempt: 5, Class: pipelines.AttemptRetryRequested, Surface: pipelines.PlacementFleet, WorkerID: other, MachineName: "  "},
 		// Nothing recorded of where it ran, and the attempt that passed.
-		{Attempt: 5},
+		{Attempt: 6},
 	}
 	got := StepState{Key: "build.mac", Stage: "build", Name: "mac", Status: StepSucceeded, Attempts: history}.Report()
 	want := []pipelines.AttemptReport{
-		{Attempt: 1, Code: pipelines.CodeCloneFailed, Where: "machine 3f9c2ab0"},
+		{Attempt: 1, Code: pipelines.CodeCloneFailed, Where: "MSI Raider"},
 		{Attempt: 2, Code: pipelines.CodeNodeLost, Where: "the cluster"},
 		{Attempt: 3, Where: "your fleet"},
-		{Attempt: 4, Where: "machine 3f9c2ab0"},
-		{Attempt: 5},
+		{Attempt: 4, Where: "machine 7a1b2c3d"},
+		{Attempt: 5, Where: "machine 7a1b2c3d"},
+		{Attempt: 6},
 	}
 	if !reflect.DeepEqual(got.Attempts, want) {
 		t.Errorf("attempts\n got %+v\nwant %+v", got.Attempts, want)
@@ -446,7 +454,8 @@ func TestTheCheckRunMasksAnAttemptsText(t *testing.T) {
 	dr.remember("hunter2-token")
 	dr.tracks = []*stepTrack{{state: StepState{Key: "a.b", Stage: "a", Name: "b", Status: StepSucceeded, Attempts: []attemptRecord{
 		{Attempt: 1, Code: "failed-hunter2-token", Surface: pipelines.PlacementFleet, WorkerID: "hunter2-token-machine"},
-		{Attempt: 2},
+		{Attempt: 2, Surface: pipelines.PlacementFleet, WorkerID: "m-2", MachineName: "box-hunter2-token"},
+		{Attempt: 3},
 	}}}}
 	got := dr.report()[0].Attempts
 	for _, a := range got {
@@ -456,5 +465,67 @@ func TestTheCheckRunMasksAnAttemptsText(t *testing.T) {
 	}
 	if got[0].Code != "failed-***" {
 		t.Errorf("code %q, want the secret masked", got[0].Code)
+	}
+	if got[1].Where != "box-***" {
+		t.Errorf("a machine's name %q, want the secret masked", got[1].Where)
+	}
+}
+
+// One machine is not called two things in one list. An attempt that no machine
+// answered is attributed to the machine it was pinned to, and carries no name of
+// its own, so the report gives it the name another attempt of the step recorded
+// for that machine; only a machine with no name anywhere in the step falls back
+// to the start of its id.
+func TestAMachineIsNotCalledTwoThingsInOneList(t *testing.T) {
+	const raider, other = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c", "7a1b2c3d-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
+	got := StepState{Key: "build.mac", Status: StepFailed, Attempts: []attemptRecord{
+		{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementFleet, WorkerID: raider, MachineName: "MSI Raider"},
+		{Attempt: 2, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeNoMachineForNeed, Surface: pipelines.PlacementFleet, WorkerID: "v1:worker:registration:" + raider, NotRetriedHere: true},
+		{Attempt: 3, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementFleet, WorkerID: other},
+	}}.Report().Attempts
+	want := []pipelines.AttemptReport{
+		{Attempt: 1, Code: pipelines.CodeCloneFailed, Where: "MSI Raider"},
+		{Attempt: 2, Code: pipelines.CodeNoMachineForNeed, Where: "MSI Raider"},
+		{Attempt: 3, Code: pipelines.CodeCloneFailed, Where: "machine 7a1b2c3d"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("attempts\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// The record keeps the name of the machine that ANSWERED, masked as every string
+// of a record is. An attempt attributed to its pin because no machine answered
+// has none to keep, and a timeout, an error or a cancel names no place at all.
+func TestAnAttemptRecordKeepsTheNameOfTheMachineThatAnswered(t *testing.T) {
+	dr := &runDriver{d: Deps{Now: func() time.Time { return testNow }}}
+	dr.remember("hunter2-token")
+	req := pipelines.StepRequest{
+		Step:      retryFleetStep,
+		Attempt:   2,
+		Placement: pinnedTo("pinned-machine", 120),
+	}
+	answered := stepEnd{kind: endResult, result: pipelines.StepResult{
+		Status: pipelines.OutcomeFailed, AttemptClass: pipelines.AttemptNothingRan,
+		Where: pipelines.Where{Surface: pipelines.PlacementFleet, WorkerID: "m-1", MachineName: "box-hunter2-token"},
+	}}
+	got := dr.attemptOf(req, answered, failReceipt(pipelines.CodeCloneFailed, "The fetch failed."), testNow)
+	if got.WorkerID != "m-1" || got.MachineName != "box-***" {
+		t.Errorf("record names %q (%q); want the machine that answered, by id and by masked name", got.WorkerID, got.MachineName)
+	}
+
+	// No machine answered: the pin is credited, and it has no name here.
+	unanswered := stepEnd{kind: endResult, result: pipelines.StepResult{
+		Status: pipelines.OutcomeRefused, AttemptClass: pipelines.AttemptNothingRan, NotRetriedHere: true,
+		Where: pipelines.Where{Surface: pipelines.PlacementFleet},
+	}}
+	got = dr.attemptOf(req, unanswered, failReceipt(pipelines.CodeNoMachineForNeed, "No machine."), testNow)
+	if got.WorkerID != "pinned-machine" || got.MachineName != "" {
+		t.Errorf("record names %q (%q); want the pinned machine and no name", got.WorkerID, got.MachineName)
+	}
+
+	// A timeout reports no answer to read a place from.
+	got = dr.attemptOf(req, stepEnd{kind: endTimeout}, failReceipt(pipelines.CodeRunCeiling, "Timed out."), testNow)
+	if got.MachineName != "" {
+		t.Errorf("a timeout's record carries the name %q", got.MachineName)
 	}
 }

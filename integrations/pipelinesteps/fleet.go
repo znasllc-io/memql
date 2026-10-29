@@ -503,7 +503,7 @@ func parseFleetOutput(r worker.Result) (*fleetOutput, error) {
 // result beside this translation (attempt_class_fleet.go). A case added here
 // that changes what an ending PROVES needs its row there too.
 func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r worker.Result, out *fleetOutput, outErr error, mask func(string) string) pl.StepResult {
-	where := pl.Where{Surface: surfaceFleet, WorkerID: r.WorkerId, NodeID: r.NodeId, MachineLabels: maps.Clone(r.Labels)}
+	where := pl.Where{Surface: surfaceFleet, WorkerID: r.WorkerId, MachineName: r.MachineName, NodeID: r.NodeId, MachineLabels: maps.Clone(r.Labels)}
 	machine := r.WorkerId
 	if machine == "" {
 		machine = "the machine"

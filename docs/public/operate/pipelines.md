@@ -1784,12 +1784,12 @@ says nothing of attempts.
 ### Failed steps
 
 - `tests.go-tests#2`: The step's command exited with status 1.
-  - Attempt 1: `pipeline_clone_failed` on machine 3f9c2ab0.
-  - Attempt 2: failed on machine 5d8e1f77.
+  - Attempt 1: `pipeline_clone_failed` on MSI Raider.
+  - Attempt 2: failed on CyberPC.
 
 ### Retried steps
 
-- `tests.go-tests#1`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on machine 3f9c2ab0.
+- `tests.go-tests#1`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on MSI Raider.
 ```
 
 While a step waits for its next attempt the check already says so. The driver
@@ -1797,17 +1797,19 @@ publishes as soon as the attempt's outcome is stored, before the wait, so the
 check never promises a retry the step's row does not hold:
 
 ```text
-- `tests.go-tests#1`: Retrying: attempt 1 failed (`pipeline_clone_failed` on machine 3f9c2ab0); attempt 2 starts after 30s.
+- `tests.go-tests#1`: Retrying: attempt 1 failed (`pipeline_clone_failed` on MSI Raider); attempt 2 starts after 30s.
 ```
 
 *Starts after* is the wait the driver scheduled, and stays true once the attempt
 has begun: nothing publishes again when it does, because that would delay the
 attempt by a GitHub round trip. A retry that waits for nothing (another machine)
-says the next attempt *follows*. A machine is named by the first eight
-characters of its registration id, and the cluster as *the cluster*; the run
-page, which reads the machines' names, says the name. A replica that takes a run
-over does not restate *Retrying* before the step settles, and the step's receipt
-then carries its whole history.
+says the next attempt *follows*. A machine is named as its owner sees it in
+Fleet, its display name or else the name it reported: the dispatcher records the
+name with each attempt, beside the registration id, and the cluster is *the
+cluster*. An attempt recorded before names were, on a machine no other attempt of
+the step has a name for, falls back to the first eight characters of the
+registration id. A replica that takes a run over does not restate *Retrying*
+before the step settles, and the step's receipt then carries its whole history.
 
 ### A run can fail with every step passed
 

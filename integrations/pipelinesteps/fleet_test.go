@@ -351,7 +351,7 @@ func TestFleetStepWithNoMachineIsTyped(t *testing.T) {
 			labels := map[string]string{"docker": "true", "gpu": "true", "pipelines": "allowed"}
 			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
 				return worker.Result{OK: false, ErrorCode: code, ErrorMessage: "none of the 2 paired machine(s) can take it",
-					RefusedBeforeStart: true, WorkerId: "reg-9", NodeId: "agent-b", Labels: labels}, nil
+					RefusedBeforeStart: true, WorkerId: "reg-9", MachineName: "CyberPC", NodeId: "agent-b", Labels: labels}, nil
 			}}
 			f, lib, _, _ := newTestFleet(t, d)
 			res := runFleet(t, f, fleetReq())
@@ -366,7 +366,7 @@ func TestFleetStepWithNoMachineIsTyped(t *testing.T) {
 			}
 			// The machine the dispatcher named is where the step was last
 			// looked for; a refusal keeps it.
-			if res.Where.Surface != "fleet" || res.Where.WorkerID != "reg-9" || res.Where.NodeID != "agent-b" ||
+			if res.Where.Surface != "fleet" || res.Where.WorkerID != "reg-9" || res.Where.MachineName != "CyberPC" || res.Where.NodeID != "agent-b" ||
 				!maps.Equal(res.Where.MachineLabels, labels) {
 				t.Errorf("Where = %+v, want the fleet and the machine the dispatcher named", res.Where)
 			}
@@ -462,13 +462,13 @@ func TestFleetRecordsTheMachine(t *testing.T) {
 	for _, exit := range []int{0, 3} {
 		d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
 			return worker.Result{OK: true, OutputJSON: fmt.Sprintf(`{"exitCode":%d,"durationMs":4000}`, exit),
-				WorkerId: "reg-7", NodeId: "agent-b", Labels: labels}, nil
+				WorkerId: "reg-7", MachineName: "MSI Raider", NodeId: "agent-b", Labels: labels}, nil
 		}}
 		f, _, _, _ := newTestFleet(t, d)
 		res := runFleet(t, f, fleetReq())
-		want := pl.Where{Surface: "fleet", WorkerID: "reg-7", NodeID: "agent-b", MachineLabels: labels}
-		if res.Where.Surface != want.Surface || res.Where.WorkerID != want.WorkerID || res.Where.NodeID != want.NodeID ||
-			!maps.Equal(res.Where.MachineLabels, labels) {
+		want := pl.Where{Surface: "fleet", WorkerID: "reg-7", MachineName: "MSI Raider", NodeID: "agent-b", MachineLabels: labels}
+		if res.Where.Surface != want.Surface || res.Where.WorkerID != want.WorkerID || res.Where.MachineName != want.MachineName ||
+			res.Where.NodeID != want.NodeID || !maps.Equal(res.Where.MachineLabels, labels) {
 			t.Errorf("exit %d: Where = %+v, want %+v", exit, res.Where, want)
 		}
 		if res.ExitCode != exit {
