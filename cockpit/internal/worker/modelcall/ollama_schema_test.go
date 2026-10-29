@@ -26,7 +26,8 @@ type noFormatRunner struct {
 	mu       sync.Mutex
 	requests []map[string]any
 	answer   string
-	status   int // what a request with `format` gets; 501 unless set
+	status   int    // what a request with `format` gets; 501 unless set
+	refusal  string // the body that refusal carries; the 501's unless set
 }
 
 func (r *noFormatRunner) serve(t *testing.T) *httptest.Server {
@@ -46,7 +47,11 @@ func (r *noFormatRunner) serve(t *testing.T) *httptest.Server {
 				status = http.StatusNotImplemented
 			}
 			w.WriteHeader(status)
-			fmt.Fprint(w, `{"error":"structured output is unavailable"}`)
+			refusal := r.refusal
+			if refusal == "" {
+				refusal = `{"error":"structured output is unavailable"}`
+			}
+			fmt.Fprint(w, refusal)
 			return
 		}
 		content, _ := json.Marshal(r.answer)
@@ -115,6 +120,46 @@ func TestStructuredCallOnARunnerWithoutFormatAsksInThePrompt(t *testing.T) {
 	}
 }
 
+// grammarRefusal is what Ollama 0.33.3 answered on two machines for a
+// structured call whose schema its llama.cpp could not compile into a
+// sampling grammar (2026-10-28): llama-server's 400, wrapped by Ollama.
+const grammarRefusal = `{"error":"{\"error\":{\"code\":400,\"message\":\"Failed to initialize samplers: failed to parse grammar\",\"type\":\"invalid_request_error\"}}"}`
+
+func TestStructuredCallTheRuntimeCannotCompileAsksInThePrompt(t *testing.T) {
+	runner := &noFormatRunner{answer: `{"reply":"ok"}`, status: http.StatusBadRequest, refusal: grammarRefusal}
+	got, emits, err := structuredCall(t, runner, reviewRequest())
+	if err != nil {
+		t.Fatalf("a schema the runtime cannot compile must be asked for in the prompt: %v", err)
+	}
+	if got != `{"reply":"ok"}` || emits != 1 {
+		t.Fatalf("the validated JSON must go out once, whole: %q in %d emits", got, emits)
+	}
+	sent := runner.sent()
+	if len(sent) != 2 {
+		t.Fatalf("one request with format, then one without: %d requests", len(sent))
+	}
+	if _, ok := sent[1]["format"]; ok {
+		t.Fatal("the second request must not send format again")
+	}
+	messages, _ := sent[1]["messages"].([]any)
+	system, _ := messages[0].(map[string]any)
+	if content, _ := system["content"].(string); !strings.Contains(content, schemaInstruction) {
+		t.Fatalf("the schema must reach the model in the system message: %q", content)
+	}
+}
+
+func TestStructuredCallKeepsOtherBadRequests(t *testing.T) {
+	// A 400 that is not about the grammar -- the model cannot chat at all --
+	// would fail the same way without format, so it is passed on as it was.
+	runner := &noFormatRunner{answer: `{"reply":"ok"}`, status: http.StatusBadRequest, refusal: `{"error":"\"qwen3-embedding:0.6b\" does not support chat"}`}
+	if _, _, err := structuredCall(t, runner, reviewRequest()); err == nil || !strings.Contains(err.Error(), "returned 400") {
+		t.Fatalf("a 400 that names no grammar must fail as it did: %v", err)
+	}
+	if len(runner.sent()) != 1 {
+		t.Fatal("only a refusal of the schema itself is asked again")
+	}
+}
+
 func TestStructuredCallFindsTheJSONInAFenceOrAroundProse(t *testing.T) {
 	for name, answer := range map[string]string{
 		"fenced":      "```json\n{\"reply\":\"ok\"}\n```",
@@ -158,7 +203,7 @@ func TestStructuredCallKeepsOtherRefusals(t *testing.T) {
 		t.Fatalf("a 500 must fail as it did: %v", err)
 	}
 	if len(runner.sent()) != 1 {
-		t.Fatal("only a 501 is asked again")
+		t.Fatal("only a refusal of the schema itself is asked again, never a 500")
 	}
 	// With tools offered the turn may answer with a call instead of JSON,
 	// so it is not asked again either.

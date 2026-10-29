@@ -14,7 +14,8 @@ import (
 )
 
 // A structured call on an Ollama runner that does not implement `format`
-// (memql-cockpit#551).
+// (memql-cockpit#551), or that cannot compile the call's schema into a
+// grammar (2026-10-28, see ollamaSchemaRefused).
 //
 // ===========================================================================
 // THE SCHEMA STILL DECIDES; ONLY THE WAY IT IS ASKED FOR CHANGES
@@ -32,16 +33,41 @@ import (
 //
 // The wire contract stands: a worker returns schema-valid JSON for a
 // structured call or fails it, never prose (worker.proto,
-// response_format_schema). So on that 501 the call is made once more with the
-// schema in the system prompt and without `format`, the whole answer is held
-// back, and it is sent only when one JSON value in it validates against the
-// request's schema. Anything else fails the call, as the 501 would have.
+// response_format_schema). So on that 501, and on a 400 that says the grammar
+// could not be built, the call is made once more with the schema in the system
+// prompt and without `format`, the whole answer is held back, and it is sent
+// only when one JSON value in it validates against the request's schema.
+// Anything else fails the call, as the refusal would have.
 
-// ollamaFormatUnsupported reports the runtime refusing `format` itself: 501
-// Not Implemented, which Ollama answers before it generates anything.
-func ollamaFormatUnsupported(err error) bool {
+// ollamaSchemaRefused reports the runtime refusing the schema itself, before
+// it generates anything, in either of the two ways Ollama does:
+//
+//   - 501 Not Implemented: the runner does not implement `format` at all.
+//   - 400 naming the grammar: the runner implements `format` and could not
+//     turn THIS schema into a sampling grammar. On 2026-10-28 two machines on
+//     Ollama 0.33.3 answered a failed run's diagnosis and the PR review with
+//     `Failed to initialize samplers: failed to parse grammar` from the
+//     llama-server they bundle; the llama.cpp in Ollama 0.40.6 compiles both
+//     schemas. Without this the call failed, and with no other local door the
+//     diagnosis parked.
+//
+// Both refusals arrive before a single token, so asking once more with the
+// schema in the prompt cannot repeat any generation, and the answer is still
+// held to the whole schema (chatSchemaInPrompt). Any other 400 -- a model that
+// cannot chat, a malformed request -- would fail the same way without
+// `format`, so it is passed on as it was.
+func ollamaSchemaRefused(err error) bool {
 	var status *ollamaStatusError
-	return errors.As(err, &status) && status.status == http.StatusNotImplemented
+	if !errors.As(err, &status) {
+		return false
+	}
+	switch status.status {
+	case http.StatusNotImplemented:
+		return true
+	case http.StatusBadRequest:
+		return strings.Contains(strings.ToLower(status.detail), "grammar")
+	}
+	return false
 }
 
 // schemaInstruction is how the schema reaches a model whose runner cannot

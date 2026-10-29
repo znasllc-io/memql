@@ -279,6 +279,14 @@ fails the call, as the 501 would have (`modelcall/ollama_schema.go`). A
 structured call to this machine still gets schema-valid JSON or a failure,
 never prose.
 
+The same fallback covers a runner that implements `format` but cannot compile
+one particular schema into a sampling grammar. Ollama 0.33.3 answered the
+schemas of a pipeline's diagnosis and review prompts with
+`400 Failed to initialize samplers: failed to parse grammar`, where the
+llama.cpp in Ollama 0.40.6 compiles them. A 400 whose error names the grammar
+is asked again the same way; any other 400 fails the call as before. Upgrading
+Ollama removes the extra round trip.
+
 That escape hatch relies on one rule worth knowing: **a model id can be
 advertised once**, because the id is the label key. When the native probe and
 a declared runtime both offer the same id, the **declared** entry wins and
