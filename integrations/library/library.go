@@ -136,6 +136,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "documentHistory", Description: "Read retained versions and branch provenance.", Handler: i.handleDocumentHistory},
 		{Name: "documentVersion", Description: "Open an owned immutable snapshot.", Handler: i.handleDocumentVersion},
 		{Name: "readFile", Description: "Read the current text of an authorized saved file directly from its delivery receipt.", Handler: i.handleReadFile},
+		{Name: "readFileExcerpts", Description: "Read bounded excerpts of authorized saved text files under one budget.", Handler: i.handleReadFileExcerpts},
 		{Name: "forkDocumentVersion", Description: "Create a recoverable independent branch from an exact snapshot.", Handler: i.handleForkDocumentVersion},
 		{Name: "modifyRevisionItem", Description: "Capture a person-requested revision of one immutable proposal item.", Handler: i.handleModifyRevisionItem},
 		{Name: "requestDocumentRevision", Description: "Capture feedback and start revision analysis.", Handler: i.handleRequestDocumentRevision},
