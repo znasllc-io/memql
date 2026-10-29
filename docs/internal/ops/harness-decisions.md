@@ -998,6 +998,91 @@ database; the run page tests in
 live cluster run and a check run accepted by GitHub itself are not verified
 here.
 
+## Failed-run diagnosis reads bounded log excerpts (2026-10-29)
+
+A pipeline run that fails on its first attempt opens one owner-bound analysis
+goal (`work.OpenAnalysisGoal`, key `pipeline-maintenance:<run id>`) running the
+product recipe `znasDeliveryDiagnosis` (memql-znas). On production between
+2026-10-26 and 2026-10-29 it never produced a diagnosis. Apart from the 18 runs
+no model could serve (memql#6375), it refused 34 failures before any model saw
+them: 19 had zero or several failed steps, 9 had no execution journal, 4 had a
+step log over its 64 KB check, and 2 had a failed step with no log. Each refusal
+was an `error(...)`. The failure path (`component/automations/failure_path.go`)
+recognises none of those sentences, makes one `classifySymptom` call, and parks
+the run on a Retry or Abandon question that no retry can change. 49 such
+questions were open.
+
+The evidence behind the change:
+- `StepResult.LogCapped` says only that the live log-store copy hit its line
+  cap. The Library archive is complete up to 64 MiB, so refusing a capped step
+  as "truncated" was wrong.
+- The archive is secret-masked when it is captured, on MemQL's own node for
+  both cluster and fleet steps (`integrations/pipelinesteps/capture.go`). The
+  check-run tail is cut from the same capture, so an excerpt of the archive is
+  masked the way the tail is and needs no secret value.
+- `libraryReadFile` refuses anything over 2 MiB.
+- A body cannot call a builtin once per list item, so reading several logs
+  needs a builtin that reads several files.
+
+The engine adds `libraryReadFileExcerpts`
+(`integrations/library/read_file_excerpts.go`, `excerpt.go`). It reads up to
+eight of the caller's text files, each on `libraryReadFile`'s path
+(`readableTextFile`), under one budget of at most 64 KiB, shared max-min fair in
+ascending stored size. Each excerpt keeps the first lines, each line matching
+the caller's RE2 patterns with three lines before and twelve after, and the end
+of the file, with every omitted range marked. The budget bounds the output,
+markers included. A line is held to 64 KiB and kept to 2 KiB, and at most
+64 MiB is read. A file the caller cannot read, or whose bytes fail, is its own
+`unavailable` entry. A database or gate failure fails the call, so the failure
+path can retry it. The builtin masks nothing and grants nothing: `label` is
+only echoed back.
+
+The recipe reads the first three failed steps with logs, in `seq` order, as
+48 KiB of excerpts. It lists every failed step and the run's own
+`failureCode`/`failureMessage`, keeps the quote check, the independent review
+and `repositoryChangeRequest`, and treats model answers as proposals only.
+Every stop a retry cannot change returns `{repair: "none", reason}`: the run
+succeeds, the answer validator skips goals a pipeline requested
+(`integrations/work/validator.go`), and no classifier call or question
+follows. The goal still waits for the owner to accept or close it.
+
+Two stop conditions stay errors on purpose, because restoring the source or
+run and retrying can change the outcome:
+- a lost, inactive or mismatched source;
+- a failed run that can no longer be read.
+
+Rejected alternatives (design record
+`docs/superpowers/specs/2026-10-29-failed-run-diagnosis-evidence-design.md`,
+section 8):
+- a pipeline-bound evidence builtin;
+- the check-run tail persisted on step rows, which is only the last 40 lines;
+- a one-file reader;
+- a new terminal failure code;
+- re-masking with re-resolved secrets.
+
+Release order is a hard constraint. On 0.31.7 the recipe's
+`use library.builtins.{ libraryReadFileExcerpts }` does not resolve and strict
+boot refuses the whole bundle. So the recipe deploys only with an engine that
+carries the builtin.
+
+Tests:
+- `TestExcerpt*` and `TestCompileExcerptPatternsRefusesBadInput`
+  (`excerpt_test.go`) cover the algorithm. A seeded property test walks every
+  excerpt back to its file line by line.
+- `TestReadFileExcerpts*` cover malformed input refused before any read, the
+  budget split (including a wrong stored size), and a foreign file reported
+  without a fetch.
+- `ReadFileExcerptsAcrossEngines` in `TestDocumentRevisionWorkflow` is the
+  database-backed two-replica case.
+- memql-znas's `check-delivery-policy.go` drives the recipe through
+  `workflowhost.Run` and compiles every pattern.
+
+Not verified here:
+- a diagnosis on production, which also needs a model that answers;
+- excerpt quality on real failing logs;
+- Retry on a question the old recipe raised. It reruns the failed step under
+  the installed recipe and keeps the old run's prefix.
+
 ## Release trains carry main (2026-10-27)
 
 Every pull request to this repository is opened under the owner's account, so

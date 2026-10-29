@@ -235,6 +235,32 @@ history honest); no automatic same-file detection for browser uploads --
 identity is explicit here, and key-matched in the watched-folder epic (#4783),
 which uses this same mechanism rather than a second one.
 
+### Reading saved text
+
+Two builtins read a saved file's current text, and both authorize every file
+the same way: the row is read as the caller, read again under the file's
+version gate so the row and its bytes are one version, and held to text
+types. No bytes are fetched before the row is admitted.
+
+- **`libraryReadFile(fileId)`** returns one file's current text, up to 2 MiB.
+- **`libraryReadFileExcerpts(files, patterns, maxBytes)`** returns bounded
+  excerpts of up to eight files under one budget of 1 to 64 KiB. `files` is a
+  list of `{fileId, label}`, and each result echoes its `label`; `patterns`
+  are 1 to 32 RE2 expressions, each matched against one line. A file that
+  fits its share comes back whole (`complete: true`). A longer one keeps its
+  first lines, every matching line with three lines before and twelve after,
+  and its end, and each omitted range is one marker line such as
+  `[... lines 121-4812 omitted ...]`. A kept line over 2 KiB is cut, and at
+  most the first 64 MiB of a file is read (`scanCapped`). Files are read in
+  ascending size, so a small file returns whole and the larger ones share
+  what it left. A file the caller cannot read is reported as `unavailable`
+  in its own entry, with `libraryReadFile`'s sentence, and does not fail the
+  call.
+
+Neither builtin masks secrets: a pipeline step's log is masked when it is
+captured, and any other file is the caller's own. The failed-run diagnosis
+reads its evidence with `libraryReadFileExcerpts`.
+
 ---
 
 ## Folders

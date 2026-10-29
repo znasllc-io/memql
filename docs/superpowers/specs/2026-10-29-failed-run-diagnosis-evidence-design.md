@@ -203,8 +203,11 @@ structured model call, the quote check, the independent repair review and the
    refusal is removed. A log whose version is not 1 is left out as revised
    rather than failing the run.
 4. **The model's no-repair outcomes return results:** not actionable (the
-   model's reason); the quote check fails ("The proposal cited no exact
-   evidence for `<path>`."); the review rejects (the reviewer's reason).
+   model's reason); an actionable answer without a statement, regression or
+   files ("The diagnosis did not give a complete repair statement, regression
+   check and file list."); the file check fails ("The proposal named
+   `<path>`, which is not a concrete relative path supported by an exact quote
+   from this failure."); the review rejects (the reviewer's reason).
 5. **Prompts:** both templates describe the evidence: the run's facts, every
    failed step's code and message, and up to three excerpts that keep the
    matching failure lines with context and the end of the log, gaps marked,
