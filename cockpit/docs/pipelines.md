@@ -243,6 +243,17 @@ shell reports it), its duration, the artifacts and the missing paths:
 A failing command is **not** a failure here: it is a result with a non-zero
 `exitCode`.
 
+**The engine may send a step here again.** It retries a step whose attempt
+provably ran nothing (a failed fetch, an unavailable cache or runtime, a
+capacity refusal), or whose command exited 75, after the installation's delay,
+and it may move the step to another machine. Each attempt is a fresh dispatch
+with a fresh checkout under the same reservation rules, so a machine still
+holding an earlier attempt refuses the next one before cloning. The engine reads
+`pipeline_recovery_required` as an outcome it cannot know, because this worker
+answers it after a command as well as before one: it does not send that step
+here again, and only a step its pipeline marks `repeatable` moves on to another
+machine. Exit 75 is the command's own request for a retry.
+
 ---
 
 ## The environment a step sees
@@ -344,7 +355,9 @@ socket remain fenced for operator reconciliation. Native commands declaring
 choose another endpoint; they do not receive the container isolation guarantee.
 
 Upgrade the controller and opted-in workers together during an idle pipeline
-window. Contract 4 and contract 5 do not substitute for each other: an older
+window, in the order the engine's
+[Contract 5 switches in lockstep](../../docs/public/operate/pipelines-substrate.md#contract-5-switches-in-lockstep)
+gives. Contract 4 and contract 5 do not substitute for each other: an older
 controller cannot qualify the new worker, and the new controller refuses older
 workers. Verify current registrations and their local resource ceilings before
 resuming Fleet work. Enable pool placements and the installed placement policy

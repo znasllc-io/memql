@@ -970,6 +970,7 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 | `image` | The toolchain image container steps run in. Pin it by digest | none | -- |
 | `services` | Named sidecars a step may ask for, each with `image` (required), `env` (plain `NAME: value` configuration, never a secret) and `ready` (a shell probe the runner waits on before the step's command starts) | none | A name that breaks the rule, a service with no image, or an `env` name that is not upper-case letters, digits and underscores starting with a letter or underscore: `pipeline_step_invalid`, scoped `services` or `services/<name>` |
 | `caches` | Default caches inherited by steps, such as `go` and `npm` | none | -- |
+| `repeatable` | Default for every command step: running its command again is harmless, even while an earlier copy may still be running elsewhere. A step's own `repeatable` overrides it ([Retries and failover](#retries-and-failover)) | `false` | Non-boolean values fail manifest parsing |
 | `select` | How steps choose what to run. Required once a step names `packages` | none | [Below](#select) |
 | `stages` | The stages, in the order they run. At least one | required | Absent or empty: `pipeline_stage_invalid` |
 
@@ -997,8 +998,10 @@ it; a settings failure is different from a failed test run.
 Optional roles are `supersession`, `reconciliation`, `maintenance`,
 `evidenceReuse`, `independentReview` (since `0.31.1`) and `computePlacement`.
 Their default behavior
-preserves affected-PR supersession, cancels an invalidated queue ref, and performs
-no repair, evidence reuse, ordinary-PR AI review or pool-to-cloud fallback.
+preserves affected-PR supersession, cancels an invalidated queue ref, retries a
+failed step within the portable limits ([Retries and failover](#retries-and-failover)),
+and performs no repair, evidence reuse, ordinary-PR AI review or pool-to-cloud
+fallback.
 A resolver cannot change merge-group coverage mode away from `full` or grant
 repository write access.
 Source manifests declare commands and artifacts; they cannot replace this binding.
@@ -1046,7 +1049,9 @@ determine the check. Such steps must use digest-pinned cluster containers and
 services, and cannot request secrets, repository tokens, artifacts or native
 fleet execution. Run-, event- and version-dependent environment variables are
 removed. The declaration is an author assertion: network-dependent or otherwise
-nondeterministic commands should not use it.
+nondeterministic commands should not use it. A verification step is
+`repeatable`, because such a command only recomputes an answer; declaring
+`repeatable: false` beside it is refused.
 
 The installed `evidenceReuse` selector can admit a successful full run's directly
 completed receipt at the same commit, owner, source, engine revision, policy
@@ -1143,6 +1148,7 @@ cannot satisfy the required PR or merge-queue check.
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `caches` | Overrides the pipeline's cache list; `[]` disables inherited caches, including for a native image build beside container test steps | pipeline caches | Native steps with nonempty effective caches: `pipeline_step_invalid` |
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 6 hours. The run ceiling remains an independent bound. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `6h`: `pipeline_step_invalid` |
+| `repeatable` | `true` declares that running the command again is harmless, even while an earlier copy may still be running elsewhere, so a retry may follow an attempt whose outcome is unknown; `false` overrides a pipeline's `true` ([Retries and failover](#retries-and-failover)) | the pipeline's `repeatable`; always `true` with `verification: true` | `false` beside `verification: true`, or any value on a `sarif` or `repositoryChange` step: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
 | `secrets` | Names of secrets the step's environment receives, each under its own name ([Secrets](#secrets)) | none | A name that is not upper-case letters, digits and underscores starting with a letter (at most 128 characters), or that begins `MEMQL_`: `pipeline_secret_invalid`. A name the pipeline does not allow: `pipeline_secret_not_allowed` |
 | `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using Fleet, pool or native execution is refused |
@@ -1585,6 +1591,94 @@ secrets explicitly as environment secrets in a different step.
 A need outside the closed set is refused (`pipeline_need_unknown`), never routed
 by guesswork.
 
+## Retries and failover
+
+A command step whose attempt fails for a transient reason is tried again, a
+bounded number of times, and may move: to the same place after a delay, then to
+another of the owner's machines, then, for a `pool` step, to the cluster. A
+notify, SARIF or repository-change step is the driver's own and is not retried.
+
+**What ended the attempt decides.** The executor knows whether the step reached
+a machine and what the machine or its Job answered, so it gives every attempt
+that did not pass one class:
+
+| Class | When | Retried |
+|---|---|---|
+| Nothing ran | The command provably never started. On a machine: the fetch of the commit failed, the cache or runtime was unavailable, the machine was busy or short of headroom, its policy or its owner's settings refused the step, or no machine could take it. On the cluster: only when no runner took the step | Every step |
+| Retry requested | The command exited 75 (`EX_TEMPFAIL`), its own word that another run is safe | Every step |
+| Outcome unknown | The command may have run: the connection to the machine ended after the step was sent, the machine needs recovery (`pipeline_recovery_required`), the command exited 0 and its artifacts did not arrive intact, or an earlier driver may have started it (`pipeline_execution_uncertain`). On the cluster, also `pipeline_node_lost`, `pipeline_image_pull_failed`, `pipeline_service_failed`, `pipeline_job_unschedulable`, `pipeline_clone_failed` and a runner's `pipeline_runner_unavailable` | A `repeatable` step only |
+| Final | Any other exit, a timeout, the run's ceiling, a cancel, a refusal, a secret failure, and anything not listed above | Never |
+
+The cluster reports most failures while the step's Job is still alive, and can
+still start the command until the Job is deleted, so those are an unknown
+outcome rather than nothing ran. A timeout is final, because a hang and a stall
+look alike from outside. A command that knows it stalled exits 75, as the editor
+host tests do when their VS Code download stalls or runs out of time.
+
+**Where the next attempt goes.** A place is one machine, or the cluster. After
+nothing ran or a requested retry at place P:
+
+1. P again, up to `sameMachine` times, each after the next of `delaysSeconds`
+   (the last one repeats), unless P refused for a reason a delay does not change
+   (Host commands off, pipelines no longer allowed) or a wait for it ran out;
+2. then, for a fleet or pool step with `otherMachines`, any eligible machine not
+   yet tried, at once;
+3. then, for a pool step whose installation allows cloud (`cloudFallback`), the
+   cluster, once;
+4. otherwise the step fails with its last attempt's failure.
+
+After an unknown outcome only a `repeatable` step goes on, and any other step
+fails. A repeatable fleet or pool step goes to a machine it has not tried (with
+`otherMachines`), then back to P once if `sameMachine` is at least 1; the machine
+refuses while it still holds the old command. A repeatable `placement: cluster`
+step retries the cluster up to `sameMachine` times, with the same delays. Then
+rule 3.
+
+A `fleet` step stays on the owner's machines, so a macOS step's failover ends at
+the Macs. A `cluster` step retries on the cluster only. A `pool` step reaches
+the cluster at most once, whatever ended its attempt there. A retry pinned to
+one machine waits for it, busy or offline, at most the longest delay; a pool
+step's move to another machine waits at most `fleetWaitSeconds` (at least a
+second), and a fleet step's as long as its first attempt would. A wait that runs
+out counts as nothing ran. Every attempt counts against the run's ceiling, and
+no step makes more than 8.
+
+**The limits are the installation's.** The installed policy's `retries` set
+them ([Operator run admission](#operator-run-admission)). The portable default
+is:
+
+```memql fragment
+return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}}
+```
+
+An installation whose policy names no `retries`, or that has no placement policy
+at all, gets those values. `sameMachine` is an integer from 0 to 3,
+`delaysSeconds` one to three integers from 0 to 900 seconds, and `otherMachines`
+a boolean. Once `retries` is written, all three are required and nothing else is
+accepted. `sameMachine: 0` with `otherMachines: false` stops every retry but a
+pool step's one move to the cluster, which `cloudFallback` decides. A policy
+that cannot be read refuses every run with a command step, as
+`pipeline_stage_invalid` scoped `computePlacement`, naming the field. A run
+keeps the policy it started with, on every replica.
+
+**The manifest and the command each have one say.** `repeatable` (on the
+pipeline, or on a step) and exit 75 ask for a retry; neither widens the
+installation's limits or spends cloud the policy does not allow.
+`repeatable: true` declares that running the command again is harmless even
+while an earlier copy may still be running elsewhere: a step that may have run
+on a machine the engine can no longer reach moves on without waiting for that
+copy to stop, and the copy's late answer and files are never kept.
+`verification: true` implies it. Leave it off a step that publishes, deploys or
+spends.
+
+**Between attempts** the step reads running, on its page and in the check run,
+which says it is retrying
+([A step that took more than one attempt](#a-step-that-took-more-than-one-attempt)).
+Each attempt keeps its own record and log. Cancelling the run during the wait
+cancels the step. An agent replica that takes the run over continues from the
+step's row: the attempts it records, and when the next one may start. Scheduled
+scans take the same route as every other run.
+
 ## Delivery: webhook or poll
 
 `delivery` is set when the pipeline is connected:
@@ -1712,12 +1806,15 @@ run deadline; it does not consume the command's own execution timeout before a
 Job starts. These waits are bounded, not an indefinite pause. Started-run
 recovery remains prioritized over queued runs.
 
-For explicit `placement: pool` steps, the optional installed delivery role
-`computePlacement` selects `pipelineComputePlacementPolicy`. Its captured
-template receives `repository`, `pipelineId`, `ownerUserId` and `event`, and
-returns exactly `{fleetWaitSeconds: 60, cloudFallback: true}` (wait seconds must
-be an integer from 0 through 3600). The portable default and older snapshots
-allow no cloud fallback. A repository cannot replace this installed policy.
+The optional installed delivery role `computePlacement` selects
+`pipelineComputePlacementPolicy`. Its captured template receives `repository`,
+`pipelineId`, `ownerUserId` and `event`, and returns
+`{fleetWaitSeconds: 60, cloudFallback: true}` and, optionally, `retries` (wait
+seconds must be an integer from 0 through 3600). The two capacity fields choose
+capacity for explicit `placement: pool` steps only; `retries` limits every
+command step ([Retries and failover](#retries-and-failover)). The portable
+default and older snapshots allow no cloud fallback. A repository cannot replace
+this installed policy.
 The immutable policy source survives retries and replica changes. Its validated
 answer also enters the step's recovery definition: a changed answer, such as one
 derived from the clock, refuses recovery instead of changing a pending effect.
@@ -1732,6 +1829,9 @@ Then select the matching installed policy and change eligible manifest steps to
 `pool`, so the capability release must not depend on a manifest they cannot run.
 Version-2 admission writing likewise follows deployment of its readers on every
 agent and workbench; a partial upgrade is not permission to bypass either gate.
+The engine and every machine's Cockpit switch to worker contract 5 together,
+behind a hold ([Contract 5 switches in lockstep](pipelines-substrate.md#contract-5-switches-in-lockstep)).
+Retries need no activation: the deploy turns them on with the portable limits.
 
 ## The check run
 
@@ -1962,8 +2062,8 @@ failed and no step reported why
 | Code | Kind | Meaning | What to do |
 |---|---|---|---|
 | `pipeline_not_declared` | refusal | `memql-package.yaml` has no `pipeline:` block | Add one, or disconnect the pipeline |
-| `pipeline_stage_invalid` | refusal | No stages; or a stage missing a name, misnamed or repeated, needing itself, a later stage or no stage, with both or neither of `steps` and `channel`, or naming a misnamed channel | Correct the stage the scope names |
-| `pipeline_step_invalid` | refusal | A step missing a name, misnamed or repeated in its stage, with no command, or with a bad `packages`, `only`, `shards` or `timeout`; or a service misnamed, with no image, or with a bad `env` name | Correct the step or service the scope names |
+| `pipeline_stage_invalid` | refusal | No stages; or a stage missing a name, misnamed or repeated, needing itself, a later stage or no stage, with both or neither of `steps` and `channel`, or naming a misnamed channel. Scoped `computePlacement`: the installed compute policy could not be read, which refuses every run with a command step | Correct the stage the scope names; for `computePlacement`, the installed policy's field the sentence names |
+| `pipeline_step_invalid` | refusal | A step missing a name, misnamed or repeated in its stage, with no command, with a bad `packages`, `only`, `shards` or `timeout`, or with `repeatable: false` beside `verification: true`; or a service misnamed, with no image, or with a bad `env` name | Correct the step or service the scope names |
 | `pipeline_select_invalid` | refusal | `select` names an unknown Go selection, a `dbGated` entry that is no directory, a misnamed or empty bucket, or a glob that cannot be read; or a step uses `only` with no `dbGated` | Correct the entry the scope names |
 | `pipeline_select_missing` | refusal | A step names `packages`, and the block has no `select: { go: import-graph }` | Add it |
 | `pipeline_event_unknown` | refusal | A stage's `on` names neither an event nor a mode | Use one the sentence lists |
