@@ -8,8 +8,8 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	workspine "github.com/znasllc-io/memql/integrations/work"
 )
 
 // work_call_tags.go -- the call tags a work run's model calls carry because of
@@ -27,14 +27,6 @@ import (
 // wherever a running event lands. A goal that cannot be read refuses nothing
 // -- the run executes and routes by the ordinary rules, and the dispatcher
 // logs why -- because the tag is a routing preference, not a gate.
-
-// pipelineCallTags is the tags a goal row's origin gives its run's calls.
-func pipelineCallTags(goal map[string]any) []string {
-	if via, _ := goal["requestedVia"].(string); strings.TrimSpace(via) == "pipeline" {
-		return []string{airoute.TagPipeline}
-	}
-	return nil
-}
 
 // goalCallTags reads the goal under the owner the context already carries
 // (workExecutionContext restored it) and returns its call tags.
@@ -54,7 +46,7 @@ func goalCallTags(ctx context.Context, execute func(context.Context, string) (*m
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	return pipelineCallTags(rows[0]), nil
+	return workspine.GoalCallTags(rows[0]), nil
 }
 
 // withRunCallTags adds tags to the run context already on ctx, each once.

@@ -238,3 +238,19 @@ func TestProjectionRetainsPerMachineModalities(t *testing.T) {
 		}
 	}
 }
+
+// The registration row an agent replica routes from keeps the machine's
+// inference-only claim. An agent that does not hold the machine's stream
+// judges a tool-free turn in an Auto goal from this row before it forwards
+// (spec 2026-10-29, D4); dropping the claim here refused every such machine
+// held by a sibling replica.
+func TestTheRoutingRowReaderKeepsInferenceOnly(t *testing.T) {
+	row := map[string]any{"appDescriptors": []any{map[string]any{
+		"id": "claude-code", "harness": "claude-headless",
+		"structuredResult": true, "followUps": true, "inferenceOnly": true,
+	}}}
+	got := rowAppDescriptors(row, "appDescriptors")
+	if len(got) != 1 || !got[0].InferenceOnly || !got[0].StructuredResult || !got[0].FollowUps {
+		t.Fatalf("descriptors read from the row = %+v", got)
+	}
+}

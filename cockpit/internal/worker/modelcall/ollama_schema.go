@@ -88,6 +88,11 @@ func (c *ollamaClient) chatSchemaInPrompt(ctx context.Context, req ChatRequest, 
 	var answer strings.Builder
 	out, err := c.readChat(ctx, req, resp, func(delta string) error {
 		answer.WriteString(delta)
+		// Held back, so nothing reaches the stream until it validates; it
+		// still counts as the runtime working. Without this the idle
+		// watchdog ended a slow answer -- a thinking model writing a long
+		// JSON value, the grammar fallback's own case -- as a stall.
+		reportRuntimeProgress(ctx)
 		return nil
 	})
 	if err != nil {

@@ -459,13 +459,13 @@ func TestExecutionHopCarriesTheRunsCallTags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx = withRunCallTags(ctx, pipelineCallTags(map[string]any{"requestedVia": "pipeline"}))
+	ctx = withRunCallTags(ctx, workspine.GoalCallTags(map[string]any{"requestedVia": "pipeline"}))
 	run, ok := common.RunFromContext(ctx)
 	if !ok || !reflect.DeepEqual(run.Tags, []string{airoute.TagPipeline}) || run.RunId != "r" {
 		t.Fatalf("run context = %+v, want the pipeline tag beside the run", run)
 	}
 	for _, via := range []any{"ask", "", nil} {
-		if tags := pipelineCallTags(map[string]any{"requestedVia": via}); len(tags) != 0 {
+		if tags := workspine.GoalCallTags(map[string]any{"requestedVia": via}); len(tags) != 0 {
 			t.Errorf("requestedVia %v tagged %v", via, tags)
 		}
 	}

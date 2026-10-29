@@ -540,6 +540,14 @@ func (i *Integration) serveRemedy(ctx context.Context, remedy Remedy, kind, runI
 		i.log().Warn("work remedy: could not restore the owner's forwarded authority", "run", runId, "error", err)
 		return
 	}
+	// The replan routes where the run's other calls do: a pipeline goal's
+	// is pipeline work (GoalCallTags). An unreadable goal routes by the
+	// ordinary rules, as on the dispatcher.
+	if goal, err := i.store().goalForOwner(ctx, rc.GoalId); err != nil {
+		i.log().Warn("work remedy: could not read the run's goal; the replan routes by the ordinary rules", "run", runId, "goal", rc.GoalId, "error", err)
+	} else {
+		rc.Tags = GoalCallTags(goal)
+	}
 	ctx = common.ContextWithRun(ctx, rc)
 	ctx = memql.ContextWithBudgetScope(ctx, memql.BudgetScopeId("run", runId), memql.BudgetScopeId("goal", rc.GoalId))
 	ctx = context.WithValue(ctx, providerPhaseKey{}, providerPhase{

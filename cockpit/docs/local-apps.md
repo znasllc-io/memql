@@ -274,7 +274,9 @@ and what the machine advertises cannot disagree. The answer rides `Register` as
 one **app descriptor** per app — the harness word, and whether it can return a
 structured answer, take a follow-up, and run a turn with **no tools** — so the
 engine never asks this machine for a protocol it cannot speak, and never sends
-a structured call to a `codex-mcp` that cannot constrain one.
+a structured call to a `codex-mcp` that cannot constrain one. Descriptors are
+bound at `Register`: a harness gained mid-connection (a Codex upgraded to one
+with the app-server) is advertised on the next reconnect.
 
 **An inference-only turn runs the app with no tools.** When a turn carries no
 images and no inputs, the engine marks it inference-only and the harness drops
@@ -283,9 +285,7 @@ and the Codex app-server turns its shell, patch, multi-agent and web-search
 features off. `codex-mcp` has no such switch, so its descriptor never claims
 it. The claim (`inferenceOnly`) is what lets such a turn answer inside a goal
 whose execution destination is Auto: without tools it is a model call, not work
-on your computer. A Cockpit that predates the claim keeps the engine's refusal. Descriptors are bound at `Register`: a
-harness gained mid-connection (a Codex upgraded to one with the app-server) is
-advertised on the next reconnect.
+on your computer. A Cockpit that predates the claim keeps the engine's refusal.
 
 **Codex through `codex mcp-server` reports no usage and cannot constrain the
 answer, and both are stated rather than papered over.** The tool pair's output

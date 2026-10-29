@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 )
 
 // A structured call on a runner that does not implement `format`
@@ -229,5 +232,48 @@ func TestStructuredCallWithNoSystemMessageGainsOne(t *testing.T) {
 	}
 	if len(req.Messages) != 1 {
 		t.Fatal("the caller's messages must not be changed")
+	}
+}
+
+// The schema-in-prompt fallback holds the answer back until it validates, so
+// its tokens never reach the stream; they must still count as the runtime
+// working, or the idle watchdog ends a slow answer as a stall. A thinking
+// model writing a long JSON answer at `reasoning` -- the case the grammar
+// fallback exists for -- is exactly that slow answer.
+func TestTheHeldBackAnswerKeepsTheIdleClockAlive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if _, hasFormat := body["format"]; hasFormat {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, grammarRefusal)
+			return
+		}
+		flusher := w.(http.Flusher)
+		fmt.Fprintln(w, `{"message":{"thinking":"private thought"}}`)
+		flusher.Flush()
+		for _, piece := range []string{`{"re`, `ply"`, `:"`, `o`, `k`, `"`, `}`} {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(300 * time.Millisecond):
+			}
+			content, _ := json.Marshal(piece)
+			fmt.Fprintf(w, "{\"message\":{\"content\":%s}}\n", content)
+			flusher.Flush()
+		}
+		fmt.Fprintln(w, `{"message":{"content":""},"done":true,"done_reason":"stop"}`)
+	}))
+	defer srv.Close()
+	m := managerFor(inventoryWith(ollamaModel(srv.URL, "m", models.Attributes{MaxConcurrent: 1, StructuredOutput: true, ContextWindow: 8192})))
+	rec := newRecorder()
+	st := start("held-back", "m", KindChat)
+	st.ResponseFormatSchema = []byte(`{"type":"object","required":["reply"],"properties":{"reply":{"type":"string"}}}`)
+	st.Limits.IdleTimeoutSeconds = 1
+	m.Start(context.Background(), rec, st)
+	end := rec.wait(t)
+	if end.GetFinishReason() != FinishStop || rec.content() != `{"reply":"ok"}` {
+		t.Fatalf("finish=%q code=%q error=%q content=%q: a held-back answer still being written is not a stall",
+			end.GetFinishReason(), end.GetErrorCode(), end.GetError(), rec.content())
 	}
 }

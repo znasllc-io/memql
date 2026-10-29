@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -40,5 +41,24 @@ func TestAForwardedFailureNamesTheMachine(t *testing.T) {
 	err := &ModelCallFailed{Forwarded: true, Machine: "laptop", ErrorCode: "runtime_error", Message: "ollama: /api/chat returned 400"}
 	if err.Error() != "laptop: runtime_error ollama: /api/chat returned 400" || err.Code() != "runtime_error" {
 		t.Fatalf("forwarded failure reads %q / %q", err.Error(), err.Code())
+	}
+}
+
+// A machine's code reaches the decision line, which another person may read
+// when the machine is lent to them, and that line is a stable code and the
+// router's own words, never the error's text (component/router's
+// failure_reason.go). A code that is not a stable word is not repeated.
+func TestAMachineCodeThatIsNotAStableWordIsNotRepeated(t *testing.T) {
+	for code, want := range map[string]string{
+		"runtime_error":                     "runtime_error",
+		"timeout":                           "timeout",
+		"":                                  "",
+		"see https://example.test/ secrets": "model_call_failed",
+		"Runtime_Error":                     "model_call_failed",
+		strings.Repeat("a", 41):             "model_call_failed",
+	} {
+		if got := (&ModelCallFailed{ErrorCode: code}).Code(); got != want {
+			t.Errorf("Code() for %q = %q, want %q", code, got, want)
+		}
 	}
 }

@@ -236,7 +236,7 @@ A pipeline's AI -- the independent PR review, a failed run's diagnosis, the
 repository change a diagnosis requests -- carries the `pipeline` tag: the review
 because the pipeline runner makes the call, the others because their work goal
 arrived through a pipeline (`requestedVia: "pipeline"`, read off the goal by the
-replica executing the run). `pipelineLocalFirst` outranks `reasoningParks` for
+replica doing the work, a planner's replan of such a run included). `pipelineLocalFirst` outranks `reasoningParks` for
 those calls and names `localFirstStrongest`: the strongest local model that can
 hold the call, then a signed-in app, then the strongest vendor, **in that
 order**. `federationStrongest` has the same entries but is one of the chains

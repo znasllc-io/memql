@@ -299,6 +299,30 @@ func (d AppDescriptor) Valid() bool {
 	return IsKnownAppId(d.Id) && IsKnownHarness(d.Harness)
 }
 
+// AppDescriptorFromMap decodes one descriptor as a registration row stores it
+// (descriptorsAsMaps), and reports whether it is one the engine can act on.
+//
+// ONE DECODER FOR EVERY ROW READER. The registration store and the fleet
+// router's store each read the row, and when the inference-only claim was
+// added only one of them learned the key: an agent replica routing from the
+// row then refused, as "cannot run without tools", every machine whose stream
+// its sibling held (spec 2026-10-29, D4).
+func AppDescriptorFromMap(m map[string]any) (AppDescriptor, bool) {
+	id, _ := m["id"].(string)
+	harness, _ := m["harness"].(string)
+	structured, _ := m["structuredResult"].(bool)
+	followUps, _ := m["followUps"].(bool)
+	inferenceOnly, _ := m["inferenceOnly"].(bool)
+	d := AppDescriptor{
+		Id:               strings.TrimSpace(id),
+		Harness:          strings.TrimSpace(harness),
+		StructuredResult: structured,
+		FollowUps:        followUps,
+		InferenceOnly:    inferenceOnly,
+	}
+	return d, d.Valid()
+}
+
 // AppDescriptorsFromProto converts the wire descriptors, DROPPING every entry
 // the engine cannot act on and de-duplicating by id. Sorted by id so the
 // persisted row is stable across reconnects.

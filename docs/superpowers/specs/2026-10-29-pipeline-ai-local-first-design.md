@@ -128,7 +128,12 @@ saved model setup caps the window at 32,768 tokens. A long review on a local
 - Not verified on Ollama 0.33.3 itself: reproducing needs that build. D1 does
   not depend on which schema feature it rejects.
 - D4 helps only machines on a Cockpit that declares inference-only turns; until
-  then the app door stays refused for pipeline goals, as today.
+  then the app door stays refused for pipeline goals, as today. App selection
+  picks one machine by score without the claim, so during a rollout the app
+  door can be skipped while an updated machine is online.
+- D5 tags the calls of the pipeline's own runs, including a planner replan of
+  one; a goal such a run opens for itself (`agent()`, a compose) routes by its
+  own origin.
 - The parked diagnosis from 2026-10-28 was not re-tried by the
   `inferenceUnavailable` sweep after its `resumeAt`; reported as a follow-up,
   not fixed here.

@@ -1140,18 +1140,24 @@ Ollama 0.40.6 compiles the same schemas. A 400 to a `format` request with no
 tools, whose error names the grammar, now takes the schema-in-prompt path the
 501 already took: one retry on the same machine, the answer held to the whole
 schema, otherwise the call fails. Any other 400 fails as before. Safe because
-Ollama refuses before generating. Tests:
+Ollama refuses before generating. The held-back answer reports runtime
+progress, so the idle watchdog does not end a slow answer as a stall. Tests:
 `TestStructuredCallTheRuntimeCannotCompileAsksInThePrompt`,
-`TestStructuredCallKeepsOtherBadRequests`. Takes effect only on machines
+`TestStructuredCallKeepsOtherBadRequests`,
+`TestTheHeldBackAnswerKeepsTheIdleClockAlive`. Takes effect only on machines
 running a Cockpit release that carries it; upgrading Ollama removes the retry.
 
 **A machine's failure keeps its code** (`component/worker/modelcall_failed.go`).
 The stream's handle, the holder's forward response and the sender each kept a
 failed call's machine code (`runtime_error`, ...) only as text, and the holder
 replaced it with `model_call_failed`, so the decision record said `other`.
-`ModelCallFailed` carries the code with each path's old text; the router names
-`runtime_error`, `model_call_failed` and `worker_stopped` in its own words and
-never puts the runtime's text in `considered`. The in-process loopback now
+`ModelCallFailed` carries the code with each path's old text shape; the router
+names `runtime_error`, `model_call_failed` and `worker_stopped` in its own words
+and never puts the runtime's text in `considered`. `Code()` repeats a machine's
+code only when it is a stable word (lowercase and underscores, at most forty),
+because the decision line can be read by someone the machine was lent to;
+anything else reads `model_call_failed`
+(`TestAMachineCodeThatIsNotAStableWordIsNotRepeated`). The in-process loopback now
 fails a call the way the real stream does. Tests:
 `TestAFinishedCallWithAnErrorKeepsTheMachinesCode`,
 `TestAMachinesFailureCodeCrossesTheModelHop` (planner to agent over the real
@@ -1185,15 +1191,22 @@ keeps its refusal), and only on a machine whose app descriptor declares
 `inferenceOnly` (`worker.proto`, set by the Cockpit for `claude-headless` and
 `codex-app-server`, never `codex-mcp`; absent reads false). The agent's local
 selection, its forward and the holder all judge the machine; the holder uses
-its live descriptor. A planner or bff sender runs no gate and leaves the
-judgment to the holder. Session-door steps and turns with images or inputs
+its live descriptor; an agent that does not hold the stream reads the claim off
+the registration row through `workerservice.AppDescriptorFromMap`, the one
+decoder both row readers use (the routing store once dropped the key, which
+refused every machine a sibling replica held). A planner or bff sender runs no
+gate and leaves the judgment to the holder. Session-door steps and turns with images or inputs
 keep the refusal. Tests: `TestAToolFreeTurnInAnAutoGoalRunsOnAMachineThatDeclaresIt`,
 `TestAToolFreeTurnSkipsAMachineThatCannotRunWithoutTools`,
 `TestAnAutoGoalStillRefusesATurnWithInputs`,
 `TestAWorkbenchGoalStillRefusesAToolFreeTurn`,
 `TestTheSessionDoorStillNeedsDestinationConsent`,
 `TestAToolFreeTurnIsJudgedOnTheHoldersMachine` (hop; shown load-bearing by
-disabling the holder's check).
+disabling the holder's check), `TestAnAgentWithoutTheStreamJudgesTheRegistrationRow`
+(hop with an agent sender reading the real row), `TestTheRoutingRowReaderKeepsInferenceOnly`.
+App SELECTION (`SelectAppForCall`) still pins one machine by score without the
+claim: during a Cockpit rollout an app door can be skipped in an Auto goal while
+an updated machine is online; the route moves to its next entry.
 
 **The pipeline rule** (`dsl/rules/rules.memql` `pipelineLocalFirst`,
 `dsl/policies/policies.memql` `localFirstStrongest`, `app/work_call_tags.go`).
@@ -1201,15 +1214,21 @@ Calls carrying the `pipeline` tag at `reasoning` take fleet:strongest, app:*,
 federation:strongest in the order written; Auto ranks only the three general
 chains. The tag comes from the review's own call attribution
 (`pipelineCallContext`) and from the run context of a work run whose goal has
-`requestedVia: "pipeline"`, read off the goal row by the dispatcher on the
-executing replica; a goal that cannot be read routes by the ordinary rules and
-is logged. Tests: `TestAPipelineReasoningCallMatchesThePipelineRule`,
+`requestedVia: "pipeline"`, read off the goal row on the replica doing the work
+(`integrations/work.GoalCallTags`) by the agent's dispatcher and by the
+planner's remedy, whose reasoning-level replan would otherwise take
+reasoningParks' app-first order; `ResolveFor` adds the run's tags to a request
+built outside the engine. A goal that cannot be read routes by the ordinary
+rules and is logged. A goal a pipeline run opens itself (`agent()`, a compose)
+routes by its own origin. Tests: `TestAPipelineReasoningCallMatchesThePipelineRule`,
 `TestAutoLeavesThePipelineChainInItsWrittenOrder`,
 `TestAFullSizeReviewSkipsTheLocalDoor` (a 1 MiB review's 266,240-token floor
 exceeds a 262,144-token local window), `TestCallTagsFromTheCallerAndTheRunReachTheRequest`,
 `TestExecutionHopCarriesTheRunsCallTags`,
 `TestAGoalThatCannotBeReadLeavesTheRunUntagged`,
-`TestTheIndependentReviewCallIsTaggedPipeline`, and the shipped-rule gates in
+`TestTheIndependentReviewCallIsTaggedPipeline`,
+`TestAPipelineGoalsReplanCarriesThePipelineTag`,
+`TestResolveForAppliesTheRunsCallTags`, and the shipped-rule gates in
 `test/dslconformance/local_first_policies_test.go` and the OS routing tests.
 
 **Not verified here.** No change ran on the production cluster or on a fleet

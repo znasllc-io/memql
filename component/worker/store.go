@@ -1088,20 +1088,8 @@ func (g *workerFieldGetter) appDescriptors(key string) []AppDescriptor {
 		if stru == nil {
 			continue
 		}
-		m := stru.AsMap()
-		id, _ := m["id"].(string)
-		harness, _ := m["harness"].(string)
-		structured, _ := m["structuredResult"].(bool)
-		followUps, _ := m["followUps"].(bool)
-		inferenceOnly, _ := m["inferenceOnly"].(bool)
-		d := AppDescriptor{
-			Id:               strings.TrimSpace(id),
-			Harness:          strings.TrimSpace(harness),
-			StructuredResult: structured,
-			FollowUps:        followUps,
-			InferenceOnly:    inferenceOnly,
-		}
-		if !d.Valid() {
+		d, ok := AppDescriptorFromMap(stru.AsMap())
+		if !ok {
 			continue
 		}
 		out = append(out, d)

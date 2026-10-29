@@ -39,6 +39,7 @@ import (
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/component/router"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/worker/fleetcatalog"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -811,4 +812,63 @@ func TestAToolFreeTurnIsJudgedOnTheHoldersMachine(t *testing.T) {
 	if sessions, _ := h.harness.sessions(); len(sessions) != 1 || !sessions[0].InferenceOnly {
 		t.Fatalf("the turn must open inference-only on the holder: %+v", sessions)
 	}
+}
+
+// AN AGENT THAT DOES NOT HOLD THE STREAM JUDGES THE REGISTRATION ROW
+// (spec 2026-10-29, D4). Work runs execute on agent replicas, so with two of
+// them a tool-free turn in an Auto goal usually starts on the replica that
+// does NOT hold the machine's stream. That replica reads the machine from its
+// registration row -- through the production row reader, here -- and must see
+// the inference-only claim the holder's Cockpit made, or it refuses every
+// machine its sibling holds and the holder is never asked.
+func TestAnAgentWithoutTheStreamJudgesTheRegistrationRow(t *testing.T) {
+	h := newAppHop(t)
+	auto := &memqlengine.ExecutionDestinationRequired{From: "auto", To: "computer"}
+	h.holderStore.destinationErr = auto
+	h.registry.WorkerById(hopMachine).SetAppDescriptors([]workerservice.AppDescriptor{{Id: workerservice.AppIdClaudeCode,
+		Harness: workerservice.HarnessClaudeHeadless, StructuredResult: true, FollowUps: true, InferenceOnly: true}})
+
+	// The row as the registration stores it, read back the way routing reads it.
+	row := map[string]any{
+		"id": hopMachine, "name": "laptop", "connectedNodeId": hopHolder,
+		"lastSeenAt":   fleetNow().UTC().Format(time.RFC3339Nano),
+		"capabilities": []any{workerservice.CapabilityHeadless},
+		"labels":       map[string]any{workerservice.AppLabelKey(workerservice.AppIdClaudeCode): "2.1"},
+		"apps":         []any{map[string]any{"id": workerservice.AppIdClaudeCode, "version": "2.1.283", "allowed": true, "signedIn": true}},
+		"appDescriptors": []any{map[string]any{"id": workerservice.AppIdClaudeCode, "harness": workerservice.HarnessClaudeHeadless,
+			"structuredResult": true, "followUps": true, "inferenceOnly": true}},
+	}
+	rows := &fleetcatalog.EngineStore{Engine: rowEngine(func(context.Context, string) (*memqlengine.ExecuteResult, error) {
+		return memqlengine.NewResultWithOutput([]any{row}), nil
+	})}
+	ctx, cancel := plannerCtx(t)
+	defer cancel()
+	candidates, err := rows.WorkersForOwner(ctx, hopOwner)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("row read: %v %+v", err, candidates)
+	}
+
+	senderStore := &gateStore{fakeFleet: &fakeFleet{machines: candidates, owner: hopOwner}, destinationErr: auto}
+	logger := testLogger()
+	sender := &AppInference{
+		router: NewRouter(senderStore, logger, fleetNow), store: senderStore,
+		registry: workerservice.NewRegistry(logger, fleetNow),
+		runner:   &workerservice.SessionRunner{Logger: logger, Minter: fixedMinter{}},
+		prefs:    senderStore, logger: logger, clock: fleetNow,
+		forward: h.link.router, selfNodeId: hopPlanner,
+	}
+	if _, err := sender.Call(ctx, memqlengine.AppCallRequest{ActingUserId: hopOwner, AppId: workerservice.AppIdClaudeCode,
+		RunId: "v1:work:run:goal-1", Messages: []common.ChatMessage{{Role: "user", Content: "diagnose"}}}); err != nil {
+		t.Fatalf("the sibling's machine declares tool-free turns and must be reached: %v", err)
+	}
+	if sessions, _ := h.harness.sessions(); len(sessions) != 1 || !sessions[0].InferenceOnly {
+		t.Fatalf("the turn must open inference-only on the holder: %+v", sessions)
+	}
+}
+
+// rowEngine answers the routing store's one query with fixed rows.
+type rowEngine func(context.Context, string) (*memqlengine.ExecuteResult, error)
+
+func (f rowEngine) Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error) {
+	return f(ctx, query)
 }

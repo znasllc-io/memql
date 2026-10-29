@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // WORK A PIPELINE STARTED RUNS LOCAL FIRST, IN ORDER (spec 2026-10-29, D5).
@@ -71,5 +72,25 @@ func TestAFullSizeReviewSkipsTheLocalDoor(t *testing.T) {
 	if _, _, err := r.ResolveStructured(ResolveRequest{UserId: "alice", Level: airoute.LevelReasoning, Needs: airoute.Needs{Structured: true, MinContextTokens: floor}}); err == nil ||
 		!strings.Contains(err.Error(), "context window 262144 is under the floor 266240") {
 		t.Fatalf("a 1 MiB review must not be offered to a 262,144-token local model: %v", err)
+	}
+}
+
+// A request built outside the engine -- the agent replier's own -- reaches the
+// router without the run's tags; ResolveFor, the one function every model call
+// reaches, applies them from the run context the executing node built.
+func TestResolveForAppliesTheRunsCallTags(t *testing.T) {
+	providers := memql.NewProviderRegistryForTest()
+	providers.SetFleetInference(&stubFleetInference{models: []memql.FleetModel{sizedModel("qwen3.8:27b", 27_000_000_000, 131072)}})
+	policies := memql.NewPolicyRegistryForTest(map[string][]string{
+		"localFirst": {memql.FleetStrongest}, "federationStrongest": {memql.FleetStrongest}, "localFirstStrongest": {memql.FleetStrongest},
+	})
+	r := New(providers, policies, pipelineRules(t).rules, nil, nil)
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{RunId: "v1:work:run:diagnosis", StepKey: "diagnosed", Tags: []string{airoute.TagPipeline}})
+	resolved, err := r.ResolveFor(ctx, ResolveRequest{UserId: "alice", Level: airoute.LevelReasoning, Modality: airoute.ModalityChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolved.Resolution.Decision.Rule; got != "pipelineLocalFirst" {
+		t.Fatalf("rule = %q, want the run's pipeline tag to choose pipelineLocalFirst", got)
 	}
 }

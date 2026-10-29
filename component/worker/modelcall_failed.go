@@ -1,5 +1,7 @@
 package worker
 
+import "regexp"
+
 // modelcall_failed.go -- a model call a machine STARTED and then failed, with
 // the machine's own stable code.
 //
@@ -13,8 +15,10 @@ package worker
 // decision record of a parked pipeline diagnosis as `failed when called:
 // other`, with the Ollama text readable only on the run's observations.
 //
-// The TEXT is unchanged from what each path printed before, so logs and the
-// errorMessage a person already reads look the same; only Code() is new.
+// The TEXT keeps each path's shape -- "worker: model call failed: <message>"
+// on the replica holding the stream, "<machine>: <code> <message>" on the
+// replica that forwarded -- except that the forwarded form now names the
+// machine's own code where it used to say model_call_failed.
 
 // ModelCallFailed is a model call a machine started and then failed.
 type ModelCallFailed struct {
@@ -38,4 +42,20 @@ func (e *ModelCallFailed) Error() string {
 }
 
 // Code is the stable machine-readable tag the router names a failure by.
-func (e *ModelCallFailed) Code() string { return e.ErrorCode }
+//
+// It is repeated only when it IS a stable word -- lowercase letters and
+// underscores, at most forty -- because it lands on the decision line, which a
+// person other than the machine's owner may read when the machine is lent to
+// them, and that line carries codes and the router's own words, never an
+// error's text (component/router's failure_reason.go). Anything else a machine
+// sent reads as the generic model_call_failed; the full text stays on the
+// error and the row's errorMessage. Empty stays empty, so the router falls
+// back to its own category of the error.
+func (e *ModelCallFailed) Code() string {
+	if e.ErrorCode == "" || stableModelCallCode.MatchString(e.ErrorCode) {
+		return e.ErrorCode
+	}
+	return "model_call_failed"
+}
+
+var stableModelCallCode = regexp.MustCompile(`^[a-z][a-z_]{0,39}$`)
