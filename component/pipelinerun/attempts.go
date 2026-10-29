@@ -251,9 +251,8 @@ func cutText(s string, n int) string {
 //
 //  1. P again, while P has had fewer than sameMachine retries and is not marked
 //     not-retried-here, after delaysSeconds[i] (the last value repeats). Each
-//     place has its own count. A cluster step's retries stay on the cluster
-//     under this count; under this rule a pool step's retries reach the
-//     cluster at most once (an unknown outcome there is ruling 18's, below).
+//     place has its own count. The cluster is P again only for a step whose
+//     placement is the cluster, under this count.
 //  2. Otherwise, for a fleet or pool step with otherMachines, an eligible machine
 //     not yet tried, at once.
 //  3. Otherwise, for a pool step with cloudFallback, the cluster, if it has not
@@ -264,7 +263,8 @@ func cutText(s string, n int) string {
 //
 //  1. an eligible machine not yet tried (rule 2's step);
 //  2. P again: ONCE when P is a machine; up to sameMachine times, after the same
-//     delays as rule 1, when P is the cluster (ruling 18);
+//     delays as rule 1, when P is the cluster and the step's placement is the
+//     cluster (ruling 18, as amended);
 //  3. rule 3;
 //  4. otherwise the step fails.
 //
@@ -275,13 +275,20 @@ func cutText(s string, n int) string {
 // driver itself confirms the previous attempt's Job, Secret and pods are gone
 // before it sends the next attempt (ruling 13, runStep), so a repeatable step
 // cannot overlap itself there however often it is retried; and since nearly
-// every cluster failure is an unknown outcome (rulings 14 and 15), a cluster
-// count of one would leave repeatable steps without their cluster retries.
+// every cluster failure is an unknown outcome (rulings 14 and 15), a step that
+// can run nowhere else would otherwise have no retries left.
 //
-// Either "P again" stays owed while the untried machines are tried, and is paid
-// after them, a machine's before the cluster's, then rule 3: a pool step whose
-// unknown outcome was on the cluster tries the machines first, then the
-// cluster again within sameMachine.
+// A POOL STEP REACHES THE CLUSTER ONCE, whatever ended the attempt there: the
+// cluster is the one place an attempt spends cloud, and the owner chose to
+// spend it at most once per pool step as a cost bound. That one attempt is its
+// first attempt's own fallback (inside the executor) or rule 3's, and the
+// cluster is never P again for a pool step: one whose attempt there failed, an
+// unknown outcome included, tries the machines it has not tried and then
+// stops. A cluster step has no other place, so its retries are all on the
+// cluster.
+//
+// A machine's "P again" stays owed while the untried machines are tried, and
+// is paid after them, then rule 3.
 //
 // Bounds no policy can widen: MaxStepAttempts in all; a fleet step never reaches
 // the cluster and a cluster step never a machine (the executor refuses both,
@@ -387,11 +394,12 @@ func exhausting(r attemptRecord, sent *pipelines.AttemptPlacement) bool {
 // attemptHistory is what a step's records say, read once for one decision.
 type attemptHistory struct {
 	policy pipelines.ComputePlacementPolicy
-	// mayFleet and mayCluster say which surfaces the step may be placed on at
-	// all: a fleet or pool step the owner's machines, a cluster step or a pool
-	// step whose policy allows cloud the cluster.
-	mayFleet, mayCluster bool
-	pool                 bool
+	// mayFleet: the step may be placed on the owner's machines (a fleet or pool
+	// step). clusterPlaced: the step's placement IS the cluster, its only place,
+	// and the only kind of step the cluster is ever P again for. A pool step is
+	// on the cluster at most once (rule 3, or its first attempt's own fallback).
+	mayFleet, clusterPlaced bool
+	pool                    bool
 	// repeatable: the step says running it again after an unknown outcome is
 	// harmless (spec D5), which every owed retry needs.
 	repeatable bool
@@ -403,13 +411,11 @@ type attemptHistory struct {
 	notRetried map[string]bool
 	// at counts the attempts at each place (placeKey).
 	at map[string]int
-	// clusterUsed: the cluster has been a place; clusterRetries counts the
-	// attempts after the first that ran there. clusterOwed: the latest attempt
-	// on the cluster ended with an unknown outcome, so the cluster is owed its
-	// retries (ruling 18) until one runs there.
-	clusterUsed    bool
-	clusterRetries int
-	clusterOwed    bool
+	// clusterUsed: the cluster has been a place. clusterOwed: the latest
+	// attempt on the cluster ended with an unknown outcome, so a cluster step's
+	// cluster is owed its retries (ruling 18) until one runs there.
+	clusterUsed bool
+	clusterOwed bool
 	// exhausted: an attempt found the fleet exhausted (exhausting).
 	exhausted bool
 	// owed is the machines an unknown outcome left owed their one retry, in the
@@ -435,10 +441,10 @@ func readHistory(step pipelines.Step, policy pipelines.ComputePlacementPolicy, r
 	pool := step.Placement == pipelines.PlacementPool && !step.RequiresFleet()
 	h := attemptHistory{
 		policy: policy, pool: pool, repeatable: step.Repeatable,
-		mayFleet:   step.RequiresFleet() || pool,
-		mayCluster: !step.RequiresFleet() && (!pool || policy.CloudFallback),
-		notRetried: map[string]bool{},
-		at:         map[string]int{},
+		mayFleet:      step.RequiresFleet() || pool,
+		clusterPlaced: !step.RequiresFleet() && !pool,
+		notRetried:    map[string]bool{},
+		at:            map[string]int{},
 	}
 	firstUnknown := map[string]int{}
 	lastAt := map[string]int{}
@@ -449,9 +455,6 @@ func readHistory(step pipelines.Step, policy pipelines.ComputePlacementPolicy, r
 		}
 		if r.Surface == pipelines.PlacementCluster {
 			h.clusterUsed = true
-			if i > 0 {
-				h.clusterRetries++
-			}
 			h.clusterOwed = r.Class == pipelines.AttemptOutcomeUnknown
 			continue
 		}
@@ -487,10 +490,11 @@ func (h attemptHistory) samePlace(last attemptRecord) (*pipelines.AttemptPlaceme
 	delay := retryDelay(h.policy.Retries, retries)
 	switch {
 	case key == "cluster":
-		if !h.mayCluster || (h.pool && h.clusterRetries > 0) {
-			// Under this rule a pool step's retries reach the cluster at most
-			// once: the cluster is the one place an attempt spends money. An
-			// unknown outcome there is retried under owedCluster instead.
+		if !h.clusterPlaced {
+			// Only a step whose placement is the cluster is retried there: it
+			// has no other place. A pool step spends cloud at most once, by the
+			// owner's choice, so its attempt on the cluster -- whatever ended it --
+			// was its one, and rule 2 takes it to the machines it has not tried.
 			return nil, 0, false
 		}
 		return &pipelines.AttemptPlacement{Surface: pipelines.PlacementCluster}, delay, true
@@ -529,15 +533,16 @@ func (h attemptHistory) owedRetry() (*pipelines.AttemptPlacement, bool) {
 }
 
 // owedCluster is an unknown outcome's "P again" when P is the cluster (ruling
-// 18): the cluster again while it has had fewer than sameMachine retries, after
-// the same delays as rule 1, its count shared with rule 1's. Each such attempt
-// is sent only once the previous one's Job, Secret and pods are confirmed gone
-// (runStep), which is what makes more than one safe here. A pool step's retries
-// may come back to the cluster for this after trying its untried machines; the
-// policy's cloudFallback still decides whether a pool step may be on the
-// cluster at all (mayCluster).
+// 18, as amended): for a step whose placement is the cluster, its only place,
+// the cluster again while it has had fewer than sameMachine retries, after the
+// same delays as rule 1, its count shared with rule 1's. Each such attempt is
+// sent only once the previous one's Job, Secret and pods are confirmed gone
+// (runStep), which is what makes more than one safe here. Never for a pool
+// step: it spends cloud at most once, by the owner's choice, so an unknown
+// outcome on the cluster leaves it the machines it has not tried, and then
+// nothing.
 func (h attemptHistory) owedCluster() (*pipelines.AttemptPlacement, time.Duration, bool) {
-	if !h.repeatable || !h.mayCluster || !h.clusterOwed {
+	if !h.repeatable || !h.clusterPlaced || !h.clusterOwed {
 		return nil, 0, false
 	}
 	retries := h.at["cluster"] - 1

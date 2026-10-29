@@ -156,13 +156,16 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 			numbered(notRetried(on("M", nothingRan)), noMachine, onCluster(nothingRan)), stop},
 		{"pool step, the cluster asked for a retry and was already a place", retryPoolStep, standard,
 			numbered(notRetried(on("M", nothingRan)), noMachine, onCluster(retryRequested)), stop},
-		// A pool step's first attempt can end on the cluster inside itself (the
-		// Fleet preference ran out). Its retries reach the cluster once more at
-		// most, and then the machines it never tried.
-		{"pool step, its first attempt fell back to the cluster", retryPoolStep, standard,
-			numbered(onCluster(nothingRan)), next(toCluster, 30*time.Second)},
-		{"pool step, the cluster reached once in its retries", retryPoolStep, standard,
-			numbered(onCluster(nothingRan), onCluster(nothingRan)), next(failoverFrom(60), 0)},
+		// A pool step reaches the cluster once, whatever ended the attempt there
+		// (the owner's cost bound). Its first attempt can end on the cluster inside
+		// itself (the Fleet preference ran out): that was its one cluster attempt,
+		// and its retries go to the machines it never tried, then stop.
+		{"pool step, its first attempt fell back to the cluster: the machines, not the cluster", retryPoolStep, standard,
+			numbered(onCluster(nothingRan)), next(failoverFrom(60), 0)},
+		{"pool step, exit 75 on the cluster: the machines, not the cluster", retryPoolStep, standard,
+			numbered(onCluster(retryRequested)), next(failoverFrom(60), 0)},
+		{"pool step, its one cluster attempt spent and the machines exhausted", retryPoolStep, standard,
+			numbered(onCluster(nothingRan), noMachine), stop},
 
 		// Ruling 8: a pool step's failover to another machine waits at most
 		// fleetWaitSeconds for a busy one, and at least a second (0 is no bound).
@@ -212,12 +215,12 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 			numbered(on("M", unknownOutcome), noMachine, on("M", retryRequested)), next(pinnedTo("M", 120), 120*time.Second)},
 		{"a machine that needs recovering is not retried after its unknown outcome", repeatableStep(retryPoolStep), standard,
 			numbered(notRetried(on("M", unknownOutcome)), noMachine), next(toCluster, 0)},
-		// Ruling 18: an unknown outcome on the CLUSTER is retried there, up to
-		// sameMachine with the same delays, for a repeatable step -- each only
-		// once the previous attempt's Job is confirmed gone, so it cannot overlap
+		// Ruling 18 (as amended): an unknown outcome on the cluster is retried
+		// there, up to sameMachine with the same delays, for a repeatable step
+		// whose placement IS the cluster -- it has no other place -- each only once
+		// the previous attempt's Job is confirmed gone, so it cannot overlap
 		// itself. Almost every cluster failure is an unknown outcome (rulings 14
-		// and 15), so without this a repeatable step would have no cluster
-		// retries left.
+		// and 15), so without this such a step would have no retries left.
 		{"a repeatable cluster step's unknown outcome: the cluster again after 30 s", repeatableStep(retryClusterStep), standard,
 			numbered(onCluster(unknownOutcome)), next(toCluster, 30*time.Second)},
 		{"twice unknown on the cluster: again after 120 s", repeatableStep(retryClusterStep), standard,
@@ -230,26 +233,21 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 			numbered(onCluster(unknownOutcome)), stop},
 		{"the zero policy retries no unknown outcome on the cluster", repeatableStep(retryClusterStep), pipelines.ComputePlacementPolicy{},
 			numbered(onCluster(unknownOutcome)), stop},
-		// A pool step whose unknown outcome was on the cluster tries the machines
-		// it has not tried first, then the cluster again within sameMachine.
+		// A repeatable pool step whose unknown outcome was on the cluster tries
+		// the machines it has not tried, and then stops: it never goes back to
+		// the cluster.
 		{"a repeatable pool step's unknown outcome on the cluster: an untried machine", repeatableStep(retryPoolStep), standard,
 			numbered(onCluster(unknownOutcome)), next(failoverFrom(60), 0)},
-		{"then, the machines exhausted, the cluster again", repeatableStep(retryPoolStep), standard,
-			numbered(onCluster(unknownOutcome), noMachine), next(toCluster, 30*time.Second)},
-		{"then the cluster within sameMachine", repeatableStep(retryPoolStep), standard,
-			numbered(onCluster(unknownOutcome), noMachine, onCluster(unknownOutcome)), next(toCluster, 120*time.Second)},
-		{"then nothing: the cluster's sameMachine spent", repeatableStep(retryPoolStep), standard,
-			numbered(onCluster(unknownOutcome), noMachine, onCluster(unknownOutcome), onCluster(unknownOutcome)), stop},
-		{"the cluster again after an untried machine's own retries", repeatableStep(retryPoolStep), standard,
-			numbered(onCluster(unknownOutcome), on("N", nothingRan), on("N", nothingRan), on("N", nothingRan), noMachine),
-			next(toCluster, 30*time.Second)},
-		{"a machine owed its once comes before the cluster", repeatableStep(retryPoolStep), standard,
+		{"then, the machines exhausted, nothing: never a second cluster attempt", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), noMachine), stop},
+		{"nor after an untried machine's own retries", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), on("N", nothingRan), on("N", nothingRan), on("N", nothingRan), noMachine), stop},
+		{"a machine owed its once is still paid", repeatableStep(retryPoolStep), standard,
 			numbered(onCluster(unknownOutcome), on("M", unknownOutcome), noMachine), next(pinnedTo("M", 120), 0)},
-		{"and the cluster after it", repeatableStep(retryPoolStep), standard,
-			numbered(onCluster(unknownOutcome), on("M", unknownOutcome), noMachine, notRetried(on("M", nothingRan))),
-			next(toCluster, 30*time.Second)},
-		{"no other machines: the cluster again after its delay", repeatableStep(retryPoolStep), noOtherMachines,
-			numbered(onCluster(unknownOutcome)), next(toCluster, 30*time.Second)},
+		{"and then nothing, not the cluster", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), on("M", unknownOutcome), noMachine, notRetried(on("M", nothingRan))), stop},
+		{"no other machines: nothing, not the cluster", repeatableStep(retryPoolStep), noOtherMachines,
+			numbered(onCluster(unknownOutcome)), stop},
 
 		// The engine's cap: no step makes more than eight attempts.
 		{"seven attempts: one more", retryFleetStep, standard,
