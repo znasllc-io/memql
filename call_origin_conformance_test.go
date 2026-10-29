@@ -834,10 +834,25 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// are routed over and whose authority is bound is copied by the driver
 		// off the pipeline row, and the run and step are the driver's own.
 		//
+		// A retry names machines, and that is not a caller-supplied identifier
+		// either. worker.Request.PinRegistration and ExcludeRegistrations
+		// (filled in dispatchStep from the attempt's placement) are registration
+		// ids that EARLIER ATTEMPTS OF THE SAME STEP reported back as
+		// worker.Result.WorkerId. The engine's own driver
+		// (component/pipelinerun) reads them off its journal and chooses which to
+		// pin or exclude; nothing a caller, a request or a model sends is ever
+		// one of them. They only NARROW the machines the owner's own routing and
+		// consents already offered and admit none, and the dispatcher refuses
+		// either field on every purpose but the pipeline's
+		// (integrations/agent/worker/pipeline_purpose.go, machineNarrowingBinding),
+		// which is itself admitted only under this stamp. Asserted in
+		// integrations/pipelinesteps/fleet_attempt_test.go
+		// (TestPlacementPinsAndExcludesThroughTheDispatcher).
+		//
 		// The stamp is applied in ONE place, inline as the argument to the one
 		// Dispatch call in fleet.go, on a context made for that call and never
 		// returned -- asserted by integrations/pipelinesteps/internal_origin_test.go.
-		"integrations/pipelinesteps": "the pipelines executor's fleet half -- server-initiated, its one caller the agent's pipelines driver; the stamp is how the dispatcher admits the pipeline purpose from the engine's own Go and nothing else, applied inline on the one Dispatch call (epic memql#5478)",
+		"integrations/pipelinesteps": "the pipelines executor's fleet half -- server-initiated, its one caller the agent's pipelines driver; the stamp is how the dispatcher admits the pipeline purpose from the engine's own Go and nothing else, applied inline on the one Dispatch call; a retry's pin and exclusions are registration ids earlier attempts of the same step reported, chosen by the driver and never by a caller (epic memql#5478)",
 		"integrations/agent/worker":  "worker store, server-initiated",
 		// Owned-work turn preparation issues exactly two fixed native Training
 		// reads. Both revalidate the run/goal/source under the unchanged actor;

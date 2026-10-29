@@ -97,6 +97,14 @@ type StepRun struct {
 	RunDeadline string `json:"runDeadline"`
 	// GoTimings asks the runner to read Go test timings out of the output.
 	GoTimings bool `json:"goTimings,omitempty"`
+	// PinWorker, ExcludeWorkers and MaxWaitSeconds are the attempt's placement
+	// on the fleet (pl.AttemptPlacement), copied here by stepRunFor so the
+	// fleet path has one input. Only a fleet attempt ever carries them: the
+	// executor refuses a placement that names machines for an attempt that is
+	// not going to one, so a cluster forward's StepRun never has them.
+	PinWorker      string   `json:"pinWorker,omitempty"`
+	ExcludeWorkers []string `json:"excludeWorkers,omitempty"`
+	MaxWaitSeconds int      `json:"maxWaitSeconds,omitempty"`
 }
 
 // A StepRun carries resolved secret values because the runner needs them, so

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -131,8 +132,33 @@ type fleetOutput struct {
 	ArtifactsTooLarge bool     `json:"artifactsTooLarge"`
 }
 
-// RunStep runs one step on a machine that offers what it needs.
+// fleetDispatch is what runStep remembers of the dispatcher, for the class of
+// the attempt: its last answer, and whether that answer is where the result
+// came from. It is false for every result the fleet made without a dispatch
+// answering -- a refusal of the request, a clone token that could not be
+// minted, a wait that gave up, a stop -- and then the result alone decides.
+type fleetDispatch struct {
+	result     worker.Result
+	dispatched bool
+}
+
+// RunStep runs one step on a machine that offers what it needs, and says what
+// became of the attempt: every result that is not a success leaves with the
+// class fleetAttemptClass gives it (spec section 4), because the fleet is the
+// only place that holds both the dispatcher's own word on whether anything
+// started and the result made from it. A result that arrives already classified
+// -- the bounded wait that ran out says so where it decides -- keeps its class.
 func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (pl.StepResult, error) {
+	var seen fleetDispatch
+	res, err := f.runStep(ctx, req, run, &seen)
+	if err != nil || res.AttemptClass != "" {
+		return res, err
+	}
+	res.AttemptClass, res.NotRetriedHere = fleetAttemptClass(seen.result, res, seen.dispatched)
+	return res, nil
+}
+
+func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, seen *fleetDispatch) (pl.StepResult, error) {
 	if run.GitHubReadToken || req.Step.GitHubReadToken {
 		return refusedResult(pl.CodeStepInvalid, "githubReadToken requires cluster container execution."), nil
 	}
@@ -241,6 +267,7 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		artifacts.chunk(message)
 	})
 	finished := f.now()
+	seen.result, seen.dispatched = result, stopped == nil && err == nil
 	// The machine's last partial lines are output; a chunk that arrives after
 	// this -- the dispatcher stopped waiting on a timeout or a cancel -- is
 	// dropped rather than racing the archive.
@@ -319,6 +346,23 @@ func (f *Fleet) cloneToken(ctx context.Context, run StepRun) (string, pl.StepRes
 // sibling replica holds is reached over a forward, and the receiving replica
 // checks the machine against the asserted subject -- never against the
 // envelope's owner field. Without one a sibling-held machine is skipped.
+//
+// THE ATTEMPT'S PLACE. A retry the driver placed carries a pin (a same-machine
+// retry) or exclusions (a failover to a machine not yet tried), and they go to
+// the dispatcher as they are, on the one Request. They are registration ids that
+// earlier attempts of THIS step reported (Result.WorkerId), chosen by the
+// engine's own driver and copied through the StepRun; nothing a caller or a
+// model sends names a machine (design D4), and the dispatcher refuses either
+// field on every purpose but this one. They narrow the plan the owner's routing
+// and consents already produced and admit nothing, so the machine owner's
+// pipelines=allowed requirement below stays on a pinned dispatch.
+//
+// A failover also says why it moved: ReroutedFrom is "worker:<the machine the
+// step last left>", the dispatcher's own marker for a call that is not where it
+// was first sent, so the attempt's invocation record answers "why did this run
+// on that machine" after the fact. The last exclusion is the last machine tried
+// (the driver appends them in the order it tried them). A pin moves nothing and
+// says nothing.
 func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRun, token string, onChunk func(*nodev1.WorkerForwardStream)) (worker.Result, error) {
 	labels := worker.EnvironmentNeedsLabels(req.Step.Needs, "")
 	if labels == nil {
@@ -330,19 +374,25 @@ func (f *Fleet) dispatchStep(ctx context.Context, req pl.StepRequest, run StepRu
 	if err != nil {
 		return worker.Result{}, err
 	}
-	return f.dispatch.Dispatch(auth.ContextWithInternalOrigin(owned), worker.Request{
-		Tool:          "workerHost",
-		Action:        worker.PipelineStepAction,
-		Purpose:       worker.PurposePipeline,
-		Args:          fleetArgs(run, token),
-		OwnerUserId:   run.OwnerUserID,
-		RunId:         run.WorkRunID,
-		StepId:        run.StepKey,
-		CorrelationId: run.RunID,
-		Timeout:       time.Duration(run.TimeoutSeconds)*time.Second + fleetCloneSlack,
-		RequireLabels: labels,
-		OnStreamChunk: onChunk,
-	})
+	request := worker.Request{
+		Tool:                 "workerHost",
+		Action:               worker.PipelineStepAction,
+		Purpose:              worker.PurposePipeline,
+		Args:                 fleetArgs(run, token),
+		OwnerUserId:          run.OwnerUserID,
+		RunId:                run.WorkRunID,
+		StepId:               run.StepKey,
+		CorrelationId:        run.RunID,
+		Timeout:              time.Duration(run.TimeoutSeconds)*time.Second + fleetCloneSlack,
+		RequireLabels:        labels,
+		PinRegistration:      run.PinWorker,
+		ExcludeRegistrations: slices.Clone(run.ExcludeWorkers),
+		OnStreamChunk:        onChunk,
+	}
+	if n := len(run.ExcludeWorkers); n > 0 {
+		request.ReroutedFrom = "worker:" + run.ExcludeWorkers[n-1]
+	}
+	return f.dispatch.Dispatch(auth.ContextWithInternalOrigin(owned), request)
 }
 
 // ownerAuthority binds the pipeline owner's own assertion to ctx, as a
@@ -437,6 +487,13 @@ func parseFleetOutput(r worker.Result) (*fleetOutput, error) {
 // sentence that quotes the machine is masked and bounded, as the cluster's
 // are: the result's text is the machine's, and a failed clone or an echoing
 // command can fill it with the step's credentials, or with anything at all.
+//
+// THE ATTEMPT'S CLASS (could the command have run?) IS NOT DECIDED HERE, and
+// cannot be: this switch flattens most machine codes into pipeline_executor_error
+// (pipeline_cache_unavailable, pipeline_recovery_required and the rest), where
+// the raw code is the whole proof. fleetAttemptClass reads the dispatcher's
+// result beside this translation (attempt_class_fleet.go). A case added here
+// that changes what an ending PROVES needs its row there too.
 func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r worker.Result, out *fleetOutput, outErr error, mask func(string) string) pl.StepResult {
 	where := pl.Where{Surface: surfaceFleet, WorkerID: r.WorkerId, NodeID: r.NodeId, MachineLabels: maps.Clone(r.Labels)}
 	machine := r.WorkerId
