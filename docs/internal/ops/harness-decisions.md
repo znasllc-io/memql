@@ -1394,7 +1394,12 @@ Journal and takeover: `TestStepAttemptsAreVersionsOfOneRow`,
 `TestAStepReportSaysRetryingOnlyWhileItIs`, `TestMachineWords`,
 `TestARefusalNeverNamesAMachineByWhatItReported`, the run page and Compute tests
 in `clients/os/test/deployables/pipelines/`, and the exit-75 cases in
-`scripts/vscode/download.test.cjs`.
+`scripts/vscode/download.test.cjs`. Across the mesh, with `MEMQL_REQUIRE_DB=1`:
+`TestAFleetStepRetriedOnTheAgentReplica` (`test/pipelinehop`: a push delivered
+on the bff, the run driven on the agent under the policy the bff captured, a
+first attempt that ran nothing retried on the same machine). Scheduled scans:
+`TestAScheduledPoolStepGoesToTheFleet` (`integrations/pipelinesteps`, agent
+tag).
 
 **Known limitations.**
 

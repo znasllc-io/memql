@@ -56,28 +56,19 @@ pipeline:
 // a machine names the platform it runs on, and needs the owner's consent to
 // the fleet, so its pipeline is connected with compute cluster_and_fleet. The
 // stages and step keys are testManifest's.
-const poolManifest = `formatVersion: 1
-name: shop
-pipeline:
-  image: ghcr.io/acme/toolchain@sha256:5491
-  select:
-    go: import-graph
-  stages:
-    - name: checks
-      steps:
-        - name: vet
-          packages: affected
-          run: go vet ./...
-    - name: tests
-      needs: [checks]
-      steps:
-        - name: unit
-          placement: pool
-          platform: linux/amd64
-          run: go test ./...
-        - name: race
-          run: go test -race ./...
-`
+var poolManifest = replaceOnce(testManifest,
+	"        - name: unit\n          run: go test ./...\n",
+	"        - name: unit\n          placement: pool\n          platform: linux/amd64\n          run: go test ./...\n")
+
+// replaceOnce replaces the one occurrence of old in s, and panics when there is
+// not exactly one: a fixture derived from another must not quietly stop
+// differing from it.
+func replaceOnce(s, old, new string) string {
+	if n := strings.Count(s, old); n != 1 {
+		panic(fmt.Sprintf("fixture: %q occurs %d times, want 1", old, n))
+	}
+	return strings.Replace(s, old, new, 1)
+}
 
 // testStages is the stage order testManifest declares.
 var testStages = []string{"checks", "tests"}

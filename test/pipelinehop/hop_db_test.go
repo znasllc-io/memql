@@ -483,8 +483,10 @@ const (
 // to the fleet. Its first attempt reaches the machine "laptop", whose fetch of
 // the commit fails before the command starts, which the fleet reads as nothing
 // ran (laptopAnswer). The agent records that outcome on the step's row, says
-// on the check run that the step is retrying, waits the delay the run's policy
-// names, and sends attempt 2 pinned to the same machine, where it passes.
+// on the check run that the step is retrying, stores when attempt 2 may start
+// from the delay the run's policy names, and sends attempt 2 pinned to the same
+// machine, where it passes. The stored time is what this test checks; the wait
+// itself is unit-tested beside the driver.
 //
 // THE POLICY IS THE RUN'S, NOT THE AGENT'S. Only the bff, which opens the run
 // and captures its policy, has a policy installed whose same-machine retries

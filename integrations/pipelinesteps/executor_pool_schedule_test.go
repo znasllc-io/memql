@@ -25,8 +25,10 @@ import (
 // is dispatched to that machine exactly as a pull request's pool step is, and
 // runs there. No cluster Job is created, although the installation's policy
 // lets the step spend cloud, so the cluster was there to be chosen. The event
-// decides the run's mode, and on the cluster a Job's queue priority; it never
-// decides where a pool step runs.
+// decides the run's mode, and on the cluster a Job's queue priority. An
+// installed compute policy is handed the event and may set the fleet wait or
+// the cloud fallback by it; given the same policy, the executor never reads the
+// event to route a pool step.
 func TestAScheduledPoolStepGoesToTheFleet(t *testing.T) {
 	request := func(event pl.Event, mode pl.Mode, head string) pl.StepRequest {
 		r := placedPoolRequest()
