@@ -378,6 +378,10 @@ and the rules above decide: the same machine or another, then the cluster when
 same refusal on a later attempt read nothing ran; `cloudFallback` covers a
 failed fleet as well as a full one (section 6). Only the fleet staying full
 through the preference sends the first attempt on to the cluster inside itself.
+Decided by the owner during implementation: without `cloudFallback`, a first
+attempt that finds no machine at all (no candidate and none offline) ends at
+once as nothing ran, as a fleet step's does, instead of waiting until the run's
+ceiling; a busy or offline machine is still waited for.
 
 A later attempt naming the fleet without a pin waits for a busy or offline
 machine at most `max(delaysSeconds)`, or `max(1, fleetWaitSeconds)` for a

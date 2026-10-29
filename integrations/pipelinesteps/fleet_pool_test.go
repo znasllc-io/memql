@@ -91,6 +91,60 @@ func TestFleetPoolPreferenceDoesNotShortenStartedExecution(t *testing.T) {
 	}
 }
 
+// A pool step whose installation allows no cloud waits for a busy or an
+// offline machine up to its run's ceiling, but not for one that does not
+// exist: with no candidate at all and none offline (no_worker_available
+// without WaitForConnection) its first attempt ends at once, nothing ran, as a
+// fleet step's does, and the driver's retry order ends the step. With the cloud
+// allowed, the Fleet preference still waits for a machine before the cluster
+// (TestFleetPoolWaitOnlyEndsAfterConfirmedCapacityRefusal).
+func TestANoCloudPoolStepWithNoMachineAtAllEndsAtOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result worker.Result
+		atOnce bool
+	}{
+		{"no machine at all", worker.Result{ErrorCode: "no_worker_available", RefusedBeforeStart: true}, true},
+		{"an eligible machine offline", worker.Result{ErrorCode: "no_worker_available", RefusedBeforeStart: true, WaitForConnection: true}, false},
+		{"every machine busy", worker.Result{ErrorCode: "pipeline_capacity_busy", RefusedBeforeStart: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			now := exNow
+			dispatch := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				calls++
+				now = now.Add(time.Minute)
+				return tc.result, nil
+			}}
+			fleet, _, _, _ := newTestFleet(t, dispatch)
+			fleet.now = func() time.Time { return now }
+			fleet.capacityRetry = time.Millisecond
+			req := exRequest()
+			req.Step.Execution = pl.ExecutionContainer
+			req.Step.Needs = nil
+			req.Step.Placement = pl.PlacementPool
+			req.ComputePlacement = &pl.ComputePlacementPolicy{FleetWaitSeconds: 0, CloudFallback: false}
+			run := fleetRun(req)
+			run.RunDeadline = exNow.Add(10 * time.Minute).Format(time.RFC3339)
+			result, err := fleet.RunStep(context.Background(), req, run)
+			if err != nil {
+				t.Fatalf("RunStep: %v", err)
+			}
+			if !tc.atOnce {
+				if calls < 2 || result.Failure == nil || result.Failure.Code != pl.CodeRunCeiling {
+					t.Fatalf("dispatched %d time(s), ending %+v; want a wait for the machine up to the run's ceiling", calls, result.Failure)
+				}
+				return
+			}
+			if calls != 1 || result.Status != pl.OutcomeRefused || result.Failure == nil || result.Failure.Code != pl.CodeNoMachineForNeed ||
+				result.AttemptClass != pl.AttemptNothingRan || result.Where.WorkerID != "" {
+				t.Fatalf("dispatched %d time(s), ending %s %+v class %q on %q; want one dispatch, refused %s, nothing ran, naming no machine",
+					calls, result.Status, result.Failure, result.AttemptClass, result.Where.WorkerID, pl.CodeNoMachineForNeed)
+			}
+		})
+	}
+}
+
 func TestFleetPoolNoFallbackKeepsOriginalRunBound(t *testing.T) {
 	calls := 0
 	now := exNow

@@ -1642,8 +1642,10 @@ the Macs. A `cluster` step retries on the cluster only. A `pool` step reaches
 the cluster at most once, whatever ended its attempt there. Its first attempt
 waits while no machine can take it (all busy, fenced, offline or without their
 runtime, or none eligible at all) up to `fleetWaitSeconds`, then goes on to the
-cluster when `cloudFallback` allows; without it, it waits on, up to the run's
-ceiling. A machine that refuses it for another reason (its limits or policy,
+cluster when `cloudFallback` allows; without it, it waits on for a busy or
+offline machine, up to the run's ceiling, and when no machine of yours could
+take it at all it ends at once, as a fleet step's does. A machine that refuses
+it for another reason (its limits or policy,
 Host commands off) ends that attempt with nothing run, and the order above takes
 over. A retry pinned to one machine waits for it, busy or offline, at most the
 longest delay, and so does a move to another machine, except a pool step's while

@@ -26,7 +26,9 @@ import (
 //     can run the step, and the ceiling bounds everything.
 //   - A pool step's FIRST attempt waits fleetWaitSeconds while the policy allows
 //     cloud, then gives the cluster the chance (the Codex preference deadline,
-//     kept whole inside that one attempt).
+//     kept whole inside that one attempt). Without the cloud it waits for a busy
+//     or offline machine until its run's ceiling, but not when the owner has no
+//     machine that could take it at all (noMachineToWaitFor).
 //   - An attempt the DRIVER placed on the fleet waits run.MaxWaitSeconds when it
 //     is positive, and then answers nothing ran, not tried here again
 //     (waitRanOut). The driver chose the wait (chooseNext's pinned and failover)
@@ -121,6 +123,9 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 				// the cloud inside this attempt (fleetPreferenceRanOut, runPool).
 				return result, nil, nil
 			}
+			if noMachineToWaitFor(req, result) {
+				return result, nil, nil
+			}
 			if req.ComputePlacement != nil && req.ComputePlacement.CloudFallback && !f.now().Before(preferenceEnds) {
 				res := refusedResult(pl.CodeNoMachineForNeed, "Fleet preference wait elapsed after confirmed pre-start capacity refusal. No Fleet command was started.")
 				return worker.Result{}, &res, nil
@@ -212,6 +217,26 @@ func fleetPoolCapacityRefusal(r worker.Result) bool {
 	default:
 		return false
 	}
+}
+
+// noMachineToWaitFor is the one capacity answer a pool step's first attempt
+// does not wait out when its policy allows no cloud: the dispatcher found no
+// candidate at all and no eligible machine offline (no_worker_available
+// without WaitForConnection), so no machine of the owner's could take the step
+// as things stand -- none allows pipeline steps, offers its needs, or runs the
+// current action contract. Waiting for one until the run's ceiling held the
+// stage's slot for up to the whole ceiling for a machine nobody was bringing;
+// the owner chose to end the attempt at once instead (2026-10-29), as a fleet
+// step's does (fleetMayWait). It ends nothing ran, naming no machine, and the
+// driver's retry order routes once more after its first delay and then ends
+// the step. A busy machine, an offline one and a fenced one are still waited
+// for. With the cloud allowed, the installation's Fleet preference still waits
+// fleetWaitSeconds for a machine to appear before the cluster takes the step.
+//
+// Regression test: TestANoCloudPoolStepWithNoMachineAtAllEndsAtOnce.
+func noMachineToWaitFor(req pl.StepRequest, r worker.Result) bool {
+	cloud := req.ComputePlacement != nil && req.ComputePlacement.CloudFallback
+	return !cloud && r.ErrorCode == "no_worker_available" && !r.WaitForConnection
 }
 
 // placedOnFleet says the driver placed this attempt on the fleet by name

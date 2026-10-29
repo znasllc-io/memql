@@ -154,6 +154,13 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan), noMachine), next(toCluster, 0)},
 		{"pool step, machines exhausted, no cloud", retryPoolStep, noCloud,
 			numbered(notRetried(on("M", nothingRan)), noMachine), stop},
+		// A no-cloud pool step whose first attempt found no machine at all (the
+		// executor ends it at once: noMachineToWaitFor) routes once more after the
+		// first delay, and then ends: no cloud follows.
+		{"pool step with no cloud and no machine at all: routing once more", retryPoolStep, noCloud,
+			numbered(noMachine), next(failoverFrom(120), 30*time.Second)},
+		{"pool step with no cloud and still no machine: the end", retryPoolStep, noCloud,
+			numbered(noMachine, noMachine), stop},
 		{"pool step, the cluster already a place", retryPoolStep, standard,
 			numbered(notRetried(on("M", nothingRan)), noMachine, onCluster(nothingRan)), stop},
 		{"pool step, the cluster asked for a retry and was already a place", retryPoolStep, standard,

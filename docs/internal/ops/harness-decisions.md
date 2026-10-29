@@ -1293,6 +1293,16 @@ obvious choices:
   wait until the run's ceiling, holding its stage's slot for hours where the
   step had failed at once, and a pool step's with no cloud one second, which
   ended the step on any busy fleet. No wait shortens a started command.
+- A pool step whose installation allows no cloud waits for a busy or offline
+  machine up to the run's ceiling, but its first attempt ends at once, nothing
+  ran, when no machine could take it at all (no candidate and none offline:
+  `noMachineToWaitFor`), as a fleet step's does. The retry order then routes
+  once more after the first delay and ends the step. It used to wait until the
+  ceiling, holding its stage's slot for a machine nobody was bringing; the
+  owner chose to end it at once (2026-10-29). With the cloud allowed, the Fleet
+  preference still waits `fleetWaitSeconds` for a machine before the cluster.
+  `TestANoCloudPoolStepWithNoMachineAtAllEndsAtOnce` and the no-cloud rows of
+  `TestChooseNextFollowsTheRetryOrder` cover it.
 - A step whose last attempt only found the fleet exhausted settles with the
   failure before it (`failureToSettle`), so its receipt and the check run say
   three failed fetches, not `pipeline_no_machine_for_need`. The search stays in
@@ -1524,10 +1534,6 @@ tag).
   attempt was refused: the record keeps the attempt's class and code, not its
   outcome. Its code, words, place and log are that attempt's own; the check run
   says "failed" where the attempt said "refused".
-- A pool step whose installation allows no cloud keeps waiting for the fleet,
-  up to the run's ceiling, while no machine can take its first attempt, and
-  that includes when the owner has no eligible machine at all. A fleet step's
-  first attempt is answered at once in that case.
 
 **Not verified.** These tests prove the source contract and in-process replica
 hops. Live fleet-to-cloud failover and a production maintenance window for the
