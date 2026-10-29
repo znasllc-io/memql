@@ -934,6 +934,7 @@ func TestPipelineStepPacksTheDeclaredArtifacts(t *testing.T) {
 // trailing slash is the directory.
 func TestPipelineStepArtifactGlobsAreRelativeToTheCheckoutOnly(t *testing.T) {
 	isolatePipelineCapacity(t)
+	fakePipelineHostHeadroom(t)
 	allowLocalClones(t)
 	fx := newPipelineFixture(t)
 	root := filepath.Join(t.TempDir(), "ci [main] *")
