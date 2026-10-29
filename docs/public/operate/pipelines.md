@@ -1584,6 +1584,17 @@ A manifest carries secret **names**, never values:
 - An allowed name with no value on the cluster fails its step
   `pipeline_secret_missing`.
 
+For private GitHub npm dependencies, the optional `NPM_PACKAGES_READ_TOKEN`
+registry entry uses the existing operator seeder; follow
+[Pipeline package-read credential](env-vars.md#pipeline-package-read-credential).
+Allow that exact name in `secretNames` and declare it only on the client step
+that needs it. That step may map it to `NODE_AUTH_TOKEN` for npm. All of the
+step's processes can see its environment, including dependency lifecycle
+scripts. The native allowlist limits which steps receive a credential; it
+does not narrow a classic GitHub token to that repository or package.
+Seeding the value does not connect a pipeline, authorize a qualification or
+prove that the native checks pass.
+
 Values exist only in the request handed to the runner for one step. They are
 never written to a pipeline row, a run row, a work step, a log line or the
 check run, and the log tails a check run shows have every secret value of four
