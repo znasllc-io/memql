@@ -9,10 +9,10 @@
   visibility and rollout) were presented and each approved. D10 below departs
   from the approved section 4 on one point, for a reason found while writing
   this record; the owner reviews it with this record. Corrected on 2026-10-29
-  to match what was built: D5 and sections 3 to 7, 9, 10, 12 and 13 carry the
-  decisions made during implementation, each with its reason. The maintained
-  account is the "Pipeline step attempts, retries and failover" section of
-  `docs/internal/ops/harness-decisions.md`.
+  to match what was built: D5, D9 to D11 and sections 3 to 7, 9, 10, 12 and 13
+  carry the decisions made during implementation, each with its reason. The
+  maintained account is the "Pipeline step attempts, retries and failover"
+  section of `docs/internal/ops/harness-decisions.md`.
 - **What it is:** a pipeline step that can run on either side runs on the
   owner's fleet first and on the cloud cluster only for what the fleet cannot
   take. A step that fails for a transient reason is retried a bounded number of
@@ -178,8 +178,9 @@ of the fleet router holds: a model still cannot name a machine.
 
 ### D9 -- "Host commands" off is a refusal before start
 
-The router reads `ownerFeatures.headless` and skips a machine with Host
-commands off. A machine switched off after it was picked refuses with a typed
+For the pipeline purpose, the router reads `ownerFeatures.headless` and skips
+a machine with Host commands off (an agent's call is refused before send and
+follows its owner's fallback). A machine switched off after it was picked refuses with a typed
 error, which both the local and the forwarded dispatch report as refused before
 start, under `worker_feature_disabled`, so the dispatch moves to the next
 candidate. This applies to every purpose, because the refusal always precedes
@@ -526,7 +527,8 @@ Updated in this change: `docs/public/operate/pipelines.md` (`repeatable`, exit
 `docs/public/operate/pipelines-substrate.md` (where a step runs, the fleet,
 losing a replica or machine, when each side gives up, codes);
 `docs/public/operate/workers-runbook.md` (pipeline pin and exclude, Host
-commands off); `docs/internal/ops/harness-decisions.md` (a section on step
+commands off); `cockpit/docs/pipelines.md` (when the engine sends a step again,
+and the lockstep); `docs/internal/ops/harness-decisions.md` (a section on step
 attempts: trigger, evidence, chosen path, alternatives, stop conditions, what
 survives a takeover, regression tests, unverified behaviour); and the code
 comments at each decision.

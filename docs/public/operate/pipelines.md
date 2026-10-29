@@ -1606,8 +1606,8 @@ that did not pass one class:
 |---|---|---|
 | Nothing ran | The command provably never started. On a machine: the fetch of the commit failed, the cache or runtime was unavailable, the machine was busy or short of headroom, its policy or its owner's settings refused the step, or no machine could take it. On the cluster: only when no runner took the step | Every step |
 | Retry requested | The command exited 75 (`EX_TEMPFAIL`), its own word that another run is safe | Every step |
-| Outcome unknown | The command may have run: the connection to the machine ended after the step was sent, the machine needs recovery (`pipeline_recovery_required`), the command exited 0 and its artifacts did not arrive intact, or an earlier driver may have started it (`pipeline_execution_uncertain`). On the cluster, also `pipeline_node_lost`, `pipeline_image_pull_failed`, `pipeline_service_failed`, `pipeline_job_unschedulable`, `pipeline_clone_failed` and a runner's `pipeline_runner_unavailable` | A `repeatable` step only |
-| Final | Any other exit, a timeout, the run's ceiling, a cancel, a refusal, a secret failure, and anything not listed above | Never |
+| Outcome unknown | The command may have run: the connection to the machine ended after the step was sent, the machine needs recovery (`pipeline_recovery_required`), on a machine the command exited 0 and its artifacts did not arrive intact, or an earlier driver may have started it (`pipeline_execution_uncertain`). On the cluster, also `pipeline_node_lost`, `pipeline_image_pull_failed`, `pipeline_service_failed`, `pipeline_job_unschedulable`, `pipeline_clone_failed` and a runner's `pipeline_runner_unavailable` | A `repeatable` step only |
+| Final | Any other exit, a timeout, the run's ceiling, a cancel, an engine refusal, a secret failure, and anything not listed above | Never |
 
 The cluster reports most failures while the step's Job is still alive, and can
 still start the command until the Job is deleted, so those are an unknown
@@ -1831,6 +1831,8 @@ Version-2 admission writing likewise follows deployment of its readers on every
 agent and workbench; a partial upgrade is not permission to bypass either gate.
 The engine and every machine's Cockpit switch to worker contract 5 together,
 behind a hold ([Contract 5 switches in lockstep](pipelines-substrate.md#contract-5-switches-in-lockstep)).
+A `verification: true` step cannot be `pool`: reusable verification requires
+`placement: cluster`, so such a step is refused with `pipeline_step_invalid`.
 Retries need no activation: the deploy turns them on with the portable limits.
 
 ## The check run

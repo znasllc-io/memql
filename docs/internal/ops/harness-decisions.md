@@ -1322,8 +1322,8 @@ failed model call reaches the run-failure line as a stable code and the
 router's own words (`router.FailureReason`, for example *failed when called:
 every_door_shut: no door to a model is open for this call*), never as its text
 (`TestAFailedReviewModelCallIsReportedByItsCodeNotItsText`). The original is
-logged at warn level with the work run as its subject, and the router's call
-ledger keeps the provider's own message. When Host commands off is the
+logged at warn level, tagged with the pipeline, repository, pull request and
+head commit, and the router's call ledger keeps the provider's own message. When Host commands off is the
 only reason a machine cannot take pipeline steps, MemQL OS names it and points
 at the Fleet switch, not at `policy.yaml`.
 
@@ -1422,7 +1422,8 @@ tag).
   one GitHub call, bounded at two minutes in an outage, and publishes go one at
   a time, so several steps retrying at once can queue behind each other.
 - The model and app door texts (`fleet_inference.go`, `fleet_context_allocation.go`
-  in `integrations/agent/worker`) keep a machine's reported name, because they
+  and `app_forward.go` in `integrations/agent/worker`) keep a machine's reported
+  name, because they
   serve the owner's own screens, and words a machine's own Cockpit composes are
   quoted as they arrive.
 

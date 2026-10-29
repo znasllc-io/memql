@@ -805,8 +805,10 @@ runtime are confirmed pre-execution refusals and permit another candidate.
 When the dispatcher confirms that shared build capacity was busy or fenced by
 a retained local-build record, an eligible worker is offline, or its connection
 disappeared before dispatch, the fleet runner waits and routes again under the
-run's wall-clock ceiling, or, for a retry, within the shorter wait the driver
-gave it ([When each side gives up](#when-each-side-gives-up)). Every dispatch
+run's wall-clock ceiling, or, for a retry pinned to its machine or a pool
+step's failover, within the shorter wait the driver gave it; a fleet step's
+failover to another machine waits up to the ceiling
+([When each side gives up](#when-each-side-gives-up)). Every dispatch
 rechecks consent and routing. Waiting does not consume
 the command's own timeout, but the run ceiling still limits its remaining
 execution time. A long wait refreshes the repository clone token and keeps
