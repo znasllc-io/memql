@@ -14078,25 +14078,6 @@ func WorkRunSummaryForOwnerBuild(args WorkRunSummaryForOwnerArgs) string {
 	return b.String()
 }
 
-// WorkRunningRunsForOwner -- The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds server-side, so this answers for whoever the actor is and nobody else.
-// SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in its own comment: it is deliberately un-narrowed because two surfaces read it. This is a third question -- "what is in flight for this person" -- asked by the computer-use kill switch (memql#5066), where paging an active person's whole run history to find the few running ones is the wrong read for a control that has to act promptly.
-// BOUNDED AT 500, which is a real limit and not a formality: a person with more than 500 runs executing at once would have some missed. Nothing in the product produces that state -- runs are opened per goal and per analysis -- and an unbounded scan on the path a kill switch takes is the worse failure. The pre-dispatch gate is refusing every new call meanwhile, so a missed run's next worker call is denied regardless.
-//
-// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunningRunsForOwner"] in generated_concepts.go).
-type WorkRunningRunsForOwnerArgs struct {
-}
-
-// WorkRunningRunsForOwner calls the engine query workRunningRunsForOwner.
-func (qc *QueryClient) WorkRunningRunsForOwner(ctx context.Context, args WorkRunningRunsForOwnerArgs) (*Result, error) {
-	call := WorkRunningRunsForOwnerBuild(args)
-	return qc.executeNamed(ctx, "workRunningRunsForOwner", call)
-}
-
-func WorkRunningRunsForOwnerBuild(args WorkRunningRunsForOwnerArgs) string {
-	_ = args
-	return "query workRunningRunsForOwner()"
-}
-
 // WorkRunsForGoal -- The runs of one of the caller's goals, newest first.
 //
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForGoal"] in generated_concepts.go).

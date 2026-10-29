@@ -28,6 +28,18 @@ func TestEmailProviderLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 func TestWorkRunOwnerLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 	testWorkIndex(t, "memory_nodes_work_run_owner_lookup_idx", database.EnsureWorkRunOwnerLookupIndex)
 }
+func TestWorkRunGoalLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_run_goal_lookup_idx", database.EnsureWorkRunGoalLookupIndex)
+}
+func TestWorkRunOwnerWalkIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_run_owner_walk_idx", database.EnsureWorkRunOwnerWalkIndex)
+}
+func TestWorkRunSignatureLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_run_signature_lookup_idx", database.EnsureWorkRunSignatureLookupIndex)
+}
+func TestWorkRunRevisionLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_run_revision_lookup_idx", database.EnsureWorkRunRevisionLookupIndex)
+}
 func TestEmailDigestLookupIndexesBuildAndRepairChunkCoverage(t *testing.T) {
 	for _, index := range []string{"memory_nodes_recipient_digest_lookup_idx", "memory_nodes_consent_digest_lookup_idx"} {
 		t.Run(index, func(t *testing.T) { testWorkIndex(t, index, database.EnsureEmailDigestLookupIndexes) })

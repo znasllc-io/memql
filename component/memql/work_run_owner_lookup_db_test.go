@@ -96,7 +96,9 @@ func TestWorkRunOwnerLookupBoundsSummaryPagesAndKeepsLatestOwner(t *testing.T) {
 		pageCtx := ContextWithCursor(reader, cursor)
 		result, scans := capturedScans(t, eng, hook, pageCtx, query)
 		require.NotEmpty(t, scans)
-		require.Contains(t, scans[0], `(payload->>'ownerUserId')`, "enumerate only the caller's candidate IDs")
+		// An owner-only feed walks the owner's versions newest first
+		// (latest_scan_walk.go): still only the caller's candidates.
+		require.Contains(t, scans[0], `(w.payload->>'ownerUserId')`, "enumerate only the caller's candidate IDs")
 		collapsed, _ := collapsedScans(t, eng, hook, pageCtx, query)
 		require.Equal(t, pageIDs(t, collapsed), pageIDs(t, result), "lookup and concept-wide reads must return the same ordered page")
 		if page == 0 {
@@ -119,7 +121,7 @@ func TestWorkRunOwnerLookupBoundsSummaryPagesAndKeepsLatestOwner(t *testing.T) {
 	missing, scans := capturedScans(t, eng, hook, nonClusterOwnerCtx("v1:identity:user:missing-owner"), query)
 	require.Empty(t, missing.Bundle.Nodes)
 	require.NotEmpty(t, scans)
-	require.Contains(t, scans[0], `(payload->>'ownerUserId')`, "an empty owner's feed must also use the lookup")
+	require.Contains(t, scans[0], `(w.payload->>'ownerUserId')`, "an empty owner's feed must also walk only that owner's versions")
 
 	// Analyze only this isolated fixture. Production diagnosis uses EXPLAIN
 	// without ANALYZE; its recorded plan hydrated every owner's latest run.

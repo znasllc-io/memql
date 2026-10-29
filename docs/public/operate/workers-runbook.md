@@ -401,8 +401,14 @@ Three independent gates run **before** every dispatch:
    `User.preferences.computerUseEnabled` (default true).
    Floating widget in the frontend's space chrome flips it. When
    false, every dispatch is rejected with `kill_switch_engaged`
-   and the `killSwitchSuspendsRunningPlans` automation
-   transitions running plans to `awaitingFeedback`.
+   and the `killSwitchCancelsComputerUseRuns` automation asks the
+   owner's running runs that dispatched to one of their machines to
+   stop at their next step boundary. It finds them through the work
+   spine's current-run projection (`work_run_heads`). While that
+   projection's backfill is unfinished, a capture trigger is missing
+   or disabled, or more than 10,000 changes wait to be projected,
+   the automation fails rather than stopping nothing. The dispatch
+   rejection holds either way.
 
 A single denial transitions the calling plan to
 `awaitingFeedback` with `feedbackReason=scope_elevation_required`.

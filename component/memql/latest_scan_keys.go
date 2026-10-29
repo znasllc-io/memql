@@ -24,9 +24,40 @@ import (
 // A mandatory equality or membership on an indexed payload field narrows the
 // enumeration to the ids that index finds (latestLookupKeys).
 func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) *bun.SelectQuery {
-	var concept string
-	var ids []*ComparisonExpression
-	var terms []payloadLookupTerm
+	concept, terms, ids := latestScanTerms(expr)
+	if concept == "" {
+		return nil
+	}
+	idFilters := make([]compiledExpression, 0, len(ids))
+	for _, id := range ids {
+		filter, err := e.compileComparisonExpressionWithContext(id, concept)
+		if err != nil {
+			return nil
+		}
+		idFilters = append(idFilters, filter)
+	}
+	if keys := e.latestLookupKeys(concept, terms, idFilters, timestamp); keys != nil && !memorynodes.HasLiveness(concept) {
+		return keys
+	}
+	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+		Column("id", "createdAt").DistinctOn("id").
+		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
+	if memorynodes.HasLiveness(concept) {
+		keys = keys.ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
+	}
+	for _, filter := range idFilters {
+		keys = keys.Where(filter.sql, filter.args...)
+	}
+	if timestamp != nil {
+		keys = keys.Where(`"createdAt" <= ?`, timestamp.UTC())
+	}
+	return keys
+}
+
+// latestScanTerms reads the mandatory conjuncts a latest-key enumeration may
+// narrow on: the concept equality, the payload lookup terms and the id
+// comparisons. Only top-level AND conjuncts count (see latestScanKeys).
+func latestScanTerms(expr ExpressionNode) (concept string, terms []payloadLookupTerm, ids []*ComparisonExpression) {
 	var visit func(ExpressionNode)
 	visit = func(expr ExpressionNode) {
 		switch n := expr.(type) {
@@ -62,31 +93,5 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 		}
 	}
 	visit(expr)
-	if concept == "" {
-		return nil
-	}
-	idFilters := make([]compiledExpression, 0, len(ids))
-	for _, id := range ids {
-		filter, err := e.compileComparisonExpressionWithContext(id, concept)
-		if err != nil {
-			return nil
-		}
-		idFilters = append(idFilters, filter)
-	}
-	if keys := e.latestLookupKeys(concept, terms, idFilters, timestamp); keys != nil && !memorynodes.HasLiveness(concept) {
-		return keys
-	}
-	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
-		Column("id", "createdAt").DistinctOn("id").
-		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
-	if memorynodes.HasLiveness(concept) {
-		keys = keys.ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
-	}
-	for _, filter := range idFilters {
-		keys = keys.Where(filter.sql, filter.args...)
-	}
-	if timestamp != nil {
-		keys = keys.Where(`"createdAt" <= ?`, timestamp.UTC())
-	}
-	return keys
+	return concept, terms, ids
 }

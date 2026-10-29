@@ -131,6 +131,12 @@ type Integration struct {
 	// error the sweep reports rather than reading nothing.
 	rowsInFlight func(ctx context.Context) ([]map[string]any, error)
 
+	// runningRuns is the computer-use kill switch's selection: one owner's
+	// runs executing right now. A field for rowsInFlight's reason, so the
+	// switch's per-run decisions are testable without a database; New sets it
+	// to the projection read in recovery_heads.go.
+	runningRuns func(ctx context.Context, owner string) ([]map[string]any, error)
+
 	// armedRetries is the `retry` waits this replica has a timer armed for,
 	// keyed by run and wait (failure_waits.go, armRetry): every sighting of a
 	// wait's event -- the park, and each nudge the sweep makes -- would
@@ -196,6 +202,7 @@ func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integr
 		return memql.AcquireWriteGates(ctx, db, locks...)
 	}
 	i.rowsInFlight = i.runsInFlight
+	i.runningRuns = i.runningRunsForOwner
 	return i
 }
 
