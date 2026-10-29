@@ -741,6 +741,12 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The step wrote more to disk than a pipeline step may",
     next: "Write less, or declare a cache for what a tool keeps between runs. An operator can raise the overlay's ephemeral-storage limit.",
   },
+  pipeline_step_memory_exceeded: {
+    // The step's own doing, as its disk is: the kernel's out-of-memory killer
+    // took a process of its command. Its exit code is kept beside the code.
+    title: "The step ran out of memory",
+    next: "Run fewer processes at once, or reserve more with the step's memoryMiB, up to the cluster's command limit.",
+  },
   pipeline_node_lost: {
     title: "The node running the step went away before it finished",
     next: "Re-run the step.",

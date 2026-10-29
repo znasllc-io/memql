@@ -343,6 +343,17 @@ not increase physical capacity. Raising concurrency requires cold-cache storage
 measurements as well as CPU and memory measurements. An isolation probe
 on a selected pool does not establish enforcement on every node in that pool.
 
+**Memory** is each container's own limit: the step's `memoryMiB` when it
+declares one, otherwise the LimitRange's default, which the API server writes
+into the pod as it admits it. Every process the command starts shares the step
+container's limit; each service has its own. Past it, the kernel's
+out-of-memory killer stops a process and the kubelet records `OOMKilled` on
+the pod, and the step fails `pipeline_step_memory_exceeded`. The failure names
+the limit the pod shows and keeps the exit code: 137 when the command itself
+was killed, the command's own code when it outlived a process it started. The
+pod is deleted with its Job, so this failure is the only record of why. A
+command that loses a process and still exits 0 passes.
+
 **Disk** is ephemeral storage. A container's own files outside any volume, and
 its logs, count against its limit; every emptyDir counts against the sum of the
 pod's containers' limits, the workspace among them; and the workspace has a
@@ -1197,6 +1208,7 @@ run's page and, for a failed step, the check run, with its sentence.
 | `pipeline_job_rejected` | failure | The step could not be made into a safe Job (an artifact path that could leave the working copy, a secret named like a variable the platform sets, an unknown cache, a clone URL that is not plain `https`, no image or command); the cluster refused its Job or Secret; a container could not be created; or the step's cache directory could not be prepared, a cache volume that would not mount within 10 minutes included | The message says which. Fix the manifest when it names the step; for the cache, the pod's events name the mount error |
 | `pipeline_job_unschedulable` | failure | The step's pod could not be scheduled within 10 minutes: no node had room, or the cache claim it mounts is Pending (a storage class that does not exist; on AKS, no Blob CSI driver) | Give the steps room -- a dedicated node pool, or lower requests or ceiling in the overlay -- or turn the Blob CSI driver on (`azure-provision.sh` does) |
 | `pipeline_step_disk_exceeded` | failure | The kubelet stopped the step for the disk its pod wrote: its working copy past the workspace's size limit, or the pod's or one container's files past the namespace's ephemeral-storage limit. The working copy, what the containers write anywhere in their own filesystems and their logs all count; a declared cache does not. The message quotes the kubelet's sentence | Write less, or declare a cache for what a tool keeps between runs (Go's build cache otherwise lands in the image's home directory); an operator raises the overlay's limit |
+| `pipeline_step_memory_exceeded` | failure | The kernel's out-of-memory killer stopped a process of the step's command: the step container passed its memory limit, its own `memoryMiB` or the namespace's default. The kubelet's `OOMKilled` is on the pod alone, which goes with its Job, so the message keeps it, with the exit code (137 when the command itself was killed) and the limit the pod showed | Run fewer processes at once (for Go tests, a lower `-p` or `-parallel`), or reserve more with `memoryMiB`, up to the workbench's maximum (`MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB`, 8192 by default) |
 | `pipeline_execution_uncertain` | failure | A prior intent has no recoverable Job or fleet receipt; no replacement effect is started | Reconcile the original attempt before authorizing new work |
 | `pipeline_node_lost` | failure | The cluster stopped the step's pod (a drain, a preemption, an eviction) before its command ended; the pod or Job failed with nothing saying why; the Job was deleted while another replica held it; no workbench replica reported the step within its deadline and the 4 minutes 30 seconds past it; or a fleet machine's connection ended before it reported | Re-run the step |
 | `pipeline_step_cancelled` | failure | The step was cancelled: its run was cancelled or superseded, or the drive running it ended | Re-run when ready |
