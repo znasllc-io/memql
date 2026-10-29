@@ -380,7 +380,8 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 // maxPlacementWaitSeconds bounds an attempt's MaxWaitSeconds at the same hour a
 // pool step's fleetWaitSeconds may not pass (above), because the driver passes
 // that value here for the failover of a pool step whose policy allows the
-// cloud; every other wait it passes is a retry delay, at most 900 seconds. The
+// cloud and whose one cluster attempt is still ahead; every other wait it
+// passes is a retry delay, at most 900 seconds. The
 // run's ceiling bounds every wait regardless.
 const maxPlacementWaitSeconds = 3600
 

@@ -146,6 +146,37 @@ class HostBuildGuardTests(unittest.TestCase):
                     pass
                 path.unlink()
 
+    def test_inference_witness_end_outlasts_the_bound_for_no_time(self):
+        # The time the record names decides, even past the bound a record with no
+        # time gets: a call may name a deadline longer than 30 minutes.
+        self.write_witness({"version": 2, "attempt": "a" * 32, "until": self.rfc3339(time.time() + 600)},
+                           age_seconds=guard.INFERENCE_FENCE_BOUND_SECONDS + 60)
+        with self.assertRaises(guard.GuardError):
+            with guard.host_build_guard():
+                self.fail("a build was admitted before the end the record names")
+
+    def test_inference_witness_fences_through_the_instant_it_names(self):
+        until = self.rfc3339(time.time() + 600)
+        self.write_witness({"version": 2, "attempt": "a" * 32, "until": until})
+        end = guard.rfc3339_seconds(until)
+        with mock.patch.object(guard.time, "time", return_value=end):
+            with self.assertRaises(guard.GuardError):
+                with guard.host_build_guard():
+                    self.fail("a build was admitted at the instant the fence ends")
+        with mock.patch.object(guard.time, "time", return_value=end + 0.01):
+            with guard.host_build_guard():
+                pass
+
+    def test_a_record_too_deep_to_parse_ends_the_bound_after_it_was_written(self):
+        path = self.write_witness("[" * 4096)
+        with self.assertRaises(guard.GuardError):
+            with guard.host_build_guard():
+                self.fail("an unreadable record admitted a build inside the bound")
+        old = time.time() - guard.INFERENCE_FENCE_BOUND_SECONDS - 60
+        os.utime(path, (old, old))
+        with guard.host_build_guard():
+            pass
+
     def test_a_directory_in_place_of_the_inference_witness_never_ends(self):
         path = self.root / "inference-active.json"
         path.mkdir()
@@ -161,7 +192,11 @@ class HostBuildGuardTests(unittest.TestCase):
         self.assertEqual(-7200, guard.rfc3339_seconds("1970-01-01T00:00:00+02:00"))
         self.assertAlmostEqual(1.5, guard.rfc3339_seconds("1970-01-01T00:00:01.5Z"))
         self.assertAlmostEqual(1.123456789, guard.rfc3339_seconds("1970-01-01T00:00:01.123456789Z"))
-        for text in ("soon", "1970-13-01T00:00:00Z", "1970-01-01 00:00:00Z", "", None, 5):
+        # Go's parser also takes a comma before the fraction, and more digits.
+        self.assertAlmostEqual(1.5, guard.rfc3339_seconds("1970-01-01T00:00:01,5Z"))
+        self.assertAlmostEqual(1.1234567891, guard.rfc3339_seconds("1970-01-01T00:00:01.1234567891Z"))
+        for text in ("soon", "1970-13-01T00:00:00Z", "1970-01-01 00:00:00Z", "1970-01-01T00:00:00+25:00",
+                     "1970-01-01T00:00:00+02:60", "١970-01-01T00:00:00Z", "", None, 5):
             with self.subTest(text=text):
                 self.assertIsNone(guard.rfc3339_seconds(text))
 

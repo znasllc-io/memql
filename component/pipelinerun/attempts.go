@@ -444,8 +444,8 @@ func cutText(s string, n int) string {
 // THE WAITS a placed attempt carries (AttemptPlacement.MaxWaitSeconds), each at
 // least a second because zero would mean no bound: a pinned machine is waited
 // for at most the largest delay; a failover to another machine at most the
-// largest delay too, or, for a pool step whose policy allows the cloud,
-// fleetWaitSeconds (failover says why).
+// largest delay too, or, for a pool step whose policy allows the cloud and whose
+// one cluster attempt is still ahead, fleetWaitSeconds (failover says why).
 //
 // The run's ceiling is not this function's: the caller refuses to wait into it
 // or to start an attempt with less than a second of it left (runStep).

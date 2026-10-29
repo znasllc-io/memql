@@ -1183,10 +1183,12 @@ writer (it holds `inference.lock`, or `pipeline.lock` exclusively) removes it,
 and the workbench, which shares `pipeline.lock` with model calls, only ignores
 it, because a path-based removal there could remove a record a call has just
 written. The local build guard (`scripts/lib/host_build_guard.py`, which
-`make dev` runs) reads the same end and removes nothing, as it removes no
-record (`test_inference_witness_past_its_end_admits_a_build_and_is_kept`,
-`test_inference_witness_with_no_time_ends_the_bound_after_it_was_written`). A
-witness with no time (an older Cockpit's, or a write that did not
+`make dev` runs) reads the end by the same rule for every record the Cockpit
+writes, and leaves a witness past its end in place: it is another program's
+record, which the Cockpit's next exclusive reader removes
+(`test_inference_witness_past_its_end_admits_a_build_and_is_kept`,
+`test_inference_witness_with_no_time_ends_the_bound_after_it_was_written`). On
+text no Cockpit writes, its parser and Go's can disagree. A witness with no time (an older Cockpit's, or a write that did not
 complete) ends 30 minutes after its file was written, so an upgrade clears it; a
 symlink or directory is never read or removed. The headroom checks still
 measure what is actually free, so a generation still finishing after its
