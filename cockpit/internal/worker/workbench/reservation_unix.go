@@ -81,8 +81,10 @@ func reserveAt(root string, slotIndex int) (*reservation, error) {
 		return nil, ErrInterrupted
 	}
 	// A worker may have exited while its model runtime is still working. The
-	// shared lock alone is insufficient after that exit; only the runtime's
-	// confirmed completion clears its separate activity witness.
+	// shared lock alone is insufficient after that exit; the separate activity
+	// witness fences until the runtime's confirmed completion or the time it
+	// names. This lock is shared, so a model call may be writing its own record
+	// now: a witness past its end is ignored here, never removed.
 	if err := capacity.CheckInferenceIdle(root); err != nil {
 		pipeline.Close()
 		return nil, fmt.Errorf("%w: %v", ErrInterrupted, err)

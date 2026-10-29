@@ -52,11 +52,28 @@ type resourceReservation struct {
 	release func()
 }
 
-func (r *resourceReservation) begin() error {
+// begin records the durable activity witness before the runtime is handed the
+// call, in force until until (inferenceFenceEnd).
+func (r *resourceReservation) begin(until time.Time) error {
 	if r.lease != nil {
-		return r.lease.beginActive()
+		return r.lease.beginActive(until)
 	}
 	return nil
+}
+
+// inferenceFenceEnd is when a runtime handed a call now can no longer be
+// working on it: the call's own deadline, past which its request is cut off,
+// or, for a context with none, capacity.InferenceFenceBound after now. A
+// cancelled or failed call's witness stays in force until then, because the
+// runtime may still be generating; after it the witness is absent
+// (capacity.CheckInferenceIdle). Every call the Manager runs has a deadline
+// (Start bounds it by its envelope's timeout), so the bound is for a caller
+// that brings none.
+func inferenceFenceEnd(ctx context.Context, now time.Time) time.Time {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline
+	}
+	return now.Add(capacity.InferenceFenceBound)
 }
 
 func (r *resourceReservation) complete() error {
@@ -195,7 +212,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		}
 		c := &ollamaClient{baseURL: old.BaseURL, http: client}
 		if lease != nil {
-			if err := lease.beginActive(); err != nil {
+			if err := lease.beginActive(inferenceFenceEnd(ctx, time.Now())); err != nil {
 				return nil, err
 			}
 		}

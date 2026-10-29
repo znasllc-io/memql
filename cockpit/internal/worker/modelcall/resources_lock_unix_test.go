@@ -113,7 +113,8 @@ func TestInferenceActivitySurvivesLockReleaseAndRequiresExactCompletion(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := lease.beginActive(); err != nil {
+			until := time.Now().Add(time.Hour)
+			if err := lease.beginActive(until); err != nil {
 				lease.close()
 				t.Fatal(err)
 			}
@@ -121,9 +122,12 @@ func TestInferenceActivitySurvivesLockReleaseAndRequiresExactCompletion(t *testi
 			var witness map[string]any
 			decodeErr := json.Unmarshal(data, &witness)
 			attempt, _ := witness["attempt"].(string)
-			if err != nil || decodeErr != nil || len(witness) != 2 || witness["version"] != float64(1) || len(attempt) != 32 {
+			ends, _ := witness["until"].(string)
+			endsAt, endsErr := time.Parse(time.RFC3339, ends)
+			if err != nil || decodeErr != nil || len(witness) != 3 || witness["version"] != float64(2) || len(attempt) != 32 ||
+				endsErr != nil || !endsAt.Equal(until) {
 				lease.close()
-				t.Fatalf("activity witness must contain only version and random identity: %s %v", data, err)
+				t.Fatalf("activity witness must contain only version, random identity and when it ends: %s %v", data, err)
 			}
 			if completed {
 				if err := lease.completeActive(); err != nil {
@@ -198,7 +202,7 @@ func TestInferenceCompletionDoesNotClearChangedWitness(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lease.close()
-	if err := lease.beginActive(); err != nil {
+	if err := lease.beginActive(time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, capacity.InferenceActivityFile)

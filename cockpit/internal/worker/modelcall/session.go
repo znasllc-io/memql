@@ -584,7 +584,7 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 			return
 		}
 		defer reservation.close()
-		if err := reservation.begin(); err != nil {
+		if err := reservation.begin(inferenceFenceEnd(ctx, time.Now())); err != nil {
 			stopWatchdog()
 			finish, code, detail := m.classify(c, err)
 			_ = sender.SendModelCallEnd(&memqlv1.ModelCallEnd{RequestId: c.requestID, FinishReason: finish, ErrorCode: code, Error: detail})
@@ -617,10 +617,11 @@ func (m *Manager) run(ctx context.Context, sender Sender, c *call, info models.I
 	}
 	// A terminal runtime response ends resource use even if local validation or
 	// delivery fails afterward. Keep that error, but release its exact activity
-	// witness. Cancellation and truncated transports have no terminal evidence
-	// and remain fenced for reconciliation after these process locks close.
-	// Successful clients already require a terminal response; the explicit
-	// evidence additionally preserves completion on their error paths.
+	// witness. Cancellation and truncated transports have no terminal evidence:
+	// their witness stays in force after these process locks close, until the
+	// call's own deadline (inferenceFenceEnd), because the runtime may still be
+	// generating. Successful clients already require a terminal response; the
+	// explicit evidence additionally preserves completion on their error paths.
 	if reservation != nil && (err == nil || res.RuntimeCompleted) {
 		if completeErr := reservation.complete(); completeErr != nil {
 			err = errors.Join(err, fmt.Errorf("inference completed but shared capacity could not be released: %w", completeErr))

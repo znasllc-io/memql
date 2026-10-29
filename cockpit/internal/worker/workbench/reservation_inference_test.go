@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 )
@@ -88,5 +89,28 @@ func TestInferenceFencesUnknownWorkbenchEvenWithoutContents(t *testing.T) {
 				t.Fatal("unknown evidence disappeared", err)
 			}
 		})
+	}
+}
+
+// A fence past its end no longer refuses a workbench. The workbench holds
+// pipeline.lock only shared, so a model call may be writing its own record at
+// that moment: it leaves the stale file for a reader that excludes every writer.
+func TestWorkbenchIgnoresAnInferenceFencePastItsEndWithoutRemovingIt(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, capacity.InferenceActivityFile)
+	data, err := capacity.InferenceRecord("0123456789abcdef0123456789abcdef", time.Now().Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := reserve(root)
+	if err != nil {
+		t.Fatal("a fence past its end refused a workbench", err)
+	}
+	reservation.close()
+	if after, err := os.ReadFile(path); err != nil || string(after) != string(data) {
+		t.Fatal("a shared reader changed the inference record", err)
 	}
 }

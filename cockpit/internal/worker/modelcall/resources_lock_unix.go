@@ -71,11 +71,13 @@ func acquireInferenceLease(ctx context.Context, root string, poll time.Duration)
 		}
 	}()
 	// Check after acquiring inference ownership: a previous live call may have
-	// completed while we waited, but an interrupted call retains its witness.
+	// completed while we waited, but an interrupted call retains its witness
+	// until the time it names. Holding inference.lock excludes every writer of
+	// that witness, so one past its end is removed here.
 	if err := checkRetainedHostWork(root, pipeline); err != nil {
 		return nil, err
 	}
-	if err := capacity.CheckInferenceIdle(root); err != nil {
+	if err := capacity.CheckInferenceIdleExclusive(root); err != nil {
 		return nil, err
 	}
 	ok = true
@@ -142,11 +144,16 @@ func (l *inferenceLease) close() {
 }
 
 // beginActive precedes every runtime effect, including owned-model eviction.
-// Persist no prompt, model identifier, endpoint, credentials, PID or timestamp.
-// A partial write remains a fence; only a positively completed operation may
-// remove its exact witness. Creating and syncing the directory entry makes a
-// worker or machine restart preserve the admission decision.
-func (l *inferenceLease) beginActive() error {
+// until is when the effect about to start cannot still be running
+// (inferenceFenceEnd): the witness is in force until then whatever happens to
+// this process, and every reader takes it as absent after
+// (capacity.CheckInferenceIdle). Persist no prompt, model identifier, endpoint,
+// credentials or PID: the witness holds a random identity and that time.
+// A partial write remains a fence until capacity.InferenceFenceBound after it
+// was written; only a positively completed operation may remove its exact
+// witness early. Creating and syncing the directory entry makes a worker or
+// machine restart preserve the admission decision.
+func (l *inferenceLease) beginActive(until time.Time) error {
 	if len(l.active) != 0 {
 		return capacity.ErrInferenceUnreconciled
 	}
@@ -154,10 +161,7 @@ func (l *inferenceLease) beginActive() error {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
-	data, err := json.Marshal(struct {
-		Version int    `json:"version"`
-		Attempt string `json:"attempt"`
-	}{Version: 1, Attempt: hex.EncodeToString(nonce[:])})
+	data, err := capacity.InferenceRecord(hex.EncodeToString(nonce[:]), until)
 	if err != nil {
 		return err
 	}
@@ -181,7 +185,8 @@ func (l *inferenceLease) beginActive() error {
 }
 
 // completeActive requires the runtime's terminal response. Cancellation, EOF,
-// a transport failure and local process death provide no such evidence.
+// a transport failure and local process death provide no such evidence: their
+// witness stays in force until the time it names.
 func (l *inferenceLease) completeActive() error {
 	if len(l.active) == 0 {
 		return capacity.ErrInferenceUnreconciled

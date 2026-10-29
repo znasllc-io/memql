@@ -41,5 +41,34 @@ func ReadSystemHeadroom() (SystemHeadroom, error) {
 	if pages > ^uint64(0)/page {
 		return SystemHeadroom{}, errors.New("host memory count overflow")
 	}
-	return SystemHeadroom{Total: total, Available: min(total, pages*page), Pressure: values[5] != 1}, nil
+	return SystemHeadroom{Total: total, Available: min(total, pages*page), Pressure: darwinPressure(values[5])}, nil
+}
+
+// The levels kern.memorystatus_vm_pressure_level reports: XNU answers the
+// dispatch memory-pressure levels, which are bit values, not a scale.
+const (
+	darwinPressureNormal   = 1 // DISPATCH_MEMORYPRESSURE_NORMAL
+	darwinPressureWarn     = 2 // DISPATCH_MEMORYPRESSURE_WARN
+	darwinPressureCritical = 4 // DISPATCH_MEMORYPRESSURE_CRITICAL
+)
+
+// darwinPressure is whether the kernel's level alone refuses new work.
+//
+// ONLY CRITICAL REFUSES. A Mac in ordinary use reads warn for long stretches
+// (compressed memory is how macOS uses RAM), and reading warn as pressure
+// refused every pipeline step on such a machine. At warn the caller's own
+// check decides: available memory against the step's need plus its reserve
+// (checkPipelineHeadroom). Critical is the kernel saying it is about to kill
+// processes, which no measured headroom outweighs.
+//
+// A level this code does not know is pressure: the kernel's answer is not
+// understood, so the safe reading is that it said no.
+func darwinPressure(level uint64) bool {
+	switch level {
+	case darwinPressureNormal, darwinPressureWarn:
+		return false
+	case darwinPressureCritical:
+		return true
+	}
+	return true
 }
