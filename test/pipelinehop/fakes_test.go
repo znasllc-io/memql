@@ -153,6 +153,38 @@ func (g *fakeGitHub) writesFor(repository string) []checkWrite {
 	return out
 }
 
+// runCheckWrites is writesFor without the per-step checks: the writes of
+// every check run created for a run rather than for one of its steps. A step
+// check's external id is "<run id>:<step key>" (pipelines.StepFromExternalID).
+func (g *fakeGitHub) runCheckWrites(repository string) []checkWrite {
+	run, _ := g.splitCheckWrites(repository)
+	return run
+}
+
+// stepCheckWrites is the per-step checks' writes alone.
+func (g *fakeGitHub) stepCheckWrites(repository string) []checkWrite {
+	_, step := g.splitCheckWrites(repository)
+	return step
+}
+
+func (g *fakeGitHub) splitCheckWrites(repository string) (run, step []checkWrite) {
+	all := g.writesFor(repository)
+	isStep := map[int64]bool{}
+	for _, w := range all {
+		if _, _, ok := pipelines.StepFromExternalID(w.Run.ExternalID); w.Create && ok {
+			isStep[w.ID] = true
+		}
+	}
+	for _, w := range all {
+		if isStep[w.ID] {
+			step = append(step, w)
+		} else {
+			run = append(run, w)
+		}
+	}
+	return run, step
+}
+
 // checkRun is every write to one check run, in order.
 func (g *fakeGitHub) checkRun(id int64) []checkWrite {
 	g.mu.Lock()
