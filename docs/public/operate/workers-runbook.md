@@ -777,6 +777,9 @@ that is not pinned to one machine.
 False means the dispatch reached the machine and the sender must **not**
 re-pick even on failure: an exec that lost its stream mid-run may have run, and
 running it elsewhere is a second side effect rather than a retry (design D5).
+Only a pipeline's driver may send such a step again, as a new attempt, and only
+when the step is `repeatable`
+([Retries and failover](pipelines.md#retries-and-failover)).
 
 **What the receiver re-checks, and what it deliberately does not.** The consent
 gates -- per-task approval, the kill switch, standing scope, the classifier --
