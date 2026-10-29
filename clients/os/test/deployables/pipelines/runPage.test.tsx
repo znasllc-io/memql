@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { readTheBar } from "../../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -12,7 +13,8 @@ import { DeployablesApp } from "../../../src/apps/deployables/DeployablesApp";
 import { useOs } from "../../../src/chrome/state";
 import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/settings";
 import { LIBRARY_ARTIFACT_CONCEPT, WORK_STEP_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
-import { click, emit, fakeConnection, withSession, type FakeConnection, type FakeSeed } from "../harness";
+import { MachinesProvider } from "../../../src/live/machines";
+import { click, emit, fakeConnection, rowsResult, withSession, type FakeConnection, type FakeSeed } from "../harness";
 import { UNCERTAIN_MESSAGE, VIEWER, minutesAgo, packageRow, pipelineRow, runRow, stepRow, uncertainRunRow, uncertainStepRows } from "./fixtures";
 
 // The run page, layout A (epic memql#5479, issue memql#5500), opened the way a
@@ -313,5 +315,132 @@ describe("the run page", () => {
     mount(fakeConnection(seed()), "r-1", "user");
     await screen.findByRole("heading", { name: "Show the cart" });
     await waitFor(() => expect(barActs()).toEqual(["Open on GitHub"]));
+  });
+});
+
+// A step that took more than one attempt (the fleet-first retries, epic
+// memql#6294): its row's binding holds each attempt, and the page lists them
+// under the step -- where each ran by the machine's name, why it ended, and its
+// own log -- in the page's existing step detail.
+describe("a step's attempts on the run page", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("--- FAIL: TestRunLease (0.31s)\nFAIL\n", { status: 206, headers: { "Content-Range": "bytes 100-130/131" } })));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const machine = (id: string, name: string): Row => ({
+    id: `v1:worker:registration:${id}`, ownerUserId: VIEWER, name: `${id}-host`, displayName: name, platformInfo: {}, labels: {}, operatorLabels: {},
+    capabilityDescriptor: {}, concurrency: {}, activeCount: 0, registeredAt: "2026-09-01T00:00:00Z", lastSeenAt: new Date().toISOString(),
+  } as unknown as Row);
+  const MACHINES = [machine("m-raider", "MSI Raider"), machine("m-cyber", "CyberPC")];
+
+  function mountWithMachines(seedRows: FakeSeed) {
+    const connection = fakeConnection(seedRows);
+    const query = connection.query as unknown as { executeNamed: (name: string, call: string, opts?: unknown) => Promise<unknown> };
+    const inner = query.executeNamed;
+    query.executeNamed = vi.fn(async (name: string, call: string, opts?: unknown) => {
+      if (call === "query myWorkersWithStatus()") return rowsResult(MACHINES);
+      return inner(name, call, opts);
+    });
+    h.connection = connection;
+    return render(withSession(
+      <MachinesProvider>
+        <DeployablesApp surface="pipelines" sectionId="runs" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} intent={{ id: "open-r-1", payload: { runId: "r-1" } }} consumeIntent={vi.fn()} />
+        <FileDestinationProbe />
+      </MachinesProvider>,
+      { role: "owner", userId: VIEWER },
+    ));
+  }
+
+  const cloneFailed = { attempt: 1, class: "nothing_ran", code: "pipeline_clone_failed", message: "The machine's git fetch failed.", surface: "fleet", workerId: "m-raider", logFileId: "file-a1" };
+  const passedOnCyber = { attempt: 2, surface: "fleet", workerId: "m-cyber", logFileId: "file-a2" };
+  const LOGS = [
+    { id: "artifact-a1", sourceConceptRef: "v1:library:file:file-a1", title: "tests.unit.log", format: "text", producedByRunId: "wr-1" },
+    { id: "artifact-a2", sourceConceptRef: "v1:library:file:file-a2", title: "tests.unit.log", format: "text", producedByRunId: "wr-1" },
+  ];
+  const stepsOf = (unit: Row): Row[] => [stepRow("checks.vet", { seq: 0, runId: "wr-1" }), unit];
+  const passedRun = () => runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(10), conclusion: "success",
+    stages: [{ name: "checks", status: "passed", durationMs: 42000, steps: 1, failed: 0 }, { name: "tests", status: "passed", durationMs: 42000, steps: 1, failed: 0 }] });
+  const retriedUnit = () => stepRow("tests.unit", { seq: 1, runId: "wr-1", logFileId: "file-a2", binding: { surface: "fleet", workerId: "m-cyber", attempts: [cloneFailed, passedOnCyber] } });
+
+  function attemptLines(): string[] {
+    return [...document.querySelectorAll(".pipeline-attempt")].map((li) => (li.querySelector("span")?.textContent ?? ""));
+  }
+
+  it("lists each attempt of a step that passed on a retry, by machine name, with why it ended and its own log", async () => {
+    mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [passedRun()], workSteps: { "wr-1": stepsOf(retriedUnit()) }, runArtifacts: { "wr-1": LOGS } });
+    await screen.findByText("Attempt 2 on CyberPC: Passed.");
+    expect(attemptLines()).toEqual([
+      "Attempt 1 on MSI Raider: The repository could not be fetched at this commit.",
+      "Attempt 2 on CyberPC: Passed.",
+    ]);
+    // The step shows its count beside where it ran last.
+    const row = screen.getByText("unit").closest(".os-record-row") as HTMLElement;
+    expect(await within(row).findByText("Fleet: CyberPC, 2 attempts")).toBeTruthy();
+    expect(within(row).getByText("Passed")).toBeTruthy();
+    // The list is the step's own, under its name.
+    expect(screen.getByRole("list", { name: "Attempts of unit" })).toBeTruthy();
+  });
+
+  it("opens an attempt's own log, and offers none for a file the Library does not hold", async () => {
+    mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [passedRun()], workSteps: { "wr-1": stepsOf(retriedUnit()) }, runArtifacts: { "wr-1": [LOGS[0]!] } });
+    await screen.findByText("Attempt 2 on CyberPC: Passed.");
+    expect(screen.queryByRole("button", { name: "Open the log of attempt 2" })).toBeNull();
+    await click(await screen.findByRole("button", { name: "Open the log of attempt 1" }));
+    expect(JSON.parse(screen.getByLabelText("Files destination").textContent!)).toEqual({ artifactId: "artifact-a1" });
+  });
+
+  it("lists the attempts of a step that failed before the failure it led to, which keeps its own account", async () => {
+    const exited = { attempt: 2, message: "The step's command exited with status 1.", surface: "fleet", workerId: "m-cyber", logFileId: "file-a2" };
+    const failed = stepRow("tests.unit", { seq: 1, runId: "wr-1", status: "failed", errorCode: "pipeline_executor_error", errorMessage: "The step's command exited with status 1.",
+      logFileId: "file-a2", binding: { surface: "fleet", workerId: "m-cyber", attempts: [cloneFailed, exited] } });
+    mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(10) })],
+      workSteps: { "wr-1": stepsOf(failed) }, runArtifacts: { "wr-1": LOGS } });
+    await screen.findByText("Attempt 2 on CyberPC: Failed.");
+    // The last attempt says only that the step failed: why, and its log, are the step's account below.
+    expect(attemptLines()).toEqual([
+      "Attempt 1 on MSI Raider: The repository could not be fetched at this commit.",
+      "Attempt 2 on CyberPC: Failed.",
+    ]);
+    const list = screen.getByRole("list", { name: "Attempts of unit" });
+    const failure = document.querySelector(".pipeline-step-failure");
+    expect(failure).toBeTruthy();
+    expect(list.compareDocumentPosition(failure!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(failure as HTMLElement).getByText("The step's command exited with status 1.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open the full log" })).toBeTruthy();
+    // One way to the failing attempt's log, not two; the earlier attempt keeps its own.
+    expect(screen.queryByRole("button", { name: "Open the log of attempt 2" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Open the log of attempt 1" })).toBeTruthy();
+  });
+
+  it("says a running step is retrying, on the attempt after the one that failed", async () => {
+    const waiting = stepRow("tests.unit", { seq: 1, runId: "wr-1", status: "running", durationMs: 0, logFileId: "", binding: { attempts: [cloneFailed], nextAttemptAt: "2026-10-04T13:05:39Z" } });
+    const running = runRow({ id: "r-1", ownerUserId: VIEWER, queuedAt: minutesAgo(2), status: "in_progress", conclusion: "", durationMs: 0, finishedAt: "",
+      stages: [{ name: "checks", status: "passed", durationMs: 42000, steps: 1, failed: 0 }, { name: "tests", status: "running", durationMs: 0, steps: 1, failed: 0 }] });
+    mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [running], workSteps: { "wr-1": stepsOf(waiting) }, runArtifacts: { "wr-1": LOGS } });
+    await screen.findByText("Attempt 1 on MSI Raider: The repository could not be fetched at this commit.");
+    const row = screen.getByText("unit").closest(".os-record-row") as HTMLElement;
+    expect(within(row).getByText("Retrying")).toBeTruthy();
+    expect(within(row).getByText("Attempt 2")).toBeTruthy();
+    expect(within(row).queryByText("In progress")).toBeNull();
+  });
+
+  it("says nothing of attempts for a step that ran once, or a step with no history", async () => {
+    const once = stepRow("tests.unit", { seq: 1, runId: "wr-1", logFileId: "file-a1", binding: { surface: "fleet", workerId: "m-raider", attempts: [{ attempt: 1, surface: "fleet", workerId: "m-raider", logFileId: "file-a1" }] } });
+    mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [passedRun()], workSteps: { "wr-1": stepsOf(once) }, runArtifacts: { "wr-1": LOGS } });
+    const row = (await screen.findByText("unit")).closest(".os-record-row") as HTMLElement;
+    expect(await within(row).findByText("Fleet: MSI Raider")).toBeTruthy();
+    expect(document.querySelector(".pipeline-attempts")).toBeNull();
+    expect(screen.queryByText(/attempts?\b/i)).toBeNull();
+  });
+
+  it("names a machine it cannot find by its place, never by its id", async () => {
+    const stranger = stepRow("tests.unit", { seq: 1, runId: "wr-1", logFileId: "file-a2", binding: { surface: "fleet", workerId: "m-removed",
+      attempts: [{ ...cloneFailed, workerId: "m-removed" }, { ...passedOnCyber, workerId: "m-removed" }] } });
+    mountWithMachines({ packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [passedRun()], workSteps: { "wr-1": stepsOf(stranger) }, runArtifacts: { "wr-1": LOGS } });
+    await screen.findByText("Attempt 2 on your fleet: Passed.");
+    expect(document.body.textContent).not.toContain("m-removed");
   });
 });

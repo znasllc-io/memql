@@ -231,6 +231,8 @@ describe("the pipelines reading", () => {
       // An operator label cannot grant what the machine itself does not say.
       machine("m5", { labels: {}, operatorLabels: { pipelines: "allowed" } }),
       machine("m6", { labels: { pipelines: "denied" } }),
+      // The router skips a machine whose owner turned Host commands off.
+      machine("m7", { ownerFeatures: { headless: false } }),
     ].map(machineFromRow);
     expect(machinesAllowingPipelines(rows, "u-me")).toBe(2);
     expect(machinesAllowingPipelines(rows, "")).toBe(0);

@@ -65,7 +65,10 @@ or `pipeline-runs`, `pipeline-runs-empty`, `pipeline-runs-none`,
 the workflow failed: the run's own reason above the stops),
 `pipeline-run-running`, `pipeline-run-queued`,
 `pipeline-run-passed`, `pipeline-run-refused`, `pipeline-run-cancelled`,
-`pipeline-run-rerun`, `pipeline-run-developer` (Pipelines > Runs and a run
+`pipeline-run-rerun`, `pipeline-run-developer`, `pipeline-run-retried` (steps
+that took more than one attempt: one passed on its second, one failed on its
+third, one ran once) and `pipeline-run-retrying` (a step waiting between two
+attempts) (Pipelines > Runs and a run
 page in each state, epic memql#5479; the seeds are `qa/pipelinesSeeds.ts`, and
 `pipeline-run-failed` answers the Library content route with a Go test's last
 lines so the log tail is judged with a real failure in it), or

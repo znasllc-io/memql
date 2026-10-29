@@ -837,7 +837,8 @@ release publication or installation authority.
   with three steps. **Repository** reads `memql-package.yaml` at the default
   branch's head with `pipelinesPreview`, so the stages show before anything is
   confirmed. **Compute** offers *Cluster* and, only when one of your machines
-  reports `pipelines=allowed`, *Cluster and your fleet* -- the fleet alone
+  reports `pipelines=allowed` and has not had Host commands switched off in
+  Fleet settings, *Cluster and your fleet* -- the fleet alone
   when a step names a need, which the cluster refuses -- and waits for a
   choice, because running steps on your own machines is consent. **Confirm**
   names the check, the stages and the secrets the steps read, and asks how
@@ -851,8 +852,10 @@ release publication or installation authority.
 - **A run’s page** draws the stages down the left, or across a narrow window,
   read from the step rows; the open stop's steps say where each ran and for how long; a failed
   step shows its last lines -- read from its full log, which the runner keeps in
-  your Library -- with **Open the full log**; a skipped step says why; a run
-  that failed with no step at fault says why above the stages
+  your Library -- with **Open the full log**; a step that took more than one
+  attempt lists them under it, each with the machine it ran on, why it ended
+  and its own log, and reads **Retrying** while it goes again; a skipped step
+  says why; a run that failed with no step at fault says why above the stages
   ([A run can fail with every step passed](#a-run-can-fail-with-every-step-passed)); the
   artifacts open in Files. One bar carries the state and the acts the run
   allows: **Open on GitHub**, **Re-run**, **Re-run failed**, or **Cancel** while
@@ -1749,7 +1752,8 @@ OS, `https://os.<domain>/?pipelineRun=<run id>`.
 | Refused | *Refused: \<what\> (\<where\>)* |
 
 The summary is one line saying which run, then the stage table, then the failed
-steps, each with its message and code:
+steps, each with its message and code, then the steps that took more than one
+attempt:
 
 ```text
 Mode full · Push to the default branch · Commit 3f9c2ab
@@ -1767,6 +1771,43 @@ A stage reads *Passed*, *Failed*, *Cancelled*, *Running*, *Waiting*, *Not run*,
 its longest step's, and `-` is a time nobody measured. The check run's text is
 the last lines of each failed step's output, with secret values masked. A
 refused run shows the refusal and what to do instead of a table.
+
+### A step that took more than one attempt
+
+A step the driver retried says how it got there. One that passed after a retry
+is listed under **Retried steps**, after the failed steps, with the attempt it
+passed on and what ended each attempt before it. A failed step lists every
+attempt, the one it failed on included, under its own line. A step that ran once
+says nothing of attempts.
+
+```text
+### Failed steps
+
+- `tests.go-tests#2`: The step's command exited with status 1.
+  - Attempt 1: `pipeline_clone_failed` on machine 3f9c2ab0.
+  - Attempt 2: failed on machine 5d8e1f77.
+
+### Retried steps
+
+- `tests.go-tests#1`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on machine 3f9c2ab0.
+```
+
+While a step waits for its next attempt the check already says so. The driver
+publishes as soon as the attempt's outcome is stored, before the wait, so the
+check never promises a retry the step's row does not hold:
+
+```text
+- `tests.go-tests#1`: Retrying: attempt 1 failed (`pipeline_clone_failed` on machine 3f9c2ab0); attempt 2 starts after 30s.
+```
+
+*Starts after* is the wait the driver scheduled, and stays true once the attempt
+has begun: nothing publishes again when it does, because that would delay the
+attempt by a GitHub round trip. A retry that waits for nothing (another machine)
+says the next attempt *follows*. A machine is named by the first eight
+characters of its registration id, and the cluster as *the cluster*; the run
+page, which reads the machines' names, says the name. A replica that takes a run
+over does not restate *Retrying* before the step settles, and the step's receipt
+then carries its whole history.
 
 ### A run can fail with every step passed
 
@@ -1812,9 +1853,9 @@ unobtainable -- records `checkRunState: unavailable`, and its check run still
 shows it unfinished, which holds a merge on a required check. The every-minute
 recovery on an agent replica republishes the final report of each such run
 concluded in the last 24 hours, trying less often while it keeps failing, and
-records `written` once it lands. The republished report carries the stage table
-and each failed step's message and code, but not the log excerpt, which only
-the agent that drove the run held.
+records `written` once it lands. The republished report carries the stage table,
+each failed step's message and code, and every step's attempts, but not the log
+excerpt, which only the agent that drove the run held.
 
 **A journal outage stops advancement.** The driver requires a stored intent
 before starting a command or staging a notification, a stored receipt before

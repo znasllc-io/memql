@@ -59,8 +59,10 @@ import {
   ALLOWED_MACHINE,
   FAILED_LOG,
   PIPELINES_NO_RUNS_SEED,
+  PIPELINES_RETRIES_SEED,
   PIPELINES_SEED,
   PIPELINES_UNCONNECTED_SEED,
+  RETRY_MACHINES,
   installContentRoute,
   mapPipelines,
 } from "./pipelinesSeeds";
@@ -999,6 +1001,18 @@ const VIEWS: Record<
     seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFilesError: "Unavailable" },
     framed: true, render: () => <RunsWindow runId="r-7" />,
   },
+  // Steps that took more than one attempt (the fleet-first retries): r-11 ended
+  // with one step passed on its second attempt and one failed on its third;
+  // r-12 is a step waiting between two attempts.
+  "pipeline-run-retried": {
+    connect: () => {
+      installContentRoute(FAILED_LOG);
+      return pipelinesConnection(PIPELINES_RETRIES_SEED, { machines: RETRY_MACHINES });
+    },
+    wrap: pipelinesWrap,
+    render: () => <RunsWindow runId="r-11" />,
+  },
+  "pipeline-run-retrying": { connect: () => pipelinesConnection(PIPELINES_RETRIES_SEED, { machines: RETRY_MACHINES }), wrap: pipelinesWrap, render: () => <RunsWindow runId="r-12" /> },
   "pipeline-run-queued": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-9" /> },
   "pipeline-run-passed": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-6" /> },
   "pipeline-run-refused": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-5" /> },

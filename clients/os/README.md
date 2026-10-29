@@ -985,6 +985,30 @@ connection failures do not become a claim of read-only access or empty history.
   full log" and says the log is saved, rather than offering to save it; a
   failed step's last lines are the tail of that file, read through the
   Library's content route with one suffix Range.
+- **A STEP'S ATTEMPTS ARE ON ITS ROW, AND THE PAGE ONLY READS THEM.** A step the
+  engine retried carries every ended attempt in `binding.attempts`
+  (`stepFromRow` -> `StepRow.attempts`, malformed entries dropped), and the
+  run page lists them under the step in the failure account's own column and
+  type -- one line each, where it ran (the machines feed's NAME, "your fleet"
+  when it cannot name one, never an id), how it ended in the page's words (a
+  code's copy headline, else the attempt's own message, else "Failed"; never
+  the code) and a link to that attempt's own log. Only a step with two or more
+  attempts, or one still going, is annotated; a step that ran once has one
+  record and no story. A running step with an attempt behind it reads
+  **Retrying** (the check run says the same word for the same state), on the
+  attempt after the last that ended. **The last attempt of a failed step says
+  only "Failed" and offers no link**: the account below it already says why
+  and offers the same log (rule 7). Covered by `runPage.test.tsx` and
+  `words.test.ts`; rendered with `pipeline-run-retried` / `-retrying`. Not
+  verified live: a cluster with a real fleet failing over.
+- **"YOUR FLEET" MIRRORS THE ENGINE'S ROUTER, HOST COMMANDS INCLUDED.**
+  `pipelines/fleet.ts` counts a machine only if the router would offer it a
+  step: unrevoked, contract 5, its own `pipelines` label, and the owner has not
+  switched Host commands off (`ownerFeatures.headless`, read as the engine reads
+  it: a setting never saved is on, a malformed one is off). The connect flow
+  and Settings > Pipelines read the one rule. Their remedy copy still blames
+  `policy.yaml` when Host commands is the blocker -- a wording choice the design
+  docs do not settle, left as it was.
 - **NOTHING HERE IS A SECOND COPY OF A RUN'S STATE OR OF ITS RULES.** The
   words are `pipelines/words.ts` (the check run's own words), the bar is the
   pure `pipelines/acts.ts` (an act the engine would refuse is absent: no re-run

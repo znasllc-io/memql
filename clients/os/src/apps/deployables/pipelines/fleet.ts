@@ -31,14 +31,30 @@ export const PIPELINES_ALLOWED = "allowed";
 // verified artifact streaming; older workers cannot execute the step.
 export const PIPELINE_STEP_CONTRACT = 5;
 
-/** Whether a machine implements the required contract and consents through its own reported policy. */
-export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract">): boolean {
-  return !isRevoked(machine) && machine.pipelineContract === PIPELINE_STEP_CONTRACT && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED;
+/**
+ * Whether a machine implements the required contract, consents through its own
+ * reported policy, and has not had Host commands switched off by its owner.
+ *
+ * HOST COMMANDS OFF EXCLUDES IT, AS THE ROUTER DOES. A pipeline step is a command
+ * on the machine, so the engine's router drops a machine whose owner turned "Host
+ * commands" off in Fleet settings (`ownerFeatures.headless`; fleetcatalog's
+ * `Candidate.HostCommandsOff`, `RoutePlan.RequireHostCommands`), and one switched
+ * off after the plan refuses before it starts. Counting such a machine as "your
+ * fleet" would offer Compute a fleet no step can reach. The setting is read as the
+ * engine reads it (`OwnerFeaturesFromRow`): a machine that never saved it is on,
+ * and `machineFromRow` already decodes a malformed one as off. A reading with no
+ * `ownerFeatures` at all is on, like a router candidate built without one.
+ */
+export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract" | "ownerFeatures">): boolean {
+  return !isRevoked(machine)
+    && machine.pipelineContract === PIPELINE_STEP_CONTRACT
+    && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED
+    && machine.ownerFeatures?.headless !== false;
 }
 
 /** How many of `ownerUserId`'s own machines allow pipelines. */
 export function machinesAllowingPipelines(
-  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract">[],
+  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract" | "ownerFeatures">[],
   ownerUserId: string,
 ): number {
   return machines.filter((m) => ownsMachine(m, ownerUserId) && allowsPipelines(m)).length;

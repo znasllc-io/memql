@@ -27,7 +27,7 @@ import {
 } from "../../../src/apps/deployables/pipelines/connect/flow";
 import { machineFromRow } from "../../../src/apps/fleet/rows";
 import { SHA_A } from "./fixtures";
-import { PIPELINE_STEP_CONTRACT } from "../../../src/apps/deployables/pipelines/fleet";
+import { PIPELINE_STEP_CONTRACT, allowsPipelines, machinesAllowingPipelines } from "../../../src/apps/deployables/pipelines/fleet";
 
 // THE CONNECT RAIL'S READING, on values (issue memql#5502). Every claim here is
 // about a function in connect/flow.ts; connectPage.test.tsx asserts what a
@@ -402,6 +402,33 @@ describe("the fleet", () => {
         operatorLabels: { "workerHost.pipeline_step": "5" },
       })], "u-me")).toBe(false);
     }
+  });
+
+  // THE ROUTER SKIPS A MACHINE WHOSE OWNER TURNED "HOST COMMANDS" OFF
+  // (ownerFeatures.headless, Fleet settings), so "your fleet" must not count it:
+  // read the way the engine reads the setting (OwnerFeaturesFromRow) -- a setting
+  // never saved is on, one that is not a plain `true` is off.
+  it("is not offered by a machine whose owner turned Host commands off", () => {
+    expect(fleetAvailable([machine({ ownerFeatures: { headless: false } })], "u-me")).toBe(false);
+    expect(fleetAvailable([machine({ ownerFeatures: { headless: false, apps: true, computerUse: true } })], "u-me")).toBe(false);
+    expect(machinesAllowingPipelines([machine({ ownerFeatures: { headless: false } }), machine({ id: "v1:worker:registration:m2" })], "u-me")).toBe(1);
+    // The other two switches steer no pipeline step.
+    expect(fleetAvailable([machine({ ownerFeatures: { headless: true, apps: false, computerUse: false } })], "u-me")).toBe(true);
+  });
+
+  it("reads a missing Host commands setting as on, and a malformed one as off, as the engine does", () => {
+    for (const saved of [undefined, null, {}, { apps: false }, { headless: true }]) {
+      expect(fleetAvailable([machine({ ownerFeatures: saved })], "u-me"), JSON.stringify(saved)).toBe(true);
+    }
+    for (const saved of [[], "on", 0, false, { headless: "true" }, { headless: 1 }, { headless: null }]) {
+      expect(fleetAvailable([machine({ ownerFeatures: saved })], "u-me"), JSON.stringify(saved)).toBe(false);
+    }
+  });
+
+  it("counts a hand-built machine that names no setting as on, like a Candidate the router was given without one", () => {
+    const reading = { ownerUserId: "u-me", revokedAt: "", reportedLabels: { pipelines: "allowed" }, pipelineContract: PIPELINE_STEP_CONTRACT };
+    expect(allowsPipelines(reading)).toBe(true);
+    expect(allowsPipelines({ ...reading, ownerFeatures: { headless: false, apps: true, computerUse: true, updatedAt: "" } })).toBe(false);
   });
 
   it("is not offered by a revoked machine, another label, an operator's label or somebody else's machine", () => {

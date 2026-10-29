@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  attemptWords, dayLabel, durationWords, refusalPhrase, runOutcome, runTitle, stepLabel, stepWord, triggerWords, whereWords,
+  attemptCountWords, attemptSentence, attemptWords, dayLabel, durationWords, isAccountedBelow, refusalPhrase, runOutcome, runTitle, shownAttempts,
+  stepLabel, stepWord, triggerWords, whereWords,
 } from "../../../src/apps/deployables/pipelines/words";
 import { run, step } from "./fixtures";
 
@@ -79,5 +80,100 @@ describe("the pipelines vocabulary", () => {
     expect(dayLabel(new Date(2026, 9, 3, 23, 0).toISOString(), now)).toBe("Yesterday");
     expect(dayLabel(new Date(2026, 8, 30, 12, 0).toISOString(), now)).toContain("September");
     expect(dayLabel(new Date(2025, 8, 30, 12, 0).toISOString(), now)).toContain("2025");
+  });
+});
+
+
+describe("a step's attempts in words", () => {
+  const names: Record<string, string> = { "m-raider": "MSI Raider", "m-cyber": "CyberPC" };
+  const machineName = (workerId: string) => names[workerId] ?? "";
+  const failedOnRaider = { attempt: 1, code: "pipeline_clone_failed", surface: "fleet", workerId: "m-raider", logFileId: "file-a1" };
+  const retried = step("build.mac", {
+    binding: { surface: "fleet", workerId: "m-cyber", attempts: [failedOnRaider, { attempt: 2, surface: "fleet", workerId: "m-cyber", logFileId: "file-a2" }] },
+  });
+  const retrying = step("build.mac", { status: "running", durationMs: 0, binding: { attempts: [failedOnRaider], nextAttemptAt: "2026-10-04T13:05:39Z" } });
+
+  it("counts the attempts beside where the step ran, once there is more than one", () => {
+    expect(attemptCountWords(retried)).toBe("2 attempts");
+    expect(attemptCountWords(step("build.mac", { binding: { surface: "cluster", attempts: [{ attempt: 1 }] } }))).toBe("");
+    expect(attemptCountWords(step("build.mac"))).toBe("");
+    // A step still going is on the attempt after the last that ended.
+    expect(attemptCountWords(retrying)).toBe("Attempt 2");
+    expect(attemptCountWords(step("build.mac", { status: "running", binding: {} }))).toBe("");
+  });
+
+  it("calls a running step with a failed attempt behind it retrying, and no other step", () => {
+    expect(stepWord(retrying)).toBe("Retrying");
+    expect(stepWord(step("build.mac", { status: "running", binding: { surface: "cluster" } }))).toBe("In progress");
+    // Settled, the history is not a state: the word is how the step ended.
+    expect(stepWord(retried)).toBe("Passed");
+    expect(stepWord(step("build.mac", { status: "failed", binding: { attempts: [failedOnRaider, { attempt: 2 }] } }))).toBe("Failed");
+  });
+
+  it("lists attempts only for a history worth reading", () => {
+    expect(shownAttempts(retried).map((a) => a.attempt)).toEqual([1, 2]);
+    expect(shownAttempts(retrying).map((a) => a.attempt)).toEqual([1]);
+    // A step that ran once has one record and no story, passed or failed.
+    expect(shownAttempts(step("build.mac", { binding: { attempts: [{ attempt: 1 }] } }))).toEqual([]);
+    expect(shownAttempts(step("build.mac", { status: "failed", binding: { attempts: [{ attempt: 1, code: "pipeline_clone_failed" }] } }))).toEqual([]);
+    expect(shownAttempts(step("build.mac"))).toEqual([]);
+  });
+
+  it("says each attempt: where it ran, and how it ended in the page's own words", () => {
+    expect(attemptSentence(retried, retried.attempts[0]!, machineName)).toBe("Attempt 1 on MSI Raider: The repository could not be fetched at this commit.");
+    expect(attemptSentence(retried, retried.attempts[1]!, machineName)).toBe("Attempt 2 on CyberPC: Passed.");
+    // The cluster, a machine nobody can name, and no place recorded.
+    const odd = step("build.mac", { status: "running", binding: { attempts: [
+      { attempt: 1, code: "pipeline_node_lost", surface: "cluster" },
+      { attempt: 2, code: "pipeline_clone_failed", surface: "fleet", workerId: "m-gone" },
+      { attempt: 3, code: "pipeline_clone_failed", surface: "fleet" },
+      { attempt: 4, code: "pipeline_node_lost" },
+    ] } });
+    expect(odd.attempts.map((a) => attemptSentence(odd, a, machineName))).toEqual([
+      "Attempt 1 on the cluster: The node running the step went away before it finished.",
+      "Attempt 2 on your fleet: The repository could not be fetched at this commit.",
+      "Attempt 3 on your fleet: The repository could not be fetched at this commit.",
+      "Attempt 4: The node running the step went away before it finished.",
+    ]);
+  });
+
+  it("leaves the account of how a step ended to the step: its last attempt says only the step's word", () => {
+    const histories = {
+      failed: step("build.mac", { status: "failed", errorMessage: "The step's command exited with status 1.", binding: { surface: "fleet", workerId: "m-cyber", attempts: [
+        failedOnRaider, { attempt: 2, message: "The step's command exited with status 1.", surface: "fleet", workerId: "m-cyber" }] } }),
+      refused: step("build.mac", { status: "failed", result: { status: "refused" }, binding: { surface: "fleet", workerId: "m-cyber", attempts: [
+        failedOnRaider, { attempt: 2, code: "pipeline_no_machine_for_need", surface: "fleet", workerId: "m-cyber" }] } }),
+      cancelled: step("build.mac", { status: "cancelled", errorMessage: "The run was cancelled before this step finished.", binding: { surface: "fleet", workerId: "m-cyber", attempts: [
+        failedOnRaider, { attempt: 2, message: "The run was cancelled before this step finished.", surface: "fleet", workerId: "m-cyber" }] } }),
+    };
+    expect(histories.failed.attempts.map((a) => [attemptSentence(histories.failed, a, machineName), isAccountedBelow(histories.failed, a)])).toEqual([
+      ["Attempt 1 on MSI Raider: The repository could not be fetched at this commit.", false],
+      ["Attempt 2 on CyberPC: Failed.", true],
+    ]);
+    expect(attemptSentence(histories.refused, histories.refused.attempts[1]!, machineName)).toBe("Attempt 2 on CyberPC: Refused.");
+    expect(attemptSentence(histories.cancelled, histories.cancelled.attempts[1]!, machineName)).toBe("Attempt 2 on CyberPC: Cancelled.");
+    // A cancelled step with no reason has no account below it, so its last attempt says its own.
+    const bare = step("build.mac", { status: "cancelled", errorMessage: "", binding: { attempts: [failedOnRaider, { attempt: 2, message: "Stopped by a cancel.", surface: "fleet", workerId: "m-cyber" }] } });
+    expect(isAccountedBelow(bare, bare.attempts[1]!)).toBe(false);
+    // A step that passed, or is still going, has no account: every attempt says its own.
+    expect(retried.attempts.some((a) => isAccountedBelow(retried, a))).toBe(false);
+    expect(retrying.attempts.some((a) => isAccountedBelow(retrying, a))).toBe(false);
+  });
+
+  it("never invents a reason: a code this build has no copy for says the server's own words, and none says Failed", () => {
+    const unknown = step("build.mac", { status: "failed", binding: { surface: "fleet", workerId: "m-cyber", attempts: [
+      { attempt: 1, code: "pipeline_from_the_future", message: "A new kind of fault.", surface: "fleet", workerId: "m-raider" },
+      { attempt: 2, message: "The step's command exited with status 75", surface: "fleet", workerId: "m-raider" },
+      { attempt: 3, surface: "fleet", workerId: "m-cyber" },
+    ] } });
+    expect(unknown.attempts.map((a) => attemptSentence(unknown, a, machineName))).toEqual([
+      "Attempt 1 on MSI Raider: A new kind of fault.",
+      "Attempt 2 on MSI Raider: The step's command exited with status 75.",
+      // The step failed, so its last attempt did too, whatever it carried.
+      "Attempt 3 on CyberPC: Failed.",
+    ]);
+    // A code alone, with no copy and no message, is not shown as a word.
+    const bare = step("build.mac", { status: "running", binding: { attempts: [{ attempt: 1, code: "pipeline_from_the_future" }] } });
+    expect(attemptSentence(bare, bare.attempts[0]!, machineName)).toBe("Attempt 1: Failed.");
   });
 });

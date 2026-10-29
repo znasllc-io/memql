@@ -267,7 +267,7 @@ export function waitWords(ms: number): string {
  * machines count and why only the reported label does.
  */
 export function fleetAvailable(
-  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract">[],
+  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract" | "ownerFeatures">[],
   ownerUserId: string,
 ): boolean {
   return machinesAllowingPipelines(machines, ownerUserId) > 0;
