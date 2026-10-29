@@ -1121,3 +1121,90 @@ App-authored pull request satisfies `require_code_owner_review` together with
 GitHub marks a pull request merged when its head reaches `main` through
 another pull request's merge (memql#6325 marked memql#6318 to memql#6324
 merged).
+
+## Owner-scoped run reads cost what they return (2026-10-29)
+
+On 2026-10-29 around 09:40Z, reads made as the cluster owner in MemQL OS hit
+the eight-second statement limit (SQLSTATE 57014): `workRunsForGoal` twice and
+`workRunningRunsForOwner` once. `workGoalForOwner`, `workApprovalsForOwner` and
+`pipelineRunsForOwner` answered in the same minutes. The goal read is what
+`cancelGoal` (Ask's stop, Nexus's close) and `workAcceptGoalResults` read
+before they act; the running read was the computer-use kill switch's
+selection. Neither failed for want of data: both read the owner's whole run
+history to return a handful of rows.
+
+**Why the history.** Every pipeline run is a `v1:work:run` owned by the
+pipeline's owner, which in production is the cluster owner, and every step
+boundary writes the run again. The run owner lookup index
+(`memory_nodes_work_run_owner_lookup_idx`) was built for one person's runs
+among many system runs; for this owner its range is the history. Two engine
+behaviors met it (`component/memql/latest_scan_lookup.go`):
+
+- The lookup ANDed every required string term into its id scan, so
+  `goalId` -- which no index served -- was read from every version's TOASTed
+  payload in that range.
+- With two served terms ANDed, the planner cannot choose: PostgreSQL ignores a
+  partial index's statistics when it estimates a payload equality, both
+  ranges cost the default 0.5%, and the tie went to the owner index even after
+  ANALYZE. A new index alone would not have fixed the goal read.
+
+**Chosen path.** The lookup now ANDs only terms a lookup index serves, and
+never a coarse one (`payloadLookup.coarse`, the run owner) beside a finer one;
+every other term is decided once per candidate on its latest version. Migration
+`20261029100000_work_run_goal_lookup_index` adds the goal lookup
+(`memory_nodes_work_run_goal_lookup_idx`), so the goal read costs one goal's
+runs. On a 9,600-version fixture the goal read went from 38,621 buffers to 32;
+`workRunsForOwnerGoalSignature`, which ANDed `goalSignature` and `status` the
+same way, from 38,615 to 27,117.
+
+No index bounds "running now": it is a property of a run's latest version,
+every run passes through it, and an index holds every version. An index-only
+walk of every current run id was already measured past the limit cold in
+production ([operational retention](operational-retention.md#bounded-current-run-recovery)).
+The kill switch now reads the recovery projection, `work_run_heads`
+(`runningRunsForOwner` in `integrations/work/recovery_heads.go`), and
+`workRunningRunsForOwner`, which had no other caller, is deleted along with
+its SDK methods.
+
+**Freshness and replicas.** The kill switch does not refresh the projection:
+`refresh_work_run_heads` claims the projector's state row with `NOWAIT`, so a
+refreshing kill switch would fail whenever another replica's sweep was
+projecting. It reads the heads at `running` plus every id in
+`work_run_head_events`, then each candidate's latest version in the same
+statement. A run written after its last projection is a candidate through its
+event, so the answer matches a refreshed projection's. The projection lives in
+the database, so any replica gives the same answer.
+
+**Refusals.** The read refuses while the projection's backfill is unfinished,
+while a capture trigger is missing or disabled, or while more than 10,000
+events wait, because an empty list would read as "nothing to stop". The
+readiness check and the read share one repeatable-read snapshot. A refusal
+fails the kill switch visibly; the pre-dispatch gate refuses the owner's next
+machine call either way.
+
+**Ownership.** The read runs under the owner's borrowed authority, matches the
+owner in both spellings in SQL and admits every row as fetched. It keeps the
+DSL query's 500-run bound and its staged-data ruling is MUST-NOT-GATE: a staged
+run that used the owner's machine must still be stopped.
+
+**Regression evidence.** `TestWorkRunReadsDoNotScanTheOwnersHistory`
+(`component/memql/work_run_goal_lookup_db_test.go`) runs the real queries as
+the cluster owner over an owner-owns-everything history. It pins the lookup
+SQL, the planned buffers and agreement with the concept-wide read.
+`TestLatestScanKeysLookUpOnlyMandatorySetTermsOnALookupField` holds both lookup
+rules on the rendered SQL without a database.
+`TestRunningRunsForOwnerReadsTheProjectionNotTheHistory`
+(`integrations/work/running_runs_db_test.go`) pins the answer, including runs
+only a pending event names, row admission, the three refusals and a bound of
+500 buffers over a 2,400-version history. The kill switch's selection tests
+(`killswitch_test.go`) answer through the same seam. Both database tests need
+`MEMQL_REQUIRE_DB=1`.
+
+**Not verified, and not fixed.** Nothing here ran against production; it takes
+effect in the engine release after 0.31.7. An owner-only read still enumerates
+the owner's whole range: `workRunSummariesForOwner` (Nexus's run list),
+`workRunsForOwner`, `workSignedRunsForOwner`, the procedure corpus read and the
+document revision reads cost one heap fetch per version of the owner's runs
+plus one latest payload per run. Expression indexes allow neither index-only
+scans nor TimescaleDB's SkipScan. That class needs its own design and is not
+claimed bounded here.

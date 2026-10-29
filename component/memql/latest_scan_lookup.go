@@ -91,32 +91,50 @@ func payloadLookupTermOf(n *ComparisonExpression) (payloadLookupTerm, bool) {
 //     5, so an id whose latest version matches could go unfound);
 //   - a nested path: no lookup index leads with one.
 //
-// Every set string equality or membership the filter requires is ANDed into
-// the lookup, the indexed one and any other: each is a property the latest
-// version has, so each can only narrow. Only an indexed field STARTS a lookup:
-// without the index the lookup reads every version's payload, which is the cost
-// the latest-key enumeration exists to avoid (a heartbeat concept carries
-// hundreds of thousands of versions of a few ids).
+// ONLY AN INDEXED TERM IS READ IN THE LOOKUP, AND ONLY OF THE FINEST GRAIN.
+//
+// The lookup visits every VERSION in its range, and a term in its WHERE clause
+// that no index answers is read from each of those versions' payloads: a heap
+// fetch and a TOAST read per version. So a term is ANDed into the lookup only
+// when a lookup index serves it, and every other required term is decided by
+// the filter on each found id's latest version -- once per id, not once per
+// version. Without an index serving at least one term there is no lookup at
+// all: reading every version's payload is the cost the latest-key enumeration
+// exists to avoid (a heartbeat concept carries hundreds of thousands of
+// versions of a few ids).
+//
+// This used to AND every required term, on the reasoning that each can only
+// narrow. That is true of the ids and wrong about the cost. Production's
+// cluster owner owns every pipeline run, so the owner index's range for them
+// is the run history, and workRunsForGoal read the goalId of every historical
+// version in it until the request pool cancelled it at eight seconds
+// (2026-10-29, SQLSTATE 57014).
+//
+// When terms of both grains are served, only the fine ones are ANDed
+// (payloadLookup.coarse). The planner cannot choose between two lookup
+// indexes: PostgreSQL ignores a partial index's statistics when it estimates
+// a payload equality, so both ranges cost the default selectivity and the tie
+// goes to whichever index it considers first. Measured after ANALYZE: the
+// owner index, with the goal term as a per-version filter. Leaving the coarse
+// term to the filter leaves the planner one index to use. A coarse term alone
+// still starts a lookup -- one person's runs among many system runs, the read
+// its index was built for.
+//
+// TestWorkRunReadsDoNotScanTheOwnersHistory holds both rules to the real SQL.
 //
 // The latest version of each found id is a LATERAL probe of the latest-row
 // index, so the plan is the matching lookup ranges plus one probe per id
 // whatever the statistics say: the same fence the payload probe in
 // executeCombinedFilterQuery relies on.
 func (e *MemQLEngine) latestLookupKeys(concept string, terms []payloadLookupTerm, idFilters []compiledExpression, timestamp *time.Time) *bun.SelectQuery {
-	served := false
-	for _, term := range terms {
-		if payloadLookupFor(concept, term.field) {
-			served = true
-			break
-		}
-	}
-	if !served {
+	drivers := lookupDrivers(concept, terms)
+	if len(drivers) == 0 {
 		return nil
 	}
 	db := e.database()
 	lookup := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).Column("id").Distinct().
 		Where("concept = ?", concept)
-	for _, term := range terms {
+	for _, term := range drivers {
 		if len(term.values) == 1 {
 			lookup = lookup.Where("(payload->>?) = ?", term.field, term.values[0])
 		} else {
@@ -139,4 +157,25 @@ func (e *MemQLEngine) latestLookupKeys(concept string, terms []payloadLookupTerm
 	return db.NewSelect().TableExpr("(?) AS lookup", lookup).
 		ColumnExpr(`latest.id, latest."createdAt"`).
 		Join(latest, args...)
+}
+
+// lookupDrivers is the required terms a lookup reads its range through: the
+// ones a lookup index serves, the fine-grained in preference to the coarse
+// (see latestLookupKeys). Empty when no index serves any of them.
+func lookupDrivers(concept string, terms []payloadLookupTerm) []payloadLookupTerm {
+	var fine, coarse []payloadLookupTerm
+	for _, term := range terms {
+		lookup, served := payloadLookupFor(concept, term.field)
+		switch {
+		case !served:
+		case lookup.coarse:
+			coarse = append(coarse, term)
+		default:
+			fine = append(fine, term)
+		}
+	}
+	if len(fine) > 0 {
+		return fine
+	}
+	return coarse
 }

@@ -26,4 +26,5 @@ var (
 	EnsureEmailDigestLookupIndexes = ensureEmailDigestLookupIndexes
 	EnsureEmailProviderLookupIndex = ensureEmailProviderLookupIndex
 	EnsureWorkRunOwnerLookupIndex  = ensureWorkRunOwnerLookupIndex
+	EnsureWorkRunGoalLookupIndex   = ensureWorkRunGoalLookupIndex
 )

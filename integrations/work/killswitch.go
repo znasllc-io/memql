@@ -50,6 +50,16 @@ package work
 // behind them. Starting from the invocations would page through call history
 // to rediscover a set the run table already holds.
 //
+// The run table holds that set cheaply only through the recovery projection.
+// The read was the DSL query workRunningRunsForOwner, which the engine
+// answered from the owner's whole run history, and for production's cluster
+// owner -- the owner of every pipeline run -- that ran past the statement
+// limit (2026-10-29). It now reads work_run_heads (runningRunsForOwner in
+// recovery_heads.go, which says why it does not refresh), and it REFUSES while
+// that projection cannot answer, so a failure is reported rather than read as
+// "nothing to stop". Either way the pre-dispatch gate is refusing the owner's
+// next machine call.
+//
 // ===========================================================================
 // AUTHORITY: INTERNAL ORIGIN, WHICH IS THE GATE THIS EXACT SURFACE TAUGHT
 // ===========================================================================
@@ -122,7 +132,10 @@ func (i *Integration) CancelComputerUseRuns(ctx context.Context, ownerUserId str
 	// else's id on an open surface.
 	as := ownerActor(ctx, owner)
 
-	runs, err := st.runningRunsForOwner(as)
+	if i.runningRuns == nil {
+		return 0, 0, fmt.Errorf("work: no running-runs read is wired; the kill switch cannot tell what to stop")
+	}
+	runs, err := i.runningRuns(as, owner)
 	if err != nil {
 		return 0, 0, err
 	}

@@ -93,6 +93,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerEmailDigestLookupIndexes(m, logger)
 	registerEmailProviderLookupIndex(m, logger)
 	registerWorkRunOwnerLookupIndex(m, logger)
+	registerWorkRunGoalLookupIndex(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {

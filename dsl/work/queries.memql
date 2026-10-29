@@ -26,8 +26,6 @@
 // precisely what AccessContext.IsClusterOwner() tests. So the filter now says
 // out loud what the tier already implied, and the gate can see it.
 
-use common.traits.{ statusIsRunning }
-
 /// One run by id, for resume. @serverOnly: the run may be the deployment's, with a
 /// present-and-empty owner, so an actor.userId conjunct would refuse the writer its own record.
 @serverOnly
@@ -225,27 +223,9 @@ query run workRunSummaryForOwner {
   shape workRunSummary
 }
 
-/// The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds
-/// server-side, so this answers for whoever the actor is and nobody else.
-///
-/// SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in
-/// its own comment: it is deliberately un-narrowed because two surfaces read it. This is a third
-/// question -- "what is in flight for this person" -- asked by the computer-use kill switch
-/// (memql#5066), where paging an active person's whole run history to find the few running ones is
-/// the wrong read for a control that has to act promptly.
-///
-/// BOUNDED AT 500, which is a real limit and not a formality: a person with more than 500 runs
-/// executing at once would have some missed. Nothing in the product produces that state -- runs are
-/// opened per goal and per analysis -- and an unbounded scan on the path a kill switch takes is the
-/// worse failure. The pre-dispatch gate is refusing every new call meanwhile, so a missed run's
-/// next worker call is denied regardless.
-@actor
-query run workRunningRunsForOwner {
-  filter  row => row.ownerUserId == actor.userId && statusIsRunning(row)
-  sort    "row.createdAt", "desc"
-  paginate 500
-  shape   workRunFull
-}
+// Served by the run goal lookup index, so it costs one goal's runs. The owner's index range is
+// their whole run history, and for the owner of every pipeline run reading goalId across it ran
+// past the statement limit (2026-10-29; component/memql latestLookupKeys).
 
 /// The runs of one of the caller's goals, newest first.
 @actor

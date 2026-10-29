@@ -204,16 +204,6 @@ func (s *store) runForOwner(ctx context.Context, runId string) (map[string]any, 
 	return one(s.query(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runId})))
 }
 
-// runningRunsForOwner is the caller's runs that are executing RIGHT NOW.
-//
-// A separate construct from workRunsForOwner rather than a status filter over
-// it: that one is deliberately unbounded and un-narrowed because two surfaces
-// read it, and paging an active person's whole run history to find the few in
-// flight is the wrong read for a control that has to act promptly.
-func (s *store) runningRunsForOwner(ctx context.Context) ([]map[string]any, error) {
-	return s.query(ctx, "query workRunningRunsForOwner()")
-}
-
 // runUsedAWorker reports whether any call inside this run was dispatched to
 // one of the owner's machines.
 //
