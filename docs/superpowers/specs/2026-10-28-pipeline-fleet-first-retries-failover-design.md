@@ -272,8 +272,8 @@ row.
 | Where | What came back | Class |
 |---|---|---|
 | machine | the machine's fetch failed (`pipeline_clone_failed`), or the clone token could not be minted | nothing ran |
-| machine | `pipeline_cache_unavailable`, `pipeline_runtime_unavailable`, a capacity refusal that reached the result, `denied_by_policy`, `worker_feature_unavailable`, or the dispatcher's verdict that no machine started the step (`pipeline_no_machine_for_need`) | nothing ran |
-| machine | `worker_feature_disabled`, `pipelines_not_allowed`, or a placed attempt's wait for a busy or offline machine that ran out | nothing ran, and that machine is not retried |
+| machine | `pipeline_cache_unavailable`, `pipeline_runtime_unavailable`, a busy or fenced capacity refusal that reached the result (`pipeline_capacity_busy`, `pipeline_capacity_fenced`), `worker_feature_unavailable` beside the dispatcher's verdict that no machine started the step, or that verdict alone (`pipeline_no_machine_for_need`) | nothing ran |
+| machine | `denied_by_policy`, `pipeline_capacity_unavailable`, `worker_feature_disabled` or `pipelines_not_allowed` (the last two with the dispatcher's verdict), or a placed attempt's wait for a busy or offline machine that ran out | nothing ran, and that machine is not retried |
 | machine | `pipeline_recovery_required` | outcome unknown, and that machine is not retried |
 | machine | the connection ended after the dispatch left, a lost reply, or a takeover of an in-flight attempt | outcome unknown |
 | machine | the command exited 0 and its artifacts did not arrive intact (`pipeline_artifact_unavailable`) | outcome unknown |
@@ -312,6 +312,18 @@ a repeatable step still gets.
 - `worker_feature_unavailable`, a Host-commands setting the holding replica
   could not read, was missing: nothing ran, and the same machine may be tried
   again after its delay.
+- The codes the engine itself makes when it refuses before sending
+  (`worker_feature_disabled`, `worker_feature_unavailable`,
+  `pipelines_not_allowed`) are nothing ran only beside the dispatcher's
+  refused-before-start verdict. Without it they are a code like any other, read
+  from the result (final), so a reply from another version cannot make an
+  ordinary failure retryable. A machine's own codes need no verdict: the
+  Cockpit answers them before the command.
+- `denied_by_policy` (the machine's own policy, its container caps included)
+  and `pipeline_capacity_unavailable` (a reservation the machine cannot take:
+  a local model call's fence until the call's deadline, or interrupted work)
+  were retried on the same machine. Neither answer changes within the retry
+  delays, so that machine is not retried and the step moves on at once.
 
 ## 5. Choosing the next attempt
 
@@ -328,7 +340,9 @@ After **nothing ran** or **retry requested** at place P (exit 75 needs no
    eligible machine not yet tried, at once;
 3. otherwise, for a `pool` step when `cloudFallback` is true, the cluster, if
    it has not been a place yet;
-4. otherwise the step fails with its last attempt's failure.
+4. otherwise the step fails with its last attempt's failure; when that attempt
+   only found the fleet exhausted, with the failure before it (decided during
+   implementation: "no machine could take the step" is not why it failed).
 
 After **outcome unknown** at place P, for a repeatable step:
 
@@ -355,14 +369,28 @@ another on the cluster.
 
 A `pool` step's first attempt keeps the Codex behaviour inside one attempt:
 `fleetWaitSeconds` for fleet capacity, then the cluster when `cloudFallback`
-allows. A later attempt naming the fleet waits for busy machines at most
-`max(1, fleetWaitSeconds)` for a `pool` step (then counts as nothing ran, so
-rule 3 applies) and as a first attempt does for a `fleet` step. The floor of
-one second is a correction: a wait of 0 means no bound beyond the run's ceiling.
-A pinned dispatch to a machine that is offline or still busy waits for it at
-most `max(delaysSeconds)`, and at least a second, then counts as nothing ran
-there and is not retried there. A `cluster` step's retries stay on the cluster
-under the same `sameMachine` count. Every attempt counts against the run's
+allows. Corrected during implementation: a refusal a machine made before start
+for another reason (its container caps or policy, Host commands off, pipelines
+no longer allowed), verified by the dispatcher (`RefusedBeforeStart`, not
+`RefusedByGate`), ends that first attempt as nothing ran, naming the machine,
+and the rules above decide: the same machine or another, then the cluster when
+`cloudFallback` allows. It was a final `pipeline_executor_error`, although the
+same refusal on a later attempt read nothing ran; `cloudFallback` covers a
+failed fleet as well as a full one (section 6). Only the fleet staying full
+through the preference sends the first attempt on to the cluster inside itself.
+
+A later attempt naming the fleet without a pin waits for a busy or offline
+machine at most `max(delaysSeconds)`, or `max(1, fleetWaitSeconds)` for a
+`pool` step whose policy allows the cloud, then counts as nothing ran and not
+retried there, so rule 3 applies or the step fails. Corrected during
+implementation, twice: a wait of 0 means no bound beyond the run's ceiling, so
+the first version's fleet-step failover held its stage's slot until the
+ceiling, and its `max(1, fleetWaitSeconds)` for every pool step waited one
+second when no cloud followed, which ended the step on any busy fleet. Every
+wait is at least a second. A pinned dispatch to a machine that is offline or
+still busy waits for it at most `max(delaysSeconds)`, then counts as nothing
+ran there and is not retried there. A `cluster` step's retries stay on the
+cluster under the same `sameMachine` count. Every attempt counts against the run's
 ceiling (720 minutes in production), and no step makes more than 8.
 
 Also decided during implementation: an **unpinned** fleet attempt that comes
@@ -545,14 +573,20 @@ comments at each decision.
 2. **A Cockpit release carrying contract 5**, cut through the release pipeline
    memql#6372 establishes. Not installed yet: a contract-5 Cockpit is
    ineligible on the current engine. It is cut while production still runs the
-   old engine, because its macOS steps need today's machines.
+   old engine, because its macOS steps need today's machines. This PR does not
+   bump `cockpit/VERSION`; that release bumps it in its own release PR, as
+   memql#6372 did, because the version belongs to the release. Eligibility keys
+   on the contract number, not the version.
 3. **A maintenance window:** hold new runs with the cost guard's
    `operatorHold`; let in-flight runs finish; deploy the engine (memql-znas pin,
    manual ArgoCD sync); upgrade Cockpit on all four machines (CyberPC also
    needs `pipelines.allow: true`; Black MacBook Pro when the owner turns
    pipelines back on); release the hold and watch the first run, holding again
    if it fails. (Corrected during implementation: a hold cannot let exactly one
-   run through, because an allowance admits every queued run.) After the deploy,
+   run through, because an allowance admits every queued run. Holding again
+   after the deploy also stops new cloud Jobs of runs already started, so their
+   cluster steps wait under their ceiling until the hold is released; only the
+   old engine's hold stops nothing but new runs.) After the deploy,
    dry-run the installed policy: a policy phase that errors now refuses every
    run with a command step (section 6).
 4. **memql follow-up PR:** `memql-package.yaml` moves the portable checks to
@@ -581,6 +615,10 @@ comments at each decision.
 - Source tests prove the contract; live fleet-to-cloud behaviour is verified at
   rollout, not by this PR. Neither live fleet-to-cloud failover nor a
   production maintenance window has been exercised.
+- Found during implementation: a wait for a busy machine that runs out marks
+  the machine not retried for the rest of the step although nothing ran there,
+  and a failover onto a fleet busy for longer than the longest retry delay ends
+  the step (or sends a pool step on to the cluster), never worse than no retry.
 - Found during implementation: a repeatable cluster step's earlier attempt can
   start after its runner reported and before its Job was deleted, so it may have
   run in part before the next attempt; confirmed deletion keeps the two from

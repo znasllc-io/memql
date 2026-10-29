@@ -324,7 +324,10 @@ local defaults; a request above either local ceiling refuses before checkout.
 The worker accounts for the command and every service together, keeping one CPU
 and host RAM headroom outside that total. It reads host RAM and Docker metadata
 before checkout and again before starting services or the command. Missing or
-inconsistent evidence refuses. Docker admission subtracts current container RAM
+inconsistent evidence refuses. On macOS the kernel's memory pressure level
+refuses a step only at critical; at warn, which a busy Mac reads for long
+stretches, available memory against the reserve decides, and a level the worker
+does not recognize refuses. Docker admission subtracts current container RAM
 usage and keeps at least 2 GiB or one quarter of its pool for runtime overhead;
 this is conservative admission, not a reservation against unrelated applications.
 
@@ -333,12 +336,19 @@ lock with local builds, workbenches and local model calls. Inference shares that
 lock with retained workspaces while excluding CI builds. Its admission accounts
 for the workspaces' bounded memory so a goal can use a model, use its workspace,
 then use the model again without discarding that workspace. A retained
-`inference-active.json` witness contains only a version and random
-attempt identity; interruption, cancellation or an uncertain runtime reply keeps
-that fence. Its age or an exited PID does not prove completion. Only the original
-call's confirmed terminal response clears its exact witness, even if the answer
-then fails validation or cannot be delivered; otherwise operator
-reconciliation is required. Existing resident-model and pressure rules remain.
+`inference-active.json` witness contains only a version, a random attempt
+identity and the time it ends: the call's own deadline, after which the runtime
+is no longer working for it. The original call's confirmed terminal response
+clears its exact witness at once, even if the answer then fails validation or
+cannot be delivered. Interruption, cancellation or an uncertain runtime reply
+keeps the fence until its end, because the runtime may still be generating; an
+exited PID proves nothing. After its end the witness reads as absent, and the
+next model call or build removes it; a workbench, which shares the lock with
+model calls, only ignores it. A witness an older worker wrote names no end, and
+expires 30 minutes after it was written (no limit bounds a local call's length,
+so the worker chooses that bound), so an upgrade clears it. A symlink or
+directory in its place is never read or removed. Existing resident-model and
+pressure rules remain.
 
 Native macOS commands use this same shared admission and conservative CPU/RAM
 headroom, but do not gain container hard limits. They remain an explicitly

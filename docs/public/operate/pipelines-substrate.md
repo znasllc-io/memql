@@ -805,9 +805,9 @@ runtime are confirmed pre-execution refusals and permit another candidate.
 When the dispatcher confirms that shared build capacity was busy or fenced by
 a retained local-build record, an eligible worker is offline, or its connection
 disappeared before dispatch, the fleet runner waits and routes again under the
-run's wall-clock ceiling, or, for a retry pinned to its machine or a pool
-step's failover, within the shorter wait the driver gave it; a fleet step's
-failover to another machine waits up to the ceiling
+run's wall-clock ceiling, or, for a retry, within the shorter wait the driver
+gave it: the longest retry delay, or `fleetWaitSeconds` for a pool step's move
+to another machine when the cloud may follow
 ([When each side gives up](#when-each-side-gives-up)). Every dispatch
 rechecks consent and routing. Waiting does not consume
 the command's own timeout, but the run ceiling still limits its remaining
@@ -838,9 +838,13 @@ The worker admits one pipeline command at a time per OS user across all its
 cluster connections. Its exclusive host lock also excludes Fleet workbench
 execution, local inference and guarded local builds for that user. Inference
 retains a durable activity witness when its runtime outcome is uncertain, so a
-process exit cannot make potentially active inference appear idle. These locks
-coordinate admission; they do not impose hard CPU or memory limits on native
-commands or coordinate another OS account.
+process exit cannot make potentially active inference appear idle. The witness
+ends at the call's own deadline (one an older Cockpit wrote, 30 minutes after it
+was written), so a cancelled call keeps the machine from steps only until then;
+until it ends the machine answers `pipeline_capacity_unavailable`, and the step
+moves on to another machine. These locks coordinate admission; they do not
+impose hard CPU or memory limits on native commands or coordinate another OS
+account.
 
 Pipeline attempt records also outlive process death. A replacement worker
 reconciles recorded containers and networks only against the same Docker daemon;
@@ -905,13 +909,18 @@ together, behind a global hold ([Operator run admission](pipelines.md#operator-r
 
 1. Hold new runs: `allowNewRuns: false`, with no `allowTrainRuns`. Held runs
    stay queued, and their clocks do not start.
-2. Let the runs in flight finish. The hold stops only new runs, and a fleet
-   step of a run still going when the engine changes finds no eligible machine.
+2. Let the runs in flight finish. Under the engine you are replacing, the hold
+   stops only new runs, and a fleet step of a run still going when the engine
+   changes finds no eligible machine.
 3. Deploy the engine.
 4. Upgrade every machine's Cockpit.
 5. Release the hold. An allowance admits every queued run, so a hold cannot let
    exactly one through.
-6. Watch the first run that takes a fleet step. If it fails, hold again.
+6. Watch the first run that takes a fleet step. If it fails, hold again. Under
+   the new engine a hold also stops new cloud Jobs of runs already started
+   ([Operator run admission](pipelines.md#operator-run-admission)): their
+   cluster steps wait, using up their run's ceiling, until the hold is
+   released, while their fleet steps go on.
 
 Build the contract-5 Cockpit before the window: a release pipeline whose macOS
 steps run on your machines needs them while they still match the engine.
@@ -1146,9 +1155,9 @@ Nothing waits forever, and each party waits longer than the one inside it:
 | The runner, settling a step that ended | 3 minutes 30 seconds in all: recording how it ended (10 s), reading the log to its end (30 s), the clone's and services' tails (20 s), the Library writes (2 min) and recording the outcome on the Job (30 s), each phase in a window of its own | a Library that does not answer costs the step its files, never the outcome recorded on the Job |
 | The agent | while the step's Job does not exist, the run's ceiling plus 4 minutes 30 seconds; once it does, the Job's creation plus the step's timeout plus 4 minutes 30 seconds, never past the run's ceiling plus 4 minutes 30 seconds. The 4 minutes 30 seconds are the runner's settling and one more minute | one last status read decides. A recorded outcome is taken; a Job still held reads as its deadline code; a Job never created (no slot came before the run's ceiling, or the request never reached a runner) reads `pipeline_run_ceiling`; a holder gone quiet, or no answer, reads `pipeline_node_lost`. Whatever it reads, the Job is deleted |
 | The seam's driver | the run's ceiling plus 10 minutes | `pipeline_run_ceiling` |
-| The driver, between a step's attempts | 8 attempts, the installation's retry limits, or a next attempt that would start with less than a second of the run's ceiling left | the step fails with its last attempt's failure |
+| The driver, between a step's attempts | 8 attempts, the installation's retry limits, or a next attempt that would start with less than a second of the run's ceiling left | the step fails with its last attempt's failure, or, when that attempt only found no free machine, with the one before it |
 | A fleet dispatch | the effective timeout plus 5 minutes | by then the machine has stopped the command at the timeout, and the step failed with its deadline code |
-| A retry's wait for a busy or offline machine | the longest retry delay for a pinned machine; `fleetWaitSeconds`, at least one second, for a pool step's next machine | nothing ran there, and the next place is tried |
+| A retry's wait for a busy or offline machine | the longest retry delay, at least one second, for a pinned machine and for a move to another machine; `fleetWaitSeconds`, at least one second, for a pool step's move to another machine when its installation allows the cloud | nothing ran there; after a move, no other machine is tried for the step, and the cluster follows where the policy allows it, else the step fails |
 
 ---
 

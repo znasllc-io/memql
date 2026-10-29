@@ -1620,12 +1620,15 @@ nothing ran or a requested retry at place P:
 
 1. P again, up to `sameMachine` times, each after the next of `delaysSeconds`
    (the last one repeats), unless P refused for a reason a delay does not change
-   (Host commands off, pipelines no longer allowed) or a wait for it ran out;
+   (its own policy or limits, Host commands off, pipelines no longer allowed, a
+   local model call that may still be running there) or a wait for it ran out;
 2. then, for a fleet or pool step with `otherMachines`, any eligible machine not
    yet tried, at once;
 3. then, for a pool step whose installation allows cloud (`cloudFallback`), the
    cluster, once;
-4. otherwise the step fails with its last attempt's failure.
+4. otherwise the step fails with its last attempt's failure, or, when that
+   attempt only looked for a free machine and found none, with the failure
+   before it.
 
 After an unknown outcome only a `repeatable` step goes on, and any other step
 fails. A repeatable fleet or pool step goes to a machine it has not tried (with
@@ -1636,12 +1639,17 @@ rule 3.
 
 A `fleet` step stays on the owner's machines, so a macOS step's failover ends at
 the Macs. A `cluster` step retries on the cluster only. A `pool` step reaches
-the cluster at most once, whatever ended its attempt there. A retry pinned to
-one machine waits for it, busy or offline, at most the longest delay; a pool
-step's move to another machine waits at most `fleetWaitSeconds` (at least a
-second), and a fleet step's as long as its first attempt would. A wait that runs
-out counts as nothing ran. Every attempt counts against the run's ceiling, and
-no step makes more than 8.
+the cluster at most once, whatever ended its attempt there. Its first attempt
+waits for a busy fleet up to `fleetWaitSeconds` and then goes on to the cluster
+when `cloudFallback` allows (without it, it waits on); a machine that refuses it
+for another reason (its limits or policy, Host commands off) ends that attempt
+with nothing run, and the order above takes over. A retry pinned to one machine
+waits for it, busy or offline, at most the longest delay, and so does a move to
+another machine, except a pool step's when its installation allows the cloud,
+which waits at most `fleetWaitSeconds`. Each waits at least a second. A wait
+that runs out counts as nothing ran, and after a move no other machine is tried:
+the cluster follows where the policy allows it, and otherwise the step fails.
+Every attempt counts against the run's ceiling, and no step makes more than 8.
 
 **The limits are the installation's.** The installed policy's `retries` set
 them ([Operator run admission](#operator-run-admission)). The portable default
