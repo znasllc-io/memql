@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { downloadVSCode } = require("./download.cjs");
+const { downloadVSCode, exitCodeFor } = require("./download.cjs");
 
 function fixture(t, body) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "memql-download-test-"));
@@ -103,4 +103,38 @@ test("an upstream transport retry resets only its byte counter", {timeout:10000}
   },100);`);
   assert.equal(await downloadVSCode({}, {...f,timeoutMs:500,totalTimeoutMs:5000}),'/download/Code');
   assert.equal(f.count(),1);
+});
+
+test("a download that failed for a passing reason asks the pipeline to retry the step", {timeout:10000}, async t => {
+  const stalled = fixture(t, "setInterval(() => {}, 1000);");
+  const stall = await downloadVSCode({}, {...stalled, timeoutMs:300}).catch(error => error);
+  assert.match(stall.message, /download stalled/);
+  assert.equal(exitCodeFor(stall), 75);
+
+  const slow = fixture(t, `let bytes=0;setInterval(()=>process.send({progress:{stage:'downloading',bytes:++bytes}}),20);`);
+  const limit = await downloadVSCode({}, {...slow, timeoutMs:500, totalTimeoutMs:600}).catch(error => error);
+  assert.match(limit.message, /total time limit/);
+  assert.equal(exitCodeFor(limit), 75);
+
+  const transport = fixture(t, `Promise.reject(Object.assign(new Error('aborted'), {code:'ECONNRESET'}));`);
+  const reset = await downloadVSCode({}, transport).catch(error => error);
+  assert.match(reset.message, /ECONNRESET/);
+  assert.equal(exitCodeFor(reset), 75);
+});
+
+test("a download that cannot succeed by retrying fails the step", async t => {
+  for (const body of ["console.error('Version not found: HTTP 404'); process.exit(1);", "process.disconnect();"]) {
+    const f = fixture(t, body);
+    const error = await downloadVSCode({}, f).catch(error => error);
+    assert.match(error.message, /download failed/);
+    assert.equal(exitCodeFor(error), 1);
+  }
+});
+
+test("only a download failure can ask for a retry", () => {
+  // A failed host test, or a look-alike thrown outside the download, is final.
+  assert.equal(exitCodeFor(Object.assign(new Error("3 host tests failed"), {retryable:true})), 1);
+  assert.equal(exitCodeFor(new Error("VS Code download exceeded its total time limit")), 1);
+  assert.equal(exitCodeFor("ECONNRESET"), 1);
+  assert.equal(exitCodeFor(undefined), 1);
 });

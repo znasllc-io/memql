@@ -8,6 +8,13 @@ const { setTimeout: delay } = require("node:timers/promises");
 // including through an unhandled rejection. Its timeout still retries only the
 // downloader process, under the same attempt count and shared time budget.
 const TRANSIENT = /\b(?:ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH)\b|@vscode\/test-electron request timeout/;
+const TIME_LIMIT = "VS Code download exceeded its total time limit";
+
+// The pipeline reads exit 75 (EX_TEMPFAIL) as a request to retry the step,
+// within the step's retry limits. Only a failure carrying this mark, set as it
+// leaves downloadVSCode, can make that request.
+const RETRY_STEP = 75;
+const DOWNLOAD_FAILURE = Symbol("VS Code download failure");
 
 function attempt(options, worker, idleMs, remainingMs) {
   return new Promise((resolve, reject) => {
@@ -22,7 +29,7 @@ function attempt(options, worker, idleMs, remainingMs) {
     const stages = new Set();
     const stop = reason => { timeoutReason = reason; child.kill("SIGKILL"); };
     const idle = setTimeout(() => stop("VS Code download stalled"), idleMs);
-    const deadline = setTimeout(() => stop("VS Code download exceeded its total time limit"), remainingMs);
+    const deadline = setTimeout(() => stop(TIME_LIMIT), remainingMs);
     const clearTimers = () => { clearTimeout(idle); clearTimeout(deadline); };
     child.stderr.on("data", chunk => {
       process.stderr.write(chunk);
@@ -65,7 +72,7 @@ function attempt(options, worker, idleMs, remainingMs) {
   });
 }
 
-async function downloadVSCode(options, settings = {}) {
+async function download(options, settings) {
   const worker = settings.worker || __filename;
   // The 302 MB macOS archive can make progress for over ten minutes. Give all
   // attempts one shared 20-minute budget, leaving time for the real host test.
@@ -73,7 +80,7 @@ async function downloadVSCode(options, settings = {}) {
   const deadline = performance.now() + (settings.totalTimeoutMs ?? 1200000);
   for (let number = 1; number <= 3; number++) {
     const remainingMs = deadline - performance.now();
-    if (remainingMs <= 0) throw new Error("VS Code download exceeded its total time limit");
+    if (remainingMs <= 0) throw new Error(TIME_LIMIT);
     try {
       return await attempt(options, worker, idleMs, remainingMs);
     } catch (error) {
@@ -83,6 +90,25 @@ async function downloadVSCode(options, settings = {}) {
       await delay(retryDelayMs);
     }
   }
+}
+
+async function downloadVSCode(options, settings = {}) {
+  try {
+    return await download(options, settings);
+  } catch (error) {
+    if (error !== null && typeof error === "object") error[DOWNLOAD_FAILURE] = true;
+    throw error;
+  }
+}
+
+// exitCodeFor is the status a runner exits with after a failure. A download
+// that failed for a passing reason (a stalled transfer, the shared time limit
+// or a transport failure) answers 75, so another attempt can succeed. A bad
+// version, a missing receipt, a failed host test and anything thrown outside
+// the download answer 1.
+function exitCodeFor(error) {
+  if (!error?.[DOWNLOAD_FAILURE]) return 1;
+  return error.retryable === true || error.message === TIME_LIMIT ? RETRY_STEP : 1;
 }
 
 function safeError(error) {
@@ -116,4 +142,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { downloadVSCode };
+module.exports = { downloadVSCode, exitCodeFor };
