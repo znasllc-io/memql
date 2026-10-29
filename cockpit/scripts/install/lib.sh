@@ -11,8 +11,8 @@
 # can never drift between the two platforms; the uninstall helpers at
 # the bottom are the single statement of what an uninstall removes,
 # for the same reason. The pure-logic helpers are exercised by
-# lib_test.sh, wired into CI via
-# .github/workflows/install-scripts-lint.yml.
+# lib_test.sh. install_test.go includes these fixture suites in native
+# Go test lanes and make test; no GitHub Actions workflow is needed.
 
 set -uo pipefail
 
@@ -30,8 +30,8 @@ readonly INSTALL_PREFIX_USER="${HOME}/.memql/bin"
 readonly STATE_DIR_DEFAULT="${HOME}/.memql/state"
 
 # Where releases live. Both download bases the installers compose hang
-# off this one root: `latest/download` when no version is named, and
-# `download/vX.Y.Z` for a --version pin (and for the app / menu
+# off this one root: `download/cockpit/vX.Y.Z` after catalog discovery or
+# a --version pin (and for the app / menu
 # archives, which must match the worker that was just installed).
 # Overridable ONLY so lib_test.sh can point the composition at a
 # file:// fixture and prove the pinned URL offline; the published
@@ -977,9 +977,8 @@ function preflight_asset() {
     arch="$(detect_arch)"
     echo "ERROR: release asset not found (or unreachable): $url" >&2
     echo "       (flavour: ${flavour}, platform: ${os}/${arch})" >&2
-    echo "       The default download base is the LATEST release" >&2
-    echo "       (releases/latest/download), which may not publish an asset for" >&2
-    echo "       this flavour. Check the release's published assets, pass" >&2
+    echo "       The selected Cockpit release must publish this platform and" >&2
+    echo "       flavour. Check its published assets, pass" >&2
     echo "       --version=X.Y.Z to pin a release that ships it, or pass" >&2
     echo "       --download-base to point at any other location." >&2
     echo "       Nothing was installed or modified." >&2
@@ -1071,19 +1070,40 @@ function release_checksum_manifest() {
     esac
 }
 
-# Resolve only a published, stable Cockpit release. The engine and Cockpit
-# share a repository; GitHub's single /latest pointer is not product-specific.
+# The catalog selector is shared with the standalone POSIX installer. In a
+# checkout it is a sibling; a piped installer fetches it from the same source
+# base as lib.sh. Selection is read-only and completes before install effects.
+# Explicit pins bypass it. The helper follows all pages and refuses a partial
+# catalog, so a network failure cannot turn an older page into "latest".
 function resolve_latest_version() {
     local endpoint="${MEMQL_INSTALL_RELEASE_API:-https://api.github.com/repos/znasllc-io/memql/releases?per_page=100}"
+    local helper="" temporary="" tag rc
     command -v python3 >/dev/null 2>&1 || { echo "ERROR: Python 3 is required to select a Cockpit release; alternatively pass --version." >&2; return 4; }
-    curl -fsSL "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 2097152 "$endpoint" |
-        python3 -c 'import json,re,sys
-rows=json.load(sys.stdin)
-for row in rows:
-    tag=row.get("tag_name", "")
-    if not row.get("draft") and not row.get("prerelease") and re.fullmatch(r"cockpit/v[0-9]+\.[0-9]+\.[0-9]+",tag):
-        print(tag[len("cockpit/v"): ]); sys.exit(0)
-sys.exit("No published Cockpit release was found; select a version explicitly.")'
+    # source_lib deletes its downloaded temporary library after sourcing it.
+    # Never treat that temporary directory as a trusted helper directory.
+    if [[ -f "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]##*/}" == lib.sh ]]; then
+        helper="$(dirname "${BASH_SOURCE[0]}")/release-version.py"
+    fi
+    if [[ ! -f "$helper" ]]; then
+        helper="$(mktemp)" || return 4
+        temporary="$helper"
+        local raw_base="${MEMQL_INSTALL_RAW_BASE:-https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install}"
+        local helper_flags
+        read -r -a helper_flags <<< "$(release_fetch_protocol "${raw_base}/release-version.py")"
+        if ! curl "${helper_flags[@]}" -sS "${CURL_NET[@]}" "${CURL_SMALL[@]}" --max-filesize 65536 "${raw_base}/release-version.py" -o "$helper" || [[ ! -s "$helper" ]]; then
+            rm -f "$temporary"
+            echo "ERROR: Could not load the Cockpit release selector. Nothing was installed; retry later." >&2
+            return 4
+        fi
+    fi
+    if tag="$(python3 "$helper" --api-url "$endpoint")"; then
+        [[ -z "$temporary" ]] || rm -f "$temporary"
+        printf '%s\n' "${tag#cockpit/v}"
+    else
+        rc=$?
+        [[ -z "$temporary" ]] || rm -f "$temporary"
+        return "$rc"
+    fi
 }
 
 # verify_release_binary checks a downloaded binary against its release's

@@ -844,8 +844,8 @@ until upgraded; there is no fallback to an inline archive.
 clone script, over `https` only), the command in the machine's own environment,
 its output streamed back masked, the artifacts packed, the checkout removed --
 is the Cockpit's, and
-[Pipeline steps on this machine](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/pipelines.md)
-(`docs/pipelines.md` in the memql-cockpit repository) says it. On the engine's
+[Pipeline steps on this machine](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/pipelines.md)
+(`cockpit/docs/pipelines.md` in this repository) says it. On the engine's
 side:
 
 - The agent mints the clone token (one repository, contents read). The dispatch

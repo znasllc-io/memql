@@ -24,7 +24,7 @@ require making its users developers.
 
 ## Cockpit owns the machine
 
-[MemQL Cockpit](https://github.com/znasllc-io/memql-cockpit) is the fleet
+[MemQL Cockpit](../cockpit/README.md) is the fleet
 worker runtime and cluster CLI. It owns machine enrollment, the worker
 connection, local tool execution, local app/model access, watched-folder
 backup, its local transfer spool, and its backup ledger. The extensions must

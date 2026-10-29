@@ -519,8 +519,8 @@ ordinary Library files owned by the same person, and the one-way invariant does
 not stop applying because the arrangement ended. Nothing reaches the origin
 either: stopping a backup does not delete anything on the machine.
 
-Operator side, in the cockpit repo:
-[docs/watched-folders.md](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/watched-folders.md).
+Operator-side documentation in the monorepo:
+[Cockpit watched folders](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/watched-folders.md).
 
 ---
 

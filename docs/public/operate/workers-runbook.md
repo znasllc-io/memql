@@ -83,11 +83,16 @@ consent and policy before execution.
 ## 2. Install
 
 Pick the installer for your OS. `install-mac.sh` and `install-linux.sh` ship
-from the `memql-cockpit` repo (the worker is a run mode of the `memql`
-command that repo builds), not from this engine repo's `scripts/install/`
--- that directory carries the cluster-bring-up installers (`mkcert-setup.sh`,
-`hosts-entries.sh`, `install-binary.sh`, ...) and has no `install-mac.sh` /
-`install-linux.sh` of its own.
+from `cockpit/scripts/install/` in the MemQL monorepo. Cockpit builds the
+machine-side `memql` command and releases it independently from the engine.
+The root `scripts/install/` directory carries cluster-bring-up installers,
+not the machine installers.
+
+The default selects a published, stable `cockpit/vX.Y.Z` release from
+`znasllc-io/memql`. If no such release is available, the operator must complete
+Cockpit publication with the platform assets and checksums before installation
+can proceed. Passing `--version=X.Y.Z` selects an existing release; it cannot
+recover missing assets. An engine release is never a Cockpit fallback.
 
 Each command below is ONE physical line, deliberately: terminal paste handling
 splits the multi-line backslash form, so `bash -s --` runs alone and every flag
@@ -127,7 +132,7 @@ version. Fleet's setup and cancellation commands follow the selected location.
 ### macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh | bash -s -- --token mql_wkr_xxxxxxxxxxxx --cluster https://api.example.com --computeruse
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/install-mac.sh | bash -s -- --token mql_wkr_xxxxxxxxxxxx --cluster https://api.example.com --computeruse
 ```
 
 The install script:
@@ -176,7 +181,7 @@ install rather than as a missing grant.
 ### Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-linux.sh | bash -s -- --token mql_wkr_xxxxxxxxxxxx --cluster https://api.example.com --computeruse
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/install-linux.sh | bash -s -- --token mql_wkr_xxxxxxxxxxxx --cluster https://api.example.com --computeruse
 ```
 
 The install script upserts the same multi-home registry
@@ -236,29 +241,29 @@ enrollment and the runtime in one go.
 **macOS** (one physical line):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.<domain>
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.<domain>
 ```
 
 With flags (still one physical line):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.<domain> --purge --user-local
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.<domain> --purge --user-local
 ```
 
 **Linux** (one physical line):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.<domain>
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.<domain>
 ```
 
 With flags:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.<domain> --purge --user-local
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/main/cockpit/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.<domain> --purge --user-local
 ```
 
-From a cockpit clone: `./scripts/install/uninstall-mac.sh` or
-`./scripts/install/uninstall-linux.sh` with the same flags.
+From the monorepo root: `./cockpit/scripts/install/uninstall-mac.sh` or
+`./cockpit/scripts/install/uninstall-linux.sh` with the same flags.
 
 ---
 
@@ -711,7 +716,8 @@ connects with, as ONE act (`fleetRevokeMachine`, epic memql#5327 design D2),
 ends its live connection within seconds from whichever replica is holding it,
 and shows the uninstall one-liner for its platform — the same
 paste-safe `curl | bash` lines in [Uninstall](#uninstall) above
-(`uninstall-mac.sh` / `uninstall-linux.sh` from cockpit `main`), with
+(`cockpit/scripts/install/uninstall-mac.sh` / `uninstall-linux.sh` from the
+monorepo's `main`), with
 `--cluster=https://api.<domain>` naming this cluster's enrollment. That
 script removes the enrollment and, when it was the machine's last one,
 stops and removes the service, the binary, and the token registry

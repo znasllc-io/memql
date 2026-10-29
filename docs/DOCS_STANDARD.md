@@ -9,7 +9,8 @@ owner: znas
 
 # Documentation Standard
 
-**Status:** stable · **Applies to:** `memql` (canonical), and — lighter — `memql-cockpit` and the product repos (the frontend SPA and the product pack).
+**Status:** stable · **Applies to:** `memql` (canonical), and — lighter — its
+`cockpit/docs/` tree and the product repos (the frontend SPA and the product pack).
 
 This is the single rulebook for where documentation lives, how it is
 tagged, and how it reaches **memql.io**. It exists because docs had
@@ -32,7 +33,6 @@ docs/
 │   ├── ai/                   # AI providers, policies, integrations & tools
 │   ├── operate/              # deploy, auth, env, runbooks that are public
 │   ├── build/                # gRPC API, SDKs, building against MemQL
-│   ├── cockpit/              # the terminal IDE / ops console
 │   └── reference/            # generated reference (the bundle renders the
 │                             # concept catalog here as reference/concepts.md)
 ├── public_boundary_allowlist.toml  # links the boundary gate lets through

@@ -2,14 +2,16 @@
 
 ## Supported versions
 
-memQL Cockpit is pre-1.0 and follows memQL core's release cadence. Only the latest commit on `main` is supported. Security fixes are applied to `main`; there are no backported branches yet.
+MemQL Cockpit is pre-1.0 and lives in this repository's `cockpit/` module.
+Only the latest commit on the monorepo's `main` is supported. Security fixes
+are applied to `main`; there are no backported branches yet.
 
 ## Reporting a vulnerability
 
 **Please do not file a public issue for security vulnerabilities.**
 
 Open a private security advisory via the **Security** tab on this repository, or directly:
-[Report a vulnerability](https://github.com/znasllc-io/memql-cockpit/security/advisories/new)
+[Report a vulnerability](https://github.com/znasllc-io/memql/security/advisories/new)
 
 Include:
 
