@@ -191,6 +191,16 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 	if !strings.Contains(vuln.Run, "@v1.7.0") || !strings.Contains(vuln.Run, "govulncheck github.com/znasllc-io/memql/...") || strings.Contains(vuln.Run, "-format") || !strings.Contains(vuln.Run, `test "$status" -eq 0`) {
 		t.Fatal("Go vulnerability findings can disappear behind formatting or incomplete module coverage")
 	}
+	// A release records findings without failing on them (owner decision,
+	// 2026-10-29): only its exit 3, findings, is relaxed, and only for the
+	// release event; a broken scan still fails, and so does every other event.
+	if !strings.Contains(vuln.Run, `[ "${MEMQL_EVENT:-}" = release ] && [ "$status" -eq 3 ]`) {
+		t.Fatal("a release fails on Go vulnerability findings, or relaxes more than findings")
+	}
+	npm, found := engineDeclaredStep(spec, "npm-vulnerabilities")
+	if !found || !strings.Contains(npm.Run, `if [ "${MEMQL_EVENT:-}" = release ]; then`) || !strings.Contains(npm.Run, "--report-only") || strings.Count(npm.Run, "npm-audit.py") != 2 {
+		t.Fatal("npm audit must report only on releases and fail on findings elsewhere")
+	}
 	// govulncheck over every module holds the whole program in memory: at the
 	// namespace default (4 GiB) the kernel killed it at 4.2 GB resident (run
 	// 45f5502f, 2026-10-11), so the budget is declared, not inherited.

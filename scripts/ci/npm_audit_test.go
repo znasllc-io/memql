@@ -56,6 +56,15 @@ print(json.dumps(report))
 			if (err == nil) != (fault == "clean") {
 				t.Fatalf("fault=%s: err=%v\n%s", fault, err, out)
 			}
+			// A release records findings without failing on them, but a report
+			// it cannot read is still no audit (--report-only, release runs).
+			cmd = exec.Command("python3", script, "--report-dir=reports", "--report-only")
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "FAULT="+fault, "PATH="+filepath.Join(root, "bin")+":"+os.Getenv("PATH"))
+			out, err = cmd.CombinedOutput()
+			if (err == nil) != (fault == "clean" || fault == "findings") {
+				t.Fatalf("report-only fault=%s: err=%v\n%s", fault, err, out)
+			}
 			if fault != "empty" {
 				if _, err := os.Stat(filepath.Join(root, "reports", "root.json")); err != nil {
 					t.Fatal("scanner report was not retained", err)
