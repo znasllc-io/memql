@@ -382,7 +382,7 @@ func describe(p *pipelines.AttemptPlacement) string {
 func TestAStepReportCarriesItsAttempts(t *testing.T) {
 	const machine, other = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c", "7a1b2c3d-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
 	history := []attemptRecord{
-		// The machine's name, as its owner sees it in Fleet, which the dispatcher
+		// The machine's display name, which its owner chose and the dispatcher
 		// recorded with the id: the name is what the check run says.
 		{Attempt: 1, Class: pipelines.AttemptNothingRan, Code: pipelines.CodeCloneFailed, Surface: pipelines.PlacementFleet, WorkerID: machine, MachineName: "MSI Raider"},
 		{Attempt: 2, Class: pipelines.AttemptOutcomeUnknown, Code: pipelines.CodeNodeLost, Surface: pipelines.PlacementCluster, JobName: "job-1"},

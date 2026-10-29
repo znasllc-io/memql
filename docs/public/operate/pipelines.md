@@ -1808,13 +1808,16 @@ check never promises a retry the step's row does not hold:
 *Starts after* is the wait the driver scheduled, and stays true once the attempt
 has begun: nothing publishes again when it does, because that would delay the
 attempt by a GitHub round trip. A retry that waits for nothing (another machine)
-says the next attempt *follows*. A machine is named as its owner sees it in
-Fleet, its display name or else the name it reported: the dispatcher records the
-name with each attempt, beside the registration id, and the cluster is *the
-cluster*. An attempt recorded before names were, on a machine no other attempt of
-the step has a name for, falls back to the first eight characters of the
-registration id. A replica that takes a run over does not restate *Retrying*
-before the step settles, and the step's receipt then carries its whole history.
+says the next attempt *follows*. A machine is named by the display name its
+owner gave it in Fleet: the dispatcher records that name with each attempt,
+beside the registration id, and the cluster is *the cluster*. The check run is
+public on GitHub for a public repository, so the name a machine reported, which
+is its hostname unless the owner replaced it, is never published. A machine its
+owner gave no display name is called by the first eight characters of its
+registration id, as is an attempt recorded before names were, unless another
+attempt of the same step has a name for that machine. A replica that takes a run
+over does not restate *Retrying* before the step settles, and the step's receipt
+then carries its whole history.
 
 ### A run can fail with every step passed
 

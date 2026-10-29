@@ -97,18 +97,24 @@ func (a attemptRecord) asMap() map[string]any {
 const machineIDChars = 8
 
 // whereWords is where the attempt ran, in the words the check run says it in:
-// the cluster, or a machine by the name its owner sees in Fleet.
+// the cluster, or a machine by the display name its owner chose.
 //
 // THE NAME COMES FROM THE DISPATCHER, which stamps it on the result beside the
 // registration id (worker.Result.MachineName) and the driver keeps it in the
 // record (MachineName): the driver itself holds no machine's name, which is a
-// Fleet setting. known is the names this step's other attempts recorded, by bare
-// registration id: an attempt the dispatcher could only attribute to its pin
-// (no machine answered, so none was named) takes the name its machine was
-// recorded under, so one machine is not called two things in one list. Only a
-// machine no attempt of the step recorded a name for -- a row written before
-// names were recorded -- falls back to the first characters of its id, and a
-// fleet that named no machine is "your fleet".
+// Fleet setting. It is the display name the machine's OWNER chose and nothing
+// else -- never the name the machine reported, which is its hostname -- because
+// this sentence is a check run, public on GitHub for a public repository.
+//
+// known is the names this step's other attempts recorded, by bare registration
+// id: an attempt the dispatcher could only attribute to its pin (no machine
+// answered, so none was named) takes the name its machine was recorded under, so
+// one machine is not called two things in one list. Only a machine no attempt of
+// the step recorded a name for -- its owner gave it no display name, or the row
+// was written before names were recorded -- falls back to the first characters of
+// its id, and a fleet that named no machine is "your fleet". Covered by
+// TestTheCheckRunCallsAMachineByItsIdWhenItsOwnerGaveItNoName and
+// TestAStepReportCarriesItsAttempts.
 func (a attemptRecord) whereWords(known map[string]string) string {
 	switch {
 	case a.Surface == pipelines.PlacementCluster:

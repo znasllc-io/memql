@@ -791,8 +791,8 @@ func TestAnUnconfirmedCleanupStopsTheRetries(t *testing.T) {
 }
 
 // retryingMachine is the registration a retried step's first attempt ran on, and
-// retryingMachineName what the check run calls it: the name its owner sees in Fleet,
-// which the dispatcher records with the id.
+// retryingMachineName what the check run calls it: the display name its owner chose
+// in Fleet, which the dispatcher records with the id.
 const (
 	retryingMachine     = "3f9c2ab0-1d2e-4f3a-8b5c-6d7e8f9a0b1c"
 	retryingMachineName = "MSI Raider"
@@ -1139,5 +1139,34 @@ func TestAMachineNameIsMaskedLikeTheRestOfAnAttemptsRecord(t *testing.T) {
 	}
 	if final := rh.lastUpdate(t).Run; !strings.Contains(final.Output.Summary, "Attempt 1: `pipeline_clone_failed` on box-\\*\\*\\*.") {
 		t.Errorf("the concluded check run names the masked machine:\n%s", final.Output.Summary)
+	}
+}
+
+// A machine its owner gave no display name arrives with none (the dispatcher
+// stamps only a name the owner chose: a check run is public, and the name a
+// machine reported is its hostname), and the check run calls it by the first
+// characters of its registration id, as it does a row written before names were
+// recorded.
+func TestTheCheckRunCallsAMachineByItsIdWhenItsOwnerGaveItNoName(t *testing.T) {
+	rh := newRetryHarness(t, retryFleetManifest, true)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.Attempt == 1 {
+			return onMachine(nothingRanResult(pipelines.CodeCloneFailed, "The fetch failed."), retryingMachine), nil
+		}
+		return onMachine(passed(req), retryingMachine), nil
+	}
+	run := rh.openRun(t, prOpening())
+	fire := make(chan time.Time)
+	rh.driveIntoTheWait(t, run, fire)
+
+	wantWhile := "- `build.mac`: Retrying: attempt 1 failed (`pipeline_clone_failed` on machine 3f9c2ab0); attempt 2 starts after 30s.\n"
+	if waiting := rh.lastUpdate(t).Run; !strings.HasSuffix(waiting.Output.Summary, wantWhile) {
+		t.Errorf("the check run while the step waits:\n%s\nwant it to end\n%s", waiting.Output.Summary, wantWhile)
+	}
+	fire <- rh.clock.now()
+	waitDrives(t, rh.integ)
+	wantAfter := "- `build.mac`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on machine 3f9c2ab0.\n"
+	if final := rh.lastUpdate(t).Run; !strings.HasSuffix(final.Output.Summary, wantAfter) {
+		t.Errorf("the concluded check run:\n%s\nwant it to end\n%s", final.Output.Summary, wantAfter)
 	}
 }

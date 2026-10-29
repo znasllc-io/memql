@@ -108,12 +108,14 @@ type Result struct {
 	WorkerId string
 	NodeId   string
 	Labels   map[string]string
-	// MachineName is the label the machine's owner sees for WorkerId in Fleet:
-	// its display name, else the name its Cockpit reported (Candidate.Label).
-	// It is set beside WorkerId, from the same candidate, so a caller that must
-	// SAY where a step ran -- a check run read on GitHub -- says "MSI Raider" and
-	// not a registration id. Empty exactly when WorkerId is, and when the row
-	// names the machine neither way.
+	// MachineName is the display name the machine's OWNER gave it in Fleet,
+	// trimmed, and NEVER the name its Cockpit reported (Candidate.Name, which is its
+	// hostname unless the owner replaced it). It is set beside WorkerId, from the
+	// same candidate, so a caller that must SAY where a step ran -- a check run,
+	// which is public on GitHub for a public repository -- says "MSI Raider" and
+	// not a registration id, and never says a hostname the owner did not choose to
+	// publish. Empty when WorkerId is, and for a machine its owner gave no display
+	// name: such a machine is called by its id.
 	MachineName string
 
 	// RefusedBeforeStart is the dispatcher's own verdict that the call started
@@ -591,9 +593,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 // Whatever came back names the machine (Result.WorkerId / MachineName / NodeId /
 // Labels): the candidate it was attempted on, and the replica holding its stream --
 // this one for a local dispatch, the forward's target otherwise. MachineName is
-// the candidate's label as the owner sees it in Fleet, stamped here and not read
-// off the reply, so a forwarded attempt names its machine as a local one does and
-// the forward's wire carries nothing new. NodeId falls
+// the owner's display name for the candidate, stamped here and not read off the
+// reply, so a forwarded attempt names its machine as a local one does and the
+// forward's wire carries nothing new. NodeId falls
 // back to the row's connectedNodeId only on a single-node install with no node
 // id of its own, where the row is the one place an id is written.
 func (d *Dispatcher) attempt(
@@ -620,7 +622,17 @@ func (d *Dispatcher) attempt(
 	// and forwarded alike, a sibling's own refusal codes included.
 	res.RefusedBeforeStart = outcome == ForwardRefusedBeforeStart
 	res.WorkerId = cand.RegistrationId
-	res.MachineName = cand.Label()
+	// ONLY A NAME THE OWNER CHOSE. A pipeline step's result reaches a check run,
+	// which is public on GitHub for a public repository, and the name the machine
+	// REPORTED (Candidate.Name: its hostname, "Joses-MacBook-Pro", unless the owner
+	// replaced it) can say things the owner never chose to publish. So the result
+	// carries the display name the owner set in Fleet and nothing else, and a machine
+	// with none carries none: the check run then calls it by the first characters of
+	// its id, as it does a row written before names were recorded. Fleet and the run
+	// page, which only the owner sees, name a machine by its reported name when it
+	// has no display name (Candidate.Label) and are not affected. Covered by
+	// TestAMachineIsNamedOnlyByTheNameItsOwnerChose.
+	res.MachineName = strings.TrimSpace(cand.DisplayName)
 	res.NodeId = nodeId
 	res.Labels = maps.Clone(cand.Labels)
 	return res, outcome
