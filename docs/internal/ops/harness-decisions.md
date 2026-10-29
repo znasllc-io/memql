@@ -1121,3 +1121,100 @@ App-authored pull request satisfies `require_code_owner_review` together with
 GitHub marks a pull request merged when its head reaches `main` through
 another pull request's merge (memql#6325 marked memql#6318 to memql#6324
 merged).
+
+## Pipeline AI runs local first (2026-10-29)
+
+Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a
+failed run's diagnosis, the repository change a diagnosis requests -- runs on
+the fleet's local models first, then a signed-in app, with a paid vendor as the
+balance. On the production installation that day, the diagnosis of a failed
+release parked on `inferenceUnavailable`: the app door refused, two local
+models failed, an embedding model was tried as a chat model, and there was no
+vendor to try. The [spec](../../superpowers/specs/2026-10-29-pipeline-ai-local-first-design.md)
+records the evidence and the owner's decisions; this section maps the paths.
+
+**A runtime that cannot compile the schema** (`cockpit/internal/worker/modelcall/ollama_schema.go`,
+`ollamaSchemaRefused`). Ollama 0.33.3 answered both local models with
+`400 Failed to initialize samplers: failed to parse grammar`; the llama.cpp in
+Ollama 0.40.6 compiles the same schemas. A 400 to a `format` request with no
+tools, whose error names the grammar, now takes the schema-in-prompt path the
+501 already took: one retry on the same machine, the answer held to the whole
+schema, otherwise the call fails. Any other 400 fails as before. Safe because
+Ollama refuses before generating. Tests:
+`TestStructuredCallTheRuntimeCannotCompileAsksInThePrompt`,
+`TestStructuredCallKeepsOtherBadRequests`. Takes effect only on machines
+running a Cockpit release that carries it; upgrading Ollama removes the retry.
+
+**A machine's failure keeps its code** (`component/worker/modelcall_failed.go`).
+The stream's handle, the holder's forward response and the sender each kept a
+failed call's machine code (`runtime_error`, ...) only as text, and the holder
+replaced it with `model_call_failed`, so the decision record said `other`.
+`ModelCallFailed` carries the code with each path's old text; the router names
+`runtime_error`, `model_call_failed` and `worker_stopped` in its own words and
+never puts the runtime's text in `considered`. The in-process loopback now
+fails a call the way the real stream does. Tests:
+`TestAFinishedCallWithAnErrorKeepsTheMachinesCode`,
+`TestAMachinesFailureCodeCrossesTheModelHop` (planner to agent over the real
+NodeService envelope), `TestAMachineFailureIsNamedOnTheDecisionLine`.
+
+**Eligibility is decided per online machine** (`FleetModel.eligibleFor`,
+`FleetMachine.serves`). The catalog's model-level flags are a union over every
+registration, offline ones included, and one online machine's pre-#551 Cockpit
+plus old offline registrations claimed tools and structured output for
+`qwen3-embedding:0.6b`. A model is a candidate only through one online machine
+that allows the purpose in its model setup and advertises every capability and
+the context window itself (`fleetcatalog.Project` keeps each machine's
+window). An embedding model never answers a non-embedding call, in the catalog
+and in `ModelAttributes.Satisfies` (owner decision: "never", replacing
+memql#6238's allowance for a model claiming both). Fixtures that set only the
+union use `FleetModelAdvertisedOnEveryMachineForTest`. Tests:
+`TestAnEmbedderIsNeverAChatCandidateEvenWhenAMachineClaimsTools`,
+`TestACapabilityOnlyAnOfflineMachineClaimsServesNothing`,
+`TestSetupAndCapabilityMustHoldOnTheSameMachine`,
+`TestTheContextFloorIsTheServingMachinesWindow`,
+`TestProjectKeepsEachMachinesWindow`, `TestAnEmbeddingModelAnswersEmbeddingCallsOnly`.
+
+**A tool-free app turn in an Auto goal is a model call**
+(`integrations/agent/worker/app_gate.go`, `toolFreeTurnWaivesDestination`).
+Pipeline maintenance opens the diagnosis goal for the owner with no route
+choice, so its destination is Auto, and the gate refused every app session in
+it as a move to the computer. A chat-door turn with no images and no inputs
+already runs the app with no tools. The destination refusal is waived for such
+a turn only when the goal is Auto (owner decision: an explicit Workbench goal
+keeps its refusal), and only on a machine whose app descriptor declares
+`inferenceOnly` (`worker.proto`, set by the Cockpit for `claude-headless` and
+`codex-app-server`, never `codex-mcp`; absent reads false). The agent's local
+selection, its forward and the holder all judge the machine; the holder uses
+its live descriptor. A planner or bff sender runs no gate and leaves the
+judgment to the holder. Session-door steps and turns with images or inputs
+keep the refusal. Tests: `TestAToolFreeTurnInAnAutoGoalRunsOnAMachineThatDeclaresIt`,
+`TestAToolFreeTurnSkipsAMachineThatCannotRunWithoutTools`,
+`TestAnAutoGoalStillRefusesATurnWithInputs`,
+`TestAWorkbenchGoalStillRefusesAToolFreeTurn`,
+`TestTheSessionDoorStillNeedsDestinationConsent`,
+`TestAToolFreeTurnIsJudgedOnTheHoldersMachine` (hop; shown load-bearing by
+disabling the holder's check).
+
+**The pipeline rule** (`dsl/rules/rules.memql` `pipelineLocalFirst`,
+`dsl/policies/policies.memql` `localFirstStrongest`, `app/work_call_tags.go`).
+Calls carrying the `pipeline` tag at `reasoning` take fleet:strongest, app:*,
+federation:strongest in the order written; Auto ranks only the three general
+chains. The tag comes from the review's own call attribution
+(`pipelineCallContext`) and from the run context of a work run whose goal has
+`requestedVia: "pipeline"`, read off the goal row by the dispatcher on the
+executing replica; a goal that cannot be read routes by the ordinary rules and
+is logged. Tests: `TestAPipelineReasoningCallMatchesThePipelineRule`,
+`TestAutoLeavesThePipelineChainInItsWrittenOrder`,
+`TestAFullSizeReviewSkipsTheLocalDoor` (a 1 MiB review's 266,240-token floor
+exceeds a 262,144-token local window), `TestCallTagsFromTheCallerAndTheRunReachTheRequest`,
+`TestExecutionHopCarriesTheRunsCallTags`,
+`TestAGoalThatCannotBeReadLeavesTheRunUntagged`,
+`TestTheIndependentReviewCallIsTaggedPipeline`, and the shipped-rule gates in
+`test/dslconformance/local_first_policies_test.go` and the OS routing tests.
+
+**Not verified here.** No change ran on the production cluster or on a fleet
+machine. The grammar failure was not reproduced on Ollama 0.33.3 itself. The
+app waiver helps only machines on a Cockpit that declares `inferenceOnly`. The
+production installation has no vendor configured, so the third door stays
+empty until the owner configures one. The `inferenceUnavailable` sweep did not
+re-try the parked diagnosis after its `resumeAt`; that is not addressed here.
