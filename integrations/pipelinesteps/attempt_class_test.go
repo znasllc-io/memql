@@ -2,7 +2,9 @@ package pipelinesteps
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -97,12 +99,13 @@ var eitherSurfaceRows = []classRow{
 
 func TestAttemptClassTable(t *testing.T) {
 	rows := append([]classRow{
-		// cluster | the clone failed: the one cluster verdict of this kind that is
-		// still nothing ran, because a failed clone leaves the pod terminal (the
-		// Job's restartPolicy is Never and its backoffLimit 0; see
-		// TestACloneFailureLeavesThePodTerminal), so nothing can start the step
-		// container after the report.
-		{"cluster", "the Job's clone failed", failedResult(pl.CodeCloneFailed, "x"), pl.AttemptNothingRan},
+		// cluster | the clone failed. UNKNOWN, though a failed clone init container
+		// does leave the pod terminal: the code has TWO sources the agent cannot
+		// tell apart. The other is the runner's own failure to mint the clone token
+		// (create()), made by a Run that found no Job while another Run of the same
+		// attempt can still be creating it; see
+		// TestAClusterCloneFailureIsAnUnknownOutcomeFromEitherSource.
+		{"cluster", "the Job's clone failed", failedResult(pl.CodeCloneFailed, "x"), pl.AttemptOutcomeUnknown},
 
 		// cluster | the other verdicts that read "the command never started" are
 		// reported while the Job and its pod are still ALIVE (the runner only
@@ -169,7 +172,8 @@ func TestExecuteClassifiesWhatTheClusterAnswered(t *testing.T) {
 		answer pl.StepResult
 		want   pl.AttemptClass
 	}{
-		{"a Job whose clone failed", failedResult(pl.CodeCloneFailed, "clone"), pl.AttemptNothingRan},
+		{"a Job whose clone failed", failedResult(pl.CodeCloneFailed, "clone"), pl.AttemptOutcomeUnknown},
+		{"a runner that could not mint the clone token", failedResult(pl.CodeCloneFailed, "the clone token could not be minted: installation 42 is suspended"), pl.AttemptOutcomeUnknown},
 		{"a Job whose image could not be pulled", failedResult(pl.CodeImagePullFailed, "pull"), pl.AttemptOutcomeUnknown},
 		{"a Job whose service stopped before the step", failedResult(pl.CodeServiceFailed, "service"), pl.AttemptOutcomeUnknown},
 		{"a Job whose pod no node could schedule", failedResult(pl.CodeJobUnschedulable, "pod"), pl.AttemptOutcomeUnknown},
@@ -649,8 +653,9 @@ func TestARecoveryIsAnUnknownOutcomeAtEverySiteThatMakesRunnerUnavailable(t *tes
 // and the scheduler keeps trying to place an unschedulable pod. Any of them can
 // succeed AFTER the report, and the step's command then starts. So a pull
 // failure, a service failure and an unschedulable pod are always an unknown
-// outcome, however the pod looked when it was read. The failed clone is the
-// contrast: it leaves the pod terminal, so nothing can start afterwards.
+// outcome, however the pod looked when it was read. (A failed clone is unknown
+// for another reason, its two sources: TestAClusterCloneFailureIsAnUnknownOutcome
+// FromEitherSource.)
 //
 // This test replaces the round-1 test that read the step container's StartedAt.
 // With these three always unknown the class no longer reads StartedAt, so a test
@@ -687,12 +692,6 @@ func TestAClusterVerdictMadeWhileTheJobIsAliveIsAnUnknownOutcome(t *testing.T) {
 			clsNow, pl.CodeServiceFailed, pl.AttemptOutcomeUnknown},
 		{"no node could schedule the pod",
 			unschedulable, clsCreated.Add(10*time.Minute + time.Second), pl.CodeJobUnschedulable, pl.AttemptOutcomeUnknown},
-
-		// The contrast: the clone is an init container the step container waits
-		// for, and its failure leaves the pod terminal.
-		{"the clone failed",
-			clsPod("Failed", []ContainerStatus{clsTerminated("clone", 128, "Error", "fatal: not our ref", clsStart.Add(time.Second)), clsSvcInit}, clsStepInit),
-			clsNow, pl.CodeCloneFailed, pl.AttemptNothingRan},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			job := clsJob(1200)
@@ -709,43 +708,52 @@ func TestAClusterVerdictMadeWhileTheJobIsAliveIsAnUnknownOutcome(t *testing.T) {
 	}
 }
 
-// TestACloneFailureLeavesThePodTerminal pins the one condition on which a failed
-// clone is still "nothing ran" on the cluster. A clone that failed can only be
-// retried into a step that runs if the pod or the Job lets it be: with the pod's
-// restartPolicy Never a failed init container is not restarted and the pod
-// fails, and with the Job's backoffLimit 0 the Job controller makes no
-// replacement pod, so the step container, which starts only after every init
-// container has completed, never starts. BuildJob sets both; if either changes,
-// pipeline_clone_failed must be read as unknown with the rest
-// (clusterAttemptClass says so beside its case).
-func TestACloneFailureLeavesThePodTerminal(t *testing.T) {
-	job, err := BuildJob(testConfig(), testRun(), testJobName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := job.Spec.Template.Spec.RestartPolicy; got != "Never" {
-		t.Errorf("the pod's restartPolicy is %q, want Never: a failed clone would be restarted, and could then run the step", got)
-	}
-	if got := job.Spec.BackoffLimit; got == nil || *got != 0 {
-		t.Errorf("the Job's backoffLimit is %v, want 0: a failed pod would be replaced, and the new pod could run the step", got)
-	}
-	var clone *Container
-	for i, c := range job.Spec.Template.Spec.InitContainers {
-		if c.Name == ContainerClone {
-			clone = &job.Spec.Template.Spec.InitContainers[i]
+// TestAClusterCloneFailureIsAnUnknownOutcomeFromEitherSource: on the cluster
+// pipeline_clone_failed has two sources, and nothing in the result says which
+// spoke.
+//
+//   - the pod verdict: the clone init container exited non-zero. That leaves the
+//     pod terminal (restartPolicy Never, backoffLimit 0; TestBuildJob pins both),
+//     so by itself it would prove the step never started;
+//   - the runner's own failure to mint the clone token (create()), made by a Run
+//     that found no Job and so created nothing (TestRunnerCloneTokenFailure
+//     CreatesNothing). Another Run of the same attempt can still be alive in
+//     create(): the create() doc says the Job it answers may be one another Run
+//     created first, a recovery proceeds while the queued Secret reads queued
+//     (the state a previous driver's Run leaves between quota-rejected POSTs),
+//     and the Run whose mint failed never takes the creation claim, so the other
+//     can still POST Job N.
+//
+// So the agent reads the code as an unknown outcome whichever spoke. The cluster
+// already retries the clone's fetch three times inside the Job, so the retries
+// this gives up are rare. This test drives both sources through the real
+// functions (Classify and step.decision; the real Runner) and asserts the class.
+func TestAClusterCloneFailureIsAnUnknownOutcomeFromEitherSource(t *testing.T) {
+	t.Run("the pod verdict", func(t *testing.T) {
+		pod := clsPod("Failed", []ContainerStatus{clsTerminated("clone", 128, "Error", "fatal: not our ref", clsStart.Add(time.Second)), clsSvcInit}, clsStepInit)
+		job := clsJob(1200)
+		obs := Classify(job, pod, clsCreated, clsNow, clsConfig(), pl.CodeStepTimeout)
+		if obs.Phase != PhaseFailed || obs.Failure == nil || obs.Failure.Code != pl.CodeCloneFailed {
+			t.Fatalf("Classify = phase %s, failure %+v; this test is about the clone verdict", clsPhaseNames[obs.Phase], obs.Failure)
 		}
-	}
-	if clone == nil {
-		t.Fatal("the pod has no clone init container")
-	}
-	if clone.RestartPolicy != nil {
-		t.Errorf("the clone's restartPolicy is %q: it is a sidecar, and the step container would start without waiting for it to complete", *clone.RestartPolicy)
-	}
-	var stepIsAContainer bool
-	for _, c := range job.Spec.Template.Spec.Containers {
-		stepIsAContainer = stepIsAContainer || c.Name == ContainerStep
-	}
-	if !stepIsAContainer {
-		t.Error("the step is not a main container of the pod, so it is not held back by its init containers")
-	}
+		s := &step{r: &Runner{now: func() time.Time { return clsNow }}, run: StepRun{TimeoutSeconds: 1200, DeadlineCode: pl.CodeStepTimeout}}
+		if got := clusterAttemptClass(s.decision(obs, pod, job)); got != pl.AttemptOutcomeUnknown {
+			t.Errorf("class = %q, want outcome_unknown", got)
+		}
+	})
+
+	t.Run("the runner's clone-token failure", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.tokens.err = errors.New("installation 42 is suspended")
+		res := h.run(t, rtRun())
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeCloneFailed)
+		for _, request := range h.c.requests() {
+			if request.Method != http.MethodGet {
+				t.Fatalf("the Run that could not mint a token mutated Kubernetes: %s %s", request.Method, request.Path)
+			}
+		}
+		if got := clusterAttemptClass(res); got != pl.AttemptOutcomeUnknown {
+			t.Errorf("class = %q, want outcome_unknown: this Run created nothing, and another Run of the attempt may still create Job N", got)
+		}
+	})
 }

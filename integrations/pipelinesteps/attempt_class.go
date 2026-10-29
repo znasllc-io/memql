@@ -41,8 +41,8 @@ import (
 // make an ordinary failure retryable. The two places a runner's outcome enters
 // the agent drop any class it carries (fromARunner, executor_cluster.go).
 //
-// WHAT A CODE CANNOT SAY. On the cluster, a verdict that reads "the command never
-// started" is weaker than it sounds, for two reasons.
+// WHAT A CODE CANNOT SAY. On the cluster, almost no verdict that reads "the
+// command never started" proves it, for two different reasons.
 //
 //   - WHEN the runner reports it. The runner reports a verdict while the Job and
 //     its pod are still ALIVE: settling only annotates the Job, and it is deleted by
@@ -51,19 +51,29 @@ import (
 //     pull and restarts service sidecars; the scheduler keeps trying to place a
 //     pod), so the step's command can start AFTER the report. A pull failure, a
 //     service failure and an unschedulable pod are therefore ALWAYS an unknown
-//     outcome. A failed clone is the exception, because it leaves the pod terminal.
-//   - WHO MADE IT. pipeline_runner_unavailable is nothing ran only when the agent
-//     made it (noRunnerReached, below), before any runner took the step, and not on
-//     a recovery. A runner makes it where the step's Job exists or may exist:
-//     unknown.
+//     outcome.
+//   - WHO MADE IT. A code with more than one source is read as its weakest. A
+//     clone failure is the pod verdict (which alone would prove the step never
+//     started) or the runner's failure to mint the clone token, which can race
+//     another Run's creation of the Job: ALWAYS unknown. pipeline_runner_unavailable
+//     is a runner's (unknown: the Job exists or may exist) or the agent's own
+//     refusal before any runner took the step, which is classified where it is made
+//     (noRunnerReached, below) and is not a recovery's.
 //
-// A class decided from a code that does not prove it is how a non-repeatable step
-// runs twice, so each is spelled out at its case.
+// So the cluster's only nothing-ran case is the agent's own
+// pipeline_runner_unavailable when the step is not a recovery. (The fleet reads its
+// own codes: attempt_class_fleet.go.) A class decided from a code that does not
+// prove it is how a non-repeatable step runs twice, so each is spelled out at its
+// case.
 
 // clusterAttemptClass is the class of an attempt read from its result alone:
 // the whole answer for a Job, and the part of a machine's answer that does not
 // depend on what the dispatcher said (fleetAttemptClass starts from it). It
 // answers "" for a step that succeeded, which has no class.
+//
+// It reads a code as the cluster would, which is not always as the fleet would:
+// pipeline_clone_failed and pipeline_runner_unavailable are weaker here (a Job
+// may exist), so the fleet's own are classified by the fleet, not inherited.
 //
 // It is also what Execute applies to a result no surface classified: an
 // executor-made refusal, a ceiling reached before a step started, a fleet
@@ -93,23 +103,6 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 
 	// NOTHING RAN -- the command cannot have started, and nothing can start it.
 
-	case pl.CodeCloneFailed:
-		// The clone init container exited non-zero, and that leaves the pod
-		// TERMINAL, which is why this is the one cluster verdict of its kind that
-		// is still nothing ran. The clone is an ordinary init container (not a
-		// sidecar), and the step container starts only after every init container
-		// has completed. BuildJob sets the pod's restartPolicy to Never, so a failed
-		// init container is not restarted and the pod fails, and the Job's
-		// backoffLimit to 0, so the Job controller makes no replacement pod (the
-		// classifier's measured case shows the Job failing BackoffLimitExceeded).
-		// Nothing the kubelet or the scheduler does afterwards can start the step
-		// container. TestACloneFailureLeavesThePodTerminal pins those settings; if
-		// either changes, this case becomes unknown with the three below.
-		//
-		// (The Job's clone retries its fetch itself first; a machine's fetch is
-		// retried by the driver.) Also what a clone token that could not be minted
-		// reads as, on a machine, where nothing was sent at all.
-		return pl.AttemptNothingRan
 	case pl.CodeNoMachineForNeed:
 		// Only ever made when the dispatcher PROVED no machine started the
 		// command (Fleet.classify's reading of Result.RefusedBeforeStart, and the
@@ -119,6 +112,28 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 
 	// OUTCOME UNKNOWN -- the command may have run, and nothing says how it ended.
 
+	case pl.CodeCloneFailed:
+		// UNKNOWN, always, because on the cluster this code has TWO sources and the
+		// result does not say which spoke:
+		//
+		//   - the pod verdict: the clone init container exited non-zero. That alone
+		//     would prove the step never started: the clone is an ordinary init
+		//     container the step container waits for, and BuildJob sets the pod's
+		//     restartPolicy to Never and the Job's backoffLimit to 0, so the pod is
+		//     terminal and no replacement is made (TestBuildJob pins both);
+		//   - the runner's own failure to mint the clone token (create()). That Run
+		//     found no Job and created nothing, but another Run of the same attempt
+		//     can still be alive in create(): its doc says the Job it answers may be
+		//     one another Run created first; a recovery proceeds while the queued
+		//     Secret reads queued, the state a previous driver's Run leaves between
+		//     quota-rejected POSTs; and the Run whose mint failed never takes the
+		//     creation claim, so the other can still POST Job N and run the step.
+		//
+		// The agent cannot tell them apart, so it reads the weaker one. The Job's
+		// own clone already retries its fetch three times, so the retries this gives
+		// up are rare. (The fleet's clone failures are classified separately and stay
+		// nothing ran: attempt_class_fleet.go.)
+		return pl.AttemptOutcomeUnknown
 	case pl.CodeImagePullFailed, pl.CodeServiceFailed, pl.CodeJobUnschedulable:
 		// UNKNOWN, always. The runner reports these while the Job and its pod are
 		// still ALIVE: settling an outcome only annotates the Job (settle, persist),
@@ -207,7 +222,8 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 // the step: nothing ran. It is the one kind of pipeline_runner_unavailable that
 // proves it, which is why the class is decided HERE, where the agent makes the
 // result, and not read back from the code (clusterAttemptClass says why the code
-// alone cannot): the same code from a runner means its Job may exist.
+// alone cannot): the same code from a runner means its Job may exist. It is also
+// the only cluster result that is nothing ran at all.
 //
 // The agent makes it in exactly these places, each before the step reached a
 // runner or a machine:

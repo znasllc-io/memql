@@ -157,6 +157,20 @@ func fleetAttemptClass(r worker.Result, res pl.StepResult, dispatched bool) (pl.
 		// here already classified: RunStep keeps a class that is set. A bare one
 		// that got here is not the agent's, and clusterAttemptClass reads it as an
 		// unknown outcome. A recovery never reaches that site: it is read first.
+		//
+		// pipeline_clone_failed is read HERE and not by clusterAttemptClass, which
+		// reads it as unknown. On the cluster the code has two sources the result
+		// does not tell apart, one of which can race another Run's creation of the
+		// Job. On the fleet, undispatched, it has one: Fleet.cloneToken mints the
+		// clone token on the agent before anything is dispatched, and again before
+		// the next dispatch when a long wait for capacity outlives the token. A token
+		// that cannot be minted sends nothing, every dispatch so far was refused
+		// before it started, and the fleet has no second Run to race. NOTHING RAN.
+		// (A recovery never reaches this either: it is read before the token is
+		// minted.)
+		if res.Failure != nil && res.Failure.Code == pl.CodeCloneFailed {
+			return pl.AttemptNothingRan, false
+		}
 		return clusterAttemptClass(res), false
 	}
 

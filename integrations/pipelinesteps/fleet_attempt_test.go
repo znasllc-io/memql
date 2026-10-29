@@ -157,6 +157,38 @@ func TestFleetAttemptsThatNeverReachedAMachine(t *testing.T) {
 			t.Errorf("class = %q notRetriedHere = %v with %d dispatch(es), want nothing_ran and no dispatch", res.AttemptClass, res.NotRetriedHere, len(d.reqs))
 		}
 	})
+	t.Run("a clone token that could not be minted again during a long wait", func(t *testing.T) {
+		// The fleet's second place to mint a token: a wait for capacity that
+		// outlives the token needs a fresh one before the next dispatch. Every
+		// dispatch so far was refused before it started, and the failure is made
+		// here, so nothing was sent anywhere (the cluster reads the same code as
+		// unknown, because there a runner's mint failure can race another Run).
+		now, calls := exNow, 0
+		var tokens *fakeTokens
+		d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+			calls++
+			now = now.Add(tokenRefreshAge)
+			tokens.err = errors.New("the installation was suspended")
+			return worker.Result{ErrorCode: "pipeline_capacity_busy", RefusedBeforeStart: true, WorkerId: attemptMachine}, nil
+		}}
+		f, _, fakeT, _ := newTestFleet(t, d)
+		tokens = fakeT
+		f.now = func() time.Time { return now }
+		f.capacityRetry = time.Millisecond
+		req := fleetReq()
+		run := fleetRun(req)
+		run.RunDeadline = exNow.Add(24 * time.Hour).Format(time.RFC3339)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		res, err := f.RunStep(ctx, req, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeCloneFailed)
+		if res.AttemptClass != pl.AttemptNothingRan || res.NotRetriedHere || calls != 1 {
+			t.Errorf("class = %q notRetriedHere = %v after %d dispatch(es), want nothing_ran after the one refused dispatch", res.AttemptClass, res.NotRetriedHere, calls)
+		}
+	})
 	t.Run("a node with no dispatcher", func(t *testing.T) {
 		f, _, _, _ := newTestFleet(t, nil)
 		res := runFleet(t, f, fleetReq())
