@@ -216,9 +216,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	// Refused BEFORE START, so the sender moves the step on to a machine that
 	// does consent.
 	if req.GetPurpose() == PurposePipeline && !machineAllowsPipelines(w, innerArgs) {
-		h.sendRefusal(send, requestId, codePipelinesNotAllowed,
-			"the machine does not advertise "+PipelinesLabel+"="+PipelinesAllowed+
-				" with pipeline action contract 2 and the requested native platform on its connection here")
+		h.sendRefusal(send, requestId, codePipelinesNotAllowed, pipelinesNotAllowedWords("the machine"))
 		return
 	}
 

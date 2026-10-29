@@ -44,6 +44,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -92,6 +93,22 @@ const (
 	// replica about to dispatch to it (machineAllowsPipelines).
 	codePipelinesNotAllowed = "pipelines_not_allowed"
 )
+
+// pipelinesNotAllowedWords is the sentence a machine is refused with, before
+// start, when its live registration does not carry what a pipeline step needs
+// (machineAllowsPipelines): the pipelines=allowed label, the step's exact action
+// contract and, for a native step, the requested platform. The contract is
+// spelled from the constant the gate checks, because a failed step prints this
+// sentence on a check run that is public for a public repository and a number
+// typed here went stale once (it said 2 while the gate asked for 5). who is how
+// the caller names the machine (checkRunName on the sender, "the machine" on the
+// replica that holds it). Covered by TestARefusalNeverNamesAMachineByWhatItReported
+// and TestTheDispatchingReplicaRereadsTheMachinesPipelinesConsent.
+func pipelinesNotAllowedWords(who string) string {
+	return who + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
+		" with pipeline action contract " + strconv.Itoa(PipelineStepContract) +
+		" and the requested native platform on its connection here"
+}
 
 // fallbackFor is the fallback the dispatch loop applies when a candidate
 // refuses before start (RULING R19).

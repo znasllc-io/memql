@@ -694,10 +694,9 @@ func (d *Dispatcher) attemptLocal(
 	// forward's receiver makes when a sibling dispatches instead.
 	if req.Purpose == PurposePipeline && !machineAllowsPipelines(w, req.Args) {
 		return Result{
-			OK:        false,
-			ErrorCode: codePipelinesNotAllowed,
-			ErrorMessage: checkRunName(cand) + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
-				" with pipeline action contract 2 and the requested native platform on its connection here",
+			OK:           false,
+			ErrorCode:    codePipelinesNotAllowed,
+			ErrorMessage: pipelinesNotAllowedWords(checkRunName(cand)),
 		}, ForwardRefusedBeforeStart
 	}
 

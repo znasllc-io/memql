@@ -23,8 +23,16 @@ package worker
 // dispatcher words (dispatch.go) and a reason the router gives for turning a
 // machine away (router.go) -- uses checkRunName. Candidate.Label() stays for log
 // lines and for the screens only the owner sees (the consent card, the machine
-// chooser, availability, model and app calls), none of which a pipeline step's
-// message can quote.
+// chooser, availability).
+//
+// The model-call and app-call door texts (fleet_inference.go,
+// fleet_context_allocation.go, app_forward.go) keep Label() too, because they
+// serve owner screens, and their errors CAN travel into a pipeline: the
+// independent review makes a model call. That text still never reaches a check
+// run, because the pipeline's public review seam
+// (app/pipeline_independent_review.go) words a model call's error by its code
+// (router.FailureReason) and keeps the original only in the error chain and the
+// owner's log.
 //
 // What this does not cover: words the machine itself composes (its Cockpit's
 // refusal text) are quoted as they arrive, and the dispatcher cannot know

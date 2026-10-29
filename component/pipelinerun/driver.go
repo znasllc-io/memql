@@ -1311,22 +1311,24 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 			"step", step.Key, "attempt", t.attempt, "class", string(history[len(history)-1].Class),
 			"code", history[len(history)-1].Code, "next", describePlacement(next), "nextAttemptAt", nextAt)
 		// The check run says so now. Nothing else would for up to minutes: the
-		// workflow publishes progress when a step settles, and this one has not,
-		// so a person reading the check saw the step as it stood before its first
-		// attempt until the wait and the attempt after it were over. It is said
-		// only here, once the outcome is DURABLE (a Retrying the journal refused
-		// returned above, so the check run never promises a retry the row does not
-		// hold), and before the cleanup and the wait, so GitHub's latency comes out
-		// of the wait rather than adding to it. A failover to another machine has no
-		// wait, so for it the publish delays the next attempt directly, by one GitHub
-		// round trip: bounded by githubCallTimeout (2 minutes) during a GitHub outage,
-		// and a cost only a step that is going again pays. Retrying stays set while
-		// the next attempt runs, and its wording claims only what stays true
-		// (retrySentence), because nothing publishes again when that attempt begins:
-		// a publish there would delay the attempt itself by a GitHub round trip. It
-		// ends when that attempt's record arrives (setAttempts) or with the receipt
-		// (settle). A takeover does not restate it before the step settles; the row's
-		// history, which the OS reads, is not affected. Covered by
+		// workflow publishes progress when a step settles, and this one has not, so a
+		// person reading the check saw the step as it stood before its first attempt
+		// until the wait and the attempt after it were over. It is said only here,
+		// once the outcome is DURABLE (a Retrying the journal refused returned above,
+		// so the check run never promises a retry the row does not hold), and before
+		// the cleanup and the wait, so GitHub's latency comes out of the wait rather
+		// than adding to it. A failover to another machine has no wait, so for it the
+		// publish delays the next attempt directly, by one GitHub round trip. The
+		// bound is githubCallTimeout (2 minutes) PER PUBLISH CALL, not per attempt:
+		// progress is serialized by progressMu, so several steps retrying at once
+		// queue behind each other's publishes, and during a GitHub outage the last
+		// waits one bound for each. It is a cost only a step that is going again pays.
+		// Retrying stays set while the next attempt runs, and its wording claims only
+		// what stays true (retrySentence), because nothing publishes again when that
+		// attempt begins: a publish there would delay the attempt itself by a GitHub
+		// round trip. It ends when that attempt's record arrives (setAttempts) or with
+		// the receipt (settle). A takeover does not restate it before the step
+		// settles; the row's history, which the OS reads, is not affected. Covered by
 		// TestTheCheckRunSaysAStepIsRetryingWhileItWaits.
 		t.setRetrying(max(nextAt.Sub(dr.d.now()), 0))
 		dr.progress(ctx)

@@ -19,6 +19,8 @@ package worker
 // the owner never chose to publish.
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -156,9 +158,12 @@ func TestARefusalNeverNamesAMachineByWhatItReported(t *testing.T) {
 			setup: func(t *testing.T, f *pinFleet) {
 				f.d.registry.WorkerById("desktop").Labels = map[string]string{"os": "linux"}
 			},
-			narrow:   pinTo("desktop"),
-			unnamed:  "machine desktop",
-			sentence: func(label string) string { return label + " does not advertise pipelines=allowed" },
+			narrow:  pinTo("desktop"),
+			unnamed: "machine desktop",
+			// The contract it names is the one the gate checks (machineAllowsPipelines).
+			sentence: func(label string) string {
+				return label + " does not advertise pipelines=allowed with pipeline action contract " + strconv.Itoa(PipelineStepContract)
+			},
 		},
 		{
 			name: "the replica holding the machine has no forward", holder: "laptop", code: "worker_unreachable",
@@ -190,7 +195,7 @@ func TestARefusalNeverNamesAMachineByWhatItReported(t *testing.T) {
 			narrow:  pinTo("desktop"),
 			unnamed: "machine desktop",
 			sentence: func(label string) string {
-				return label + " has not reported workerHost.pipeline_step contract 5"
+				return fmt.Sprintf("%s has not reported workerHost.%s contract %d", label, PipelineStepAction, PipelineStepContract)
 			},
 		},
 		{
