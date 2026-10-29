@@ -567,6 +567,69 @@ func TestHeldCloudGateMakesTheCloudFailoverWait(t *testing.T) {
 	}
 }
 
+const retryRepeatableClusterManifest = `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:abc
+  stages:
+    - name: checks
+      steps:
+        - name: vet
+          run: go vet ./...
+          repeatable: true
+`
+
+// Ruling 18: a repeatable cluster step whose node went away under its Job
+// (pipeline_node_lost: the command may have run) is tried again on the cluster,
+// once the first attempt's Job is confirmed gone -- so two copies of it never
+// run at once.
+func TestARepeatableClusterStepRetriesAnUnknownOutcomeOnTheCluster(t *testing.T) {
+	rh := newRetryHarness(t, retryRepeatableClusterManifest, false)
+	rh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		rh.note("execute %d", req.Attempt)
+		if !req.Step.Repeatable {
+			t.Errorf("the fixture's step is not repeatable: %+v", req.Step)
+		}
+		if req.Attempt == 1 {
+			return onTheCluster(pipelines.StepResult{Status: pipelines.OutcomeFailed, ExitCode: -1,
+				Failure:      &pipelines.Failure{Code: pipelines.CodeNodeLost, Message: "The node under the step's Job went away before it reported."},
+				AttemptClass: pipelines.AttemptOutcomeUnknown}, req), nil
+		}
+		return onTheCluster(passed(req), req), nil
+	}
+	run := rh.openRun(t, prOpening())
+	deliver(t, rh.integ, run)
+
+	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
+		t.Fatalf("the run ended %s; want success on the step's second attempt", got.Conclusion)
+	}
+	sent := rh.exec.sent()
+	if len(sent) != 2 {
+		t.Fatalf("the executor was handed %d attempts, want 2", len(sent))
+	}
+	if sent[1].Attempt != 2 || sent[1].RecoverOnly || !reflect.DeepEqual(sent[1].Placement, toCluster) {
+		t.Errorf("attempt 2 = attempt %d, recover-only %v, placement %s; want a fresh attempt 2 on the cluster",
+			sent[1].Attempt, sent[1].RecoverOnly, describe(sent[1].Placement))
+	}
+	if order := rh.events(); !slices.Equal(order, []string{"execute 1", "acknowledge 1", "execute 2", "acknowledge 2"}) {
+		t.Errorf("the order was %v; attempt 1's Job must be confirmed gone before attempt 2 is sent", order)
+	}
+	if waits := rh.waited(); !slices.Equal(waits, []time.Duration{30 * time.Second}) {
+		t.Errorf("waits %v, want the policy's first delay, 30s", waits)
+	}
+	updates := rh.work.receiptsOf("checks.vet")
+	if len(updates) != 2 {
+		t.Fatalf("%d updates of the step, want attempt 1's outcome and the receipt", len(updates))
+	}
+	if records, _ := attemptsOf(updates[0]); len(records) != 1 || records[0].Class != pipelines.AttemptOutcomeUnknown ||
+		records[0].Code != pipelines.CodeNodeLost || records[0].Surface != pipelines.PlacementCluster {
+		t.Errorf("attempt 1's record = %+v", records)
+	}
+	if records, _ := attemptsOf(updates[1]); argString(updates[1].Args, "status") != WorkStepDone || len(records) != 2 {
+		t.Errorf("the receipt: %s with %+v; want done with both attempts", argString(updates[1].Args, "status"), records)
+	}
+}
+
 // Ruling 13: the next attempt starts only once the previous attempt's
 // resources are confirmed gone. When the acknowledgement cannot confirm it, the
 // step is not retried and the run stays unfinished for recovery, its row saying

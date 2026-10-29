@@ -212,13 +212,44 @@ func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
 			numbered(on("M", unknownOutcome), noMachine, on("M", retryRequested)), next(pinnedTo("M", 120), 120*time.Second)},
 		{"a machine that needs recovering is not retried after its unknown outcome", repeatableStep(retryPoolStep), standard,
 			numbered(notRetried(on("M", unknownOutcome)), noMachine), next(toCluster, 0)},
-		// Section 5's unknown-outcome rules name an untried machine, the same
-		// MACHINE once, or the cluster for a pool step: a cluster step whose node
-		// went away has none of them.
-		{"a repeatable cluster step's unknown outcome", repeatableStep(retryClusterStep), standard,
+		// Ruling 18: an unknown outcome on the CLUSTER is retried there, up to
+		// sameMachine with the same delays, for a repeatable step -- each only
+		// once the previous attempt's Job is confirmed gone, so it cannot overlap
+		// itself. Almost every cluster failure is an unknown outcome (rulings 14
+		// and 15), so without this a repeatable step would have no cluster
+		// retries left.
+		{"a repeatable cluster step's unknown outcome: the cluster again after 30 s", repeatableStep(retryClusterStep), standard,
+			numbered(onCluster(unknownOutcome)), next(toCluster, 30*time.Second)},
+		{"twice unknown on the cluster: again after 120 s", repeatableStep(retryClusterStep), standard,
+			numbered(onCluster(unknownOutcome), onCluster(unknownOutcome)), next(toCluster, 120*time.Second)},
+		{"three times unknown on the cluster: sameMachine spent", repeatableStep(retryClusterStep), standard,
+			numbered(onCluster(unknownOutcome), onCluster(unknownOutcome), onCluster(unknownOutcome)), stop},
+		{"the cluster's count is one count, whatever each attempt proved", repeatableStep(retryClusterStep), standard,
+			numbered(onCluster(nothingRan), onCluster(unknownOutcome)), next(toCluster, 120*time.Second)},
+		{"a cluster step's unknown outcome, not repeatable", retryClusterStep, standard,
 			numbered(onCluster(unknownOutcome)), stop},
+		{"the zero policy retries no unknown outcome on the cluster", repeatableStep(retryClusterStep), pipelines.ComputePlacementPolicy{},
+			numbered(onCluster(unknownOutcome)), stop},
+		// A pool step whose unknown outcome was on the cluster tries the machines
+		// it has not tried first, then the cluster again within sameMachine.
 		{"a repeatable pool step's unknown outcome on the cluster: an untried machine", repeatableStep(retryPoolStep), standard,
 			numbered(onCluster(unknownOutcome)), next(failoverFrom(60), 0)},
+		{"then, the machines exhausted, the cluster again", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), noMachine), next(toCluster, 30*time.Second)},
+		{"then the cluster within sameMachine", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), noMachine, onCluster(unknownOutcome)), next(toCluster, 120*time.Second)},
+		{"then nothing: the cluster's sameMachine spent", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), noMachine, onCluster(unknownOutcome), onCluster(unknownOutcome)), stop},
+		{"the cluster again after an untried machine's own retries", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), on("N", nothingRan), on("N", nothingRan), on("N", nothingRan), noMachine),
+			next(toCluster, 30*time.Second)},
+		{"a machine owed its once comes before the cluster", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), on("M", unknownOutcome), noMachine), next(pinnedTo("M", 120), 0)},
+		{"and the cluster after it", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome), on("M", unknownOutcome), noMachine, notRetried(on("M", nothingRan))),
+			next(toCluster, 30*time.Second)},
+		{"no other machines: the cluster again after its delay", repeatableStep(retryPoolStep), noOtherMachines,
+			numbered(onCluster(unknownOutcome)), next(toCluster, 30*time.Second)},
 
 		// The engine's cap: no step makes more than eight attempts.
 		{"seven attempts: one more", retryFleetStep, standard,

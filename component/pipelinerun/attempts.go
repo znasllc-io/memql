@@ -252,25 +252,42 @@ func cutText(s string, n int) string {
 //  1. P again, while P has had fewer than sameMachine retries and is not marked
 //     not-retried-here, after delaysSeconds[i] (the last value repeats). Each
 //     place has its own count. A cluster step's retries stay on the cluster
-//     under this count; a pool step's retries reach the cluster at most once.
+//     under this count; under this rule a pool step's retries reach the
+//     cluster at most once (an unknown outcome there is ruling 18's, below).
 //  2. Otherwise, for a fleet or pool step with otherMachines, an eligible machine
 //     not yet tried, at once.
 //  3. Otherwise, for a pool step with cloudFallback, the cluster, if it has not
 //     been a place yet.
 //  4. Otherwise the step fails.
 //
-// After an OUTCOME UNKNOWN at P, only for a repeatable step (spec D5): an
-// eligible machine not yet tried (rule 2's step), then P again ONCE when P is a
-// machine, then rule 3, then the step fails. The "P again once" a machine is
-// owed stays owed while the other machines are tried, and is paid before the
-// cluster: an attempt there may refuse while the old command holds the
-// machine, which counts as nothing ran.
+// After an OUTCOME UNKNOWN at P, only for a repeatable step (spec D5):
+//
+//  1. an eligible machine not yet tried (rule 2's step);
+//  2. P again: ONCE when P is a machine; up to sameMachine times, after the same
+//     delays as rule 1, when P is the cluster (ruling 18);
+//  3. rule 3;
+//  4. otherwise the step fails.
+//
+// The two "P again" differ because what guards against two copies of the
+// command differs. On a machine only the machine's own reservation does: a
+// machine still holding the old command refuses the next one (which counts as
+// nothing ran), and that guard is worth one more try. On the cluster the
+// driver itself confirms the previous attempt's Job, Secret and pods are gone
+// before it sends the next attempt (ruling 13, runStep), so a repeatable step
+// cannot overlap itself there however often it is retried; and since nearly
+// every cluster failure is an unknown outcome (rulings 14 and 15), a cluster
+// count of one would leave repeatable steps without their cluster retries.
+//
+// Either "P again" stays owed while the untried machines are tried, and is paid
+// after them, a machine's before the cluster's, then rule 3: a pool step whose
+// unknown outcome was on the cluster tries the machines first, then the
+// cluster again within sameMachine.
 //
 // Bounds no policy can widen: MaxStepAttempts in all; a fleet step never reaches
 // the cluster and a cluster step never a machine (the executor refuses both,
 // refusePlacement); the cluster only where cloudFallback allows it. The policy
-// can narrow every rule, and the zero policy retries nothing: rule 1 and the
-// once-owed retry need sameMachine > 0, rule 2 needs otherMachines, rule 3
+// can narrow every rule, and the zero policy retries nothing: rule 1 and both
+// owed retries need sameMachine > 0, rule 2 needs otherMachines, rule 3
 // cloudFallback.
 //
 // THE WAITS a placed attempt carries (AttemptPlacement.MaxWaitSeconds): a pinned
@@ -327,8 +344,8 @@ func decideNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, hi
 	h := readHistory(step, policy, history, sent)
 
 	if last.Class != pipelines.AttemptOutcomeUnknown && !exhausting(last, sent[n-1]) {
-		// Rule 1. Not after an unknown outcome, whose same-machine retry is the
-		// once-owed one below, and not after an attempt that found the fleet
+		// Rule 1. Not after an unknown outcome, whose same-place retry is an
+		// owed one below, and not after an attempt that found the fleet
 		// exhausted: ruling 9 sends that one straight to rule 3, and the machine
 		// it may name (the last one busy) is never pinned.
 		if placement, delay, ok := h.samePlace(last); ok {
@@ -338,8 +355,11 @@ func decideNext(step pipelines.Step, policy pipelines.ComputePlacementPolicy, hi
 	if placement, ok := h.anotherMachine(); ok { // rule 2, and the unknown outcome's first resort
 		return placement, 0, true
 	}
-	if placement, ok := h.owedRetry(); ok { // the unknown outcome's "P again, once"
+	if placement, ok := h.owedRetry(); ok { // an unknown outcome's "P again", P a machine: once
 		return placement, 0, true
+	}
+	if placement, delay, ok := h.owedCluster(); ok { // an unknown outcome's "P again", P the cluster (ruling 18)
+		return placement, delay, true
 	}
 	if placement, ok := h.cluster(); ok { // rule 3
 		return placement, 0, true
@@ -372,6 +392,9 @@ type attemptHistory struct {
 	// step whose policy allows cloud the cluster.
 	mayFleet, mayCluster bool
 	pool                 bool
+	// repeatable: the step says running it again after an unknown outcome is
+	// harmless (spec D5), which every owed retry needs.
+	repeatable bool
 
 	// tried is every machine an attempt ran on or was pinned to, in the order
 	// first tried: what a failover excludes.
@@ -381,9 +404,12 @@ type attemptHistory struct {
 	// at counts the attempts at each place (placeKey).
 	at map[string]int
 	// clusterUsed: the cluster has been a place; clusterRetries counts the
-	// attempts after the first that ran there.
+	// attempts after the first that ran there. clusterOwed: the latest attempt
+	// on the cluster ended with an unknown outcome, so the cluster is owed its
+	// retries (ruling 18) until one runs there.
 	clusterUsed    bool
 	clusterRetries int
+	clusterOwed    bool
 	// exhausted: an attempt found the fleet exhausted (exhausting).
 	exhausted bool
 	// owed is the machines an unknown outcome left owed their one retry, in the
@@ -408,7 +434,7 @@ func placeKey(r attemptRecord) string {
 func readHistory(step pipelines.Step, policy pipelines.ComputePlacementPolicy, records []attemptRecord, sent []*pipelines.AttemptPlacement) attemptHistory {
 	pool := step.Placement == pipelines.PlacementPool && !step.RequiresFleet()
 	h := attemptHistory{
-		policy: policy, pool: pool,
+		policy: policy, pool: pool, repeatable: step.Repeatable,
 		mayFleet:   step.RequiresFleet() || pool,
 		mayCluster: !step.RequiresFleet() && (!pool || policy.CloudFallback),
 		notRetried: map[string]bool{},
@@ -426,6 +452,7 @@ func readHistory(step pipelines.Step, policy pipelines.ComputePlacementPolicy, r
 			if i > 0 {
 				h.clusterRetries++
 			}
+			h.clusterOwed = r.Class == pipelines.AttemptOutcomeUnknown
 			continue
 		}
 		if r.WorkerID == "" {
@@ -461,8 +488,9 @@ func (h attemptHistory) samePlace(last attemptRecord) (*pipelines.AttemptPlaceme
 	switch {
 	case key == "cluster":
 		if !h.mayCluster || (h.pool && h.clusterRetries > 0) {
-			// A pool step's retries reach the cluster at most once: the cluster
-			// is the one place an attempt spends money.
+			// Under this rule a pool step's retries reach the cluster at most
+			// once: the cluster is the one place an attempt spends money. An
+			// unknown outcome there is retried under owedCluster instead.
 			return nil, 0, false
 		}
 		return &pipelines.AttemptPlacement{Surface: pipelines.PlacementCluster}, delay, true
@@ -490,14 +518,33 @@ func (h attemptHistory) anotherMachine() (*pipelines.AttemptPlacement, bool) {
 	return h.failover(), true
 }
 
-// owedRetry is an unknown outcome's "P again, once": the first machine still
-// owed it. The policy's sameMachine: 0 says no place is tried again, which an
-// unknown outcome cannot override (spec D7).
+// owedRetry is an unknown outcome's "P again" when P is a machine: once, at the
+// first machine still owed it. The policy's sameMachine: 0 says no place is
+// tried again, which an unknown outcome cannot override (spec D7).
 func (h attemptHistory) owedRetry() (*pipelines.AttemptPlacement, bool) {
-	if !h.mayFleet || h.policy.Retries.SameMachine < 1 || len(h.owed) == 0 {
+	if !h.repeatable || !h.mayFleet || h.policy.Retries.SameMachine < 1 || len(h.owed) == 0 {
 		return nil, false
 	}
 	return h.pinned(h.owed[0]), true
+}
+
+// owedCluster is an unknown outcome's "P again" when P is the cluster (ruling
+// 18): the cluster again while it has had fewer than sameMachine retries, after
+// the same delays as rule 1, its count shared with rule 1's. Each such attempt
+// is sent only once the previous one's Job, Secret and pods are confirmed gone
+// (runStep), which is what makes more than one safe here. A pool step's retries
+// may come back to the cluster for this after trying its untried machines; the
+// policy's cloudFallback still decides whether a pool step may be on the
+// cluster at all (mayCluster).
+func (h attemptHistory) owedCluster() (*pipelines.AttemptPlacement, time.Duration, bool) {
+	if !h.repeatable || !h.mayCluster || !h.clusterOwed {
+		return nil, 0, false
+	}
+	retries := h.at["cluster"] - 1
+	if retries >= h.policy.Retries.SameMachine {
+		return nil, 0, false
+	}
+	return &pipelines.AttemptPlacement{Surface: pipelines.PlacementCluster}, retryDelay(h.policy.Retries, retries), true
 }
 
 // cluster is rule 3: a pool step's one move to the cluster.
