@@ -433,13 +433,15 @@ func (a *App) invokePipelineIndependentReview(ctx context.Context, input pipelin
 // request id. So the text the pipeline carries is the router's own line for a
 // failed call, built from a code table and never from the error's text.
 //
-// The callers that decide on the error's TYPE keep working through Unwrap: a run
-// ceiling parks the run on a budget approval (errors.As to *memql.RunCeilingError),
-// a refusal parks it on its doors (work.DoorsFrom), a cancel or a deadline is
-// recognised as one (errors.Is). Only the words change. A failure that travels
-// as a string still names a refusal's code, which is what
-// work.InferenceRefusalCode matches (router.FailureReason keeps the code in the
-// line). Covered by TestAFailedReviewModelCallIsReportedByItsCodeNotItsText.
+// Unwrap keeps the original for a caller that decides on the error's TYPE
+// (errors.Is, errors.As: a run ceiling, a refusal's doors, a cancel or a
+// deadline). Nothing in the pipeline's own chain branches on one today, so that
+// holds for a caller added later. Only the words change. The router's refusals
+// keep their code in the line (every_door_shut, ceiling_reached,
+// no_local_model_available, no_app_available), which is what
+// work.InferenceRefusalCode matches in a failure that travels as a string; the
+// no-owner app refusal reads app_no_owner there. Covered by
+// TestAFailedReviewModelCallIsReportedByItsCodeNotItsText.
 type pipelineReviewModelFailure struct {
 	words string
 	err   error
@@ -451,11 +453,15 @@ func (f *pipelineReviewModelFailure) Unwrap() error { return f.err }
 // pipelineModelFailure words a failed model call for the pipeline and logs the
 // original for the owner.
 //
-// THE ORIGINAL IS NOT LOST: it goes to this node's log at warn level, with the
-// run the call belongs to as the subject (the work run, bare id, as the router's
-// decision rows name it), so the owner who needs the machine's or the vendor's
-// own words reads them in Logs, a place only they can see. The line also says
-// what the pipeline reported in their place. Logging is best effort and never
+// THE ORIGINAL IS NOT LOST: it goes to this node's log at warn level, tagged
+// with the pipeline, repository, pull request and head SHA, so the owner who
+// needs the machine's or the vendor's own words finds them in Logs, a place only
+// they can see. The line takes the work run as its subject only when the context
+// carries one, and the pipeline driver's does not (it drives from a background
+// context through borrowed-run scoped execution), so in production the tags are
+// what find it. The line also says what the pipeline reported in their place.
+// It covers every failure of the prompt call, including one before any model was
+// asked (a prompt that would not render), which reads by its category. Logging is best effort and never
 // stands between the failure and its wording: a node with no logger still words
 // the error.
 //
@@ -479,7 +485,7 @@ func (a *App) pipelineModelFailure(ctx context.Context, input pipelinerun.Indepe
 		if rc, ok := common.RunFromContext(ctx); ok && rc.RunId != "" {
 			attrs = append(attrs, logger.Subject(memorynodes.ConceptWorkRun, memql.BareShortId(rc.RunId)))
 		}
-		a.Logger.Warn("pipelines: the independent review's model call failed; the check run reports its code and not its text", attrs...)
+		a.Logger.Warn("pipelines: the independent review's prompt call failed; the check run reports its code and not its text", attrs...)
 	}
 	return failure
 }

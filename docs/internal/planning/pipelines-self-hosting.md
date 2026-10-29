@@ -722,7 +722,8 @@ orphan reconciliation. Focused race tests, the serial Cockpit suite and its
 GitHub checks pass. Engine manifest/dispatch wiring now preserves execution, placement and platform
 through the compiled plan, cross-replica dispatch and Kubernetes node selector.
 Native steps use binary-reported OS/architecture. Fleet workers must advertise
-exact action contract 2, checked again on the live connection. Host requirements
+the exact pipeline action contract (`PipelineStepContract`, 5 since the
+fleet-first work), checked again on the live connection. Host requirements
 do not pass through a container boundary; ordinary fleet containers declare
 placement separately. A native Docker requirement receives a live daemon probe.
 The OS connect preview carries fleet placement even without host needs and

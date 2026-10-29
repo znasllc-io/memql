@@ -1955,9 +1955,9 @@ When the independent review's model call fails, the line carries only a stable
 code and the router's own words (*failed when called: upstream: the provider
 failed*, *failed when called: timeout: timed out*), never a machine's name, a
 path or a request id: the check run is public on GitHub for a public
-repository. The original error is logged at warn level with the work run as its
-subject, so the owner reads it in [Logs](logs.md); the run's own record carries
-the worded text.
+repository. The original error is logged at warn level, tagged with the
+pipeline, repository, pull request and head commit, so the owner finds it in
+[Logs](logs.md); the run's own record carries the worded text.
 
 A failed step keeps the title, and the run's own reason is listed before the
 failed steps. The run page says *The run failed outside its steps* above the

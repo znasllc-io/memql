@@ -80,8 +80,8 @@ func TestAFailedReviewModelCallIsReportedByItsCodeNotItsText(t *testing.T) {
 		requireNothingReported(t, got)
 		var typed *router.InferenceUnavailable
 		require.ErrorAs(t, got, &typed)
-		// A refusal parks the run on its doors: both readers keep working, the
-		// typed one through the chain and the message one through the code.
+		// A refusal's doors stay readable: both readers keep working, the typed
+		// one through the chain and the message one through the code.
 		code, found, ok := work.DoorsFrom(got)
 		require.True(t, ok)
 		require.Equal(t, work.RefusalEveryDoorShut, code)
@@ -106,7 +106,7 @@ func TestAFailedReviewModelCallIsReportedByItsCodeNotItsText(t *testing.T) {
 		require.ErrorIs(t, got, context.DeadlineExceeded, "a cancel or a deadline is still recognised as one")
 	})
 
-	t.Run("a run ceiling still parks the run on a budget", func(t *testing.T) {
+	t.Run("a run ceiling stays visible to errors.As", func(t *testing.T) {
 		in := &memql.RunCeilingError{RunId: "run-7", StepKey: "review", Breach: memql.RunCeilingBreach{Ceiling: "tokens", Limit: "1000", Actual: "1200", Reason: "the token budget is spent"}}
 		got := a.pipelineModelFailure(ctx, reviewFailureInput(), in)
 		var ceiling *memql.RunCeilingError
@@ -131,8 +131,9 @@ func requireNothingReported(t *testing.T, err error) {
 }
 
 // The owner can still read what the model call said: the original error goes to
-// this node's log, with the run it belongs to as the subject, and the line says
-// what the pipeline reported instead.
+// this node's log, tagged with the pipeline and repository (and with the work run
+// as its subject when the context carries one, as this test's does), and the
+// line says what the pipeline reported instead.
 func TestTheOriginalReviewModelErrorIsLoggedForTheOwner(t *testing.T) {
 	var buf bytes.Buffer
 	a := &App{Logger: slog.New(slog.NewJSONHandler(&buf, nil))}
