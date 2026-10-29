@@ -215,6 +215,16 @@ func clusterAttemptClass(res pl.StepResult) pl.AttemptClass {
 //   - fleet.go, runStep: the same, and a dispatcher that could not take the step,
 //     which is an error before anything is sent.
 //
+// NEVER ON A RECOVERY. A recovery (StepRequest.RecoverOnly) re-sends an attempt a
+// previous driver journaled and recorded no receipt for, so that attempt's Job may
+// exist and be running under a runner this node has never heard from, or its
+// command may have been dispatched to a machine. "No replica took the step" is this
+// executor's own memory, which starts empty, so it proves nothing about it. A
+// recovery therefore treats the step as already reached (clusterStep.reached) and,
+// with no route at all, answers pipeline_execution_uncertain as the runner itself
+// does for a recovery that cannot find the Job; the fleet reads a recovery before
+// it asks whether it has a dispatcher. None of those sentences says "Nothing ran.".
+//
 // A result that arrives from a runner is stripped of any class on the way in, so
 // a class on a result here can only have been set by the agent's own code.
 func noRunnerReached(message string) pl.StepResult {

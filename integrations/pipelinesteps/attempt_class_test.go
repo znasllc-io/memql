@@ -526,6 +526,112 @@ func TestAClusterRunnerUnavailableIsNothingRanOnlyWhenTheAgentMadeIt(t *testing.
 	}
 }
 
+// TestARecoveryIsAnUnknownOutcomeAtEverySiteThatMakesRunnerUnavailable: a
+// recovery re-sends the SAME attempt because a previous driver journaled its
+// intent and recorded no receipt (RecoverOnly), so the attempt's Job may exist
+// and be running under the previous driver's runner. This executor has never
+// heard from that runner, so "no replica ever took the step" -- a fact about
+// this executor's own memory (clusterStep.reached), which starts false -- is no
+// proof at all. At the three sites where the agent makes
+// pipeline_runner_unavailable, a recovery therefore reads as an unknown outcome,
+// and its sentence does not say "Nothing ran.". (The runner itself answers a
+// recovery that cannot find the Job pipeline_execution_uncertain.)
+func TestARecoveryIsAnUnknownOutcomeAtEverySiteThatMakesRunnerUnavailable(t *testing.T) {
+	notConfigured := &nodev1.WorkbenchForwardResponse{ErrorCode: workbench.ErrCodePipelinesNotConfigured, ErrorMessage: "no runner"}
+	recovery := func() pl.StepRequest {
+		req := exRequest()
+		req.RecoverOnly = true
+		return req
+	}
+	poolRecovery := func() pl.StepRequest {
+		req := poolRequest()
+		req.RecoverOnly = true
+		return req
+	}
+	// noReplica runs a recovery that no workbench replica is ever reachable for.
+	// The clock moves half an hour per try, so the run's bound is reached after a
+	// handful of tries and the test does not wait for it.
+	noReplica := func(t *testing.T, req pl.StepRequest) pl.StepResult {
+		var clock *exClock
+		unreachable := func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			clock.advance(30 * time.Minute)
+			return nil, "", workbench.ErrNoWorkbenchPeer
+		}
+		wb := &scriptedWorkbench{step: unreachable, status: unreachable}
+		e := newTestExecutor(wb, nil)
+		clock = withClock(e)
+		e.noPeerPatience = 30 * time.Second
+		res := awaitResult(t, executeAndCommitAsync(e, context.Background(), req), "the recovery waited for a replica to the run's bound")
+		if n := len(wb.sent(workbench.PipelineStepAction)); n < 3 {
+			t.Errorf("step forwards = %d: a recovery must keep trying past the no-replica patience, not give up at it", n)
+		}
+		return res
+	}
+
+	for _, c := range []struct {
+		name string
+		run  func(t *testing.T) pl.StepResult
+		code string
+	}{
+		{"the agent has no route to a workbench", func(t *testing.T) pl.StepResult {
+			res, err := newTestExecutor(nil, nil).Execute(context.Background(), recovery())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.CodeExecutionUncertain},
+		{"a pool step's recovery, on an agent with no route to a workbench", func(t *testing.T) pl.StepResult {
+			// runPool sends a recovery to the cluster and never to the fleet.
+			fleet := &poolFleet{}
+			res, err := newTestExecutor(nil, fleet).Execute(context.Background(), poolRecovery())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fleet.calls != 0 {
+				t.Fatal("a pool step's recovery reached the fleet")
+			}
+			return res
+		}, pl.CodeExecutionUncertain},
+		{"no replica was reachable for longer than the no-replica patience", func(t *testing.T) pl.StepResult {
+			return noReplica(t, recovery())
+		}, pl.CodeNodeLost},
+		{"a pool step's recovery, with no replica reachable", func(t *testing.T) pl.StepResult {
+			return noReplica(t, poolRecovery())
+		}, pl.CodeNodeLost},
+		{"the first replica to answer has no runner", func(t *testing.T) pl.StepResult {
+			wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return notConfigured, "workbench-a", nil
+			}}
+			res, err := newTestExecutor(wb, nil).Execute(context.Background(), recovery())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.CodeRunnerUnavailable},
+		{"a pool step's recovery, answered first by a replica with no runner", func(t *testing.T) pl.StepResult {
+			wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return notConfigured, "workbench-a", nil
+			}}
+			res, err := newTestExecutor(wb, &poolFleet{}).Execute(context.Background(), poolRecovery())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}, pl.CodeRunnerUnavailable},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := c.run(t)
+			wantFailure(t, res, pl.OutcomeFailed, c.code)
+			if res.AttemptClass != pl.AttemptOutcomeUnknown || res.NotRetriedHere {
+				t.Errorf("class = %q, notRetriedHere = %v, want outcome_unknown and false: the previous driver's runner may be running the step's Job", res.AttemptClass, res.NotRetriedHere)
+			}
+			if strings.Contains(res.Failure.Message, "Nothing ran") {
+				t.Errorf("failure %q says \"Nothing ran.\" about a recovery whose class is unknown", res.Failure.Message)
+			}
+		})
+	}
+}
+
 // TestAnImagePullFailureIsNothingRanOnlyWhenTheStepNeverStarted drives the
 // REAL classifier and the REAL settling of its verdict (Classify, then
 // step.decision, which fills StartedAt from stepTimes), so the rule in

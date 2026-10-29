@@ -73,7 +73,13 @@ type clusterStep struct {
 	// whose runner went quiet, for a stale re-forward. A forward that fails
 	// is retried with it, so the retry never hands the step back there.
 	exclude string
-	// reached says some replica answered something about this step.
+	// reached says some replica answered something about this step, or took it
+	// and was lost. It is this executor's own memory and starts false, EXCEPT for
+	// a recovery: a recovery re-sends an attempt a previous driver may have
+	// started, so its Job may exist and be running under a runner this executor
+	// has never heard from. A recovery is a step already reached (runCluster), and
+	// the two decisions that treat "no replica ever took it" as proof that nothing
+	// ran (noPeerTooLong, answer) must not be able to.
 	reached bool
 	// absentForwards counts the forwards an absent Job has caused; each
 	// waits twice as long as the one before (absentBackoffMax doublings).
@@ -92,6 +98,19 @@ type clusterStep struct {
 func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Duration, runDeadline time.Time) pl.StepResult {
 	job := JobName(run.RunID, run.StepKey, run.Attempt)
 	if e.fwd == nil {
+		if run.RecoverOnly {
+			// A recovery asks after an attempt a previous driver may have started:
+			// its Job may exist and be running under a runner this node cannot
+			// reach. The agent cannot say it never started, so this is not nothing
+			// ran (noRunnerReached); it is what the runner itself answers a recovery
+			// that cannot find the Job, an unknown outcome.
+			return withWhere(failedResult(pl.CodeExecutionUncertain,
+				"This agent node has no route to a workbench replica (MEMQL_WORKBENCH_REMOTE is not set, or the "+
+					"workbench integration is missing), so the previous attempt's Job could not be looked for. A previous "+
+					"driver may have started it and it may be running; no replacement was sent. Reconcile that attempt "+
+					"before authorizing new work."),
+				pl.Where{Surface: surfaceCluster, JobName: job})
+		}
 		// Made by the agent before any runner was asked: nothing ran (noRunnerReached).
 		return withWhere(noRunnerReached(
 			"This agent node has no route to a workbench replica (MEMQL_WORKBENCH_REMOTE is not set, or the "+
@@ -103,7 +122,8 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 		return withWhere(failedResult(pl.CodeExecutorError, "The step could not be encoded for the workbench: "+err.Error()),
 			pl.Where{Surface: surfaceCluster, JobName: job})
 	}
-	s := &clusterStep{e: e, run: run, args: args, job: job, timeout: timeout, runDeadline: runDeadline, handedAt: e.now()}
+	s := &clusterStep{e: e, run: run, args: args, job: job, timeout: timeout, runDeadline: runDeadline, handedAt: e.now(),
+		reached: run.RecoverOnly}
 	s.forward(ctx, "")
 
 	status := time.NewTicker(e.statusEvery)
@@ -223,10 +243,11 @@ func (s *clusterStep) ended(ctx context.Context, end forwardEnd) (pl.StepResult,
 		slog.String("jobName", s.job), slog.String("nodeId", end.servedBy))
 	switch {
 	case end.err == nil:
-		// Whether some replica took or answered the step BEFORE this reply: the
-		// one fact that tells a replica with no runner answering a step nobody
-		// has run (nothing ran) from one answering a step another replica may
-		// have started (answer).
+		// Whether some replica took or answered the step BEFORE this reply (or the
+		// step is a recovery, which counts as taken from the start): the one fact
+		// that tells a replica with no runner answering a step nobody has run
+		// (nothing ran) from one answering a step another runner may have started
+		// (answer).
 		tookBefore := s.reached
 		s.reached, s.noPeerSince = true, time.Time{}
 		if end.servedBy != "" {
@@ -253,7 +274,10 @@ func (s *clusterStep) ended(ctx context.Context, end forwardEnd) (pl.StepResult,
 // noPeerTooLong fails a step that no replica has ever taken once no replica
 // has been reachable for noPeerPatience. A step some replica already took
 // waits on to its deadline instead: its Job may be running, and a replica
-// coming back adopts it.
+// coming back adopts it. A recovery is such a step from the start (reached is
+// true for it): the Job of the attempt it re-sends may be running under a
+// runner this executor never heard from, so it is never failed as nothing ran
+// here and waits to the deadline like the rest.
 func (s *clusterStep) noPeerTooLong() (pl.StepResult, bool) {
 	if s.reached || s.noPeerSince.IsZero() || s.e.now().Sub(s.noPeerSince) < s.e.noPeerPatience {
 		return pl.StepResult{}, false
@@ -274,12 +298,14 @@ func (s *clusterStep) answer(ctx context.Context, resp *nodev1.WorkbenchForwardR
 				servedBy, resp.GetErrorMessage())
 			if tookBefore {
 				// This replica ran nothing, but it is not the first to be asked: a
-				// replica that took the step and was lost may have made its Job. Not
-				// made "before any runner took the step", so the class stays what a
-				// runner-unavailable reads as (unknown), and the sentence does not
-				// claim otherwise.
+				// replica that took the step and was lost may have made its Job, and
+				// a recovery (reached starts true for it) re-sends an attempt a
+				// previous driver may have started. Not made "before any runner took
+				// the step", so the class stays what a runner-unavailable reads as
+				// (unknown), and the sentence does not claim otherwise.
 				return s.where(failedResult(pl.CodeRunnerUnavailable,
-					says+" Another replica had already taken the step, so whether it ran is unknown."))
+					says+" An earlier replica, or the previous driver's runner in a recovery, may already have taken the "+
+						"step, so whether it ran is unknown."))
 			}
 			// The first replica to answer cannot run steps, and no replica took the
 			// step before it: nothing ran (noRunnerReached).

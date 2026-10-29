@@ -205,12 +205,16 @@ func (f *Fleet) runStep(ctx context.Context, req pl.StepRequest, run StepRun, se
 	if req.Step.Placement == pl.PlacementPool && (run.Execution != pl.ExecutionContainer || len(run.Needs) != 0 || len(req.Step.Needs) != 0) {
 		return refusedResult(pl.CodeStepInvalid, "Pool execution requires a portable container command without host needs."), nil
 	}
+	// A recovery is read first: it asks after an attempt a previous driver may have
+	// dispatched to a machine, which a node with no dispatcher cannot say it did
+	// not. (Execute answers a recovery before it reaches the fleet at all; this is
+	// for a caller that does.)
+	if req.RecoverOnly || run.RecoverOnly {
+		return failedResult(pl.CodeExecutionUncertain, "The previous fleet attempt has no durable result. No replacement command was sent; reconcile the original attempt first."), nil
+	}
 	if f == nil || f.dispatch == nil {
 		// Made by the agent before any machine was asked: nothing ran (noRunnerReached).
 		return noRunnerReached("This agent node has no dispatcher to reach the owner's machines with. Nothing ran."), nil
-	}
-	if req.RecoverOnly || run.RecoverOnly {
-		return failedResult(pl.CodeExecutionUncertain, "The previous fleet attempt has no durable result. No replacement command was sent; reconcile the original attempt first."), nil
 	}
 	if err := pl.CheckExecution(run.Execution, run.Platform, true); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), nil

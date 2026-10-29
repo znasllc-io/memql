@@ -180,6 +180,20 @@ func TestFleetAttemptsThatNeverReachedAMachine(t *testing.T) {
 			t.Errorf("class = %q notRetriedHere = %v, want nothing_ran", res.AttemptClass, res.NotRetriedHere)
 		}
 	})
+	t.Run("a recover-only attempt on a node with no dispatcher is unknown, not nothing ran", func(t *testing.T) {
+		// Execute never sends a recovery here (runFleet answers it first), but a
+		// caller of the fleet directly could: a recovery means a previous driver
+		// may have dispatched the command to a machine, and a node that cannot
+		// dispatch cannot say that it did not.
+		f, _, _, _ := newTestFleet(t, nil)
+		req := fleetReq()
+		req.RecoverOnly = true
+		res := runFleet(t, f, req)
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutionUncertain)
+		if res.AttemptClass != pl.AttemptOutcomeUnknown || strings.Contains(res.Failure.Message, "Nothing ran") {
+			t.Errorf("class = %q, message %q: want outcome_unknown and no \"Nothing ran.\"", res.AttemptClass, res.Failure.Message)
+		}
+	})
 	t.Run("a recover-only attempt", func(t *testing.T) {
 		// A previous driver may have started the command and left no result.
 		d := &fakeDispatcher{}

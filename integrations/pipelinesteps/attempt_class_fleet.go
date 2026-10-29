@@ -144,11 +144,19 @@ func fleetAttemptClass(r worker.Result, res pl.StepResult, dispatched bool) (pl.
 	}
 
 	if !dispatched {
-		// The fleet made this itself. What it says on its face is the whole
-		// proof: pipeline_clone_failed (the clone token could not be minted:
-		// nothing was sent), pipeline_runner_unavailable (no dispatcher),
+		// The fleet made this itself, and no dispatcher answered. For most codes
+		// what the result says on its face is the whole proof: pipeline_clone_failed
+		// (the clone token could not be minted: nothing was sent),
 		// pipeline_no_machine_for_need (a wait gave up), pipeline_execution_uncertain
 		// (a recovery), or a refusal.
+		//
+		// pipeline_runner_unavailable is NOT one of them. Its face proves nothing
+		// (the same code from a runner means a Job may exist), so the fleet's own
+		// (no dispatcher; a dispatcher that errored before it sent anything) is
+		// classified where it is made, nothing ran, by noRunnerReached, and arrives
+		// here already classified: RunStep keeps a class that is set. A bare one
+		// that got here is not the agent's, and clusterAttemptClass reads it as an
+		// unknown outcome. A recovery never reaches that site: it is read first.
 		return clusterAttemptClass(res), false
 	}
 
