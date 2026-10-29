@@ -1,0 +1,342 @@
+package pipelinerun
+
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/znasllc-io/memql/component/pipelines"
+)
+
+// attempts_test.go -- where a step's next attempt goes (spec 2026-10-28
+// fleet-first retries, section 5, as the controller's rulings amend it) and the
+// record each attempt leaves in the step's binding (section 3).
+
+// The steps the table retries: one per placement, as the compiler leaves them.
+var (
+	retryFleetStep = pipelines.Step{Key: "build.mac", Stage: "build", Name: "mac", Kind: pipelines.StepCommand,
+		Placement: pipelines.PlacementFleet, Execution: pipelines.ExecutionNative, Platform: "darwin/arm64"}
+	retryPoolStep = pipelines.Step{Key: "checks.vet", Stage: "checks", Name: "vet", Kind: pipelines.StepCommand,
+		Placement: pipelines.PlacementPool, Execution: pipelines.ExecutionContainer, Platform: "linux/amd64"}
+	retryClusterStep = pipelines.Step{Key: "checks.lint", Stage: "checks", Name: "lint", Kind: pipelines.StepCommand,
+		Placement: pipelines.PlacementCluster, Execution: pipelines.ExecutionContainer}
+)
+
+func repeatableStep(s pipelines.Step) pipelines.Step {
+	s.Repeatable = true
+	return s
+}
+
+// The records the table is written in. An attempt on a machine names it; the
+// fleet answering for an unpinned failover that it found no machine for names
+// none; a cluster attempt names the cluster.
+func on(machine string, class pipelines.AttemptClass) attemptRecord {
+	return attemptRecord{Class: class, Code: "pipeline_clone_failed", Surface: pipelines.PlacementFleet, WorkerID: machine}
+}
+
+func notRetried(r attemptRecord) attemptRecord {
+	r.NotRetriedHere = true
+	return r
+}
+
+func onCluster(class pipelines.AttemptClass) attemptRecord {
+	return attemptRecord{Class: class, Code: "pipeline_image_pull_failed", Surface: pipelines.PlacementCluster, JobName: "job"}
+}
+
+var noMachine = attemptRecord{Class: pipelines.AttemptNothingRan, Code: pipelines.CodeNoMachineForNeed, Surface: pipelines.PlacementFleet}
+
+// numbered is records as a step's history: attempt 1, 2, ... in order.
+func numbered(records ...attemptRecord) []attemptRecord {
+	out := make([]attemptRecord, len(records))
+	for i, r := range records {
+		r.Attempt = i + 1
+		out[i] = r
+	}
+	return out
+}
+
+func repeatRecord(r attemptRecord, n int) []attemptRecord {
+	out := make([]attemptRecord, n)
+	for i := range out {
+		out[i] = r
+	}
+	return out
+}
+
+const (
+	nothingRan     = pipelines.AttemptNothingRan
+	retryRequested = pipelines.AttemptRetryRequested
+	unknownOutcome = pipelines.AttemptOutcomeUnknown
+)
+
+func pinnedTo(machine string, wait int) *pipelines.AttemptPlacement {
+	return &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet, PinWorker: machine, MaxWaitSeconds: wait}
+}
+
+func failoverFrom(wait int, tried ...string) *pipelines.AttemptPlacement {
+	return &pipelines.AttemptPlacement{Surface: pipelines.PlacementFleet, ExcludeWorkers: tried, MaxWaitSeconds: wait}
+}
+
+var toCluster = &pipelines.AttemptPlacement{Surface: pipelines.PlacementCluster}
+
+func TestChooseNextFollowsTheRetryOrder(t *testing.T) {
+	// The spec's example installation (section 6): the portable retries, a
+	// minute's Fleet preference, cloud allowed.
+	standard := pipelines.ComputePlacementPolicy{FleetWaitSeconds: 60, CloudFallback: true, Retries: pipelines.DefaultRetryPolicy()}
+	noCloud := standard
+	noCloud.CloudFallback = false
+	noFleetWait := standard
+	noFleetWait.FleetWaitSeconds = 0
+	noOtherMachines := standard
+	noOtherMachines.Retries.OtherMachines = false
+	oneDelay := standard
+	oneDelay.Retries = pipelines.RetryPolicy{SameMachine: 3, DelaysSeconds: []int{10}, OtherMachines: true}
+	// A policy built by hand: its zero retries retry nothing, and its delays are
+	// an EMPTY list, which must not be indexed.
+	handBuilt := pipelines.ComputePlacementPolicy{Retries: pipelines.RetryPolicy{SameMachine: 1}}
+
+	type want struct {
+		placement *pipelines.AttemptPlacement
+		delay     time.Duration
+		ok        bool
+	}
+	next := func(p *pipelines.AttemptPlacement, delay time.Duration) want { return want{p, delay, true} }
+	stop := want{}
+
+	cases := []struct {
+		name    string
+		step    pipelines.Step
+		policy  pipelines.ComputePlacementPolicy
+		history []attemptRecord
+		want    want
+	}{
+		// Rule 1: the same machine, after its delays, then rule 2 at once. Every
+		// pinned attempt waits for its machine at most the largest delay.
+		{"nothing ran on M once: M again after 30 s", retryFleetStep, standard,
+			numbered(on("M", nothingRan)), next(pinnedTo("M", 120), 30*time.Second)},
+		{"twice: M again after 120 s", retryFleetStep, standard,
+			numbered(on("M", nothingRan), on("M", nothingRan)), next(pinnedTo("M", 120), 120*time.Second)},
+		{"three times: any machine but M, at once", retryFleetStep, standard,
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan)), next(failoverFrom(0, "M"), 0)},
+		{"M not retried here: any machine but M, at once", retryFleetStep, standard,
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(0, "M"), 0)},
+		{"the wait for pinned M ran out: any machine but M, at once", retryFleetStep, standard,
+			numbered(on("M", nothingRan), notRetried(on("M", nothingRan))), next(failoverFrom(0, "M"), 0)},
+		{"each new machine has its own count", retryFleetStep, standard,
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan), on("N", nothingRan)),
+			next(pinnedTo("N", 120), 30*time.Second)},
+		{"the last delay repeats", retryFleetStep, oneDelay,
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan)), next(pinnedTo("M", 10), 10*time.Second)},
+		{"no other machines once M is spent", retryFleetStep, noOtherMachines,
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan)), stop},
+
+		// Ruling 9: an unpinned failover that comes back nothing ran and not
+		// retried here, or naming no machine at all, found the fleet exhausted.
+		// A fleet step stops there; the machine a spent wait names is never
+		// pinned, because it was only the last one busy.
+		{"fleet step, every eligible machine tried", retryFleetStep, standard,
+			numbered(notRetried(on("M", nothingRan)), noMachine), stop},
+		{"fleet step, the failover found only a machine not retried here", retryFleetStep, standard,
+			numbered(notRetried(on("M", nothingRan)), notRetried(on("N", nothingRan))), stop},
+		{"pool step, the failover's wait ran out on a busy machine: never pin it", retryPoolStep, noCloud,
+			numbered(notRetried(on("M", nothingRan)), notRetried(on("N", nothingRan))), stop},
+		{"fleet step, never the cluster", retryFleetStep, standard,
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan), noMachine), stop},
+
+		// Rule 3: a pool step's machines exhausted, the cluster once.
+		{"pool step, machines exhausted, cloud allowed: the cluster", retryPoolStep, standard,
+			numbered(notRetried(on("M", nothingRan)), noMachine), next(toCluster, 0)},
+		{"pool step, machines exhausted after their same-machine retries", retryPoolStep, standard,
+			numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan), noMachine), next(toCluster, 0)},
+		{"pool step, machines exhausted, no cloud", retryPoolStep, noCloud,
+			numbered(notRetried(on("M", nothingRan)), noMachine), stop},
+		{"pool step, the cluster already a place", retryPoolStep, standard,
+			numbered(notRetried(on("M", nothingRan)), noMachine, onCluster(nothingRan)), stop},
+		{"pool step, the cluster asked for a retry and was already a place", retryPoolStep, standard,
+			numbered(notRetried(on("M", nothingRan)), noMachine, onCluster(retryRequested)), stop},
+		// A pool step's first attempt can end on the cluster inside itself (the
+		// Fleet preference ran out). Its retries reach the cluster once more at
+		// most, and then the machines it never tried.
+		{"pool step, its first attempt fell back to the cluster", retryPoolStep, standard,
+			numbered(onCluster(nothingRan)), next(toCluster, 30*time.Second)},
+		{"pool step, the cluster reached once in its retries", retryPoolStep, standard,
+			numbered(onCluster(nothingRan), onCluster(nothingRan)), next(failoverFrom(60), 0)},
+
+		// Ruling 8: a pool step's failover to another machine waits at most
+		// fleetWaitSeconds for a busy one, and at least a second (0 is no bound).
+		{"pool step's failover waits fleetWaitSeconds", retryPoolStep, standard,
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(60, "M"), 0)},
+		{"pool step's failover waits a second at least", retryPoolStep, noFleetWait,
+			numbered(notRetried(on("M", nothingRan))), next(failoverFrom(1, "M"), 0)},
+		{"pool step's pinned retry waits the largest delay", retryPoolStep, standard,
+			numbered(on("M", nothingRan)), next(pinnedTo("M", 120), 30*time.Second)},
+
+		// A cluster step's retries stay on the cluster, under sameMachine.
+		{"cluster step, nothing ran once", retryClusterStep, standard,
+			numbered(onCluster(nothingRan)), next(toCluster, 30*time.Second)},
+		{"cluster step, nothing ran twice", retryClusterStep, standard,
+			numbered(onCluster(nothingRan), onCluster(nothingRan)), next(toCluster, 120*time.Second)},
+		{"cluster step, sameMachine spent", retryClusterStep, standard,
+			numbered(onCluster(nothingRan), onCluster(nothingRan), onCluster(nothingRan)), stop},
+		{"cluster step, retry requested", retryClusterStep, standard,
+			numbered(onCluster(retryRequested)), next(toCluster, 30*time.Second)},
+
+		// Exit 75 needs no repeatable: the command said another run is safe.
+		{"retry requested on a step that is not repeatable", retryFleetStep, standard,
+			numbered(on("M", retryRequested)), next(pinnedTo("M", 120), 30*time.Second)},
+
+		// An unknown outcome is retried only for a repeatable step: another
+		// machine first, then the same machine once, then the cluster for pool.
+		{"outcome unknown, not repeatable", retryFleetStep, standard,
+			numbered(on("M", unknownOutcome)), stop},
+		{"outcome unknown, repeatable: another machine", repeatableStep(retryFleetStep), standard,
+			numbered(on("M", unknownOutcome)), next(failoverFrom(0, "M"), 0)},
+		{"outcome unknown, repeatable, pool: another machine within the Fleet wait", repeatableStep(retryPoolStep), standard,
+			numbered(on("M", unknownOutcome)), next(failoverFrom(60, "M"), 0)},
+		{"after the others: M once", repeatableStep(retryFleetStep), standard,
+			numbered(on("M", unknownOutcome), noMachine), next(pinnedTo("M", 120), 0)},
+		{"after the others and their own retries: M once", repeatableStep(retryFleetStep), standard,
+			numbered(on("M", unknownOutcome), on("N", nothingRan), on("N", nothingRan), on("N", nothingRan), noMachine),
+			next(pinnedTo("M", 120), 0)},
+		{"no other machines: M once at once", repeatableStep(retryFleetStep), noOtherMachines,
+			numbered(on("M", unknownOutcome)), next(pinnedTo("M", 120), 0)},
+		{"then the cluster, for pool", repeatableStep(retryPoolStep), standard,
+			numbered(on("M", unknownOutcome), noMachine, notRetried(on("M", nothingRan))), next(toCluster, 0)},
+		{"then nothing, for fleet", repeatableStep(retryFleetStep), standard,
+			numbered(on("M", unknownOutcome), noMachine, notRetried(on("M", nothingRan))), stop},
+		{"M's one retry is spent though it was unknown again", repeatableStep(retryPoolStep), standard,
+			numbered(on("M", unknownOutcome), noMachine, on("M", unknownOutcome)), next(toCluster, 0)},
+		{"M's one retry asked for another: M under its own count", repeatableStep(retryFleetStep), standard,
+			numbered(on("M", unknownOutcome), noMachine, on("M", retryRequested)), next(pinnedTo("M", 120), 120*time.Second)},
+		{"a machine that needs recovering is not retried after its unknown outcome", repeatableStep(retryPoolStep), standard,
+			numbered(notRetried(on("M", unknownOutcome)), noMachine), next(toCluster, 0)},
+		// Section 5's unknown-outcome rules name an untried machine, the same
+		// MACHINE once, or the cluster for a pool step: a cluster step whose node
+		// went away has none of them.
+		{"a repeatable cluster step's unknown outcome", repeatableStep(retryClusterStep), standard,
+			numbered(onCluster(unknownOutcome)), stop},
+		{"a repeatable pool step's unknown outcome on the cluster: an untried machine", repeatableStep(retryPoolStep), standard,
+			numbered(onCluster(unknownOutcome)), next(failoverFrom(60), 0)},
+
+		// The engine's cap: no step makes more than eight attempts.
+		{"seven attempts: one more", retryFleetStep, standard,
+			numbered(append(append(repeatRecord(on("m1", retryRequested), 3), repeatRecord(on("m2", retryRequested), 3)...),
+				on("m3", retryRequested))...),
+			next(pinnedTo("m3", 120), 30*time.Second)},
+		{"eight attempts: no more", retryFleetStep, standard,
+			numbered(append(append(repeatRecord(on("m1", retryRequested), 3), repeatRecord(on("m2", retryRequested), 3)...),
+				repeatRecord(on("m3", retryRequested), 2)...)...),
+			stop},
+
+		// Only a class the executor set and this engine knows is retried.
+		{"final", retryFleetStep, standard, numbered(on("M", pipelines.AttemptFinal)), stop},
+		{"no class reads as final", retryFleetStep, standard, numbered(on("M", "")), stop},
+		{"a class this engine does not know reads as final", retryFleetStep, standard, numbered(on("M", "try_harder")), stop},
+		{"no history", retryFleetStep, standard, nil, stop},
+
+		// A policy built by hand: no retries, and an empty delay list is no
+		// delay and a one-second wait for a pinned machine, never a panic.
+		{"the zero policy retries nothing", retryFleetStep, pipelines.ComputePlacementPolicy{},
+			numbered(on("M", nothingRan)), stop},
+		{"the zero policy retries no unknown outcome either", repeatableStep(retryFleetStep), pipelines.ComputePlacementPolicy{},
+			numbered(on("M", unknownOutcome)), stop},
+		{"a hand-built policy with no delays", retryFleetStep, handBuilt,
+			numbered(on("M", nothingRan)), next(pinnedTo("M", 1), 0)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			placement, delay, ok := chooseNext(c.step, c.policy, c.history)
+			if ok != c.want.ok || delay != c.want.delay || !reflect.DeepEqual(placement, c.want.placement) {
+				t.Fatalf("chooseNext = %s, %s, %v; want %s, %s, %v",
+					describe(placement), delay, ok, describe(c.want.placement), c.want.delay, c.want.ok)
+			}
+		})
+	}
+}
+
+// chooseNext hands back a placement the caller owns: an executor that edits
+// what it was handed cannot change what the next decision reads.
+func TestChooseNextSharesNothingWithItsHistory(t *testing.T) {
+	policy := pipelines.ComputePlacementPolicy{Retries: pipelines.DefaultRetryPolicy()}
+	history := numbered(on("M", nothingRan), on("M", nothingRan), on("M", nothingRan))
+	first, _, ok := chooseNext(retryFleetStep, policy, history)
+	if !ok || len(first.ExcludeWorkers) != 1 {
+		t.Fatalf("want a failover from M, got %s %v", describe(first), ok)
+	}
+	first.ExcludeWorkers[0] = "edited"
+	again, _, _ := chooseNext(retryFleetStep, policy, history)
+	if again.ExcludeWorkers[0] != "M" || history[0].WorkerID != "M" {
+		t.Fatalf("an edit to one answer reached the next: %s", describe(again))
+	}
+}
+
+// An attempt's record is what a replica that takes the run over reads back
+// from the step's binding (section 3), through the parse the journal's engine
+// gives it: JSON numbers, a list of objects, and the next attempt's time.
+func TestAttemptRecordsRoundTripThroughTheBinding(t *testing.T) {
+	records := []attemptRecord{
+		{Attempt: 1, Class: nothingRan, Code: "pipeline_clone_failed", Message: "The fetch failed.", Surface: "fleet",
+			WorkerID: "reg-msi", NodeID: "agent-0", StartedAt: "2026-10-03T12:00:00Z", FinishedAt: "2026-10-03T12:00:05Z",
+			LogFileID: "file-log-1", NotRetriedHere: true},
+		{Attempt: 2, Surface: "cluster", NodeID: "workbench-0", JobName: "job-2"},
+	}
+	next := testNow.Add(30 * time.Second)
+	binding := attemptsBinding(map[string]any{"surface": "cluster"}, records, next)
+	if binding["surface"] != "cluster" {
+		t.Errorf("the binding lost what it was built on: %v", binding)
+	}
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got, gotNext := attemptsFromBinding(decoded)
+	if !reflect.DeepEqual(got, records) || !gotNext.Equal(next) {
+		t.Fatalf("read back %+v, next %s; want %+v, next %s", got, gotNext, records, next)
+	}
+
+	// The second record wrote no blank: a field nobody reported is left out.
+	second := records[1].asMap()
+	for _, key := range []string{"class", "code", "message", "workerId", "notRetriedHere", "logFileId", "startedAt"} {
+		if _, written := second[key]; written {
+			t.Errorf("%s written blank: %v", key, second)
+		}
+	}
+
+	// Without a next attempt, the binding names none, and an intent replaces
+	// one a Retrying wrote (the binding is replaced whole).
+	stale := map[string]any{bindingAttempts: []any{}, bindingNextAttemptAt: next.Format(time.RFC3339)}
+	if b := attemptsBinding(stale, records, time.Time{}); b[bindingNextAttemptAt] != nil {
+		t.Errorf("an intent kept a stale next attempt: %v", b)
+	}
+	if b := attemptsBinding(nil, nil, time.Time{}); b != nil {
+		t.Errorf("a first attempt's intent must name no binding at all, as Step always wrote: %v", b)
+	}
+	if got, gotNext := attemptsFromBinding(nil); got != nil || !gotNext.IsZero() {
+		t.Errorf("an empty binding read as %v %s", got, gotNext)
+	}
+}
+
+// describe is a placement as a failure message reads it.
+func describe(p *pipelines.AttemptPlacement) string {
+	if p == nil {
+		return "<none>"
+	}
+	var b strings.Builder
+	b.WriteString("{" + p.Surface)
+	if p.PinWorker != "" {
+		b.WriteString(" pin " + p.PinWorker)
+	}
+	if len(p.ExcludeWorkers) > 0 {
+		b.WriteString(" excluding " + strings.Join(p.ExcludeWorkers, ","))
+	}
+	if p.MaxWaitSeconds != 0 {
+		b.WriteString(" waiting " + (time.Duration(p.MaxWaitSeconds) * time.Second).String())
+	}
+	return b.String() + "}"
+}

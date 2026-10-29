@@ -338,6 +338,12 @@ type StepState struct {
 	// artifacts (masked, as the receipt is): what a notify stage later in
 	// the run lists in its message.
 	ArtifactFileIDs []string
+	// Attempts is the step's attempt history (attempts.go): a record of every
+	// attempt the executor was handed, in order, once that attempt ended,
+	// masked as the step's receipt is. While a step waits between attempts its
+	// Status stays running and this says why. Empty for a step that never
+	// reached the executor; a resumed drive starts it empty.
+	Attempts []attemptRecord
 }
 
 // Report is the step as the check run reports it.

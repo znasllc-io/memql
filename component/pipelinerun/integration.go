@@ -135,6 +135,13 @@ type Deps struct {
 	// two seconds a read, or twenty minutes for a delivery that never comes.
 	notifyPoll    time.Duration
 	notifyTimeout time.Duration
+	// retryTimer, when set, is the timer the driver waits on between two
+	// attempts of a step (awaitNextAttempt), in place of time.NewTimer: it is
+	// handed the wait and answers a channel that delivers when the wait is
+	// over. A test sets it, so a retry delay of half a minute neither sleeps
+	// nor races the test -- it can fire at once, never, or when the test says.
+	// The driver still stops a wait on its lease's stop channel either way.
+	retryTimer func(time.Duration) <-chan time.Time
 }
 
 // Integration is the `pipelines` plug-in.
