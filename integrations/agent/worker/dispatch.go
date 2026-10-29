@@ -630,9 +630,10 @@ func (d *Dispatcher) attempt(
 	// with none carries none: the check run then calls it by the first characters of
 	// its id, as it does a row written before names were recorded. Fleet and the run
 	// page, which only the owner sees, name a machine by its reported name when it
-	// has no display name (Candidate.Label) and are not affected. Covered by
+	// has no display name (Candidate.Label) and are not affected. The refusals below
+	// follow the same rule (machine_words.go). Covered by
 	// TestAMachineIsNamedOnlyByTheNameItsOwnerChose.
-	res.MachineName = strings.TrimSpace(cand.DisplayName)
+	res.MachineName = ownerChosenName(cand)
 	res.NodeId = nodeId
 	res.Labels = maps.Clone(cand.Labels)
 	return res, outcome
@@ -654,6 +655,13 @@ func (d *Dispatcher) isLocal(cand Candidate) bool {
 	return strings.TrimSpace(cand.ConnectedNodeId) != "" && cand.ConnectedNodeId == d.selfNodeId
 }
 
+// attemptLocal dispatches to a machine this replica holds.
+//
+// THE REFUSALS HERE NAME THE MACHINE BY checkRunName, never by Label(). The
+// fleet executor quotes a pipeline dispatch's refusal whole into a failed step's
+// message, and the check run prints it, publicly for a public repository; Label()
+// falls back to the name the machine reported, which is its hostname. Log lines
+// keep Label(). See machine_words.go.
 func (d *Dispatcher) attemptLocal(
 	ctx context.Context,
 	req Request,
@@ -670,7 +678,7 @@ func (d *Dispatcher) attemptLocal(
 		return Result{
 			OK:           false,
 			ErrorCode:    "worker_disconnected",
-			ErrorMessage: "machine " + cand.Label() + " is no longer connected to this replica",
+			ErrorMessage: checkRunName(cand) + " is no longer connected to this replica",
 		}, ForwardRefusedBeforeStart
 	}
 	// The connected stream must still belong to the caller whose inventory was
@@ -688,7 +696,7 @@ func (d *Dispatcher) attemptLocal(
 		return Result{
 			OK:        false,
 			ErrorCode: codePipelinesNotAllowed,
-			ErrorMessage: "machine " + cand.Label() + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
+			ErrorMessage: checkRunName(cand) + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
 				" with pipeline action contract 2 and the requested native platform on its connection here",
 		}, ForwardRefusedBeforeStart
 	}
@@ -767,6 +775,10 @@ func (d *Dispatcher) attemptLocal(
 	return out, ForwardCompleted
 }
 
+// attemptRemote dispatches to a machine a sibling replica holds, over the
+// forward. Its own refusal names the machine by checkRunName for the reason
+// attemptLocal's do; the sibling's refusals arrive worded by the sibling, whose
+// handler names no machine.
 func (d *Dispatcher) attemptRemote(
 	ctx context.Context,
 	req Request,
@@ -787,7 +799,7 @@ func (d *Dispatcher) attemptRemote(
 		return Result{
 			OK:           false,
 			ErrorCode:    "worker_unreachable",
-			ErrorMessage: "machine " + cand.Label() + " is connected to replica " + cand.ConnectedNodeId + " and this node has no forward",
+			ErrorMessage: checkRunName(cand) + " is connected to replica " + cand.ConnectedNodeId + " and this node has no forward",
 		}, ForwardRefusedBeforeStart
 	}
 

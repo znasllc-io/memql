@@ -1819,9 +1819,12 @@ cluster*. The check run is public on GitHub for a public repository, so the name
 a machine reported, which is its hostname unless the owner replaced it, is never
 published. A machine its owner gave no display name is called by the first eight
 characters of its registration id, as is an attempt recorded before names were,
-unless another attempt of the same step has a name for that machine. A replica
-that takes a run over does not restate *Retrying* before the step settles, and
-the step's receipt then carries its whole history.
+unless another attempt of the same step has a name for that machine. The
+sentences the engine words itself about a machine that could not take a step
+follow the same rule (*machine 3f9c2ab0 is no longer connected to this replica*,
+or the owner's name in its place), because a failed step quotes them into the
+check run. A replica that takes a run over does not restate *Retrying* before
+the step settles, and the step's receipt then carries its whole history.
 
 ### A run can fail with every step passed
 

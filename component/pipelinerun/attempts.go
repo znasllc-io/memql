@@ -91,11 +91,6 @@ func (a attemptRecord) asMap() map[string]any {
 	return out
 }
 
-// machineIDChars is how much of a machine's registration id the check run calls
-// it by when no name was recorded. The id is a UUID, so its first eight
-// characters name a machine the way a short hash names a commit.
-const machineIDChars = 8
-
 // whereWords is where the attempt ran, in the words the check run says it in:
 // the cluster, or a machine by the display name its owner chose.
 //
@@ -104,7 +99,10 @@ const machineIDChars = 8
 // record (MachineName): the driver itself holds no machine's name, which is a
 // Fleet setting. It is the display name the machine's OWNER chose and nothing
 // else -- never the name the machine reported, which is its hostname -- because
-// this sentence is a check run, public on GitHub for a public repository.
+// this sentence is a check run, public on GitHub for a public repository. The
+// words for a machine with no name are pipelines.MachineWords's, which the
+// dispatcher's refusals use too, so one machine reads alike in a step's attempt
+// list and in that step's failure.
 //
 // known is the names this step's other attempts recorded, by bare registration
 // id: an attempt the dispatcher could only attribute to its pin (no machine
@@ -126,7 +124,7 @@ func (a attemptRecord) whereWords(known map[string]string) string {
 		if name := known[bareID(a.WorkerID)]; name != "" {
 			return name
 		}
-		return "machine " + cutText(bareID(a.WorkerID), machineIDChars)
+		return pipelines.MachineWords("", a.WorkerID)
 	case a.Surface == pipelines.PlacementFleet:
 		// The fleet named no machine: nothing was available to take the attempt.
 		return "your fleet"

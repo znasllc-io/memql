@@ -561,23 +561,34 @@ func LabelsFromArgs(v any) map[string]string {
 
 // RequireRepository narrows a plan using the machine-reported action scope.
 // Missing metadata is unknown consent, and cannot be repaired by labels.
+//
+// THE REASONS THIS FILE GIVES FOR A PIPELINE STEP'S NARROWING (this, the contract,
+// the native platform) NAME THE MACHINE BY checkRunName, not Label(). They become
+// the plan's Rejected text, which noCandidateMessage puts into the dispatch's
+// error message, which the fleet executor quotes into a failed step's message --
+// printed in a check run that is public for a public repository. Label() falls
+// back to the name the machine reported, its hostname (machine_words.go).
 func (p *RoutePlan) RequireRepository(action, repository string) {
 	p.filterCandidates(func(candidate Candidate) string {
 		if candidate.RepositoryScopes.Accepts(action, repository) {
 			return ""
 		}
-		return fmt.Sprintf("%s's reported repository policy does not accept %s for %s", candidate.Label(), repository, action)
+		return fmt.Sprintf("%s's reported repository policy does not accept %s for %s", checkRunName(candidate), repository, action)
 	})
 }
 
 // RequireActionContract excludes older implementations that might silently
 // ignore newer request fields. Operator labels cannot override this metadata.
+//
+// An agent's computer-use calls narrow by it too, and the same wording serves
+// them: a machine its owner never named is "machine 3f9c2ab0" in their
+// rejection as well, with the full registration id beside it in the message.
 func (p *RoutePlan) RequireActionContract(action string, version int) {
 	p.filterCandidates(func(candidate Candidate) string {
 		if candidate.ActionContracts.Supports(action, version) {
 			return ""
 		}
-		return fmt.Sprintf("%s has not reported %s contract %d", candidate.Label(), action, version)
+		return fmt.Sprintf("%s has not reported %s contract %d", checkRunName(candidate), action, version)
 	})
 }
 
@@ -609,7 +620,7 @@ func (p *RoutePlan) RequireNativePlatform(platform string) {
 		if platform != "" && candidate.NativePlatform == platform {
 			return ""
 		}
-		return fmt.Sprintf("%s has not reported native platform %s", candidate.Label(), platform)
+		return fmt.Sprintf("%s has not reported native platform %s", checkRunName(candidate), platform)
 	})
 }
 
