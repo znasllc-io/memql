@@ -115,6 +115,8 @@ test("a download that failed for a passing reason asks the pipeline to retry the
   const limit = await downloadVSCode({}, {...slow, timeoutMs:500, totalTimeoutMs:600}).catch(error => error);
   assert.match(limit.message, /total time limit/);
   assert.equal(exitCodeFor(limit), 75);
+  // The same words thrown outside the download are final.
+  assert.equal(exitCodeFor(new Error(limit.message)), 1);
 
   const transport = fixture(t, `Promise.reject(Object.assign(new Error('aborted'), {code:'ECONNRESET'}));`);
   const reset = await downloadVSCode({}, transport).catch(error => error);
@@ -132,9 +134,8 @@ test("a download that cannot succeed by retrying fails the step", async t => {
 });
 
 test("only a download failure can ask for a retry", () => {
-  // A failed host test, or a look-alike thrown outside the download, is final.
+  // A failed host test, or anything else thrown outside the download, is final.
   assert.equal(exitCodeFor(Object.assign(new Error("3 host tests failed"), {retryable:true})), 1);
-  assert.equal(exitCodeFor(new Error("VS Code download exceeded its total time limit")), 1);
   assert.equal(exitCodeFor("ECONNRESET"), 1);
   assert.equal(exitCodeFor(undefined), 1);
 });

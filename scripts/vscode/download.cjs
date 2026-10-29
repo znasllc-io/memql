@@ -96,7 +96,8 @@ async function downloadVSCode(options, settings = {}) {
   try {
     return await download(options, settings);
   } catch (error) {
-    if (error !== null && typeof error === "object") error[DOWNLOAD_FAILURE] = true;
+    // Not enumerable, so a runner that logs the error does not print the mark.
+    if (error !== null && typeof error === "object") Object.defineProperty(error, DOWNLOAD_FAILURE, { value: true });
     throw error;
   }
 }
