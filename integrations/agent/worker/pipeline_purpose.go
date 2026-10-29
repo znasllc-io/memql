@@ -173,9 +173,41 @@ func purposeBinding(purpose, tool, action, agentId string) (code, msg string) {
 	return "", ""
 }
 
-// purposeRefusal is purposeBinding as a gate result, for preDispatchCheck.
+// machineNarrowingBinding is the half of design D4 that purposeBinding cannot
+// ask. A pipeline step's retry may pin its dispatch to one machine or exclude
+// machines from it (Request.PinRegistration / ExcludeRegistrations), which is
+// the one way a dispatch names a machine, so it belongs to the pipeline purpose
+// alone. For any other purpose -- an agent's call, the workbench's, one this
+// engine does not know -- either field is refused, whatever else the request
+// is. Without this, a builtin that one day read a pin out of its arguments would
+// hand a model the thing D4 withholds, and the router would honour it.
+//
+// "Set" is any non-empty pin or any listed exclusion, blank text included: a
+// request that carries the field at all is not an ordinary one.
+//
+// The SENDER asks this and the receiving replica cannot. A forward carries the
+// one registration the sender chose and nothing of how it was chosen, so no pin
+// or exclusion rides the envelope to be re-decided. What the receiver does
+// re-decide is the machine's consent (machineAllowsPipelines), which does not
+// depend on how the machine was picked. Regression tests:
+// TestPinAndExcludeAreRefusedOutsideThePipelinePurpose.
+func machineNarrowingBinding(req Request) (code, msg string) {
+	if req.Purpose == PurposePipeline || (req.PinRegistration == "" && len(req.ExcludeRegistrations) == 0) {
+		return "", ""
+	}
+	return codeDeniedPipelinePurpose,
+		"only a pipeline step's retry may pin a dispatch to a machine or exclude machines from it: " +
+			"a call states what its work needs and the owner's routing policy decides which machine"
+}
+
+// purposeRefusal is purposeBinding, then machineNarrowingBinding, as a gate
+// result for preDispatchCheck. An action that does not belong to its purpose,
+// or a purpose nothing defines, is reported before a machine narrowing is.
 func purposeRefusal(req Request) (gateResult, bool) {
 	code, msg := purposeBinding(req.Purpose, req.Tool, req.Action, req.AgentId)
+	if code == "" {
+		code, msg = machineNarrowingBinding(req)
+	}
 	if code == "" {
 		return gateResult{}, false
 	}

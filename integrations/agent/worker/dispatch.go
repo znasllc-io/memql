@@ -140,6 +140,9 @@ type Result struct {
 	// WaitForConnection is the router's own evidence that an otherwise
 	// eligible pipeline worker has no stream. It is never read from a worker
 	// response. A caller still requires RefusedBeforeStart and a finite ceiling.
+	//
+	// Under a pin it is the pinned machine alone that is waited for, and a
+	// machine the request excluded never is.
 	WaitForConnection bool
 }
 
@@ -150,7 +153,10 @@ type Result struct {
 // an omission (design D4, memql#4351). An agent says what the work NEEDS --
 // RequireLabels narrows the candidate set, PreferLabels orders it -- and the
 // owner's routing policy decides which of their machines that lands on. A
-// model cannot name a machine, so it cannot hallucinate one.
+// model cannot name a machine, so it cannot hallucinate one. The one narrowing
+// by registration id is the engine's own, for a pipeline step's retry
+// (PinRegistration and ExcludeRegistrations below), and the pipeline purpose is
+// the only one that may carry it.
 type Request struct {
 	// Native-only receipt and freshly claimed constraint; never read from model args.
 	computerPermission  *permission.Grant
@@ -180,6 +186,37 @@ type Request struct {
 	// the candidate set. PreferLabels only orders it.
 	RequireLabels map[string]string
 	PreferLabels  map[string]string
+
+	// PinRegistration and ExcludeRegistrations narrow WHICH of the owner's
+	// machines a pipeline step may land on. They exist for the engine's retry
+	// driver: an attempt that must run where the step last ran is a pin, and one
+	// that must move excludes every machine already tried in this step. The ids
+	// are the registrations earlier attempts reported (Result.WorkerId); they
+	// never come from a model.
+	//
+	// THEY DO NOT REOPEN DESIGN D4 (above). Only the engine's pipeline executor
+	// sets them: the builtins never read them from their arguments, and
+	// purposeRefusal refuses either on every purpose but the pipeline's, which is
+	// itself admitted only under internal origin (pipelineGate). So a model still
+	// cannot name a machine, whatever it writes.
+	//
+	// They NARROW the plan and never admit: each is a test applied to the plan
+	// the router and the requirements already produced, so a pinned machine that
+	// has stopped allowing pipelines, or whose owner switched Host commands off,
+	// is reported for that reason and not waited for. Dispatching straight to a
+	// registration instead would have skipped the router and every consent it
+	// reads.
+	//
+	// A pin leaves at most one candidate, so that machine's refusal before start
+	// IS the result: the dispatcher never widens the plan to run a same-machine
+	// retry somewhere else, and what to do next is the caller's. Neither field
+	// crosses the mesh. The sender narrows its own plan and forwards to the one
+	// registration it chose, and the receiving replica re-checks the machine's
+	// consent, contract and Host commands exactly as for an unpinned dispatch.
+	//
+	// The empty pin is no pin. Regression tests: pipeline_pin_hop_test.go.
+	PinRegistration      string
+	ExcludeRegistrations []string
 
 	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
 	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
@@ -398,6 +435,27 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		// offered the machine, which refuses before send, and the owner's own
 		// fallback then decides whether the next machine is tried (fallbackFor).
 		plan.RequireHostCommands()
+
+		// THE RETRY DRIVER'S OWN NARROWING, LAST. Each narrowing is a test on one
+		// machine, so the machines left are the same in any order; what the order
+		// decides is the REASON recorded for a machine that two of them would turn
+		// away, because the first to reject it speaks. The owner's consents and the
+		// router's checks go first so that a machine they rule out is reported for
+		// that ("Host commands are off in Fleet settings") and not as "already
+		// tried in this step", which would send the owner looking in the wrong
+		// place. Both narrow the machines waiting for their connection too: a
+		// pinned machine that is only disconnected is the one WaitForConnection
+		// (below) asks the caller to wait for, and a machine already tried is
+		// never waited for. Only the engine's pipeline executor sets either field
+		// (purposeRefusal), so design D4 holds: no model names a machine.
+		//
+		// An empty PinRegistration is no pin. One that is only whitespace is a pin
+		// that names nothing, so it matches no machine -- the failure to want if a
+		// caller meant to pin and lost the value.
+		if req.PinRegistration != "" {
+			plan.PinRegistration(req.PinRegistration)
+		}
+		plan.ExcludeRegistrations(req.ExcludeRegistrations)
 	}
 	if err == nil && req.computerPermission != nil {
 		plan.RequireActionContract(permission.Contract, permission.Version)

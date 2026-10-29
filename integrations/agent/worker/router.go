@@ -19,12 +19,21 @@ package worker
 //   - the label matcher was never fed. The dispatch builtins had no way to
 //     express a requirement, so MatchesLabels ran on nil forever.
 //
-// WHAT IT DELIBERATELY DOES NOT DO. It never accepts a machine id. The
-// builtins take requireLabels / preferLabels and nothing else (design D4), so
-// a model naming a machine is not a failure mode this surface has. The worst a
-// wrong label can do is empty the candidate set, which is reported as
+// WHAT IT DELIBERATELY DOES NOT DO. It never accepts a machine id from a model.
+// The builtins take requireLabels / preferLabels and nothing else (design D4),
+// so a model naming a machine is not a failure mode this surface has. The worst
+// a wrong label can do is empty the candidate set, which is reported as
 // no_worker_available with every machine considered and the reason each was
 // rejected.
+//
+// THE ONE NARROWING BY REGISTRATION ID IS THE ENGINE'S OWN. A pipeline step's
+// retry may be pinned to the machine its last attempt ran on, or exclude the
+// machines it has already tried (RoutePlan.PinRegistration /
+// ExcludeRegistrations). The ids are the ones earlier attempts reported, the
+// purpose is the pipeline's alone (purposeRefusal refuses either field on every
+// other), and both only subtract from a plan that already enforced every
+// requirement, so they choose among machines the owner's consents admit and
+// never admit one.
 //
 // RE-PICK ONLY BEFORE SIDE EFFECTS (design D5). The loop in dispatch.go moves
 // to the next candidate on `worker_busy`, on a stream that went away BEFORE
@@ -601,6 +610,52 @@ func (p *RoutePlan) RequireNativePlatform(platform string) {
 			return ""
 		}
 		return fmt.Sprintf("%s has not reported native platform %s", candidate.Label(), platform)
+	})
+}
+
+// PinRegistration keeps only the machine a same-machine retry is pinned to and
+// turns every other away as "not the machine this retry is pinned to".
+//
+// It subtracts from the plan and never looks a machine up, which is what keeps
+// a pin from being a way round a consent. A pinned machine the requirements
+// ruled out (revoked, labels, contract, Host commands off) is in neither set and
+// keeps its own reason in Rejected, so the dispatch reports THAT; one that is
+// eligible but disconnected stays in OfflineCandidates alone, which is what lets
+// the dispatcher tell a pipeline to wait for it (Result.WaitForConnection) and
+// for no other machine.
+//
+// The id is matched as sameRegistration does, because a registration id is
+// spelled canonically on one side of a seam and bare on the other. A blank id
+// matches no machine: a pin that lost its value must not become "any machine".
+func (p *RoutePlan) PinRegistration(id string) {
+	p.filterCandidates(func(candidate Candidate) string {
+		if sameRegistration(candidate.RegistrationId, id) {
+			return ""
+		}
+		return "not the machine this retry is pinned to"
+	})
+}
+
+// ExcludeRegistrations drops the machines a step has already been tried on,
+// naming "already tried in this step" as the reason, so an attempt that must
+// move does not come back to a machine it left. It narrows the machines waiting
+// for a connection as well: a pipeline must not wait for a machine it has
+// already tried.
+//
+// Ids match as in PinRegistration, since an exclusion that failed to match would
+// send the retry back to the machine it meant to avoid. A blank id names no
+// machine and excludes none.
+func (p *RoutePlan) ExcludeRegistrations(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	p.filterCandidates(func(candidate Candidate) string {
+		for _, id := range ids {
+			if sameRegistration(candidate.RegistrationId, id) {
+				return "already tried in this step"
+			}
+		}
+		return ""
 	})
 }
 
