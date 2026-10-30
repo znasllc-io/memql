@@ -208,6 +208,38 @@ uses the real upload handler and persisted owner-stamped rows, then reads JSON
 on a second engine without an artifact index. The same bytes under binary MIME
 remain refused, and unauthenticated/foreign readers never fetch the blob.
 
+## A stored file is not a failed push (2026-10-30)
+
+The Library's upload route waits a bounded time for `indexFileOnCreate` to
+promote a file, then answers 201 with the file ID alone
+(`waitForPromotion` in `component/server/artifact_handler.go`). Its reasoning is
+that the bytes are durable and the artifact will appear. Cockpit read that same
+answer as a failed push and failed the whole app session.
+
+**Evidence.** On production on 2026-10-30, three of five Claude Code sessions
+ended failed with exit code 0 and a result in hand, reporting "server returned no
+artifact id", and Ask showed the person a failure. Measured from MemQL OS at the
+time, the lookup behind the wait took 0.8 to 4.5 seconds against its 3-second
+budget, so one slow read can spend the whole wait.
+
+**Chosen path.** Cockpit treats a file ID alone as stored. The output manifest
+records that file by its file ID. An answer naming neither ID proves nothing was
+stored and remains a failed push, which keeps the workspace for recovery.
+
+**Alternative rejected.** Only raising the server's wait needs an engine release
+and still leaves a bound that a slow enough read can exceed, so a late index row
+could still discard a finished answer.
+
+**Invariant.** `produced_artifact_ids` names artifacts only, because the engine
+stamps provenance on each one. A file ID never rides in it.
+
+**Known limits.** A file whose artifact was late gets no produced-by provenance.
+The slow lookup itself is not addressed here. Regression tests:
+`TestSession_AStoredFileAwaitingItsArtifactDoesNotFailTheSession`,
+`TestPush_AFileIdAloneIsAStoredFile`, `TestPush_AnAnswerNamingNothingIsAFailure`.
+A real Library upload with a late index row has been exercised only through the
+test server until this build runs on a fleet machine.
+
 ## Knowledge requirements can change during execution
 
 An initial role or skill binding is not a complete account of a goal's needs.

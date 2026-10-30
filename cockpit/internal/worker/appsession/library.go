@@ -287,17 +287,19 @@ func downloadFileName(resp *http.Response, id string) string {
 	return "artifact"
 }
 
-// PushResult is one uploaded artifact.
+// PushResult is one stored file. ArtifactId is empty when the file is stored but
+// its index row was not visible yet when the server answered; FileId names it
+// either way.
 type PushResult struct {
 	ArtifactId string `json:"artifactId"`
 	FileId     string `json:"fileId"`
 }
 
-// Push uploads one file and returns its artifact id.
-func (l *Library) Push(ctx context.Context, path, name string) (string, error) {
+// Push uploads one file and says where it went.
+func (l *Library) Push(ctx context.Context, path, name string) (PushResult, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("library: push %s: %w", filepath.Base(path), err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", filepath.Base(path), err)
 	}
 	defer f.Close()
 	return l.pushReader(ctx, f, name)
@@ -305,37 +307,37 @@ func (l *Library) Push(ctx context.Context, path, name string) (string, error) {
 
 // PushBytes uploads an in-memory body -- the transcript path, which never
 // needs to touch disk.
-func (l *Library) PushBytes(ctx context.Context, body []byte, name string) (string, error) {
+func (l *Library) PushBytes(ctx context.Context, body []byte, name string) (PushResult, error) {
 	return l.pushReader(ctx, bytes.NewReader(body), name)
 }
 
-func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (string, error) {
+func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (PushResult, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, err := writer.CreateFormFile(libraryFormFileKey, name)
 	if err != nil {
-		return "", fmt.Errorf("library: push %s: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", name, err)
 	}
 	if _, err := io.Copy(part, r); err != nil {
-		return "", fmt.Errorf("library: push %s: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", name, err)
 	}
 	if err := writer.WriteField(libraryFormNameKey, name); err != nil {
-		return "", fmt.Errorf("library: push %s: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", name, err)
 	}
 	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("library: push %s: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", name, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.baseURL+"/artifacts", &buf)
 	if err != nil {
-		return "", fmt.Errorf("library: push %s: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", name, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+l.bearer())
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := l.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("library: push %s: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: %w", name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -344,16 +346,26 @@ func (l *Library) pushReader(ctx context.Context, r io.Reader, name string) (str
 		// and a run that pulled its inputs fine and then failed to push
 		// its output reported the two halves of one expiry as two
 		// unrelated problems.
-		return "", pushStatusError(name, resp)
+		return PushResult{}, pushStatusError(name, resp)
 	}
 	var out PushResult
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("library: push %s: decode response: %w", name, err)
+		return PushResult{}, fmt.Errorf("library: push %s: decode response: %w", name, err)
 	}
-	if strings.TrimSpace(out.ArtifactId) == "" {
-		return "", fmt.Errorf("library: push %s: server returned no artifact id", name)
+	// A FILE ID ALONE IS A STORED FILE, NOT A FAILED PUSH. The upload route waits
+	// a bounded time for the automation that promotes a file to an artifact, then
+	// answers 201 with the file id alone, because the bytes are durable and the
+	// artifact will appear (component/server's waitForPromotion). Reading that as
+	// a failure failed sessions that had already finished their work: on
+	// production on 2026-10-30, three of five Claude Code sessions, each with exit
+	// code 0 and a result, while the lookup behind that wait took 0.8 to 4.5
+	// seconds against its 3-second budget. An answer naming neither id proves
+	// nothing was stored, so that one stays an error.
+	out.ArtifactId, out.FileId = strings.TrimSpace(out.ArtifactId), strings.TrimSpace(out.FileId)
+	if out.ArtifactId == "" && out.FileId == "" {
+		return PushResult{}, fmt.Errorf("library: push %s: server named neither an artifact nor a file", name)
 	}
-	return out.ArtifactId, nil
+	return out, nil
 }
 
 // The multipart field names the Library's upload route reads.

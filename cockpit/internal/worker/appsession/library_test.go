@@ -209,12 +209,45 @@ func TestPush_ReturnsTheArtifactId(t *testing.T) {
 	defer srv.Close()
 
 	l := NewLibrary(srv.URL, testBearer, srv.Client())
-	id, err := l.PushBytes(context.Background(), []byte("hello"), "out.txt")
+	pushed, err := l.PushBytes(context.Background(), []byte("hello"), "out.txt")
 	if err != nil {
 		t.Fatalf("PushBytes: %v", err)
 	}
-	if id != "art-9" {
-		t.Errorf("id = %q", id)
+	if pushed.ArtifactId != "art-9" || pushed.FileId != "file-9" {
+		t.Errorf("pushed = %+v", pushed)
+	}
+}
+
+// TestPush_AFileIdAloneIsAStoredFile: the upload route answers this when the
+// artifact index row is not visible within its wait. The bytes are durable.
+func TestPush_AFileIdAloneIsAStoredFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprint(w, `{"artifactId":"","fileId":"file-9","versionNumber":1}`)
+	}))
+	defer srv.Close()
+
+	pushed, err := NewLibrary(srv.URL, testBearer, srv.Client()).PushBytes(context.Background(), []byte("hello"), "out.txt")
+	if err != nil {
+		t.Fatalf("a stored file was reported as a failed push: %v", err)
+	}
+	if pushed.ArtifactId != "" || pushed.FileId != "file-9" {
+		t.Errorf("pushed = %+v", pushed)
+	}
+}
+
+// TestPush_AnAnswerNamingNothingIsAFailure: with neither id, nothing proves the
+// file was stored, and a success here would lose it silently.
+func TestPush_AnAnswerNamingNothingIsAFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprint(w, `{"artifactId":" ","fileId":""}`)
+	}))
+	defer srv.Close()
+
+	_, err := NewLibrary(srv.URL, testBearer, srv.Client()).PushBytes(context.Background(), []byte("hello"), "out.txt")
+	if err == nil || !strings.Contains(err.Error(), "neither an artifact nor a file") {
+		t.Fatalf("err = %v, want the answer named as empty", err)
 	}
 }
 
