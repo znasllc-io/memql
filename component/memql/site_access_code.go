@@ -266,6 +266,28 @@ func AccessSessionEnd(issuedAt, codeExpiresAt time.Time) time.Time {
 	return capEnd
 }
 
+// The two headers the edge stamps on every access request it forwards, and the
+// bff reads (the visitor protocol, section 6 of the design record).
+//
+// THEY LIVE HERE for the reason the shopper's do (shopper_surface.go): this is
+// the one package component/edge and component/server can both import, and a
+// literal repeated on each side is wrong before it drifts. If the two ever
+// disagree the symptom is silent and ugly: the edge stamps a header the bff does
+// not read, every visit arrives as an unstamped request, and the bff answers
+// each with the 404 a stranger gets.
+const (
+	// AccessStampSiteHeader names the v1:platform:site row the request arrived
+	// on. It is a POINTER, never an assertion: the bff re-reads that row and
+	// holds every code and session it touches to its id.
+	AccessStampSiteHeader = "X-Memql-Access-Site"
+
+	// AccessStampOwnerHeader names the user whose authority a call borrows. The
+	// bff requires the site row's own ownerUserId to equal it, because the tier's
+	// account arm would admit a forged owner who is a member of the organization:
+	// the row coming back proves nothing, and this comparison is the check.
+	AccessStampOwnerHeader = "X-Memql-Access-Owner"
+)
+
 // hexSHA256 is how every digest in this file is spelled: lowercase hex, because
 // a stored digest and a presented one are compared as strings.
 func hexSHA256(s string) string {

@@ -63,4 +63,24 @@
 // memql#3712). Serving a bundle to an unauthenticated browser grants
 // nothing -- the bundle is the same bytes for everyone who resolves that
 // hostname.
+//
+// # The access surface
+//
+// Four method and path pairs on a deployable's own origin are answered ahead of
+// the bundle and of the generic /_memql/* proxy, whatever the site's apiProxy
+// says (access.go). They are how a visitor holding an access code gets in, stays
+// in and leaves, and each is forwarded to the bff's /access family:
+//
+//	POST /_memql/access        ->  POST /access/unlock
+//	GET  /_memql/access        ->  GET  /access/session
+//	POST /_memql/access/leave  ->  POST /access/leave
+//	POST /_memql/access/call   ->  POST /access/call
+//
+// Anything else under the same prefix is not this surface's and reaches the
+// generic proxy as it always did. A visitor's browser has no MemQL identity to
+// open a stream with, and only an HTTP response can set an HttpOnly cookie, so
+// this is an owner-approved HTTP exception (2026-10-29). The edge routes, caps,
+// rate-limits and stamps the site and owner it resolved; it never reads the
+// session cookie and never decides access, which the bff does on every request
+// (design record docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md).
 package edge
