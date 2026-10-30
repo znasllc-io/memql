@@ -94,6 +94,10 @@ type ForwardRouter struct {
 	// app session's answer can never be delivered to a generation.
 	appMu       sync.Mutex
 	appInflight map[string]*appForwardCall
+
+	// appSignInInflight is the sign-in actions waiting on their one answer.
+	appSignInMu       sync.Mutex
+	appSignInInflight map[string]chan *nodev1.AppSignInForwardResponse
 }
 
 // peerManagerSender is the production PeerSender: look the replica up by node

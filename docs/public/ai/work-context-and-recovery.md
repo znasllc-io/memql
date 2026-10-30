@@ -400,9 +400,10 @@ reads the successful receipt. Changed feedback starts fresh research. A changed
 automation definition still refuses in-place resume: this reuse does not bypass
 the definition check or apply an old proposal.
 
-Remaining subscription quota is not inferred from sign-in. A failed session
-or bounded timeout remains an error with its attempt receipt. The chain may
-continue while the parent run is active; cancellation of the parent stops it.
+Remaining subscription quota is measured by the machine and not inferred from
+sign-in. A failed session or bounded timeout remains an error with its attempt
+receipt. The chain may continue while the parent run is active; cancellation of the
+parent stops it.
 A session that timed out is closed before another attempt. These mechanisms
 reuse the app session's existing permission, timeout and cleanup boundaries.
 
@@ -619,6 +620,14 @@ resumes the same saved work after the appropriate recorded decision; ordinary
 guidance does not approve a blocked operation. Empty workspace snapshots can
 resume without filesystem restoration. Populated snapshots remain refused
 where restoration is unsupported, rather than pretending their files survived.
+
+An app that runs out of usage or loses its login partway through a step hands it to
+the next ready app. The next app receives the step, the journal of what ran and where
+the work is, and carries on. The same rule applies: the first app's narrative travels
+as its own account and establishes nothing, so the journal is what is presented as
+fact. Without a complete journal nothing takes over. Any other failure may have left
+an action half done and is not continued automatically.
+([Local apps](../operate/local-apps.md#when-an-app-stops-partway) has the rule.)
 
 An approval resume also preserves that recovered context through the final App
 handoff. If the original rerun replaced the whole prompt, that old replacement

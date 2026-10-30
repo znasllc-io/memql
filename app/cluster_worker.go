@@ -128,6 +128,10 @@ func (a *App) wireWorkerForwarding(
 	// is served by a bff, which cannot reach a machine's stream, so the row it
 	// writes is the whole of the request and this event is the only thing that
 	// picks it up.
+	// Fleet's Sign in action, for a call that lands on this replica: a machine this
+	// replica holds is told directly, and one a sibling holds through the forward.
+	a.engine.SetAppSignInRelay(agentworker.NewAppSignInRelay(forwarder, integ.Dispatcher().Registry(), a.Logger))
+
 	if a.eventBus != nil {
 		runner := agentworker.NewModelPullRunner(integ.Dispatcher(), forwarder, nodeIdentity.ID)
 		// The unsubscribe is DISCARDED, deliberately. This subscription lives

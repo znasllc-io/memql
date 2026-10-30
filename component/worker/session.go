@@ -164,6 +164,10 @@ type AppSessionOutcome struct {
 	// one, since Claude Code's headless output states none.
 	Model  string
 	Effort string
+	// StopReason says the app stopped for a reason outside the work, on the machine's
+	// word: AppStopOutOfUsage or AppStopSignedOut. Empty for any other end, and from a
+	// cockpit that predates the field.
+	StopReason string
 }
 
 // AppSessionHandle is the caller's view of a running session.

@@ -170,6 +170,7 @@ type NodeClientMessage struct {
 	//	*NodeClientMessage_ModelProbeForwardCancel
 	//	*NodeClientMessage_AppCallForwardRequest
 	//	*NodeClientMessage_AppCallForwardCancel
+	//	*NodeClientMessage_AppSignInForwardRequest
 	Payload       isNodeClientMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -440,6 +441,15 @@ func (x *NodeClientMessage) GetAppCallForwardCancel() *AppCallForwardCancel {
 	return nil
 }
 
+func (x *NodeClientMessage) GetAppSignInForwardRequest() *AppSignInForwardRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*NodeClientMessage_AppSignInForwardRequest); ok {
+			return x.AppSignInForwardRequest
+		}
+	}
+	return nil
+}
+
 type isNodeClientMessage_Payload interface {
 	isNodeClientMessage_Payload()
 }
@@ -536,6 +546,10 @@ type NodeClientMessage_AppCallForwardCancel struct {
 	AppCallForwardCancel *AppCallForwardCancel `protobuf:"bytes,109,opt,name=app_call_forward_cancel,json=appCallForwardCancel,proto3,oneof"`
 }
 
+type NodeClientMessage_AppSignInForwardRequest struct {
+	AppSignInForwardRequest *AppSignInForwardRequest `protobuf:"bytes,110,opt,name=app_sign_in_forward_request,json=appSignInForwardRequest,proto3,oneof"`
+}
+
 func (*NodeClientMessage_NodeHello) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_Heartbeat) isNodeClientMessage_Payload() {}
@@ -582,6 +596,8 @@ func (*NodeClientMessage_AppCallForwardRequest) isNodeClientMessage_Payload() {}
 
 func (*NodeClientMessage_AppCallForwardCancel) isNodeClientMessage_Payload() {}
 
+func (*NodeClientMessage_AppSignInForwardRequest) isNodeClientMessage_Payload() {}
+
 type NodeServerMessage struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	MessageId   string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
@@ -610,6 +626,7 @@ type NodeServerMessage struct {
 	//	*NodeServerMessage_ModelProbeForwardResponse
 	//	*NodeServerMessage_ModelProbeForwardProgress
 	//	*NodeServerMessage_AppCallForwardResponse
+	//	*NodeServerMessage_AppSignInForwardResponse
 	Payload       isNodeServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -862,6 +879,15 @@ func (x *NodeServerMessage) GetAppCallForwardResponse() *AppCallForwardResponse 
 	return nil
 }
 
+func (x *NodeServerMessage) GetAppSignInForwardResponse() *AppSignInForwardResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*NodeServerMessage_AppSignInForwardResponse); ok {
+			return x.AppSignInForwardResponse
+		}
+	}
+	return nil
+}
+
 type isNodeServerMessage_Payload interface {
 	isNodeServerMessage_Payload()
 }
@@ -950,6 +976,10 @@ type NodeServerMessage_AppCallForwardResponse struct {
 	AppCallForwardResponse *AppCallForwardResponse `protobuf:"bytes,108,opt,name=app_call_forward_response,json=appCallForwardResponse,proto3,oneof"`
 }
 
+type NodeServerMessage_AppSignInForwardResponse struct {
+	AppSignInForwardResponse *AppSignInForwardResponse `protobuf:"bytes,109,opt,name=app_sign_in_forward_response,json=appSignInForwardResponse,proto3,oneof"`
+}
+
 func (*NodeServerMessage_NodeWelcome) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_Heartbeat) isNodeServerMessage_Payload() {}
@@ -991,6 +1021,8 @@ func (*NodeServerMessage_ModelProbeForwardResponse) isNodeServerMessage_Payload(
 func (*NodeServerMessage_ModelProbeForwardProgress) isNodeServerMessage_Payload() {}
 
 func (*NodeServerMessage_AppCallForwardResponse) isNodeServerMessage_Payload() {}
+
+func (*NodeServerMessage_AppSignInForwardResponse) isNodeServerMessage_Payload() {}
 
 // NodeHello is sent by a connecting node to identify itself.
 type NodeHello struct {
@@ -4911,12 +4943,180 @@ func (x *AppCallForwardCancel) GetReason() string {
 	return ""
 }
 
+// AppSignInForwardRequest carries one Fleet sign-in action from the node that took
+// the person's call to the agent holding the machine's stream. Sign-in is a person
+// at one machine's page, so there is no other machine to fall through to, and the
+// row is how they watch: this answers only whether the machine was told.
+type AppSignInForwardRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RegistrationId string                 `protobuf:"bytes,2,opt,name=registration_id,json=registrationId,proto3" json:"registration_id,omitempty"`
+	// owner_user_id is a hint held against the verified authority, as elsewhere.
+	OwnerUserId string `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
+	SignInId    string `protobuf:"bytes,4,opt,name=sign_in_id,json=signInId,proto3" json:"sign_in_id,omitempty"`
+	// action is "start", "code" or "cancel".
+	Action string `protobuf:"bytes,5,opt,name=action,proto3" json:"action,omitempty"`
+	App    string `protobuf:"bytes,6,opt,name=app,proto3" json:"app,omitempty"`
+	// code is what the person pasted. Never logged, and never written to a row.
+	Code          string              `protobuf:"bytes,7,opt,name=code,proto3" json:"code,omitempty"`
+	Authority     *ForwardedAuthority `protobuf:"bytes,8,opt,name=authority,proto3" json:"authority,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSignInForwardRequest) Reset() {
+	*x = AppSignInForwardRequest{}
+	mi := &file_node_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSignInForwardRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSignInForwardRequest) ProtoMessage() {}
+
+func (x *AppSignInForwardRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSignInForwardRequest.ProtoReflect.Descriptor instead.
+func (*AppSignInForwardRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *AppSignInForwardRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetRegistrationId() string {
+	if x != nil {
+		return x.RegistrationId
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetOwnerUserId() string {
+	if x != nil {
+		return x.OwnerUserId
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetSignInId() string {
+	if x != nil {
+		return x.SignInId
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetApp() string {
+	if x != nil {
+		return x.App
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *AppSignInForwardRequest) GetAuthority() *ForwardedAuthority {
+	if x != nil {
+		return x.Authority
+	}
+	return nil
+}
+
+type AppSignInForwardResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Empty error_code means the machine was told.
+	ErrorCode     string `protobuf:"bytes,2,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage  string `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppSignInForwardResponse) Reset() {
+	*x = AppSignInForwardResponse{}
+	mi := &file_node_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppSignInForwardResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppSignInForwardResponse) ProtoMessage() {}
+
+func (x *AppSignInForwardResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppSignInForwardResponse.ProtoReflect.Descriptor instead.
+func (*AppSignInForwardResponse) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *AppSignInForwardResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *AppSignInForwardResponse) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *AppSignInForwardResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"node.proto\x12\x15znasllc.memql.node.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x94\x13\n" +
+	"node.proto\x12\x15znasllc.memql.node.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x84\x14\n" +
 	"\x11NodeClientMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -4947,11 +5147,12 @@ const file_node_proto_rawDesc = "" +
 	"\x1bmodel_probe_forward_request\x18j \x01(\v2/.znasllc.memql.node.v1.ModelProbeForwardRequestH\x00R\x18modelProbeForwardRequest\x12m\n" +
 	"\x1amodel_probe_forward_cancel\x18k \x01(\v2..znasllc.memql.node.v1.ModelProbeForwardCancelH\x00R\x17modelProbeForwardCancel\x12g\n" +
 	"\x18app_call_forward_request\x18l \x01(\v2,.znasllc.memql.node.v1.AppCallForwardRequestH\x00R\x15appCallForwardRequest\x12d\n" +
-	"\x17app_call_forward_cancel\x18m \x01(\v2+.znasllc.memql.node.v1.AppCallForwardCancelH\x00R\x14appCallForwardCancel\x1a;\n" +
+	"\x17app_call_forward_cancel\x18m \x01(\v2+.znasllc.memql.node.v1.AppCallForwardCancelH\x00R\x14appCallForwardCancel\x12n\n" +
+	"\x1bapp_sign_in_forward_request\x18n \x01(\v2..znasllc.memql.node.v1.AppSignInForwardRequestH\x00R\x17appSignInForwardRequest\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
-	"\apayloadJ\x04\b<\x10=J\x04\b\x1f\x10 R\rquery_forwardR\tevent_ack\"\xe1\x11\n" +
+	"\apayloadJ\x04\b<\x10=J\x04\b\x1f\x10 R\rquery_forwardR\tevent_ack\"\xd4\x12\n" +
 	"\x11NodeServerMessage\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12!\n" +
@@ -4979,7 +5180,8 @@ const file_node_proto_rawDesc = "" +
 	"\x1bmodel_pull_forward_progress\x18i \x01(\v2/.znasllc.memql.node.v1.ModelPullForwardProgressH\x00R\x18modelPullForwardProgress\x12s\n" +
 	"\x1cmodel_probe_forward_response\x18j \x01(\v20.znasllc.memql.node.v1.ModelProbeForwardResponseH\x00R\x19modelProbeForwardResponse\x12s\n" +
 	"\x1cmodel_probe_forward_progress\x18k \x01(\v20.znasllc.memql.node.v1.ModelProbeForwardProgressH\x00R\x19modelProbeForwardProgress\x12j\n" +
-	"\x19app_call_forward_response\x18l \x01(\v2-.znasllc.memql.node.v1.AppCallForwardResponseH\x00R\x16appCallForwardResponse\x1a;\n" +
+	"\x19app_call_forward_response\x18l \x01(\v2-.znasllc.memql.node.v1.AppCallForwardResponseH\x00R\x16appCallForwardResponse\x12q\n" +
+	"\x1capp_sign_in_forward_response\x18m \x01(\v2/.znasllc.memql.node.v1.AppSignInForwardResponseH\x00R\x18appSignInForwardResponse\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
@@ -5341,7 +5543,24 @@ const file_node_proto_rawDesc = "" +
 	"\x14AppCallForwardCancel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason*\xca\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xaa\x02\n" +
+	"\x17AppSignInForwardRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
+	"\x0fregistration_id\x18\x02 \x01(\tR\x0eregistrationId\x12\"\n" +
+	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12\x1c\n" +
+	"\n" +
+	"sign_in_id\x18\x04 \x01(\tR\bsignInId\x12\x16\n" +
+	"\x06action\x18\x05 \x01(\tR\x06action\x12\x10\n" +
+	"\x03app\x18\x06 \x01(\tR\x03app\x12\x12\n" +
+	"\x04code\x18\a \x01(\tR\x04code\x12G\n" +
+	"\tauthority\x18\b \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\"}\n" +
+	"\x18AppSignInForwardResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage*\xca\x01\n" +
 	"\x10NodeHealthStatus\x12\x1b\n" +
 	"\x17NODE_HEALTH_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16NODE_HEALTH_CONNECTING\x10\x01\x12\x17\n" +
@@ -5370,7 +5589,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
 var file_node_proto_goTypes = []any{
 	(NodeHealthStatus)(0),                // 0: znasllc.memql.node.v1.NodeHealthStatus
 	(ForwardedPrincipalKind)(0),          // 1: znasllc.memql.node.v1.ForwardedPrincipalKind
@@ -5421,19 +5640,21 @@ var file_node_proto_goTypes = []any{
 	(*AppCallImage)(nil),                 // 46: znasllc.memql.node.v1.AppCallImage
 	(*AppCallForwardResponse)(nil),       // 47: znasllc.memql.node.v1.AppCallForwardResponse
 	(*AppCallForwardCancel)(nil),         // 48: znasllc.memql.node.v1.AppCallForwardCancel
-	nil,                                  // 49: znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
-	nil,                                  // 50: znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
-	nil,                                  // 51: znasllc.memql.node.v1.NodeHello.LabelsEntry
-	nil,                                  // 52: znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
-	nil,                                  // 53: znasllc.memql.node.v1.PeerInfo.LabelsEntry
-	nil,                                  // 54: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
-	nil,                                  // 55: znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	nil,                                  // 56: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	(*timestamppb.Timestamp)(nil),        // 57: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),              // 58: google.protobuf.Struct
+	(*AppSignInForwardRequest)(nil),      // 49: znasllc.memql.node.v1.AppSignInForwardRequest
+	(*AppSignInForwardResponse)(nil),     // 50: znasllc.memql.node.v1.AppSignInForwardResponse
+	nil,                                  // 51: znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
+	nil,                                  // 52: znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
+	nil,                                  // 53: znasllc.memql.node.v1.NodeHello.LabelsEntry
+	nil,                                  // 54: znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
+	nil,                                  // 55: znasllc.memql.node.v1.PeerInfo.LabelsEntry
+	nil,                                  // 56: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
+	nil,                                  // 57: znasllc.memql.node.v1.SpawnRequest.EnvEntry
+	nil,                                  // 58: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	(*timestamppb.Timestamp)(nil),        // 59: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),              // 60: google.protobuf.Struct
 }
 var file_node_proto_depIdxs = []int32{
-	49, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
+	51, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
 	4,  // 1: znasllc.memql.node.v1.NodeClientMessage.node_hello:type_name -> znasllc.memql.node.v1.NodeHello
 	6,  // 2: znasllc.memql.node.v1.NodeClientMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
 	8,  // 3: znasllc.memql.node.v1.NodeClientMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
@@ -5457,63 +5678,66 @@ var file_node_proto_depIdxs = []int32{
 	41, // 21: znasllc.memql.node.v1.NodeClientMessage.model_probe_forward_cancel:type_name -> znasllc.memql.node.v1.ModelProbeForwardCancel
 	42, // 22: znasllc.memql.node.v1.NodeClientMessage.app_call_forward_request:type_name -> znasllc.memql.node.v1.AppCallForwardRequest
 	48, // 23: znasllc.memql.node.v1.NodeClientMessage.app_call_forward_cancel:type_name -> znasllc.memql.node.v1.AppCallForwardCancel
-	50, // 24: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
-	5,  // 25: znasllc.memql.node.v1.NodeServerMessage.node_welcome:type_name -> znasllc.memql.node.v1.NodeWelcome
-	6,  // 26: znasllc.memql.node.v1.NodeServerMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
-	8,  // 27: znasllc.memql.node.v1.NodeServerMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
-	9,  // 28: znasllc.memql.node.v1.NodeServerMessage.spawn_request:type_name -> znasllc.memql.node.v1.SpawnRequest
-	10, // 29: znasllc.memql.node.v1.NodeServerMessage.spawn_result:type_name -> znasllc.memql.node.v1.SpawnResult
-	11, // 30: znasllc.memql.node.v1.NodeServerMessage.event_forward:type_name -> znasllc.memql.node.v1.EventForward
-	14, // 31: znasllc.memql.node.v1.NodeServerMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
-	15, // 32: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
-	25, // 33: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
-	18, // 34: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
-	21, // 35: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
-	24, // 36: znasllc.memql.node.v1.NodeServerMessage.deploy_control_forward_response:type_name -> znasllc.memql.node.v1.DeployControlForwardResponse
-	27, // 37: znasllc.memql.node.v1.NodeServerMessage.worker_forward_response:type_name -> znasllc.memql.node.v1.WorkerForwardResponse
-	28, // 38: znasllc.memql.node.v1.NodeServerMessage.worker_forward_stream:type_name -> znasllc.memql.node.v1.WorkerForwardStream
-	31, // 39: znasllc.memql.node.v1.NodeServerMessage.model_forward_response:type_name -> znasllc.memql.node.v1.ModelForwardResponse
-	32, // 40: znasllc.memql.node.v1.NodeServerMessage.model_forward_delta:type_name -> znasllc.memql.node.v1.ModelForwardDelta
-	35, // 41: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_response:type_name -> znasllc.memql.node.v1.ModelPullForwardResponse
-	36, // 42: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_progress:type_name -> znasllc.memql.node.v1.ModelPullForwardProgress
-	39, // 43: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_response:type_name -> znasllc.memql.node.v1.ModelProbeForwardResponse
-	40, // 44: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_progress:type_name -> znasllc.memql.node.v1.ModelProbeForwardProgress
-	47, // 45: znasllc.memql.node.v1.NodeServerMessage.app_call_forward_response:type_name -> znasllc.memql.node.v1.AppCallForwardResponse
-	51, // 46: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
-	7,  // 47: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	57, // 48: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
-	0,  // 49: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
-	52, // 50: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
-	0,  // 51: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
-	53, // 52: znasllc.memql.node.v1.PeerInfo.labels:type_name -> znasllc.memql.node.v1.PeerInfo.LabelsEntry
-	7,  // 53: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	54, // 54: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
-	55, // 55: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	57, // 56: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
-	58, // 57: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
-	12, // 58: znasllc.memql.node.v1.EventForward.cause:type_name -> znasllc.memql.node.v1.EventCause
-	13, // 59: znasllc.memql.node.v1.EventCause.chain:type_name -> znasllc.memql.node.v1.EventCauseLink
-	56, // 60: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	17, // 61: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	1,  // 62: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
-	17, // 63: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	17, // 64: znasllc.memql.node.v1.DeployControlForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	17, // 65: znasllc.memql.node.v1.WorkerForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	17, // 66: znasllc.memql.node.v1.ModelForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	17, // 67: znasllc.memql.node.v1.ModelPullForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	17, // 68: znasllc.memql.node.v1.ModelProbeForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	43, // 69: znasllc.memql.node.v1.AppCallForwardRequest.messages:type_name -> znasllc.memql.node.v1.AppCallMessage
-	44, // 70: znasllc.memql.node.v1.AppCallForwardRequest.schema:type_name -> znasllc.memql.node.v1.AppCallSchema
-	45, // 71: znasllc.memql.node.v1.AppCallForwardRequest.pin:type_name -> znasllc.memql.node.v1.AppCallPin
-	46, // 72: znasllc.memql.node.v1.AppCallForwardRequest.images:type_name -> znasllc.memql.node.v1.AppCallImage
-	17, // 73: znasllc.memql.node.v1.AppCallForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	2,  // 74: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
-	3,  // 75: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
-	75, // [75:76] is the sub-list for method output_type
-	74, // [74:75] is the sub-list for method input_type
-	74, // [74:74] is the sub-list for extension type_name
-	74, // [74:74] is the sub-list for extension extendee
-	0,  // [0:74] is the sub-list for field type_name
+	49, // 24: znasllc.memql.node.v1.NodeClientMessage.app_sign_in_forward_request:type_name -> znasllc.memql.node.v1.AppSignInForwardRequest
+	52, // 25: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
+	5,  // 26: znasllc.memql.node.v1.NodeServerMessage.node_welcome:type_name -> znasllc.memql.node.v1.NodeWelcome
+	6,  // 27: znasllc.memql.node.v1.NodeServerMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
+	8,  // 28: znasllc.memql.node.v1.NodeServerMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
+	9,  // 29: znasllc.memql.node.v1.NodeServerMessage.spawn_request:type_name -> znasllc.memql.node.v1.SpawnRequest
+	10, // 30: znasllc.memql.node.v1.NodeServerMessage.spawn_result:type_name -> znasllc.memql.node.v1.SpawnResult
+	11, // 31: znasllc.memql.node.v1.NodeServerMessage.event_forward:type_name -> znasllc.memql.node.v1.EventForward
+	14, // 32: znasllc.memql.node.v1.NodeServerMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
+	15, // 33: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
+	25, // 34: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
+	18, // 35: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
+	21, // 36: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
+	24, // 37: znasllc.memql.node.v1.NodeServerMessage.deploy_control_forward_response:type_name -> znasllc.memql.node.v1.DeployControlForwardResponse
+	27, // 38: znasllc.memql.node.v1.NodeServerMessage.worker_forward_response:type_name -> znasllc.memql.node.v1.WorkerForwardResponse
+	28, // 39: znasllc.memql.node.v1.NodeServerMessage.worker_forward_stream:type_name -> znasllc.memql.node.v1.WorkerForwardStream
+	31, // 40: znasllc.memql.node.v1.NodeServerMessage.model_forward_response:type_name -> znasllc.memql.node.v1.ModelForwardResponse
+	32, // 41: znasllc.memql.node.v1.NodeServerMessage.model_forward_delta:type_name -> znasllc.memql.node.v1.ModelForwardDelta
+	35, // 42: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_response:type_name -> znasllc.memql.node.v1.ModelPullForwardResponse
+	36, // 43: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_progress:type_name -> znasllc.memql.node.v1.ModelPullForwardProgress
+	39, // 44: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_response:type_name -> znasllc.memql.node.v1.ModelProbeForwardResponse
+	40, // 45: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_progress:type_name -> znasllc.memql.node.v1.ModelProbeForwardProgress
+	47, // 46: znasllc.memql.node.v1.NodeServerMessage.app_call_forward_response:type_name -> znasllc.memql.node.v1.AppCallForwardResponse
+	50, // 47: znasllc.memql.node.v1.NodeServerMessage.app_sign_in_forward_response:type_name -> znasllc.memql.node.v1.AppSignInForwardResponse
+	53, // 48: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
+	7,  // 49: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
+	59, // 50: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
+	0,  // 51: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
+	54, // 52: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
+	0,  // 53: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
+	55, // 54: znasllc.memql.node.v1.PeerInfo.labels:type_name -> znasllc.memql.node.v1.PeerInfo.LabelsEntry
+	7,  // 55: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
+	56, // 56: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
+	57, // 57: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
+	59, // 58: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
+	60, // 59: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
+	12, // 60: znasllc.memql.node.v1.EventForward.cause:type_name -> znasllc.memql.node.v1.EventCause
+	13, // 61: znasllc.memql.node.v1.EventCause.chain:type_name -> znasllc.memql.node.v1.EventCauseLink
+	58, // 62: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	17, // 63: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	1,  // 64: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
+	17, // 65: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	17, // 66: znasllc.memql.node.v1.DeployControlForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	17, // 67: znasllc.memql.node.v1.WorkerForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	17, // 68: znasllc.memql.node.v1.ModelForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	17, // 69: znasllc.memql.node.v1.ModelPullForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	17, // 70: znasllc.memql.node.v1.ModelProbeForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	43, // 71: znasllc.memql.node.v1.AppCallForwardRequest.messages:type_name -> znasllc.memql.node.v1.AppCallMessage
+	44, // 72: znasllc.memql.node.v1.AppCallForwardRequest.schema:type_name -> znasllc.memql.node.v1.AppCallSchema
+	45, // 73: znasllc.memql.node.v1.AppCallForwardRequest.pin:type_name -> znasllc.memql.node.v1.AppCallPin
+	46, // 74: znasllc.memql.node.v1.AppCallForwardRequest.images:type_name -> znasllc.memql.node.v1.AppCallImage
+	17, // 75: znasllc.memql.node.v1.AppCallForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	17, // 76: znasllc.memql.node.v1.AppSignInForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	2,  // 77: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
+	3,  // 78: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
+	78, // [78:79] is the sub-list for method output_type
+	77, // [77:78] is the sub-list for method input_type
+	77, // [77:77] is the sub-list for extension type_name
+	77, // [77:77] is the sub-list for extension extendee
+	0,  // [0:77] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -5545,6 +5769,7 @@ func file_node_proto_init() {
 		(*NodeClientMessage_ModelProbeForwardCancel)(nil),
 		(*NodeClientMessage_AppCallForwardRequest)(nil),
 		(*NodeClientMessage_AppCallForwardCancel)(nil),
+		(*NodeClientMessage_AppSignInForwardRequest)(nil),
 	}
 	file_node_proto_msgTypes[1].OneofWrappers = []any{
 		(*NodeServerMessage_NodeWelcome)(nil),
@@ -5568,6 +5793,7 @@ func file_node_proto_init() {
 		(*NodeServerMessage_ModelProbeForwardResponse)(nil),
 		(*NodeServerMessage_ModelProbeForwardProgress)(nil),
 		(*NodeServerMessage_AppCallForwardResponse)(nil),
+		(*NodeServerMessage_AppSignInForwardResponse)(nil),
 	}
 	file_node_proto_msgTypes[26].OneofWrappers = []any{
 		(*WorkerForwardStream_StdoutChunk)(nil),
@@ -5580,7 +5806,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   55,
+			NumMessages:   57,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

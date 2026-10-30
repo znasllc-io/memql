@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
@@ -249,7 +250,11 @@ type AppCallRequest struct {
 	ActingUserId   string
 	AppId          string
 	RegistrationId string
-	Messages       []common.ChatMessage
+	// PreferRegistrationId is the machine selection should use when anything on it
+	// can serve the call: the one holding a step's work, on a takeover
+	// (app_takeover.go). It is a preference, and RegistrationId is the answer.
+	PreferRegistrationId string `json:"-"`
+	Messages             []common.ChatMessage
 	// Schema is set for a structured call. Its presence is what makes the
 	// call require a harness that can return a structured final answer.
 	Schema  *common.StructuredSchema
@@ -653,14 +658,33 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		}
 	}
 
+	// AN ANSWER ALREADY SHOWN CANNOT BE TAKEN BACK, so a stream that has shown part of
+	// one does not move to another app, whose answer would follow it. The doc's rule for
+	// a model call: a partial streamed response is not retried automatically.
+	var shown atomic.Bool
+	if onContent := req.OnContent; onContent != nil {
+		req.OnContent = func(delta string) {
+			shown.Store(true)
+			onContent(delta)
+		}
+	}
 	var res AppCallResult
 	var err error
 	var excluded []string
+	// THE LAST REFUSAL OUTLIVES THE SELECTION THAT FINDS NOTHING LEFT: "no enabled
+	// app matches" after a refusal would hide why the call failed, and send
+	// somebody to look at a setting when their login has expired.
+	var lastRefusal error
 	for {
 		req.AppId = p.appId
+		selected := AppSelection{AppId: p.appId}
 		if selector, ok := a.(AppSelector); ok {
-			selected, selectErr := selector.SelectApp(ctx, req, false, excluded)
+			var selectErr error
+			selected, selectErr = selector.SelectApp(ctx, req, false, excluded)
 			if selectErr != nil {
+				if lastRefusal != nil {
+					return res, lastRefusal
+				}
 				return AppCallResult{}, selectErr
 			}
 			req.AppId, req.RegistrationId = selected.AppId, selected.RegistrationId
@@ -677,14 +701,19 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		if err == nil {
 			break
 		}
-		var quota *AppQuotaRefused
-		if !p.wildcard || !errors.As(err, &quota) || ctx.Err() != nil {
+		// A PIN STAYS ITS APP without a rule of its own: req.AppId is reset to
+		// p.appId above, so the selector offers a pinned call that app on another
+		// machine and never a different app. Anything but a proven pre-work
+		// refusal may have caused effects and is returned as it is.
+		exclude, moves := appRefusalExclusion(err, selected)
+		if !moves || ctx.Err() != nil || shown.Load() {
 			return res, err
 		}
 		if _, ok := a.(AppSelector); !ok {
 			return res, err
 		}
-		excluded = append(excluded, req.AppId)
+		lastRefusal = err
+		excluded = append(excluded, exclude)
 		if len(excluded) >= 16 {
 			return res, err
 		}

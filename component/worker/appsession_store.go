@@ -60,8 +60,11 @@ type AppSessionRow struct {
 	// RecordedSteps is how many steps the recording wrote, and the SEQ
 	// ALLOCATOR both writers read. DroppedActions is how many actions were
 	// lost.
-	RecordedSteps       int
-	DroppedActions      int
+	RecordedSteps  int
+	DroppedActions int
+	// StopReason is the machine's word for why the app stopped. It sets the two
+	// refusal stamps and is not stored apart from them.
+	StopReason          string
 	Usage               AppSessionUsage
 	Billing             string
 	ExitCode            int
@@ -247,9 +250,12 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"producedArtifactIds": stringsOrEmpty(row.ProducedArtifactIds),
 		"appSessionRef":       row.AppSessionRef,
 		"errorMessage":        row.ErrorMessage,
-		"quotaRefused":        row.Status == AppSessionStatusFailed && memqlengine.IsAppQuotaRefusal(row.ErrorMessage),
-		"cancelReason":        row.CancelReason,
-		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
+		// The machine's word counts as well as the sentence, because the app can say
+		// usageLimitExceeded around a sentence no list knows.
+		"quotaRefused": row.Status == AppSessionStatusFailed && (row.StopReason == AppStopOutOfUsage || memqlengine.IsAppQuotaRefusal(row.ErrorMessage)),
+		"authRefused":  row.Status == AppSessionStatusFailed && (row.StopReason == AppStopSignedOut || memqlengine.IsAppAuthRefusal(row.ErrorMessage)),
+		"cancelReason": row.CancelReason,
+		"endedAt":      row.EndedAt.UTC().Format(time.RFC3339Nano),
 	}
 	// NAMED ONLY WHEN THERE IS ONE -- resultArg's contract, which this map
 	// used to break by carrying the key unconditionally. A present key with a
