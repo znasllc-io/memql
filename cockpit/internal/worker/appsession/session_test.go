@@ -2153,6 +2153,82 @@ func TestSessionScratchKeptWhenThePushFails(t *testing.T) {
 	}
 }
 
+// TestSession_AStoredFileAwaitingItsArtifactDoesNotFailTheSession: the upload
+// route answers 201 with a file id alone when the artifact index row has not
+// become visible within its wait (component/server's waitForPromotion), and
+// says why that is not an error: the bytes are durable and the artifact will
+// appear. Failing the session here threw away a finished answer. On production
+// on 2026-10-30, three of five Claude Code sessions ended this way, with exit
+// code 0 and a result in hand, and Ask showed the person a failure.
+func TestSession_AStoredFileAwaitingItsArtifactDoesNotFailTheSession(t *testing.T) {
+	fakeApp(t, "claude", "echo 'result content' > output.txt\n"+quietClaude)
+	h := newRig(t)
+	var mu sync.Mutex
+	stored := map[string][]byte{}
+	late := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "no file part", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		body, _ := io.ReadAll(file)
+		mu.Lock()
+		stored[header.Filename] = body
+		id := len(stored)
+		mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"artifactId":"","fileId":"file-%d","versionNumber":1}`, id)
+	}))
+	t.Cleanup(late.Close)
+	h.manager.opts.LibraryBase = late.URL
+	h.manager.opts.HTTPClient = preflightFixtureClient(h.library.server)
+
+	end := h.start(t, nil)
+
+	if end.GetExitCode() != 0 || end.GetError() != "" {
+		t.Fatalf("a finished session failed over a late index row: exit %d, error %q", end.GetExitCode(), end.GetError())
+	}
+	// produced_artifact_ids names artifacts, and these have no id yet. A file
+	// id in that list would be stamped as if it were an artifact.
+	if ids := end.GetProducedArtifactIds(); len(ids) != 0 {
+		t.Errorf("produced_artifact_ids = %q, want none while no artifact is visible", ids)
+	}
+	// What the list cannot name, the durable receipt still does: nothing was
+	// lost, so the record says where it went.
+	mu.Lock()
+	defer mu.Unlock()
+	var manifest map[string]any
+	for name, body := range stored {
+		if strings.HasSuffix(name, "-outputs.json") {
+			if err := json.Unmarshal(body, &manifest); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if manifest == nil {
+		t.Fatalf("no output manifest among %d stored files", len(stored))
+	}
+	if failures, _ := manifest["failures"].([]any); len(failures) != 0 {
+		t.Errorf("a stored file was recorded as a failure: %v", failures)
+	}
+	if id, _ := manifest["transcriptFileId"].(string); id == "" {
+		t.Errorf("the manifest does not say where the transcript went: %v", manifest)
+	}
+	files, _ := manifest["files"].([]any)
+	if len(files) != 1 {
+		t.Fatalf("manifest files = %v, want the one output", files)
+	}
+	entry, _ := files[0].(map[string]any)
+	if id, _ := entry["fileId"].(string); id == "" {
+		t.Errorf("the manifest does not say where the output went: %v", entry)
+	}
+}
+
 // TestOpenSessionKeepsItsScratchDir: an `open` session hands the app to a
 // PERSON, whose terminal can outlive the session -- a cancel or the
 // wall-clock ceiling stops the launcher, not the shell or the app in the

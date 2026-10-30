@@ -250,7 +250,9 @@ func (s *session) reportedUsage() *memqlv1.AppSessionUsage {
 }
 
 // pushOutputs uploads what the run produced plus the full transcript, and
-// returns the artifact ids.
+// returns the artifact ids it learned. A file still awaiting its artifact is
+// stored and recorded in the manifest by file id, but it has no id for this list
+// and so gets no produced-by provenance from the engine.
 func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	library, transcript, before, workspace, written := s.library, s.transcript, s.before, s.workspace, s.written
@@ -276,6 +278,15 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 	var ids []string
 	var failures []string
 	manifest := outputManifest{Version: 1, SessionID: s.id}
+	// produced_artifact_ids names artifacts, and the engine stamps each one's
+	// provenance, so a file id must never ride in it.
+	retained := func(pushed PushResult) {
+		if pushed.ArtifactId != "" {
+			ids = append(ids, pushed.ArtifactId)
+			return
+		}
+		s.logger.Info("app session output stored; its Library artifact is not visible yet", "file_id", pushed.FileId)
+	}
 
 	// The RESOLVED workspace, not the start's: a start that named none ran
 	// in a directory this machine chose, and what the app made there is
@@ -310,23 +321,24 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 				manifest.Omitted = append(manifest.Omitted, note)
 				continue
 			}
-			id, err := library.Push(pushCtx, f.path, artifactName(f.rel))
+			pushed, err := library.Push(pushCtx, f.path, artifactName(f.rel))
 			if err != nil {
 				failures = append(failures, err.Error())
 				continue
 			}
-			ids = append(ids, id)
-			manifest.Files = append(manifest.Files, outputArtifact{Path: filepath.ToSlash(f.rel), Bytes: f.size, ArtifactID: id})
+			retained(pushed)
+			manifest.Files = append(manifest.Files, outputArtifact{Path: filepath.ToSlash(f.rel), Bytes: f.size, ArtifactID: pushed.ArtifactId, FileID: pushed.FileId})
 		}
 	}
 
 	if transcriptPath != "" {
 		name := "app-session-" + sanitizeLedgerName(s.id) + "-transcript.log"
-		if id, pushErr := library.Push(pushCtx, transcriptPath, name); pushErr != nil {
+		if pushed, pushErr := library.Push(pushCtx, transcriptPath, name); pushErr != nil {
 			failures = append(failures, pushErr.Error())
 		} else {
-			ids = append(ids, id)
-			manifest.TranscriptID = id
+			retained(pushed)
+			manifest.TranscriptID = pushed.ArtifactId
+			manifest.TranscriptFileID = pushed.FileId
 			_ = os.Remove(transcriptPath)
 			_ = os.Remove(filepath.Dir(transcriptPath))
 		}
@@ -335,10 +347,10 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 		manifest.Failures = append([]string(nil), failures...)
 		body, err := json.Marshal(manifest)
 		if err == nil {
-			var id string
-			id, err = library.PushBytes(pushCtx, s.redact.apply(body), "app-session-"+sanitizeLedgerName(s.id)+"-outputs.json")
+			var pushed PushResult
+			pushed, err = library.PushBytes(pushCtx, s.redact.apply(body), "app-session-"+sanitizeLedgerName(s.id)+"-outputs.json")
 			if err == nil {
-				ids = append(ids, id)
+				retained(pushed)
 			}
 		}
 		if err != nil {
@@ -356,17 +368,20 @@ func (s *session) pushOutputs(ctx context.Context) ([]string, error) {
 // The artifact list alone cannot establish completeness. Keep the selection
 // and transfer receipt in MemQL beside the journal, including explicit gaps.
 type outputManifest struct {
-	Version      int              `json:"version"`
-	SessionID    string           `json:"sessionId"`
-	TranscriptID string           `json:"transcriptArtifactId,omitempty"`
-	Files        []outputArtifact `json:"files,omitempty"`
-	Omitted      []string         `json:"omitted,omitempty"`
-	Failures     []string         `json:"failures,omitempty"`
+	Version      int    `json:"version"`
+	SessionID    string `json:"sessionId"`
+	TranscriptID string `json:"transcriptArtifactId,omitempty"`
+	// TranscriptFileID also names a transcript whose artifact was not visible yet.
+	TranscriptFileID string           `json:"transcriptFileId,omitempty"`
+	Files            []outputArtifact `json:"files,omitempty"`
+	Omitted          []string         `json:"omitted,omitempty"`
+	Failures         []string         `json:"failures,omitempty"`
 }
 type outputArtifact struct {
 	Path       string `json:"path"`
 	Bytes      int64  `json:"bytes"`
-	ArtifactID string `json:"artifactId"`
+	ArtifactID string `json:"artifactId,omitempty"`
+	FileID     string `json:"fileId,omitempty"`
 }
 
 // sendEnd closes the session on the wire, exactly once.
