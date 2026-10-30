@@ -948,6 +948,296 @@ independent instructions and cancellation. The existing driver regression
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
 
+## A refused app call moves on only when nothing ran (2026-10-29)
+
+Production, engine 0.31.9: Ask with routing set to apps failed twice on one
+machine. Codex was out of credits and the call stopped there, then Claude Code
+failed with `OAuth session expired`, as it had since 2026-10-24. The
+[spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md) records
+what each app really reports.
+
+**The proof** (`appPreWorkRefusal`, `integrations/agent/worker/app_inference.go`).
+A failed session may move to another app or machine only when nothing ran: no
+served model, no structured result, no recorded or dropped action, no tokens, and
+no prose except the refusal's own sentence. Anything else may have caused effects
+and is not run again, because that would repeat them. A step that stopped partway on
+its usage or login is handed over rather than run again ("An app that stops partway
+hands its work over", below). `usage.known` is not part of the proof. A Codex turn refused by its limit reports
+no usage at all, which is why failover never fired for it. Stated tokens still
+disprove it. The alternative, trusting the sentence alone, would replay a turn
+that had already started tools. Tests:
+`TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions`,
+`TestAppFallbackCrossesReplicaForARefusalReportingNoUsage`.
+
+**Two refusals, because they are about different things**
+(`appRefusalExclusion`, `component/memql/app_selection.go`). A usage limit is the
+account's, so it rules the app out on every machine for the rest of the call:
+trying each would open a session on each to hear the same answer. A login is one
+machine's, so it rules out that machine's app and the same app elsewhere can still
+answer. A pin stays its app either way, because the selector is asked for the
+pinned app every time. When nothing is left, the caller gets the last refusal
+rather than "no enabled app matches", which would send somebody to a setting when
+their login has expired. The walk stops at 16 exclusions. Tests:
+`TestAppRefusalExclusionMatchesWhatTheRefusalIsAbout`,
+`TestPinnedAppNeverMovesToAnotherApp`,
+`TestAppFallbackThatRunsOutKeepsTheLastRefusal`.
+
+**The block is availability evidence, not permission to replay.**
+`v1:worker:appSession.quotaRefused` and `authRefused` are stamped from the error's
+words whatever the session did, and `appAvailabilityEvidence` reads the newest of
+them and of a success, on any replica. A refusal blocks until the reset its
+sentence names, and otherwise for a 15-minute recheck (`appRefusalUntil`). A login
+has no reset, and a sign-in in a terminal writes no row, so the next call after
+the window is what finds it. Test: `TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas`.
+
+**Codex's reset names no zone.** "try again at Nov 3rd, 2026 11:52 PM" is in the
+machine's zone, which a cluster node does not know. Reading it as unknown blocked
+an app out of credits for days for only 15 minutes, so every call met the refusal
+again. It is now read as the earliest instant it can mean (UTC+14), so the block
+never outlasts the real reset and can end up to a day early. A reset read as
+already past takes the recheck, not no block. Test:
+`TestAppRefusalUntilRechecksAResetThatHasAlreadyPassed`.
+
+**Limits.** The classification reads each app's sentence, so a sentence neither
+list knows is an ordinary failure: no failover and no block. The phrases were
+measured on Claude Code 2.1.304 and codex-cli 0.162.1 against fabricated expired
+logins, and on one real out-of-usage Codex. A real expired refresh token and
+Claude Code's own usage-limit sentence were not reproduced here. Failing over a
+signed-out Codex costs about 20 seconds of its own retries before the next app
+starts; checking before routing is the follow-up that removes that wait. Neither
+the failover nor the block has run against the production fleet.
+
+## A machine measures whether its apps can answer (2026-10-29)
+
+A file cannot say whether a login works, and neither can the apps' status commands,
+which read the same file (measured, [spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md)).
+So Cockpit asks each app the cheapest real question it offers and reports the answer on
+`AppInfo.readiness`. Owner's brief: checked "in intervals every once in a while", with
+limits "checked before exposing the app's route" by "a simple ping that doesn't waste a
+lot of tokens".
+
+**Measuring** (`cockpit/internal/worker/harness/readiness.go`). Codex reads
+`account/read` and `account/rateLimits/read` over its app-server, spending nothing.
+Claude Code has no such read, so it is `auth status` and then a ping. The order is the
+spending guard: an API or proxy setting in the environment runs nothing, a login that
+is not `claude.ai` is not pinged, and a ping whose init event reports an `apiKeySource`
+other than `none` is stopped. Anything unreadable is `unknown`. Tests in
+`harness/readiness_test.go` replay recorded streams.
+
+**Scheduling** (`cockpit/internal/worker/apps/readiness.go`). One tracker for the
+machine, because a login and a plan are the machine's whichever cluster asks, running
+one check at a time.
+
+| Decision | Trigger | Why | Test |
+|---|---|---|---|
+| Codex every 5 minutes, Claude Code hourly while working and every 15 minutes otherwise | the cadence | a check's price sets its rate; an hour-stale "ready" costs one failed turn at zero tokens, which then corrects the answer | `TestTrackerChecksOnEachAppsOwnCadence` |
+| Skip while a session runs | the session brackets itself | the session will report what it finds | `TestTrackerSkipsAppsWithARunningSession` |
+| A real turn counts as a check | `TurnResult.Readiness` | a busy machine never pings | `TestTrackerReusesARealTurnInsteadOfPinging` |
+| At most 30 spending pings in 24 hours | a persisted log of checks that may have spent | the spend stays bounded whatever triggers a check | `TestTrackerStopsPingingAtTheCeiling` |
+| Answers and the log survive a restart | `app-readiness.json` | a crash loop is the worst trigger there is | `TestTrackerSurvivesARestartWithoutSpendingAgain` |
+| A refused ping does not count | `ReadinessSignal.Spent` | a signed-out machine re-checks often and spends nothing | `TestTrackerCountsOnlyWhatACheckSpent` |
+| No check for an app no cluster allows | `apps.homes` | nothing is spent without the machine owner's consent | `TestTrackerChecksEachAllowedAppAndNothingElse` |
+| Re-check on a login file change only while signed out | stat of the login files | a sign-in in a terminal tells nobody, and every Claude Code rewrites `~/.claude.json` | `TestTrackerRechecksASignedOutAppWhenItsLoginFileChanges`, `TestTrackerIgnoresLoginFileChangesWhileReady` |
+| No ping during metered overage | `isUsingOverage` | each ping would be paid for | `TestTrackerDoesNotPingThroughMeteredOverage` |
+
+**Only `ready` is admitted, with one exception.** Owner, 2026-10-30: "I shouldn't be
+able to reach an app that is not online, that meaning like does not, is not ready, is
+not connected." So a Cockpit that measures is taken at its word, and `unknown` is not
+routed to. **The exception is a Cockpit that predates the checks,** which sends no word:
+refusing it would take every current machine out of routing until it upgraded, which the
+same brief ruled out, so it keeps the file-based answer it always had and a call it
+refuses moves on. A Cockpit that measures always sends a word, `unknown` before its
+first check, so the exception cannot admit an app a machine could not vouch for. It can
+be deleted once no machine in a fleet reports silence. This replaced a first design
+that left `unknown` selectable too. Tests: `TestRunnableHonoursWhatTheMachineMeasured`,
+`TestAnAppThatCouldNotBeCheckedGetsNoDoor`, `TestTrackerReportsUnknownBeforeTheFirstCheck`.
+
+**One check that cannot tell does not change the answer.** With `unknown` refused, a
+ping timing out on a busy machine would take a working app away for 15 minutes. It keeps
+the last answer and looks again within a minute, and a second one in a row is the
+answer, because the app has then gone too long unchecked to vouch for. The checks then
+return to the ordinary cadence, since an app on an API key will never say more. Test:
+`TestTrackerKeepsItsAnswerThroughOneCheckThatCouldNotTell`.
+
+**Routing** (`component/worker/apps.go`). `Runnable` adds the measurement, so the
+`app:` label, doors, the session gate and the machine refusal are one answer. It takes
+no clock, so every replica reading the row agrees, and labels cannot go stale by
+themselves. Selection also re-reads the row (`appMeasuredNotReady`), because a door may
+be a beat older than the read. Cockpit clears `signed_in` on `signed_out`, so an engine
+predating the field is right too. Tests: `TestRunnableHonoursWhatTheMachineMeasured`,
+`TestAppSelectionDBReadsReadinessOffTheRow`,
+`TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor`,
+`TestAnAppThatReportsNoReadinessKeepsItsDoor`.
+
+**On a machine that measures, only a check ends a refusal** (`appBlockedUntil`). Owner,
+2026-10-30: "we should keep a state and an interval checking for it until it becomes
+available, then it can be used again." The block in the section above reads session
+rows, and buying a reset or signing in writes none. So a `ready` measured after the
+refusal clears it, and neither an older check, nor one that could not tell, nor the
+reset passing does: any of those would send a person's real call to find out what the
+machine reports anyway. The state lives on the row and in `app-readiness.json`, and an
+exhausted app is asked every 15 minutes (Codex every 5) because a refused ask is free.
+Credits count: Codex's plan window stays at 100% after they are bought, so the read
+takes them first, and only spending being stopped outranks them. A Cockpit that predates
+the checks has only the clock of the section above, so a real call still finds out
+there, and a refusal moves on. Tests: `TestAppRefusalDBClearsOnANewerMeasurement`,
+`TestAppRefusalDBOutlivesItsResetUntilTheMachineSaysSo`,
+`TestTrackerRechecksAnExhaustedAppOnTheShortInterval`,
+`TestCodexLimitsReadCreditsAndSpendControl`.
+
+**The row moves for answers, not for checks.** A changed answer lands on the next beat
+as a routing change. A check that only moved its time rewrites the row at most every 30
+minutes (`appReadinessRowRefresh`), so "checked 20 minutes ago" can be up to that stale,
+which a reader loses nothing by. Test: `TestAppsEqualIgnoresACheckInsideTheRowRefresh`.
+
+**The Linux unit is why no Linux machine had completed a session.** Under `ProtectHome=read-only`
+with only `~/.memql` writable, Codex's app-server exits at start, no login can be
+written, and the default workspace cannot be created. `RestrictNamespaces` refuses the
+sandbox shell commands need, and `MemoryDenyWriteExecute` kills Node.js. The unit now
+leaves the worker's own home writable and drops those two; other users' homes and the
+system tree stay read-only, which is what the unit said it was for. This is less
+hardening than before, chosen because the alternative is apps that cannot run, and macOS
+has no such restriction at all. Gate: `lib_test.sh` checks both places the unit is
+written. A machine keeps the old unit until the installer runs again.
+
+**Limits.** The cadence is a judgement, and a login that lapses on an idle machine reads
+ready for up to an hour. Claude Code's refused-limit stream is shaped from the event's
+own vocabulary, not recorded, because no plan here was out of usage. A Codex account
+holding credits was not observed, so what a turn does then is reasoned from the read's
+fields. Whether a LaunchAgent can refresh a Keychain login was not measured. The checks ran for real through
+`memql worker apps --check` on this Mac and, against fabricated expired logins, under both
+units in a Linux VM (systemd 255). They have not run on the fleet, and neither a real
+successful Claude Code turn on Linux nor the tracker's schedule on a real machine has been
+observed.
+
+## Signing in to an app from Fleet (2026-10-29)
+
+Owner's brief: an unauthenticated app gets "a sign-in button", and "right now there's a
+button that says retry availability. That's not what we want." Fleet now shows each app's
+state with its reset time and offers Sign in. Retry is gone, because the machine's own
+checks do its job.
+
+**What crosses and what does not.** Credentials stay on the machine: the app writes its own
+login. A page's address and a device code cross the worker stream and sit on a
+`v1:worker:appSignIn` row. A pasted code crosses to the waiting process and is written
+nowhere; it is an authorization code bound to the verifier that process holds (PKCE). The
+address and the code are cleared when the sign-in ends, though an earlier row version keeps
+them, by then useless. Tests: `TestFleetAppSignInDB` reads every row version for the pasted
+code, `TestAppSignInRefusalDoesNotEchoACode`.
+
+**Who.** Only the machine's owner, at three points: the act reads through `modelSetupRow`,
+which answers only for the caller's own machines, so a cluster owner gets the stranger's
+refusal; the holder checks the verified authority and not the envelope
+(`HandleForwardedAppSignIn`); and the row's tier is plain owner with no cluster-owner
+bypass, unlike the model pull's, because a device code signs an account into a machine.
+Tests: `TestFleetAppSignInDB`, `TestAppSignInRefusesAnyoneButTheMachinesOwner`.
+
+**How it crosses replicas.** The act runs on the bff that took the call, the machine's stream
+ends on one agent, and the row is what the person watches. A start is forwarded rather than
+claimed from an event as a model pull is, because a pasted code must reach the same replica
+without being written anywhere, so the forward has to exist anyway, and it makes "that
+machine has gone" a refusal rather than a spinner. Test: `TestAppSignInCrossesTheHop`.
+
+**Fallbacks and stops.** A machine whose Cockpit predates `AppDescriptor.sign_in` gets the
+older Ask-driven Connect, because it would ignore the message. A code goes only to a sign-in
+its stream started, because after a reconnect the process holding the verifier is gone. When
+the stream ends the row closes as failed and the process stops. A sign-in stops itself after
+15 minutes, and nothing sweeps the rows: Fleet reads a live status past `expiresAt` as over,
+which is what covers a replica dying. A newer sign-in to the same app replaces an older one.
+A cancel takes the sign-in off the stream at once, because the row then holds the person's
+answer, and neither a last word from the machine nor the stream ending may rewrite it. A code
+that could not be sent stays open, so the stream ending closes it.
+On Linux, a home the service cannot write fails at the start with what to do, rather than
+after the person has done everything. Tests: `TestAppSignInClosesWhenTheStreamEnds`,
+`TestAppSignInCancelStaysCancelled`, `TestAppSignInCodeThatDidNotGoIsClosedByTheStreamEnding`,
+`TestAppSignInCodeGoesOnlyToASignInThisStreamStarted`, `TestSignInStopsWithTheStream`,
+`TestANewerSignInReplacesAnOlderOne`, `TestCheckLoginWritableSaysToUpdateTheService`.
+
+**Retry's removal.** A measurement newer than a refusal now ends its block (the section
+above), so nothing needs pressing. A machine still on a Cockpit that measures nothing has
+no such measurement: a named reset blocks until then, even if credits were bought, and
+success cannot clear it because the app is not selected. It clears when that machine's
+Cockpit upgrades. `availabilityRetriedAt` stays on stored `appRouting` rows, unread, because
+that field is a free object.
+
+**Limits.** No real login has completed through this path. The flows were run against the
+real CLIs in scratch config directories up to the page and a fabricated code, and the Fleet
+states were checked against fixtures (`clients/os/qa/app-routing.tsx`), at desktop and phone
+width, light and dark. Whether Codex's device code login is enabled for an account is that
+account's setting; a refusal then reads as the app's own sentence. The row takes no lock: the
+holder and the bff can both write it, so a `waiting` write already in flight when a cancel
+lands could land after it. The row would then read as waiting until the person cancels again
+or it expires. That is reasoned from the code and has not been observed.
+
+## An app that stops partway hands its work over (2026-10-30)
+
+Owner: "If during usage we run out of credits, then that's fine. We get the error
+message, but actually what should happen is that instead of just saying, oh, I run out
+of credits for Codex, it should now attempt Claude, for Claude Code to take over." Before
+this, only a refusal proven to precede any work moved, and a step that had done work
+failed with the app's sentence. Recorded actions have effects, so the next app is not
+given the step as if nothing happened: it gets the step, what is established to have
+happened, and where the work is, and it carries on (`component/memql/app_takeover.go`).
+
+| Situation | What happens | Why |
+|---|---|---|
+| The app stopped on its usage or login, with a complete record | The next ready app takes over, told what ran | Those reasons are about the app, and it has finished its turn with no call in flight |
+| The same, with a dropped action, an unread or short journal, or outputs not all in the Library | The step fails with the app's sentence, and says why nothing took over | Nobody could tell the next app what happened |
+| Refused before any work | The next app gets the same prompt | Nothing happened, so there is nothing to tell |
+| Any other failure, a crash or a timeout included | The step fails. Never run again automatically | An action may be half done |
+| The stop has a structured answer | The step fails as before | It already has an answer |
+| A pin or an Only strategy | Stays that app, and may only move machines on a login | A person chose it |
+| A chat turn that ran no action | The same prompt goes to the next app, unless part of an answer was already shown | Nothing but tokens was spent, and a shown answer cannot be taken back |
+| A chat turn that ran an action | Fails | It has no step, so it has no record to hand over |
+| Nothing else is ready | The step fails with the app's sentence and "no other app is ready to take over" | The record stays on its run |
+
+**The machine's word, not the sentence** (`AppSessionEnd.stop_reason`). Before any work a
+sentence is enough, because nothing can be lost. After work, a failure whose words only
+resemble a limit would put a second agent on top of whatever the first left half done. So
+only the app's own protocol counts: `TurnResult.Readiness` on a failed turn. A Cockpit
+that predates the field gets no takeover. The machine withdraws the word when an output
+did not reach the Library, because a takeover carries on from what was left. Tests:
+`TestSessionEndSaysWhenTheAppStoppedOnItsUsageOrLogin`,
+`TestSessionEndWithdrawsTheStopWhenOutputsDidNotReachTheLibrary`,
+`TestAppStoppedMidWorkTakesTheMachinesWordAndACompleteRecord`.
+
+**What establishes what happened** (`completeStop`). The journal: the actions the machine
+reported, and the MemQL tool calls the MCP node recorded, read from the rows on whichever
+replica holds the session. A recording write that fails is logged and swallowed, so a
+journal holding fewer of the machine's actions than it reported takes the takeover back.
+The app's own words travel too, marked as its account and not evidence, as the existing
+rule says of a delegated narrative. The brief is bounded, keeps the most recent actions,
+leaves out reads, and counts what it cuts. It goes on after any override, because a
+person's whole-prompt replacement must not erase what has already happened. Tests:
+`TestDelegateTakesBackAStopWithoutACompleteRecord`, `TestTheRecordSurvivesAWholePromptOverride`,
+`TestAppWorkJournalDBReadsWhatAnotherReplicaWrote`,
+`TestAppTakeoverBriefIsBoundedAndCountsWhatItLeavesOut`.
+
+**Which machine.** A run's sessions share one directory on a machine, so the machine
+holding the work is asked first, and the next app finds the files as they were left.
+Another machine may carry on when it is the only one with a ready app: what reached the
+Library is delivered as inputs, and the brief says the rest stayed behind. Chosen over
+failing the step, because work there is usually redoable and the record warns against
+repeating what reached outside. A session runs only on a stream this replica holds, so a
+machine on a sibling replica is passed over, as it is for any session. Tests:
+`TestAppSelectionDBPrefersTheMachineHoldingTheWork`,
+`TestDelegateDeliversWhatReachedTheLibraryToAnotherMachine`.
+
+**What a person sees.** The parent run gets a note naming both apps and both records, and
+the child run of each session stays. The next app is asked to say in one sentence that it
+took over. A takeover's recording starts in the middle, so its child run carries no goal
+signature and procedure learning never mines it. Tests:
+`TestDelegateGivesTheNextAppTheRecordOnTheSameMachine`,
+`TestATakeoverSessionIsNoRecordingOfTheGoal`.
+
+**Limits.** No real limit has been hit partway through a real turn: the streams are shaped
+from the recorded refused turn with tokens added. A session has one chance at the machine
+holding its stream, so with two replicas the other's machines are not considered. A person's
+own route listing `app:codex` then `app:claude-code` stays on the first, because a session
+winner's chain is itself alone; only the Apps route's `app:*` moves between apps. An action
+that started a background process cannot be seen stopping. If pulling a delivered file fails
+on another machine, that session fails as an ordinary failure.
+
 ## Pipeline AI runs local first (2026-10-29)
 
 Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a

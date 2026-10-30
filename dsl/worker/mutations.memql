@@ -963,6 +963,7 @@ mutation appSession endAppSession {
     producedArtifactIds  array
     appSessionRef  string
     quotaRefused bool
+    authRefused bool
     errorMessage   string
     cancelReason   string
     /// The harness's structured final answer, when it produced one. It does
@@ -988,6 +989,7 @@ mutation appSession endAppSession {
     args.producedArtifactIds
     args.appSessionRef
     args.quotaRefused
+    args.authRefused
     args.errorMessage
     args.cancelReason
     // NOT `?? {}`. A session END that carries no result must not blank a
@@ -1192,6 +1194,73 @@ mutation modelPull finishModelPull {
       statusLine: args.statusLine ?? ""
       errorMessage: args.errorMessage ?? ""
       updatedAt: args.endedAt
+    }
+  }
+}
+
+// ---- The sign-in's row ----
+//
+// Both @serverOnly, for the pull's reason: what the machine said is only the server's
+// to write, and a caller who could write `status` could close a sign-in still running.
+
+/// Open the record for one sign-in. fleetAppSignIn has already checked the machine is the
+/// caller's, and allows the app. Scoping to actor.userId would not help: the caller IS the owner,
+/// so a self-scoped filter admits exactly this call, and the hazard is `targetNodeId`, which only
+/// the server can read off the machine's row.
+@actor
+@serverOnly
+mutation appSignIn createAppSignIn {
+  args {
+    signInId      string!
+    workerId      string!
+    app           enum("claude-code", "codex")!
+    targetNodeId  string
+    requestedAt   string!
+    expiresAt     string!
+  }
+  insert {
+    id: args.signInId
+    // From the actor, never an argument: only the machine's owner may start one.
+    ownerUserId: actor.userId
+    args.workerId
+    args.app
+    status: "requested"
+    url: ""
+    userCode: ""
+    needsCode: false
+    errorMessage: ""
+    targetNodeId: args.targetNodeId ?? ""
+    args.requestedAt
+    args.expiresAt
+  }
+}
+
+/// What the machine, or the person, last said. A status that is not `waiting` carries no address
+/// and no code, and these lines write that as empty, so a finished row holds neither. Scoping to
+/// actor.userId would not help: the owner is who a self-scoped filter admits, and the row is a
+/// report from their machine, whose `url` they are about to follow. Only the replica holding its
+/// stream has heard from it.
+@actor
+@serverOnly
+mutation appSignIn updateAppSignIn {
+  args {
+    signInId      string!
+    status        enum("waiting", "succeeded", "failed", "cancelled")!
+    url           string
+    userCode      string
+    needsCode     bool
+    errorMessage  string
+    expiresAt     string
+    updatedAt     string!
+    endedAt       string
+  }
+  update {
+    accept { status, needsCode, expiresAt, updatedAt, endedAt }
+    stamp {
+      id: args.signInId
+      url: args.url ?? ""
+      userCode: args.userCode ?? ""
+      errorMessage: args.errorMessage ?? ""
     }
   }
 }

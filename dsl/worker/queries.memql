@@ -443,6 +443,32 @@ query modelPull modelPullsForWorker {
   shape   workerModelPullFull
 }
 
+/// The CALLER'S sign-ins for one machine, newest first. Backs the Sign in action on the machine's
+/// Apps page.
+@actor
+@cache(0)
+query appSignIn appSignInsForWorker {
+  args {
+    workerId  string!
+  }
+  filter  row => row.workerId == args.workerId && row.ownerUserId == actor.userId
+  sort    "requestedAt", "desc"
+  paginate 10
+  shape   workerAppSignInFull
+}
+
+/// One of the caller's sign-ins, read fresh by the act that answers it.
+@actor
+@cache(0)
+query appSignIn appSignInById {
+  args {
+    signInId  string!
+  }
+  filter  row => row.id == args.signInId && row.ownerUserId == actor.userId
+  paginate 1
+  shape   workerAppSignInFull
+}
+
 /// Every model pull nobody is driving, for the sweep that closes them.
 ///
 /// ===========================================================================
@@ -648,7 +674,8 @@ query appSession appRoutingEvidence {
 }
 
 /// Latest availability-changing receipt on this owner's machine, independent of
-/// the rolling usage window. Unrelated failures do not erase an exhausted quota.
+/// the rolling usage window. Unrelated failures do not erase an exhausted quota
+/// or an expired login.
 @actor
 @cache(0)
 query appSession appAvailabilityEvidence {
@@ -656,7 +683,7 @@ query appSession appAvailabilityEvidence {
     workerId string!
     app string!
   }
-  filter row => row.ownerUserId == actor.userId && row.workerId == args.workerId && row.app == args.app && (row.quotaRefused == true || row.status == "ended")
+  filter row => row.ownerUserId == actor.userId && row.workerId == args.workerId && row.app == args.app && (row.quotaRefused == true || row.authRefused == true || row.status == "ended")
   sort "endedAt", "desc"
   paginate 1
   shape workerAppRoutingEvidence

@@ -1050,9 +1050,24 @@ builtin fleetSetAppRouting {
 }
 
 @sdk
-@executor("fleetRetryAppAvailability")
-@description("Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work.")
-builtin fleetRetryAppAvailability {
-  registrationId string!
+@executor("fleetAppSignIn")
+@description("Start signing in to an app on YOUR OWN machine, and return at once with the id of the record to watch. The machine must be yours, connected, with the app allowed for this cluster and a Cockpit that can run a sign-in; each of those is refused before anything is written. The v1:worker:appSignIn row then carries the page to open and any code to enter. The app writes its own login on the machine, and no credential ever crosses to the cluster.")
+builtin fleetAppSignIn {
+  registrationId string!  @description("v1:worker:registration.id of the machine. Another user's answers exactly as a made-up one does.")
   app enum("claude-code", "codex")!
+}
+
+@sdk
+@executor("fleetAppSignInCode")
+@description("Pass the code a sign-in page showed to the app waiting on your machine. It goes to that machine and nowhere else: it is in no row, no log line and no reply. It is useless without the verifier the process on the machine holds.")
+builtin fleetAppSignInCode {
+  signInId string!
+  code string!  @description("What the sign-in page showed. Read once and passed on; never stored or echoed.")
+}
+
+@sdk
+@executor("fleetAppSignInCancel")
+@description("Stop a sign-in you started on your machine. Nothing changes on the machine except that the app stops waiting.")
+builtin fleetAppSignInCancel {
+  signInId string!
 }

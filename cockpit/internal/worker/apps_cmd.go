@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/apps"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/appsession"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/harness"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/inference"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/tools"
@@ -38,6 +39,10 @@ import (
 
 const appsProbeTimeout = 15 * time.Second
 
+// appsCheckTimeout is the watchdog on one --check. A ping took under 3 seconds when
+// measured, and a signed-out Codex's limits read answers at once.
+const appsCheckTimeout = 90 * time.Second
+
 func handleApps(args []string) {
 	fs := flag.NewFlagSet("worker apps", flag.ExitOnError)
 	configPath := fs.String("config", DefaultConfigPath(), "path to legacy worker.yaml")
@@ -46,6 +51,7 @@ func handleApps(args []string) {
 	fs.Var(&allow, "allow", "allow this app for one cluster (policy.yaml apps.homes.<cluster>.allow); repeatable")
 	fs.Var(&deny, "deny", "withdraw this app from one cluster; repeatable")
 	home := fs.String("home", "", "the cluster --allow and --deny apply to: its home id or cluster URL (default: the only one enrolled)")
+	check := fs.Bool("check", false, "measure now whether each app can take a call, signed in and with usage left; a Claude Code check spends about 600 tokens")
 	_ = fs.Parse(args)
 
 	// The policy.yaml the worker itself reads: beside workers.yaml for a
@@ -101,6 +107,43 @@ func handleApps(args []string) {
 		homeIDs = append(homeIDs, h.ID)
 	}
 	printAppInventory(os.Stdout, inventory, homeIDs, policy, policyPath)
+	if *check {
+		printAppChecks(context.Background(), os.Stdout, &apps.Detector{}, appsession.CheckLauncher())
+	}
+}
+
+// printAppChecks runs each installed app's real check and prints what it found, for
+// a person at a terminal asking whether this machine's apps work. The worker does
+// the same on its own schedule, and this reads nothing it wrote.
+func printAppChecks(ctx context.Context, w io.Writer, detector *apps.Detector, launch harness.LaunchFunc) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Checked now")
+	for _, spec := range apps.Specs() {
+		resolved, ok := detector.ResolveSpec(ctx, spec.ID)
+		if !ok {
+			continue
+		}
+		checkCtx, cancel := context.WithTimeout(ctx, appsCheckTimeout)
+		signal := apps.MeasureNow(checkCtx, spec.ID, resolved, launch)
+		cancel()
+		fmt.Fprintf(w, "%-12s %s\n", spec.ID, appCheckLine(signal))
+	}
+}
+
+// appCheckLine is one check's answer in a sentence.
+func appCheckLine(signal harness.ReadinessSignal) string {
+	switch signal.State {
+	case harness.ReadinessReady:
+		return "ready"
+	case harness.ReadinessSignedOut:
+		return "signed out: " + signal.Detail
+	case harness.ReadinessOutOfUsage:
+		if signal.ResetsAt.IsZero() {
+			return "out of usage"
+		}
+		return "out of usage until " + signal.ResetsAt.Local().Format("Jan 2 3:04 PM")
+	}
+	return "could not tell: " + signal.Detail
 }
 
 // printAppInventory writes the report. Split out so the shape is assertable

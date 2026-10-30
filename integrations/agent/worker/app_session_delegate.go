@@ -31,6 +31,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -182,6 +183,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	if childRunId != "" {
 		d.stampParentStep(ctx, owner, stepRowId, childRunId)
 	}
+	d.recordTakeover(ctx, owner, h, childRunId)
 
 	var childStep *workjournal.Step
 	if child != nil {
@@ -243,6 +245,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	}
 
 	if runErr != nil {
+		runErr = d.completeStop(ctx, owner, childRunId, runErr)
 		childStep.Failed(ctx, "app_session_failed", runErr.Error())
 		child.Failed(ctx, "app_session_failed", runErr.Error())
 		return out, runErr
@@ -254,6 +257,71 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	})
 	child.Succeeded(ctx, map[string]any{"sessionId": out.SessionId})
 	return out, nil
+}
+
+// completeStop finishes an app's stop with what the journal says it did, or takes the
+// takeover back. The record is the second thing a takeover needs (memql's
+// app_takeover.go), and the recording path logs and swallows a failed write, so this is
+// where a hole is noticed. With no record the step fails with the app's own sentence,
+// because nobody could tell the next app what already happened.
+//
+// THE JOURNAL IS READ FROM THE ROWS, on whichever replica holds this session, because
+// the MCP node writes its half of the record from somewhere else.
+func (d *AppSessionDelegate) completeStop(ctx context.Context, owner, childRunId string, runErr error) error {
+	var stop *memqlengine.AppStoppedMidWork
+	if !errors.As(runErr, &stop) {
+		return runErr
+	}
+	refuse := func(why string) error {
+		d.logger.Warn("app session: an app stopped partway and nothing may take over",
+			"session_id", stop.SessionId, "app", stop.AppId, "why", why)
+		return fmt.Errorf("%s stopped partway through this step and nothing took over, because %s: %s", stop.AppId, why, stop.Reason)
+	}
+	if d.engine == nil || strings.TrimSpace(childRunId) == "" {
+		return refuse("this node recorded no journal for it")
+	}
+	journal, err := memqlengine.ReadAppWorkJournal(ctx, d.engine, owner, childRunId)
+	if err != nil {
+		return refuse("its journal could not be read: " + err.Error())
+	}
+	if !memqlengine.AppJournalComplete(journal, stop.RecordedActions) {
+		return refuse(fmt.Sprintf("its journal holds fewer actions than the %d it reported", stop.RecordedActions))
+	}
+	stop.ChildRunId = childRunId
+	stop.Journal = journal
+	return runErr
+}
+
+// recordTakeover writes on the parent's run that this session is taking over, so a
+// person reading the work can see why two apps served one step and where the first
+// one's record is. Best effort, for stampParentStep's reason: the session is about to
+// run either way.
+func (d *AppSessionDelegate) recordTakeover(ctx context.Context, owner string, h memqlengine.AppSessionHandover, childRunId string) {
+	if d.engine == nil || len(h.TakingOverFrom) == 0 || strings.TrimSpace(h.RunId) == "" {
+		return
+	}
+	stop := h.TakingOverFrom[len(h.TakingOverFrom)-1]
+	query, err := langparser.RenderCall("createWorkObservation", map[string]any{
+		"observationId": "takeover-" + memqlengine.BareShortId(h.RunId) + "-" + memqlengine.BareShortId(stop.SessionId),
+		"runId":         h.RunId,
+		"stepKey":       h.StepId,
+		"kind":          "note",
+		"content":       fmt.Sprintf("%s. %s is taking over this step.", stop.Error(), h.AppId),
+		"data": map[string]any{
+			"takeover": true, "fromApp": stop.AppId, "toApp": h.AppId,
+			"fromSessionId": stop.SessionId, "fromChildRunId": stop.ChildRunId, "toChildRunId": childRunId,
+			"reason": stop.Kind, "recordedActions": stop.RecordedActions,
+			"sameMachine": stop.RegistrationId == h.RegistrationId,
+		},
+	})
+	if err != nil {
+		d.logger.Warn("app session: could not record a takeover", "run_id", h.RunId, "error", err)
+		return
+	}
+	writeCtx := auth.ContextWithUserActor(auth.ContextWithInternalOrigin(ctx), owner)
+	if _, err := d.engine.Execute(writeCtx, "mutation "+query); err != nil {
+		d.logger.Warn("app session: could not record a takeover", "run_id", h.RunId, "error", err)
+	}
 }
 
 // beginChildRun opens the subrun. A nil journal, or a begin that fails, yields
@@ -282,6 +350,11 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 	// reason -- they are the goal's input, and the lift maps each free
 	// parameter to the input key that supplied it.
 	signature, variables := d.parentRunInheritance(ctx, owner, h.RunId)
+	// A TAKEOVER'S RECORDING STARTS IN THE MIDDLE, so it is no recording of the goal,
+	// and with no signature procedure learning never mines it.
+	if len(h.TakingOverFrom) > 0 {
+		signature = ""
+	}
 	run, err := d.journal.Begin(ctx, workjournal.Work{
 		OwnerUserID: owner,
 		Template:    appSessionTemplate,
@@ -416,6 +489,7 @@ func (d *AppSessionDelegate) planSession(ctx context.Context, owner string, h me
 	}
 	rc, inRun := common.RunFromContext(ctx)
 	if !inRun {
+		plan.addTakeover(h)
 		return plan, nil
 	}
 	if ov := rc.Override; ov != nil {
@@ -446,7 +520,21 @@ func (d *AppSessionDelegate) planSession(ctx context.Context, owner string, h me
 		plan.inputs = append(plan.inputs, restore.artifactIds...)
 		plan.prompt = restore.preamble + "\n\n" + plan.prompt
 	}
+	plan.addTakeover(h)
 	return plan, nil
+}
+
+// addTakeover puts what earlier sessions of this step did on the end of the plan.
+//
+// IT GOES ON LAST, once the prompt has settled: a person's override can replace the
+// whole prompt, and the record must survive that, because it says what has already
+// happened whatever the step is now asked to do.
+func (p *sessionPlan) addTakeover(h memqlengine.AppSessionHandover) {
+	if len(h.TakingOverFrom) == 0 {
+		return
+	}
+	p.prompt = strings.TrimRight(p.prompt, "\n") + "\n\n" + memqlengine.AppTakeoverBrief(h.TakingOverFrom, h.RegistrationId, h.AppId)
+	p.inputs = append(p.inputs, memqlengine.AppTakeoverInputs(h.TakingOverFrom, h.RegistrationId)...)
 }
 
 // applyOverride puts a person's override onto the session (design D20).

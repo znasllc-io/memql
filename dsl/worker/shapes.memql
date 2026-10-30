@@ -190,6 +190,26 @@ shape modelPull workerModelPullFull {
   row.createdAt
 }
 
+/// Full projection of one sign-in. Backs the Sign in action on a machine's Apps page.
+@row
+shape appSignIn workerAppSignInFull {
+  row.id
+  ownerUserId
+  workerId
+  app
+  status
+  url
+  userCode
+  needsCode
+  errorMessage
+  targetNodeId
+  requestedAt
+  expiresAt
+  updatedAt
+  endedAt
+  row.createdAt
+}
+
 /// Full projection of one probe (epic memql#5146). Backs the machine page's live progress and the
 /// stale sweep's read.
 @row
@@ -238,4 +258,6 @@ shape appSession workerAppRoutingEvidence {
   endedAt
   usage
   errorMessage
+  quotaRefused
+  authRefused
 }

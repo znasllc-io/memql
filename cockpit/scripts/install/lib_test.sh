@@ -537,6 +537,26 @@ _script_dir="$(cd "$(dirname "$0")" && pwd)"
 _piped_cwd="${_tmp}/piped-cwd"
 mkdir -p "$_piped_cwd"
 
+# The Linux unit must leave the worker's own home writable and the sandbox a session
+# runs in possible, in BOTH places it is written. Measured on 2026-10-29 under the
+# old unit (systemd 255, Claude Code 2.1.314, codex-cli 0.166.0): `codex app-server`
+# exited with "Read-only file system" and could not start at all, ~/.claude and
+# ~/.claude.json were read-only so a login could neither refresh nor be written, node
+# died on MemoryDenyWriteExecute, and bubblewrap could not create a namespace.
+_unit_template="$(dirname "$0")/../../deploy/systemd/memql-worker.service"
+_unit_installer="$(dirname "$0")/install-linux.sh"
+for _unit_file in "$_unit_template" "$_unit_installer"; do
+    if ! grep -qE '^ReadWritePaths=(%h|\$\{HOME\})$' "$_unit_file"; then
+        fail "$(basename "$_unit_file") must leave the worker's home writable (ReadWritePaths)"
+    elif grep -qE '^(MemoryDenyWriteExecute|RestrictNamespaces)=' "$_unit_file"; then
+        fail "$(basename "$_unit_file") must not set MemoryDenyWriteExecute or RestrictNamespaces: apps cannot run under them"
+    elif ! grep -qE '^ProtectHome=read-only$' "$_unit_file" || ! grep -qE '^ProtectSystem=strict$' "$_unit_file" || ! grep -qE '^NoNewPrivileges=yes$' "$_unit_file"; then
+        fail "$(basename "$_unit_file") dropped the hardening that does not get in an app's way"
+    else
+        pass "$(basename "$_unit_file") keeps the home writable for apps and the rest hardened"
+    fi
+done
+
 for _installer in install-mac.sh install-linux.sh uninstall-mac.sh uninstall-linux.sh; do
     # Piped from a cwd holding no lib.sh, with RAW_BASE at the real
     # lib.sh: must survive sourcing and reach flag handling.

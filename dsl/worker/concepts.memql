@@ -147,7 +147,7 @@ concept registration {
   capacity       object  @description("What the machine can take on RIGHT NOW (fleet capacity, routes design record): {memoryTotalBytes, memoryFreeBytes, memoryKind: unified|vram|system, loadedModels:[{model, runtime, sizeBytes, expiresAt, activeCalls}], measuredAt, reportedAt}. Written on every heartbeat flush from the cockpit's Capacity report; reportedAt is the AGENT's clock when the report arrived, and a report older than two minutes is treated as absent. memoryFreeBytes is what a NEW model could take without swapping; memory held by an idle loaded model is reclaimable and counted from loadedModels. ABSENT MEANS THIS COCKPIT DOES NOT REPORT CAPACITY, never a machine with no free memory: admission then rests on concurrency slots alone, which is how every machine was admitted before this field existed.")
   setup          object  @description("What the machine's installer is doing and how it ended (memql#6229): {state: running|finished|stopped, stages:[{name: permissions|runtime|models|workbench, state: waiting|running|done|failed|skipped, detail, model, completedBytes, totalBytes, modelsDone, modelsTotal}], updatedAt, reportedAt}. Written on the heartbeat flush from the cockpit's SetupProgress report; permissions (a computer-use Mac's macOS permissions, first, waiting for the person: done when allowed, skipped when they chose to go on without, memql#6235) comes before anything downloads; the model fields are the models stage's only, with bytes across the whole model. reportedAt is the AGENT's clock when the report arrived, so a running report that stops being refreshed reads as stopped. ABSENT MEANS THE COCKPIT REPORTED NO INSTALL, never one that failed. It decides nothing in the engine: it exists so the OS can say what the machine is doing.")
   permissions    object  @description("TCC / X11 status snapshot at register time: {accessibility, screen_recording, x11_display, detail}. Surfaced in /me/workers; the worker re-registers on reconnect so this stays accurate.")
-  apps           []object  @description("Local apps the cockpit detected on this machine (memql#4359). Each entry is {id, version, signedIn, subscription, allowed}: `allowed` is the machine's own policy.yaml apps.allow verdict, `signedIn` is the app's auth state as the cockpit can observe it, and `subscription` is unknown|none|present as the app REPORTS it -- never inferred. Stored verbatim including ids this engine cannot drive; only an entry that is both allowed and signedIn, with an id in the engine's closed runnable set, derives an `app:<id>` routing label into `labels`.")
+  apps           []object  @description("Local apps the cockpit detected on this machine (memql#4359). Each entry is {id, version, signedIn, subscription, allowed, readiness, readinessCheckedAt, usageResetsAt}: `allowed` is the machine's own policy.yaml apps.allow verdict, `signedIn` is the app's auth state as the cockpit can observe it, `subscription` is unknown|none|present as the app REPORTS it -- never inferred, and `readiness` is ready|signed_out|out_of_usage|unknown as the machine last measured it, absent from a Cockpit that measured nothing and read as unknown. Stored verbatim including ids this engine cannot drive; only an entry that is both allowed and signedIn, with an id in the engine's closed runnable set and not measured as signed out or out of usage, derives an `app:<id>` routing label into `labels`.")
   appDescriptors []object  @description("How the cockpit DRIVES each app it reported (epic memql#5096, design D8). Each entry is {id, harness, structuredResult, followUps, inferenceOnly}, where harness is one of claude-headless | codex-app-server | codex-mcp, and inferenceOnly says the harness runs the app with no tools for an inference-only turn (absent reads false). Reported on REGISTER only -- Register is accepted once per stream, so unlike `apps` this cannot change mid-connection and a cockpit that gains a harness advertises it on reconnect. Unlike `apps` it is NOT stored verbatim: an entry whose app id or harness word this engine does not know is dropped, because a protocol name with no client behind it is not a fact the engine can act on. An app with no entry is not the same as an app whose harness does neither -- every reader takes the absent case as 'this cockpit predates the field', never as a declared no.")
   version        string  @description("Cockpit binary version (e.g. v2026.5.4-computeruse).")
   buildTag       string  @description("Cockpit build flavor: 'computeruse' or 'headless'.")
@@ -207,6 +207,7 @@ concept appSession {
   mcpEndpoint    string  @description("The streamable-HTTP MCP URL the app was pointed at (https://mcp.<domain>/mcp). Recorded so an audit reader can see which surface the credential was good for.")
   errorMessage   string  @description("Populated when status reaches failed. Empty otherwise.")
   quotaRefused bool @description("The completed app reported a quota or credit refusal. Availability evidence, not permission to replay a session that may have performed work.")
+  authRefused bool @description("The completed app reported that its login is missing or expired. Availability evidence for this machine's app, not permission to replay a session that may have performed work.")
   cancelReason   string  @description("Free text carried from the cancel that ended the session.")
   startedAt      datetime!  @description("When the session row was created and AppSessionStart went on the wire.")
   heartbeatAt    datetime  @description("When the agent replica HOLDING the session last reported it alive: the row's open, then a flush every couple of seconds until the recording starts to close -- including the stretch after the app's output stops and before its transcript is stored, which can take a minute. A heartbeat names no status: the holder promotes the row to `running` once, on the first chunk, so a row the sweep has failed stays failed until the holder's own terminal write. It is what workerAppSessionStaleSweep judges a live row by, and ONLY the holder writes it -- the MCP node's step allocation and an app's `submit` also write this row, but they come from a different replica, and an app that keeps calling MemQL after the replica running its session died is exactly the orphan the sweep exists to close. EMPTY on a row written before the field existed, which only the startedAt backstop can judge.")
@@ -308,6 +309,45 @@ concept modelPull {
   requestedAt    datetime!  @description("When the act was accepted and this row written.")
   updatedAt      datetime  @description("When progress was last recorded. Written on a throttle rather than per observation: a pull emits several a second and a row version each would be tens of thousands of versions for one download.")
   endedAt        datetime  @description("When the pull reached a terminal status. Empty while live.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="workerId", target=registration, direction="outgoing")
+}
+
+/// One sign-in to an app on one of the owner's machines, started from Fleet.
+///
+/// CREDENTIALS STAY ON THE MACHINE. The app writes its own login there. This row holds where a
+/// person goes to sign in and, for an app that gives one, the code to enter on that page. A code
+/// the person pastes back is never written here or anywhere else.
+///
+/// THE ADDRESS AND THE CODE ARE CLEARED WHEN THE SIGN-IN ENDS, so a finished row holds neither. An
+/// earlier version of the row still does, and it answers nothing by then: the device code expires
+/// in minutes and is used once, and the address is useless without the verifier the process on the
+/// machine held.
+///
+/// A ROW LEFT AT `requested` OR `waiting` is one whose replica died holding it. Nothing sweeps it,
+/// because `expiresAt` already says it is over: Fleet reads a past `expiresAt` as ended, and the next
+/// Sign in starts a new row.
+///
+/// TIER: plain owner, with NO cluster-owner bypass, deliberately unlike the pull and the probe. A
+/// device code signs an account into a machine, and only the machine's owner may start one, so nobody
+/// else has a reason to read it.
+@rowAuthz(owner="ownerUserId")
+@displayCard(primary="app", secondary="workerId", tertiary="requestedAt", status="status")
+concept appSignIn {
+  ownerUserId    string!  @serverSet  @description("v1:identity:user.id who asked, and who owns the machine. THE ROW-AUTHZ OWNER FIELD, stamped from the caller's actor by fleetAppSignIn, never from an argument.")
+  workerId       string!  @description("v1:worker:registration.id of the machine being signed in.")
+  app            enum("claude-code", "codex")!  @description("The app being signed in.")
+  status         enum("requested", "waiting", "succeeded", "failed", "cancelled")!  @description("Lifecycle. requested = the machine has been told and has not answered; waiting = it is waiting on the person, and url is ready; succeeded = the app reported a login, and readiness on the registration follows when the machine next checks; failed = the app or the transport said no; cancelled = the person stopped it.")
+  url            string  @description("The page to open. Carries no secret. Empty once the sign-in has ended.")
+  userCode       string  @description("What the person enters on that page (Codex's device code). Empty when the app gives none, and once the sign-in has ended.")
+  needsCode      bool  @description("The page shows a code to paste back into Fleet (Claude Code). That code is never stored.")
+  errorMessage   string  @description("The app's own sentence when status is failed.")
+  targetNodeId   string  @description("MEMQL_NODE_ID of the agent replica that held the machine's stream when this started, which is where a pasted code must go.")
+  requestedAt    datetime!  @description("When the person pressed Sign in.")
+  expiresAt      datetime!  @description("When this is over if nothing has moved it. Fleet reads a live status past this as ended, so a replica dying cannot leave a person watching a spinner.")
+  updatedAt      datetime  @description("When the machine last said something.")
+  endedAt        datetime  @description("When it reached a terminal status. Empty while live.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="workerId", target=registration, direction="outgoing")

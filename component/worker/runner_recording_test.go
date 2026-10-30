@@ -672,3 +672,26 @@ func TestAModelCallSessionTellsTheRecorderSo(t *testing.T) {
 		}
 	}
 }
+
+// A takeover acts on the machine's word, so the word has to survive the trip from the
+// End to the result, beside the count of what the session did. A word this engine
+// cannot read moves nothing.
+func TestTheRunnerCarriesTheMachinesWordWhenAnAppStops(t *testing.T) {
+	for reported, want := range map[string]string{"out_of_usage": AppStopOutOfUsage, "signed_out": AppStopSignedOut, "a word from the future": "", "": ""} {
+		runner, session, _, _, _ := recordingFixture(t)
+		go func() {
+			waitForSession(t, session, "sess-run")
+			session.handleAppSessionChunk(actionChunk(t, 1, map[string]any{
+				"id": "toolu_1", "seq": 1, "tool": "exec",
+				"args": map[string]any{"command": "ls"},
+			}))
+			session.handleAppSessionEnd(&memqlv1.AppSessionEnd{
+				SessionId: "sess-run", ExitCode: 1, Error: "the app stopped", StopReason: reported,
+			})
+		}()
+		result, _ := runner.Run(context.Background(), session.worker, runSpec(), nil)
+		if result.StopReason != want || result.Status != AppSessionStatusFailed || result.RecordedActions != 1 {
+			t.Errorf("%q: got stop %q, status %s, %d actions", reported, result.StopReason, result.Status, result.RecordedActions)
+		}
+	}
+}

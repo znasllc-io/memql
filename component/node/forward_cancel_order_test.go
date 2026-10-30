@@ -80,6 +80,8 @@ func (h *contextOnlyHandler) HandleForwardedAppCall(ctx context.Context, req *no
 	h.record(ctx, req.GetRequestId())
 }
 func (h *contextOnlyHandler) CancelForwardedAppCall(context.Context, string) {}
+func (*contextOnlyHandler) HandleForwardedAppSignIn(context.Context, *nodev1.AppSignInForwardRequest, func(*nodev1.NodeServerMessage) error) {
+}
 
 type forwardPair struct {
 	name    string

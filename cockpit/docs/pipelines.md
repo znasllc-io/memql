@@ -257,12 +257,14 @@ A step inherits the **worker's** environment, which is not your login shell's.
   the command-line developer tools, `/usr/bin/git` is an install stub that
   would raise a dialog; a step refuses rather than run it.
 - **Linux (user systemd unit).** The installer's unit hardens the worker, and a
-  step inherits it: `ProtectHome=read-only` leaves only `~/.memql` writable in
-  your home, so toolchain caches there (`~/.cache/go-build`, `~/go/pkg/mod`,
-  `~/.npm`) are read-only -- point them under `~/.memql` or the checkout from the
-  step's command; `MemoryDenyWriteExecute=yes` stops JIT runtimes such as
-  Node.js. Relaxing the unit (`systemctl --user edit memql-worker`) is a
-  decision about this machine to make deliberately.
+  step inherits it: the system tree and other users' home directories are
+  read-only, and `PrivateTmp` gives it a `/tmp` of its own. Your own home is
+  writable, so toolchain caches there work. Tightening the unit
+  (`systemctl --user edit memql-worker`) is a decision about this machine to make
+  deliberately: the apps it drives need `~/.claude`, `~/.claude.json` and `~/.codex`
+  writable, `MemoryDenyWriteExecute=yes` stops JIT runtimes such as Node.js, and
+  `RestrictNamespaces=yes` refuses the sandbox a session's shell commands run in
+  ([local-apps.md](local-apps.md)).
 
 `shell.allow`, `shell.deny`, `shell.run_as_user` and the shell's `max_*`
 limits do not apply to a step: the command is the pipeline runner's,

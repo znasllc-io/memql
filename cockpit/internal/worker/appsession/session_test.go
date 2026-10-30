@@ -2216,3 +2216,141 @@ func (t fixtureMCPTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 func preflightFixtureClient(s *httptest.Server) *http.Client {
 	return &http.Client{Transport: fixtureMCPTransport{base: s.Client().Transport, target: s.URL}}
 }
+
+// recordingReadiness is the machine's tracker, as a session sees it.
+type recordingReadiness struct {
+	mu        sync.Mutex
+	started   []string
+	ended     []string
+	observed  []harness.ReadinessSignal
+	rechecked []string
+}
+
+func (r *recordingReadiness) SessionStarted(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.started = append(r.started, app)
+}
+
+func (r *recordingReadiness) SessionEnded(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = append(r.ended, app)
+}
+
+func (r *recordingReadiness) Observe(_ string, signal harness.ReadinessSignal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.observed = append(r.observed, signal)
+}
+
+func (r *recordingReadiness) Recheck(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rechecked = append(r.rechecked, app)
+}
+
+func (r *recordingReadiness) snapshot() (started, ended []string, observed []harness.ReadinessSignal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.started...), append([]string(nil), r.ended...), append([]harness.ReadinessSignal(nil), r.observed...)
+}
+
+// A real turn is the best check there is, and the machine must not ping while one
+// runs: the session brackets itself and passes on what its turn said.
+func TestSession_TellsTheTrackerWhatItsTurnSaid(t *testing.T) {
+	fakeApp(t, "claude", `
+cat <<'CLAUDE_JSON'
+{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":0,"output_tokens":0},"modelUsage":{}}
+CLAUDE_JSON
+exit 1
+`)
+	h := newRig(t)
+	readiness := &recordingReadiness{}
+	h.manager.opts.Readiness = readiness
+	h.start(t, nil)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		started, ended, observed := readiness.snapshot()
+		if len(ended) == 1 {
+			if len(started) != 1 || started[0] != apps.IDClaudeCode {
+				t.Fatalf("started: %v", started)
+			}
+			if len(observed) != 1 || observed[0].State != harness.ReadinessSignedOut {
+				t.Fatalf("observed: %+v", observed)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the session never ended on the tracker: %v %v %+v", started, ended, observed)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The engine hands a step that has already done work to another app only on this
+// machine's word, so the word has to be exact: the app's own statement, and nothing
+// that merely looks like it. The turn may have done anything before it stopped.
+func TestSessionEndSaysWhenTheAppStoppedOnItsUsageOrLogin(t *testing.T) {
+	const initEvent = `{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}`
+	for name, tt := range map[string]struct {
+		stream string
+		want   string
+	}{
+		"a limit partway through": {
+			initEvent + "\n" +
+				`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1793487600,"rateLimitType":"seven_day","overageStatus":"rejected","isUsingOverage":false}}` + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"You've hit your weekly limit · resets Oct 31 at 4pm (America/Phoenix)","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"out_of_usage",
+		},
+		"a lapsed login partway through": {
+			initEvent + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"signed_out",
+		},
+		"any other failure": {
+			initEvent + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"the model produced something the app could not parse","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeApp(t, "claude", "cat <<'CLAUDE_JSON'\n"+tt.stream+"\nCLAUDE_JSON\nexit 1\n")
+			h := newRig(t)
+			end := h.start(t, nil)
+			if end.GetError() == "" {
+				t.Fatal("the turn was meant to fail")
+			}
+			if got := end.GetStopReason(); got != tt.want {
+				t.Fatalf("stop_reason = %q, want %q (error %q)", got, tt.want, end.GetError())
+			}
+			h.settled(t)
+		})
+	}
+}
+
+// A takeover needs what the app left behind, so an output that did not reach the
+// Library means nothing may take over from this session. Its directory is kept.
+func TestSessionEndWithdrawsTheStopWhenOutputsDidNotReachTheLibrary(t *testing.T) {
+	fakeApp(t, "claude", `
+echo made > notes.md
+cat <<'CLAUDE_JSON'
+{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":120,"output_tokens":40}}
+CLAUDE_JSON
+exit 1
+`)
+	h := newRig(t)
+	down := failingLibrary(t)
+	h.manager.opts.LibraryBase = down.URL
+	h.manager.opts.HTTPClient = preflightFixtureClient(h.library.server)
+	end := h.start(t, nil)
+	if !strings.Contains(end.GetError(), "pushing outputs to the Library failed") {
+		t.Fatalf("end error = %q, want the failed push", end.GetError())
+	}
+	if got := end.GetStopReason(); got != "" {
+		t.Fatalf("stop_reason = %q with outputs left behind", got)
+	}
+	h.settled(t)
+}
