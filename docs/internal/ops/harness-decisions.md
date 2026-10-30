@@ -1770,3 +1770,35 @@ The other review and maintenance tests run with both switches on
 and a train's pull request with review off (it is an ordinary pull-request run,
 so the same gate applies). Known limit: a reader error reads as off and is not
 reported on the run.
+
+## A release records vulnerability findings and keeps going (2026-10-29)
+
+The 0.31.8 release run (tag `v0.31.8`, `f19b3db57`) failed
+`vulnerabilities.npm-vulnerabilities` on a moderate advisory for `vite` 6.4.4 in
+`editors/browser`, published after its pull request's checks passed. The gate
+fails on any advisory, a re-run cannot pass, and a release tag never moves, so
+one advisory cost a new version and a full release run. The owner decided that
+releases should flag findings, not fail on them.
+
+- **Chosen path** (`memql-package.yaml`, the `vulnerabilities` stage). On
+  `MEMQL_EVENT=release`, `go-vulnerabilities` turns govulncheck's exit 3
+  (findings) into a warning, and `npm-vulnerabilities` runs
+  `scripts/ci/npm-audit.py --report-only`. Both still run and keep their reports
+  as artifacts, so a candidate pins the same evidence as before.
+- **Invariant.** Only findings are relaxed. A scan that could not run or whose
+  report cannot be read still fails the release (govulncheck's other exit codes;
+  `--report-only` fails on an invalid report), so a broken scan can never look
+  clean. Every other event still fails on findings, which keeps fixing an
+  advisory a pull request's job.
+- **Rejected for now.** Skipping the stage on releases: today's candidate
+  workflow refuses a release whose steps were skipped for any reason but
+  `pipeline_not_affected` or a proven `pipeline_passed_earlier`, so a skip would
+  block the candidate rather than save time. Reusing the pull request's
+  evidence in the release run is the larger saving (its tests repeat the PR's on
+  the same tree), but release runs reuse nothing by design (#6344), and changing
+  that is an engine decision of its own.
+- **Tests.** `TestEngineSecurityScansDoNotTurnFindingsIntoSuccess` pins the
+  release-only relaxation and that every other event still fails;
+  `TestNPMAuditRejectsFindingsAndIncompleteReports` covers `--report-only`
+  (findings pass, an unreadable report fails). Not verified here: a live release
+  run with a finding.

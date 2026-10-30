@@ -1252,7 +1252,7 @@ coverage; packaging their binaries does not exercise those hosts.
 | Stage | Steps | Runs on |
 |---|---|---|
 | `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
-| `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities` | every event, after a failure too |
+| `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities`; on a release they record findings without failing | every event, after a failure too |
 | `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
 | `gates` | `gate-inputs` | pull requests and manual runs |
@@ -1268,6 +1268,17 @@ The daily schedule runs the stages that opt into it; the history and CodeQL
 stages declare a weekly cadence. A release retains ordinary tests and dependency
 vulnerability checks without repeating those weekly scans. PR, merge-group and
 push secret checks still inspect every introduced commit.
+
+A release runs both dependency vulnerability checks and keeps their reports, but
+a known vulnerability does not fail it: the release's pull request already ran
+the same checks on the same tree, and an advisory published since must not
+stop the version from shipping (owner decision, 2026-10-29, after the 0.31.8
+release failed on an advisory for `vite` 6.4.4 published after its pull request
+passed). The step logs a warning and the report under `.memql-security` names
+each finding. Only findings are relaxed: govulncheck's exit 3, and
+`npm-audit.py --report-only` still failing on a report it cannot read. Pull
+requests, pushes, merge groups and scheduled runs fail on findings as before,
+so an advisory is fixed in a pull request rather than discovered by a release.
 
 The longest audit steps outlast the default 2-hour run ceiling. Operators must
 budget the complete run, including queue time, and configure both agent and

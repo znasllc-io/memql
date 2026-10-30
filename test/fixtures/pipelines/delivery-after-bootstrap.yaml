@@ -379,6 +379,14 @@ pipeline:
             status=0
             govulncheck github.com/znasllc-io/memql/... > .memql-security/go/findings.txt 2> .memql-security/go/errors.txt || status=$?
             cat .memql-security/go/findings.txt .memql-security/go/errors.txt
+            # A release records findings and continues (owner decision,
+            # 2026-10-29): its pull request already ran this scan, and an
+            # advisory published since must not block shipping. govulncheck
+            # exits 3 for findings; any other failure is a broken scan.
+            if [ "${MEMQL_EVENT:-}" = release ] && [ "$status" -eq 3 ]; then
+              echo "WARNING: govulncheck reported findings; this release records them in .memql-security/go and continues." >&2
+              status=0
+            fi
             test "$status" -eq 0
         - name: npm-vulnerabilities
           placement: cluster
@@ -386,7 +394,13 @@ pipeline:
           artifacts: [.memql-security/npm]
           run: |
             set -eu
-            python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm
+            # A release records findings without failing on them, as
+            # go-vulnerabilities does; every other event still fails.
+            if [ "${MEMQL_EVENT:-}" = release ]; then
+              python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm --report-only
+            else
+              python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm
+            fi
     # Event selection is declared, so the plan exposes the selected scan.
     # New-commit scans preserve reports even when an earlier check failed.
     # Full history shares the later weekly analysis stage with CodeQL, so
