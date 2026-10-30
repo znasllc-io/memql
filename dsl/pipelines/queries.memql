@@ -228,6 +228,26 @@ query run pipelineRunsForPipelineSha {
   shape     pipelineRunFull
 }
 
+/// The runs of one pipeline that tested one git tree, most recently queued first -- what a release
+/// reads to find the run whose checks it may reuse (component/pipelinerun/evidence.go). Commits differ
+/// where trees do not: a merge commit of an up-to-date pull request has the pull request head's tree.
+/// @serverOnly: the driver reads it with no person behind the call, so there is no actor.userId to
+/// scope to; the owner, pipeline and repository are compared natively on the rows this returns.
+@serverOnly
+@actor
+query run pipelineRunsForPipelineTree {
+  args {
+    pipelineId  string!
+    treeHash    string!
+  }
+  filter    row => row.pipelineId == args.pipelineId
+                && row.treeHash == args.treeHash
+                && actor.isClusterOwner == true
+  sort      "queuedAt", "desc"
+  paginate  50
+  shape     pipelineRunFull
+}
+
 /// The run a GitHub check run reports, by its check-run id -- what a re-requested check run re-runs.
 /// @serverOnly for pipelineRunsForPipelineSha's reason: the caller is GitHub, so actor.userId names
 /// nobody. A check run belongs to one run; the sort and page of one say so.

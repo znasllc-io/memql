@@ -80,8 +80,9 @@ func StepCheckOutput(s StepReport) (title, summary, text string) {
 	switch s.Status {
 	case "succeeded":
 		if s.Code == CodePassedEarlier && message != "" {
-			// Verified at this commit in another run: there is no duration
-			// of this run's to show, only where it passed.
+			// Verified in another run, at this commit or for a release on this
+			// tree: there is no duration of this run's to show, only where it
+			// passed.
 			return "Passed: " + oneLine(s.Message, 200), "Step " + key + " passed: " + message, ""
 		}
 		took := formatDuration(s.DurationMs)

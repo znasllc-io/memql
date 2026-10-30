@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -214,6 +215,36 @@ func (c *Client) CommitForRef(ctx context.Context, bearer, owner, repo, ref stri
 		return "", "", errors.New("GitHub answered for that ref and named no commit")
 	}
 	return payload.SHA, payload.Commit.Message, nil
+}
+
+// commitTreeHash is a whole git object id, of either hash function.
+var commitTreeHash = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
+
+// CommitTree answers the hash of the tree one exact commit records
+// (GET /repos/{owner}/{repo}/git/commits/{sha}). A git object is immutable, so
+// the answer never changes. Two commits with one tree hold the same source: an
+// up-to-date pull request's head and the merge commit that landed it, for one.
+// A pipeline run keeps this hash so a release can find the run that tested its
+// source (component/pipelinerun/evidence.go). Only a reply naming that commit
+// and a whole hash counts, because a wrong hash would let one run stand for
+// another's source.
+func (c *Client) CommitTree(ctx context.Context, bearer, owner, repo, sha string) (string, error) {
+	if strings.TrimSpace(sha) == "" {
+		return "", errors.New("a commit tree lookup needs a commit")
+	}
+	var payload struct {
+		SHA  string `json:"sha"`
+		Tree struct {
+			SHA string `json:"sha"`
+		} `json:"tree"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/git/commits/"+escapePath(sha), bearer, &payload); err != nil {
+		return "", err
+	}
+	if payload.SHA != sha || !commitTreeHash.MatchString(payload.Tree.SHA) {
+		return "", errors.New("GitHub's reply did not name that commit and a whole tree hash")
+	}
+	return payload.Tree.SHA, nil
 }
 
 // maxArchiveRedirects bounds the hops an archive request follows. GitHub

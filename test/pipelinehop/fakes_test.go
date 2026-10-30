@@ -396,6 +396,10 @@ func (h githubAt) Compare(_ context.Context, token, repository, base, head strin
 	return slices.Clone(r.changed), true, nil
 }
 
+func (h githubAt) CommitTree(_ context.Context, _, _, _ string) (string, error) {
+	return "", fmt.Errorf("the hop fixture has no commit objects to read")
+}
+
 func (h githubAt) CommitForRef(_ context.Context, token, repository, ref string) (string, string, error) {
 	g := h.g
 	g.mu.Lock()

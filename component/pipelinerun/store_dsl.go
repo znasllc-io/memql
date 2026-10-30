@@ -40,17 +40,18 @@ const (
 	qLibraryFileByID               = "libraryFileById"               // (fileId) -- dsl/library
 
 	// Server-only reads, every owner's rows, cluster-owner conjunct.
-	qPipelinesForRepository     = "pipelinesForRepository"     // (repository)
-	qPipelinesPolled            = "pipelinesPolled"            // ()
-	qPipelinesForScheduledScan  = "pipelinesForScheduledScan"  // ()
-	qPipelineByID               = "pipelineById"               // (pipelineId)
-	qPipelineRunsForKey         = "pipelineRunsForKey"         // (runKey)
-	qPipelineRunsForPipelineSha = "pipelineRunsForPipelineSha" // (pipelineId, sha)
-	qPipelineRunByCheckRun      = "pipelineRunByCheckRun"      // (repository, checkRunId)
-	qPipelineRunsMaintenance    = "pipelineRunsAwaitingMaintenance"
-	qPipelineRunsUnfinished     = "pipelineRunsUnfinished" // ()
-	qPipelineRunByID            = "pipelineRunById"        // (runId)
-	qPipelinesActive            = "pipelinesActive"        // ()
+	qPipelinesForRepository      = "pipelinesForRepository"      // (repository)
+	qPipelinesPolled             = "pipelinesPolled"             // ()
+	qPipelinesForScheduledScan   = "pipelinesForScheduledScan"   // ()
+	qPipelineByID                = "pipelineById"                // (pipelineId)
+	qPipelineRunsForKey          = "pipelineRunsForKey"          // (runKey)
+	qPipelineRunsForPipelineSha  = "pipelineRunsForPipelineSha"  // (pipelineId, sha)
+	qPipelineRunsForPipelineTree = "pipelineRunsForPipelineTree" // (pipelineId, treeHash)
+	qPipelineRunByCheckRun       = "pipelineRunByCheckRun"       // (repository, checkRunId)
+	qPipelineRunsMaintenance     = "pipelineRunsAwaitingMaintenance"
+	qPipelineRunsUnfinished      = "pipelineRunsUnfinished" // ()
+	qPipelineRunByID             = "pipelineRunById"        // (runId)
+	qPipelinesActive             = "pipelinesActive"        // ()
 
 	// Recovery's other read, likewise server-only: concluded runs whose
 	// final check run did not land, which it republishes.
@@ -67,6 +68,7 @@ const (
 	// cluster-owner-conjoined like the reads above: a resumed driver reads the
 	// steps its predecessor's journal wrote.
 	qWorkStepsForRun = "workStepsForRun" // (runId)
+	qWorkRunByID     = "workRunById"     // (runId)
 
 	// Writes, every one @serverOnly.
 	mCreatePipeline    = "createPipeline"
@@ -390,6 +392,19 @@ func (s *dslStore) RunsForPipelineSHA(ctx context.Context, pipelineID, sha strin
 	}))
 }
 
+func (s *dslStore) RunsForPipelineTree(ctx context.Context, pipelineID, treeHash string) ([]Run, error) {
+	treeHash = strings.TrimSpace(treeHash)
+	if treeHash == "" {
+		// In the query a blank value equals an absent field, so it would answer
+		// every run that never read its tree (the language's absent-value rule).
+		return nil, nil
+	}
+	return allRuns(s.systemRead(ctx, qPipelineRunsForPipelineTree, map[string]any{
+		"pipelineId": bareID(pipelineID),
+		"treeHash":   treeHash,
+	}))
+}
+
 func (s *dslStore) RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error) {
 	if checkRunID <= 0 {
 		return nil, nil
@@ -471,6 +486,19 @@ func (s *dslStore) OutboundStatuses(ctx context.Context, ids []string) ([]Outbou
 		out = append(out, status)
 	}
 	return out, nil
+}
+
+// WorkRunRow is one v1:work:run as read, or nil when there is none.
+func (s *dslStore) WorkRunRow(ctx context.Context, workRunID string) (map[string]any, error) {
+	id := bareID(workRunID)
+	if id == "" {
+		return nil, nil
+	}
+	rows, err := s.systemRead(ctx, qWorkRunByID, map[string]any{"runId": id})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return rows[0], nil
 }
 
 func (s *dslStore) WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error) {
@@ -646,6 +674,7 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 	setNamed(args, "maintenanceState", patch.MaintenanceState)
 	setNamed(args, "maintenanceGoalId", patch.MaintenanceGoalID)
 	setNamed(args, "maintenanceMessage", patch.MaintenanceMessage)
+	setNamed(args, "treeHash", patch.TreeHash)
 	setNamed(args, "status", patch.Status)
 	setNamed(args, "conclusion", patch.Conclusion)
 	setNamed(args, "refusalCode", patch.RefusalCode)
@@ -1178,6 +1207,7 @@ func runFromRow(row map[string]any) Run {
 		PipelineID:         bareID(rowString(row, "pipelineId")),
 		Repository:         normalizeRepository(rowString(row, "repository")),
 		SHA:                strings.ToLower(rowString(row, "sha")),
+		TreeHash:           rowString(row, "treeHash"),
 		Mode:               pipelines.Mode(rowString(row, "mode")),
 		Event:              pipelines.Event(rowString(row, "event")),
 		RunKey:             rowString(row, "runKey"),
@@ -1323,11 +1353,14 @@ func workStepFromRow(row map[string]any) WorkStep {
 		ErrorCode:       rowString(row, "errorCode"),
 		ErrorMessage:    rowString(row, "errorMessage"),
 		ArtifactFileIDs: rowStrings(row, "artifactFileIds"),
+		Raw:             row,
 	}
 	if call, ok := row["call"].(map[string]any); ok {
 		s.PipelineKind = pipelines.StepKind(rowString(call, "pipelineKind"))
 		s.DefinitionFingerprint = rowString(call, "definitionFingerprint")
 		s.VerificationFingerprint = rowString(call, "verificationFingerprint")
+		s.TreeFingerprint = rowString(call, "treeFingerprint")
+		s.EvidenceRunID = bareID(rowString(call, "evidenceRunId"))
 		s.Stage = rowString(call, "stage")
 		s.Name = rowString(call, "name")
 		s.Packages = rowStrings(call, "packages")

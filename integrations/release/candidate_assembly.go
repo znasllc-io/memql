@@ -188,6 +188,9 @@ func (s *candidateAssemblyScope) readRun(ctx context.Context, args map[string]an
 	if len(plan.Receipts) == 0 {
 		return nil, errors.New("assembly run has no complete evidence")
 	}
+	if plan.ReusedFrom, err = s.reader.reusedProvenance(ctx, s.runs[alias], plan); err != nil {
+		return nil, err
+	}
 	first := plan.Receipts[0]
 	if first.Repository != s.p.versionReader.sources[component.Name].Repository {
 		return nil, errors.New("assembly run belongs to a different source repository")
@@ -356,7 +359,7 @@ func (s *candidateAssemblyScope) resolved() (pl.ReleaseCandidate, error) {
 			for _, receipt := range plan.Receipts {
 				out.Evidence = append(out.Evidence, pl.ReleaseEvidence{Name: assemblyEvidenceName(declaration.Name, alias, receipt.StepKey), Component: declaration.Name,
 					WorkRunID: receipt.WorkRunID, StepKey: receipt.StepKey, Attempt: receipt.Attempt, ReceiptID: receipt.ReceiptID, ReceiptDigest: receipt.ReceiptDigest,
-					DefinitionDigest: receipt.DefinitionDigest, ArtifactIntentIDs: slices.Clone(receipt.ArtifactIntentIDs)})
+					DefinitionDigest: receipt.DefinitionDigest, ArtifactIntentIDs: slices.Clone(receipt.ArtifactIntentIDs), ReusedFrom: plan.ReusedFrom[receipt.StepKey]})
 			}
 		}
 	}

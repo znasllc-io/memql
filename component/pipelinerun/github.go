@@ -161,6 +161,14 @@ func (g *packagesGitHub) CommitForRef(ctx context.Context, token, repository, re
 	return c.CommitForRef(ctx, token, owner, name, ref)
 }
 
+func (g *packagesGitHub) CommitTree(ctx context.Context, token, repository, sha string) (string, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return "", err
+	}
+	return c.CommitTree(ctx, token, owner, name, sha)
+}
+
 func (g *packagesGitHub) Tree(ctx context.Context, token, repository, sha string, keep func(string) bool, maxBytes int64) (fs.FS, error) {
 	c, owner, name, err := g.target(repository)
 	if err != nil {

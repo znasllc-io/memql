@@ -42,6 +42,43 @@ type carriedStep struct {
 	carried    bool
 	failed     bool
 	artifacts  []string
+	// evidenceRun: the step reused that run's receipt instead of executing.
+	// treeFingerprint is what the driver declares on a verification step, and
+	// blocked is a reused step settled by a failed stage before it could be.
+	evidenceRun     string
+	treeFingerprint string
+	blocked         bool
+}
+
+// skipReason is what the plan declared for a step it did not run.
+func (s carriedStep) skipReason() string {
+	if s.evidenceRun != "" {
+		return "Verified on the same source tree in run " + s.evidenceRun + "."
+	}
+	return "Passed in attempt 1."
+}
+
+// carriedRunSpec is one native run and its journal. Zero values are a release
+// attempt of the fixture's run key.
+type carriedRunSpec struct {
+	attempt    int
+	rerunOf    string
+	queuedAt   time.Time
+	succeeded  bool
+	steps      map[string]carriedStep
+	event      string
+	mode       string
+	sha        string
+	repository string
+	pipeline   string
+	runKey     string
+	// tree is on the run row and in the work input, unless workTree says the
+	// journal disagrees or noWorkTree says it names none.
+	tree, workTree        string
+	noWorkTree            bool
+	startedAt, finishedAt time.Time
+	cancelRequested       bool
+	noWorkRun             bool
 }
 
 func newCarriedDB(t *testing.T) *carriedDB {
@@ -62,36 +99,78 @@ func newCarriedDB(t *testing.T) *carriedDB {
 // attempt writes release attempt n: its pipeline run row, a journal work run
 // with the given steps, and the run's ending.
 func (f *carriedDB) attempt(n int, rerunOf string, queuedAt time.Time, succeeded bool, steps map[string]carriedStep) (string, string) {
+	f.t.Helper()
+	return f.run(carriedRunSpec{attempt: n, rerunOf: rerunOf, queuedAt: queuedAt, succeeded: succeeded, steps: steps})
+}
+
+// run writes one native run and its journal.
+func (f *carriedDB) run(spec carriedRunSpec) (string, string) {
 	t := f.t
 	t.Helper()
+	if spec.event == "" {
+		spec.event = "release"
+	}
+	if spec.mode == "" {
+		spec.mode = "full"
+	}
+	if spec.sha == "" {
+		spec.sha = carriedSHA
+	}
+	if spec.repository == "" {
+		spec.repository = carriedRepo
+	}
+	if spec.pipeline == "" {
+		spec.pipeline = f.pipeline
+	}
+	if spec.runKey == "" {
+		spec.runKey = f.runKey
+	}
+	if spec.attempt == 0 {
+		spec.attempt = 1
+	}
+	if spec.workTree == "" {
+		spec.workTree = spec.tree
+	}
 	runID := id.NewShortId()
 	conclusion := "failure"
-	if succeeded {
+	if spec.succeeded {
 		conclusion = "success"
 	}
-	args := map[string]any{"runId": runID, "pipelineId": f.pipeline, "repository": carriedRepo, "sha": carriedSHA, "mode": "full", "event": "release", "runKey": f.runKey,
-		"attempt": n, "trigger": "manual", "releaseTag": "v1.2.3", "version": "v1.2.3", "status": "completed", "conclusion": conclusion, "queuedAt": queuedAt.UTC().Format(time.RFC3339)}
-	if rerunOf != "" {
-		args["rerunOf"] = rerunOf
+	args := map[string]any{"runId": runID, "pipelineId": spec.pipeline, "repository": spec.repository, "sha": spec.sha, "mode": spec.mode, "event": spec.event, "runKey": spec.runKey,
+		"attempt": spec.attempt, "trigger": "manual", "releaseTag": "v1.2.3", "version": "v1.2.3", "status": "completed", "conclusion": conclusion, "queuedAt": spec.queuedAt.UTC().Format(time.RFC3339)}
+	if spec.rerunOf != "" {
+		args["rerunOf"] = spec.rerunOf
+	}
+	if !spec.finishedAt.IsZero() {
+		args["finishedAt"] = spec.finishedAt.UTC().Format(time.RFC3339)
 	}
 	profileMutation(t, f.engine, "createPipelineRun", args)
-	keys := make([]string, 0, len(steps))
-	for key := range steps {
+	keys := make([]string, 0, len(spec.steps))
+	for key := range spec.steps {
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
 	decls := make([]workjournal.StepDecl, 0, len(keys))
 	for _, key := range keys {
-		s := steps[key]
+		s := spec.steps[key]
 		call := map[string]any{"construct": "pipeline", "pipelineKind": "command", "definitionFingerprint": s.definition, "packages": s.packages}
-		if s.carried {
-			call["skip"] = map[string]any{"code": pl.CodePassedEarlier, "reason": "Passed in attempt 1."}
+		if s.carried || s.evidenceRun != "" {
+			call["skip"] = map[string]any{"code": pl.CodePassedEarlier, "reason": s.skipReason()}
+		}
+		if s.evidenceRun != "" {
+			call["evidenceRunId"] = s.evidenceRun
+		}
+		if s.treeFingerprint != "" {
+			call["treeFingerprint"] = s.treeFingerprint
 		}
 		decls = append(decls, workjournal.StepDecl{Key: key, Kind: workjournal.KindDeterministic, StepType: "exec", Call: call})
 	}
-	work := workjournal.Work{OwnerUserID: f.owner, Template: "pipeline:carried", GoalKey: id.NewShortId(), RunKey: "1", Statement: "Carried release fixture", TriggeredBy: pl.WorkTriggerPrefix + "full",
-		Input: map[string]any{"repository": carriedRepo, "sha": carriedSHA, "mode": "full", "event": "release", "pipelineId": f.pipeline, "pipelineRunId": runID, "attempt": n},
-		Steps: decls}
+	input := map[string]any{"repository": spec.repository, "sha": spec.sha, "mode": spec.mode, "event": spec.event, "pipelineId": spec.pipeline, "pipelineRunId": runID, "attempt": spec.attempt}
+	if spec.workTree != "" && !spec.noWorkTree {
+		input["treeHash"] = spec.workTree
+	}
+	work := workjournal.Work{OwnerUserID: f.owner, Template: "pipeline:carried", GoalKey: id.NewShortId(), RunKey: "1", Statement: "Carried release fixture", TriggeredBy: pl.WorkTriggerPrefix + spec.mode,
+		Input: input, Steps: decls}
 	_, workRunID, err := workjournal.IDs(work)
 	if err != nil {
 		t.Fatal(err)
@@ -101,15 +180,17 @@ func (f *carriedDB) attempt(n int, rerunOf string, queuedAt time.Time, succeeded
 		t.Fatal(err)
 	}
 	for _, key := range keys {
-		s := steps[key]
+		s := spec.steps[key]
 		step, err := run.Step(ownerCtx(), key)
 		if err != nil {
 			t.Fatal(err)
 		}
 		receipt := workjournal.Receipt{Status: "done", Result: map[string]any{"status": "succeeded", "metadata": map[string]any{"exitCode": 0}}}
 		switch {
-		case s.carried:
-			receipt = workjournal.Receipt{Status: "skipped", Code: pl.CodePassedEarlier, Result: map[string]any{"code": pl.CodePassedEarlier, "reason": "Passed in attempt 1."}}
+		case s.blocked:
+			receipt = workjournal.Receipt{Status: "skipped", Code: pl.CodeStageBlocked, Result: map[string]any{"code": pl.CodeStageBlocked, "reason": "Blocked by an earlier stage."}}
+		case s.carried || s.evidenceRun != "":
+			receipt = workjournal.Receipt{Status: "skipped", Code: pl.CodePassedEarlier, Result: map[string]any{"code": pl.CodePassedEarlier, "reason": s.skipReason()}}
 		case s.failed:
 			receipt = workjournal.Receipt{Status: "failed", Code: "pipeline_step_failed", Message: "exit 1", Result: map[string]any{"status": "failed", "metadata": map[string]any{"exitCode": 1}}}
 		case len(s.artifacts) > 0:
@@ -119,7 +200,7 @@ func (f *carriedDB) attempt(n int, rerunOf string, queuedAt time.Time, succeeded
 			t.Fatal(key, err)
 		}
 	}
-	if succeeded {
+	if spec.succeeded {
 		err = run.Succeeded(ownerCtx(), map[string]any{"status": "succeeded"})
 	} else {
 		err = run.Failed(ownerCtx(), "pipeline_failed", "A step failed.")
@@ -127,13 +208,33 @@ func (f *carriedDB) attempt(n int, rerunOf string, queuedAt time.Time, succeeded
 	if err != nil {
 		t.Fatal(err)
 	}
-	profileMutation(t, f.engine, "updatePipelineRun", map[string]any{"runId": runID, "workRunId": workRunID})
+	update := map[string]any{"runId": runID}
+	if !spec.noWorkRun {
+		update["workRunId"] = workRunID
+	}
+	if spec.tree != "" {
+		update["treeHash"] = spec.tree
+	}
+	if !spec.startedAt.IsZero() {
+		update["startedAt"] = spec.startedAt.UTC().Format(time.RFC3339)
+	}
+	if spec.cancelRequested {
+		update["cancelRequested"] = true
+	}
+	profileMutation(t, f.engine, "updatePipelineRun", update)
 	return runID, workRunID
 }
 
 // coverage asks candidate coverage about a candidate whose evidence is the
 // complete work run workRunID and whose artifact build.image produced.
 func (f *carriedDB) coverage(workRunID string) (candidateCoverage, error) {
+	f.t.Helper()
+	return f.coverageRecording(workRunID, nil)
+}
+
+// coverageRecording is coverage of a candidate that records reused as the
+// provenance of each step key.
+func (f *carriedDB) coverageRecording(workRunID string, reused map[string]*pl.ReleaseReusedFrom) (candidateCoverage, error) {
 	t := f.t
 	t.Helper()
 	built, err := f.reader.read(ownerCtx(), workRunID, "build.image")
@@ -151,7 +252,7 @@ func (f *carriedDB) coverage(workRunID string) (candidateCoverage, error) {
 			t.Fatal(key, err)
 		}
 		c.Evidence = append(c.Evidence, pl.ReleaseEvidence{Name: key, Component: "engine", WorkRunID: workRunID, StepKey: key, Attempt: receipt.Attempt,
-			ReceiptID: receipt.ReceiptID, ReceiptDigest: receipt.ReceiptDigest, DefinitionDigest: receipt.DefinitionDigest, ArtifactIntentIDs: receipt.ArtifactIntentIDs})
+			ReceiptID: receipt.ReceiptID, ReceiptDigest: receipt.ReceiptDigest, DefinitionDigest: receipt.DefinitionDigest, ArtifactIntentIDs: receipt.ArtifactIntentIDs, ReusedFrom: reused[key]})
 	}
 	return f.reader.coverage(ownerCtx(), c)
 }

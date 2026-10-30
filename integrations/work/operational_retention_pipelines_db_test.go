@@ -21,8 +21,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"maps"
@@ -757,6 +759,172 @@ VALUES(?,'pipeline-owner','{"WorkRunID":"artifact-authority"}'::jsonb,'legacy-au
 		}
 	}
 	assertRetired(t, db, work, run)
+}
+
+// A candidate proves each reused step against the run that executed it, on every
+// read: at publication, and whenever an overlay is built from it, however long
+// after. A release's own rows stay while its artifacts are pinned, and the pull
+// request it stood on has no artifact to keep it. So a live candidate holds that run
+// the way an artifact holds its producer, or a release would become unprovable a
+// month after it was cut. A retired candidate is read no more, and an archived one's
+// own rows leave on their usual window, so neither holds anything.
+func TestRetentionKeepsARunALiveCandidateReusedFrom(t *testing.T) {
+	db, i := sweepDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.AddDate(0, 0, -40)
+	cutoff := now.AddDate(0, 0, -30)
+	work := seedPipelineWorkRun(t, db, "reused-source", pipelineOwner, runStatusSucceeded, old)
+	run := seedPipelinesRun(t, db, "reused-source", pipelineOwner, "completed", old)
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('workRunId',?::text) WHERE id=?`, work, run); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := seedPipelineWorkRun(t, db, "unrelated", pipelineOwner, runStatusSucceeded, old)
+	// Refused before it opened any work: it names no work run, and must not be
+	// kept for that. NULL NOT IN a list that is not empty is not true.
+	noWork := seedPipelinesRun(t, db, "no-work", pipelineOwner, "completed", old)
+	before := storedKeys(t, db, work, run)
+	// The manifest's own type, so a renamed field fails here rather than holding
+	// nothing. A candidate records a work run's id bare.
+	manifest, err := json.Marshal(pipelines.ReleaseCandidate{Evidence: []pipelines.ReleaseEvidence{
+		{Name: "ran", WorkRunID: "the-release"},
+		{Name: "reused", WorkRunID: "the-release", ReusedFrom: &pipelines.ReleaseReusedFrom{WorkRunID: "reused-source"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state) VALUES (?,'pipeline-owner',?,'ready')`,
+		"sha256:"+strings.Repeat("a", 64), string(manifest)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&verifyingArchive{})
+	admitted := func(concept string) []string {
+		t.Helper()
+		q, args := retentionCandidateRead(operationalPolicy{concept: concept, predicate: "TRUE"}, cutoff, old.Add(-24*time.Hour), cutoff, nil)
+		var candidates []map[string]any
+		if err := db.NewRaw(q, args...).Scan(t.Context(), &candidates); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(candidates))
+		for _, row := range candidates {
+			ids = append(ids, fmt.Sprint(row["id"]))
+		}
+		return ids
+	}
+	for _, state := range []string{"ready", "approved"} {
+		if _, err := db.Exec(`UPDATE release_candidates SET state=?`, state); err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range []struct{ concept, id string }{{runConcept, work}, {pipelinesRunConcept, run}} {
+			if got := admitted(record.concept); slices.Contains(got, record.id) {
+				t.Fatalf("%s: a run a live candidate reused was admitted to history retention: %v", state, got)
+			}
+			// The final transactional guard too: a read made before the release was
+			// prepared cannot delete what it now stands on.
+			_, deleted, _, err := i.retireVerified(retentionOwner(), record.concept, []map[string]any{{"id": record.id, "createdAt": rfc(old)}}, record.concept == runConcept, cutoff, false)
+			if err != nil || deleted != 0 {
+				t.Fatalf("%s: deleted the run a live candidate reused: %d %v", state, deleted, err)
+			}
+		}
+		assertStillStored(t, db, before)
+	}
+	// Only the run it names is held.
+	if got := admitted(runConcept); !slices.Contains(got, unrelated) {
+		t.Fatalf("the candidate held another run too: %v", got)
+	}
+	if got := admitted(pipelinesRunConcept); !slices.Contains(got, noWork) {
+		t.Fatalf("the candidate held a run that names no work: %v", got)
+	}
+	for _, state := range []string{"retired", "archived"} {
+		if _, err := db.Exec(`UPDATE release_candidates SET state=?`, state); err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range []struct{ concept, id string }{{runConcept, work}, {pipelinesRunConcept, run}} {
+			if got := admitted(record.concept); !slices.Contains(got, record.id) {
+				t.Fatalf("a %s candidate still holds its source: %v", state, got)
+			}
+		}
+	}
+	for _, record := range []struct{ concept, id string }{{runConcept, work}, {pipelinesRunConcept, run}} {
+		_, deleted, _, err := i.retireVerified(retentionOwner(), record.concept, []map[string]any{{"id": record.id, "createdAt": rfc(old)}}, record.concept == runConcept, cutoff, false)
+		if err != nil || deleted == 0 {
+			t.Fatalf("an archived candidate held history: %d %v", deleted, err)
+		}
+	}
+	assertRetired(t, db, work, run)
+}
+
+// The hold reads the candidates once per statement, however many versions the
+// statement looks at. Read per row it detoasted every live manifest once per version,
+// which at a hundred or so candidates took a delete past its 8 s statement timeout,
+// so the same page failed every night and retention stopped (retentionHeldBackSQL).
+func TestRetentionHoldReadsTheCandidatesOncePerStatement(t *testing.T) {
+	db, _ := sweepDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.AddDate(0, 0, -40)
+	cutoff := now.AddDate(0, 0, -30)
+	if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state)
+SELECT 'sha256:'||encode(sha256(g::text::bytea),'hex'),'pipeline-owner',
+ jsonb_build_object('evidence',(SELECT jsonb_agg(jsonb_build_object('name','step-'||e,'reusedFrom',jsonb_build_object('workRunId','source-'||g))) FROM generate_series(1,30) e)),'approved'
+FROM generate_series(1,200) g`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ANALYZE release_candidates`); err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, 50)
+	raw := make([]retirementKey, 0, 50)
+	for n := range 50 {
+		name := fmt.Sprintf("many-%d", n)
+		keys = append(keys, seedPipelineWorkRun(t, db, name, pipelineOwner, runStatusSucceeded, old))
+		raw = append(raw, retirementKey{keys[n], runConcept, old})
+	}
+	body, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, args := retentionCandidateRead(operationalPolicy{concept: runConcept, predicate: "TRUE"}, cutoff, old.Add(-24*time.Hour), cutoff, nil)
+	for name, statement := range map[string]retirementStatement{
+		"the candidate read": {query: read, args: args},
+		"the guarded delete": retirementDelete(runConcept, false, keys, string(body)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			var plan []byte
+			if err := tx.QueryRowContext(context.Background(), `EXPLAIN (ANALYZE, FORMAT JSON) `+statement.query, statement.args...).Scan(&plan); err != nil {
+				t.Fatalf("explain: %v\n%.400s", err, statement.query)
+			}
+			var plans []struct {
+				Plan explainNode `json:"Plan"`
+			}
+			if err := json.Unmarshal(plan, &plans); err != nil || len(plans) != 1 {
+				t.Fatalf("explain output: %v %s", err, plan)
+			}
+			scans, loops := relationLoops(plans[0].Plan, "release_candidates")
+			if scans == 0 {
+				t.Fatalf("the plan never read the candidates, so this says nothing: %s", plan)
+			}
+			if loops != float64(scans) {
+				t.Errorf("the candidates were read %.0f times across %d scans: the hold went back to the manifests per row", loops, scans)
+			}
+		})
+	}
+}
+
+// relationLoops is how many scans of a relation a plan holds, and their loops.
+func relationLoops(n explainNode, relation string) (scans int, loops float64) {
+	if n.Relation == relation && strings.Contains(n.NodeType, "Scan") {
+		scans, loops = 1, n.ActualLoops
+	}
+	for _, child := range n.Plans {
+		s, l := relationLoops(child, relation)
+		scans, loops = scans+s, loops+l
+	}
+	return scans, loops
 }
 
 // TestRetentionPoliciesSharingTheWorkRunConceptUseTheirOwnWindows: two

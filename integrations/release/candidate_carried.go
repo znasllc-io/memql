@@ -25,12 +25,15 @@ type candidateCarriedFrom struct {
 	ReceiptDigest string `json:"receiptDigest"`
 }
 
-// carriedRun is the part of a native pipeline run row a carried proof reads.
+// carriedRun is the part of a native pipeline run row a carried or reused proof
+// reads.
 type carriedRun struct {
 	ID, OwnerUserID, PipelineID, Repository, SHA, Mode, Event string
 	RunKey, RerunOf, Version, ReleaseTag, WorkRunID           string
 	Attempt                                                   int
 	QueuedAt                                                  time.Time
+	// row is the run as read, for the rule a reuse is proven under.
+	row map[string]any
 }
 
 const (
@@ -87,57 +90,96 @@ func carriedChain(carrying carriedRun, read func(id string) (carriedRun, error))
 	return chain, nil
 }
 
-// carriedFrom proves one step that a failed-only re-run of a release carried
-// (skip code pipeline_passed_earlier) against the attempt that executed it
-// (docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md):
+// candidateStepProof is what one pipeline_passed_earlier skip stands on: a receipt
+// an earlier attempt of the release executed, or one another run executed on the
+// same tree. Exactly one is set.
+type candidateStepProof struct {
+	CarriedFrom *candidateCarriedFrom
+	ReusedFrom  *pl.ReleaseReusedFrom
+}
+
+// oneRow is the one row a named owner query answers, or an error saying otherwise.
+// Within one pass (forOnePass) each row is read once.
+func (r candidateEvidenceReader) oneRow(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	key := renderCall(name, args)
+	if row, ok := r.pass[key]; ok {
+		return row, nil
+	}
+	rows, err := r.rows(ctx, name, args, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 {
+		return nil, fmt.Errorf("%s answered %d rows, want exactly one", name, len(rows))
+	}
+	if r.pass != nil {
+		r.pass[key] = rows[0]
+	}
+	return rows[0], nil
+}
+
+// forOnePass is this reader for one proof of a complete run. Twenty-seven reused
+// steps name one source run, and a publication repeats coverage for each artifact, so
+// reading that run and its work run for every step would double what verifying the
+// candidate costs. A pass reads each row once, still fresh from the database, and
+// keeps it no longer than the pass.
+func (r candidateEvidenceReader) forOnePass() candidateEvidenceReader {
+	r.pass = map[string]map[string]any{}
+	return r
+}
+
+// pipelineRun reads one of the owner's native pipeline runs.
+func (r candidateEvidenceReader) pipelineRun(ctx context.Context, id string) (carriedRun, error) {
+	var run carriedRun
+	row, err := r.oneRow(ctx, "pipelineRunForOwner", map[string]any{"runId": id})
+	if err != nil {
+		return run, err
+	}
+	if err := decodeRow(row, &run); err != nil {
+		return run, err
+	}
+	if memql.BareShortId(run.ID) != id {
+		return run, errors.New("pipeline run identity changed")
+	}
+	run.row = row
+	return run, nil
+}
+
+func decodeRow(row map[string]any, dst any) error {
+	body, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, dst)
+}
+
+// passedEarlier proves one step a release skipped as pipeline_passed_earlier:
+// carried from the attempt of the same release that executed it
+// (docs/superpowers/specs/2026-10-28-release-failed-only-rerun-design.md), or
+// reused from the run that tested the same tree (candidate_reused.go).
 //
 //   - The carrying work run names its native pipeline run, which must be the
 //     same attempt, owned by the same person.
-//   - The attempt chain must hold (carriedChain).
-//   - Walking back, attempts that carried the step themselves are passed
-//     over. The first attempt that did not carry it must have executed it: a
-//     done command with exit zero and no artifact intents, inside an attempt
-//     that ended in any terminal state (pl.InspectCarriedReleaseReceipt).
-//   - That receipt must have the carried step's definition digest and
-//     package slice.
+//   - A row that names an evidence run was reused here, and reusedFrom proves it.
+//     This attempt need not be a re-run: a release's first attempt reuses.
+//   - Otherwise the attempt chain must hold (carriedChain).
+//   - Walking back, the first attempt that reused the step is proven the same
+//     way, against that attempt's own start. A failed-only re-run therefore keeps
+//     what its attempt reused, inside the chain's 24-hour window, without the row
+//     having to have settled as reused: a failed stage may have blocked it first.
+//   - Attempts that carried the step themselves are passed over. The first attempt
+//     that did not carry it must have executed it: a done command with exit zero
+//     and no artifact intents, inside an attempt that ended in any terminal state
+//     (pl.InspectCarriedReleaseReceipt).
+//   - That receipt, or that reuse, must have the carried step's definition digest
+//     and package slice.
 //
 // Every read is the owner's, through the same fresh queries as the rest of
 // candidate evidence. An error names what failed; nothing is assumed.
-func (r candidateEvidenceReader) carriedFrom(ctx context.Context, owner, workRunID string, carried pl.ReleaseWorkReceipt) (candidateCarriedFrom, error) {
-	one := func(name string, args map[string]any) (map[string]any, error) {
-		rows, err := r.rows(ctx, name, args, 1)
-		if err != nil {
-			return nil, err
-		}
-		if len(rows) != 1 {
-			return nil, fmt.Errorf("%s answered %d rows, want exactly one", name, len(rows))
-		}
-		return rows[0], nil
-	}
-	decode := func(row map[string]any, dst any) error {
-		body, err := json.Marshal(row)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(body, dst)
-	}
-	readRun := func(id string) (carriedRun, error) {
-		var run carriedRun
-		row, err := one("pipelineRunForOwner", map[string]any{"runId": id})
-		if err != nil {
-			return run, err
-		}
-		if err := decode(row, &run); err != nil {
-			return run, err
-		}
-		if memql.BareShortId(run.ID) != id {
-			return run, errors.New("pipeline run identity changed")
-		}
-		return run, nil
-	}
-	workRow, err := one("workRunForOwner", map[string]any{"runId": workRunID})
+func (r candidateEvidenceReader) passedEarlier(ctx context.Context, owner, workRunID string, carried pl.ReleaseWorkReceipt) (candidateStepProof, error) {
+	workRow, err := r.oneRow(ctx, "workRunForOwner", map[string]any{"runId": workRunID})
 	if err != nil {
-		return candidateCarriedFrom{}, err
+		return candidateStepProof{}, err
 	}
 	var work struct {
 		Input struct {
@@ -145,53 +187,73 @@ func (r candidateEvidenceReader) carriedFrom(ctx context.Context, owner, workRun
 			Attempt       int
 		}
 	}
-	if err := decode(workRow, &work); err != nil {
-		return candidateCarriedFrom{}, err
+	if err := decodeRow(workRow, &work); err != nil {
+		return candidateStepProof{}, err
 	}
+	readRun := func(id string) (carriedRun, error) { return r.pipelineRun(ctx, id) }
 	carrying, err := readRun(memql.BareShortId(work.Input.PipelineRunID))
 	if err != nil {
-		return candidateCarriedFrom{}, err
+		return candidateStepProof{}, err
 	}
 	if carrying.OwnerUserID != owner || memql.BareShortId(carrying.WorkRunID) != workRunID || carrying.Attempt != work.Input.Attempt {
-		return candidateCarriedFrom{}, errors.New("the carrying work run is not its release attempt's")
+		return candidateStepProof{}, errors.New("the carrying work run is not its release attempt's")
+	}
+	carriedRow, err := r.oneRow(ctx, "workStepForOwnerRun", map[string]any{"runId": workRunID, "stepKey": carried.StepKey})
+	if err != nil {
+		return candidateStepProof{}, err
+	}
+	reused := func(reuser carriedRun, row map[string]any) (candidateStepProof, error) {
+		from, err := r.reusedFrom(ctx, owner, reuser, row, carried.StepKey)
+		if err != nil {
+			return candidateStepProof{}, err
+		}
+		return candidateStepProof{ReusedFrom: &from}, nil
+	}
+	if reusedSkip(carriedRow) != "" {
+		return reused(carrying, carriedRow)
 	}
 	chain, err := carriedChain(carrying, readRun)
 	if err != nil {
-		return candidateCarriedFrom{}, err
-	}
-	carriedRow, err := one("workStepForOwnerRun", map[string]any{"runId": workRunID, "stepKey": carried.StepKey})
-	if err != nil {
-		return candidateCarriedFrom{}, err
+		return candidateStepProof{}, err
 	}
 	for _, earlier := range chain {
 		earlierWork := memql.BareShortId(earlier.WorkRunID)
 		if earlierWork == "" {
-			return candidateCarriedFrom{}, fmt.Errorf("attempt %d has no work run to prove the pass", earlier.Attempt)
+			return candidateStepProof{}, fmt.Errorf("attempt %d has no work run to prove the pass", earlier.Attempt)
 		}
-		stepRow, err := one("workStepForOwnerRun", map[string]any{"runId": earlierWork, "stepKey": carried.StepKey})
+		stepRow, err := r.oneRow(ctx, "workStepForOwnerRun", map[string]any{"runId": earlierWork, "stepKey": carried.StepKey})
 		if err != nil {
-			return candidateCarriedFrom{}, fmt.Errorf("attempt %d: %w", earlier.Attempt, err)
+			return candidateStepProof{}, fmt.Errorf("attempt %d: %w", earlier.Attempt, err)
+		}
+		if reusedSkip(stepRow) != "" {
+			if stepDefinitionDigest(stepRow) != carried.DefinitionDigest {
+				return candidateStepProof{}, fmt.Errorf("attempt %d reused a different step definition", earlier.Attempt)
+			}
+			if !slices.Equal(callPackages(stepRow), callPackages(carriedRow)) {
+				return candidateStepProof{}, fmt.Errorf("attempt %d reused the step over different packages", earlier.Attempt)
+			}
+			return reused(earlier, stepRow)
 		}
 		if carriedSkip(stepRow) {
 			continue
 		}
-		runRow, err := one("workRunForOwner", map[string]any{"runId": earlierWork})
+		runRow, err := r.oneRow(ctx, "workRunForOwner", map[string]any{"runId": earlierWork})
 		if err != nil {
-			return candidateCarriedFrom{}, fmt.Errorf("attempt %d: %w", earlier.Attempt, err)
+			return candidateStepProof{}, fmt.Errorf("attempt %d: %w", earlier.Attempt, err)
 		}
 		executed, err := pl.InspectCarriedReleaseReceipt(owner, earlierWork, carried.StepKey, runRow, stepRow)
 		if err != nil {
-			return candidateCarriedFrom{}, fmt.Errorf("attempt %d did not leave a pass to carry: %w", earlier.Attempt, err)
+			return candidateStepProof{}, fmt.Errorf("attempt %d did not leave a pass to carry: %w", earlier.Attempt, err)
 		}
 		if executed.DefinitionDigest != carried.DefinitionDigest {
-			return candidateCarriedFrom{}, fmt.Errorf("attempt %d ran a different step definition", earlier.Attempt)
+			return candidateStepProof{}, fmt.Errorf("attempt %d ran a different step definition", earlier.Attempt)
 		}
 		if !slices.Equal(callPackages(stepRow), callPackages(carriedRow)) {
-			return candidateCarriedFrom{}, fmt.Errorf("attempt %d ran the step over different packages", earlier.Attempt)
+			return candidateStepProof{}, fmt.Errorf("attempt %d ran the step over different packages", earlier.Attempt)
 		}
-		return candidateCarriedFrom{PipelineRunID: memql.BareShortId(earlier.ID), WorkRunID: earlierWork, Attempt: earlier.Attempt, ReceiptDigest: executed.ReceiptDigest}, nil
+		return candidateStepProof{CarriedFrom: &candidateCarriedFrom{PipelineRunID: memql.BareShortId(earlier.ID), WorkRunID: earlierWork, Attempt: earlier.Attempt, ReceiptDigest: executed.ReceiptDigest}}, nil
 	}
-	return candidateCarriedFrom{}, errors.New("no earlier attempt of the release executed the step")
+	return candidateStepProof{}, errors.New("no earlier attempt of the release executed the step")
 }
 
 // carriedSkip reports a step row an attempt settled as carried from an

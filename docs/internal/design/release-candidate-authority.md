@@ -101,13 +101,13 @@ recording preparation. Each declaration records whether it is a command or a
 notification. A delivered notification retains its actual delivery identities;
 it never becomes a command exit or an artifact producer. A skipped step must
 match its originally recorded selection code and reason. The installed recipe
-permits only `pipeline_not_affected` (an empty planned selection in a full run),
-while preserving that skip in the complete evidence set. It refuses carried
-`pipeline_passed_earlier` receipts until the original execution chain is
-verified, and unplanned or blocked skips fail natively. A release run never
-reuses another run's evidence (`reuseVerification` in
-`component/pipelinerun/evidence.go`), so only a failed-only re-run can present a
-carried receipt. A successful aggregate
+permits `pipeline_not_affected` (an empty planned selection in a full run), while
+preserving that skip in the complete evidence set. It refuses
+`pipeline_passed_earlier` receipts unless coverage proved the execution behind
+them: a carried one against the attempt that ran it (`carriedFrom`), a reused one
+against the run that tested the same tree (`reusedFrom`, recorded in the manifest;
+`integrations/release/candidate_reused.go`). Unplanned or blocked skips fail
+natively. A successful aggregate
 cannot silently replace missing individual receipts. Existing runs without
 typed declarations require fresh qualification; missing type is not inferred.
 
