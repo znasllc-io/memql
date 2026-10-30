@@ -1434,6 +1434,144 @@ path, and the kubelet's `OOMKilled` for a killed child process (an exit other
 than 137), which is a constructed case. A fleet machine reports no such
 reason, so a fleet step killed for memory still reads as its exit code.
 
+## Waiting pipeline steps move forward as their run ages (2026-10-29)
+
+A run's ceiling counts from its start, queue time included, and a strict queue
+admits by class first and age second, so age only breaks ties within a class. A
+step of a low class, or one created late in an old run, can wait out the whole
+ceiling and fail `pipeline_run_ceiling` without having started. On 2026-10-29 the
+daily and weekly scans of the first installation with a queue did that behind
+twelve hours of check and release jobs, and pull-request runs started at 06:00
+were still waiting at 15:00. That installation added a CronJob of its own the same
+day (memql-znas #277, #278). This moves it into the engine's
+`deploy/k8s/components/pipelines-capacity`.
+
+Every five minutes a pass (`memql pipeline-deadline-priority`,
+`integrations/pipelinesteps/deadline_priority.go`) lists the runner's Jobs and
+relabels each one that is suspended, in the named queue and not past its deadline:
+past half its run's ceiling to `memql-pipeline-aged` (350), in the last quarter to
+`memql-pipeline-expiring` (400), and, when an owner named its run with
+`--boost-run`, to `memql-pipeline-boosted` (375) at any age. Kueue re-prioritizes a
+workload that has not reserved quota when that label changes, and strict order then
+accumulates room for the oldest Job of the highest class. A pass records
+`memql.io/priority-promoted-from`, `-at` and `-reason` on the Job and prints one
+JSON line. No event may start at these classes, so finding one on a Job says how it
+got there.
+
+**It stays a CronJob, and becomes Go on the workbench image.** The installation's
+copy was Python on a borrowed image, chosen because its cost guard already pulled
+that image. In the engine that would have been the first Python in any deployed
+manifest, a third-party pin with no updater (Dependabot's docker updater reads
+Dockerfiles, and `.github/dependabot.yml` says why a pin without one is only quieter
+about being insecure), tests that run only if a step names them, and the runner's
+label and annotation names restated across a language boundary. A subcommand needs
+none of that: `integrations/pipelinesteps` is already linked into all seven node
+binaries, the overlay's `images:` entry for the workbench retargets the CronJob from
+the same line, the tests are ordinary Go, and the names are the runner's own
+constants. Moving it into the runner as a loop would need no image or grant either,
+and was rejected for three reasons: a bug would cost the process supervising every
+running step rather than one failed pass; it would merge a list-and-patch grant into
+the runner's; and an owner naming a run to go first, which happened six times on the
+first day, would roll the workbench under running steps rather than edit a CronJob's
+arguments. The price of the subcommand is sequencing: a component ahead of its image
+fails every pass, loudly, until the image catches up, so an installation moves both
+pins in one change. An installation that releases through the native receiver must
+also bind the new image slot (`batch/CronJob/memql/pipeline-deadline-priority`,
+container `promote`) in its `installation.json`, or `verifyImagesAndDiff` refuses
+its next release naming that slot.
+
+**Windows follow each Job's own ceiling unless stated.** The installation's windows
+were 180 and 360 minutes of a 720-minute ceiling. Carried over as defaults they
+would put every waiting Job of an installation on the 120-minute default in the top
+class at the first pass, which erases the event order the queue exists for. So the
+runner writes `memql.io/run-ceiling-minutes` on a queued Job, and an unstated window
+is that ceiling's quarter or half: the same proportions, and the same numbers at
+720. Two other sources were rejected. A flag or variable on the CronJob would be a
+third copy of `MEMQL_PIPELINES_RUN_MAX_MINUTES`, silently wrong when forgotten, and
+wrong anyway for a step already waiting when the ceiling changes. A `StepRun` field
+would change `creationDefinition`'s hash and make queued steps uncertain across a
+rolling upgrade. The ceiling read is the workbench's, the deadline the agent's;
+`components/pipelines-long-runs` sets both alike. A Job with no readable ceiling (one
+from before this) still takes a boost and any stated window; what would need the
+ceiling is not guessed, because the only thing a guess could do is promote too much,
+and with nothing else due the Job is left alone and counted `no-ceiling`.
+
+**Off, windows and boosts are declared configuration**, patches in the layer that
+composes the component, because each is an operator's decision rather than a vendor
+protocol (`docs/public/build/integration-boundary.md`). Off is the CronJob's own
+`spec.suspend`, which leaves every promoted Job where it is. Windows and boosts are
+arguments appended to the container: `--window-minutes`, `--aged-window-minutes`
+(`0` turns that tier off) and `--boost-run`. A boost ranks below expiring so it can
+never be what makes another run expire, and takes a 32-hex run id so a pasted pull
+request number is refused rather than matching nothing. The classes are not settings:
+the promise that a Job only moves up rests on knowing their order without reading
+them, which the grant does not allow. The installation's copy forgot a class once no
+run named it, so a Job left at boosted when its run came off the list was moved down
+to aged on entering that window (`TestARunDroppedFromTheBoostListKeepsItsClass`).
+
+**The queue is `StrictFIFO`, now as the component's own value.** The component
+shipped `BestEffortFIFO`, which the first installation patched away after backfill
+starved 40 GiB database steps behind a stream of 20 GiB checks, and a promoted Job
+means nothing in a queue that admits around it. Only suspended Jobs are touched: every
+patch is a compare-and-swap on the `resourceVersion` the Job was read suspended at, so
+one admitted or heartbeaten since answers 409 and waits for the next pass
+(`changed-since-list`), neither a failure nor a relabelled admitted Job. A Job past
+its deadline is left for the runner to fail, the ceiling is never extended (a step's
+deadline is pinned in its creation definition), and preemption stays `Never`.
+
+**The grant and where it runs.** Its own ServiceAccount in the mesh namespace, and one
+Role in `memql-pipelines`: `list` and `patch` on `batch/jobs`, with no `get`, no
+Secrets, no Pods and no Workloads. It holds no Secret and no database pool. It runs
+outside the step namespace because that namespace's network policy denies the API
+server's cluster address and its Jobs count against the steps' quota, and it stays
+off the build pool because that pool is tainted, with no pool name to be one
+provider's value. A pass holds no state: a missed tick is the next pass, a repeated one
+finds everything `already-promoted`, a class and its provenance live on the Job and so
+survive any replica change, a retried step is a new Job that starts at its event class
+and is promoted at the next pass, and passes keep relabelling under `stopPolicy: Hold`,
+so the order is ready when admission resumes.
+
+**It reaches the installations that compose the component, and no overlay in this
+repository does.** A local cluster has no Kueue and no queue: its steps wait for a slot
+under `count/jobs.batch` before a Job exists, so there is nothing for a pass to
+reorder, and a CronJob there would only look like coverage. Giving it one means
+installing Kueue in `make up` and in the editor's installer, reserving every local
+step container's full limit (4 GiB and 20 GiB, against that overlay's own warning about
+cold builds on a shared disk), raising the Job quota so that a queue can form, and
+widening the AppProject the cloud shares. That is a decision about local admission
+rather than about this promoter, and it is left open.
+
+Known limits. A step created late in an old run starts at its event's class and waits
+up to five minutes for its first promotion. A pass cannot read a class's value, so an
+event class above 350 would be relabelled down: `priorities.yaml` says to keep them
+below. Promotion reorders one queue and cannot make room it does not have. A step that
+can never fit blocks a strict queue from its head, and promotion can carry one there;
+that blocking was seen with a Job that did not tolerate the flavor's taint, and the
+runner's Jobs do, so the case that remains is a step larger than the queue's budget.
+
+`integrations/pipelinesteps/deadline_priority_test.go` carries the 20 decision and pass
+tests of the installation's copy, case for case, and adds the windows
+(`TestWindowsFollowEachRunsOwnCeiling`), the compare-and-swap
+(`TestAJobThatChangedSinceTheListIsLeftForTheNextPass`) and the contract with the Job
+the runner builds (`TestAQueuedJobTheRunnerBuildsIsOneAPassCanPromote`).
+`subcommand_pipeline_deadline_priority_test.go` covers the flags, the line and the exit
+codes, and runs the component's own command line. `component_test.go` renders the
+component over all three instance overlays and over the patches an installation writes
+(`TestAnInstallationSetsThePromoterFromItsOverlay`), and takes over the copy's five
+manifest tests. One half of those stays with an installation: that its own event
+classes rank below the promoted ones, since the engine ships no event class.
+`TestAChangeToThePromoterRunsItsTestsInGoTests` asks the real selector that `go-tests`
+reaches all of this, its YAML included. `TestAPromotedJobIsAdmittedFirst`
+(`deploy/kueue/install`, opt-in) runs a real pass against the pinned controller, and is
+what to run before moving the Kueue pin.
+
+Verified on a throwaway k3d cluster with the pinned Kueue: the rendered component, its
+Role, a scheduled tick of the CronJob and admission in promoted order, running a
+workbench binary built from this source over `memql-workbench:local`, against Jobs
+written in the runner's shape. Not verified: AKS, an image from the release pipeline,
+reconciliation through ArgoCD, a release through the native receiver, or a step created
+by a real runner in a queue.
+
 ## Release trains carry main (2026-10-27)
 
 Every pull request to this repository is opened under the owner's account, so
