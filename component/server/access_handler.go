@@ -218,8 +218,8 @@ type AccessSession struct {
 //
 // A MISS IS (nil, nil), and that covers every way of not being allowed to see a row.
 // A read that FAILED is an error and never looks like a miss: it opens nothing, ends
-// nothing and clears nothing, so a database blip is not a visitor taken out. The one
-// exception is the second read of a call, with rows in hand: serveCall says why.
+// nothing and clears nothing, so a database blip is not a visitor taken out. That holds
+// for the second read of a call as well, which delivers nothing and costs one retry.
 //
 // AN ERROR MUST BE SAFE TO LOG, and that is part of this contract rather than
 // something the handler can check: the handler logs it, and the digests these
@@ -653,12 +653,17 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, site *
 	// and is what makes "taken out now" true of a query already running. A write that
 	// landed stays landed; what it says to the visitor is that they are out.
 	//
-	// ANYTHING BUT AN OPEN SESSION IS ONE ANSWER HERE, and that includes a read that
-	// failed, the one place a database blip takes somebody out. The rows are in hand and
-	// nothing can say they may leave, so they do not. Somebody taken out by a blip types
-	// their code again; somebody handed rows after their code was regenerated cannot be
-	// made not to have read them.
-	if _, state := h.openSession(r, site); state != "" {
+	// A READ THAT FAILED FOUND NOTHING ENDED, so it is not answered as though it had. The
+	// rows are in hand and nothing has said they may leave, so they do not, but the session
+	// may be as good as it was: this is the same refusal as any other failed read, and it
+	// clears nothing, so a database blip costs one retry and takes nobody out. `ended` is
+	// for a read that succeeded and said so.
+	switch _, state := h.openSession(r, site); state {
+	case "":
+	case accessResultRefused:
+		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
+		return accessResultRefused
+	default:
 		clearAccessCookie(w)
 		writeAccessJSON(w, http.StatusUnauthorized, accessBodyEnded)
 		return accessResultEnded

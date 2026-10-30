@@ -1294,9 +1294,10 @@ func TestCallAfterExpiryNeverReachesTheEngine(t *testing.T) {
 
 // NOTHING LEAVES UNTIL THE SESSION HAS BEEN READ AGAIN (section 8). The check ahead of
 // a call has no opinion about what happened while the call ran, so each of these lands
-// from inside Execute, with the rows already in the engine's hands: an operator's act,
-// the clock, and a second read that cannot say. Every one of them delivers nothing and
-// answers as a call after the end does.
+// from inside Execute, with the rows already in the engine's hands: an operator's act
+// or the clock. Every one of them delivers nothing and answers as a call after the end
+// does. A second read that cannot say either way is a different thing, and has its own
+// test below.
 func TestAnEndLandingDuringACallDeliversNothing(t *testing.T) {
 	const secretRow = "a-row-this-visitor-may-no-longer-read"
 	for name, act := range map[string]func(r *accessRig, token string){
@@ -1321,15 +1322,6 @@ func TestAnEndLandingDuringACallDeliversNothing(t *testing.T) {
 		"the code's row going": func(r *accessRig, _ string) { delete(r.store.codes, accessTestCodeID) },
 		"the code's copy of the account going stale": func(r *accessRig, _ string) {
 			r.store.codes[accessTestCodeID].AccountID = "acct-the-site-left"
-		},
-		// THE ONE FAILED READ THAT TAKES SOMEBODY OUT. The rows are in hand and nothing can
-		// say they may leave. The first read of a call still answers 502, which is
-		// TestAStoreFailureOpensNothingAndEndsNothing.
-		"the second read of the session failing": func(r *accessRig, _ string) {
-			r.store.fail["SessionByTokenHash"] = errors.New("the store failed")
-		},
-		"the second read of the code failing": func(r *accessRig, _ string) {
-			r.store.fail["CodeByID"] = errors.New("the store failed")
 		},
 	} {
 		for _, construct := range []string{"deskBriefs", "deskNote"} {
@@ -1373,6 +1365,54 @@ func TestAnEndLandingDuringACallDeliversNothing(t *testing.T) {
 			t.Fatalf("the code was read %d times, want 2", got)
 		}
 	})
+}
+
+// A SECOND READ THAT FAILED FOUND NOTHING ENDED. `ended` is reserved for a read that
+// succeeded and said so; this one is the same `refused` as any other failed read, so a
+// database blip costs one retry and takes nobody out. What it must not do is let the rows
+// go, because nothing has said they may.
+func TestAFailedSecondReadDeliversNothingAndEndsNothing(t *testing.T) {
+	const secretRow = "a-row-nothing-has-said-may-leave"
+	for _, read := range []string{"SessionByTokenHash", "CodeByID"} {
+		for _, construct := range []string{"deskBriefs", "deskNote"} {
+			t.Run(read+", on "+construct, func(t *testing.T) {
+				rig := newAccessRig(t)
+				token := rig.open()
+				rig.engine.result = memql.NewResultWithOutput([]any{map[string]any{"id": "brief1", "title": secretRow}})
+				rig.engine.during = func() { rig.store.fail[read] = errors.New("the store failed") }
+				args := map[string]any{}
+				if construct == "deskNote" {
+					args = map[string]any{"noteId": "note1", "title": "mine"}
+				}
+				before := metrics.SiteAccessRequestValue("call", "refused")
+
+				rec := rig.call(token, construct, args)
+
+				if len(rig.engine.calls) != 1 {
+					t.Fatalf("the construct did not run, so nothing was in hand: %v", rig.engine.calls)
+				}
+				assertAccessReply(t, rec, http.StatusBadGateway, `{"error":"refused"}`)
+				assertNoAccessCookie(t, rec)
+				if got := metrics.SiteAccessRequestValue("call", "refused"); got != before+1 {
+					t.Fatalf("call/refused moved from %v to %v", before, got)
+				}
+
+				// ONE RETRY, ONCE THE STORE IS BACK. The cookie the browser still holds is
+				// still good, because nothing here touched it or the row behind it.
+				rig.engine.during = nil
+				delete(rig.store.fail, read)
+				if rec := rig.session(token); rec.Code != http.StatusOK {
+					t.Fatalf("the session did not survive the failure: %d %s", rec.Code, rec.Body.String())
+				}
+				rec = rig.call(token, "deskBriefs", nil)
+				assertAccessReply(t, rec, http.StatusOK, `{"data":[{"id":"brief1","title":"`+secretRow+`"}]}`)
+				assertNoAccessCookie(t, rec)
+				if len(rig.store.ended) != 0 {
+					t.Fatalf("a failed read ended a session: %v", rig.store.ended)
+				}
+			})
+		}
+	}
 }
 
 // A GENERATION STARTS AT 1, and an unreadable one comes back as 0. Equality is not enough:
@@ -1867,8 +1907,8 @@ func TestOnlyTheFourRoutesAnswer(t *testing.T) {
 // A FAILED READ IS NOT AN ANSWER. It opens nothing, ends nothing and clears nothing:
 // a database blip must not read as "your code is wrong", and a cookie cleared on a
 // blip would take out a visitor whose session the row still honours. The second read of
-// a call, with rows in hand, is the one exception, and it has its own cases in
-// TestAnEndLandingDuringACallDeliversNothing.
+// a call holds to this too, and with rows in hand it has its own test:
+// TestAFailedSecondReadDeliversNothingAndEndsNothing.
 func TestAStoreFailureOpensNothingAndEndsNothing(t *testing.T) {
 	failure := errors.New("the store failed")
 	for _, tc := range []struct {
