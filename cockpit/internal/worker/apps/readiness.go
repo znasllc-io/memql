@@ -111,10 +111,11 @@ type readinessEntry struct {
 	MeteredOverage bool        `json:"meteredOverage,omitempty"`
 	Spends         []time.Time `json:"spends,omitempty"`
 
-	sessions  int
-	recheck   bool
-	stamp     string
-	ceilingAt time.Time
+	sessions     int
+	recheck      bool
+	stamp        string
+	loginChanged bool
+	ceilingAt    time.Time
 }
 
 // ReadinessTracker keeps the answers and runs the checks, one at a time, for the
@@ -281,10 +282,10 @@ func (t *ReadinessTracker) due(id string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.entry(id)
-	loginChanged := e.stamp != "" && stamp != e.stamp
-	if e.stamp == "" || stamp != e.stamp {
-		e.stamp = stamp
+	if e.stamp != "" && stamp != e.stamp {
+		e.loginChanged = true
 	}
+	e.stamp = stamp
 	if e.sessions > 0 {
 		// The session will report what it finds, and the check's process would
 		// compete with it for the same login.
@@ -309,7 +310,11 @@ func (t *ReadinessTracker) due(id string) bool {
 	// file, and for a signed-out app that is worth asking about at once. Not for a
 	// working one: every interactive Claude Code rewrites ~/.claude.json, and a ping
 	// each time would spend the owner's plan on their own terminal.
-	if loginChanged && e.State == harness.ReadinessSignedOut && now.Sub(e.CheckedAt) >= loginChangeFloor {
+	//
+	// The change stays remembered until a check answers it. The floor delays the
+	// question and does not cancel it: a sign-in finished seconds after a check would
+	// otherwise read signed out until the next cadence.
+	if e.loginChanged && e.State == harness.ReadinessSignedOut && now.Sub(e.CheckedAt) >= loginChangeFloor {
 		return true
 	}
 	return !now.Before(nextCheck(id, e))
@@ -354,6 +359,7 @@ func (t *ReadinessTracker) record(id string, signal harness.ReadinessSignal) {
 	defer t.mu.Unlock()
 	e := t.entry(id)
 	e.recheck = false
+	e.loginChanged = false
 	now := t.now()
 	if signal.Spent {
 		e.Spends = append(e.Spends, now)

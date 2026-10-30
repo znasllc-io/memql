@@ -282,6 +282,38 @@ func TestTrackerRechecksASignedOutAppWhenItsLoginFileChanges(t *testing.T) {
 	}
 }
 
+// A sign-in finished seconds after a check: the floor delays the question, and must
+// not cancel it, or the app reads signed out until the next cadence.
+func TestTrackerRemembersALoginChangeInsideTheFloor(t *testing.T) {
+	f := newTrackerFixture(t)
+	f.allowed[IDCodex] = false
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessSignedOut}
+	f.tick()
+
+	dir := filepath.Join(f.home, ".claude")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(10 * time.Second)
+	if f.log.count(IDClaudeCode) != 1 {
+		t.Fatalf("checked inside the floor: %d", f.log.count(IDClaudeCode))
+	}
+
+	// Nothing changes again, so only the remembered change can ask now. The login was
+	// fabricated: it still reads signed out, and that answers the change.
+	f.advance(time.Minute)
+	if f.log.count(IDClaudeCode) != 2 {
+		t.Fatalf("the change inside the floor was forgotten: %d", f.log.count(IDClaudeCode))
+	}
+	f.advance(2 * time.Minute)
+	if f.log.count(IDClaudeCode) != 2 {
+		t.Fatalf("an answered change asked again: %d", f.log.count(IDClaudeCode))
+	}
+}
+
 // Any interactive Claude Code rewrites ~/.claude.json, so a working app must not
 // spend a ping every time somebody opens a terminal.
 func TestTrackerIgnoresLoginFileChangesWhileReady(t *testing.T) {

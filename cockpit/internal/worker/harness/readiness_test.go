@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -59,14 +60,10 @@ func fakeClaudeForChecks(t *testing.T, status string, statusExit int, ping strin
 		"printf '%s\\n' \"$*\" >> '" + log + "'\n" +
 		"if [ \"$1 $2\" = 'auth status' ]; then\n" +
 		"cat <<'STATUS_JSON'\n" + status + "\nSTATUS_JSON\n" +
-		"exit " + itoa(statusExit) + "\nfi\n" +
+		"exit " + strconv.Itoa(statusExit) + "\nfi\n" +
 		"cat <<'PING_JSON'\n" + ping + "\nPING_JSON\n" +
-		"exit " + itoa(pingExit) + "\n"
+		"exit " + strconv.Itoa(pingExit) + "\n"
 	return fakeBinary(t, "claude", script), log
-}
-
-func itoa(n int) string {
-	return strings.TrimSpace(strings.Join([]string{string(rune('0' + n))}, ""))
 }
 
 func claudeCheckSpec(t *testing.T, binary string) CheckSpec {
@@ -250,7 +247,7 @@ func TestClaudeTurnReportsWhatTheAppSaidAboutItself(t *testing.T) {
 		"a refused limit":                  {shapedClaudeRejected, 1, ReadinessOutOfUsage},
 	} {
 		t.Run(name, func(t *testing.T) {
-			binary, _ := fakeClaude(t, prints(tt.stream)+"exit "+itoa(tt.exit)+"\n")
+			binary, _ := fakeClaude(t, prints(tt.stream)+"exit "+strconv.Itoa(tt.exit)+"\n")
 			h := &claudeHeadless{}
 			if err := h.Start(context.Background(), Spec{Binary: binary, Workspace: t.TempDir(), Launch: testLaunch}); err != nil {
 				t.Fatal(err)
