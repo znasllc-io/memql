@@ -18,8 +18,9 @@ import (
 // dsl_domains_db_test.go -- package.dslDomains against a real engine (design
 // record 2026-10-29, D5).
 //
-// The offline tests beside analyze_access_gate_test.go prove what an analysis
-// SENDS. What they cannot prove is what a row DOES with it: that the write
+// The offline tests beside this one prove what the pipeline SENDS and when
+// (analyze_access_gate_test.go, dsl_domains_deploy_test.go). What they cannot
+// prove is what a row DOES with it: that the write
 // replaces the list rather than merging into it, that the field comes back
 // through the shape every package read returns, and that the read the bff's
 // access handler makes -- the site's package, under the site's owner -- gets it.
@@ -96,7 +97,7 @@ func TestTheDomainsAPackageShipsAreRewrittenWholeAndComeBackThroughItsShape(t *t
 		// says so, and its old domains stop being its own.
 		{"a source that ships no DSL any more", []string{}, nil, "an empty list does not replace the old one"},
 	} {
-		if err := s.recordPackageDeployables(ownerCtx, pkg, declares, step.record); err != nil {
+		if err := s.recordPackageDslDomains(ownerCtx, pkg, step.record); err != nil {
 			t.Fatalf("%s: %v", step.name, err)
 		}
 		got := read(t)
@@ -108,21 +109,28 @@ func TestTheDomainsAPackageShipsAreRewrittenWholeAndComeBackThroughItsShape(t *t
 		}
 	}
 
-	// The same write carries declares, and writing the domains with it does not
-	// disturb it.
+	// THE TWO WRITES ARE SEPARATE, and neither disturbs the other. An analysis
+	// writes declares and must leave the list as the last deploy left it; a
+	// deploy writes the list and must leave declares as the last analysis found.
+	if err := s.recordPackageDslDomains(ownerCtx, pkg, []string{"acme", "realns"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.recordPackageDeployables(ownerCtx, pkg, declares); err != nil {
+		t.Fatal(err)
+	}
 	row, err := s.packageById(ownerCtx, pkg)
 	if err != nil || row == nil {
 		t.Fatal(err)
 	}
 	if declared, ok := row["declares"].([]any); !ok || len(declared) != 1 {
-		t.Fatalf("declares = %v, want the one deployable the same write carried", row["declares"])
+		t.Fatalf("declares = %v, want the one deployable the analysis wrote", row["declares"])
+	}
+	if list, _ := dslDomainsOf(row); !reflect.DeepEqual(list, []string{"acme", "realns"}) {
+		t.Fatalf("an analysis's declares write changed the list to %v, want [acme realns] as the deploy left it", list)
 	}
 
 	// Every read that returns a package returns the field, because they share
 	// the one shape: the OS lists, and the bff's by-id read.
-	if err := s.recordPackageDeployables(ownerCtx, pkg, declares, []string{"acme", "realns"}); err != nil {
-		t.Fatal(err)
-	}
 	all, err := s.queryAll(ownerCtx, "query packagesAll()")
 	if err != nil {
 		t.Fatal(err)

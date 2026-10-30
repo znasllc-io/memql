@@ -117,6 +117,23 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 		}
 	}
 
+	// ---- and the list of domains goes back with the DSL ----
+	//
+	// REWRITTEN FROM THE DEPLOYMENT IT RETURNS TO (design record 2026-10-29, D5),
+	// from the report that deployment recorded, AFTER its DSL is live again --
+	// the order a deploy keeps, for the same reason: the list is only ever one
+	// whose DSL is running, so the gap fails closed. A rollback that did not
+	// complete returned above and wrote nothing.
+	//
+	// A deployment recorded before the list existed states no namespaces, so
+	// there is nothing to restore and the honest list is empty: its gates stay
+	// closed until the next deploy writes one. A warning rather than a failure,
+	// for the reason the deploy's write is.
+	if derr := d.Store.recordPackageDslDomains(ctx, req.PackageId, dslDomainsFrom(reportFromRow(prior))); derr != nil {
+		d.log().Warn("packages: rolled back, but could not record which DSL domains this package ships; its access gates stay as the previous list left them",
+			"component", "packages.rollback", "package", req.PackageId, "deployment", req.DeploymentId, "err", derr)
+	}
+
 	return restored, nil
 }
 

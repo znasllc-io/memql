@@ -872,7 +872,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// manifest contains and have the console offer to deploy them.
 		// Caller-scoping does not address that either: the claim worth
 		// refusing is about the CONTENTS of a package the caller already owns.
-		{Path: "platform/mutations.memql", Name: "recordPackageDeployables"}:      true,
+		{Path: "platform/mutations.memql", Name: "recordPackageDeployables"}: true,
+		// recordPackageDslDomains is the deploy's and the rollback's record of
+		// which DSL domains a source ships (design record 2026-10-29, D5), kept
+		// apart from the analysis's write above because WHEN it is written is
+		// what it protects. It is a pipeline writer for the same reason: it runs
+		// where actor.userId is empty. And what it records is what the bff
+		// compares an access gate's domain with, so a client-reachable form would
+		// let somebody make a package own a domain it does not ship. Caller-
+		// scoping does not address that either: the claim worth refusing is about
+		// the CONTENTS of a package the caller already owns.
+		{Path: "platform/mutations.memql", Name: "recordPackageDslDomains"}:       true,
 		{Path: "platform/mutations.memql", Name: "openPackageDeployment"}:         true,
 		{Path: "platform/mutations.memql", Name: "advancePackageDeployment"}:      true,
 		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentReport"}: true,

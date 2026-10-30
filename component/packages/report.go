@@ -109,8 +109,10 @@ func declaredFrom(rep *Report) []DeclaredDeployable {
 	return out
 }
 
-// dslDomainsFrom projects the analysis report onto the list a package records of
-// the DSL domains it ships (`v1:platform:package.dslDomains`).
+// dslDomainsFrom projects a run's report onto the list a package records of the
+// DSL domains it ships (`v1:platform:package.dslDomains`). A deploy writes it
+// from its own report once its DSL is live, and a rollback from the report of
+// the deployment it returns to; an analysis states it and records nothing.
 //
 // SPELLED AS A CONCEPT ID SPELLS A DOMAIN, not as the repository names a
 // directory: an access gate records the domain of the concept its construct is
@@ -206,11 +208,13 @@ type DslDomainReport struct {
 	Reserved bool `json:"reserved,omitempty"`
 	// Namespaces are the domain names an access gate bound to one of this
 	// domain's concepts records (design record 2026-10-29, D5), sorted: the
-	// namespace its concepts' ids carry, which is the directory's
-	// namespace.pin when it has one and the directory's own name when it has
-	// not, plus whatever a nested directory under it pins. Read by the engine
-	// from the candidate tree, never guessed from the directory name, because a
-	// pin moves the two apart. Empty for a reserved domain, which ships nothing.
+	// first segment of the namespace in the id of each concept the load produced
+	// from this directory's files. A namespace.pin shows as the pin, a nested
+	// directory that pins its own adds it, and a name with no concept behind it
+	// -- a pin on a directory that declares none, a domain that declares none --
+	// is not here. Read by the engine from the load, never guessed from the
+	// directory name or a pin file. Empty for a reserved domain, which ships
+	// nothing.
 	Namespaces []string `json:"namespaces,omitempty"`
 }
 

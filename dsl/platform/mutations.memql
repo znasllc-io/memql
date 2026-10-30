@@ -2424,15 +2424,11 @@ mutation package recordPackageName {
   }
 }
 
-/// Record what a source's tree says it contains, from the analysis that read it: the deployables
-/// its manifest declares, and the DSL domains it ships.
+/// Record what a source's manifest declares, from the analysis that read it.
 ///
 /// @serverOnly because it is the PIPELINE's reading of the tree, not a claim a client may make:
-/// the first list is what the OS offers as "apps you can still deploy", so a caller able to write
-/// it could invent deployables that no manifest contains and have the console offer to deploy
-/// them. The second is what the bff compares an access gate's domain with (design record
-/// 2026-10-29, D5), so a caller able to write it could make a package own a domain it does not
-/// ship and have another product's gates open for its sites.
+/// this list is what the OS offers as "apps you can still deploy", so a caller able to write it
+/// could invent deployables that no manifest contains and have the console offer to deploy them.
 ///
 /// actor.userId scoping is not the fix, for both of the reasons the other pipeline writers give.
 /// It runs during a deploy, where stages hand off across nodes and actor.userId is EMPTY on the
@@ -2443,21 +2439,56 @@ mutation package recordPackageName {
 ///
 /// Rewritten whole on every analysis rather than merged, because the manifest is the authority on
 /// what the source contains -- an app removed upstream must LEAVE this list, and a merge would
-/// keep it forever. Both lists are written together: they are read off the same tree by the same
-/// analysis, and two writes would leave a window in which one described a newer tree than the
-/// other.
+/// keep it forever.
 @serverOnly
 mutation package recordPackageDeployables {
   args {
+    packageId  string!
+    declares   []object!
+  }
+  update {
+    id:       args.packageId
+    declares: args.declares
+  }
+}
+
+/// Record which DSL domains a source ships, from the deploy that committed them or the rollback that
+/// restored them -- and from nothing else.
+///
+/// The list is what the bff compares an access gate's domain with, on every call, to decide whether a
+/// construct belongs to the package whose site a visitor is on (design record 2026-10-29, D5). So WHEN
+/// it is written is the whole point, and it is not at analysis: a run that is refused, parked at the
+/// confirm gate, cancelled or failed must not change which domains a package owns, and neither may an
+/// analysis nobody deploys. A deploy writes it from its own report once the DSL it carries is staged
+/// and rolled -- or found unchanged, or there is none -- and before any site is published, so the
+/// window between the DSL going live and the list arriving fails closed rather than open. A rollback
+/// rewrites it from the deployment it returns to, after that deployment's DSL is back.
+/// recordPackageDeployables is the analysis's write and is kept apart from this one for that reason:
+/// it records what the manifest DECLARES, which is true of a tree whether or not anyone deploys it.
+///
+/// @serverOnly because it is the PIPELINE's record of what a committed deploy shipped, not a claim a
+/// client may make: a caller able to write it could make a package own a domain it does not ship, and
+/// have another product's gates open for its sites.
+///
+/// actor.userId scoping is not the fix, for both of the reasons the other pipeline writers give. It
+/// runs during a deploy and a rollback, where stages hand off across nodes and actor.userId is EMPTY
+/// on the very path that has to write -- a caller-scoped form could never write at all. And the thing
+/// worth refusing here is not cross-user reach: it is somebody asserting that a package THEY OWN
+/// ships a domain its tree does not contain. Scoping bounds whose rows are touched, never what may be
+/// claimed about them.
+///
+/// Rewritten whole, never merged: the tree is the authority on what the source ships, and a domain
+/// dropped upstream must LEAVE this list or the package would go on owning a namespace it no longer
+/// ships.
+@serverOnly
+mutation package recordPackageDslDomains {
+  args {
     packageId   string!
-    declares    []object!
     dslDomains  []string!
   }
   update {
-    accept { declares, dslDomains }
-    stamp {
-      id: args.packageId
-    }
+    id:         args.packageId
+    dslDomains: args.dslDomains
   }
 }
 

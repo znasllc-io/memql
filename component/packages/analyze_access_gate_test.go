@@ -1,7 +1,6 @@
 package packages
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -18,8 +17,9 @@ import (
 // reads or writes, to a DSL domain. At run time the bff opens a visitor's code
 // only for a construct whose deployable is the site's own and whose domain its
 // package ships, so a gate that breaks either rule could only ever answer 404.
-// Analysis says so before anything is staged, and records the domains the
-// package ships (package.dslDomains) for the bff to read with the site.
+// Analysis says so before anything is staged, and states the domains the
+// package ships; a deploy records them (package.dslDomains) for the bff to read
+// with the site, once its DSL is live (dsl_domains_deploy_test.go).
 //
 // These fixtures share process-wide pack registrations with the neighbouring
 // analyze tests, so they do not call t.Parallel either.
@@ -232,25 +232,31 @@ func TestAnalysisRefusesAGateBoundToADomainThePackageDoesNotShip(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// package.dslDomains
+// package.dslDomains: what the analysis puts on its report
 // ---------------------------------------------------------------------------
 
-// recordedDslDomains runs a tree through the pipeline's analysis (no confirm,
-// so nothing builds) and answers the dslDomains literal it wrote onto the
-// package row, or "" when it wrote none.
-func recordedDslDomains(t *testing.T, tree fstest.MapFS) string {
+// shippedBy is the list a package would record, as the analysis of its tree
+// states it: dslDomainsFrom of the report. Recording it is the DEPLOY's act
+// (dsl_domains_deploy_test.go); analysis only says what the tree ships.
+func shippedBy(t *testing.T, tree fstest.MapFS) []string {
 	t.Helper()
-	h := newHarness(t, tree, ownerPackage())
-	_, _ = Deploy(context.Background(), h.deps, DeployRequest{PackageId: "v1:platform:package:abc", Actor: mayDeployDsl()})
-	stmt := statementContaining(h.engine.statements(), "mutation recordPackageDeployables(")
-	if stmt == "" {
-		return ""
+	rep, err := Analyze(tree, Options{})
+	if err != nil {
+		t.Fatalf("setup: the tree was refused: %v (problems %+v)", err, rep.Problems)
 	}
-	_, after, ok := strings.Cut(stmt, "dslDomains: ")
-	if !ok {
-		t.Fatalf("the record carries no dslDomains: %s", stmt)
+	return dslDomainsFrom(rep)
+}
+
+func sameList(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
 	}
-	return strings.TrimSuffix(after, ")")
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestAnalysisRecordsTheDomainsThePackageShips(t *testing.T) {
@@ -261,69 +267,74 @@ func TestAnalysisRecordsTheDomainsThePackageShips(t *testing.T) {
 	}
 
 	t.Run("every domain it ships, sorted", func(t *testing.T) {
-		if got := recordedDslDomains(t, withDomain(validPackage(), "beta")); got != `["acme","beta"]` {
-			t.Fatalf("dslDomains = %s, want [\"acme\",\"beta\"]", got)
+		if got := shippedBy(t, withDomain(validPackage(), "beta")); !sameList(got, []string{"acme", "beta"}) {
+			t.Fatalf("the analysis ships %v, want [acme beta]", got)
 		}
 	})
 
-	// REWRITTEN WHOLE, as declares is: the tree is the authority, so each
-	// analysis writes the complete list, and a domain dropped upstream is not in
-	// the one that follows. (That the write replaces rather than merges is the
-	// database test beside this one.)
-	t.Run("a domain dropped upstream leaves the list", func(t *testing.T) {
-		before := recordedDslDomains(t, withDomain(validPackage(), "beta"))
-		after := recordedDslDomains(t, validPackage())
-		if before != `["acme","beta"]` || after != `["acme"]` {
-			t.Fatalf("dslDomains went from %s to %s, want [\"acme\",\"beta\"] to [\"acme\"]", before, after)
-		}
-	})
-
-	// THE POINT OF RECORDING THE NAMESPACE. A gate records the domain of the
-	// concept it is bound to, and the concept's id carries the pin.
+	// THE POINT OF SPELLING IT AS A CONCEPT ID DOES. A gate records the domain
+	// of the concept it is bound to, and the concept's id carries the pin.
 	t.Run("a namespace.pin records the pin and not the directory", func(t *testing.T) {
 		tree := validPackage()
 		tree["dsl/pinneddir/concepts.memql"] = file(validConcepts)
 		tree["dsl/pinneddir/memql.toml"] = file(languageLine)
 		tree["dsl/pinneddir/namespace.pin"] = file("realns\n")
-		got := recordedDslDomains(t, tree)
-		if got != `["acme","realns"]` {
-			t.Fatalf("dslDomains = %s, want [\"acme\",\"realns\"]: a pinned domain is spelled by its pin", got)
+		if got := shippedBy(t, tree); !sameList(got, []string{"acme", "realns"}) {
+			t.Fatalf("the analysis ships %v, want [acme realns]: a pinned domain is spelled by its pin", got)
 		}
 	})
 
-	t.Run("a domain with no construct still counts as shipped", func(t *testing.T) {
+	// A NAME WITH NO CONCEPT BEHIND IT IS NOT SHIPPED (the list is built from
+	// the concepts the load produced): a domain that declares none contributes
+	// nothing, and a pin on a directory that declares none claims nothing.
+	t.Run("a domain declaring no concept contributes nothing", func(t *testing.T) {
 		tree := validPackage()
 		tree["dsl/quiet/notes.memql"] = file("// nothing here yet\n")
 		tree["dsl/quiet/memql.toml"] = file(languageLine)
-		if got := recordedDslDomains(t, tree); got != `["acme","quiet"]` {
-			t.Fatalf("dslDomains = %s, want [\"acme\",\"quiet\"]", got)
+		if got := shippedBy(t, tree); !sameList(got, []string{"acme"}) {
+			t.Fatalf("the analysis ships %v, want only [acme]", got)
 		}
 	})
 
-	// A package with no DSL says so with an empty list, never with null: the
-	// concept's []string refuses the word null, and a refused write would leave
-	// the package claiming whatever the LAST analysis found.
-	t.Run("a package with no DSL records an empty list", func(t *testing.T) {
-		if got := recordedDslDomains(t, spaOnlyPackage()); got != `[]` {
-			t.Fatalf("dslDomains = %s, want []", got)
+	t.Run("a pin with no concept behind it claims nothing", func(t *testing.T) {
+		tree := validPackage()
+		tree["dsl/claiming/notes.memql"] = file("// constructs would go here\n")
+		tree["dsl/claiming/memql.toml"] = file(languageLine)
+		tree["dsl/claiming/namespace.pin"] = file("claimed\n")
+		if got := shippedBy(t, tree); !sameList(got, []string{"acme"}) {
+			t.Fatalf("the analysis ships %v, want only [acme]: a pin file alone made the package the owner of a namespace", got)
 		}
 	})
 
-	// An analysis that fails records nothing, as declares does: the list the
-	// package already has stands until a tree analyzes.
-	t.Run("an analysis that fails records nothing", func(t *testing.T) {
-		for name, tree := range map[string]fstest.MapFS{
-			"a domain the engine owns": reservedDomainPackage(),
-			"dsl that refuses boot":    bootRefusingPackage(),
-			"a gate that cannot open":  gatedPackage(gateOnAnotherProduct),
-		} {
-			if got := recordedDslDomains(t, tree); got != "" {
-				t.Errorf("%s: a refused analysis recorded dslDomains %s", name, got)
-			}
+	// A name the engine owns is never shipped, whether it arrives as a
+	// directory (refused outright) or as a pin (which the engine accepts).
+	t.Run("an engine domain is never shipped", func(t *testing.T) {
+		rep, err := Analyze(reservedDomainPackage(), Options{})
+		if RefusalCode(err) != CodeDslDomainReserved {
+			t.Fatalf("setup: want %s, got %v", CodeDslDomainReserved, err)
+		}
+		if got := dslDomainsFrom(rep); !sameList(got, []string{"acme"}) {
+			t.Fatalf("a refused tree lists %v, want only [acme]: the reserved directory is not shipped", got)
+		}
+		tree := validPackage()
+		tree["dsl/pinnedtocore/concepts.memql"] = file(validConcepts)
+		tree["dsl/pinnedtocore/memql.toml"] = file(languageLine)
+		tree["dsl/pinnedtocore/namespace.pin"] = file("library\n")
+		if got := shippedBy(t, tree); !sameList(got, []string{"acme"}) {
+			t.Fatalf("the analysis ships %v, want only [acme]: a pin naming an engine domain was listed", got)
 		}
 	})
 
-	t.Run("the report names the namespaces it recorded", func(t *testing.T) {
+	// A package with no DSL has an empty list, never nil: the concept's
+	// []string refuses the word null.
+	t.Run("a package with no DSL ships an empty list", func(t *testing.T) {
+		got := shippedBy(t, spaOnlyPackage())
+		if got == nil || len(got) != 0 {
+			t.Fatalf("the analysis ships %#v, want an empty list", got)
+		}
+	})
+
+	t.Run("the report names the namespaces", func(t *testing.T) {
 		tree := validPackage()
 		tree["dsl/pinneddir/concepts.memql"] = file(validConcepts)
 		tree["dsl/pinneddir/memql.toml"] = file(languageLine)

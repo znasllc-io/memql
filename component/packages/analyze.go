@@ -238,8 +238,9 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 		dr := DslDomainReport{Domain: d, Reserved: isReserved}
 		if !isReserved {
 			// What an access gate bound to this domain's concepts records as
-			// its domain (D5), read by the engine from the candidate's own
-			// tree: a namespace.pin moves it off the directory's name.
+			// its domain (D5), taken by the engine from the concepts the
+			// candidate's load produced: a namespace.pin moves it off the
+			// directory's name, and a pin with no concept behind it is nothing.
 			dr.Namespaces = result.Namespaces[d]
 			if c, ok := counts[d]; ok {
 				dr.Constructs = c.byKind

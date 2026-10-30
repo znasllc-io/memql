@@ -314,19 +314,53 @@ func TestAnalyzePackageDSLNamesEachMountedDomainByTheNamespaceItsConceptsCarry(t
 		}
 	})
 
-	// "If a domain has no constructs it still counts as shipped": a package that
-	// ships only the name of a domain still owns it.
-	t.Run("a domain holding no construct is still shipped", func(t *testing.T) {
+	// THE LIST COMES FROM THE CONCEPTS THE LOAD PRODUCED, so a name with no
+	// concept behind it is not shipped: a domain that declares none contributes
+	// nothing (a gate's Domain is the domain of a concept, and no concept
+	// assembles under a name nobody declared one in), and a namespace.pin on a
+	// directory that declares no concept claims nothing. A pin file alone must
+	// not make a package the owner of a namespace.
+	t.Run("a domain declaring no concept contributes nothing", func(t *testing.T) {
 		root := fstest.MapFS{"emptydir/notes.memql": &fstest.MapFile{Data: []byte("// nothing here yet\n")}}
 		got := namespacesOf(t, withLanguageLines(root))
-		if want := []string{"emptydir"}; !reflect.DeepEqual(got["emptydir"], want) {
-			t.Fatalf("Namespaces = %v, want %v", got, want)
+		names, mounted := got["emptydir"]
+		if !mounted || len(names) != 0 {
+			t.Fatalf("Namespaces = %v, want the domain mounted and shipping no namespace", got)
+		}
+	})
+
+	t.Run("a pin with no concept behind it claims nothing", func(t *testing.T) {
+		root := gateCandidate(map[string]string{"owningdir": ""})
+		// A directory of the same package that pins a namespace and declares no
+		// concept: only constructs, bound to the first directory's concept.
+		root["claimingdir/queries.memql"] = &fstest.MapFile{Data: []byte(
+			"use owningdir.concepts.{ deskBrief }\nuse owningdir.shapes.{ owningdirBriefFull }\n\n" +
+				gateCandidateQuery("", "claimingBriefs", "owningdir"))}
+		root["claimingdir/namespace.pin"] = &fstest.MapFile{Data: []byte("claimed\n")}
+		withLanguageLines(root)
+		got := namespacesOf(t, root)
+		if names := got["claimingdir"]; len(names) != 0 {
+			t.Fatalf("Namespaces[claimingdir] = %v: a pin with no concept behind it was counted as shipped", names)
+		}
+		if want := []string{"owningdir"}; !reflect.DeepEqual(got["owningdir"], want) {
+			t.Fatalf("Namespaces[owningdir] = %v, want %v", got["owningdir"], want)
+		}
+	})
+
+	t.Run("a nested pin with no concept behind it claims nothing", func(t *testing.T) {
+		root := gateCandidate(map[string]string{"outerclaim": ""})
+		root["outerclaim/inner/more.memql"] = &fstest.MapFile{Data: []byte("// constructs would go here\n")}
+		root["outerclaim/inner/namespace.pin"] = &fstest.MapFile{Data: []byte("claimed\n")}
+		got := namespacesOf(t, root)
+		if want := []string{"outerclaim"}; !reflect.DeepEqual(got["outerclaim"], want) {
+			t.Fatalf("Namespaces = %v, want %v: the nested pin declares no concept", got, want)
 		}
 	})
 
 	// A name the engine owns is not a package's to ship however it arrives. A
 	// directory carrying one is refused outright; a pin naming one is the same
-	// name by another road, and the list it would put the package in must not
+	// name by another road -- here with a concept behind it, so the load does
+	// produce v1:library:... -- and the list it would put the package in must not
 	// hold it.
 	t.Run("a pin naming a domain the engine owns is not shipped", func(t *testing.T) {
 		root := gateCandidate(map[string]string{"pinnedtocore": ""})

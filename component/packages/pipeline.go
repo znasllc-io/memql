@@ -716,18 +716,8 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// a client could see it: absent from the list, and absent from its own
 	// source's "apps it produces". A warning rather than a failure -- the
 	// deploy is not less correct because a catalogue write did not land.
-	//
-	// THE DSL DOMAINS THE TREE SHIPS ride the same write, for the same reason
-	// and with the same rule (design record 2026-10-29, D5). The bff reads them
-	// with the site on every call and opens an access code only for a gate
-	// whose domain is in the list, so a domain dropped upstream has to leave it:
-	// a merge would keep the package owning, for good, a domain it no longer
-	// ships. A write that did not land leaves the previous list standing, which
-	// can close a gate but opens none the live tree lacks; and a source not
-	// analyzed since the field existed has none, which opens nothing until it is
-	// analyzed again.
-	if nerr := d.Store.recordPackageDeployables(ctx, req.PackageId, declaredFrom(rep), dslDomainsFrom(rep)); nerr != nil {
-		d.log().Warn("packages: could not record what the source declares and ships",
+	if nerr := d.Store.recordPackageDeployables(ctx, req.PackageId, declaredFrom(rep)); nerr != nil {
+		d.log().Warn("packages: could not record what the manifest declares",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 			"deployment", out.DeploymentId, "err", nerr)
 	}
@@ -835,6 +825,34 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 				"deployment", out.DeploymentId)
 		}
+	}
+
+	// ---- which DSL domains this package ships, now that its DSL is live ----
+	//
+	// WRITTEN HERE AND NOWHERE EARLIER (design record 2026-10-29, D5). The bff
+	// reads the list with the site on every call and opens an access code only
+	// for a gate whose domain is in it, so a write that precedes a commitment is
+	// a widening: at analysis, a run that was refused, parked at the confirm
+	// gate or cancelled would already have changed which domains a package owns.
+	// This is after the last cancel checkpoint, after the DSL is staged and
+	// rolled (or found unchanged, or absent), and before any site is published --
+	// so the window between the DSL going live and the list arriving closes gates
+	// rather than opening them.
+	//
+	// FROM THIS RUN'S OWN REPORT, the tree this run staged. A package whose DSL
+	// did not move, or that ships none, writes the list its report states: that
+	// is how a source deployed before the field existed gets one, and how a
+	// source that stopped shipping DSL closes the gates of what it used to ship.
+	//
+	// A warning rather than a failure, as declares and the deployed version are:
+	// a package row that refuses bookkeeping (a historic one with no
+	// organization refuses every such write) must not stop its sites deploying.
+	// What it leaves is the previous list, which can close a gate and opens none
+	// the live tree lacks.
+	if derr := d.Store.recordPackageDslDomains(ctx, req.PackageId, dslDomainsFrom(rep)); derr != nil {
+		d.log().Warn("packages: could not record which DSL domains this package ships; its access gates stay as the previous list left them",
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+			"deployment", out.DeploymentId, "err", derr)
 	}
 
 	// ---- publish ----

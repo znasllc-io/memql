@@ -67,17 +67,21 @@ type PackageDSLResult struct {
 	// caller binds each to the package that ships it.
 	AccessGates []AccessGateEntry
 	// Namespaces maps each mounted domain directory to the domain names an
-	// @accessGate bound to one of its concepts records (AccessGateEntry.Domain),
-	// sorted. A directory that pins nothing goes by its own name; a
-	// namespace.pin moves it off the directory, and so does a nested directory
-	// that pins its own, which is why a domain can answer with more than one.
+	// @accessGate bound to one of ITS concepts records (AccessGateEntry.Domain),
+	// sorted: the first segment of the namespace in the id of each concept the
+	// load produced from that directory's files.
 	//
-	// Read from the CANDIDATE's tree, with the loader's own pin reader, and not
-	// guessed from directory names: a gate in a pinned domain would otherwise
-	// record a spelling the package's list never holds, and be closed without a
-	// word. Every mounted domain has an entry, whatever it holds. A domain the
-	// engine owns (SkippedCore) is not mounted and has none, and a pin that
-	// names one is left out of the entry it would have been in.
+	// Built from the concept ids the load actually produced, not from
+	// namespace.pin files, so the spelling is the one a gate records by
+	// construction -- a pin moves a namespace off the directory name, and so
+	// does a nested directory that pins its own -- and a name with no concept
+	// behind it is not shipped: a domain that declares no concept, or a pin on a
+	// directory that declares none, contributes nothing. A pin file alone does
+	// not make a package the owner of a namespace.
+	//
+	// Every mounted domain has an entry, possibly empty. A domain the engine
+	// owns (SkippedCore) is not mounted and has none, and a pin that names one
+	// is left out of the entry it would have been in.
 	Namespaces map[string][]string
 }
 
@@ -97,13 +101,16 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 		return PackageDSLResult{}, err
 	}
 
-	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore, Namespaces: candidateNamespaces(tree, mounted)}
+	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore}
 	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
 		// A warning of its own: boot refuses nothing for it (lint_parity.go).
 		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg, Severity: LintSeverityWarning}
 	}
 
-	concepts, conceptSkips, err := BuildUnifiedConcepts(logger, tree)
+	concepts, origins, conceptSkips, err := buildUnifiedConceptsWithOrigins(logger, tree)
+
+	// THE DOMAINS THIS CANDIDATE SHIPS, from the concepts its load produced.
+	result.Namespaces = candidateNamespaces(origins, mounted)
 
 	// A concept the loader could not BUILD leaves no trace in the load report,
 	// which covers construct-phase skips only. Reporting it is the difference
@@ -184,59 +191,38 @@ func candidateGates(view []AccessGateEntry, mounted []string) []AccessGateEntry 
 // candidateNamespaces answers, for each mounted domain, the domain names an
 // access gate records for a construct bound to one of its concepts.
 //
-// AccessGateEntry.Domain is the first segment of the namespace in a concept's
-// id -- v1:<namespace>:name -- and the namespace is not the directory's name:
-// it is the directory's namespace.pin when it has one. So the list a package
-// ships is read the way the loader assembles an id, through the loader's own pin
-// reader (declaredNamespaceForDomainFromTree), from the candidate's own tree and
-// never from the live domain's old pin, and the two spellings agree by
-// construction.
+// AccessGateEntry.Domain is conceptRootDomain of the id of the concept the
+// construct is bound to, so this takes the same function of the same ids: the
+// ids the load produced (origins maps each to the file that declared it), kept
+// when that file is in a mounted domain. A package is the owner of the
+// namespaces its own concepts assemble under and of no other, which is why a
+// pin cannot claim one: it only changes what a concept's id says, and a pin
+// with no concept behind it changes nothing.
 //
-// A DOMAIN IS MORE THAN ITS TOP DIRECTORY. A namespace is a path
-// (NamespaceFromFilePath), so a nested directory is a namespace of its own, and
-// since a path is no legal namespace it can hold a concept only by pinning one
-// -- which need not be the domain's. Every directory under the domain that
-// holds a file is read, and one that pins nothing, whose namespace is a path,
-// names nothing.
-//
-// The domain itself counts first, whatever it holds: a package that ships a
-// domain with no construct still ships it.
-func candidateNamespaces(tree fs.FS, mounted []string) map[string][]string {
-	out := make(map[string][]string, len(mounted))
+// A name the engine owns is left out however it arrives. A directory carrying
+// one is refused outright (dsl_domain_reserved); a pin naming one is the same
+// name by another road, and the engine does not police it, so the list leaves it
+// out rather than hand the package a core domain's gates.
+func candidateNamespaces(origins map[string]string, mounted []string) map[string][]string {
+	names := make(map[string]map[string]struct{}, len(mounted))
 	for _, domain := range mounted {
-		names := map[string]struct{}{}
-		read := map[string]struct{}{}
-		add := func(directory string) {
-			// A pin is read once per directory, however many files it holds.
-			if _, done := read[directory]; done {
-				return
-			}
-			read[directory] = struct{}{}
-			namespace := declaredNamespaceForDomainFromTree(tree, directory)
-			if namespace == "" || strings.Contains(namespace, "/") {
-				return
-			}
-			root, _, _ := strings.Cut(namespace, ":")
-			// A name the engine owns is not a package's to ship however it
-			// arrives. A directory carrying one is refused outright
-			// (dsl_domain_reserved); a pin naming one is the same name by another
-			// road, and the engine does not police it, so the list leaves it out
-			// rather than hand the package a core domain's gates.
-			if memqldsl.IsCoreDomain(root) {
-				return
-			}
-			names[root] = struct{}{}
+		names[domain] = map[string]struct{}{}
+	}
+	for id, file := range origins {
+		set, own := names[RootDomainFromFilePath(file)]
+		if !own {
+			continue
 		}
-		add(domain)
-		if sub, err := fs.Sub(tree, domain); err == nil {
-			if files, err := dslfs.WalkMemqlFiles(sub); err == nil {
-				for _, file := range files {
-					add(NamespaceFromFilePath(domain + "/" + file))
-				}
-			}
+		root := conceptRootDomain(id)
+		if root == "" || memqldsl.IsCoreDomain(root) {
+			continue
 		}
-		list := make([]string, 0, len(names))
-		for name := range names {
+		set[root] = struct{}{}
+	}
+	out := make(map[string][]string, len(mounted))
+	for domain, set := range names {
+		list := make([]string, 0, len(set))
+		for name := range set {
 			list = append(list, name)
 		}
 		sort.Strings(list)
