@@ -30,13 +30,13 @@ import (
 // servedButNotExternallyRouted is defence in depth, for the reason
 // shopper_handler.go gives. So this handler re-derives everything from the graph,
 // and there are two differences from the shopper surface, and they are the point of
-// resolveSite and openSession below.
+// resolveSite and findSession below.
 //
-// A ROW COMING BACK PROVES NOTHING HERE. v1:platform:site is composite tier, and its
-// account arm admits any member of the site's organization, so a forged owner who is
-// one reads the row. So the stamp is compared with the row's own ownerUserId, and that
-// comparison is THE check on the owner. From then on the owner this handler uses is the
-// row's and never the header's.
+// A ROW COMING BACK PROVES NOTHING HERE. The site is read as the cluster, so it comes
+// back whoever is named. So the stamp is compared with the row's own ownerUserId, and that
+// comparison is THE check on the owner, as the row's account is the check on a code's
+// copy of it. From then on the owner this handler uses is the row's and never the
+// header's.
 //
 // NO TIER SCOPES THE CODES AND SESSIONS. The store reads and updates those rows as the
 // cluster acting, because a row's current owner must not decide whether a code opens: in
@@ -44,6 +44,25 @@ import (
 // owner, and a read under the site's owner stopped finding it, with nothing anywhere
 // saying why. So every row read here has to name the stamped site, the site's row as well
 // as each code and session, and a row that does not is one this site never had.
+//
+// # A stranger costs nothing
+//
+// Anybody on the internet can send these four requests, and the budget in front of them
+// is 600 a minute per (site, address) on each edge replica, so what a request with no
+// credential costs is the floor of what the cluster can be made to spend. Measured
+// before this order: a cookie-less status check ran 52 statements, because the site was
+// resolved first and under the owner's authority, which reads who the owner is and what
+// they belong to, and a pool of four connections flattened at about 50 requests a second.
+//
+// SO NOTHING IS READ UNTIL A CREDENTIAL OF THE RIGHT SHAPE IS PRESENTED, the first read is
+// its digest, and a digest that finds nothing is the end of it: no site read and no other
+// write. Only a digest that found a row pays for the site, one point read as the cluster.
+//
+// THE OWNER'S AUTHORITY IS READ ONCE, RIGHT BEFORE IT IS LENT. A call reads the site and
+// its package under the owner just ahead of running the construct, which already pays for
+// that authority, and answers 404 if the owner cannot read them. That is what closes a
+// tied site whose owner left its organization. The other three requests never lend it, so
+// such a site still unlocks and still says who is in, and nothing gated runs.
 //
 // # What a session is and is not
 //
@@ -53,7 +72,8 @@ import (
 // construct stays out of reach of anybody holding a code (D6). The reads that
 // decide a request are the store's, which makes them as the cluster with its own
 // internal origin, because this package may not stamp one and the rows are
-// unreadable without it (D14).
+// unreadable without it (D14). The one read that is not is the owner's own, ahead of a
+// construct.
 //
 // # Every answer is decided fresh
 //
@@ -87,8 +107,9 @@ import (
 // open a stream with, and only an HTTP response can set an HttpOnly cookie, so the
 // other party dictates the wire.
 
-// AccessCookieName is the cookie a visitor's session token travels in.
-const AccessCookieName = "memql_access"
+// AccessCookieName is the cookie a visitor's session token travels in. It is memql's,
+// because the edge has to keep it to the four routes and neither can import the other.
+const AccessCookieName = memql.AccessCookieName
 
 // AccessStampSiteHeader and AccessStampOwnerHeader are the edge's stamp: the site a
 // request arrived on and the owner to borrow. They are memql's, because component/edge
@@ -96,20 +117,6 @@ const AccessCookieName = "memql_access"
 // second spelling here would only have to stay equal, and a name that drifted would make
 // every visit an unstamped request, which is a 404 that says nothing about why.
 const AccessStampSiteHeader, AccessStampOwnerHeader = memql.AccessStampSiteHeader, memql.AccessStampOwnerHeader
-
-// accessCookiePath is where the browser sends the cookie: the site's own origin, on
-// the four routes and nowhere else. It is the EDGE's spelling of the route family,
-// not this handler's, because the browser only ever talks to the edge.
-const accessCookiePath = "/_memql/access"
-
-// The body caps. Enforced while reading, before anything is decoded or hashed: the
-// normalizer and the digests run over caller input and neither bounds its own, and
-// the edge's cap is the edge's. A code is 29 characters and a leave says nothing, so
-// 1 KiB is generous for both.
-const (
-	accessSmallBodyBytes = 1 << 10
-	accessCallBodyBytes  = 64 << 10
-)
 
 // The op and result labels of memql_site_access_requests_total. Fixed sets, so a
 // label never holds anything a visitor sent.
@@ -144,10 +151,11 @@ var (
 // narrow on it and an app's own Logs section can select it (logger.Subject).
 const accessSiteConcept = "v1:platform:site"
 
-// Why a stamp did not check out, as an operator reads it. Fixed text, because this is a
-// reason and not a report: nothing a request carried belongs in it.
+// Why a site is turned away, as an operator reads it. Fixed text, because this is a reason
+// and not a report: nothing a request carried belongs in it.
 const (
-	accessReasonUnreadable = "the stamped owner cannot read this site, which is what an owner removed from the site's organization looks like"
+	accessReasonUnreadable = "the site's owner cannot read this site or its package, which is what an owner removed from the site's organization looks like"
+	accessReasonNoRow      = "the stamped site has no row"
 	accessReasonNotOwner   = "the stamped owner is not this site's owner"
 )
 
@@ -163,11 +171,14 @@ type accessRoute struct {
 	maxBody int64
 }
 
+// THE CAPS ARE ENFORCED WHILE READING, before anything is decoded or hashed: the
+// normalizer and the digests run over caller input and neither bounds its own, and the
+// edge's cap is the edge's.
 var accessRoutes = []accessRoute{
-	{http.MethodPost, memql.AccessUnlockPath, accessOpUnlock, accessSmallBodyBytes},
-	{http.MethodGet, memql.AccessSessionPath, accessOpSession, accessSmallBodyBytes},
-	{http.MethodPost, memql.AccessLeavePath, accessOpLeave, accessSmallBodyBytes},
-	{http.MethodPost, memql.AccessCallPath, accessOpCall, accessCallBodyBytes},
+	{http.MethodPost, memql.AccessUnlockPath, accessOpUnlock, memql.AccessSmallBodyBytes},
+	{http.MethodGet, memql.AccessSessionPath, accessOpSession, memql.AccessSmallBodyBytes},
+	{http.MethodPost, memql.AccessLeavePath, accessOpLeave, memql.AccessSmallBodyBytes},
+	{http.MethodPost, memql.AccessCallPath, accessOpCall, memql.AccessCallBodyBytes},
 }
 
 func accessRouteFor(method, path string) (accessRoute, bool) {
@@ -184,10 +195,11 @@ func accessRouteFor(method, path string) (accessRoute, bool) {
 // The omissions are the point, as they are on ShopperSite: a handler that cannot see
 // the bundle or the settings cannot leak them into a reply.
 type AccessSite struct {
-	ID, OwnerUserID, AccountID, DeployableName string
+	ID, OwnerUserID, AccountID, PackageID, DeployableName string
 	// PackageDomains are the DSL domains the site's package ships
-	// (package.dslDomains). Empty reaches no gate, so a package whose list is unknown
-	// fails closed (D5).
+	// (package.dslDomains), as the read under the owner found them. The read as the
+	// cluster leaves it empty, and PackageDomainsAsCluster is that read's answer. Empty
+	// reaches no gate, so a package whose list is unknown fails closed (D5).
 	PackageDomains []string
 }
 
@@ -210,11 +222,11 @@ type AccessSession struct {
 // AccessStore is the rows this handler reads and writes, in its own terms: this
 // package may not stamp internal origin, and it may not import integrations/.
 //
-// ONLY THE SITE IS READ AS ANYBODY IN PARTICULAR. A code and a session are read and
-// updated as the cluster acting, so these answer whoever's row it is now, and nothing
-// about who asked narrows them: resolveSite and openSession are what hold a row to the
-// stamped site. A session is the one thing still given an owner, because its row is
-// stamped with the site's owner when it is born.
+// ONLY ONE READ IS MADE AS ANYBODY IN PARTICULAR. A site, a package, a code and a session
+// are read as the cluster acting, so these answer whoever's row it is now, and nothing
+// about who asked narrows them: resolveSite and findSession are what hold a row to the
+// stamped site. SiteAsOwner is the one read under a person, and a session is the one thing
+// still given an owner, because its row is stamped with the site's owner when it is born.
 //
 // A MISS IS (nil, nil), and that covers every way of not being allowed to see a row.
 // A read that FAILED is an error and never looks like a miss: it opens nothing, ends
@@ -226,11 +238,20 @@ type AccessSession struct {
 // methods are handed must not be in it. integrations/siteaccess scrubs its errors for
 // exactly this.
 type AccessStore interface {
-	// AccessSite resolves the site UNDER owner's own actor, or a miss when they cannot
-	// read it. A site with no package deployable is not a miss: it comes back with a
-	// blank DeployableName, and the handler refuses it, because it was read and has
+	// SiteAsCluster reads the site as the cluster acting, one point read. It says nothing
+	// about who may do what: what makes the row mean something is the handler comparing
+	// the stamp with it. A site with no package deployable is not a miss: it comes back
+	// with a blank DeployableName, and the handler refuses it, because it was read and has
 	// simply never had a code to open.
-	AccessSite(ctx context.Context, siteID, owner string) (*AccessSite, error)
+	SiteAsCluster(ctx context.Context, siteID string) (*AccessSite, error)
+	// PackageDomainsAsCluster reads the DSL domains a package ships, as the cluster acting,
+	// one point read. No package and no list are both no domains, which reaches no gate.
+	PackageDomainsAsCluster(ctx context.Context, packageID string) ([]string, error)
+	// SiteAsOwner reads the site and its package UNDER owner's own actor, or a miss when
+	// they cannot read the site. It is what a call asks just before it lends that person's
+	// authority to a construct, and it costs what resolving that person costs, so it is
+	// made there and nowhere else.
+	SiteAsOwner(ctx context.Context, siteID, owner string) (*AccessSite, error)
 	// CodeByHash finds a code by the digest of what a visitor typed. A removed or
 	// expired code still answers; which of those means which reply is decided here.
 	CodeByHash(ctx context.Context, siteID, codeHash string) (*AccessCode, error)
@@ -288,32 +309,28 @@ func (h *AccessHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serve answers one request and says how it went, for the counter.
 func (h *AccessHandler) serve(op string, w http.ResponseWriter, r *http.Request) string {
-	siteID, owner, stamped := readAccessStamp(r)
+	stamp, stamped := readAccessStamp(r)
 	if !stamped {
-		writeAccessJSON(w, http.StatusNotFound, accessBodyNotFound)
-		return accessResultNotFound
-	}
-	site, err := h.resolveSite(r.Context(), siteID, owner)
-	if err != nil {
-		h.logger.Warn("access surface: resolving the site failed",
-			"component", "server", "site", siteID, "err", err)
-		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
-		return accessResultRefused
-	}
-	if site == nil {
 		writeAccessJSON(w, http.StatusNotFound, accessBodyNotFound)
 		return accessResultNotFound
 	}
 	switch op {
 	case accessOpUnlock:
-		return h.serveUnlock(w, r, site)
+		return h.serveUnlock(w, r, stamp)
 	case accessOpSession:
-		return h.serveSession(w, r, site)
+		return h.serveSession(w, r, stamp)
 	case accessOpLeave:
-		return h.serveLeave(w, r, site)
+		return h.serveLeave(w, r, stamp)
 	default:
-		return h.serveCall(w, r, site)
+		return h.serveCall(w, r, stamp)
 	}
+}
+
+// accessStamp is what the edge said a request arrived on. Nothing here has been believed
+// yet: see resolveSite. The site is bare because the rows are compared with it and handed
+// it, and the owner stays as it was spelled because it is only ever compared.
+type accessStamp struct {
+	site, owner string
 }
 
 // readAccessStamp is what the edge said, before any of it is believed.
@@ -321,38 +338,40 @@ func (h *AccessHandler) serve(op string, w http.ResponseWriter, r *http.Request)
 // FAILS CLOSED WITH NO CREDENTIALS, which is exactly what membership in
 // HandlerAuthorizedPaths() certifies: a request with no stamp, the shape a direct
 // caller sends, reaches no read and no write.
-func readAccessStamp(r *http.Request) (siteID, owner string, stamped bool) {
-	siteID = strings.TrimSpace(r.Header.Get(AccessStampSiteHeader))
-	owner = strings.TrimSpace(r.Header.Get(AccessStampOwnerHeader))
-	return siteID, owner, siteID != "" && owner != ""
+func readAccessStamp(r *http.Request) (accessStamp, bool) {
+	site := strings.TrimSpace(r.Header.Get(AccessStampSiteHeader))
+	owner := strings.TrimSpace(r.Header.Get(AccessStampOwnerHeader))
+	return accessStamp{site: memql.BareShortId(site), owner: owner}, site != "" && owner != ""
 }
 
 // resolveSite re-derives the site from the graph, and answers nil for every way the
-// stamp can fail to check out. All of them are the one 404: a stamp naming a site its
-// owner cannot read says nothing about which of those it was.
+// stamp can fail to check out. All of them are the one 404: a stamp naming a site whose
+// row says otherwise says nothing about which of those it was.
+//
+// IT RUNS ONLY FOR A REQUEST WHOSE DIGEST FOUND A ROW. See the file note. Past a miss
+// nothing here is ever reached, which is what keeps a stranger from costing a read.
 //
 // WHAT COMES OUT OF HERE IS THE ONE THING EVERY LATER ROW IS HELD TO. The codes and
 // sessions are read as the cluster, so nothing but a comparison with this site's id
 // stops a row of another site being honored on this one, and that makes these two
 // comparisons the checks on the stamp, rather than a second opinion about it.
-func (h *AccessHandler) resolveSite(ctx context.Context, siteID, owner string) (*AccessSite, error) {
-	site, err := h.store.AccessSite(ctx, siteID, owner)
+func (h *AccessHandler) resolveSite(ctx context.Context, stamp accessStamp) (*AccessSite, error) {
+	site, err := h.store.SiteAsCluster(ctx, stamp.site)
 	if err != nil {
 		return nil, err
 	}
 	// The row has to be the site the stamp named, and not whatever the read turned up:
 	// site.ID is what every code and session below is compared with.
-	if site == nil || !sameBareID(site.ID, siteID) {
-		h.warnSiteClosed(siteID, accessReasonUnreadable)
+	if site == nil || !sameBareID(site.ID, stamp.site) {
+		h.warnSiteClosed(stamp.site, accessReasonNoRow)
 		return nil, nil
 	}
-	// THE CHECK ON THE OWNER, and there is no other. The tier's account arm admits a
-	// member of the organization, so a forged owner who is one has just read this row,
-	// and the row's owner is the only thing that tells them apart from the real one.
-	// Past here nothing is read as the stamped owner at all. A row with no owner matches
-	// no stamp, since a stamp is never blank by here: a site with no owner cannot have
-	// codes (D6).
-	if !sameBareID(site.OwnerUserID, owner) {
+	// THE CHECK ON THE OWNER, and until a call reads the site under that owner there is no
+	// other. The row comes back whoever the stamp named, and the row's owner is the only
+	// thing that tells a forged one from the real one. Past here nothing is read as the
+	// stamped owner at all. A row with no owner matches no stamp, since a stamp is never
+	// blank by here: a site with no owner cannot have codes (D6).
+	if !sameBareID(site.OwnerUserID, stamp.owner) {
 		h.warnSiteClosed(site.ID, accessReasonNotOwner)
 		return nil, nil
 	}
@@ -362,17 +381,34 @@ func (h *AccessHandler) resolveSite(ctx context.Context, siteID, owner string) (
 	return site, nil
 }
 
-// warnSiteClosed says why a site's codes are answering 404, which the reply never will.
+// answerSite resolves the site and, when that did not come to a site, answers the request
+// and says how it went. "" means the site is good and nothing has been written.
+func (h *AccessHandler) answerSite(w http.ResponseWriter, r *http.Request, stamp accessStamp) (*AccessSite, string) {
+	site, err := h.resolveSite(r.Context(), stamp)
+	if err != nil {
+		h.logger.Warn("access surface: resolving the site failed",
+			"component", "server", "site", stamp.site, "err", err)
+		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
+		return nil, accessResultRefused
+	}
+	if site == nil {
+		writeAccessJSON(w, http.StatusNotFound, accessBodyNotFound)
+		return nil, accessResultNotFound
+	}
+	return site, ""
+}
+
+// warnSiteClosed says why a site's visitors are answered 404, which the reply never will.
 // A tied site whose owner was removed from its organization reads as zero rows under
-// that owner: every code it has stops working, correctly, and without this line nothing
-// anywhere tells the operator looking at them why.
+// that owner: every gated call it has stops working, correctly, and without this line
+// nothing anywhere tells the operator looking at them why.
 //
 // NOTHING A VISITOR SENT GOES IN THIS LINE, and neither does the owner the stamp named:
 // the reason is a constant, and the site is the edge's stamp or the row's own id. It is
-// said once per request, because there is no state here to say it once with, and only
-// what the edge's budgets let through can reach it.
+// said once per request, because there is no state here to say it once with. Only a
+// credential that found a row can reach it, so a stranger cannot drive it at all.
 func (h *AccessHandler) warnSiteClosed(siteID, reason string) {
-	h.logger.Warn("access surface: this site's codes answer 404",
+	h.logger.Warn("access surface: this site's calls answer 404",
 		"component", "server", "reason", reason,
 		logger.Subject(accessSiteConcept, memql.BareShortId(siteID)))
 }
@@ -397,7 +433,7 @@ func sameBareID(a, b string) bool {
 // not a difference: a site with no organization has codes with no copy.
 //
 // A GENERATION STARTS AT 1, so anything below it is a generation that could not be read,
-// and it fails here as a zero expiry fails below. openSession only tests equality, and 0
+// and it fails here as a zero expiry fails below. judgeSession only tests equality, and 0
 // on a code and 0 on its session compare equal: with both read as absent, a regenerate
 // would stop ending sessions and nothing would look wrong.
 func codeOpensSite(code *AccessCode, site *AccessSite) bool {
@@ -409,26 +445,37 @@ func codeOpensSite(code *AccessCode, site *AccessSite) bool {
 // unlock
 // ---------------------------------------------------------------------------
 
-func (h *AccessHandler) serveUnlock(w http.ResponseWriter, r *http.Request, site *AccessSite) string {
+func (h *AccessHandler) serveUnlock(w http.ResponseWriter, r *http.Request, stamp accessStamp) string {
 	// A BODY THAT CANNOT HOLD A CODE IS AN INVALID CODE. The wire has one word for a
 	// failed attempt, and a request too long or malformed to be one is not a different
-	// thing to have failed at.
+	// thing to have failed at. Nor is one that could not be a code, and neither of them
+	// is worth a read: every minted code is 25 symbols once normalized.
 	var body struct {
 		Code string `json:"code"`
 	}
-	if !decodeAccessBody(r.Body, &body) {
+	if !decodeAccessBody(r.Body, &body) || !memql.AccessCodeWellFormed(body.Code) {
 		writeAccessJSON(w, http.StatusUnauthorized, accessBodyInvalid)
 		return accessResultInvalid
 	}
 
-	code, err := h.store.CodeByHash(r.Context(), site.ID, memql.AccessCodeDigest(body.Code))
+	// THE DIGEST FIRST, AND A MISS ENDS IT. No site read and no other write, so a guess
+	// costs one lookup. The site is resolved only for a request holding a code it found.
+	code, err := h.store.CodeByHash(r.Context(), stamp.site, memql.AccessCodeDigest(body.Code))
 	if err != nil {
 		h.logger.Warn("access surface: looking up a code failed",
-			"component", "server", "site", site.ID, "err", err)
+			"component", "server", "site", stamp.site, "err", err)
 		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
 		return accessResultRefused
 	}
-	if code == nil || !codeOpensSite(code, site) {
+	if code == nil {
+		writeAccessJSON(w, http.StatusUnauthorized, accessBodyInvalid)
+		return accessResultInvalid
+	}
+	site, answered := h.answerSite(w, r, stamp)
+	if answered != "" {
+		return answered
+	}
+	if !codeOpensSite(code, site) {
 		writeAccessJSON(w, http.StatusUnauthorized, accessBodyInvalid)
 		return accessResultInvalid
 	}
@@ -480,28 +527,45 @@ type accessOpen struct {
 	at   time.Time
 }
 
-// openSession hashes the cookie and decides whether it still opens anything. The
-// string is accessResultNone with no cookie, accessResultEnded for every way a cookie
-// can have stopped being good, accessResultRefused for a read that failed, and "" for
-// a live session.
-func (h *AccessHandler) openSession(r *http.Request, site *AccessSite) (*accessOpen, string) {
+// findSession reads what the cookie names and says whether it is a live row of the stamped
+// site. The string is accessResultNone with no cookie, accessResultEnded for a cookie
+// that names nothing here, accessResultRefused for a read that failed, and "" for a
+// session the caller should go on to judge.
+//
+// IT COMPARES ONLY WITH THE STAMP, and that is enough to say no: the session's own site
+// has to be the stamped one, and whether the stamp itself is good is resolveSite's to say
+// once something has been found. So every answer here but the last costs one read at
+// most, and a cookie that could not be a token costs none.
+func (h *AccessHandler) findSession(r *http.Request, stamp accessStamp) (*AccessSession, string) {
 	cookie, err := r.Cookie(AccessCookieName)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
 		return nil, accessResultNone
 	}
+	// THE COOKIE IS THE CALLER'S TO WRITE, so one MintAccessSessionToken could not have
+	// made is a miss nobody needs the database to establish, and it reads as one.
+	if !memql.AccessSessionTokenWellFormed(cookie.Value) {
+		return nil, accessResultEnded
+	}
 	session, err := h.store.SessionByTokenHash(r.Context(), memql.AccessSessionTokenDigest(cookie.Value))
 	if err != nil {
 		h.logger.Warn("access surface: reading a session failed",
-			"component", "server", "site", site.ID, "err", err)
+			"component", "server", "site", stamp.site, "err", err)
 		return nil, accessResultRefused
 	}
 	// A cookie with no row is `ended` as well, so a fixated or invented token and one
 	// that was really left cannot be told apart. The site is the comparison a read as
 	// the cluster cannot make for itself: a session is honored on the site it was opened
 	// on and no other.
-	if session == nil || session.Ended || !sameBareID(session.SiteID, site.ID) {
+	if session == nil || session.Ended || !sameBareID(session.SiteID, stamp.site) {
 		return nil, accessResultEnded
 	}
+	return session, ""
+}
+
+// judgeSession decides whether a session found on this site still opens anything. The
+// string is accessResultEnded for every way it can have stopped being good,
+// accessResultRefused for a read that failed, and "" for a live session.
+func (h *AccessHandler) judgeSession(r *http.Request, session *AccessSession, site *AccessSite) (*accessOpen, string) {
 	code, err := h.store.CodeByID(r.Context(), session.CodeID)
 	if err != nil {
 		h.logger.Warn("access surface: reading a session's code failed",
@@ -521,11 +585,22 @@ func (h *AccessHandler) openSession(r *http.Request, site *AccessSite) (*accessO
 	return &accessOpen{code: code, end: end, at: now}, ""
 }
 
-func (h *AccessHandler) serveSession(w http.ResponseWriter, r *http.Request, site *AccessSite) string {
-	open, state := h.openSession(r, site)
+func (h *AccessHandler) serveSession(w http.ResponseWriter, r *http.Request, stamp accessStamp) string {
+	session, state := h.findSession(r, stamp)
+	var open *accessOpen
+	if state == "" {
+		site, answered := h.answerSite(w, r, stamp)
+		if answered != "" {
+			return answered
+		}
+		open, state = h.judgeSession(r, session, site)
+	}
 	switch state {
 	case accessResultNone:
-		clearAccessCookie(w)
+		// NO CLEAR, BECAUSE THERE IS NOTHING TO SAY IT ABOUT. No cookie on this request does
+		// not mean the browser holds none: under SameSite=Strict a cross-site navigation
+		// to this path arrives without it, and answering that with a clear would delete
+		// the real session of whoever followed the link.
 		writeAccessJSON(w, http.StatusUnauthorized, accessBodyNone)
 		return accessResultNone
 	case accessResultEnded:
@@ -548,29 +623,31 @@ func (h *AccessHandler) serveSession(w http.ResponseWriter, r *http.Request, sit
 // code are two sessions, and leaving in one is not leaving in both.
 //
 // IT LOOKS AT THE SESSION ONLY, not at whether its code is still good: a visitor
-// whose code was removed under them can still say they left.
-func (h *AccessHandler) serveLeave(w http.ResponseWriter, r *http.Request, site *AccessSite) string {
-	if cookie, err := r.Cookie(AccessCookieName); err == nil && strings.TrimSpace(cookie.Value) != "" {
-		session, err := h.store.SessionByTokenHash(r.Context(), memql.AccessSessionTokenDigest(cookie.Value))
-		if err != nil {
-			h.logger.Warn("access surface: reading a session to end it failed",
+// whose code was removed under them can still say they left. A stranger's leave, a cookie
+// that names nothing, one that has already ended and one of another site all come back
+// from findSession without a site read, and each is told the same 204.
+//
+// IDEMPOTENT BY DECIDING FIRST. The store would write the time again for a session that
+// has already ended, and the time somebody left is not something a repeat should move.
+func (h *AccessHandler) serveLeave(w http.ResponseWriter, r *http.Request, stamp accessStamp) string {
+	session, state := h.findSession(r, stamp)
+	switch state {
+	case accessResultRefused:
+		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
+		return accessResultRefused
+	case "":
+		site, answered := h.answerSite(w, r, stamp)
+		if answered != "" {
+			return answered
+		}
+		if err := h.store.EndSession(r.Context(), session.ID, h.now()); err != nil {
+			// THE COOKIE STAYS. Clearing it would tell the browser this is over while
+			// the row still honours the token, so a copy of the cookie would go on
+			// working with nobody able to retry the end.
+			h.logger.Warn("access surface: ending a session failed",
 				"component", "server", "site", site.ID, "err", err)
 			writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
 			return accessResultRefused
-		}
-		// IDEMPOTENT BY DECIDING FIRST. The store would write the time again for a
-		// session that has already ended, and the time somebody left is not something
-		// a repeat should move. Another site's session is not this site's to end.
-		if session != nil && !session.Ended && sameBareID(session.SiteID, site.ID) {
-			if err := h.store.EndSession(r.Context(), session.ID, h.now()); err != nil {
-				// THE COOKIE STAYS. Clearing it would tell the browser this is over while
-				// the row still honours the token, so a copy of the cookie would go on
-				// working with nobody able to retry the end.
-				h.logger.Warn("access surface: ending a session failed",
-					"component", "server", "site", site.ID, "err", err)
-				writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
-				return accessResultRefused
-			}
 		}
 	}
 	clearAccessCookie(w)
@@ -582,8 +659,18 @@ func (h *AccessHandler) serveLeave(w http.ResponseWriter, r *http.Request, site 
 // the call
 // ---------------------------------------------------------------------------
 
-func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, site *AccessSite) string {
-	open, state := h.openSession(r, site)
+func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, stamp accessStamp) string {
+	session, state := h.findSession(r, stamp)
+	var open *accessOpen
+	var site *AccessSite
+	if state == "" {
+		var answered string
+		site, answered = h.answerSite(w, r, stamp)
+		if answered != "" {
+			return answered
+		}
+		open, state = h.judgeSession(r, session, site)
+	}
 	switch state {
 	case accessResultNone, accessResultEnded:
 		// A CALL HAS ONE WORD FOR THIS. `none` is an answer to a stranger asking whether
@@ -608,10 +695,20 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, site *
 		return accessResultInvalidArgs
 	}
 
+	// THE PACKAGE IS READ HERE AND NOWHERE ELSE: a status check has no use for it, and it
+	// is polled. A read that failed is the same refusal as any other, and opens nothing.
+	domains, err := h.store.PackageDomainsAsCluster(r.Context(), site.PackageID)
+	if err != nil {
+		h.logger.Warn("access surface: reading the site's package failed",
+			"component", "server", "site", site.ID, "err", err)
+		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
+		return accessResultRefused
+	}
+
 	// THE REGISTRY FIRST, so that nothing about the arguments can tell a construct
 	// that is in reach from one that is not. The request's name is only ever compared
 	// with what is declared here: what gets rendered is the entry's own Call().
-	entry := memql.AccessGateFor(site.DeployableName, open.code.Gate, body.Call, site.PackageDomains)
+	entry := memql.AccessGateFor(site.DeployableName, open.code.Gate, body.Call, domains)
 	if entry == nil {
 		writeAccessJSON(w, http.StatusNotFound, accessBodyNotFound)
 		return accessResultNotFound
@@ -628,6 +725,26 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, site *
 			"component", "server", "site", site.ID, "construct", entry.Construct)
 		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
 		return accessResultRefused
+	}
+
+	// THE OWNER HAS TO BE ABLE TO SEE WHAT THEY ARE ABOUT TO LEND, asked last, because it
+	// costs what resolving that person costs and everything above can say no for less. It
+	// is what closes a tied site whose owner left its organization: the site reads as zero
+	// rows under them, and a construct would run under somebody with no standing here. The
+	// row is held to the one the cluster read, and the construct's domain to the list they
+	// can see, so this cannot lend authority over anything but what was just decided on.
+	owned, err := h.store.SiteAsOwner(r.Context(), site.ID, site.OwnerUserID)
+	if err != nil {
+		h.logger.Warn("access surface: reading the site under its owner failed",
+			"component", "server", "site", site.ID, "err", err)
+		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
+		return accessResultRefused
+	}
+	if owned == nil || !sameBareID(owned.ID, site.ID) || !sameBareID(owned.OwnerUserID, site.OwnerUserID) ||
+		!slices.Contains(owned.PackageDomains, entry.Domain) {
+		h.warnSiteClosed(site.ID, accessReasonUnreadable)
+		writeAccessJSON(w, http.StatusNotFound, accessBodyNotFound)
+		return accessResultNotFound
 	}
 
 	// BORROWED AUTHORITY, and the row's owner rather than the stamp's spelling of one.
@@ -658,7 +775,11 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, site *
 	// may be as good as it was: this is the same refusal as any other failed read, and it
 	// clears nothing, so a database blip costs one retry and takes nobody out. `ended` is
 	// for a read that succeeded and said so.
-	switch _, state := h.openSession(r, site); state {
+	session, state = h.findSession(r, stamp)
+	if state == "" {
+		_, state = h.judgeSession(r, session, site)
+	}
+	switch state {
 	case "":
 	case accessResultRefused:
 		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
@@ -852,21 +973,25 @@ func writeAccessJSON(w http.ResponseWriter, status int, body []byte) {
 
 // setAccessCookie hands the browser its session.
 //
-// HOST-ONLY AND WITH NO Max-Age, on purpose. The server is the authority on expiry,
-// and an operator extending a code must not be cut short by a browser-side clock. The
-// path means the cookie travels with these four requests and nothing else.
+// A __Host- COOKIE, AND A BROWSER HOLDS IT TO THAT: Secure, Path=/ and no Domain, or it is
+// refused without a word. That is what stops a sibling site on the same parent domain
+// planting one (memql.AccessCookieName says how that went without it).
+//
+// NO Max-Age, on purpose. The server is the authority on expiry, and an operator
+// extending a code must not be cut short by a browser-side clock.
 func setAccessCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: AccessCookieName, Value: token, Path: accessCookiePath,
+		Name: AccessCookieName, Value: token, Path: "/",
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 }
 
 // clearAccessCookie takes it back, with the attributes it was given: a browser will
-// not let a weaker cookie overwrite a Secure one.
+// not let a weaker cookie overwrite a Secure one, and it refuses a __Host- cookie that
+// does not carry them.
 func clearAccessCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name: AccessCookieName, Value: "", Path: accessCookiePath, MaxAge: -1,
+		Name: AccessCookieName, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 }

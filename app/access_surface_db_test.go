@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -482,7 +485,7 @@ func (w *accessWorld) unlock(code string) *httptest.ResponseRecorder {
 	return w.unlockOn(w.site, code)
 }
 
-var accessE2ECookie = regexp.MustCompile(`^memql_access=(mql_acs_[A-Za-z0-9_-]{43}); Path=/_memql/access; HttpOnly; Secure; SameSite=Strict$`)
+var accessE2ECookie = regexp.MustCompile(`^__Host-memql_access=(mql_acs_[A-Za-z0-9_-]{43}); Path=/; HttpOnly; Secure; SameSite=Strict$`)
 
 func (w *accessWorld) open(code string) string {
 	w.t.Helper()
@@ -542,10 +545,16 @@ func requireAccessReply(t *testing.T, rec *httptest.ResponseRecorder, status int
 
 func requireAccessCookieCleared(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	raw := rec.Header().Get("Set-Cookie")
-	require.Contains(t, raw, "memql_access=;")
-	require.Contains(t, raw, "Max-Age=0")
-	require.Contains(t, raw, "Path=/_memql/access")
+	require.Equal(t, []string{"__Host-memql_access=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict"}, rec.Header().Values("Set-Cookie"))
+}
+
+// accessUnheldToken is a token of the right shape, which is what gets a cookie as far as
+// the session's row.
+func accessUnheldToken(t *testing.T) string {
+	t.Helper()
+	token, _, err := memql.MintAccessSessionToken()
+	require.NoError(t, err)
+	return token
 }
 
 func accessDataRows(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
@@ -568,6 +577,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		w := newAccessWorld(t, rig)
 		rec := w.session("")
 		requireAccessReply(t, rec, http.StatusUnauthorized, `{"state":"none"}`)
+		require.Empty(t, rec.Header().Values("Set-Cookie"), "a request with no cookie has nothing to clear, and a browser may well hold one")
 		// The verifier really is in front of the mux: what is not one of the four exact
 		// routes does not get past it.
 		rec = w.send(http.MethodGet, "/access/nope", "", "", w.site, w.owner)
@@ -840,14 +850,16 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 
 	// THE TIER READS THE STAMP'S OWNER THROUGH THE ORGANIZATION, so an owner who is not a
 	// member of the site's organization, which is what somebody who has left it looks like,
-	// does not read their own site. The surface answers as it does for any stamp that does
-	// not check out: nothing opens until somebody who can act has dealt with the site.
-	t.Run("an owner outside the site's organization opens nothing", func(t *testing.T) {
+	// does not read their own site. A construct would run as that person, so a call reads
+	// the site under them first and answers the one 404 when it cannot. Nothing else lends
+	// their authority, so the site still unlocks and nothing gated runs or leaves.
+	t.Run("an owner outside the site's organization unlocks, and no call runs", func(t *testing.T) {
 		w := newAccessWorld(t, rig)
 		outsiders := "as-outsiders-" + w.suffix
+		outsider := "v1:identity:user:" + w.stranger
 		w.insert("v1:platform:site", outsiders, map[string]any{
 			"hostname": outsiders + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://access-surface/v1",
-			"ownerUserId": "v1:identity:user:" + w.stranger, "accountId": w.account,
+			"ownerUserId": outsider, "accountId": w.account,
 			"packageId": "v1:platform:package:" + w.pkg, "packageDeployableName": accessE2EDeployable,
 		})
 		result, err := rig.eng.Execute(auth.ContextWithUserActor(context.Background(), w.stranger),
@@ -855,17 +867,33 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, memql.MaterializeRows(result), "the premise failed: the tier admits an owner outside the organization")
 
+		asThem := auth.ContextWithInternalOrigin(auth.ContextWithUserActor(context.Background(), w.stranger))
+		_, code := w.forgeCodeAs(asThem, outsiders, w.account, "dashboard")
 		rig.logs.Reset()
-		rec := w.send(http.MethodGet, "/access/session", "", "", outsiders, "v1:identity:user:"+w.stranger)
+
+		rec := w.send(http.MethodPost, "/access/unlock", `{"code":"`+code+`"}`, "", outsiders, outsider)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		token := accessE2EToken(t, rec)
+		rec = w.send(http.MethodGet, "/access/session", "", token, outsiders, outsider)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Empty(t, rig.logs.String(), "an unlock and a status check are no reason to tell an operator anything")
+
+		rec = w.send(http.MethodPost, "/access/call", `{"call":"accessBriefs"}`, token, outsiders, outsider)
 		requireAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
 
 		// AND AN OPERATOR CAN SEE WHY, since nothing else anywhere says so.
 		logged := rig.logs.String()
 		require.Contains(t, logged, "level=WARN")
-		require.Contains(t, logged, "the stamped owner cannot read this site")
+		require.Contains(t, logged, "the site's owner cannot read this site or its package")
 		require.Contains(t, logged, "subject.id="+outsiders)
 		require.Contains(t, logged, "subject.concept=v1:platform:site")
-		require.NotContains(t, logged, w.stranger, "the line names the owner the stamp named")
+		require.NotContains(t, logged, w.stranger, "the line names the site's owner")
+
+		// A visitor can still say they left.
+		rec = w.send(http.MethodPost, "/access/leave", "{}", token, outsiders, outsider)
+		requireAccessReply(t, rec, http.StatusNoContent, "")
+		rec = w.send(http.MethodGet, "/access/session", "", token, outsiders, outsider)
+		requireAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
 	})
 
 	t.Run("a code whose copy of the account is out of date", func(t *testing.T) {
@@ -876,7 +904,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		requireAccessReply(t, w.unlock(code), http.StatusUnauthorized, unknown.Body.String())
 
 		// And a session already open on it, as one would be had the move raced the mint.
-		const token = "mql_acs_a-session-opened-before-the-move-landed"
+		token := accessUnheldToken(t)
 		store := siteaccess.NewGraphStore(&AccessEngineAdapter{Engine: rig.eng})
 		require.NoError(t, store.CreateSession(context.Background(), w.owner, siteaccess.Session{
 			SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
@@ -910,7 +938,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		requireAccessReply(t, w.session(token), http.StatusUnauthorized, `{"state":"ended"}`)
 
 		// A session under somebody else is honored the same way, and ended the same way.
-		const moved = "mql_acs_a-session-whose-row-belongs-to-an-heir"
+		moved := accessUnheldToken(t)
 		store := siteaccess.NewGraphStore(&AccessEngineAdapter{Engine: rig.eng})
 		require.NoError(t, store.CreateSession(context.Background(), w.member, siteaccess.Session{
 			SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
@@ -954,7 +982,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 
 				acting := &accessActingEngine{inner: &AccessEngineAdapter{Engine: rig.eng}}
 				logger := slog.New(slog.DiscardHandler)
-				handler := server.NewAccessHandler(acting, newAccessStore(&AccessEngineAdapter{Engine: rig.eng}, logger), logger, time.Now)
+				handler := server.NewAccessHandler(acting, newAccessStore(&AccessEngineAdapter{Engine: rig.eng}), logger, time.Now)
 				serve := func() *httptest.ResponseRecorder {
 					req := httptest.NewRequest(http.MethodPost, "/access/call", strings.NewReader(`{"call":"accessBriefs"}`))
 					req.Header.Set(server.AccessStampSiteHeader, w.site)
@@ -1159,4 +1187,313 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		require.Contains(t, handler, w.site)
 		require.Contains(t, handler, "accessBriefRecord")
 	})
+}
+
+// ---------------------------------------------------------------------------
+// what a request costs the database
+// ---------------------------------------------------------------------------
+
+// accessStatements records what the database was asked, for the two questions a fake
+// store cannot answer: how many statements a read really is, and what plan each gets.
+type accessStatements struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (c *accessStatements) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) context.Context {
+	return ctx
+}
+
+func (c *accessStatements) AfterQuery(_ context.Context, event *bun.QueryEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seen = append(c.seen, event.Query)
+}
+
+// during is every statement one act made.
+func (c *accessStatements) during(act func()) []string {
+	c.mu.Lock()
+	c.seen = nil
+	c.mu.Unlock()
+	act()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string{}, c.seen...)
+}
+
+// A STRANGER COSTS THE DATABASE NOTHING, AND A GUESS COSTS IT ONE LOOKUP. Measured before
+// the order changed: a cookie-less status check ran 52 statements and a live one 66, 38 of
+// the first being reads of who the owner is, and a pool of four connections flattened at
+// about 50 requests a second. The bounds on the live requests are bounds rather than
+// exact counts, because they are the engine's business until they stop being small.
+func TestAccessSurfaceCostsWhatItShould(t *testing.T) {
+	rig := bootAccessSurface(t)
+	w := newAccessWorld(t, rig)
+	statements := &accessStatements{}
+	rig.db.AddQueryHook(statements)
+	_, code := w.mint(w.site, "dashboard", "")
+	token := w.open(code)
+	owner := "v1:identity:user:" + w.owner
+	unheld := accessUnheldToken(t)
+
+	for name, act := range map[string]func() *httptest.ResponseRecorder{
+		"a status check with no cookie": func() *httptest.ResponseRecorder { return w.session("") },
+		"a call with no cookie":         func() *httptest.ResponseRecorder { return w.call("", "accessBriefs", nil) },
+		"a leave with no cookie":        func() *httptest.ResponseRecorder { return w.leave("") },
+		"an unlock naming no code": func() *httptest.ResponseRecorder {
+			return w.send(http.MethodPost, "/access/unlock", "{}", "", w.site, owner)
+		},
+		"an unlock with what could not be a code": func() *httptest.ResponseRecorder { return w.unlock("let-me-in") },
+		"a status check with a malformed token":   func() *httptest.ResponseRecorder { return w.session("mql_acs_nope") },
+		"a call with a malformed token":           func() *httptest.ResponseRecorder { return w.call("PLANTED", "accessBriefs", nil) },
+		"a leave with a malformed token":          func() *httptest.ResponseRecorder { return w.leave("PLANTED") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var rec *httptest.ResponseRecorder
+			seen := statements.during(func() { rec = act() })
+			require.Less(t, rec.Code, http.StatusInternalServerError, rec.Body.String())
+			require.Empty(t, seen, "a stranger's request reached the database")
+		})
+	}
+
+	for name, act := range map[string]func() *httptest.ResponseRecorder{
+		"a code nobody minted":         func() *httptest.ResponseRecorder { return w.unlock("00000-00000-00000-00000-00000") },
+		"a status check, nothing held": func() *httptest.ResponseRecorder { return w.session(unheld) },
+		"a call, nothing held":         func() *httptest.ResponseRecorder { return w.call(unheld, "accessBriefs", nil) },
+		"a leave, nothing held":        func() *httptest.ResponseRecorder { return w.leave(unheld) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var rec *httptest.ResponseRecorder
+			seen := statements.during(func() { rec = act() })
+			require.Less(t, rec.Code, http.StatusInternalServerError, rec.Body.String())
+			require.Len(t, seen, 1, "a miss is one lookup: %v", seen)
+			require.NotContains(t, seen[0], "v1:platform:site'", "a miss read the site")
+		})
+	}
+
+	// THE ROW AND ITS LATEST-VERSION CHECK, TWO STATEMENTS PER READ. Unrolled, a status
+	// check is the session, the site and the code, and an unlock is the code, the site and
+	// the write.
+	for name, tc := range map[string]struct {
+		act  func() *httptest.ResponseRecorder
+		most int
+	}{
+		"a live status check": {func() *httptest.ResponseRecorder { return w.session(token) }, 6},
+		"an unlock":           {func() *httptest.ResponseRecorder { return w.unlock(code) }, 8},
+		"a call out of reach": {func() *httptest.ResponseRecorder { return w.call(token, "nobodyDeclaredThis", nil) }, 8},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var rec *httptest.ResponseRecorder
+			seen := statements.during(func() { rec = tc.act() })
+			require.Less(t, rec.Code, http.StatusInternalServerError, rec.Body.String())
+			require.LessOrEqual(t, len(seen), tc.most, "%v", seen)
+		})
+	}
+}
+
+// accessPlanIndexes is every index a statement's plan actually reads through.
+func accessPlanIndexes(t *testing.T, db *bun.DB, statement string) []string {
+	t.Helper()
+	var raw []byte
+	require.NoError(t, db.QueryRowContext(context.Background(), `EXPLAIN (ANALYZE, FORMAT JSON) `+statement).Scan(&raw))
+	var plans []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &plans))
+	var indexes []string
+	var walk func(map[string]any)
+	walk = func(node map[string]any) {
+		if name, ok := node["Index Name"].(string); ok {
+			indexes = append(indexes, name)
+		}
+		children, _ := node["Plans"].([]any)
+		for _, child := range children {
+			walk(child.(map[string]any))
+		}
+	}
+	walk(plans[0]["Plan"].(map[string]any))
+	return indexes
+}
+
+// THE READS REALLY USE THE INDEXES. A lookup index the planner passes over is a full walk
+// of the concept that nothing reports, and this was one: a session lookup read every
+// session row on the cluster, 1.37 s at 300,000 rows, with rows kept for 30 days and one
+// code holder able to write 20 to 120 of them a minute. A chunk's own copy of an index
+// carries its root's name, so the name is matched as a part.
+func TestAccessLookupsReadThroughTheirIndexes(t *testing.T) {
+	rig := bootAccessSurface(t)
+	w := newAccessWorld(t, rig)
+	statements := &accessStatements{}
+	rig.db.AddQueryHook(statements)
+	ctx := context.Background()
+	_, code := w.mint(w.site, "dashboard", "")
+	w.open(code)
+
+	// A FEW THOUSAND ROWS OF SOMEBODY ELSE'S, so the concept's whole range is a real
+	// alternative for the planner to turn down, and statistics to turn it down with.
+	seedID := "as-lookup-seed-" + w.suffix + "-"
+	_, err := rig.db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, concept)
+	  SELECT 'v1:platform:siteAccessSession:'||?||i, now() - (i||' seconds')::interval, 'seed', '{}'::jsonb,
+	    jsonb_build_object('siteId', 'v1:platform:site:'||?, 'codeId', 'v1:platform:siteAccessCode:'||?||(i%50),
+	      'generation', 1, 'ownerUserId', 'seed', 'tokenHash', md5(i::text)||md5(i::text), 'issuedAt', '2026-10-30T00:00:00Z'),
+	    'v1:platform:siteAccessSession'
+	  FROM generate_series(1, 5000) i`, seedID, seedID, seedID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = rig.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:siteAccessSession' AND id LIKE ?`,
+			"v1:platform:siteAccessSession:"+seedID+"%")
+	})
+	_, err = rig.db.ExecContext(ctx, `ANALYZE "MemoryNodes"`)
+	require.NoError(t, err)
+
+	store := siteaccess.NewGraphStore(&AccessEngineAdapter{Engine: rig.eng})
+	for name, tc := range map[string]struct {
+		act          func()
+		field, index string
+	}{
+		"a session by its digest": {
+			act: func() {
+				_, err := store.SessionByTokenHash(ctx, memql.AccessSessionTokenDigest(accessUnheldToken(t)))
+				require.NoError(t, err)
+			},
+			field: "tokenHash", index: "access_tokenhash_lookup",
+		},
+		"a code by its digest": {
+			act: func() {
+				_, err := store.CodeByHash(ctx, w.site, memql.AccessCodeDigest("00000-00000-00000-00000-00000"))
+				require.NoError(t, err)
+			},
+			field: "codeHash", index: "access_codehash_lookup",
+		},
+		"when a code was last opened": {
+			act: func() {
+				rows := w.builtin("siteAccessCodesForSite", map[string]any{"siteId": w.site})
+				require.NotEmpty(t, rows)
+			},
+			field: "codeId", index: "access_codeid_lookup",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var lookup string
+			for _, statement := range statements.during(tc.act) {
+				if strings.Contains(statement, "(payload->>'"+tc.field+"')") {
+					lookup = statement
+					break
+				}
+			}
+			require.NotEmpty(t, lookup, "no statement looked anything up by %s", tc.field)
+			indexes := accessPlanIndexes(t, rig.db, lookup)
+			found := false
+			for _, index := range indexes {
+				found = found || strings.Contains(index, tc.index)
+			}
+			require.True(t, found, "the plan read through %v and not %s", indexes, tc.index)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// through the real edge
+// ---------------------------------------------------------------------------
+
+// accessEdgeResolver answers every host with one site.
+type accessEdgeResolver struct{ site *edge.Site }
+
+func (r accessEdgeResolver) Resolve(context.Context, string) (*edge.Site, error) { return r.site, nil }
+func (r accessEdgeResolver) Invalidate(string)                                   {}
+func (r accessEdgeResolver) InvalidateAll()                                      {}
+
+// A BROWSER ONLY EVER TALKS TO THE EDGE, and everything above skips it by stamping the
+// request itself. This is the whole hop once: the real edge's routing, stamp and cookie
+// rule in front of the real bff, with what a browser holding somebody else's cookies would
+// send. It speaks plain HTTP between the test and the edge, because the TLS a __Host-
+// cookie needs is the ingress's, so what a browser would do with one is not on trial here.
+func TestAVisitThroughTheRealEdge(t *testing.T) {
+	rig := bootAccessSurface(t)
+	w := newAccessWorld(t, rig)
+	_, code := w.mint(w.site, "dashboard", "")
+
+	bff := httptest.NewServer(rig.surface)
+	t.Cleanup(bff.Close)
+	handler := edge.NewHandler(edge.Options{
+		Resolver: accessEdgeResolver{site: &edge.Site{
+			ID: w.site, Hostname: w.site + ".example.test", Kind: "spa", Status: "live",
+			BundleRef: "blob://none", OwnerUserID: "v1:identity:user:" + w.owner,
+		}},
+		Logger:    slog.New(slog.DiscardHandler),
+		APITarget: bff.URL,
+	})
+	site := httptest.NewServer(handler)
+	t.Cleanup(site.Close)
+
+	// WHAT A BROWSER ON THIS ORIGIN SENDS ALONG, whatever the visit is about: a sign-in
+	// cookie, the deployable's own, a bearer a page might add. The bff sees none of them.
+	const passengers = "memql_auth=a-revoked-sign-in; theme=dark"
+	send := func(method, path, body, accessCookie string) *http.Response {
+		t.Helper()
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, site.URL+path, reader)
+		require.NoError(t, err)
+		if method == http.MethodPost {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		cookie := passengers
+		if accessCookie != "" {
+			cookie = passengers + "; " + accessCookie
+		}
+		req.Header.Set("Cookie", cookie)
+		req.Header.Set("Authorization", "Bearer not-a-credential-this-surface-reads")
+		res, err := site.Client().Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = res.Body.Close() })
+		return res
+	}
+	read := func(res *http.Response) string {
+		t.Helper()
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		return string(body)
+	}
+
+	// A stranger first: `none`, no cookie set, and no database.
+	statements := &accessStatements{}
+	rig.db.AddQueryHook(statements)
+	var res *http.Response
+	require.Empty(t, statements.during(func() { res = send(http.MethodGet, "/_memql/access", "", "") }),
+		"a stranger's status check reached the database through the edge")
+	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	require.JSONEq(t, `{"state":"none"}`, read(res))
+	require.Empty(t, res.Header.Values("Set-Cookie"))
+
+	// Unlock.
+	body, err := json.Marshal(map[string]string{"code": code})
+	require.NoError(t, err)
+	res = send(http.MethodPost, "/_memql/access", string(body), "")
+	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
+	match := accessE2ECookie.FindStringSubmatch(res.Header.Get("Set-Cookie"))
+	require.NotNil(t, match, "Set-Cookie = %q", res.Header.Get("Set-Cookie"))
+	cookie := "__Host-memql_access=" + match[1]
+
+	// In, on the cookie alone.
+	res = send(http.MethodGet, "/_memql/access", "", cookie)
+	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
+	require.Empty(t, res.Header.Values("Set-Cookie"))
+
+	// A call and its row.
+	noteID := "as-through-the-edge-" + w.suffix
+	res = send(http.MethodPost, "/_memql/access/call",
+		`{"call":"accessBriefRecord","args":{"noteId":"`+noteID+`","note":"hello"}}`, cookie)
+	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
+	res = send(http.MethodPost, "/_memql/access/call", `{"call":"accessBriefs","args":{}}`, cookie)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	require.Contains(t, read(res), noteID)
+
+	// Leave, which clears it exactly, and it stays ended.
+	res = send(http.MethodPost, "/_memql/access/leave", "", cookie)
+	require.Equal(t, http.StatusNoContent, res.StatusCode, read(res))
+	require.Equal(t, []string{"__Host-memql_access=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict"}, res.Header.Values("Set-Cookie"))
+	res = send(http.MethodGet, "/_memql/access", "", cookie)
+	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	require.JSONEq(t, `{"state":"ended"}`, read(res))
 }

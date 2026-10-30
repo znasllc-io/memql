@@ -67,16 +67,16 @@ func accessFakeSiteRow() map[string]any {
 	}
 }
 
-func TestAccessSiteIsReadFreshUnderTheNamedOwner(t *testing.T) {
+func TestSiteAsOwnerIsReadFreshUnderTheNamedOwner(t *testing.T) {
 	graph := &accessFakeGraph{site: accessFakeSiteRow(), pkg: map[string]any{"dslDomains": []any{"desk", "shared"}}}
-	store := newAccessStore(graph, nil)
+	store := newAccessStore(graph)
 
-	site, err := store.AccessSite(context.Background(), "site1", "v1:identity:user:owner1")
+	site, err := store.SiteAsOwner(context.Background(), "site1", "v1:identity:user:owner1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := &server.AccessSite{
-		ID: "site1", OwnerUserID: "owner1", AccountID: "acct1", DeployableName: "client-desk",
+		ID: "site1", OwnerUserID: "owner1", AccountID: "acct1", PackageID: "pkg1", DeployableName: "client-desk",
 		PackageDomains: []string{"desk", "shared"},
 	}
 	if !reflect.DeepEqual(site, want) {
@@ -104,10 +104,10 @@ func TestAccessSiteIsReadFreshUnderTheNamedOwner(t *testing.T) {
 	}
 }
 
-func TestAccessSiteMisses(t *testing.T) {
+func TestSiteAsOwnerMisses(t *testing.T) {
 	t.Run("a site the owner cannot read", func(t *testing.T) {
 		graph := &accessFakeGraph{}
-		site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
+		site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
 		if err != nil || site != nil {
 			t.Fatalf("site = %+v, err = %v", site, err)
 		}
@@ -126,7 +126,7 @@ func TestAccessSiteMisses(t *testing.T) {
 				row["packageDeployableName"] = value
 			}
 			graph := &accessFakeGraph{site: row, pkg: map[string]any{"dslDomains": []any{"desk"}}}
-			site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
+			site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
 			if err != nil || site == nil {
 				t.Fatalf("site = %+v, err = %v", site, err)
 			}
@@ -144,7 +144,7 @@ func TestAccessSiteMisses(t *testing.T) {
 	for name, tc := range map[string][2]string{"a blank owner": {"site1", "  "}, "a blank site": {"  ", "owner1"}} {
 		t.Run(name, func(t *testing.T) {
 			graph := &accessFakeGraph{site: accessFakeSiteRow()}
-			site, err := newAccessStore(graph, nil).AccessSite(context.Background(), tc[0], tc[1])
+			site, err := newAccessStore(graph).SiteAsOwner(context.Background(), tc[0], tc[1])
 			if err != nil || site != nil || len(graph.reads) != 0 {
 				t.Fatalf("site = %+v, err = %v, reads = %+v", site, err, graph.reads)
 			}
@@ -154,54 +154,111 @@ func TestAccessSiteMisses(t *testing.T) {
 	t.Run("a failed read of the site is an error and not a miss", func(t *testing.T) {
 		failure := errors.New("the site read failed")
 		graph := &accessFakeGraph{siteErr: failure}
-		site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
+		site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
 		if site != nil || !errors.Is(err, failure) {
 			t.Fatalf("site = %+v, err = %v", site, err)
 		}
 	})
 }
 
-// DISCARDING THE ERROR WOULD OPEN NOTHING, since an empty list misses, and it would
-// leave a closed gate with nothing anywhere saying why.
-func TestAFailedPackageReadIsLoggedAndOpensNothing(t *testing.T) {
-	var logs bytes.Buffer
-	graph := &accessFakeGraph{site: accessFakeSiteRow(), pkgErr: errors.New("the package read failed")}
-	store := newAccessStore(graph, slog.New(slog.NewTextHandler(&logs, nil)))
+// A FAILED READ IS AN ERROR AND NEVER LOOKS LIKE A MISS. This read is made on the way to a
+// construct and nothing else in the request is left to answer, so the handler refuses the
+// call with a retryable 502 rather than saying a package has no domains, which would be a
+// 404 that says nothing about why.
+func TestAFailedPackageReadUnderTheOwnerIsAnError(t *testing.T) {
+	failure := errors.New("the package read failed")
+	graph := &accessFakeGraph{site: accessFakeSiteRow(), pkgErr: failure}
 
-	site, err := store.AccessSite(context.Background(), "site1", "owner1")
-	if err != nil {
-		t.Fatalf("err = %v: the rest of the request can still be answered", err)
-	}
-	if site == nil || len(site.PackageDomains) != 0 {
-		t.Fatalf("site = %+v, want a site with no domains", site)
-	}
-	for _, want := range []string{"the package read failed", "site1", "pkg1"} {
-		if !strings.Contains(logs.String(), want) {
-			t.Fatalf("the log does not say %q: %s", want, logs.String())
-		}
+	site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
+
+	if site != nil || !errors.Is(err, failure) {
+		t.Fatalf("site = %+v, err = %v", site, err)
 	}
 }
 
-func TestAccessSiteWithNoPackageOrNoListHasNoDomains(t *testing.T) {
+// THE READS THAT DECIDE MOST REQUESTS ARE THE CLUSTER'S, one point read each, and what
+// they cost a status check is the difference between a poll and a load problem. They go
+// through integrations/siteaccess, which is allowed to stamp internal origin and this
+// package is not, and they say nothing about who may do what: the handler compares.
+func TestSiteAndPackageAreReadFreshAsTheCluster(t *testing.T) {
+	t.Run("the site", func(t *testing.T) {
+		graph := &accessFakeGraph{site: accessFakeSiteRow()}
+		site, err := newAccessStore(graph).SiteAsCluster(context.Background(), "site1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := &server.AccessSite{
+			ID: "site1", OwnerUserID: "owner1", AccountID: "acct1", PackageID: "pkg1", DeployableName: "client-desk",
+		}
+		if !reflect.DeepEqual(site, want) {
+			t.Fatalf("site = %+v, want %+v", site, want)
+		}
+		if len(graph.reads) != 1 {
+			t.Fatalf("reads = %+v, want the site and nothing else", graph.reads)
+		}
+		read := graph.reads[0]
+		if !strings.Contains(read.query, `query siteById(siteId: "site1")`) {
+			t.Fatalf("read = %s", read.query)
+		}
+		if !auth.IsSystemActorId(read.actor) || read.origin != auth.OriginInternal || !read.fresh {
+			t.Fatalf("read = %+v, want a fresh read as the cluster acting", read)
+		}
+	})
+
+	t.Run("the package", func(t *testing.T) {
+		graph := &accessFakeGraph{pkg: map[string]any{"dslDomains": []any{"desk", "shared"}}}
+		domains, err := newAccessStore(graph).PackageDomainsAsCluster(context.Background(), "pkg1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"desk", "shared"}; !reflect.DeepEqual(domains, want) {
+			t.Fatalf("domains = %v, want %v", domains, want)
+		}
+		if len(graph.reads) != 1 {
+			t.Fatalf("reads = %+v", graph.reads)
+		}
+		read := graph.reads[0]
+		if !strings.Contains(read.query, `packageId: "pkg1"`) {
+			t.Fatalf("read = %s", read.query)
+		}
+		if !auth.IsSystemActorId(read.actor) || read.origin != auth.OriginInternal || !read.fresh {
+			t.Fatalf("read = %+v, want a fresh read as the cluster acting", read)
+		}
+	})
+
+	t.Run("a site with no row is a miss, and a failed read is not", func(t *testing.T) {
+		site, err := newAccessStore(&accessFakeGraph{}).SiteAsCluster(context.Background(), "site1")
+		if err != nil || site != nil {
+			t.Fatalf("site = %+v, err = %v", site, err)
+		}
+		failure := errors.New("the site read failed")
+		site, err = newAccessStore(&accessFakeGraph{siteErr: failure}).SiteAsCluster(context.Background(), "site1")
+		if site != nil || !errors.Is(err, failure) {
+			t.Fatalf("site = %+v, err = %v", site, err)
+		}
+	})
+}
+
+func TestSiteAsOwnerWithNoPackageOrNoListHasNoDomains(t *testing.T) {
 	t.Run("a site with no package id", func(t *testing.T) {
 		row := accessFakeSiteRow()
 		delete(row, "packageId")
 		graph := &accessFakeGraph{site: row}
-		site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
+		site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
 		if err != nil || site == nil || len(site.PackageDomains) != 0 || len(graph.reads) != 1 {
 			t.Fatalf("site = %+v, err = %v, reads = %+v", site, err, graph.reads)
 		}
 	})
 	t.Run("a package the owner cannot read", func(t *testing.T) {
 		graph := &accessFakeGraph{site: accessFakeSiteRow()}
-		site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
+		site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
 		if err != nil || site == nil || len(site.PackageDomains) != 0 {
 			t.Fatalf("site = %+v, err = %v", site, err)
 		}
 	})
 	t.Run("a package with no list", func(t *testing.T) {
 		graph := &accessFakeGraph{site: accessFakeSiteRow(), pkg: map[string]any{"name": "x"}}
-		site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
+		site, err := newAccessStore(graph).SiteAsOwner(context.Background(), "site1", "owner1")
 		if err != nil || site == nil || len(site.PackageDomains) != 0 {
 			t.Fatalf("site = %+v, err = %v", site, err)
 		}

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -33,7 +32,7 @@ import (
 
 func (a *App) mountAccessSurface() {
 	engine := &AccessEngineAdapter{Engine: a.engine}
-	handler := server.NewAccessHandler(engine, newAccessStore(engine, a.Logger), a.Logger, time.Now)
+	handler := server.NewAccessHandler(engine, newAccessStore(engine), a.Logger, time.Now)
 	for _, path := range server.AccessSurfacePaths() {
 		// Both methods on the one base: the handler decides which is legal for which, so
 		// a GET to /access/unlock is a 404 from the handler rather than a 405 from the
@@ -59,48 +58,65 @@ func (a *AccessEngineAdapter) Execute(ctx context.Context, query string) (any, e
 
 // accessStore is the graph, in the handler's terms.
 //
-// The code and session rows go through integrations/siteaccess, which reads and updates
-// them as the cluster acting, with its own internal origin: component/server may not
-// stamp one and may not import integrations/, those rows answer nothing to a client
-// (D14), and a row's current owner must not decide whether a code opens. Its errors are
-// scrubbed of digests before they get here, which is what AccessStore asks of them.
+// Everything but one read goes through integrations/siteaccess, which reads and updates
+// the rows as the cluster acting, with its own internal origin: component/server may not
+// stamp one and may not import integrations/, code and session rows answer nothing to a
+// client (D14), and a row's current owner must not decide whether a code opens. Its
+// errors are scrubbed of digests before they get here, which is what AccessStore asks of
+// them.
 //
-// The site and its package are read here, UNSTAMPED, under the named owner, and that is
-// the difference between the two halves. A read as that person is what admits a real
-// owner and turns away a stranger, and the handler then compares the stamp with the
-// row, because the tier also admits a member of the organization.
+// The read under the owner is made here, UNSTAMPED, and that is the difference between
+// the two halves. A read as that person is what says they can still see what a call is
+// about to lend, and it costs what resolving them costs, so the handler asks it only just
+// before a construct runs.
 type accessStore struct {
 	engine server.MemQLExecutor
 	graph  *siteaccess.GraphStore
-	logger *slog.Logger
 }
 
-func newAccessStore(engine server.MemQLExecutor, logger *slog.Logger) *accessStore {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &accessStore{engine: engine, graph: siteaccess.NewGraphStore(engine), logger: logger}
+func newAccessStore(engine server.MemQLExecutor) *accessStore {
+	return &accessStore{engine: engine, graph: siteaccess.NewGraphStore(engine)}
 }
 
 var _ server.AccessStore = (*accessStore)(nil)
 
-// AccessSite resolves a site UNDER the named owner's own actor, as shopperSiteReader
+// SiteAsCluster is the site as the cluster reads it. A conversion rather than a copy
+// field by field, so a field added to one side and not the other stops this compiling,
+// with the one field only the read under the owner fills left empty.
+func (s *accessStore) SiteAsCluster(ctx context.Context, siteID string) (*server.AccessSite, error) {
+	site, err := s.graph.SiteForAccess(ctx, siteID)
+	if site == nil {
+		return nil, err
+	}
+	return &server.AccessSite{
+		ID: site.ID, OwnerUserID: site.OwnerUserID, AccountID: site.AccountID,
+		PackageID: site.PackageID, DeployableName: site.DeployableName,
+	}, err
+}
+
+// PackageDomainsAsCluster is the DSL domains a package ships, as the cluster reads them.
+func (s *accessStore) PackageDomainsAsCluster(ctx context.Context, packageID string) ([]string, error) {
+	return s.graph.PackageDomainsForAccess(ctx, packageID)
+}
+
+// SiteAsOwner resolves a site UNDER the named owner's own actor, as shopperSiteReader
 // does. A miss is (nil, nil). A site with no package deployable is not one: it was read,
-// it has no gates to open, and it comes back with a blank name for the handler to refuse,
-// because a miss is what the handler tells an operator is a site its owner cannot read.
+// it has no gates to open, and it comes back with a blank name.
 //
 // FRESH, both reads, because nothing in the access decision is cached (D11). siteById
 // and packageById are ordinary cached reads, and the handler compares what comes back:
 // a move of the site's organization, a change of owner, or a package's domains changing
-// on a deploy has to count from the next request, not from when the entry ages out.
-func (s *accessStore) AccessSite(ctx context.Context, siteID, owner string) (*server.AccessSite, error) {
+// on a deploy has to count from the next request, not from when the entry ages out. THE
+// ROWS AND NOTHING ELSE, for the reason on the store's own reads: what the owner's
+// authority costs is who they are, and what the row is related to adds nothing to that.
+func (s *accessStore) SiteAsOwner(ctx context.Context, siteID, owner string) (*server.AccessSite, error) {
 	siteID, owner = strings.TrimSpace(siteID), memql.BareShortId(owner)
 	if siteID == "" || owner == "" {
 		return nil, nil
 	}
 	// A blank owner returns ctx unchanged from ContextWithUserActor, which is why it was
 	// refused above: this read must never run as whoever the request happened to be.
-	asOwner := memql.ContextWithFreshRead(auth.ContextWithUserActor(ctx, owner))
+	asOwner := memql.ContextWithRootsOnlyRead(memql.ContextWithFreshRead(auth.ContextWithUserActor(ctx, owner)))
 	rows, err := s.read(asOwner, "siteById", map[string]any{"siteId": siteID})
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -111,39 +127,33 @@ func (s *accessStore) AccessSite(ctx context.Context, siteID, owner string) (*se
 		ID:             accessBareField(row, "id"),
 		OwnerUserID:    accessBareField(row, "ownerUserId"),
 		AccountID:      accessBareField(row, "accountId"),
+		PackageID:      accessBareField(row, "packageId"),
 		DeployableName: strings.TrimSpace(deployable),
 	}
 	if site.DeployableName != "" {
-		site.PackageDomains = s.packageDomains(asOwner, site.ID, accessBareField(row, "packageId"))
+		if site.PackageDomains, err = s.packageDomains(asOwner, site.PackageID); err != nil {
+			return nil, err
+		}
 	}
 	return site, nil
 }
 
-// packageDomains reads the DSL domains a site's package ships.
+// packageDomains reads the DSL domains a site's package ships, under whoever asOwner is.
 //
-// A FAILED READ IS LOGGED AND READS AS NO DOMAINS. It opens nothing, since an empty
-// list reaches no gate, and the rest of the request can still be answered: a visitor
-// already inside is told they are inside and their calls 404 for the moment, rather
-// than every poll failing over a read most of them do not need. Discarding the error
-// silently would be a closed gate with nothing anywhere saying why.
-//
-// A package the owner cannot read and one with no list are the same answer, and neither
-// is logged: a source no deploy has written a list for is an ordinary state, it would be
-// said once per request, and the OS's gate list is where an operator sees it.
-func (s *accessStore) packageDomains(asOwner context.Context, siteID, packageID string) []string {
+// A package the owner cannot read and one with no list are the same answer, no domains,
+// which reaches no gate: the handler has already seen the list as the cluster, so here it
+// means the owner cannot see it. A failed read is an error, and the handler refuses the
+// call: this read is only made on the way to a construct, so there is nothing else in
+// the request left to answer.
+func (s *accessStore) packageDomains(asOwner context.Context, packageID string) ([]string, error) {
 	if packageID == "" {
-		return nil
+		return nil, nil
 	}
 	rows, err := s.read(asOwner, "packageById", map[string]any{"packageId": packageID})
-	if err != nil {
-		s.logger.Warn("access surface: reading the site's package failed, so its gates stay closed for this request",
-			"component", "server", "site", siteID, "package", packageID, "err", err)
-		return nil
+	if err != nil || len(rows) == 0 {
+		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil
-	}
-	return accessStringList(rows[0]["dslDomains"])
+	return accessStringList(rows[0]["dslDomains"]), nil
 }
 
 // read runs one named query. The arguments here are ids and nothing else, so an error

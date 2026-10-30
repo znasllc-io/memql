@@ -39,6 +39,7 @@ const (
 	accessTestSite       = "site1"
 	accessTestOtherSite  = "site2"
 	accessTestAccount    = "acct1"
+	accessTestPackage    = "pkg1"
 	accessTestDeployable = "client-desk"
 	accessTestDomain     = "desk"
 	accessTestCode       = "K7Q4M-2XPDN-8RT3V-WJ6HC-9F01A"
@@ -65,10 +66,14 @@ var accessT0 = time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 // fake that kept a tier for these rows would hide that.
 type accessFakeStore struct {
 	site *AccessSite
-	// admits is who the composite tier lets read the site. The owner, and a member
-	// of its organization through the account arm, which is the whole reason the
-	// handler compares the stamp with the row.
+	// admits is who the composite tier lets read the site UNDER THEIR OWN ACTOR. The
+	// owner, and a member of its organization through the account arm. It decides only
+	// the read a gated call makes before it runs; the handler's comparison of the stamp
+	// with the row is what stands in front of everything else.
 	admits map[string]bool
+	// ownerCannotReadPackage models a package the site's owner has no access to: the
+	// read under the owner finds the site and no list.
+	ownerCannotReadPackage bool
 	// answersAnySite makes the read of the site hand back its row whatever id it was
 	// asked for, for the handler's comparison of the row with the stamp.
 	answersAnySite bool
@@ -104,14 +109,41 @@ func (f *accessFakeStore) called(name string) int {
 	return n
 }
 
-func (f *accessFakeStore) AccessSite(_ context.Context, siteID, owner string) (*AccessSite, error) {
-	if err := f.note("AccessSite"); err != nil {
+// SiteAsCluster answers whoever asks, as the real one does. Its row carries no list of
+// domains, so a handler that used one from here would find it empty.
+func (f *accessFakeStore) SiteAsCluster(_ context.Context, siteID string) (*AccessSite, error) {
+	if err := f.note("SiteAsCluster"); err != nil {
+		return nil, err
+	}
+	if f.site == nil || (f.site.ID != siteID && !f.answersAnySite) {
+		return nil, nil
+	}
+	site := *f.site
+	site.PackageDomains = nil
+	return &site, nil
+}
+
+func (f *accessFakeStore) PackageDomainsAsCluster(_ context.Context, packageID string) ([]string, error) {
+	if err := f.note("PackageDomainsAsCluster"); err != nil {
+		return nil, err
+	}
+	if f.site == nil || f.site.PackageID != packageID {
+		return nil, nil
+	}
+	return f.site.PackageDomains, nil
+}
+
+func (f *accessFakeStore) SiteAsOwner(_ context.Context, siteID, owner string) (*AccessSite, error) {
+	if err := f.note("SiteAsOwner"); err != nil {
 		return nil, err
 	}
 	if f.site == nil || (f.site.ID != siteID && !f.answersAnySite) || !f.admits[owner] {
 		return nil, nil
 	}
 	site := *f.site
+	if f.ownerCannotReadPackage {
+		site.PackageDomains = nil
+	}
 	return &site, nil
 }
 
@@ -266,7 +298,7 @@ func newAccessRig(t *testing.T) *accessRig {
 	)
 	store := &accessFakeStore{
 		site: &AccessSite{ID: accessTestSite, OwnerUserID: accessTestOwner, AccountID: accessTestAccount,
-			DeployableName: accessTestDeployable, PackageDomains: []string{accessTestDomain}},
+			PackageID: accessTestPackage, DeployableName: accessTestDeployable, PackageDomains: []string{accessTestDomain}},
 		admits:   map[string]bool{accessTestOwner: true, accessTestMember: true},
 		codes:    map[string]*AccessCode{},
 		digests:  map[string]string{},
@@ -302,6 +334,29 @@ func (r *accessRig) send(method, path, body, token string) *httptest.ResponseRec
 	rec := httptest.NewRecorder()
 	r.h.ServeHTTP(rec, req)
 	return rec
+}
+
+// sendCookieHeader is one request carrying this Cookie header exactly as written.
+func (r *accessRig) sendCookieHeader(method, path, body, header string) *httptest.ResponseRecorder {
+	r.t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range r.stamp {
+		req.Header.Set(key, value)
+	}
+	req.Header.Set("Cookie", header)
+	rec := httptest.NewRecorder()
+	r.h.ServeHTTP(rec, req)
+	return rec
+}
+
+// costOf is the reads and writes one act made, in the order it made them, and nothing
+// from before it.
+func (r *accessRig) costOf(act func()) []string {
+	r.t.Helper()
+	before := len(r.store.calls)
+	act()
+	return append([]string{}, r.store.calls[before:]...)
 }
 
 func (r *accessRig) unlock(code string) *httptest.ResponseRecorder {
@@ -342,7 +397,7 @@ func (r *accessRig) open() string {
 	return accessTokenFrom(r.t, rec)
 }
 
-var accessCookiePattern = regexp.MustCompile(`^memql_access=(mql_acs_[A-Za-z0-9_-]{43}); Path=/_memql/access; HttpOnly; Secure; SameSite=Strict$`)
+var accessCookiePattern = regexp.MustCompile(`^__Host-memql_access=(mql_acs_[A-Za-z0-9_-]{43}); Path=/; HttpOnly; Secure; SameSite=Strict$`)
 
 func accessTokenFrom(t *testing.T, rec *httptest.ResponseRecorder) string {
 	t.Helper()
@@ -356,13 +411,13 @@ func accessTokenFrom(t *testing.T, rec *httptest.ResponseRecorder) string {
 
 func assertAccessCookieCleared(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	raw := rec.Header().Get("Set-Cookie")
-	// The same Path, because a browser only overwrites the cookie it was given, and
-	// the same attributes, because it refuses a clear that is weaker than the cookie.
-	for _, want := range []string{"memql_access=;", "Path=/_memql/access", "Max-Age=0", "HttpOnly", "Secure", "SameSite=Strict"} {
-		if !strings.Contains(raw, want) {
-			t.Fatalf("Set-Cookie = %q, which does not clear the cookie: missing %q", raw, want)
-		}
+	// EXACTLY, and not by the words it holds. A browser only overwrites the cookie it was
+	// given, so the Path has to match, and it refuses a __Host- cookie with any other
+	// Path, with a Domain or without Secure, so a clear that was almost right would leave
+	// the cookie where it is with nothing anywhere saying so.
+	const want = "__Host-memql_access=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict"
+	if got := rec.Header().Values("Set-Cookie"); len(got) != 1 || got[0] != want {
+		t.Fatalf("Set-Cookie = %q, want exactly [%s]", got, want)
 	}
 }
 
@@ -868,11 +923,21 @@ func TestLeaveIsIdempotent(t *testing.T) {
 
 	t.Run("a cookie with no row", func(t *testing.T) {
 		rig := newAccessRig(t)
-		rec := rig.leave("mql_acs_nothing")
+		rec := rig.leave(accessUnheldToken(t))
 		assertAccessReply(t, rec, http.StatusNoContent, "")
 		assertAccessCookieCleared(t, rec)
 		if len(rig.store.ended) != 0 {
 			t.Fatalf("ended %v", rig.store.ended)
+		}
+	})
+
+	t.Run("a cookie that could not be a token", func(t *testing.T) {
+		rig := newAccessRig(t)
+		rec := rig.leave("mql_acs_nothing")
+		assertAccessReply(t, rec, http.StatusNoContent, "")
+		assertAccessCookieCleared(t, rec)
+		if len(rig.store.calls) != 0 {
+			t.Fatalf("store calls = %v", rig.store.calls)
 		}
 	})
 
@@ -903,7 +968,10 @@ func TestNoCookieAnswersNone(t *testing.T) {
 			rig := newAccessRig(t)
 			rec := rig.session(token)
 			assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"none"}`)
-			assertAccessCookieCleared(t, rec)
+			// NOTHING TO CLEAR, AND THE BROWSER MAY WELL HOLD ONE. A cross-site navigation
+			// to this path arrives without the cookie under SameSite=Strict, so a clear
+			// here would delete the real session of whoever followed the link.
+			assertNoAccessCookie(t, rec)
 			for _, leaked := range []string{"dashboard", accessTestDeployable, accessTestSubject, accessTestCodeID} {
 				if strings.Contains(rec.Body.String(), leaked) {
 					t.Fatalf("a stranger learned %q: %s", leaked, rec.Body.String())
@@ -1619,7 +1687,7 @@ func TestRepliesAreNoStore(t *testing.T) {
 	replies["unlock 401"] = rig.unlock("00000-00000-00000-00000-00000")
 	replies["session 200"] = rig.session(token)
 	replies["session none"] = rig.session("")
-	replies["session ended"] = rig.session("mql_acs_nothing")
+	replies["session ended"] = rig.session(accessUnheldToken(t))
 	replies["call 200"] = rig.call(token, "deskBriefs", nil)
 	replies["call 400"] = rig.call(token, "deskBriefs", map[string]any{"bogus": 1})
 	replies["call 404"] = rig.call(token, "nobodyDeclaredThis", nil)
@@ -1670,7 +1738,7 @@ func TestUnstampedRequestIs404(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			rig := newAccessRig(t)
 			rig.stamp = stamp
-			for _, rec := range accessEveryOperation(rig, "mql_acs_whatever") {
+			for _, rec := range accessEveryOperation(rig, accessUnheldToken(t)) {
 				assertAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
 				assertNoAccessCookie(t, rec)
 			}
@@ -1681,45 +1749,53 @@ func TestUnstampedRequestIs404(t *testing.T) {
 	}
 }
 
+// accessOnlyFindsTheCredentialAndTheSite is what a request whose stamp does not check out
+// may read: the digest it presented, and the site that turned it away.
+func accessOnlyFindsTheCredentialAndTheSite(t *testing.T, cost []string) {
+	t.Helper()
+	for _, call := range cost {
+		switch call {
+		case "CodeByHash", "SessionByTokenHash", "SiteAsCluster":
+		default:
+			t.Fatalf("a stamp that does not check out went on to %s: %v", call, cost)
+		}
+	}
+}
+
 func TestForgedOwnerReadsNothing(t *testing.T) {
-	t.Run("a stranger reads zero rows", func(t *testing.T) {
+	t.Run("a stranger reads nothing past the row that turns him away", func(t *testing.T) {
 		rig := newAccessRig(t)
 		token := rig.open()
-		before := len(rig.store.calls)
 		rig.stamp[AccessStampOwnerHeader] = "user-stranger"
-		for op, rec := range accessEveryOperation(rig, token) {
+		var replies map[string]*httptest.ResponseRecorder
+		cost := rig.costOf(func() { replies = accessEveryOperation(rig, token) })
+		for op, rec := range replies {
 			t.Run(op, func(t *testing.T) {
 				assertAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
 				assertNoAccessCookie(t, rec)
 			})
 		}
-		for _, call := range rig.store.calls[before:] {
-			if call != "AccessSite" {
-				t.Fatalf("a stranger's request read %s", call)
-			}
-		}
+		accessOnlyFindsTheCredentialAndTheSite(t, cost)
 	})
 
-	// THE TIER'S ACCOUNT ARM ADMITS HIM, so "the read returned a row" says nothing, and
-	// past this comparison nothing asks who he is: the codes and sessions are read as the
-	// cluster. It is the check on the owner, and there is no other.
+	// THE ROW COMES BACK WHOEVER ASKS, since it is read as the cluster, so "the read
+	// returned a row" says nothing, and past this comparison nothing asks who he is: the
+	// codes and sessions are read as the cluster too. It is the check on the owner, and
+	// there is no other until a call reads the site under the row's own owner.
 	t.Run("a member of the site's organization reads the row and is refused anyway", func(t *testing.T) {
 		rig := newAccessRig(t)
 		token := rig.open()
-		before := len(rig.store.calls)
 		rig.stamp[AccessStampOwnerHeader] = accessTestMember
 		sessions := len(rig.store.created)
-		for op, rec := range accessEveryOperation(rig, token) {
+		var replies map[string]*httptest.ResponseRecorder
+		cost := rig.costOf(func() { replies = accessEveryOperation(rig, token) })
+		for op, rec := range replies {
 			t.Run(op, func(t *testing.T) {
 				assertAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
 				assertNoAccessCookie(t, rec)
 			})
 		}
-		for _, call := range rig.store.calls[before:] {
-			if call != "AccessSite" {
-				t.Fatalf("a forged owner's request read %s", call)
-			}
-		}
+		accessOnlyFindsTheCredentialAndTheSite(t, cost)
 		if len(rig.engine.calls) != 0 {
 			t.Fatalf("a forged owner reached the engine: %v", rig.engine.calls)
 		}
@@ -1744,31 +1820,37 @@ func TestForgedOwnerReadsNothing(t *testing.T) {
 	// would move what all of those comparisons mean.
 	t.Run("a read that answers with another site's row is refused", func(t *testing.T) {
 		rig := newAccessRig(t)
+		token := rig.open()
 		rig.store.answersAnySite = true
 		rig.stamp[AccessStampSiteHeader] = accessTestOtherSite
-		before := len(rig.store.calls)
-		for op, rec := range accessEveryOperation(rig, "mql_acs_whatever") {
+		// Both rows name the stamped site, so it is the row of the site that refuses.
+		rig.store.sessions[memql.AccessSessionTokenDigest(token)].SiteID = accessTestOtherSite
+		var replies map[string]*httptest.ResponseRecorder
+		cost := rig.costOf(func() { replies = accessEveryOperation(rig, token) })
+		for op, rec := range replies {
 			t.Run(op, func(t *testing.T) {
 				assertAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
 			})
 		}
-		for _, call := range rig.store.calls[before:] {
-			if call != "AccessSite" {
-				t.Fatalf("a row that is not the stamped site went on to read %s", call)
-			}
-		}
+		accessOnlyFindsTheCredentialAndTheSite(t, cost)
 	})
 
 	// The edge stamps the site bare and the owner as the row spells it, which is canonical,
 	// and neither spelling is what makes a stamp good or bad.
 	t.Run("a canonical spelling of the right site and owner is the right site and owner", func(t *testing.T) {
 		rig := newAccessRig(t)
-		rig.store.answersAnySite = true
 		canonicalOwner := "v1:identity:user:" + accessTestOwner
-		rig.store.admits[canonicalOwner] = true
 		rig.stamp[AccessStampSiteHeader] = "v1:platform:site:" + accessTestSite
 		rig.stamp[AccessStampOwnerHeader] = canonicalOwner
-		if rec := rig.unlock(accessTestCode); rec.Code != http.StatusOK {
+		rec := rig.unlock(accessTestCode)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+		token := accessTokenFrom(t, rec)
+		if rec := rig.session(token); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+		if rec := rig.call(token, "deskBriefs", nil); rec.Code != http.StatusOK {
 			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 		}
 	})
@@ -1786,18 +1868,17 @@ func TestForgedOwnerReadsNothing(t *testing.T) {
 	})
 }
 
-// A SITE WHOSE OWNER WAS REMOVED FROM ITS ORGANIZATION reads as zero rows under that
-// owner, so all its codes answer 404. That fails closed and stays that way, and the 404
-// has to stay the one a stranger gets, but an operator has to be able to see why a site's
-// codes stopped working, and without this line nothing anywhere says so.
+// A STAMP THAT DOES NOT CHECK OUT is the one 404, and an operator has to be able to see
+// why, because the reply never will. It takes a credential that found a row to get this
+// far, so nothing a stranger sends can drive this line.
 func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 	for name, tc := range map[string]struct {
 		arrange func(*accessRig)
 		reason  string
 	}{
-		"the stamped owner cannot read the site, as one removed from its organization cannot": {
-			arrange: func(r *accessRig) { r.store.admits = map[string]bool{} },
-			reason:  "the stamped owner cannot read this site",
+		"the stamp names a site that has no row": {
+			arrange: func(r *accessRig) { r.store.site = nil },
+			reason:  "the stamped site has no row",
 		},
 		"the site is read but the stamp does not name its owner": {
 			arrange: func(r *accessRig) { r.stamp[AccessStampOwnerHeader] = accessTestMember },
@@ -1812,7 +1893,7 @@ func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 
 			const visitorWrote = "something-only-the-visitor-sent"
 			for op, rec := range map[string]*httptest.ResponseRecorder{
-				"unlock":  rig.unlock(visitorWrote),
+				"unlock":  rig.unlock(accessTestCode),
 				"session": rig.session(token),
 				"leave":   rig.leave(token),
 				"call":    rig.call(token, visitorWrote, map[string]any{"window": visitorWrote}),
@@ -1834,6 +1915,8 @@ func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 			}
 			for what, secret := range map[string]string{
 				"what the visitor sent": visitorWrote,
+				"the code":              accessTestCode,
+				"the code's digest":     memql.AccessCodeDigest(accessTestCode),
 				"the token":             token,
 				"the stamped owner":     accessTestMember,
 				"the token's digest":    memql.AccessSessionTokenDigest(token),
@@ -1850,8 +1933,10 @@ func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 	// about those would learn to read past the one that matters.
 	t.Run("a site with no package deployable says nothing", func(t *testing.T) {
 		rig := newAccessRig(t)
+		token := rig.open()
+		rig.logs.Reset()
 		rig.store.site.DeployableName = ""
-		assertAccessReply(t, rig.session(""), http.StatusNotFound, `{"error":"not_found"}`)
+		assertAccessReply(t, rig.session(token), http.StatusNotFound, `{"error":"not_found"}`)
 		if logged := rig.logs.String(); logged != "" {
 			t.Fatalf("logged:\n%s", logged)
 		}
@@ -1863,6 +1948,442 @@ func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 		assertAccessReply(t, rig.session(""), http.StatusNotFound, `{"error":"not_found"}`)
 		if logged := rig.logs.String(); logged != "" {
 			t.Fatalf("logged:\n%s", logged)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// what a request costs
+// ---------------------------------------------------------------------------
+
+// accessUnheldToken is a token of the right shape that no session holds, so what it
+// costs is a lookup that misses.
+func accessUnheldToken(t *testing.T) string {
+	t.Helper()
+	token, _, err := memql.MintAccessSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+// A STRANGER COSTS NOTHING. Anybody on the internet can send these four, and the budget
+// is 600 a minute per (site, address) on each edge replica. Measured before this order: a
+// cookie-less status check ran 52 statements, because the handler resolved the site under
+// the owner's authority before anything else, and a pool of four connections flattened at
+// about 50 requests a second.
+func TestAStrangerCostsNoReads(t *testing.T) {
+	for name, tc := range map[string]struct {
+		send   func(*accessRig) *httptest.ResponseRecorder
+		status int
+		body   string
+		clears bool
+	}{
+		"a status check with no cookie": {
+			send:   func(r *accessRig) *httptest.ResponseRecorder { return r.session("") },
+			status: http.StatusUnauthorized, body: `{"state":"none"}`,
+		},
+		"a status check with a blank cookie": {
+			send:   func(r *accessRig) *httptest.ResponseRecorder { return r.session(" ") },
+			status: http.StatusUnauthorized, body: `{"state":"none"}`,
+		},
+		"a status check with only somebody else's cookies": {
+			send: func(r *accessRig) *httptest.ResponseRecorder {
+				return r.sendCookieHeader(http.MethodGet, "/access/session", "", "theme=dark; memql_access="+accessUnheldToken(r.t))
+			},
+			status: http.StatusUnauthorized, body: `{"state":"none"}`,
+		},
+		"a call with no cookie": {
+			send:   func(r *accessRig) *httptest.ResponseRecorder { return r.call("", "deskBriefs", nil) },
+			status: http.StatusUnauthorized, body: `{"state":"ended"}`, clears: true,
+		},
+		"a leave with no cookie": {
+			send:   func(r *accessRig) *httptest.ResponseRecorder { return r.leave("") },
+			status: http.StatusNoContent, clears: true,
+		},
+		"an unlock with nothing in the body": {
+			send: func(r *accessRig) *httptest.ResponseRecorder {
+				return r.send(http.MethodPost, "/access/unlock", "", "")
+			},
+			status: http.StatusUnauthorized, body: `{"state":"invalid"}`,
+		},
+		"an unlock naming no code": {
+			send: func(r *accessRig) *httptest.ResponseRecorder {
+				return r.send(http.MethodPost, "/access/unlock", "{}", "")
+			},
+			status: http.StatusUnauthorized, body: `{"state":"invalid"}`,
+		},
+		"an unlock with a blank code": {
+			send:   func(r *accessRig) *httptest.ResponseRecorder { return r.unlock("  -  - ") },
+			status: http.StatusUnauthorized, body: `{"state":"invalid"}`,
+		},
+		"an unlock with what could not be a code": {
+			send:   func(r *accessRig) *httptest.ResponseRecorder { return r.unlock("let-me-in") },
+			status: http.StatusUnauthorized, body: `{"state":"invalid"}`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			rec := tc.send(rig)
+			assertAccessReply(t, rec, tc.status, tc.body)
+			if tc.clears {
+				assertAccessCookieCleared(t, rec)
+			} else {
+				assertNoAccessCookie(t, rec)
+			}
+			if len(rig.store.calls) != 0 || len(rig.engine.calls) != 0 {
+				t.Fatalf("a stranger reached store %v, engine %v", rig.store.calls, rig.engine.calls)
+			}
+		})
+	}
+}
+
+// THE COOKIE IS THE CALLER'S TO WRITE, so one that could not be a token is a miss the
+// handler can answer by looking at it. It is answered as a miss, identically to the byte,
+// so nothing tells a visitor whether their guess was the wrong shape or just wrong.
+func TestAMalformedTokenCostsNoReads(t *testing.T) {
+	body43 := strings.Repeat("A", 43)
+	for name, token := range map[string]string{
+		"nothing after the prefix": "mql_acs_",
+		"a character short":        "mql_acs_" + body43[:42],
+		"a character long":         "mql_acs_" + body43 + "A",
+		"no prefix":                body43 + "AAAAAAAA",
+		"another family's prefix":  "mql_prv_" + body43,
+		"a character outside":      "mql_acs_" + body43[:42] + "!",
+		"planted":                  "PLANTED",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+
+			rec := rig.session(token)
+			assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+			assertAccessCookieCleared(t, rec)
+
+			rec = rig.call(token, "deskBriefs", nil)
+			assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+			assertAccessCookieCleared(t, rec)
+
+			rec = rig.leave(token)
+			assertAccessReply(t, rec, http.StatusNoContent, "")
+			assertAccessCookieCleared(t, rec)
+
+			if len(rig.store.calls) != 0 || len(rig.engine.calls) != 0 {
+				t.Fatalf("a malformed token reached store %v, engine %v", rig.store.calls, rig.engine.calls)
+			}
+		})
+	}
+}
+
+// A MISS IS ONE READ OF THE DIGEST AND NOTHING ELSE. No site, no code, and no write:
+// guessing is what somebody who is not a visitor does, and it must not cost more than
+// the lookup that says no.
+func TestAMissIsOneDigestReadAndNoSiteRead(t *testing.T) {
+	t.Run("a code nobody minted", func(t *testing.T) {
+		rig := newAccessRig(t)
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.unlock("00000-00000-00000-00000-00000") })
+		assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"invalid"}`)
+		assertNoAccessCookie(t, rec)
+		if want := []string{"CodeByHash"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+
+	sessionMisses := map[string]func(*accessRig) string{
+		"a token with no row": func(r *accessRig) string { return accessUnheldToken(r.t) },
+		"a session that has ended": func(r *accessRig) string {
+			token := r.open()
+			r.store.sessions[memql.AccessSessionTokenDigest(token)].Ended = true
+			return token
+		},
+		"another site's session": func(r *accessRig) string {
+			token := r.open()
+			r.store.sessions[memql.AccessSessionTokenDigest(token)].SiteID = accessTestOtherSite
+			return token
+		},
+	}
+	for name, arrange := range sessionMisses {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			token := arrange(rig)
+			var session, call, leave *httptest.ResponseRecorder
+			cost := rig.costOf(func() { session = rig.session(token) })
+			if want := []string{"SessionByTokenHash"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("a status check cost %v, want %v", cost, want)
+			}
+			cost = rig.costOf(func() { call = rig.call(token, "deskBriefs", nil) })
+			if want := []string{"SessionByTokenHash"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("a call cost %v, want %v", cost, want)
+			}
+			cost = rig.costOf(func() { leave = rig.leave(token) })
+			if want := []string{"SessionByTokenHash"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("a leave cost %v, want %v", cost, want)
+			}
+			assertAccessReply(t, session, http.StatusUnauthorized, `{"state":"ended"}`)
+			assertAccessCookieCleared(t, session)
+			assertAccessReply(t, call, http.StatusUnauthorized, `{"state":"ended"}`)
+			assertAccessCookieCleared(t, call)
+			assertAccessReply(t, leave, http.StatusNoContent, "")
+			assertAccessCookieCleared(t, leave)
+			if len(rig.engine.calls) != 0 {
+				t.Fatalf("reached the engine: %v", rig.engine.calls)
+			}
+		})
+	}
+}
+
+// A CREDENTIAL THAT FOUND A ROW IS WHAT PAYS FOR THE SITE, as the cluster, and only a call
+// goes on to read the package and to read both under the owner.
+func TestWhatAHitReads(t *testing.T) {
+	t.Run("an unlock", func(t *testing.T) {
+		rig := newAccessRig(t)
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.unlock(accessTestCode) })
+		accessTokenFrom(t, rec)
+		if want := []string{"CodeByHash", "SiteAsCluster", "CreateSession"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+
+	t.Run("an expired code reads the site before it says so", func(t *testing.T) {
+		rig := newAccessRig(t)
+		rig.clock.at = accessT0.Add(2 * time.Hour)
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.unlock(accessTestCode) })
+		assertAccessReply(t, rec, http.StatusForbidden, `{"state":"expired"}`)
+		if want := []string{"CodeByHash", "SiteAsCluster"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+
+	t.Run("a status check", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.session(token) })
+		accessSessionBody(t, rec)
+		if want := []string{"SessionByTokenHash", "SiteAsCluster", "CodeByID"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+
+	t.Run("a leave", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.leave(token) })
+		assertAccessReply(t, rec, http.StatusNoContent, "")
+		if want := []string{"SessionByTokenHash", "SiteAsCluster", "EndSession"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+
+	t.Run("a call reads under the owner just before it runs", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		before := len(rig.store.calls)
+		var atTheRun []string
+		rig.engine.during = func() { atTheRun = append([]string{}, rig.store.calls[before:]...) }
+
+		assertAccessReply(t, rig.call(token, "deskBriefs", nil), http.StatusOK, `{"data":[]}`)
+
+		if want := []string{"SessionByTokenHash", "SiteAsCluster", "CodeByID", "PackageDomainsAsCluster", "SiteAsOwner"}; !reflect.DeepEqual(atTheRun, want) {
+			t.Fatalf("by the time the construct ran: %v, want %v", atTheRun, want)
+		}
+		if want := []string{"SessionByTokenHash", "CodeByID"}; !reflect.DeepEqual(rig.store.calls[before+len(atTheRun):], want) {
+			t.Fatalf("after it ran: %v, want %v", rig.store.calls[before+len(atTheRun):], want)
+		}
+	})
+
+	// A CONSTRUCT THIS GATE DOES NOT REACH, OR ARGUMENTS IT REFUSES, NEVER PAY FOR THE
+	// OWNER'S AUTHORITY. A code holder can send those as fast as the budget allows.
+	for name, tc := range map[string]struct {
+		construct string
+		args      map[string]any
+		status    int
+	}{
+		"a construct out of reach": {"nobodyDeclaredThis", nil, http.StatusNotFound},
+		"an argument it refuses":   {"deskBriefs", map[string]any{"bogus": 1}, http.StatusBadRequest},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			token := rig.open()
+			var rec *httptest.ResponseRecorder
+			cost := rig.costOf(func() { rec = rig.call(token, tc.construct, tc.args) })
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			if want := []string{"SessionByTokenHash", "SiteAsCluster", "CodeByID", "PackageDomainsAsCluster"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("cost = %v, want %v", cost, want)
+			}
+		})
+	}
+
+	t.Run("a body that cannot be a call reads no package", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.send(http.MethodPost, "/access/call", "not json", token) })
+		assertAccessReply(t, rec, http.StatusBadRequest, `{"error":"invalid_args"}`)
+		if want := []string{"SessionByTokenHash", "SiteAsCluster", "CodeByID"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+}
+
+// A SITE WHOSE OWNER LEFT ITS ORGANIZATION reads as zero rows under that owner. The read
+// under the owner is only made ahead of a construct, so what used to close the whole
+// surface now closes the calls: a visitor can still unlock, is told they are in, and can
+// leave, and nothing gated runs and nothing leaves. The owner would have run the
+// construct, so the read that says they cannot is what stands in front of it, and an
+// operator has to be able to see why, because the 404 never says.
+func TestASiteWhoseOwnerCannotReadItStillUnlocksAndItsCallsAnswer404(t *testing.T) {
+	for name, arrange := range map[string]func(*accessRig){
+		"the owner cannot read the site, as one removed from its organization cannot": func(r *accessRig) {
+			r.store.admits = map[string]bool{}
+		},
+		"the owner can read the site and not its package": func(r *accessRig) {
+			r.store.ownerCannotReadPackage = true
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			arrange(rig)
+
+			rec := rig.unlock(accessTestCode)
+			token := accessTokenFrom(t, rec)
+			accessSessionBody(t, rig.session(token))
+			if logged := rig.logs.String(); logged != "" {
+				t.Fatalf("an unlock and a status check logged:\n%s", logged)
+			}
+
+			const visitorWrote = "something-only-the-visitor-sent"
+			rec = rig.call(token, "deskBriefs", map[string]any{"window": visitorWrote})
+			assertAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
+			assertNoAccessCookie(t, rec)
+			if len(rig.engine.calls) != 0 {
+				t.Fatalf("the construct ran: %v", rig.engine.calls)
+			}
+
+			logged := rig.logs.String()
+			if got := strings.Count(logged, "level=WARN"); got != 1 {
+				t.Fatalf("logged %d WARN lines for one call:\n%s", got, logged)
+			}
+			for _, want := range []string{"the site's owner cannot read this site or its package", "subject.id=" + accessTestSite, "subject.concept=v1:platform:site"} {
+				if !strings.Contains(logged, want) {
+					t.Fatalf("the line does not carry %q:\n%s", want, logged)
+				}
+			}
+			for what, secret := range map[string]string{
+				"what the visitor sent": visitorWrote,
+				"the token":             token,
+				"the owner":             accessTestOwner,
+			} {
+				if strings.Contains(logged, secret) {
+					t.Fatalf("the line holds %s:\n%s", what, logged)
+				}
+			}
+
+			assertAccessReply(t, rig.leave(token), http.StatusNoContent, "")
+			if len(rig.store.ended) != 1 {
+				t.Fatalf("ended %v", rig.store.ended)
+			}
+		})
+	}
+}
+
+// A ROW THAT DOES NOT AGREE WITH THE ONE THE CLUSTER READ is not the site this call
+// decided on, whichever way it differs: the second read is what is about to lend its
+// authority, so it has to be the same site and the same owner.
+func TestTheReadUnderTheOwnerIsHeldToTheFirst(t *testing.T) {
+	t.Run("another site's row", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		rig.engine.during = func() { t.Fatal("the construct ran") }
+		store := &accessOwnerRowStore{accessFakeStore: rig.store, mutate: func(s *AccessSite) { s.ID = accessTestOtherSite }}
+		rig.h = NewAccessHandler(rig.engine, store, slog.Default(), rig.clock.now)
+		assertAccessReply(t, rig.call(token, "deskBriefs", nil), http.StatusNotFound, `{"error":"not_found"}`)
+	})
+
+	t.Run("another owner's row", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		rig.engine.during = func() { t.Fatal("the construct ran") }
+		store := &accessOwnerRowStore{accessFakeStore: rig.store, mutate: func(s *AccessSite) { s.OwnerUserID = accessTestMember }}
+		rig.h = NewAccessHandler(rig.engine, store, slog.Default(), rig.clock.now)
+		assertAccessReply(t, rig.call(token, "deskBriefs", nil), http.StatusNotFound, `{"error":"not_found"}`)
+	})
+}
+
+// accessOwnerRowStore is the store with the read under the owner answering something
+// the read as the cluster did not.
+type accessOwnerRowStore struct {
+	*accessFakeStore
+	mutate func(*AccessSite)
+}
+
+func (s *accessOwnerRowStore) SiteAsOwner(ctx context.Context, siteID, owner string) (*AccessSite, error) {
+	site, err := s.accessFakeStore.SiteAsOwner(ctx, siteID, owner)
+	if site != nil {
+		s.mutate(site)
+	}
+	return site, err
+}
+
+// EXACTLY, ON THE WIRE, because a browser refuses a __Host- cookie that is almost right
+// and says so to nobody.
+func TestTheCookieIsExactlyWhatAHostPrefixRequires(t *testing.T) {
+	rig := newAccessRig(t)
+	rec := rig.unlock(accessTestCode)
+	got := rec.Header().Values("Set-Cookie")
+	if len(got) != 1 {
+		t.Fatalf("Set-Cookie = %q", got)
+	}
+	token := accessTokenFrom(t, rec)
+	if want := "__Host-memql_access=" + token + "; Path=/; HttpOnly; Secure; SameSite=Strict"; got[0] != want {
+		t.Fatalf("Set-Cookie = %q, want %q", got[0], want)
+	}
+
+	t.Run("it is read back by that name, and by no other", func(t *testing.T) {
+		rec := rig.sendCookieHeader(http.MethodGet, "/access/session", "", "memql_access="+token)
+		assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"none"}`)
+		rec = rig.sendCookieHeader(http.MethodGet, "/access/session", "", "theme=dark; __Host-memql_access="+token+"; other=1")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("ended clears it", func(t *testing.T) {
+		rec := rig.session(accessUnheldToken(t))
+		assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+		assertAccessCookieCleared(t, rec)
+	})
+
+	t.Run("a call that ended clears it", func(t *testing.T) {
+		rec := rig.call(accessUnheldToken(t), "deskBriefs", nil)
+		assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+		assertAccessCookieCleared(t, rec)
+	})
+
+	t.Run("leave clears it", func(t *testing.T) {
+		rec := rig.leave(token)
+		assertAccessReply(t, rec, http.StatusNoContent, "")
+		assertAccessCookieCleared(t, rec)
+	})
+
+	t.Run("none sets nothing", func(t *testing.T) {
+		rec := rig.session("")
+		assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"none"}`)
+		if got := rec.Header().Values("Set-Cookie"); len(got) != 0 {
+			t.Fatalf("Set-Cookie = %q", got)
+		}
+	})
+
+	t.Run("a live session sets nothing", func(t *testing.T) {
+		token := rig.open()
+		rec := rig.session(token)
+		if got := rec.Header().Values("Set-Cookie"); len(got) != 0 {
+			t.Fatalf("Set-Cookie = %q", got)
 		}
 	})
 }
@@ -1914,10 +2435,12 @@ func TestAStoreFailureOpensNothingAndEndsNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name, fails, op string
 	}{
-		{"the site read, on unlock", "AccessSite", "unlock"},
-		{"the site read, on the session", "AccessSite", "session"},
-		{"the site read, on leave", "AccessSite", "leave"},
-		{"the site read, on a call", "AccessSite", "call"},
+		{"the site read, on unlock", "SiteAsCluster", "unlock"},
+		{"the site read, on the session", "SiteAsCluster", "session"},
+		{"the site read, on leave", "SiteAsCluster", "leave"},
+		{"the site read, on a call", "SiteAsCluster", "call"},
+		{"the package read, on a call", "PackageDomainsAsCluster", "call"},
+		{"the read under the owner, on a call", "SiteAsOwner", "call"},
 		{"the code read, on unlock", "CodeByHash", "unlock"},
 		{"the session write", "CreateSession", "unlock"},
 		{"the session read, on the session", "SessionByTokenHash", "session"},
@@ -1999,8 +2522,10 @@ func TestAccessRoutesReachTheHandlerWithoutABearer(t *testing.T) {
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
-			if rig.store.called("AccessSite") != 1 {
-				t.Fatal("the request did not reach the handler")
+			// ONLY THE HANDLER SAYS THIS. The verifier's own 401 has the same status as a
+			// stranger's reply, and a stranger's reply now reads nothing to show for it.
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control = %q: the request did not reach the handler", got)
 			}
 		})
 	}
@@ -2100,7 +2625,7 @@ func TestAccessRequestsAreCounted(t *testing.T) {
 	counted("unlock", "invalid", func() { rig.unlock("00000-00000-00000-00000-00000") })
 	counted("session", "ok", func() { rig.session(token) })
 	counted("session", "none", func() { rig.session("") })
-	counted("session", "ended", func() { rig.session("mql_acs_nothing") })
+	counted("session", "ended", func() { rig.session(accessUnheldToken(t)) })
 	counted("call", "ok", func() { rig.call(token, "deskBriefs", nil) })
 	counted("call", "not_found", func() { rig.call(token, "nobodyDeclaredThis", nil) })
 	counted("call", "invalid_args", func() { rig.call(token, "deskBriefs", map[string]any{"bogus": 1}) })

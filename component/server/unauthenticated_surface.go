@@ -156,10 +156,12 @@ func HandlerAuthorizedPaths() []string {
 	//
 	// It qualifies under the rule above: with no credentials it fails CLOSED, and
 	// "credentials" here means the edge's stamp and then the session's cookie. A request
-	// with no stamp reaches no read and no write. A stamp is re-read UNDER the named
-	// owner and then COMPARED with the row's own owner, because the tier's account arm
-	// admits a forged owner who is a member. Past that, nothing runs without a session
-	// the store still honours, minted from a code an operator made.
+	// with no stamp reaches no read and no write, and neither does one with no cookie or
+	// a body that could not hold a code. Past a digest that found a row, the stamp is
+	// COMPARED with the row of the site it names, read as the cluster, so a forged owner
+	// gets nothing from naming somebody real. Nothing runs without a session the store
+	// still honours, minted from a code an operator made, and a construct runs only once
+	// the site's own owner has been shown able to read the site and its package.
 	//
 	// The same qualification as the entry above, and it is as real: the stamp is
 	// trusted because the route is classified servedButNotExternallyRouted, which is a
