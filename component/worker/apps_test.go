@@ -2,6 +2,7 @@ package worker
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,6 +354,109 @@ func TestKnownAppIdsDeriveFromTheRoutingVocabulary(t *testing.T) {
 		}
 		if !IsKnownAppId(got[i]) || !airoute.IsRunnableApp(got[i]) {
 			t.Fatalf("%q is in the list and fails one of the two predicates", got[i])
+		}
+	}
+}
+
+func TestRunnableHonoursWhatTheMachineMeasured(t *testing.T) {
+	base := AppInfo{Id: AppIdClaudeCode, Allowed: true, SignedIn: true}
+	for readiness, want := range map[string]bool{
+		"":                     true, // a Cockpit that predates the field must stay in routing
+		AppReadinessUnknown:    true,
+		AppReadinessReady:      true,
+		AppReadinessSignedOut:  false,
+		AppReadinessOutOfUsage: false,
+	} {
+		app := base
+		app.Readiness = readiness
+		if got := app.Runnable(); got != want {
+			t.Errorf("readiness %q: Runnable() = %v, want %v", readiness, got, want)
+		}
+		if _, labelled := AppLabels([]AppInfo{app})[AppLabelKey(AppIdClaudeCode)]; labelled != want {
+			t.Errorf("readiness %q: label present = %v, want %v", readiness, labelled, want)
+		}
+	}
+}
+
+func TestAppsFromProtoCarriesWhatWasMeasured(t *testing.T) {
+	checked := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	reset := time.Date(2026, 11, 4, 6, 52, 3, 0, time.UTC)
+	got := AppsFromProto([]*memqlv1.AppInfo{{
+		Id: AppIdCodex, Allowed: true, SignedIn: true, Readiness: "out_of_usage",
+		ReadinessCheckedAt: timestamppb.New(checked), UsageResetsAt: timestamppb.New(reset),
+	}, {
+		Id: AppIdClaudeCode, Allowed: true, SignedIn: true,
+	}, {
+		Id: "future-app", Readiness: "a word this engine has never heard",
+	}})
+	byID := map[string]AppInfo{}
+	for _, app := range got {
+		byID[app.Id] = app
+	}
+	codex := byID[AppIdCodex]
+	if codex.Readiness != AppReadinessOutOfUsage || codex.ReadinessCheckedAt != "2026-10-30T12:00:00Z" || codex.UsageResetsAt != "2026-11-04T06:52:03Z" {
+		t.Fatalf("got %+v", codex)
+	}
+	if claude := byID[AppIdClaudeCode]; claude.Readiness != "" || claude.ReadinessCheckedAt != "" {
+		t.Fatalf("silence must stay silence: %+v", claude)
+	}
+	if future := byID["future-app"]; future.Readiness != AppReadinessUnknown {
+		t.Fatalf("a word this engine does not know must not block anything: %+v", future)
+	}
+}
+
+// A check moving its timestamp every five minutes must not rewrite the row every
+// five minutes. A change of answer lands on the next beat, as it always did.
+func TestAppsEqualIgnoresACheckInsideTheRowRefresh(t *testing.T) {
+	at := func(minutes int) string {
+		return time.Date(2026, 10, 30, 12, minutes, 0, 0, time.UTC).Format(time.RFC3339)
+	}
+	base := AppInfo{Id: AppIdCodex, Allowed: true, SignedIn: true, Readiness: AppReadinessReady, ReadinessCheckedAt: at(0)}
+	changed := func(mutate func(*AppInfo)) []AppInfo {
+		app := base
+		mutate(&app)
+		return []AppInfo{app}
+	}
+	if !appsEqual([]AppInfo{base}, changed(func(a *AppInfo) { a.ReadinessCheckedAt = at(5) })) {
+		t.Fatal("a fresh check of the same answer rewrote the row")
+	}
+	if appsEqual([]AppInfo{base}, changed(func(a *AppInfo) { a.ReadinessCheckedAt = at(30) })) {
+		t.Fatal("the row must still move often enough to say when it was checked")
+	}
+	if appsEqual([]AppInfo{base}, changed(func(a *AppInfo) { a.Readiness = AppReadinessOutOfUsage })) {
+		t.Fatal("a changed answer is a routing change and must land now")
+	}
+	if appsEqual([]AppInfo{base}, changed(func(a *AppInfo) { a.UsageResetsAt = at(50) })) {
+		t.Fatal("a changed reset must land now")
+	}
+}
+
+// One decoder for every row reader: when a row field was added to only one reader
+// before, a replica routing from the row refused machines its sibling could serve.
+func TestAppInfoRoundTripsThroughTheRow(t *testing.T) {
+	want := AppInfo{Id: AppIdCodex, Version: "0.162.1", SignedIn: true, Allowed: true, Subscription: SubscriptionPresent, Readiness: AppReadinessOutOfUsage, ReadinessCheckedAt: "2026-10-30T12:00:00Z", UsageResetsAt: "2026-11-04T06:52:03Z"}
+	rows := appsAsMaps([]AppInfo{want})
+	got, ok := AppInfoFromMap(rows[0])
+	if !ok || got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	if _, present := appsAsMaps([]AppInfo{{Id: AppIdCodex}})[0]["readiness"]; present {
+		t.Fatal("an entry with nothing measured must not grow keys on the row")
+	}
+}
+
+func TestAppNotRunnableSaysWhichHalf(t *testing.T) {
+	for _, tt := range []struct {
+		app  AppInfo
+		want string
+	}{
+		{AppInfo{Id: AppIdCodex, Allowed: true, SignedIn: true, Readiness: AppReadinessOutOfUsage, UsageResetsAt: "2026-11-04T06:52:03Z"}, "out of usage until 2026-11-04T06:52:03Z"},
+		{AppInfo{Id: AppIdCodex, Allowed: true, SignedIn: true, Readiness: AppReadinessOutOfUsage}, "out of usage"},
+		{AppInfo{Id: AppIdCodex, Allowed: true, Readiness: AppReadinessSignedOut}, "signed out"},
+		{AppInfo{Id: AppIdCodex, Allowed: true}, "allowed and signed in"},
+	} {
+		if got := tt.app.NotRunnableReason(); !strings.Contains(got, tt.want) {
+			t.Errorf("%+v: %q does not say %q", tt.app, got, tt.want)
 		}
 	}
 }

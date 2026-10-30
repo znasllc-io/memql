@@ -2216,3 +2216,68 @@ func (t fixtureMCPTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 func preflightFixtureClient(s *httptest.Server) *http.Client {
 	return &http.Client{Transport: fixtureMCPTransport{base: s.Client().Transport, target: s.URL}}
 }
+
+// recordingReadiness is the machine's tracker, as a session sees it.
+type recordingReadiness struct {
+	mu       sync.Mutex
+	started  []string
+	ended    []string
+	observed []harness.ReadinessSignal
+}
+
+func (r *recordingReadiness) SessionStarted(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.started = append(r.started, app)
+}
+
+func (r *recordingReadiness) SessionEnded(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = append(r.ended, app)
+}
+
+func (r *recordingReadiness) Observe(_ string, signal harness.ReadinessSignal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.observed = append(r.observed, signal)
+}
+
+func (r *recordingReadiness) snapshot() (started, ended []string, observed []harness.ReadinessSignal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.started...), append([]string(nil), r.ended...), append([]harness.ReadinessSignal(nil), r.observed...)
+}
+
+// A real turn is the best check there is, and the machine must not ping while one
+// runs: the session brackets itself and passes on what its turn said.
+func TestSession_TellsTheTrackerWhatItsTurnSaid(t *testing.T) {
+	fakeApp(t, "claude", `
+cat <<'CLAUDE_JSON'
+{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":0,"output_tokens":0},"modelUsage":{}}
+CLAUDE_JSON
+exit 1
+`)
+	h := newRig(t)
+	readiness := &recordingReadiness{}
+	h.manager.opts.Readiness = readiness
+	h.start(t, nil)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		started, ended, observed := readiness.snapshot()
+		if len(ended) == 1 {
+			if len(started) != 1 || started[0] != apps.IDClaudeCode {
+				t.Fatalf("started: %v", started)
+			}
+			if len(observed) != 1 || observed[0].State != harness.ReadinessSignedOut {
+				t.Fatalf("observed: %+v", observed)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the session never ended on the tracker: %v %v %+v", started, ended, observed)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

@@ -714,14 +714,17 @@ func appCandidateRefusal(c Candidate, owner string, req memqlengine.AppCallReque
 	if !workerservice.IsOnline(c.LastSeenAt, c.RevokedAt, now) {
 		return "offline"
 	}
-	runs := false
+	runs, reported := false, ""
 	for _, app := range c.Apps {
-		if app.Id == req.AppId && app.Runnable() {
-			runs = true
+		if app.Id == req.AppId {
+			runs, reported = app.Runnable(), app.NotRunnableReason()
 			break
 		}
 	}
 	if !runs {
+		if reported != "" {
+			return reported
+		}
 		return req.AppId + " is not allowed and signed in"
 	}
 	if req.Schema != nil {

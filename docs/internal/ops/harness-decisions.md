@@ -1006,6 +1006,85 @@ signed-out Codex costs about 20 seconds of its own retries before the next app
 starts; checking before routing is the follow-up that removes that wait. Neither
 the failover nor the block has run against the production fleet.
 
+## A machine measures whether its apps can answer (2026-10-29)
+
+A file cannot say whether a login works, and neither can the apps' status commands,
+which read the same file (measured, [spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md)).
+So Cockpit asks each app the cheapest real question it offers and reports the answer on
+`AppInfo.readiness`. Owner's brief: checked "in intervals every once in a while", with
+limits "checked before exposing the app's route" by "a simple ping that doesn't waste a
+lot of tokens".
+
+**Measuring** (`cockpit/internal/worker/harness/readiness.go`). Codex reads
+`account/read` and `account/rateLimits/read` over its app-server, spending nothing.
+Claude Code has no such read, so it is `auth status` and then a ping. The order is the
+spending guard: an API or proxy setting in the environment runs nothing, a login that
+is not `claude.ai` is not pinged, and a ping whose init event reports an `apiKeySource`
+other than `none` is stopped. Anything unreadable is `unknown`. Tests in
+`harness/readiness_test.go` replay recorded streams.
+
+**Scheduling** (`cockpit/internal/worker/apps/readiness.go`). One tracker for the
+machine, because a login and a plan are the machine's whichever cluster asks, running
+one check at a time.
+
+| Decision | Trigger | Why | Test |
+|---|---|---|---|
+| Codex every 5 minutes, Claude Code hourly | the cadence | a check's price sets its rate; an hour-stale "ready" costs one failed turn at zero tokens, which then corrects the answer | `TestTrackerChecksOnEachAppsOwnCadence` |
+| Skip while a session runs | the session brackets itself | the session will report what it finds | `TestTrackerSkipsAppsWithARunningSession` |
+| A real turn counts as a check | `TurnResult.Readiness` | a busy machine never pings | `TestTrackerReusesARealTurnInsteadOfPinging` |
+| At most 30 spending pings in 24 hours | a persisted log of checks that may have spent | the spend stays bounded whatever triggers a check | `TestTrackerStopsPingingAtTheCeiling` |
+| Answers and the log survive a restart | `app-readiness.json` | a crash loop is the worst trigger there is | `TestTrackerSurvivesARestartWithoutSpendingAgain` |
+| A refused ping does not count | `ReadinessSignal.Spent` | a signed-out machine re-checks often and spends nothing | `TestTrackerCountsOnlyWhatACheckSpent` |
+| No check for an app no cluster allows | `apps.homes` | nothing is spent without the machine owner's consent | `TestTrackerChecksEachAllowedAppAndNothingElse` |
+| Re-check on a login file change only while signed out | stat of the login files | a sign-in in a terminal tells nobody, and every Claude Code rewrites `~/.claude.json` | `TestTrackerRechecksASignedOutAppWhenItsLoginFileChanges`, `TestTrackerIgnoresLoginFileChangesWhileReady` |
+| No ping during metered overage | `isUsingOverage` | each ping would be paid for | `TestTrackerDoesNotPingThroughMeteredOverage` |
+
+**Fail open, deliberately.** `unknown` and absent stay selectable, because absent is
+every Cockpit that has not upgraded. A check that cannot tell replaces an earlier
+answer rather than leaving it standing, so a stale negative cannot keep a working app
+off a machine with nothing left to clear it. For the same reason a limit whose reset
+has passed reads `unknown` before any check confirms it. The cost of a wrong "unknown"
+is one failed turn, which the call moves past.
+
+**Routing** (`component/worker/apps.go`). `Runnable` adds the measurement, so the
+`app:` label, doors, the session gate and the machine refusal are one answer. It takes
+no clock, so every replica reading the row agrees, and labels cannot go stale by
+themselves. Selection also re-reads the row (`appMeasuredNotReady`), because a door may
+be a beat older than the read. Cockpit clears `signed_in` on `signed_out`, so an engine
+predating the field is right too. Tests: `TestRunnableHonoursWhatTheMachineMeasured`,
+`TestAppSelectionDBReadsReadinessOffTheRow`,
+`TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor`,
+`TestAnAppThatReportsNoReadinessKeepsItsDoor`.
+
+**A newer measurement ends an older refusal** (`appMeasuredReadyAt`). The block in the
+section above reads session rows, and buying a reset or signing in writes none. So a
+`ready` measured after the refusal clears it, and an older check or one that could not
+tell does not. Test: `TestAppRefusalDBClearsOnANewerMeasurement`.
+
+**The row moves for answers, not for checks.** A changed answer lands on the next beat
+as a routing change. A check that only moved its time rewrites the row at most every 30
+minutes (`appReadinessRowRefresh`), so "checked 20 minutes ago" can be up to that stale,
+which a reader loses nothing by. Test: `TestAppsEqualIgnoresACheckInsideTheRowRefresh`.
+
+**The Linux unit is why no Linux machine had completed a session.** Under `ProtectHome=read-only`
+with only `~/.memql` writable, Codex's app-server exits at start, no login can be
+written, and the default workspace cannot be created. `RestrictNamespaces` refuses the
+sandbox shell commands need, and `MemoryDenyWriteExecute` kills Node.js. The unit now
+leaves the worker's own home writable and drops those two; other users' homes and the
+system tree stay read-only, which is what the unit said it was for. This is less
+hardening than before, chosen because the alternative is apps that cannot run, and macOS
+has no such restriction at all. Gate: `lib_test.sh` checks both places the unit is
+written. A machine keeps the old unit until the installer runs again.
+
+**Limits.** The cadence is a judgement, and a login that lapses on an idle machine reads
+ready for up to an hour. Claude Code's refused-limit stream is shaped from the event's
+own vocabulary, not recorded, because no plan here was out of usage. Whether a LaunchAgent
+can refresh a Keychain login was not measured. The checks ran for real through
+`memql worker apps --check` on this Mac and, against fabricated expired logins, under both
+units in a Linux VM (systemd 255). They have not run on the fleet, and neither a real
+successful Claude Code turn on Linux nor the tracker's schedule on a real machine has been
+observed.
+
 ## Pipeline AI runs local first (2026-10-29)
 
 Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a

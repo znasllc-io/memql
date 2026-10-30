@@ -7,6 +7,7 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/common"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +98,58 @@ func TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions(t *testing.T) {
 			if err := appPreWorkRefusal(r); err != nil {
 				t.Fatalf("%s with %s became retryable: %v", name, why, err)
 			}
+		}
+	}
+}
+
+// A planner reads only the row, and the holder reads the live registration. Both
+// must leave out an app the machine measured as unable to answer, before a session
+// opens anywhere.
+func TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor(t *testing.T) {
+	h := newAppHop(t)
+	apps := []workerservice.AppInfo{{Id: "claude-code", Allowed: true, SignedIn: true, Readiness: workerservice.AppReadinessOutOfUsage, UsageResetsAt: "2026-11-04T06:52:03Z"}, {Id: "codex", Allowed: true, SignedIn: true}}
+	h.senderStore.machines[0].Apps = apps
+	h.holderStore.machines[0].Apps = apps
+	h.registry.WorkerById(hopMachine).SetApps(apps)
+	ctx, cancel := plannerCtx(t)
+	defer cancel()
+	doors, err := h.remote.selectionDoors(ctx, hopOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, door := range doors {
+		if door.AppId == "claude-code" && len(door.Machines) != 0 {
+			t.Fatalf("a door opened on a replica without the stream: %+v", door)
+		}
+		if door.AppId == "codex" && len(door.Machines) != 1 {
+			t.Fatalf("the other app lost its door: %+v", door)
+		}
+	}
+	why := appCandidateRefusal(h.senderStore.machines[0], hopOwner, memqlengine.AppCallRequest{AppId: "claude-code"}, fleetNow(), false)
+	if !strings.Contains(why, "out of usage until 2026-11-04T06:52:03Z") {
+		t.Fatalf("the refusal must say why: %q", why)
+	}
+	if why := appMachineRefusal(h.registry.WorkerById(hopMachine), hopOwner, "claude-code"); !strings.Contains(why, "out of usage") {
+		t.Fatalf("the holder must refuse too: %q", why)
+	}
+	starts, _ := h.harness.sessions()
+	if len(starts) != 0 {
+		t.Fatalf("a session opened: %+v", starts)
+	}
+}
+
+// Every machine reports nothing until its Cockpit upgrades, and none may disappear.
+func TestAnAppThatReportsNoReadinessKeepsItsDoor(t *testing.T) {
+	h := newAppHop(t)
+	ctx, cancel := plannerCtx(t)
+	defer cancel()
+	doors, err := h.remote.selectionDoors(ctx, hopOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, door := range doors {
+		if door.AppId == "claude-code" && len(door.Machines) != 1 {
+			t.Fatalf("silence took the machine out of routing: %+v", door)
 		}
 	}
 }

@@ -94,6 +94,9 @@ On `Register` and on **every** heartbeat:
 | `signed_in` | the app's own state files (see below) |
 | `subscription` | what the app REPORTS; `unknown` when it said nothing |
 | `allowed` | `policy.yaml apps.homes.<this cluster>.allow` — each cluster is told its own |
+| `readiness` | what this machine last **measured**: `ready`, `signed_out`, `out_of_usage` or `unknown` (see below); nothing until the first check |
+| `readiness_checked_at` | when that was measured, by a check or by a real turn |
+| `usage_resets_at` | when the limit behind `out_of_usage` resets, when the app said |
 
 `Register` also carries one **app descriptor** per app — the harness this
 machine drives it through and whether that harness can return a structured
@@ -126,6 +129,52 @@ The version is cached (keyed on the binary's size and mtime, so an in-place
 upgrade invalidates it immediately); presence and auth state are read fresh on
 every beat, so signing in shows up on the **next beat** rather than the next
 reconnect.
+
+### How readiness is measured
+
+A file cannot say whether a login still works: an expired login leaves its files in
+place, and both apps' own status commands read those files. `claude auth status`
+printed `loggedIn: true`, and `codex login status` printed `Logged in using ChatGPT`,
+for logins whose refresh tokens were dead. So the worker asks each app the cheapest
+real question it offers, and what it measures overrides the files in both directions:
+`signed_out` clears `signed_in`, and an app that answered is signed in even with no
+file to read.
+
+| | Claude Code | Codex |
+|---|---|---|
+| The question | `claude auth status` (no network, no tokens), then a ping: `claude -p ok` on the cheapest model with no tools, settings, MCP servers or saved session | `codex app-server`: `account/read`, then `account/rateLimits/read`. No thread and no turn |
+| What it spends | about 600 tokens of your plan when it answers; nothing when refused | nothing |
+| How often | hourly when working or out of usage, every 15 minutes otherwise | every 5 minutes |
+| Bound | at most 30 pings that may have spent in any 24 hours, kept across restarts | none needed |
+
+- **A busy machine never pings.** No check runs while that app has a session, and
+  every real turn reports what it found and counts as a check.
+- **A ping never spends API credit.** With `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_BASE_URL`, or a Bedrock, Vertex or Foundry switch in the worker's
+  environment nothing is run. A login that `auth status` names as anything but
+  `claude.ai` is not pinged. A ping whose first event reports an `apiKeySource` other
+  than `none` is stopped. While a plan is on metered overage, pings wait for the reset.
+- **An app no cluster allows is never checked.** Nothing is spent on an app this
+  machine's owner has not agreed to MemQL driving.
+- **A sign-in in a terminal is noticed.** While an app reads as signed out, a change
+  to its login file (`~/.claude/.credentials.json`, `~/.claude.json`,
+  `~/.codex/auth.json`) triggers a check on the next look, every 30 seconds. On a
+  working app it does not, because every interactive Claude Code rewrites
+  `~/.claude.json`.
+- **A limit that has passed clears itself.** At the reset the app reads `unknown` until
+  a check confirms it, even if a session or the ceiling is holding that check off.
+- **A check that cannot tell says `unknown`,** and unknown stays selectable: no network,
+  a timeout, a flag an older CLI does not know, an API-key login. So does a Cockpit
+  with no checks at all. The engine then moves past a failure if one happens, which
+  costs one failed turn.
+
+The answers and the spending log live in `app-readiness.json` at the machine's state
+root (mode 0600), which holds states and times and never a credential. They survive a
+restart, so a service that keeps crashing does not ping on each start. An answer older
+than a day is measured again.
+
+To see it now, `memql worker apps --check` runs each app's check once and prints what
+it found. It answers to no cadence or ceiling, because you asked, so it spends a ping.
 
 ---
 
@@ -169,6 +218,24 @@ every `fs.deny` entry. The workspace is the app's write grant, so one that
 **contains** such a path — the home directory, or `/`, which a delegation
 policy's workspace root of `~` would name — is refused as surely as one inside
 it, with `workspace ... overlaps ...` naming the path.
+
+### On Linux: the service unit
+
+The installer's user unit keeps the system tree and other users' home directories
+read-only and removes every way to gain privileges. **Your own home is writable, and
+it has to be.** Measured on 2026-10-29 under the unit it used to write (systemd 255,
+Claude Code 2.1.314, codex-cli 0.166.0), with only `~/.memql` writable:
+
+| What failed | How |
+|---|---|
+| A session's workspace | `mkdir ~/.local/share/memql: read-only file system` |
+| `codex app-server`, so every Codex session and check | `Error: Read-only file system (os error 30)`, and it exits |
+| Writing a login at all, for either app | `~/.claude`, `~/.claude.json` and `~/.codex` are read-only |
+| Node.js, under `MemoryDenyWriteExecute=yes` | it dies with status 133 on starting its JIT |
+| Claude Code's shell sandbox, under `RestrictNamespaces=yes` | `bwrap: No permissions to create new namespace` |
+
+A machine installed before this change keeps the old unit until the installer runs
+again. Its checks say `unknown` or `signed_out` and its sessions fail as above.
 
 ## What Claude Code may do in a session
 
@@ -753,7 +820,9 @@ resources rather than Library copies of a repository.
 
 | What you see | What it means |
 |---|---|
-| `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false; the badge says which |
+| `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false, or it was measured as out of usage; the badge says which |
+| `Read-only file system` or `read-only file system`, from a session or a check on Linux | the machine still has the old service unit. Run the installer again ([the service unit](#on-linux-the-service-unit)) |
+| `memql worker apps --check` says `could not tell: ... could bill API credit; not pinged` | an API-key or proxy setting in the worker's environment. Correct refusal: a check never spends API credit, and the app stays selectable |
 | The machine never appears at all | `claude` / `codex` is in none of the directories the worker searches. A service does not get your shell's `PATH`: the worker searches its own, with `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin` appended at start, and logs the result once (`worker PATH extended`). An app installed anywhere else needs that directory in the service's own `PATH` |
 | `is not allowed for this cluster by this machine's policy.yaml (apps.homes)` | the engine routed here anyway. `memql worker apps --allow <app> --home <this cluster>`, or ask why the label was derived |
 | `apps.allow is no longer read` (worker log, `memql worker apps`) | a `policy.yaml` from before consent was per cluster. Allow the app for the cluster you meant with `--home`; that removes the old list |

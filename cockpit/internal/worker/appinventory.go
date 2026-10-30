@@ -2,11 +2,16 @@ package worker
 
 import (
 	"context"
+	"log/slog"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/apps"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/appsession"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/tools"
 )
 
@@ -28,10 +33,22 @@ type AppInventory interface {
 // cluster whatever the machine-wide list said. ONE DETECTOR, because what
 // is installed is a fact about the machine: its cached version and harness
 // probes are shared, so two homes do not fork two probes of one binary.
+//
+// ONE TRACKER, for the same reason: an app's login and its plan are facts about
+// the machine, whichever cluster asks, so two homes must not ping one login twice.
+// What each cluster hears about consent stays per home.
 type AppInventories struct {
-	detector *apps.Detector
-	policy   *tools.Policy
+	detector  *apps.Detector
+	policy    *tools.Policy
+	readiness *apps.ReadinessTracker
+
+	mu    sync.Mutex
+	homes map[string]bool
 }
+
+// appReadinessFile is where what the machine measured survives a restart, at the
+// machine's state root because it is about the machine and not one cluster.
+const appReadinessFile = "app-readiness.json"
 
 // NewAppInventories builds the per-home reporters the worker runs with. A
 // nil detector is the real one.
@@ -39,7 +56,14 @@ func NewAppInventories(policy *tools.Policy, detector *apps.Detector) *AppInvent
 	if detector == nil {
 		detector = &apps.Detector{}
 	}
-	return &AppInventories{detector: detector, policy: policy}
+	a := &AppInventories{detector: detector, policy: policy, homes: map[string]bool{}}
+	a.readiness = apps.NewReadinessTracker(apps.ReadinessOptions{
+		Detector: detector,
+		Allowed:  a.allowedAnywhere,
+		Launch:   appsession.CheckLauncher(),
+	})
+	detector.Readiness = a.readiness
+	return a
 }
 
 // For is the inventory one home's stream reports on Register and every
@@ -48,7 +72,46 @@ func (a *AppInventories) For(home string) AppInventory {
 	if a == nil {
 		return nil
 	}
+	a.mu.Lock()
+	a.homes[home] = true
+	a.mu.Unlock()
 	return &policyInventory{detector: a.detector, policy: a.policy, home: home}
+}
+
+// allowedAnywhere is whether any cluster this machine serves allows the app, read
+// live so a SIGHUP reaches the next check. An app none allows costs nothing: the
+// machine's owner has not agreed to MemQL driving it.
+func (a *AppInventories) allowedAnywhere(appID string) bool {
+	a.mu.Lock()
+	homes := make([]string, 0, len(a.homes))
+	for home := range a.homes {
+		homes = append(homes, home)
+	}
+	a.mu.Unlock()
+	for _, home := range homes {
+		if appsAllowedFor(a.policy, home)(appID) {
+			return true
+		}
+	}
+	return false
+}
+
+// Readiness is the tracker sessions report to.
+func (a *AppInventories) Readiness() *apps.ReadinessTracker {
+	if a == nil {
+		return nil
+	}
+	return a.readiness
+}
+
+// RunReadiness measures the apps on a schedule until ctx ends. stateDir is the
+// worker's state directory; what was measured survives a restart under its root.
+func (a *AppInventories) RunReadiness(ctx context.Context, stateDir string, logger *slog.Logger) {
+	if a == nil {
+		return
+	}
+	a.readiness.UseStatePath(filepath.Join(machineStateRoot(stateDir), appReadinessFile), logger)
+	go a.readiness.Run(ctx)
 }
 
 // policyInventory pairs the detector with the policy that gates it for ONE
@@ -93,13 +156,21 @@ func appsToProto(inventory []apps.Info) []*memqlv1.AppInfo {
 	}
 	out := make([]*memqlv1.AppInfo, 0, len(inventory))
 	for _, a := range inventory {
-		out = append(out, &memqlv1.AppInfo{
+		entry := &memqlv1.AppInfo{
 			Id:           apps.Truncate(a.Id),
 			Version:      apps.Truncate(a.Version),
 			SignedIn:     a.SignedIn,
 			Subscription: apps.NormalizeSubscription(a.Subscription),
 			Allowed:      a.Allowed,
-		})
+			Readiness:    a.Readiness,
+		}
+		if !a.ReadinessCheckedAt.IsZero() {
+			entry.ReadinessCheckedAt = timestamppb.New(a.ReadinessCheckedAt)
+		}
+		if !a.UsageResetsAt.IsZero() {
+			entry.UsageResetsAt = timestamppb.New(a.UsageResetsAt)
+		}
+		out = append(out, entry)
 	}
 	return out
 }

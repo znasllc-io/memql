@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/cockpit/internal/worker/harness"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/processprobe"
 )
 
@@ -41,6 +42,9 @@ type Detector struct {
 	// VersionTTL is how long a probed version is reused. Defaults to
 	// DefaultVersionTTL.
 	VersionTTL time.Duration
+	// Readiness is what has been measured about each app (readiness.go). Nil
+	// reports only what the files say.
+	Readiness ReadinessSource
 
 	mu           sync.Mutex
 	cache        map[string]versionEntry
@@ -198,7 +202,7 @@ func (d *Detector) Detect(ctx context.Context, allow []string) []Info {
 		// codex-app-server" instead of rendering the row identically to
 		// "not installed".
 		resolved := d.resolveHarness(ctx, spec, path)
-		out = append(out, Info{
+		info := Info{
 			Id:               spec.ID,
 			Version:          Truncate(d.version(ctx, spec, path)),
 			SignedIn:         state.signedIn,
@@ -208,13 +212,38 @@ func (d *Detector) Detect(ctx context.Context, allow []string) []Info {
 			StructuredResult: resolved.StructuredResult,
 			FollowUps:        resolved.FollowUps,
 			InferenceOnly:    resolved.InferenceOnly,
-		})
+		}
+		if d.Readiness != nil {
+			if report, ok := d.Readiness.Report(spec.ID); ok {
+				info.applyReadiness(report)
+			}
+		}
+		out = append(out, info)
 	}
 	// Stable order. The engine sorts by id anyway, but an unstable one
 	// here would rewrite the registration row on every beat for no
 	// actual change.
 	sort.Slice(out, func(i, j int) bool { return out[i].Id < out[j].Id })
 	return out
+}
+
+// applyReadiness lays what was measured over what the files said.
+//
+// MEASURED BEATS THE FILE, IN BOTH DIRECTIONS. A signed-out answer clears
+// SignedIn, because an expired login leaves its files in place, and doing it here
+// gives an engine that predates readiness the right answer too. An app that
+// answered has a login whatever the files say, which is the macOS case probeAuth
+// states plainly: a token in the Keychain and no account record.
+func (i *Info) applyReadiness(report ReadinessReport) {
+	i.Readiness = report.State
+	i.ReadinessCheckedAt = report.CheckedAt
+	i.UsageResetsAt = report.ResetsAt
+	switch report.State {
+	case harness.ReadinessSignedOut:
+		i.SignedIn = false
+	case harness.ReadinessReady, harness.ReadinessOutOfUsage:
+		i.SignedIn = true
+	}
 }
 
 // ResolveSpec returns the spec for one app id with its harness resolved

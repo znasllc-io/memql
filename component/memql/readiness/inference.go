@@ -133,6 +133,9 @@ type RegistrationApp struct {
 	Id       string `json:"id"`
 	SignedIn bool   `json:"signedIn"`
 	Allowed  bool   `json:"allowed"`
+	// Readiness is what the machine last measured (component/worker's
+	// AppReadiness words; this package cannot import that one).
+	Readiness string `json:"readiness"`
 }
 
 // RegistrationFacts is the slice of a v1:worker:registration row this decision
@@ -248,7 +251,9 @@ func InferenceLanes(in InferenceInput) []LaneReport {
 		for _, app := range reg.Apps {
 			if knownAppIds[strings.TrimSpace(app.Id)] && app.Allowed && app.SignedIn {
 				appConfigured = true
-				if live {
+				// Out of usage is still set up, and nothing can answer through it:
+				// the app's label is gone for the same reason.
+				if live && app.Readiness != "out_of_usage" {
 					appLive = true
 				}
 			}

@@ -965,13 +965,25 @@ func (s *EngineStore) UpdateHardware(ctx context.Context, registrationId, ownerU
 func appsAsMaps(apps []AppInfo) []map[string]any {
 	out := make([]map[string]any, 0, len(apps))
 	for _, a := range apps {
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"id":           a.Id,
 			"version":      a.Version,
 			"signedIn":     a.SignedIn,
 			"subscription": a.Subscription,
 			"allowed":      a.Allowed,
-		})
+		}
+		// Left off rather than written empty: a machine that measured nothing has
+		// said nothing, and that is what AppInfoFromMap and the OS read as unknown.
+		if a.Readiness != "" {
+			row["readiness"] = a.Readiness
+		}
+		if a.ReadinessCheckedAt != "" {
+			row["readinessCheckedAt"] = a.ReadinessCheckedAt
+		}
+		if a.UsageResetsAt != "" {
+			row["usageResetsAt"] = a.UsageResetsAt
+		}
+		out = append(out, row)
 	}
 	return out
 }
@@ -1037,23 +1049,11 @@ func (g *workerFieldGetter) apps(key string) []AppInfo {
 		if stru == nil {
 			continue
 		}
-		m := stru.AsMap()
-		raw, _ := m["id"].(string)
-		id := strings.TrimSpace(raw)
-		if id == "" {
+		app, valid := AppInfoFromMap(stru.AsMap())
+		if !valid {
 			continue
 		}
-		version, _ := m["version"].(string)
-		subscription, _ := m["subscription"].(string)
-		signedIn, _ := m["signedIn"].(bool)
-		allowed, _ := m["allowed"].(bool)
-		out = append(out, AppInfo{
-			Id:           id,
-			Version:      version,
-			SignedIn:     signedIn,
-			Subscription: NormalizeSubscription(subscription),
-			Allowed:      allowed,
-		})
+		out = append(out, app)
 	}
 	if len(out) == 0 {
 		return nil

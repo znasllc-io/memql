@@ -258,6 +258,8 @@ func runConfiguredWorker(clusterURL, token, name string, logger *slog.Logger) er
 			Models:     modelInventory,
 			Discoverer: discoverer,
 			Metrics:    metrics,
+
+			AppReadiness: appInventories.Readiness(),
 		})
 		if err != nil {
 			return err

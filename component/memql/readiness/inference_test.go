@@ -380,3 +380,17 @@ func TestEmbeddingCandidatesAreTheOnlineEmbeddersInOrder(t *testing.T) {
 		t.Fatalf("candidates %+v, want bge-m3 (alice) then qwen3-embedding:0.6b (bob), and no offline machine", got)
 	}
 }
+
+func TestAnAppOutOfUsageIsConfiguredAndNotLive(t *testing.T) {
+	lanes := InferenceLanes(InferenceInput{Now: fixedNow, Registrations: []RegistrationFacts{{
+		ConnectedNodeId: "agent-1", LastSeenAt: fixedNow,
+		Apps: []RegistrationApp{{Id: "codex", Allowed: true, SignedIn: true, Readiness: "out_of_usage"}},
+	}}})
+	lane := laneNamed(t, lanes, InferenceLaneApp)
+	if !lane.Complete {
+		t.Fatal("a plan out of usage is still set up, and setup must not ask for it again")
+	}
+	if lane.Slots[0].Present {
+		t.Fatal("nothing can answer through it, so the door must not read as live")
+	}
+}

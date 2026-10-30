@@ -83,6 +83,36 @@ machine. The alternative — selecting on presence and discovering the refusal
 on the far side — commits a plan to a machine that then rejects it, and the
 resulting failure names the wrong thing.
 
+### What the machine measures
+
+`signedIn` used to mean only that the app's credential files exist, so an expired
+login read as signed in. Each machine now checks on a schedule that its apps can
+really answer, and reports `readiness` on the same entry:
+
+| `readiness` | What it means | Selectable |
+|---|---|---|
+| `ready` | signed in with usage left, as of the last check or real turn | yes |
+| `signed_out` | no login, or an expired one. `signedIn` is false too | no |
+| `out_of_usage` | signed in with no usage left. `usageResetsAt` says until when, if the app did | no |
+| `unknown` | the check could not tell | yes |
+| absent | a Cockpit that has not measured, or predates the checks | yes |
+
+**Silence stays selectable.** Reading it as "not ready" would take every machine out
+of routing until its Cockpit upgraded, and a wrong "unknown" costs one failed turn,
+which the call moves past.
+
+The answer lives on the registration row, so a replica without the machine's stream
+reads the same thing, and selection reads the row again rather than trusting a door
+built a moment earlier. The engine compares no clock: the machine re-checks at a
+reset and reports the change.
+
+Codex's check spends nothing and runs every 5 minutes. Claude Code has no free way to
+ask, so it is pinged hourly when idle for about 600 tokens, at most 30 times a day per
+machine, and never with anything that could bill API credit. A running session
+suppresses the check, and every real turn counts as one, so a busy machine never
+pings. [The machine side](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/local-apps.md)
+has the details.
+
 Signing into an app takes effect on the **next heartbeat**, not the next
 reconnect: an inventory change is applied to the live registry immediately and
 persisted outside the 60-second `lastSeenAt` throttle, because it is a routing
@@ -92,8 +122,9 @@ the row and its derived labels are the only thing it can read.
 
 ### When an app refuses a call
 
-A signed-in app can still turn a call away: its login has expired, or its plan is
-out of usage. The call moves to the next app **only when nothing ran**: no model
+An app the machine last measured as working can still turn a call away, because the
+login expired or the plan ran out since that check, and a Cockpit that predates the
+checks measures nothing. The call moves to the next app **only when nothing ran**: no model
 served it, it has no result, no action was recorded or dropped, no tokens were
 reported, and the only text is the refusal itself. Any other failure may have
 caused effects, so it is returned rather than run again.

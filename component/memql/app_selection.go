@@ -196,6 +196,50 @@ func (e *MemQLEngine) CheckMachineAppRouting(ctx context.Context, registration, 
 	if mapString(row, "revokedAt") != "" || features["apps"] == false || !AppRoutingPolicyFrom(row["appRouting"]).allows(app) {
 		return fmt.Errorf("this machine's app settings do not allow %s", app)
 	}
+	if appMeasuredNotReady(row, app) {
+		return fmt.Errorf("%s on this machine is signed out or out of usage", app)
+	}
+	return nil
+}
+
+// appMeasuredNotReady reads what the machine last measured about an app off its
+// registration row, and only that: absent or unknown is not a refusal, because that
+// is what every Cockpit predating the checks reports.
+//
+// THE ROW IS THE ONE ANSWER ACROSS REPLICAS. Selection runs on a replica that may
+// hold no stream for this machine, and the doors it was handed may be a beat older
+// than this read, so it asks here rather than trusting them. Regression test:
+// TestAppSelectionDBReadsReadinessOffTheRow.
+func appMeasuredNotReady(row map[string]any, app string) bool {
+	entry := appRowEntry(row, app)
+	switch mapString(entry, "readiness") {
+	case "signed_out", "out_of_usage":
+		return true
+	}
+	return false
+}
+
+// appMeasuredReadyAt is when the machine last measured the app working, zero when
+// it has not said. A refusal older than this is over: buying a reset or signing in
+// writes no session row, and this is what ends the block without anybody pressing
+// anything. Regression test: TestAppRefusalDBClearsOnANewerMeasurement.
+func appMeasuredReadyAt(row map[string]any, app string) time.Time {
+	entry := appRowEntry(row, app)
+	if mapString(entry, "readiness") != "ready" {
+		return time.Time{}
+	}
+	at, _ := time.Parse(time.RFC3339, mapString(entry, "readinessCheckedAt"))
+	return at
+}
+
+func appRowEntry(row map[string]any, app string) map[string]any {
+	entries, _ := row["apps"].([]any)
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if mapString(entry, "id") == app {
+			return entry
+		}
+	}
 	return nil
 }
 
@@ -216,8 +260,11 @@ func (e *MemQLEngine) FilterAppDoors(ctx context.Context, doors []AppDoor) ([]Ap
 			if err != nil {
 				return nil, err
 			}
+			if appMeasuredNotReady(row, door.AppId) {
+				continue
+			}
 			settings, _ := row["appRouting"].(map[string]any)
-			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent)
+			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent, appMeasuredReadyAt(row, door.AppId))
 			if err != nil {
 				return nil, err
 			}
@@ -289,11 +336,11 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 					return AppSelection{}, err
 				}
 				features, _ := row["ownerFeatures"].(map[string]any)
-				if mapString(row, "revokedAt") != "" || features["apps"] == false {
+				if mapString(row, "revokedAt") != "" || features["apps"] == false || appMeasuredNotReady(row, door.AppId) {
 					continue
 				}
 				settings, _ := row["appRouting"].(map[string]any)
-				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent)
+				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent, appMeasuredReadyAt(row, door.AppId))
 				if err != nil {
 					return AppSelection{}, err
 				}

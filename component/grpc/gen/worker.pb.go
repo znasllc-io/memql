@@ -1366,7 +1366,20 @@ type AppInfo struct {
 	// "present". Never inferred from anything else.
 	Subscription string `protobuf:"bytes,4,opt,name=subscription,proto3" json:"subscription,omitempty"`
 	// allowed mirrors `policy.yaml apps.allow` on the machine.
-	Allowed       bool `protobuf:"varint,5,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	Allowed bool `protobuf:"varint,5,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	// readiness is what the machine last MEASURED about whether this app can take
+	// a call: "ready", "signed_out", "out_of_usage" or "unknown". A cockpit that
+	// measured nothing, or predates the field, sends nothing, and the engine reads
+	// that as unknown: selectable, because refusing on silence would take every
+	// machine that has not upgraded out of routing. A cockpit reporting signed_out
+	// also clears signed_in, so an engine that predates this field is right too.
+	Readiness string `protobuf:"bytes,6,opt,name=readiness,proto3" json:"readiness,omitempty"`
+	// readiness_checked_at is when that was measured, by a check or a real turn.
+	ReadinessCheckedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=readiness_checked_at,json=readinessCheckedAt,proto3" json:"readiness_checked_at,omitempty"`
+	// usage_resets_at is when the limit behind out_of_usage resets, absent when the
+	// app did not say. The machine owns the clock: it re-checks then and reports
+	// the change, so the engine compares nothing against this. It is for a person.
+	UsageResetsAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=usage_resets_at,json=usageResetsAt,proto3" json:"usage_resets_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1434,6 +1447,27 @@ func (x *AppInfo) GetAllowed() bool {
 		return x.Allowed
 	}
 	return false
+}
+
+func (x *AppInfo) GetReadiness() string {
+	if x != nil {
+		return x.Readiness
+	}
+	return ""
+}
+
+func (x *AppInfo) GetReadinessCheckedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReadinessCheckedAt
+	}
+	return nil
+}
+
+func (x *AppInfo) GetUsageResetsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UsageResetsAt
+	}
+	return nil
 }
 
 type PlatformInfo struct {
@@ -6210,13 +6244,16 @@ const file_worker_proto_rawDesc = "" +
 	"\x11structured_result\x18\x03 \x01(\bR\x10structuredResult\x12\x1d\n" +
 	"\n" +
 	"follow_ups\x18\x04 \x01(\bR\tfollowUps\x12%\n" +
-	"\x0einference_only\x18\x05 \x01(\bR\rinferenceOnly\"\x8e\x01\n" +
+	"\x0einference_only\x18\x05 \x01(\bR\rinferenceOnly\"\xbe\x02\n" +
 	"\aAppInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +
 	"\tsigned_in\x18\x03 \x01(\bR\bsignedIn\x12\"\n" +
 	"\fsubscription\x18\x04 \x01(\tR\fsubscription\x12\x18\n" +
-	"\aallowed\x18\x05 \x01(\bR\aallowed\"N\n" +
+	"\aallowed\x18\x05 \x01(\bR\aallowed\x12\x1c\n" +
+	"\treadiness\x18\x06 \x01(\tR\treadiness\x12L\n" +
+	"\x14readiness_checked_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x12readinessCheckedAt\x12B\n" +
+	"\x0fusage_resets_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rusageResetsAt\"N\n" +
 	"\fPlatformInfo\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x02 \x01(\tR\x04arch\x12\x1a\n" +
@@ -6737,63 +6774,65 @@ var file_worker_proto_depIdxs = []int32{
 	68, // 42: znasllc.memql.worker.v1.LoadedModel.expires_at:type_name -> google.protobuf.Timestamp
 	7,  // 43: znasllc.memql.worker.v1.SetupProgress.stages:type_name -> znasllc.memql.worker.v1.SetupStage
 	68, // 44: znasllc.memql.worker.v1.SetupProgress.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 45: znasllc.memql.worker.v1.PermissionStatus.accessibility_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
-	0,  // 46: znasllc.memql.worker.v1.PermissionStatus.screen_recording_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
-	0,  // 47: znasllc.memql.worker.v1.PermissionStatus.x11_display_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
-	68, // 48: znasllc.memql.worker.v1.PermissionStatus.checked_at:type_name -> google.protobuf.Timestamp
-	13, // 49: znasllc.memql.worker.v1.HardwareInventory.gpu:type_name -> znasllc.memql.worker.v1.GpuInfo
-	14, // 50: znasllc.memql.worker.v1.HardwareInventory.runtimes:type_name -> znasllc.memql.worker.v1.RuntimeInfo
-	68, // 51: znasllc.memql.worker.v1.HardwareInventory.reported_at:type_name -> google.protobuf.Timestamp
-	68, // 52: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
-	68, // 53: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
-	67, // 54: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
-	9,  // 55: znasllc.memql.worker.v1.Heartbeat.apps:type_name -> znasllc.memql.worker.v1.AppInfo
-	12, // 56: znasllc.memql.worker.v1.Heartbeat.hardware:type_name -> znasllc.memql.worker.v1.HardwareInventory
-	11, // 57: znasllc.memql.worker.v1.Heartbeat.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
-	4,  // 58: znasllc.memql.worker.v1.Heartbeat.capacity:type_name -> znasllc.memql.worker.v1.Capacity
-	6,  // 59: znasllc.memql.worker.v1.Heartbeat.setup:type_name -> znasllc.memql.worker.v1.SetupProgress
-	68, // 60: znasllc.memql.worker.v1.Ping.sent_at:type_name -> google.protobuf.Timestamp
-	68, // 61: znasllc.memql.worker.v1.Pong.sent_at:type_name -> google.protobuf.Timestamp
-	68, // 62: znasllc.memql.worker.v1.Pong.received_at:type_name -> google.protobuf.Timestamp
-	69, // 63: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
-	62, // 64: znasllc.memql.worker.v1.ToolDispatch.computer_permission:type_name -> znasllc.memql.worker.v1.ComputerPermissionConstraint
-	21, // 65: znasllc.memql.worker.v1.ToolDispatch.workbench:type_name -> znasllc.memql.worker.v1.WorkbenchConstraint
-	26, // 66: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
-	27, // 67: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
-	68, // 68: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
-	68, // 69: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
-	68, // 70: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
-	32, // 71: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
-	36, // 72: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
-	40, // 73: znasllc.memql.worker.v1.ModelCallStart.messages:type_name -> znasllc.memql.worker.v1.ModelCallMessage
-	41, // 74: znasllc.memql.worker.v1.ModelCallStart.params:type_name -> znasllc.memql.worker.v1.ModelCallParams
-	42, // 75: znasllc.memql.worker.v1.ModelCallStart.limits:type_name -> znasllc.memql.worker.v1.ModelCallLimits
-	38, // 76: znasllc.memql.worker.v1.ModelCallStart.tools:type_name -> znasllc.memql.worker.v1.ModelCallTool
-	47, // 77: znasllc.memql.worker.v1.ModelCallStart.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
-	49, // 78: znasllc.memql.worker.v1.ModelCallStart.speech:type_name -> znasllc.memql.worker.v1.ModelCallSpeech
-	50, // 79: znasllc.memql.worker.v1.ModelCallStart.image:type_name -> znasllc.memql.worker.v1.ModelCallImageRequest
-	39, // 80: znasllc.memql.worker.v1.ModelCallMessage.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
-	46, // 81: znasllc.memql.worker.v1.ModelCallMessage.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
-	39, // 82: znasllc.memql.worker.v1.ModelCallDelta.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
-	48, // 83: znasllc.memql.worker.v1.ModelCallDelta.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
-	47, // 84: znasllc.memql.worker.v1.ModelCallDelta.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
-	51, // 85: znasllc.memql.worker.v1.ModelCallEnd.usage:type_name -> znasllc.memql.worker.v1.ModelCallUsage
-	45, // 86: znasllc.memql.worker.v1.ModelCallEnd.embeddings:type_name -> znasllc.memql.worker.v1.ModelCallEmbedding
-	39, // 87: znasllc.memql.worker.v1.ModelCallEnd.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
-	48, // 88: znasllc.memql.worker.v1.ModelCallEnd.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
-	47, // 89: znasllc.memql.worker.v1.ModelCallEnd.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
-	46, // 90: znasllc.memql.worker.v1.ModelCallEnd.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
-	60, // 91: znasllc.memql.worker.v1.ModelProbeEnd.structured_validity:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	60, // 92: znasllc.memql.worker.v1.ModelProbeEnd.tool_call_correctness:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	60, // 93: znasllc.memql.worker.v1.ModelProbeEnd.throughput_tps:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	60, // 94: znasllc.memql.worker.v1.ModelProbeEnd.ttft_ms:type_name -> znasllc.memql.worker.v1.ProbeFigure
-	1,  // 95: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
-	2,  // 96: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
-	96, // [96:97] is the sub-list for method output_type
-	95, // [95:96] is the sub-list for method input_type
-	95, // [95:95] is the sub-list for extension type_name
-	95, // [95:95] is the sub-list for extension extendee
-	0,  // [0:95] is the sub-list for field type_name
+	68, // 45: znasllc.memql.worker.v1.AppInfo.readiness_checked_at:type_name -> google.protobuf.Timestamp
+	68, // 46: znasllc.memql.worker.v1.AppInfo.usage_resets_at:type_name -> google.protobuf.Timestamp
+	0,  // 47: znasllc.memql.worker.v1.PermissionStatus.accessibility_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
+	0,  // 48: znasllc.memql.worker.v1.PermissionStatus.screen_recording_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
+	0,  // 49: znasllc.memql.worker.v1.PermissionStatus.x11_display_state:type_name -> znasllc.memql.worker.v1.PermissionDecision
+	68, // 50: znasllc.memql.worker.v1.PermissionStatus.checked_at:type_name -> google.protobuf.Timestamp
+	13, // 51: znasllc.memql.worker.v1.HardwareInventory.gpu:type_name -> znasllc.memql.worker.v1.GpuInfo
+	14, // 52: znasllc.memql.worker.v1.HardwareInventory.runtimes:type_name -> znasllc.memql.worker.v1.RuntimeInfo
+	68, // 53: znasllc.memql.worker.v1.HardwareInventory.reported_at:type_name -> google.protobuf.Timestamp
+	68, // 54: znasllc.memql.worker.v1.RegisterAck.registered_at:type_name -> google.protobuf.Timestamp
+	68, // 55: znasllc.memql.worker.v1.Heartbeat.ts:type_name -> google.protobuf.Timestamp
+	67, // 56: znasllc.memql.worker.v1.Heartbeat.active_calls_per_capability:type_name -> znasllc.memql.worker.v1.Heartbeat.ActiveCallsPerCapabilityEntry
+	9,  // 57: znasllc.memql.worker.v1.Heartbeat.apps:type_name -> znasllc.memql.worker.v1.AppInfo
+	12, // 58: znasllc.memql.worker.v1.Heartbeat.hardware:type_name -> znasllc.memql.worker.v1.HardwareInventory
+	11, // 59: znasllc.memql.worker.v1.Heartbeat.permissions:type_name -> znasllc.memql.worker.v1.PermissionStatus
+	4,  // 60: znasllc.memql.worker.v1.Heartbeat.capacity:type_name -> znasllc.memql.worker.v1.Capacity
+	6,  // 61: znasllc.memql.worker.v1.Heartbeat.setup:type_name -> znasllc.memql.worker.v1.SetupProgress
+	68, // 62: znasllc.memql.worker.v1.Ping.sent_at:type_name -> google.protobuf.Timestamp
+	68, // 63: znasllc.memql.worker.v1.Pong.sent_at:type_name -> google.protobuf.Timestamp
+	68, // 64: znasllc.memql.worker.v1.Pong.received_at:type_name -> google.protobuf.Timestamp
+	69, // 65: znasllc.memql.worker.v1.ToolDispatch.timeout:type_name -> google.protobuf.Duration
+	62, // 66: znasllc.memql.worker.v1.ToolDispatch.computer_permission:type_name -> znasllc.memql.worker.v1.ComputerPermissionConstraint
+	21, // 67: znasllc.memql.worker.v1.ToolDispatch.workbench:type_name -> znasllc.memql.worker.v1.WorkbenchConstraint
+	26, // 68: znasllc.memql.worker.v1.ToolResult.success:type_name -> znasllc.memql.worker.v1.Success
+	27, // 69: znasllc.memql.worker.v1.ToolResult.failure:type_name -> znasllc.memql.worker.v1.Failure
+	68, // 70: znasllc.memql.worker.v1.RotationRequest.current_token_expires_at:type_name -> google.protobuf.Timestamp
+	68, // 71: znasllc.memql.worker.v1.RotationResponse.new_token_expires_at:type_name -> google.protobuf.Timestamp
+	68, // 72: znasllc.memql.worker.v1.AuditEvent.ts:type_name -> google.protobuf.Timestamp
+	32, // 73: znasllc.memql.worker.v1.AppSessionStart.limits:type_name -> znasllc.memql.worker.v1.AppSessionLimits
+	36, // 74: znasllc.memql.worker.v1.AppSessionEnd.usage:type_name -> znasllc.memql.worker.v1.AppSessionUsage
+	40, // 75: znasllc.memql.worker.v1.ModelCallStart.messages:type_name -> znasllc.memql.worker.v1.ModelCallMessage
+	41, // 76: znasllc.memql.worker.v1.ModelCallStart.params:type_name -> znasllc.memql.worker.v1.ModelCallParams
+	42, // 77: znasllc.memql.worker.v1.ModelCallStart.limits:type_name -> znasllc.memql.worker.v1.ModelCallLimits
+	38, // 78: znasllc.memql.worker.v1.ModelCallStart.tools:type_name -> znasllc.memql.worker.v1.ModelCallTool
+	47, // 79: znasllc.memql.worker.v1.ModelCallStart.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
+	49, // 80: znasllc.memql.worker.v1.ModelCallStart.speech:type_name -> znasllc.memql.worker.v1.ModelCallSpeech
+	50, // 81: znasllc.memql.worker.v1.ModelCallStart.image:type_name -> znasllc.memql.worker.v1.ModelCallImageRequest
+	39, // 82: znasllc.memql.worker.v1.ModelCallMessage.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
+	46, // 83: znasllc.memql.worker.v1.ModelCallMessage.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
+	39, // 84: znasllc.memql.worker.v1.ModelCallDelta.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
+	48, // 85: znasllc.memql.worker.v1.ModelCallDelta.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
+	47, // 86: znasllc.memql.worker.v1.ModelCallDelta.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
+	51, // 87: znasllc.memql.worker.v1.ModelCallEnd.usage:type_name -> znasllc.memql.worker.v1.ModelCallUsage
+	45, // 88: znasllc.memql.worker.v1.ModelCallEnd.embeddings:type_name -> znasllc.memql.worker.v1.ModelCallEmbedding
+	39, // 89: znasllc.memql.worker.v1.ModelCallEnd.tool_calls:type_name -> znasllc.memql.worker.v1.ModelCallToolCall
+	48, // 90: znasllc.memql.worker.v1.ModelCallEnd.segments:type_name -> znasllc.memql.worker.v1.ModelCallTranscriptSegment
+	47, // 91: znasllc.memql.worker.v1.ModelCallEnd.audio:type_name -> znasllc.memql.worker.v1.ModelCallAudio
+	46, // 92: znasllc.memql.worker.v1.ModelCallEnd.images:type_name -> znasllc.memql.worker.v1.ModelCallImage
+	60, // 93: znasllc.memql.worker.v1.ModelProbeEnd.structured_validity:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	60, // 94: znasllc.memql.worker.v1.ModelProbeEnd.tool_call_correctness:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	60, // 95: znasllc.memql.worker.v1.ModelProbeEnd.throughput_tps:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	60, // 96: znasllc.memql.worker.v1.ModelProbeEnd.ttft_ms:type_name -> znasllc.memql.worker.v1.ProbeFigure
+	1,  // 97: znasllc.memql.worker.v1.WorkerService.Stream:input_type -> znasllc.memql.worker.v1.WorkerClientMessage
+	2,  // 98: znasllc.memql.worker.v1.WorkerService.Stream:output_type -> znasllc.memql.worker.v1.WorkerServerMessage
+	98, // [98:99] is the sub-list for method output_type
+	97, // [97:98] is the sub-list for method input_type
+	97, // [97:97] is the sub-list for extension type_name
+	97, // [97:97] is the sub-list for extension extendee
+	0,  // [0:97] is the sub-list for field type_name
 }
 
 func init() { file_worker_proto_init() }

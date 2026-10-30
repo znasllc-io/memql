@@ -77,7 +77,8 @@ Cadence, on one machine, one check at a time:
   as a check and defers the next one, so a busy machine never pings.
 - An app no cluster allows is never checked.
 - A signed-out app is re-checked when its credential files change, because a
-  rejected ping costs nothing.
+  refused ping costs nothing. A working one is not, because every interactive Claude
+  Code rewrites `~/.claude.json`.
 
 Claude Code is pinged only when nothing can bill API credit: no `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` or cloud-provider switch in the
@@ -103,6 +104,11 @@ from anywhere.
 
 ## Linux service hardening
 
-`ProtectHome=read-only` with only `~/.memql` writable breaks the session
-workspace, token refresh and sign-in. See piece 2's PR for what was measured on
-Linux and what changed.
+Measured under the unit the installer wrote (systemd 255, Claude Code 2.1.314,
+codex-cli 0.166.0, in a VM with user namespaces allowed, as on the fleet):
+`codex app-server` exits with `Read-only file system`, `~/.claude`, `~/.claude.json`
+and `~/.codex` are read-only, Node.js dies under `MemoryDenyWriteExecute`, and bubblewrap
+cannot create a namespace under `RestrictNamespaces`. The new unit leaves the worker's
+own home writable and drops those two directives. Other users' homes and the system tree
+stay read-only and privilege gain stays off. Under it the real checks answered correctly
+against fabricated expired logins.

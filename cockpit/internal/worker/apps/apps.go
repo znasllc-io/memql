@@ -30,6 +30,7 @@ package apps
 
 import (
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/harness"
 )
@@ -134,6 +135,15 @@ type Info struct {
 	// InferenceOnly reports whether that harness runs the app with no
 	// tools when a turn asks for inference only (see Spec.InferenceOnly).
 	InferenceOnly bool
+	// Readiness is what this machine last MEASURED about whether the app can take
+	// a call (readiness.go), one of harness's Readiness words. Empty means nothing
+	// has been measured, and the engine reads that the way it reads a Cockpit that
+	// predates the field: unknown, and selectable.
+	Readiness string
+	// ReadinessCheckedAt is when that was measured. UsageResetsAt is when the limit
+	// behind out_of_usage resets. Both are zero when there is nothing to say.
+	ReadinessCheckedAt time.Time
+	UsageResetsAt      time.Time
 }
 
 // Spec is everything the cockpit needs to detect and drive one app.

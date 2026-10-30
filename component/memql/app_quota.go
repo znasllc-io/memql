@@ -100,7 +100,7 @@ func appRefusalUntil(row map[string]any) time.Time {
 
 // Latest quota/success evidence is read independently of the rolling usage
 // window. Hundreds of other calls, restarts and replica changes cannot erase it.
-func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, settings map[string]any, recent []map[string]any) (time.Time, error) {
+func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, settings map[string]any, recent []map[string]any, measuredReadyAt time.Time) (time.Time, error) {
 	call, _ := parser.RenderCall("appAvailabilityEvidence", map[string]any{"workerId": registration, "app": app})
 	res, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
@@ -127,6 +127,9 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 	retries, _ := settings["availabilityRetriedAt"].(map[string]any)
 	retry, _ := time.Parse(time.RFC3339Nano, mapString(retries, app))
 	if !retry.IsZero() && !retry.Before(latestAt) {
+		return time.Time{}, nil
+	}
+	if !measuredReadyAt.IsZero() && !measuredReadyAt.Before(latestAt) {
 		return time.Time{}, nil
 	}
 	return appRefusalUntil(latest), nil
