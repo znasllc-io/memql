@@ -157,6 +157,17 @@ func AccessCodeDigest(raw string) string {
 	return hexSHA256(NormalizeAccessCode(raw))
 }
 
+// AccessCodeWellFormed reports whether what a visitor typed could be a code at all:
+// exactly 25 symbols once it has been normalized.
+//
+// THIS IS WHAT LETS A STRANGER COST NO READ. Every minted code normalizes to 25 symbols,
+// so anything else matches no row, and the bff answers it without asking the database.
+// It is judged on the normalized spelling, or a code with its hyphens, or typed in lower
+// case, would be refused for how it was written.
+func AccessCodeWellFormed(raw string) bool {
+	return len(NormalizeAccessCode(raw)) == accessCodeSymbols
+}
+
 // The session token is what a visitor's browser holds in its cookie after a code
 // has opened the door. It has the shape of a preview token, for the same
 // reasons: a prefixed 256-bit token is greppable in a leak scan and
@@ -206,6 +217,28 @@ func MintAccessSessionToken() (token string, digest string, err error) {
 // wrong credential.
 func AccessSessionTokenDigest(token string) string {
 	return hexSHA256(strings.TrimSpace(token))
+}
+
+// AccessSessionTokenWellFormed reports whether a cookie's value has the shape of a
+// session token: the family prefix and then 43 base64url characters.
+//
+// THE SAME REASON AS AccessCodeWellFormed. The cookie is the caller's to write, so
+// anything MintAccessSessionToken cannot have produced is a miss the bff can answer
+// without a read. It trims as AccessSessionTokenDigest trims, so the two cannot disagree
+// about a value with a newline on the end.
+func AccessSessionTokenWellFormed(token string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(token), AccessSessionTokenPrefix)
+	if !ok || len(rest) != base64.RawURLEncoding.EncodedLen(accessSessionTokenBytes) {
+		return false
+	}
+	for i := 0; i < len(rest); i++ {
+		switch c := rest[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 const (
@@ -314,6 +347,43 @@ const (
 	// AccessCallPath runs a construct the session's gate reaches.
 	AccessCallPath = AccessSurfacePathPrefix + "call"
 )
+
+// What a visitor's browser sees of the surface, and the two caps on what it may send.
+//
+// HERE FOR THE SAME REASON AGAIN, and these are read from both sides: the edge routes on
+// the path and caps a body so a refusal comes before the hop, and the bff caps it again
+// while reading, because the edge's cap is the edge's.
+const (
+	// AccessInboundPath is the surface on a deployable's own origin. Unlock and the
+	// session check are POST and GET on this path, and leave and call sit beneath it. It
+	// is under the /_memql/ marker with every other reserved path, so the origin keeps one
+	// reserved namespace, and a bundle may not claim it and never could.
+	AccessInboundPath = "/_memql/access"
+
+	// AccessSmallBodyBytes caps unlock, leave and the session check. A code is 29
+	// characters and a leave says nothing, so 1 KiB is generous for all of them.
+	AccessSmallBodyBytes int64 = 1 << 10
+
+	// AccessCallBodyBytes caps a call, which carries a construct's arguments.
+	AccessCallBodyBytes int64 = 64 << 10
+)
+
+// AccessCookieName is the cookie a visitor's session token travels in. The edge reads
+// the name and never the value: it keeps the cookie to the four routes, and the bff
+// sets it and reads it.
+//
+// THE PREFIX IS A BROWSER RULE, AND IT IS THE POINT. Any site on a shared parent domain
+// can set a cookie for its siblings, and a longer Path sends first, so with a plain name
+// another organization's deployable could plant one that hides the real cookie (measured
+// in Chromium, in final review): the first value a server reads answers `ended`, which
+// clears the real one and leaves the planted one, and a planted live session would catch
+// the visitor's gated writes. A browser refuses a __Host- cookie unless it is Secure, has
+// Path=/ and names no Domain, so a sibling cannot set this one at all.
+//
+// THE COST IS Path=/, which the prefix requires. The cookie now reaches every path on the
+// origin, so the edge removes it from everything that leaves for an upstream except the
+// four routes (accessStripCookie, component/edge).
+const AccessCookieName = "__Host-memql_access"
 
 // hexSHA256 is how every digest in this file is spelled: lowercase hex, because
 // a stored digest and a presented one are compared as strings.

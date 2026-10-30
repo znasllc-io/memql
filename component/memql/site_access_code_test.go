@@ -433,16 +433,102 @@ func TestAccessSessionEnd(t *testing.T) {
 // something a person has to mean.
 func TestAccessSurfaceWireNamesArePinned(t *testing.T) {
 	for name, tc := range map[string]struct{ got, want string }{
-		"the base":        {AccessSurfacePathPrefix, "/access/"},
-		"unlock":          {AccessUnlockPath, "/access/unlock"},
-		"session":         {AccessSessionPath, "/access/session"},
-		"leave":           {AccessLeavePath, "/access/leave"},
-		"call":            {AccessCallPath, "/access/call"},
-		"the site stamp":  {AccessStampSiteHeader, "X-Memql-Access-Site"},
-		"the owner stamp": {AccessStampOwnerHeader, "X-Memql-Access-Owner"},
+		"the base":         {AccessSurfacePathPrefix, "/access/"},
+		"unlock":           {AccessUnlockPath, "/access/unlock"},
+		"session":          {AccessSessionPath, "/access/session"},
+		"leave":            {AccessLeavePath, "/access/leave"},
+		"call":             {AccessCallPath, "/access/call"},
+		"the site stamp":   {AccessStampSiteHeader, "X-Memql-Access-Site"},
+		"the owner stamp":  {AccessStampOwnerHeader, "X-Memql-Access-Owner"},
+		"the inbound path": {AccessInboundPath, "/_memql/access"},
+		"the cookie":       {AccessCookieName, "__Host-memql_access"},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s = %q, want %q", name, tc.got, tc.want)
+		}
+	}
+	if AccessSmallBodyBytes != 1024 {
+		t.Errorf("the small body cap = %d, want 1 KiB", AccessSmallBodyBytes)
+	}
+	if AccessCallBodyBytes != 65536 {
+		t.Errorf("the call body cap = %d, want 64 KiB", AccessCallBodyBytes)
+	}
+}
+
+// A MINTED CODE AND A MINTED TOKEN ARE THE SHAPE THESE ASK FOR, whatever the draw, or a
+// visitor holding a good credential is refused with nothing anywhere saying why. The
+// refusals are what a stranger gets without a read, so each has to be something no mint
+// can produce.
+func TestAWellFormedCredentialIsWhatAMintProduces(t *testing.T) {
+	for range 200 {
+		code, _, _, err := MintAccessCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !AccessCodeWellFormed(code) {
+			t.Fatalf("a minted code is not well formed: %q", code)
+		}
+		token, _, err := MintAccessSessionToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !AccessSessionTokenWellFormed(token) {
+			t.Fatalf("a minted token is not well formed: %q", token)
+		}
+	}
+
+	const code = "K7Q4M-2XPDN-8RT3V-WJ6HC-9F01A"
+	for name, typed := range map[string]string{
+		"lower case":             strings.ToLower(code),
+		"spaces":                 "k7q4m 2xpdn 8rt3v wj6hc 9f01a",
+		"no separators":          "K7Q4M2XPDN8RT3VWJ6HC9F01A",
+		"surrounding whitespace": "\n  " + code + "\t",
+		"letters for digits":     "K7Q4M-2XPDN-8RT3V-WJ6HC-9FOLA",
+		"an en dash":             "K7Q4M\u20132XPDN-8RT3V-WJ6HC-9F01A",
+	} {
+		if !AccessCodeWellFormed(typed) {
+			t.Errorf("%s: %q reads as no code at all, and normalizing is what forgives it", name, typed)
+		}
+	}
+	for name, typed := range map[string]string{
+		"nothing":        "",
+		"only spaces":    "   ",
+		"only hyphens":   "-----",
+		"a symbol short": "K7Q4M-2XPDN-8RT3V-WJ6HC-9F01",
+		"a symbol long":  code + "A",
+		"not a code":     "something-only-the-visitor-sent",
+	} {
+		if AccessCodeWellFormed(typed) {
+			t.Errorf("%s: %q cannot be a code, and reads as one", name, typed)
+		}
+	}
+
+	good := AccessSessionTokenPrefix + strings.Repeat("A", 43)
+	for name, token := range map[string]string{
+		"the shape":              good,
+		"both base64url extras":  AccessSessionTokenPrefix + strings.Repeat("-_", 21) + "A",
+		"surrounding whitespace": " " + good + "\n",
+	} {
+		if !AccessSessionTokenWellFormed(token) {
+			t.Errorf("%s: %q reads as malformed", name, token)
+		}
+	}
+	for name, token := range map[string]string{
+		"nothing":            "",
+		"the prefix alone":   AccessSessionTokenPrefix,
+		"a character short":  AccessSessionTokenPrefix + strings.Repeat("A", 42),
+		"a character long":   good + "A",
+		"no prefix":          strings.Repeat("A", 51),
+		"another family":     "mql_prv_" + strings.Repeat("A", 43),
+		"an upper-case kind": "MQL_ACS_" + strings.Repeat("A", 43),
+		"padding":            AccessSessionTokenPrefix + strings.Repeat("A", 42) + "=",
+		"standard base64":    AccessSessionTokenPrefix + strings.Repeat("A", 42) + "+",
+		"a slash":            AccessSessionTokenPrefix + strings.Repeat("A", 42) + "/",
+		"a space inside":     AccessSessionTokenPrefix + strings.Repeat("A", 21) + " " + strings.Repeat("A", 21),
+		"non-ascii":          AccessSessionTokenPrefix + strings.Repeat("A", 41) + "\u00e9",
+	} {
+		if AccessSessionTokenWellFormed(token) {
+			t.Errorf("%s: %q reads as well formed", name, token)
 		}
 	}
 }
