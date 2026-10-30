@@ -44,7 +44,7 @@ import (
 // arm. So nothing here compares an owner: the bff's handler compares the edge's stamp
 // with the site's own ownerUserId before it calls in, and THAT IS WHAT CHECKS THE OWNER.
 // These reads answer for anybody who reaches them, which is why they are @serverOnly and
-// why a caller outside this package holds only the five functions below. A test persona
+// why a caller outside this package holds only the seven functions below. A test persona
 // is judged under the caller, at the reads above, and only asked after that whether its
 // session is still live: see asCluster.
 //
@@ -103,6 +103,13 @@ type Session struct {
 	Ended              bool
 }
 
+// Site is one v1:platform:site as the access decision needs it, read as the cluster. Its
+// ids are BARE, for Code's reason. The omissions are the point, as they are on the
+// handler's own projection: what nobody can see cannot leak into a reply.
+type Site struct {
+	ID, OwnerUserID, AccountID, PackageID, DeployableName string
+}
+
 // GraphStore reads and writes access codes through the engine.
 type GraphStore struct{ engine Engine }
 
@@ -133,6 +140,10 @@ func asCluster(ctx context.Context) (context.Context, error) {
 
 // readAsCluster is one of the store's own reads.
 //
+// THE ROWS AND NOTHING ELSE. Every shape these name projects the row's own fields, and an
+// engine read otherwise expands each relationship the row has for nobody to look at: this
+// is the path a visitor's status check takes every five seconds.
+//
 // THE PERSONA IS ASKED AGAIN WITH THE ANSWER IN HAND, for the precedents' reason
 // (integrations/library/reviewstore): a session that ended while this ran was the session
 // this was for, and it gets nothing.
@@ -141,7 +152,7 @@ func (s *GraphStore) readAsCluster(ctx context.Context, what, call string, rende
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.read(cluster, what, call, rendered)
+	rows, err := s.read(memql.ContextWithRootsOnlyRead(cluster), what, call, rendered)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +183,53 @@ func asOwner(ctx context.Context, owner string) (context.Context, bool) {
 		return ctx, false
 	}
 	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, owner)), true
+}
+
+// SiteForAccess reads a site as the cluster acting, for a request that has already
+// presented a credential whose digest found a row. A miss is (nil, nil).
+//
+// IT AUTHORIZES NOTHING. What makes the row mean anything is the handler's comparison of
+// the edge's stamp with what comes back, the owner and the account both. It is a read as
+// the cluster because the other way of asking, under the stamped owner, costs dozens of
+// statements resolving who that person is and what they belong to, and this is what a
+// status check does every five seconds. A read under the owner still stands in front of
+// a gated call, which is where that authority is actually spent.
+//
+// FRESH, because a move of the site's organization or a change of owner has to count from
+// the next request and not from when a cache entry ages out (D11).
+func (s *GraphStore) SiteForAccess(ctx context.Context, siteID string) (*Site, error) {
+	if strings.TrimSpace(siteID) == "" {
+		return nil, nil
+	}
+	call, err := langparser.RenderCall("siteById", map[string]any{"siteId": siteID})
+	rows, err := s.readAsCluster(memql.ContextWithFreshRead(ctx), "the deployable", call, err)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	r := rows[0]
+	return &Site{
+		ID:             memql.BareShortId(rowString(r, "id")),
+		OwnerUserID:    memql.BareShortId(rowString(r, "ownerUserId")),
+		AccountID:      memql.BareShortId(rowString(r, "accountId")),
+		PackageID:      memql.BareShortId(rowString(r, "packageId")),
+		DeployableName: strings.TrimSpace(rowString(r, "packageDeployableName")),
+	}, nil
+}
+
+// PackageDomainsForAccess reads the DSL domains a site's package ships, as the cluster
+// acting, for a gated call. NO ROW AND NO LIST ARE ONE ANSWER, no domains, which reaches
+// no gate: a source no deploy has written a list for fails closed. A read that failed is
+// an error and never looks empty. Fresh, for SiteForAccess's reason.
+func (s *GraphStore) PackageDomainsForAccess(ctx context.Context, packageID string) ([]string, error) {
+	if strings.TrimSpace(packageID) == "" {
+		return nil, nil
+	}
+	call, err := langparser.RenderCall("packageById", map[string]any{"packageId": packageID})
+	rows, err := s.readAsCluster(memql.ContextWithFreshRead(ctx), "the deployable's package", call, err)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return rowStrings(rows[0], "dslDomains"), nil
 }
 
 // CodeByHash finds a code by the digest of what a visitor typed, on one site. A
@@ -221,7 +279,7 @@ func (s *GraphStore) SessionByTokenHash(ctx context.Context, tokenHash string) (
 		CodeID:     memql.BareShortId(rowString(r, "codeId")),
 		Generation: rowInt(r, "generation"),
 		IssuedAt:   rowTime(r, "issuedAt"),
-		Ended:      rowString(r, "endedAt") != "",
+		Ended:      rowStamp(r, "endedAt") != "",
 	}, nil
 }
 
@@ -304,7 +362,7 @@ type codeView struct {
 }
 
 func codeFromRow(r map[string]any) codeView {
-	revokedAt := rowString(r, "revokedAt")
+	revokedAt := rowStamp(r, "revokedAt")
 	return codeView{
 		Code: Code{
 			ID:         memql.BareShortId(rowString(r, "id")),
@@ -654,6 +712,27 @@ func rowTime(m map[string]any, key string) time.Time {
 		return at.UTC()
 	default:
 		return time.Time{}
+	}
+}
+
+// rowStamp reads a field whose being set is what matters, a removal or an end, as text:
+// "" when nothing is there, and something when anything is.
+//
+// ANY PRESENT VALUE COUNTS, because the alternative fails open. A removed code and an
+// ended session must not read as live for arriving in a type the reader did not expect,
+// and a shaped datetime can arrive as a time.Time as well as the text that was stored
+// (rowTime reads both). A value that is neither is still a value someone wrote there, so
+// it is printed rather than dropped: the row is treated as ended rather than as eternal.
+func rowStamp(m map[string]any, key string) string {
+	switch v := m[key].(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case time.Time:
+		return v.UTC().Format(time.RFC3339Nano)
+	default:
+		return fmt.Sprint(v)
 	}
 }
 
