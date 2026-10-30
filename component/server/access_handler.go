@@ -88,11 +88,11 @@ import (
 const AccessCookieName = "memql_access"
 
 // AccessStampSiteHeader and AccessStampOwnerHeader are the edge's stamp: the site a
-// request arrived on and the owner to borrow. component/edge does not import this
-// package, so it spells them on its own side, and the two have to stay equal: a name
-// that drifted would make every visit an unstamped request, which is a 404 that says
-// nothing about why.
-const AccessStampSiteHeader, AccessStampOwnerHeader = "X-Memql-Access-Site", "X-Memql-Access-Owner"
+// request arrived on and the owner to borrow. They are memql's, because component/edge
+// and this package cannot import each other and that is the one package both can. A
+// second spelling here would only have to stay equal, and a name that drifted would make
+// every visit an unstamped request, which is a 404 that says nothing about why.
+const AccessStampSiteHeader, AccessStampOwnerHeader = memql.AccessStampSiteHeader, memql.AccessStampOwnerHeader
 
 // accessCookiePath is where the browser sends the cookie: the site's own origin, on
 // the four routes and nowhere else. It is the EDGE's spelling of the route family,
