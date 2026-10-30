@@ -24,10 +24,15 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/compiler"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/identity"
 )
 
 // integration_db_test.go -- an operator's acts on an access code, against a
@@ -99,6 +104,9 @@ func bootEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 			s.bootErr = fmt.Errorf("engine Init: %w", err)
 			return
 		}
+		// THE REAL RUNNER, as app bootstrap wires it, so a logic's statements run on the
+		// executor that stamps a run and journals what each one returned.
+		eng.SetLogicRunner(automations.NewLogicRunner(eng, steps.NewRegistry(), discardLogger()))
 		// THE REAL HANDLERS BEHIND THE REAL DISPATCH, so a test that goes through
 		// `builtin siteAccessCode...` meets the capability gate and the shared
 		// organization gate on the way to them, as a person's call does.
@@ -411,6 +419,15 @@ func (w *world) codesOn(site string) int {
 	return int(n)
 }
 
+// codesOnSiteDistinct counts the codes on a site, however many versions each has.
+func (w *world) codesOnSiteDistinct(site string) int {
+	w.t.Helper()
+	var ids []string
+	require.NoError(w.t, w.db.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("DISTINCT id").
+		Where("concept = ?", codeConcept).Where("payload->>'siteId' = ?", siteConcept+":"+site).Scan(context.Background(), &ids))
+	return len(ids)
+}
+
 // versions counts the versions of one code, optionally only those carrying one
 // generation: a regenerate that lost must have left none behind.
 func (w *world) versions(codeID string, generation int) int {
@@ -611,10 +628,6 @@ func TestCreateRefusals(t *testing.T) {
 		{"an expiry 400 days away", operator, valid(w.site, map[string]any{"expiresAt": after(400 * 24 * time.Hour)}), "366 days"},
 		{"an expiry that is not a date", operator, valid(w.site, map[string]any{"expiresAt": "next tuesday"}), "date"},
 		{"no expiry", operator, valid(w.site, map[string]any{"expiresAt": nil}), "expire"},
-		{"a caller who is nobody", auth.ContextWithAccess(context.Background(), &auth.AccessContext{Role: auth.RoleOwner}), valid(w.site, nil), "person"},
-		{"no caller at all", context.Background(), valid(w.site, nil), "person"},
-		{"a connector", auth.ContextWithConnectorActor(context.Background(), "shopify"), valid(w.site, nil), "person"},
-		{"an anonymous caller", auth.ContextWithAnonymousActor(context.Background()), valid(w.site, nil), "person"},
 	}
 	before := w.codesOn(w.site)
 	for _, tc := range cases {
@@ -695,10 +708,10 @@ func TestRegenerateReplacesTheSecretAndKeepsEverythingElse(t *testing.T) {
 
 	// THE OLD CODE IS GONE, by the same read the bff uses to look one up.
 	store := NewGraphStore(liveEngine{w.eng})
-	gone, err := store.CodeByHash(context.Background(), w.owner, w.site, memql.AccessCodeDigest(code))
+	gone, err := store.CodeByHash(context.Background(), w.site, memql.AccessCodeDigest(code))
 	require.NoError(t, err)
 	require.Nil(t, gone, "the code that was regenerated away still resolves")
-	found, err := store.CodeByHash(context.Background(), w.owner, w.site, memql.AccessCodeDigest(fresh))
+	found, err := store.CodeByHash(context.Background(), w.site, memql.AccessCodeDigest(fresh))
 	require.NoError(t, err)
 	require.NotNil(t, found, "the regenerated code does not resolve")
 	require.Equal(t, 2, found.Generation)
@@ -889,7 +902,7 @@ func TestRemoveIsSoft(t *testing.T) {
 	require.Len(t, listed, 1, "a removed code vanished from the list; the OS hides it, the list does not")
 	require.NotEmpty(t, payloadOf(t, listed[0])["revokedAt"])
 	store := NewGraphStore(liveEngine{w.eng})
-	found, err := store.CodeByHash(context.Background(), w.owner, w.site, memql.AccessCodeDigest(code))
+	found, err := store.CodeByHash(context.Background(), w.site, memql.AccessCodeDigest(code))
 	require.NoError(t, err)
 	require.NotNil(t, found, "a removed code stopped resolving, so the bff cannot give it the same answer as an unknown one")
 	require.True(t, found.Revoked)
@@ -920,13 +933,15 @@ func TestEveryOperatorActIsAudited(t *testing.T) {
 
 	codeID, first := w.mint(operator, nil)
 	row := w.row(codeID)
-	secrets := []string{first, memql.NormalizeAccessCode(first), fmt.Sprint(row["codeHash"]), fmt.Sprint(row["codeHint"])}
+	// NOT THE HINT. It is not a secret, four symbols of 25, and one that is all digits can
+	// turn up in a timestamp, which would fail this test about one run in four thousand.
+	secrets := []string{first, memql.NormalizeAccessCode(first), fmt.Sprint(row["codeHash"])}
 
 	nodes, err := w.in.handleRegenerate(operator, map[string]any{"codeId": codeID}, 0)
 	require.NoError(t, err)
 	second := fmt.Sprint(onlyPayload(t, nodes)["code"])
 	row = w.row(codeID)
-	secrets = append(secrets, second, memql.NormalizeAccessCode(second), fmt.Sprint(row["codeHash"]), fmt.Sprint(row["codeHint"]))
+	secrets = append(secrets, second, memql.NormalizeAccessCode(second), fmt.Sprint(row["codeHash"]))
 
 	_, err = w.in.handleSetExpiry(operator, map[string]any{"codeId": codeID, "expiresAt": after(3 * time.Hour)}, 0)
 	require.NoError(t, err)
@@ -953,7 +968,7 @@ func TestEveryOperatorActIsAudited(t *testing.T) {
 		blob, err := json.Marshal(event)
 		require.NoError(t, err)
 		for _, secret := range secrets {
-			require.NotContains(t, string(blob), secret, "an audit event carries a code, a digest or a hint")
+			require.NotContains(t, string(blob), secret, "an audit event carries a code or a digest")
 		}
 	}
 	require.Equal(t, []string{auditActionCreated, auditActionRegenerated, auditActionExpiryChanged, auditActionRemoved}, actions,
@@ -1080,7 +1095,7 @@ func TestListCarriesLastOpenedForTheCurrentGeneration(t *testing.T) {
 	require.False(t, present, "another code's sessions answered for this one")
 
 	// An ended session was still opened.
-	require.NoError(t, store.EndSession(context.Background(), w.owner, newest, time.Now()))
+	require.NoError(t, store.EndSession(context.Background(), newest, time.Now()))
 	opened, present = lastOpened(codeID)
 	require.True(t, present)
 	require.Equal(t, stamp(base.Add(10*time.Minute)), opened, "ending a session moved when the code was last opened")
@@ -1174,7 +1189,12 @@ func TestActsReReadTheCodesSiteUnderTheCaller(t *testing.T) {
 		t.Run(name+" is refused for someone who cannot read the site", func(t *testing.T) {
 			nodes, err := act()
 			require.Nil(t, nodes)
-			require.Contains(t, requireSentence(t, err), "cannot read the deployable", "the refusal does not say what is in the way")
+			msg := requireSentence(t, err)
+			require.Contains(t, msg, "cannot read the deployable", "the refusal does not say what is in the way")
+			// THE SHARED GATE JUDGES THE COPY, so the people who manage the deployable now
+			// are refused this code, and a person told to ask them would be sent nowhere.
+			require.Contains(t, msg, "opens nothing", "the refusal does not say the code is harmless")
+			require.Contains(t, msg, "cluster operator must remove it", "the refusal does not say who can do something about it")
 			require.Equal(t, before, w.row(stale), "a refused act changed the row")
 			require.Empty(t, w.events(stale), "a refused act was audited")
 		})
@@ -1206,6 +1226,473 @@ func TestActsReReadTheCodesSiteUnderTheCaller(t *testing.T) {
 	_, err = w.in.handleRemove(operator, map[string]any{"codeId": stale}, 0)
 	require.NoError(t, err, "a cluster operator could not remove a stale code, so nothing can")
 	require.NotEmpty(t, w.row(stale)["revokedAt"])
+}
+
+// A SOFT-DELETED SITE READS AS NOTHING TO ANYBODY, a cluster operator included, and its
+// codes have nothing left to open. So the refusal has to be true of that as well.
+func TestACodeOfADeletedSiteIsRefusedWithoutSendingAnyoneAnywhere(t *testing.T) {
+	w := newWorld(t, "deletedsite")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	codeID, _ := w.mint(operator, nil)
+	w.insert(siteConcept, w.site, map[string]any{"deleted": true})
+	before := w.row(codeID)
+
+	_, err := w.in.handleRemove(operator, map[string]any{"codeId": codeID}, 0)
+	msg := requireSentence(t, err)
+	require.Contains(t, msg, "If it was deleted, this code opens nothing and can be left alone")
+	require.Equal(t, before, w.row(codeID))
+}
+
+// AN ACT NEEDS NO OWNER FROM THE SITE ANY MORE. It only ever needed one to run its write
+// as. Such a site cannot have a code minted, but one that lost its owner may still have
+// one, and a code nobody can end blocks a move for good.
+func TestACodeOfASiteThatLostItsOwnerCanStillBeEnded(t *testing.T) {
+	w := newWorld(t, "ownerlost")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	site := "ac-ownerless-" + w.suffix
+	w.siteRow(site, map[string]any{"ownerUserId": nil})
+	codeID := "ac-code-" + w.suffix
+	w.forgeCode(site, codeID, w.account, time.Now(), time.Now().Add(time.Hour))
+
+	nodes, err := w.in.handleList(operator, map[string]any{"siteId": site}, 0)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": codeID}, 0)
+	require.NoError(t, err)
+	row := w.row(codeID)
+	require.NotEmpty(t, row["revokedAt"])
+	require.Equal(t, w.owner, bare(row["ownerUserId"]), "the update moved the row's owner")
+}
+
+// ---------------------------------------------------------------------------
+// an act belongs to a person
+// ---------------------------------------------------------------------------
+
+// THE WRITE DOES NOT RUN AS THE PERSON WHO ASKED, so `lastChangedBy` is the only record of
+// who did, and every act refuses a caller who is not somebody. The cluster acting is the
+// one that would otherwise get through: it reads everything, and it would write a
+// `system:` id into a field that promises a person.
+func TestAnActBelongsToAPerson(t *testing.T) {
+	w := newWorld(t, "person")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	codeID, _ := w.mint(operator, nil)
+	before, versions, events := w.row(codeID), w.versions(codeID, 0), len(w.events(codeID))
+	require.NotEmpty(t, auth.MaintenanceAutomationNames(), "there is no maintenance actor to try")
+
+	callers := map[string]context.Context{
+		"a caller with no id":      auth.ContextWithAccess(context.Background(), &auth.AccessContext{Role: auth.RoleOwner}),
+		"no caller at all":         context.Background(),
+		"a connector":              auth.ContextWithConnectorActor(context.Background(), "shopify"),
+		"an anonymous caller":      auth.ContextWithAnonymousActor(context.Background()),
+		"the cluster acting":       auth.ContextWithSystemActor(context.Background(), "some-part-of-the-cluster"),
+		"the cluster, trusted":     auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "some-part-of-the-cluster")),
+		"a maintenance automation": auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.MaintenanceAutomationNames()[0])),
+	}
+	acts := map[string]func(context.Context) ([]memorynodes.MemoryNode, error){
+		"minting": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+			return w.in.handleCreate(ctx, w.createArgs(nil), 0)
+		},
+		"regenerating": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+			return w.in.handleRegenerate(ctx, map[string]any{"codeId": codeID}, 0)
+		},
+		"re-timing": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+			return w.in.handleSetExpiry(ctx, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+		},
+		"removing": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+			return w.in.handleRemove(ctx, map[string]any{"codeId": codeID}, 0)
+		},
+	}
+	for who, caller := range callers {
+		for what, act := range acts {
+			t.Run(what+" by "+who, func(t *testing.T) {
+				nodes, err := act(caller)
+				require.Nil(t, nodes, "a caller who is nobody was answered")
+				require.Contains(t, requireSentence(t, err), "person", "refused, but not for this reason")
+			})
+		}
+	}
+	require.Equal(t, before, w.row(codeID), "an act by nobody changed the row")
+	require.Equal(t, versions, w.versions(codeID, 0), "an act by nobody wrote a version")
+	require.Len(t, w.events(codeID), events, "an act by nobody was audited")
+	require.Equal(t, versions, w.codesOn(w.site), "an act by nobody minted a code")
+
+	// THE REACHABLE POSITIVE. Each of the four, by somebody, is the rest of this file; this
+	// one is the shape a server path borrows: a real person's id, with no role of their own.
+	borrowed := auth.ContextWithUserActor(context.Background(), w.owner)
+	_, err := w.in.handleSetExpiry(borrowed, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+	require.NoError(t, err, "borrowed authority names a person, and it was refused as though it named nobody")
+	require.Equal(t, w.owner, bare(w.row(codeID)["lastChangedBy"]))
+}
+
+// ---------------------------------------------------------------------------
+// a code is not minted inside a run
+// ---------------------------------------------------------------------------
+
+// codeInText is what a plain code looks like inside a row's text.
+const codeInText = `[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){4}`
+
+// THE ONE COPY OF A CODE IS THE REPLY, and inside a run the reply is not the end of it:
+// the journal writes what a statement returned into rows that outlive the code. So a run
+// is refused before anything is read or minted. Re-timing and removing carry no code, and
+// a person's call is not in a run, which is the rest of this file.
+func TestACodeIsNotMintedInsideARun(t *testing.T) {
+	w := newWorld(t, "inrun")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	codeID, _ := w.mint(operator, nil)
+	before := w.row(codeID)
+	versions := w.versions(codeID, 0)
+
+	inRun := common.ContextWithRun(operator, common.RunContext{RunId: "ac-run-" + w.suffix})
+	_, stamped := common.RunFromContext(inRun)
+	require.True(t, stamped, "the premise failed: the context carries no run")
+
+	in, spy := w.spied()
+	for name, act := range map[string]func() ([]memorynodes.MemoryNode, error){
+		"minting": func() ([]memorynodes.MemoryNode, error) { return in.handleCreate(inRun, w.createArgs(nil), 0) },
+		"regenerating": func() ([]memorynodes.MemoryNode, error) {
+			return in.handleRegenerate(inRun, map[string]any{"codeId": codeID}, 0)
+		},
+	} {
+		t.Run(name+" is refused", func(t *testing.T) {
+			spy.reset()
+			nodes, err := act()
+			require.Nil(t, nodes, "a run was handed a code")
+			msg := requireSentence(t, err)
+			require.Contains(t, msg, "Deployables", "the refusal does not say where a code is minted")
+			require.Contains(t, msg, "journal", "the refusal does not say why")
+			require.Empty(t, spy.calls, "the refusal came after something was read or written")
+		})
+	}
+	require.Equal(t, before, w.row(codeID), "a refused regenerate replaced the secret")
+	require.Equal(t, versions, w.codesOn(w.site), "a refused mint wrote a code")
+
+	t.Run("an act that carries no code may run in a run", func(t *testing.T) {
+		_, err := in.handleSetExpiry(inRun, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+		require.NoError(t, err)
+		_, err = in.handleList(inRun, map[string]any{"siteId": w.site}, 0)
+		require.NoError(t, err)
+		_, err = in.handleGates(inRun, map[string]any{"siteId": w.site}, 0)
+		require.NoError(t, err)
+		_, err = in.handleRemove(inRun, map[string]any{"codeId": codeID}, 0)
+		require.NoError(t, err)
+	})
+}
+
+// registerLogic compiles one logic and registers it as the loader would.
+func (w *world) registerLogic(source string) string {
+	w.t.Helper()
+	normalised, err := langparser.NormaliseAll(source)
+	require.NoError(w.t, err)
+	file, err := langparser.ParseFile(normalised)
+	require.NoError(w.t, err)
+	fn, ok := file.Definitions[0].(*langparser.FunctionDef)
+	require.True(w.t, ok, "the source is not a logic")
+	body, problems := compiler.CompileBody("logic", fn.Name, nil, fn.Body.(*langparser.AutomationDef).Body)
+	require.Empty(w.t, problems)
+	require.NoError(w.t, w.eng.Functions().Upsert(&memql.Function{Name: fn.Name, FunctionKind: "logic", Enabled: true, LogicBody: body}))
+	return fn.Name
+}
+
+// THROUGH THE REAL LOGIC RUNNER, because that is how the code reached the journal when
+// review measured it: `minted := builtin siteAccessCodeCreate(...); return minted` wrote the
+// plain code to v1:work:step and v1:work:run. A logic that regenerates a client's code and
+// emails it is the natural thing for a pack to write, so the property is asserted of the
+// rows themselves, under the journal this logic really writes to.
+func TestALogicCannotPutACodeInItsJournal(t *testing.T) {
+	w := newWorld(t, "logic")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	codeID, _ := w.mint(operator, nil)
+	before := w.row(codeID)
+	stamp := time.Now().UnixNano()
+	started := time.Now().Add(-time.Second)
+
+	journalRows := func(automation string) int {
+		t.Helper()
+		n, err := w.db.NewSelect().TableExpr(`"MemoryNodes"`).
+			Where("concept = ?", "v1:work:run").Where("payload->>'automationName' = ?", automation).Count(context.Background())
+		require.NoError(t, err)
+		return int(n)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).
+			Where("concept IN (?, ?)", "v1:work:run", "v1:work:step").Where(`"createdAt" >= ?`, started).
+			Where("payload::text LIKE ?", "%"+w.site+"%").Exec(ctx)
+	})
+
+	// THE CONTROL: this logic writes, so its run opens and journals what it returned. If
+	// this finds nothing, the rows below prove nothing about a journal that is not on.
+	retime := w.registerLogic(fmt.Sprintf(`logic retimeFromALogic%d {
+  moved := builtin siteAccessCodeSetExpiry(codeId: %s, expiresAt: %s)
+  return moved
+}`, stamp, langparser.QuoteString(codeID), langparser.QuoteString(after(2*time.Hour))))
+	_, err := w.eng.Execute(operator, retime+"()")
+	require.NoError(t, err)
+	require.NotZero(t, journalRows("logic:"+retime), "the logic's run was not journalled, so this test measures nothing")
+	before = w.row(codeID)
+
+	for name, source := range map[string]string{
+		"minting": fmt.Sprintf(`logic mintFromALogic%d {
+  minted := builtin siteAccessCodeCreate(siteId: %s, label: "From a logic", gate: "dashboard", expiresAt: %s)
+  return minted
+}`, stamp, langparser.QuoteString(w.site), langparser.QuoteString(after(time.Hour))),
+		"regenerating": fmt.Sprintf(`logic regenerateFromALogic%d {
+  minted := builtin siteAccessCodeRegenerate(codeId: %s)
+  return minted
+}`, stamp, langparser.QuoteString(codeID)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			logic := w.registerLogic(source)
+			_, err := w.eng.Execute(operator, logic+"()")
+			require.Error(t, err, "a logic was handed a code")
+			require.Contains(t, err.Error(), "Deployables")
+		})
+	}
+
+	// FIRST, because it is the point: with the refusal taken away this is what fails, on
+	// the rows review found the code in.
+	held, err := w.db.NewSelect().TableExpr(`"MemoryNodes"`).
+		Where("concept LIKE ?", "v1:work:%").Where(`"createdAt" >= ?`, started).
+		Where("payload::text ~ ?", codeInText).Count(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, held, "a v1:work row holds a plain code")
+	require.Equal(t, before, w.row(codeID), "a logic replaced a code's secret")
+	require.Equal(t, 1, w.codesOnSiteDistinct(w.site), "a logic minted a code")
+}
+
+// ---------------------------------------------------------------------------
+// a row's owner has no say
+// ---------------------------------------------------------------------------
+
+// transfer runs the real ownership transfer, as the caller given, and answers what it
+// says it moved.
+func (w *world) transfer(caller context.Context, args map[string]any) []map[string]any {
+	w.t.Helper()
+	integration := identity.NewIdentityIntegrationWithEngine(w.eng, func() *bun.DB { return w.db }, discardLogger())
+	for _, capability := range integration.Capabilities() {
+		if capability.Name != "transferRowOwnership" {
+			continue
+		}
+		nodes, err := capability.Handler(caller, args, 0)
+		require.NoError(w.t, err, "the transfer failed")
+		require.Len(w.t, nodes, 1)
+		reply := payloadOf(w.t, nodes[0])
+		var moved []map[string]any
+		if rows, ok := reply["rows"].([]any); ok {
+			for _, row := range rows {
+				moved = append(moved, row.(map[string]any))
+			}
+		}
+		w.t.Cleanup(func() {
+			_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).
+				Where("concept = ?", "v1:identity:auditEvent").Where("payload->>'targetId' = ?", args["toUserId"]).Exec(context.Background())
+		})
+		return moved
+	}
+	w.t.Fatal("the identity integration has no transferRowOwnership")
+	return nil
+}
+
+func (w *world) siteOwner(site string) string {
+	w.t.Helper()
+	var node memorynodes.MemoryNode
+	require.NoError(w.t, w.db.NewSelect().Model(&node).
+		Where("concept = ?", siteConcept).Where("id = ?", siteConcept+":"+site).
+		Order("createdAt DESC").Limit(1).Scan(context.Background()))
+	var payload map[string]any
+	require.NoError(w.t, json.Unmarshal(node.Payload, &payload))
+	return bare(payload["ownerUserId"])
+}
+
+func (w *world) sessionOwner(session string) string {
+	w.t.Helper()
+	var node memorynodes.MemoryNode
+	require.NoError(w.t, w.db.NewSelect().Model(&node).
+		Where("concept = ?", sessionConcept).Where("id = ?", sessionConcept+":"+session).
+		Order("createdAt DESC").Limit(1).Scan(context.Background()))
+	var payload map[string]any
+	require.NoError(w.t, json.Unmarshal(node.Payload, &payload))
+	return bare(payload["ownerUserId"])
+}
+
+// WHOLE-USER TRANSFER ONCE MOVED A CODE TO AN HEIR WHILE ITS TIED SITE KEPT ITS OWNER, and
+// a lookup as the site's owner then missed it: a code an operator had handed out stopped
+// opening, silently, because of an offboarding. Neither concept moves now, and a row's
+// owner has no say in the lookups anyway, so this is asserted from both ends.
+func TestAWholeUserTransferLeavesCodesAndSessionsWhereTheyWereStamped(t *testing.T) {
+	w := newWorld(t, "wholeuser")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	store := NewGraphStore(liveEngine{w.eng})
+	background := context.Background()
+	heir := "ac-heir-" + w.suffix
+	w.principal(heir, auth.RoleWriter)
+
+	codeID, code := w.mint(operator, nil)
+	session := "ac-session-" + w.suffix
+	token := memql.AccessSessionTokenDigest("whole-user-" + w.suffix)
+	require.NoError(t, store.CreateSession(background, w.owner, Session{
+		ID: session, SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
+	}, token))
+	codeVersions := w.versions(codeID, 0)
+	require.Equal(t, w.owner, bare(w.row(codeID)["ownerUserId"]))
+	require.Equal(t, w.owner, w.sessionOwner(session))
+
+	moved := w.transfer(operator, map[string]any{"fromUserId": w.owner, "toUserId": heir})
+
+	// THE REACHABLE POSITIVE: it is a real transfer, and it found this person's rows.
+	require.NotEmpty(t, moved, "the transfer moved nothing, so nothing here was at risk")
+	for _, row := range moved {
+		require.NotEqual(t, codeConcept, row["concept"], "the transfer moved a code")
+		require.NotEqual(t, sessionConcept, row["concept"], "the transfer moved a session")
+	}
+	require.Equal(t, w.owner, bare(w.row(codeID)["ownerUserId"]), "the code moved")
+	require.Equal(t, codeVersions, w.versions(codeID, 0), "the transfer wrote a version of the code")
+	require.Equal(t, w.owner, w.sessionOwner(session), "the session moved")
+	require.Equal(t, w.owner, w.siteOwner(w.site), "the premise failed: a tied site is what kept its owner")
+
+	// AND IT STILL OPENS: the lookups the unlock and every later request make.
+	found, err := store.CodeByHash(background, w.site, memql.AccessCodeDigest(code))
+	require.NoError(t, err)
+	require.NotNil(t, found, "the code stopped resolving after an offboarding")
+	byID, err := store.CodeByID(background, codeID)
+	require.NoError(t, err)
+	require.NotNil(t, byID)
+	open, err := store.SessionByTokenHash(background, token)
+	require.NoError(t, err)
+	require.NotNil(t, open, "an open session stopped resolving after an offboarding")
+	require.NoError(t, store.CreateSession(background, w.siteOwner(w.site), Session{
+		SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
+	}, memql.AccessSessionTokenDigest("after-"+w.suffix)))
+}
+
+// A TRANSFER OF THE SITE ALONE MOVES THE SITE AND NOT ITS CODES, on an untied site where
+// nothing restores the owner. So the code's owner and the site's now differ for good, and
+// a lookup as the site's owner would miss the code, and a session too. The codes have to
+// keep working, and an operator has to be able to end them.
+func TestASiteOnlyTransferLeavesItsCodesWorking(t *testing.T) {
+	w := newWorld(t, "siteonly")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	store := NewGraphStore(liveEngine{w.eng})
+	background := context.Background()
+	heir := "ac-heir-" + w.suffix
+	w.principal(heir, auth.RoleWriter)
+	untied := "ac-untied-" + w.suffix
+	w.siteRow(untied, map[string]any{"accountId": nil})
+
+	codeID, code := w.mint(operator, map[string]any{"siteId": untied})
+	opened := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
+	session := "ac-session-" + w.suffix
+	token := memql.AccessSessionTokenDigest("site-only-" + w.suffix)
+	require.NoError(t, store.CreateSession(background, w.owner, Session{
+		ID: session, SiteID: untied, CodeID: codeID, Generation: 1, IssuedAt: opened,
+	}, token))
+
+	// AS THE CLUSTER ACTING, because a person cannot move this row: the organization rule
+	// refuses any change to an untied site until it is attributed (organization_required),
+	// and a tied site keeps its owner whatever a transfer says. So this is how a site's
+	// owner comes to differ from the one its codes were stamped with.
+	moved := w.transfer(seedContext(), map[string]any{
+		"fromUserId": w.owner, "toUserId": heir, "concept": siteConcept, "rowId": siteConcept + ":" + untied,
+	})
+	require.Len(t, moved, 1, "the transfer did not move the site")
+
+	// THE PREMISE: the two now disagree.
+	require.Equal(t, heir, w.siteOwner(untied), "the site did not move")
+	require.Equal(t, w.owner, bare(w.row(codeID)["ownerUserId"]), "the code moved with the site")
+	require.Equal(t, w.owner, w.sessionOwner(session), "the session moved with the site")
+
+	// THE CODE STILL OPENS THE SITE, and a session opened before the transfer still resolves.
+	found, err := store.CodeByHash(background, untied, memql.AccessCodeDigest(code))
+	require.NoError(t, err)
+	require.NotNil(t, found, "a code stopped opening its site because the site changed hands")
+	open, err := store.SessionByTokenHash(background, token)
+	require.NoError(t, err)
+	require.NotNil(t, open, "an open session stopped resolving because its site changed hands")
+
+	// THE NEW OWNER'S VISITORS OPEN SESSIONS STAMPED WITH THE NEW OWNER, and "last opened"
+	// reads across both, because it reads as the cluster and not as either of them.
+	later := opened.Add(30 * time.Second)
+	require.NoError(t, store.CreateSession(background, heir, Session{
+		SiteID: untied, CodeID: codeID, Generation: 1, IssuedAt: later,
+	}, memql.AccessSessionTokenDigest("site-only-later-"+w.suffix)))
+	listed, err := w.in.handleList(operator, map[string]any{"siteId": untied}, 0)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, stamp(later), payloadOf(t, listed[0])["lastOpenedAt"], "last opened missed a session stamped with the site's new owner")
+
+	// AN OPERATOR CAN STILL REGENERATE IT AND REMOVE IT, and neither moves its owner.
+	nodes, err := w.in.handleRegenerate(operator, map[string]any{"codeId": codeID}, 0)
+	require.NoError(t, err, "a code could not be regenerated because its site changed hands")
+	fresh := fmt.Sprint(onlyPayload(t, nodes)["code"])
+	require.Equal(t, memql.AccessCodeDigest(fresh), w.row(codeID)["codeHash"])
+	require.Equal(t, w.owner, bare(w.row(codeID)["ownerUserId"]), "regenerating moved the row's owner")
+	found, err = store.CodeByHash(background, untied, memql.AccessCodeDigest(fresh))
+	require.NoError(t, err)
+	require.NotNil(t, found)
+
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": codeID}, 0)
+	require.NoError(t, err, "a code could not be removed because its site changed hands")
+	row := w.row(codeID)
+	require.NotEmpty(t, row["revokedAt"])
+	require.Equal(t, w.owner, bare(row["ownerUserId"]), "removing moved the row's owner")
+}
+
+// ---------------------------------------------------------------------------
+// the audit event does not wait on the request
+// ---------------------------------------------------------------------------
+
+// A STREAM DROPPED IN THE MOMENT AFTER THE WRITE has cancelled the request's context, and
+// the act happened regardless. The record of it has to land anyway: a regenerate with no
+// event is a credential replaced with nobody's name on it.
+func TestAStreamDroppedAfterTheWriteStillRecordsTheAct(t *testing.T) {
+	w := newWorld(t, "dropped")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	codeID, _ := w.mint(operator, nil)
+
+	acts := []struct {
+		name string
+		act  func(*Integration, context.Context) error
+	}{
+		{"regenerating", func(in *Integration, ctx context.Context) error {
+			_, err := in.handleRegenerate(ctx, map[string]any{"codeId": codeID}, 0)
+			return err
+		}},
+		{"re-timing", func(in *Integration, ctx context.Context) error {
+			_, err := in.handleSetExpiry(ctx, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+			return err
+		}},
+		{"removing", func(in *Integration, ctx context.Context) error {
+			_, err := in.handleRemove(ctx, map[string]any{"codeId": codeID}, 0)
+			return err
+		}},
+	}
+	for _, tc := range acts {
+		t.Run(tc.name, func(t *testing.T) {
+			in, spy := w.spied()
+			ctx, cancel := context.WithCancel(operator)
+			defer cancel()
+			// THE MOMENT: the write has landed, and the audit event is about to be written.
+			var (
+				atTheWrite error
+				bounded    bool
+			)
+			spy.before = func(call recordedCall) {
+				if call.construct() == "createAuditEvent" {
+					cancel()
+					atTheWrite = call.ctx.Err()
+					_, bounded = call.ctx.Deadline()
+				}
+			}
+			events := len(w.events(codeID))
+			require.NoError(t, tc.act(in, ctx))
+			require.Error(t, ctx.Err(), "the premise failed: the request was not cancelled")
+
+			require.Len(t, spy.named("createAuditEvent"), 1)
+			require.NoError(t, atTheWrite, "the audit write was left waiting on the request that was dropped")
+			require.True(t, bounded, "a write that outlives its request has no bound of its own")
+			require.Len(t, w.events(codeID), events+1, "the act happened and its audit event did not land")
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,6 +1775,7 @@ func TestEachReadAndWriteRunsAsTheActorItMust(t *testing.T) {
 	w := newWorld(t, "actors")
 	in, spy := w.spied()
 	caller := actorContext(w.operator, auth.RoleOwner)
+	theCluster := "system:" + systemActorName
 
 	expect := func(t *testing.T, construct, actor string, internal bool) recordedCall {
 		t.Helper()
@@ -1336,7 +1824,7 @@ func TestEachReadAndWriteRunsAsTheActorItMust(t *testing.T) {
 			require.NoError(t, tc.act())
 			expect(t, "siteAccessCodeById", w.operator, true)
 			expect(t, "siteById", w.operator, false)
-			write := expect(t, tc.write, w.owner, true)
+			write := expect(t, tc.write, theCluster, true)
 			require.True(t, memql.HasRowVersionFence(write.ctx, codeConcept, codeID), "%s carries no witness of the row it decided from", tc.write)
 			expect(t, "createAuditEvent", w.operator, true)
 		})
@@ -1348,7 +1836,7 @@ func TestEachReadAndWriteRunsAsTheActorItMust(t *testing.T) {
 		require.NoError(t, err)
 		expect(t, "siteById", w.operator, false)
 		expect(t, "siteAccessCodeRowsForSite", w.operator, true)
-		expect(t, "siteAccessSessionLatestForCode", w.owner, true)
+		expect(t, "siteAccessSessionLatestForCode", theCluster, true)
 	})
 
 	t.Run("the gates", func(t *testing.T) {
@@ -1359,24 +1847,25 @@ func TestEachReadAndWriteRunsAsTheActorItMust(t *testing.T) {
 		expect(t, "packageById", w.operator, false)
 	})
 
-	t.Run("the store reads and writes as the owner it is told, with no caller at all", func(t *testing.T) {
+	t.Run("the store reads and updates as the cluster, and creates as the owner it is told, with no caller at all", func(t *testing.T) {
 		spy.reset()
 		store := NewGraphStore(spy)
 		background := context.Background()
-		_, err := store.CodeByHash(background, w.owner, w.site, memql.AccessCodeDigest("nothing"))
+		_, err := store.CodeByHash(background, w.site, memql.AccessCodeDigest("nothing"))
 		require.NoError(t, err)
-		_, err = store.CodeByID(background, w.owner, codeID)
+		_, err = store.CodeByID(background, codeID)
 		require.NoError(t, err)
-		_, err = store.SessionByTokenHash(background, w.owner, memql.AccessSessionTokenDigest("nothing"))
+		_, err = store.SessionByTokenHash(background, memql.AccessSessionTokenDigest("nothing"))
 		require.NoError(t, err)
 		session := "ac-actors-session-" + w.suffix
 		require.NoError(t, store.CreateSession(background, w.owner, Session{
 			ID: session, SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
 		}, memql.AccessSessionTokenDigest("actors"+w.suffix)))
-		require.NoError(t, store.EndSession(background, w.owner, session, time.Now()))
-		for _, construct := range []string{"siteAccessCodeByHash", "siteAccessCodeById", "siteAccessSessionByToken", "createSiteAccessSession", "endSiteAccessSession"} {
-			expect(t, construct, w.owner, true)
+		require.NoError(t, store.EndSession(background, session, time.Now()))
+		for _, construct := range []string{"siteAccessCodeByHash", "siteAccessCodeById", "siteAccessSessionByToken", "endSiteAccessSession"} {
+			expect(t, construct, theCluster, true)
 		}
+		expect(t, "createSiteAccessSession", w.owner, true)
 	})
 }
 
@@ -1593,7 +2082,7 @@ func TestTwoRegeneratesFromOneReadDoNotBothSucceed(t *testing.T) {
 		require.True(t, ok)
 
 		write := func(seed string) error {
-			return store.rotateCode(context.Background(), w.owner, rotation{
+			return store.rotateCode(context.Background(), rotation{
 				CodeID: codeID, Digest: memql.AccessCodeDigest(seed), Hint: "ZZZZ", Generation: read.Generation + 1,
 				IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), ChangedBy: w.operator,
 			}, read.Version)
@@ -1919,7 +2408,7 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 	codeID, code := w.mint(operator, map[string]any{"gate": "clients", "subject": "acme"})
 	digest := memql.AccessCodeDigest(code)
 
-	got, err := store.CodeByHash(background, w.owner, w.site, digest)
+	got, err := store.CodeByHash(background, w.site, digest)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, codeID, got.ID, "the id comes back bare")
@@ -1931,26 +2420,23 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 	require.False(t, got.Revoked)
 	require.WithinDuration(t, time.Now().Add(time.Hour), got.ExpiresAt, time.Minute)
 
-	byID, err := store.CodeByID(background, w.owner, codeID)
+	byID, err := store.CodeByID(background, codeID)
 	require.NoError(t, err)
 	require.Equal(t, got, byID, "the two lookups disagree about one row")
 
 	t.Run("a miss is nil and nil", func(t *testing.T) {
 		for name, read := range map[string]func() (*Code, error){
 			"an unknown digest": func() (*Code, error) {
-				return store.CodeByHash(background, w.owner, w.site, memql.AccessCodeDigest("nope"))
+				return store.CodeByHash(background, w.site, memql.AccessCodeDigest("nope"))
 			},
-			"another site":        func() (*Code, error) { return store.CodeByHash(background, w.owner, w.site+"-other", digest) },
-			"an unknown id":       func() (*Code, error) { return store.CodeByID(background, w.owner, codeID+"-nope") },
-			"a stranger as owner": func() (*Code, error) { return store.CodeByHash(background, w.stranger, w.site, digest) },
-			"no owner at all":     func() (*Code, error) { return store.CodeByHash(background, "", w.site, digest) },
-			"no owner, by id":     func() (*Code, error) { return store.CodeByID(background, "", codeID) },
+			"another site":  func() (*Code, error) { return store.CodeByHash(background, w.site+"-other", digest) },
+			"an unknown id": func() (*Code, error) { return store.CodeByID(background, codeID+"-nope") },
 		} {
 			found, err := read()
 			require.NoError(t, err, name)
 			require.Nil(t, found, name)
 		}
-		session, err := store.SessionByTokenHash(background, w.owner, memql.AccessSessionTokenDigest("nope"))
+		session, err := store.SessionByTokenHash(background, memql.AccessSessionTokenDigest("nope"))
 		require.NoError(t, err)
 		require.Nil(t, session)
 	})
@@ -1959,7 +2445,7 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 		removed, removedCode := w.mint(operator, map[string]any{"label": "Removed"})
 		_, err := w.in.handleRemove(operator, map[string]any{"codeId": removed}, 0)
 		require.NoError(t, err)
-		found, err := store.CodeByHash(background, w.owner, w.site, memql.AccessCodeDigest(removedCode))
+		found, err := store.CodeByHash(background, w.site, memql.AccessCodeDigest(removedCode))
 		require.NoError(t, err)
 		require.NotNil(t, found)
 		require.True(t, found.Revoked)
@@ -1987,7 +2473,7 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 		require.Equal(t, token, payload["tokenHash"])
 		require.Equal(t, w.owner, bare(payload["ownerUserId"]), "the session is the site's owner's")
 
-		found, err := store.SessionByTokenHash(background, w.owner, token)
+		found, err := store.SessionByTokenHash(background, token)
 		require.NoError(t, err)
 		require.NotNil(t, found)
 		require.Equal(t, session, found.ID)
@@ -1997,14 +2483,9 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 		require.True(t, found.IssuedAt.Equal(given.Truncate(time.Second)))
 		require.False(t, found.Ended)
 
-		// A stranger's actor reads nothing, and that holds with internal origin too.
-		other, err := store.SessionByTokenHash(background, w.stranger, token)
-		require.NoError(t, err)
-		require.Nil(t, other, "a stranger resolved the owner's session by digest")
-
-		// Ending it keeps the row and says so.
-		require.NoError(t, store.EndSession(background, w.owner, session, time.Now()))
-		found, err = store.SessionByTokenHash(background, w.owner, token)
+		// Ending it keeps the row, says so, and leaves it the owner it was stamped with.
+		require.NoError(t, store.EndSession(background, session, time.Now()))
+		found, err = store.SessionByTokenHash(background, token)
 		require.NoError(t, err)
 		require.NotNil(t, found, "an ended session must still resolve, so the handler can say 'ended'")
 		require.True(t, found.Ended)
@@ -2015,7 +2496,7 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 		require.NoError(t, store.CreateSession(background, w.owner, Session{
 			SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
 		}, token))
-		found, err := store.SessionByTokenHash(background, w.owner, token)
+		found, err := store.SessionByTokenHash(background, token)
 		require.NoError(t, err)
 		require.NotNil(t, found)
 		require.NotEmpty(t, found.ID)
@@ -2025,7 +2506,6 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 		require.Error(t, store.CreateSession(background, "", Session{
 			SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now(),
 		}, memql.AccessSessionTokenDigest("ownerless-"+w.suffix)))
-		require.Error(t, store.EndSession(background, "", "any", time.Now()))
 		require.Error(t, store.CreateSession(background, w.owner, Session{
 			SiteID: w.site, CodeID: codeID, Generation: 1,
 		}, memql.AccessSessionTokenDigest("timeless-"+w.suffix)), "a session with no issuedAt was written")
@@ -2069,6 +2549,17 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 		require.NotContains(t, text, stored)
 		require.False(t, anyDigest.MatchString(text), "a digest is in: %q", text)
 	}
+	// silent holds a log line to a fixed reason and an id. Taking the digests out of an
+	// engine error that repeats its statement would still leave the operator's label, the
+	// client's subject and the hint in it, so none of the engine's words may get there.
+	silent := func(t *testing.T, text string) {
+		t.Helper()
+		clean(t, text)
+		require.NotContains(t, text, "the engine choked", "the engine's own text reached the log")
+		require.NotContains(t, text, "A label nobody logs", "an operator's label reached the log")
+		require.NotContains(t, text, "a-subject-nobody-logs", "a client's subject reached the log")
+		require.NotContains(t, text, "codeHint", "a code's hint reached the log")
+	}
 
 	for _, fail := range []string{"createSiteAccessCode", "rotateSiteAccessCode", "setSiteAccessCodeExpiry", "removeSiteAccessCode"} {
 		t.Run("a failed "+fail, func(t *testing.T) {
@@ -2076,7 +2567,7 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 			var err error
 			switch fail {
 			case "createSiteAccessCode":
-				_, err = in.handleCreate(operator, w.createArgs(nil), 0)
+				_, err = in.handleCreate(operator, w.createArgs(map[string]any{"label": "A label nobody logs", "subject": "a-subject-nobody-logs"}), 0)
 			case "rotateSiteAccessCode":
 				_, err = in.handleRegenerate(operator, map[string]any{"codeId": codeID}, 0)
 			case "setSiteAccessCodeExpiry":
@@ -2085,8 +2576,9 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 				_, err = in.handleRemove(operator, map[string]any{"codeId": codeID}, 0)
 			}
 			clean(t, requireSentence(t, err))
-			clean(t, logged.String())
-			require.Contains(t, logged.String(), "the engine choked", "the failure was not logged, so nobody can find out what happened")
+			silent(t, logged.String())
+			require.Contains(t, logged.String(), "siteaccess: an act on an access code failed", "the failure was not logged, so nobody can find out it happened")
+			require.Contains(t, logged.String(), "reason=", "the log line gives no reason")
 			logged.Reset()
 		})
 	}
@@ -2100,8 +2592,10 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 		text := logged.String()
 		require.Contains(t, text, "audit", "a failed audit write was swallowed without a word")
 		require.Contains(t, text, codeID, "the log does not say which code went unaudited")
+		require.Contains(t, text, "reason=", "the log line gives no reason")
 		require.NotContains(t, text, fresh)
 		require.NotContains(t, text, memql.AccessCodeDigest(fresh))
+		silent(t, text)
 		logged.Reset()
 	})
 
@@ -2109,11 +2603,11 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 		store := NewGraphStore(&failingEngine{inner: liveEngine{w.eng}, fail: "("})
 		digest := memql.AccessCodeDigest("something-else-" + w.suffix)
 		token := memql.AccessSessionTokenDigest("something-" + w.suffix)
-		_, err := store.CodeByHash(context.Background(), w.owner, w.site, digest)
+		_, err := store.CodeByHash(context.Background(), w.site, digest)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), digest)
 		clean(t, err.Error())
-		_, err = store.SessionByTokenHash(context.Background(), w.owner, token)
+		_, err = store.SessionByTokenHash(context.Background(), token)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), token)
 		clean(t, err.Error())

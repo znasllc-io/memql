@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -39,14 +40,30 @@ import (
 // the call said, so a `datetime!` can arrive as a word or not at all, and every value is checked
 // here before anything rests on it.
 //
+// # A code is not minted inside a run
+//
+// The plain code exists in the reply and nowhere else, and inside a run the reply is not
+// the end of it: the journal writes what a statement returned into v1:work:step
+// (result.value.code, result.result.*.payload.code) and v1:work:run
+// (outcome.returned.code), durable rows anybody who may read the run can read. A logic that
+// regenerates a client's code and emails it is the natural thing for a pack to write, so
+// minting and regenerating refuse a run rather than leaving that to its author to know.
+//
+// A RUN IS THE RIGHT TEST. Every step that journals carries one, because the executor
+// stamps it on the step's context (withRunContext, component/automations), a logic's
+// statements included. A dry run does not stamp one, and it journals nothing and refuses
+// every integration executor (CheckBuiltinPreview). A person's own call is not in one: the
+// stream builds its context from the request (component/grpc, handleExecuteQuery) and
+// stamps no run, and the top-level builtin branch of executeWith adds none. The act of
+// re-timing or removing a code carries no code, so a run may do either.
+//
 // # A refusal is a sentence
 //
 // The OS shows what a builtin refuses with, as written (the SDK's refusalSentence takes off the
 // frames the wire puts around it, and a sentence has none of its own to lose). So a refusal here
 // opens with a capital, says what is wrong and says what to do, and carries neither the construct's
 // name nor this package's. That goes for every error a handler returns: a failure a person cannot
-// act on is still worded for them, and its cause goes to the log (see failed). compose's
-// errFolderUnavailable is the precedent.
+// act on is still worded for them (see failed). compose's errFolderUnavailable is the precedent.
 
 // resultConcept is the synthetic MemoryNode concept these capabilities return: an in-flight
 // integration result, never persisted.
@@ -66,6 +83,9 @@ const (
 	// so a name in another alphabet is not held to a shorter limit than one in ASCII.
 	maxLabelLength   = 80
 	maxSubjectLength = 120
+
+	// auditWriteTimeout bounds the one write that outlives its request.
+	auditWriteTimeout = 5 * time.Second
 )
 
 // Integration exposes the access code capabilities.
@@ -174,6 +194,9 @@ type minted struct {
 // site's, so a loss means the site changed, and what changed may be the owner, the
 // organization or the package this mint copied from or was judged against.
 func (i *Integration) handleCreate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := refuseInARun(ctx, "Add it there."); err != nil {
+		return nil, err
+	}
 	actor, err := requireCaller(ctx)
 	if err != nil {
 		return nil, err
@@ -310,10 +333,12 @@ func (i *Integration) readTarget(ctx context.Context, codeID string) (target, er
 		return target{}, err
 	}
 	if !ok {
-		return target{}, refuse("You cannot read the deployable this access code belongs to, so nothing changed. Ask someone who manages that deployable to change it.")
-	}
-	if site.OwnerUserID == "" {
-		return target{}, refuse("This deployable has no owner, so its access codes cannot be changed. Give it an owner, then try again.")
+		// THREE THINGS CAN BE TRUE, and which of them is not something to tell a caller who
+		// cannot read the site. The people who manage a deployable that moved are refused by
+		// the shared gate, which judges the copy, so sending this person to them would be
+		// wrong: only a cluster operator gets past it. A deleted site reads as nothing to
+		// anybody, a cluster operator included, and its code has nothing left to open.
+		return target{}, refuse("You cannot read the deployable this access code belongs to, so nothing changed. If it moved to another organization, this code opens nothing and a cluster operator must remove it. If it was deleted, this code opens nothing and can be left alone. Otherwise, ask whoever manages the deployable.")
 	}
 	return target{code: code, site: site}, nil
 }
@@ -350,6 +375,9 @@ func refuseIfEnded(t target) error {
 // is wanted is a person's decision to make with the list in front of them. A loss to
 // anything else (a re-timing, say) changes nothing this act decides from, and it retries.
 func (i *Integration) handleRegenerate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := refuseInARun(ctx, "Regenerate it there."); err != nil {
+		return nil, err
+	}
 	actor, err := requireCaller(ctx)
 	if err != nil {
 		return nil, err
@@ -422,7 +450,7 @@ func (i *Integration) regenerate(ctx context.Context, actor, codeID string, args
 		return minted{}, err
 	}
 	generation := t.code.Generation + 1
-	if err := i.store.rotateCode(ctx, t.site.OwnerUserID, rotation{
+	if err := i.store.rotateCode(ctx, rotation{
 		CodeID:     t.code.ID,
 		Digest:     digest,
 		Hint:       hint,
@@ -487,7 +515,7 @@ func (i *Integration) setExpiry(ctx context.Context, actor, codeID string, args 
 	if err := checkExpiry(time.Now().UTC(), expiresAt); err != nil {
 		return target{}, time.Time{}, err
 	}
-	if err := i.store.setCodeExpiry(ctx, t.site.OwnerUserID, t.code.ID, expiresAt, actor, t.code.Version); err != nil {
+	if err := i.store.setCodeExpiry(ctx, t.code.ID, expiresAt, actor, t.code.Version); err != nil {
 		return target{}, time.Time{}, err
 	}
 	return t, expiresAt, nil
@@ -539,7 +567,7 @@ func (i *Integration) remove(ctx context.Context, actor, codeID string) (target,
 	if t.code.Revoked {
 		return t, false, nil
 	}
-	if err := i.store.removeCode(ctx, t.site.OwnerUserID, t.code.ID, time.Now().UTC(), actor, t.code.Version); err != nil {
+	if err := i.store.removeCode(ctx, t.code.ID, time.Now().UTC(), actor, t.code.Version); err != nil {
 		return target{}, false, err
 	}
 	return t, true, nil
@@ -605,8 +633,8 @@ func (i *Integration) gatesOf(ctx context.Context, site siteView) ([]memql.Acces
 // handleList answers every code of a site, ended ones included, without the code or
 // its digest, each with when it was last opened.
 //
-// THE SITE IS READ FIRST, for its owner: sessions are read as the owner, and a person
-// who cannot read the site is refused rather than answered empty.
+// THE SITE IS READ FIRST, under the caller: a person who cannot read it is refused rather
+// than answered empty, and the rows and the sessions below are only read for one who can.
 //
 // A READ THAT FAILS IS AN ERROR, ON ANY ROW. A code with no `lastOpenedAt` says "Not
 // opened yet" on the panel, so a session read that failed must not look like one that
@@ -629,7 +657,7 @@ func (i *Integration) handleList(ctx context.Context, args map[string]any, _ int
 	}
 	nodes := make([]memorynodes.MemoryNode, 0, len(codes))
 	for _, code := range codes {
-		opened, err := i.store.lastOpened(ctx, site.OwnerUserID, code.ID, code.Generation)
+		opened, err := i.store.lastOpened(ctx, code.ID, code.Generation)
 		if err != nil {
 			return nil, i.failed("list", siteID, err, "")
 		}
@@ -719,8 +747,8 @@ func errSiteUnreadable() error {
 //
 // A refusal is already worded. A lost fence is told in `conflict`. Anything else is a
 // failure the person cannot act on beyond trying again, so it gets a sentence that says
-// so and claims nothing about what landed, and its cause goes to the log, where somebody
-// can do something with it. The store has already taken any digest out of it.
+// so and claims nothing about what landed. The log gets a fixed reason and the id (see
+// failureReason), and the cause stays behind the sentence for errors.Is.
 func (i *Integration) failed(act, about string, err error, conflict string) error {
 	var worded *refusal
 	if errors.As(err, &worded) {
@@ -729,10 +757,27 @@ func (i *Integration) failed(act, about string, err error, conflict string) erro
 	if conflict != "" && errors.Is(err, memql.ErrRowVersionChanged) {
 		return &refusal{sentence: conflict, cause: err}
 	}
-	i.logger.Warn("siteaccess: an act on an access code failed", "act", act, "about", about, "error", err.Error())
+	i.logger.Warn("siteaccess: an act on an access code failed", "act", act, "about", about, "reason", failureReason(err))
 	return &refusal{
 		sentence: "That did not complete. Reload the list to see where it stands, and try again.",
 		cause:    err,
+	}
+}
+
+// failureReason says why an act failed in words a log line can keep.
+//
+// NEVER THE ENGINE'S OWN TEXT. An engine error may repeat the statement it was given, and
+// taking the digests out of that (scrubbed) still leaves an operator's label, a client's
+// subject and a code's hint in a line read by whoever reads logs. The person who needs the
+// statement has the act and the id, and can read the row.
+func failureReason(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "the request was cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "the request timed out"
+	default:
+		return "the engine did not complete the statement"
 	}
 }
 
@@ -744,6 +789,11 @@ func (i *Integration) failed(act, about string, err error, conflict string) erro
 // replaces it. It is logged instead, adminops' and integrations/groups' call on the same
 // question.
 //
+// IT DOES NOT WAIT ON THE REQUEST. A stream dropped in the moment after the write has
+// cancelled this context, and the act happened regardless, so the record of it is written
+// on a context of its own with a bound of its own: compose records a terminal failure the
+// same way, and for the same reason. It keeps the caller's actor, which is what it records.
+//
 // THE CONTEXT IS THE HANDLER'S. The witness each write carried was a local of that write
 // (store.go), so this one is not fenced: the code's own write has just moved the row the
 // witness names, and carrying it here would refuse this event every time.
@@ -754,8 +804,10 @@ func (i *Integration) audit(ctx context.Context, action, codeID string, detail m
 		entry.ActorEmail = access.PrimaryEmail
 		entry.ActorRole = string(access.Role)
 	}
-	if err := i.store.writeAudit(ctx, entry); err != nil {
-		i.logger.Warn("siteaccess: the audit event for an access code did not land", "action", action, "codeId", codeID, "error", err.Error())
+	detached, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditWriteTimeout)
+	defer cancel()
+	if err := i.store.writeAudit(detached, entry); err != nil {
+		i.logger.Warn("siteaccess: the audit event for an access code did not land", "action", action, "codeId", codeID, "reason", failureReason(err))
 	}
 }
 
@@ -828,12 +880,22 @@ func gateNames(gates []memql.AccessGateSummary) string {
 	return strings.Join(names, ", ")
 }
 
+// refuseInARun is what a mint or a regenerate says inside a run: see the file note. It is
+// asked first, before anything is read or minted, and `instead` says what to do about it.
+func refuseInARun(ctx context.Context, instead string) error {
+	if _, inRun := common.RunFromContext(ctx); inRun {
+		return refuse("An access code is minted only by a person in Deployables, because a run's journal would keep it. %s", instead)
+	}
+	return nil
+}
+
 // requireCaller is the person behind an act, bare, for `lastChangedBy`.
 //
-// AN ACT ON A CODE BELONGS TO A PERSON. The write runs as the site's owner, so this is the
-// only record of who asked, and a connector or an anonymous actor has nobody to name. It is
-// asked first, though no person would think to: the reads after it would refuse the same
-// callers, in words about a site or a row tier that say nothing about what is wrong.
+// AN ACT ON A CODE BELONGS TO A PERSON. The write does not run as them, so this is the
+// only record of who asked, and a connector, an anonymous actor and the cluster acting on
+// its own have nobody to name. It is asked first, though no person would think to: the
+// reads after it would refuse the same callers, in words about a site or a row tier that
+// say nothing about what is wrong, or admit the cluster and write its name on the row.
 func requireCaller(ctx context.Context) (string, error) {
 	actor := memql.BareShortId(callerUserID(ctx))
 	if actor == "" {
@@ -842,13 +904,13 @@ func requireCaller(ctx context.Context) (string, error) {
 	return actor, nil
 }
 
-// callerUserID is the authenticated caller, or "" when there is none.
+// callerUserID is the authenticated person calling, or "" when there is none.
 func callerUserID(ctx context.Context) string {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac == nil {
 		return ""
 	}
-	if ac.IsAnonymousActor() || ac.IsConnector() {
+	if ac.IsAnonymousActor() || ac.IsConnector() || ac.Synthetic {
 		return ""
 	}
 	return strings.TrimSpace(ac.UserId)

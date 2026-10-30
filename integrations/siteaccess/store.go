@@ -13,6 +13,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // store.go -- the graph seam. Every read and write is a NAMED construct rendered
@@ -21,32 +22,34 @@ import (
 //
 // # Three actors, and which is which is the whole of the authorization story
 //
-// THE SITE AND ITS PACKAGE ARE READ UNDER THE CALLER, with no stamp. That is what
-// makes them authorization checks rather than lookups: siteById and packageById
-// carry the composite tier and the organization conjunct, so a caller who may not
-// see either resolves zero rows and is refused before anything is minted. A stamp
-// would hand a read that IS the check the engine's escape for trusted Go, which
-// is integrations/customdomain's reason exactly.
+// AN OPERATOR'S ACT AUTHORIZES UNDER THE CALLER. The site and its package are read
+// with no stamp, and that is what makes them checks rather than lookups: siteById and
+// packageById carry the composite tier and the organization conjunct, so a caller who
+// may not see either resolves zero rows and is refused before anything is minted. A
+// stamp would hand a read that IS the check the engine's escape for trusted Go, which
+// is integrations/customdomain's reason exactly. A code's rows are read with internal
+// origin under the same untouched actor, because the concept is unreadable by any
+// client whatever the tier says (clientUnreadableConcepts, component/memql): an
+// unstamped read answers nothing for everybody, and the composite tier still decides
+// every row. The builtin in front of these has already passed the part and the
+// organization gate.
 //
-// A CODE'S ROWS ARE READ WITH INTERNAL ORIGIN, UNDER THE CALLER. The stamp is not
-// optional here: the concept is unreadable by any client whatever the tier says
-// (clientUnreadableConcepts, component/memql), so an unstamped read answers
-// nothing for everybody, and nothing looks wrong but an empty panel. The actor is
-// left exactly as it was, so the composite tier still decides every row, and the
-// builtin in front of this read has already passed the part and the organization
-// gate.
+// THE STORE'S OWN READS AND UPDATES RUN AS THE CLUSTER ACTING: a synthetic actor with
+// internal origin, as component/edge reads a preview grant, through the
+// `actor.isClusterOwner` arm the queries already state. A ROW'S CURRENT OWNER MUST NOT
+// DECIDE ANYTHING HERE. Whole-user transfer once moved a code to an heir while its tied
+// site kept its owner, and a transfer of the site alone does the opposite, and either
+// way a lookup as the site's owner missed a code that should open. Nor can an operator
+// who only belongs to the site's organization read a session, whose tier has no account
+// arm. So nothing here compares an owner: the bff's handler compares the edge's stamp
+// with the site's own ownerUserId before it calls in, and THAT IS WHAT CHECKS THE OWNER.
+// These reads answer for anybody who reaches them, which is why they are @serverOnly and
+// why a caller outside this package holds only the five functions below.
 //
-// THE WRITES RUN AS THE SITE'S OWNER, with internal origin, and so do the session
-// reads. A row's owner is the actor that wrote it, and it has to be the site's
-// rather than the operator's, because the bff finds the row again under the owner
-// the edge stamped on a request. The person who asked is recorded separately, in
-// `lastChangedBy` and the audit event. A session's tier has no account arm, so an
-// operator who only belongs to the site's organization is not admitted to one, and
-// reading "last opened" as them would answer nothing for every code they manage.
-//
-// The exported half below is what the bff's handler reads through, with no caller
-// at all: a visitor has no identity to read as. Those functions take the owner the
-// edge stamped, and the handler has already compared it with the site's own.
+// THE TWO CREATES RUN AS THE SITE'S OWNER, so a row is stamped with the site's owner at
+// birth and never the operator's. That stamp stays where it landed: ownership transfer
+// skips both concepts (integrations/identity). The person who asked is recorded
+// separately, in `lastChangedBy` and the audit event.
 //
 // # A witness never leaves the call that needs it
 //
@@ -69,6 +72,11 @@ const (
 	codeConcept    = "v1:platform:siteAccessCode"
 	sessionConcept = "v1:platform:siteAccessSession"
 )
+
+// systemActorName is what this package calls itself to auth.SystemActor. It is what a
+// row's createdBy says when the store updates one, by name, so a version the cluster
+// wrote cannot be mistaken for one a person did.
+const systemActorName = "siteaccess"
 
 // Engine is the narrow engine surface this package needs.
 type Engine interface {
@@ -99,12 +107,17 @@ type GraphStore struct{ engine Engine }
 // NewGraphStore wraps an engine.
 func NewGraphStore(engine Engine) *GraphStore { return &GraphStore{engine: engine} }
 
-// asOwner is the context every read and write made for a site's owner runs under.
+// asCluster is the context the store's own reads and updates run under: the cluster
+// acting, with internal origin. See the file note for why a row's owner has no say.
+func asCluster(ctx context.Context) context.Context {
+	return auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(ctx, systemActorName))
+}
+
+// asOwner is the context the two creates run under, so the row they write is stamped
+// with the site's owner.
 //
 // A BLANK OWNER ANSWERS FALSE, because auth.ContextWithUserActor leaves a context
-// unchanged for one: the work would run as whoever the inbound caller happened to
-// be. Each caller decides what no owner means to it, and the two answers differ --
-// a read misses, a write fails.
+// unchanged for one: the row would belong to whoever the inbound caller happened to be.
 func asOwner(ctx context.Context, owner string) (context.Context, bool) {
 	owner = memql.BareShortId(owner)
 	if owner == "" {
@@ -114,16 +127,16 @@ func asOwner(ctx context.Context, owner string) (context.Context, bool) {
 }
 
 // CodeByHash finds a code by the digest of what a visitor typed, on one site. A
-// miss is (nil, nil), and that covers a code of another site and a blank owner. A
-// removed or expired code still answers: which of those means `invalid` and which
-// `expired` is a decision about the reply, and it is the handler's.
-func (s *GraphStore) CodeByHash(ctx context.Context, owner, siteID, codeHash string) (*Code, error) {
-	owned, ok := asOwner(ctx, owner)
-	if !ok {
-		return nil, nil
-	}
+// miss is (nil, nil), and that covers a code of another site. A removed or expired
+// code still answers: which of those means `invalid` and which `expired` is a decision
+// about the reply, and it is the handler's.
+//
+// IT CHECKS NO OWNER, and neither does anything else on this path: it reads as the
+// cluster acting (see the file note), and it is the handler's comparison of the edge's
+// stamp with the site's ownerUserId, made before this is called, that checks the owner.
+func (s *GraphStore) CodeByHash(ctx context.Context, siteID, codeHash string) (*Code, error) {
 	call, err := langparser.RenderCall("siteAccessCodeByHash", map[string]any{"siteId": siteID, "codeHash": codeHash})
-	rows, err := s.read(owned, "a code by its digest", call, err)
+	rows, err := s.read(asCluster(ctx), "a code by its digest", call, err)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -131,13 +144,10 @@ func (s *GraphStore) CodeByHash(ctx context.Context, owner, siteID, codeHash str
 	return &code, nil
 }
 
-// CodeByID resolves the code a session was opened with. A miss is (nil, nil).
-func (s *GraphStore) CodeByID(ctx context.Context, owner, codeID string) (*Code, error) {
-	owned, ok := asOwner(ctx, owner)
-	if !ok {
-		return nil, nil
-	}
-	view, found, err := s.codeByID(owned, codeID)
+// CodeByID resolves the code a session was opened with. A miss is (nil, nil). It reads
+// as the cluster acting, for CodeByHash's reason.
+func (s *GraphStore) CodeByID(ctx context.Context, codeID string) (*Code, error) {
+	view, found, err := s.codeByID(asCluster(ctx), codeID)
 	if err != nil || !found {
 		return nil, err
 	}
@@ -146,14 +156,11 @@ func (s *GraphStore) CodeByID(ctx context.Context, owner, codeID string) (*Code,
 
 // SessionByTokenHash finds a session by the digest of the cookie presented. A
 // miss is (nil, nil). An ended session still answers, for the query's reason: a
-// cookie with no row is `ended` too, and a visitor must not tell the two apart.
-func (s *GraphStore) SessionByTokenHash(ctx context.Context, owner, tokenHash string) (*Session, error) {
-	owned, ok := asOwner(ctx, owner)
-	if !ok {
-		return nil, nil
-	}
+// cookie with no row is `ended` too, and a visitor must not tell the two apart. It
+// reads as the cluster acting, for CodeByHash's reason.
+func (s *GraphStore) SessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error) {
 	call, err := langparser.RenderCall("siteAccessSessionByToken", map[string]any{"tokenHash": tokenHash})
-	rows, err := s.read(owned, "a session by its digest", call, err)
+	rows, err := s.read(asCluster(ctx), "a session by its digest", call, err)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -168,8 +175,8 @@ func (s *GraphStore) SessionByTokenHash(ctx context.Context, owner, tokenHash st
 	}, nil
 }
 
-// CreateSession writes a session opened with a code, as the site's owner, and
-// gives it an id when the caller left it without one.
+// CreateSession writes a session opened with a code, as the site's owner, so the row
+// is stamped with them, and gives it an id when the caller left it without one.
 //
 // `issuedAt` IS WRITTEN IN ONE FORM, WHATEVER IT WAS GIVEN: UTC RFC 3339 at whole
 // seconds. siteAccessSessionLatestForCode orders sessions by the TEXT of this
@@ -201,18 +208,15 @@ func (s *GraphStore) CreateSession(ctx context.Context, owner string, in Session
 	return s.write(owned, "the session", call, err)
 }
 
-// EndSession marks a session as left, as the site's owner. Ending one that has
-// already ended writes the time again, which nothing reads as a change.
-func (s *GraphStore) EndSession(ctx context.Context, owner, sessionID string, at time.Time) error {
-	owned, ok := asOwner(ctx, owner)
-	if !ok {
-		return errors.New("siteaccess: a session belongs to the site's owner, and this site has none")
-	}
+// EndSession marks a session as left, as the cluster acting: the row keeps the owner it
+// was stamped with. Ending one that has already ended writes the time again, which
+// nothing reads as a change.
+func (s *GraphStore) EndSession(ctx context.Context, sessionID string, at time.Time) error {
 	call, err := langparser.RenderCall("endSiteAccessSession", map[string]any{
 		"sessionId": sessionID,
 		"endedAt":   wholeSecond(at),
 	})
-	return s.write(owned, "the end of the session", call, err)
+	return s.write(asCluster(ctx), "the end of the session", call, err)
 }
 
 // ---------------------------------------------------------------------------
@@ -340,16 +344,15 @@ func (s *GraphStore) codesForSite(ctx context.Context, siteID string) ([]codeVie
 	return out, nil
 }
 
-// lastOpened is when a generation of a code was last opened, as the text the
-// session stored, or "" when nobody has opened it. Read AS THE SITE'S OWNER, the
-// actor the sessions are written as: their tier has no account arm.
-func (s *GraphStore) lastOpened(ctx context.Context, owner, codeID string, generation int) (string, error) {
-	owned, ok := asOwner(ctx, owner)
-	if !ok {
-		return "", nil
-	}
+// lastOpened is when a generation of a code was last opened, as the text the session
+// stored, or "" when nobody has opened it. Read AS THE CLUSTER ACTING: the session's tier
+// has no account arm, so it would answer nothing to a member of the site's organization,
+// and a session keeps the owner it was stamped with, so it would answer nothing to the
+// site's current owner either once the site had moved on. The list in front of this has
+// already authorized the person asking, under the caller, and this says only when.
+func (s *GraphStore) lastOpened(ctx context.Context, codeID string, generation int) (string, error) {
 	call, err := langparser.RenderCall("siteAccessSessionLatestForCode", map[string]any{"codeId": codeID, "generation": generation})
-	rows, err := s.read(owned, "when the code was last opened", call, err)
+	rows, err := s.read(asCluster(ctx), "when the code was last opened", call, err)
 	if err != nil || len(rows) == 0 {
 		return "", err
 	}
@@ -360,21 +363,16 @@ func (s *GraphStore) lastOpened(ctx context.Context, owner, codeID string, gener
 // the writes
 // ---------------------------------------------------------------------------
 
-// fenced is the context one write of a code runs under: the site's owner, internal
-// origin, and the version of the row it was decided from.
+// witnessed adds to a write's context the version of the row it was decided from.
 //
 // A MISSING VERSION FAILS HERE RATHER THAN BECOMING A ZERO WITNESS, which means
 // something else: a zero version requires the row to be ABSENT, so it would refuse
 // the write as a conflict, and a person would be told to try again for ever.
-func fenced(ctx context.Context, owner, concept, rowID string, version time.Time) (context.Context, error) {
-	owned, ok := asOwner(ctx, owner)
-	if !ok {
-		return nil, errors.New("siteaccess: this write runs as the site's owner, and this site has none")
-	}
+func witnessed(ctx context.Context, concept, rowID string, version time.Time) (context.Context, error) {
 	if version.IsZero() {
 		return nil, fmt.Errorf("siteaccess: the read of %s carried no version to write against", concept)
 	}
-	return memql.ContextWithRowVersionFence(owned, concept, rowID, version), nil
+	return memql.ContextWithRowVersionFence(ctx, concept, rowID, version), nil
 }
 
 // newCode is what a mint writes. The digest and the hint are all that is left of
@@ -390,7 +388,11 @@ type newCode struct {
 // the account and the owner on this row were copied from the version of the site
 // the handler read, and a move that landed since has to refuse this write.
 func (s *GraphStore) createCode(ctx context.Context, owner string, c newCode, siteVersion time.Time) error {
-	guarded, err := fenced(ctx, owner, siteConcept, c.SiteID, siteVersion)
+	owned, ok := asOwner(ctx, owner)
+	if !ok {
+		return errors.New("siteaccess: a code belongs to the site's owner, and this site has none")
+	}
+	guarded, err := witnessed(owned, siteConcept, c.SiteID, siteVersion)
 	if err != nil {
 		return err
 	}
@@ -424,9 +426,10 @@ type rotation struct {
 	IssuedAt, ExpiresAt             time.Time
 }
 
-// rotateCode replaces a code's secret, against the version it was decided from.
-func (s *GraphStore) rotateCode(ctx context.Context, owner string, r rotation, version time.Time) error {
-	guarded, err := fenced(ctx, owner, codeConcept, r.CodeID, version)
+// rotateCode replaces a code's secret, as the cluster acting, against the version it
+// was decided from. The row keeps the owner it was stamped with.
+func (s *GraphStore) rotateCode(ctx context.Context, r rotation, version time.Time) error {
+	guarded, err := witnessed(asCluster(ctx), codeConcept, r.CodeID, version)
 	if err != nil {
 		return err
 	}
@@ -442,9 +445,9 @@ func (s *GraphStore) rotateCode(ctx context.Context, owner string, r rotation, v
 	return s.write(guarded, "the regenerated code", call, err)
 }
 
-// setCodeExpiry moves a code's expiry, against the version it was decided from.
-func (s *GraphStore) setCodeExpiry(ctx context.Context, owner, codeID string, expiresAt time.Time, changedBy string, version time.Time) error {
-	guarded, err := fenced(ctx, owner, codeConcept, codeID, version)
+// setCodeExpiry moves a code's expiry, as rotateCode writes.
+func (s *GraphStore) setCodeExpiry(ctx context.Context, codeID string, expiresAt time.Time, changedBy string, version time.Time) error {
+	guarded, err := witnessed(asCluster(ctx), codeConcept, codeID, version)
 	if err != nil {
 		return err
 	}
@@ -456,9 +459,9 @@ func (s *GraphStore) setCodeExpiry(ctx context.Context, owner, codeID string, ex
 	return s.write(guarded, "the new expiry", call, err)
 }
 
-// removeCode ends a code, against the version it was decided from.
-func (s *GraphStore) removeCode(ctx context.Context, owner, codeID string, at time.Time, changedBy string, version time.Time) error {
-	guarded, err := fenced(ctx, owner, codeConcept, codeID, version)
+// removeCode ends a code, as rotateCode writes.
+func (s *GraphStore) removeCode(ctx context.Context, codeID string, at time.Time, changedBy string, version time.Time) error {
+	guarded, err := witnessed(asCluster(ctx), codeConcept, codeID, version)
 	if err != nil {
 		return err
 	}
@@ -625,6 +628,10 @@ func rowBool(m map[string]any, key string) bool {
 
 // rowInt reads a stored integer, whichever way the read carried it: an in-process
 // row holds a decoded JSON number, and the wire carries large integers as strings.
+//
+// A VALUE THAT DOES NOT FIT READS AS ZERO, the same as an absent one. The one field
+// read here is a generation, which starts at 1, so zero matches no real code's: a
+// garbled number ends a session rather than honouring it. A saturated one could match.
 func rowInt(m map[string]any, key string) int {
 	switch v := m[key].(type) {
 	case int:
@@ -632,9 +639,9 @@ func rowInt(m map[string]any, key string) int {
 	case int32:
 		return int(v)
 	case int64:
-		return int(v)
+		return num.Int64OrZero(v)
 	case float64:
-		return int(v)
+		return num.Float64OrZero(v)
 	case string:
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {

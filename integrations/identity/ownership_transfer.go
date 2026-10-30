@@ -151,17 +151,36 @@ func (i *IdentityIntegration) handleTransferRowOwnership(ctx context.Context, ar
 	}}, nil
 }
 
+// stampedAtBirth lists the concepts whose owner stays where it was stamped, and why.
+//
+// A SHORT NAMED LIST, unlike isEvidenceOwnerField, because the reason is about these rows
+// and not about their field's name: `ownerUserId` is a real owner everywhere else.
+var stampedAtBirth = map[string]string{
+	"v1:platform:siteAccessCode": "a code's owner is whoever owned its site when it was minted. It " +
+		"follows no later owner of the site, and a transfer that moved it anyway did harm: a whole-user " +
+		"transfer moved a code to an heir while its tied site kept its owner. Nothing that decides whether " +
+		"a code opens reads the field (the bff's store reads as the cluster acting), and the row tier's " +
+		"account arm is what admits the people who manage the deployable",
+	"v1:platform:siteAccessSession": "a session is the bff's bookkeeping about a visitor, stamped when it " +
+		"opened and read as the cluster acting, and it lasts a day. It is the code's record of being opened, " +
+		"so it stays beside the code it was opened with",
+}
+
 // transferableConcepts lists the concepts whose rows carry a transferable
 // owner, narrowed to one when the caller named it.
 //
 // A concept qualifies when it declares the OWNED tier over a named field. The
 // self-owned form (`owner="id"`) is excluded: its "owner field" is the row's
 // own id, so a transfer would mean renaming the row, which is a different and
-// much worse operation than changing who owns it.
+// much worse operation than changing who owns it. So is a concept on
+// stampedAtBirth, even when it is named: the answer is that nothing moved.
 func transferableConcepts(only string) []string {
 	names := make([]string, 0)
 	for name := range memorynodes.All() {
 		if only != "" && name != only {
+			continue
+		}
+		if _, stays := stampedAtBirth[name]; stays {
 			continue
 		}
 		decl := conceptRowAuthz(name)

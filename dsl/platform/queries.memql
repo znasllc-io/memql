@@ -489,10 +489,13 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 // The v1:platform:siteAccess prefix is also on the result cache's denylist, so the default path
 // would not have cached them either; the annotation says it where a reader of the query will see it.
 //
-// EACH DOC SAYS WHY THE OBVIOUS FIX -- scoping to actor.userId -- IS NOT THE ANSWER. The bff
-// reaches the lookups with internal origin stamped, under the site owner's borrowed actor; the
-// operator handlers reach the two code reads the same way under the CALLER's actor, left untouched.
-// Either way the tier still decides every row.
+// EACH DOC SAYS WHY THE OBVIOUS FIX -- scoping to actor.userId -- IS NOT THE ANSWER. The operator
+// handlers reach the two code reads with internal origin stamped under the CALLER's actor, left
+// untouched, so the tier decides every row they see. The store behind the bff reaches the lookups with
+// internal origin stamped AS THE CLUSTER ACTING (a synthetic actor), through the cluster-owner arm,
+// because a row's current owner must not decide whether a code opens: a code keeps the owner it was
+// stamped with at birth, and the site can go on to have another. What checks the owner on that path is
+// the bff, which compares the edge's stamp with the site's own owner before it calls in.
 
 /// The rows under the siteAccessCodesForSite builtin: every access code minted against one
 /// deployable, in the siteAccessCodeView shape, which never carries the digest. Read by that
@@ -567,12 +570,13 @@ query siteAccessCode siteAccessCodeById {
 /// that is a decision about the reply rather than about which rows exist.
 ///
 /// @serverOnly, and actor.userId scoping is not the fix: this is the visitor's credential check, a
-/// visitor has no actor, and the handler runs it as the site's owner borrowed from the edge's
-/// stamp -- so the tier DOES scope it, to that owner. It is not what authenticates the stamp: the
-/// tier's account arm admits any member of the code's account, so a forged owner header naming one
-/// of them still reads the row, and the bff compares the stamp with the site's own owner before it
-/// relies on the tier. What the annotation withholds is the wire: a client-callable lookup by digest
-/// is an oracle for whether a guessed digest is a live code, for a caller who never held the code.
+/// visitor has no actor, and the store runs it as the cluster acting, so no row's owner decides it.
+/// A code keeps the owner it was stamped with at birth while its site can go on to have another, and
+/// a lookup scoped to the site's current owner would then miss a code that should open. WHAT CHECKS
+/// THE OWNER IS THE BFF, which compares the edge's stamp with the site's own owner before it asks
+/// this, and the siteId below is what keeps the answer to that one site. What the annotation withholds
+/// is the wire: a client-callable lookup by digest is an oracle for whether a guessed digest is a live
+/// code, for a caller who never held the code.
 @serverOnly
 @unbounded("access code by site and digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
 @actor
@@ -602,10 +606,12 @@ query siteAccessCode siteAccessCodeByHash {
 /// The owner tier is stated as a top-level conjunct, as sitePreviewGrantByToken states it, because
 /// this concept's tier has no account arm to make a restatement a narrowing.
 ///
-/// @serverOnly, and actor.userId scoping is already here -- the filter IS owner-scoped, to the
-/// owner the edge stamped, which the bff re-checks against the site. What the annotation withholds
-/// is the wire: a client-callable lookup by digest is an oracle for whether a guessed token is a
-/// live session.
+/// @serverOnly, and actor.userId scoping is not the fix: the store runs it as the cluster acting,
+/// through the conjunct's second arm, because a session keeps the owner it was stamped with while its
+/// site can go on to have another. The bff compares the edge's stamp with the site's own owner before
+/// it asks this, and compares the session's site with the request's after. What the annotation
+/// withholds is the wire: a client-callable lookup by digest is an oracle for whether a guessed token
+/// is a live session.
 @serverOnly
 @unbounded("access session by token digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
 @actor
@@ -636,12 +642,14 @@ query siteAccessSession siteAccessSessionByToken {
 /// row at most, in siteAccessSessionFull, which never carries the digest.
 ///
 /// The owner tier is stated as a top-level conjunct, as siteAccessSessionByToken states it, because
-/// this concept's tier has no account arm. The handler therefore reads it as the SITE'S owner, the actor
-/// the sessions are written as, and not as an operator who is only a member of the account.
+/// this concept's tier has no account arm. The handler therefore reads it as the CLUSTER ACTING, through
+/// the conjunct's second arm: not as an operator who is only a member of the account, whom the first arm
+/// does not admit, and not as the site's current owner either, since a session keeps the owner it was
+/// stamped with.
 ///
-/// @serverOnly, and actor.userId scoping is already here -- the filter IS owner-scoped. What the
-/// annotation withholds is the wire: nothing a person does needs a code's session activity except
-/// through the list, which has passed the part and the organization gate.
+/// @serverOnly, and actor.userId scoping is not the fix: the list in front of it has passed the part
+/// and the organization gate, and read the site and the code under the caller. What the annotation
+/// withholds is the wire: nothing a person does needs a code's session activity except through that list.
 @serverOnly
 @actor
 @cache(0)
