@@ -297,9 +297,15 @@ func accessRetryAfter(perMinute int) int {
 	return int(math.Ceil(60 / float64(perMinute)))
 }
 
-// accessRefusal is one answer the edge gives without asking the bff. Every one
-// is JSON, because the caller is a script that branches on the body, and every
-// body is a constant, so there is nothing from the request to escape.
+// accessRefusal is one answer this file gives without asking the bff. Every one
+// in this table is JSON, because the caller is a script that branches on the
+// body, and every body is a constant, so there is nothing from the request to
+// escape.
+//
+// NOT EVERY REPLY THE EDGE CAN SEND IS IN THIS TABLE. When the bff cannot be
+// reached the shared proxy builder answers its own 502, as text/plain, and this
+// file does not change that handler. A client must not assume a JSON body on a
+// 5xx.
 type accessRefusal struct {
 	status int
 	body   string
@@ -417,9 +423,11 @@ func boundAccessBody(w http.ResponseWriter, r *http.Request, limit int64) error 
 
 // serveAccessSurface gates one of the four access requests and forwards it.
 //
-// EVERY REFUSAL IS A SMALL JSON BODY, because the caller is a script and the
-// protocol is JSON, and the order of the refusals is deliberate: the ones that
-// cost nothing to make come before the one that spends a token.
+// EVERY REFUSAL THIS FUNCTION MAKES IS A SMALL JSON BODY, because the caller is a
+// script and the protocol is JSON. The one reply that is not is not made here:
+// when the bff cannot be reached the shared proxy builder answers 502 as
+// text/plain. The order of the refusals is deliberate: the ones that cost nothing
+// to make come before the one that spends a token.
 func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, site *Site) {
 	setAccessReplyHeaders(w)
 
@@ -443,9 +451,11 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 		return
 	}
 
+	// NO API TARGET IS THE SAME 404, AND IT IS NOT LOGGED. The edge warned once at
+	// boot (edgeAPITargetFromEnv), and serveAPI is silent in the same condition. A
+	// line here would be one per request, and how many requests there are is the
+	// visitor's to choose, so a visitor could drive error-level logs at will.
 	if strings.TrimSpace(h.apiTarget) == "" {
-		h.logger.Error("edge: the access surface has no MEMQL_EDGE_API_TARGET to forward to",
-			"component", "edge", "site", site.ID, "op", route.op)
 		writeAccessRefusal(w, accessRefusalNotFound)
 		return
 	}

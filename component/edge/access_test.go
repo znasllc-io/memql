@@ -1,11 +1,13 @@
 package edge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // access_test.go -- THE EDGE HALF OF THE ACCESS SURFACE (deployable access
@@ -78,6 +82,14 @@ func (u *accessUpstream) count() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return len(u.hits)
+}
+
+// all returns every request the bff received, for the tests that assert on each
+// of them rather than on exactly one.
+func (u *accessUpstream) all() []accessHit {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]accessHit(nil), u.hits...)
 }
 
 // only returns the one request the bff received and fails if there was any
@@ -432,20 +444,6 @@ func TestAccessStripsThenStamps(t *testing.T) {
 			t.Fatalf("a client-written owner stamp reached the bff: %q", got)
 		}
 	})
-}
-
-// THE TWO NAMES ARE A CONTRACT WITH A PACKAGE THIS ONE CANNOT IMPORT.
-// component/server reads them, and this file may not import it, so the literals
-// are pinned here: a rename on either side that did not take the other with it
-// would make the bff answer every visit as an unstamped request, and nothing
-// anywhere would name the cause.
-func TestAccessStampHeaderNamesArePinned(t *testing.T) {
-	if AccessStampSiteHeader != "X-Memql-Access-Site" {
-		t.Fatalf("AccessStampSiteHeader = %q, want X-Memql-Access-Site", AccessStampSiteHeader)
-	}
-	if AccessStampOwnerHeader != "X-Memql-Access-Owner" {
-		t.Fatalf("AccessStampOwnerHeader = %q, want X-Memql-Access-Owner", AccessStampOwnerHeader)
-	}
 }
 
 // A CLUSTER-OWNED SITE HAS NO AUTHORITY TO BORROW. The platform's own sites are
@@ -1294,6 +1292,13 @@ func TestAccessRepliesCarryNoStore(t *testing.T) {
 			t.Fatalf("status = %d, want 502", rec.Code)
 		}
 		check(t, rec)
+		// The one reply from this surface that is not JSON: the shared proxy
+		// builder's own 502. access.go says so beside accessRefusal and
+		// serveAccessSurface, and the docs tell a client not to assume a body shape
+		// on a 5xx, so if that handler is ever changed these claims change with it.
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+			t.Errorf("Content-Type = %q, want the shared handler's text/plain; update the comments in access.go if this has changed", got)
+		}
 	})
 }
 
@@ -1469,6 +1474,40 @@ func TestAccessWithNoUsableAPITargetIsRefused(t *testing.T) {
 	}
 }
 
+// A VISITOR MUST NOT BE ABLE TO DRIVE ERROR-LEVEL LOGS. With no API target the
+// surface answers its 404 and says nothing: the edge warned once at boot
+// (app/transport_edge.go), and a log line here would be one per request, a
+// number the visitor chooses. serveAPI is silent in the same condition.
+//
+// The logger is set to debug so that ANY output at all fails this, not only an
+// error. An unparseable target is the shared proxy builder's own case and is not
+// asserted here.
+func TestAccessWithNoAPITargetLogsNothingAVisitorCanDrive(t *testing.T) {
+	for _, target := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("target=%q", target), func(t *testing.T) {
+			var logs bytes.Buffer
+			h := NewHandler(Options{
+				Resolver:  staticResolver{site: accessSite(nil)},
+				Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+				Logger:    slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+				APITarget: target,
+			})
+
+			for i := 0; i < 20; i++ {
+				for _, pair := range accessPairs {
+					rec := serveAccess(h, accessRequest(pair.method, pair.path, ""))
+					if rec.Code != http.StatusNotFound {
+						t.Fatalf("%s = %d, want the 404", pair.name, rec.Code)
+					}
+				}
+			}
+			if logs.Len() != 0 {
+				t.Fatalf("80 requests drove %d bytes of log output, want none: %q", logs.Len(), logs.String()[:min(logs.Len(), 300)])
+			}
+		})
+	}
+}
+
 // A REFUSAL THAT COSTS NOTHING TO MAKE MUST NOT COST THE VISITOR A TOKEN.
 // Content type, origin and declared size are all read from the headers, and a
 // page on another site can make a browser send a request that fails every one
@@ -1581,6 +1620,388 @@ func TestAccessLimitsKeyAndRefill(t *testing.T) {
 		}
 		if passed != 10 {
 			t.Fatalf("%d came back after 1.05 s, want 10", passed)
+		}
+	})
+}
+
+// --- what a request can do to the spelling of its own path and headers --------
+//
+// These pin behaviour that was probed and found safe, so none of them is a
+// failing test waiting for a fix. Each is a way a request might try to get past
+// a check by being spelled differently, and each asserts that it does not.
+
+// AN ENCODED SLASH IS THE SLASH IT DECODES TO. The edge matches on the decoded
+// path, as every other route in this package does, so /_memql/access%2Fleave is
+// /_memql/access/leave: the same pair, forwarded on the bff's canonical path and
+// held to every check the plain spelling is. What matters is that the spelling is
+// no way AROUND anything -- not the content type, not the origin, not the size
+// and not the budget.
+func TestAccessAnEncodedSlashIsTheSlashItDecodesTo(t *testing.T) {
+	routed := []struct{ name, method, target, forwarded string }{
+		{"in the leave segment", http.MethodPost, "/_memql/access%2Fleave", "/access/leave"},
+		{"in the call segment, in lower case", http.MethodPost, "/_memql/access%2fcall", "/access/call"},
+		{"in the marker, for unlock", http.MethodPost, "/_memql%2Faccess", "/access/unlock"},
+		{"in the marker, for session", http.MethodGet, "/_memql%2Faccess", "/access/session"},
+	}
+	for _, tc := range routed {
+		t.Run("routed/"+tc.name, func(t *testing.T) {
+			up := newAccessUpstream(t)
+			h := accessHandler(t, accessSite(nil), up.server.URL)
+
+			rec := serveAccess(h, accessRequest(tc.method, tc.target, ""))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s %s = %d, want 200", tc.method, tc.target, rec.Code)
+			}
+			hit := up.only(t)
+			if hit.path != tc.forwarded {
+				t.Fatalf("%s reached the bff as %q, want the canonical %q", tc.target, hit.path, tc.forwarded)
+			}
+			if hit.header.Get(AccessStampSiteHeader) != "site1" || hit.header.Get(AccessStampOwnerHeader) != "user-owner" {
+				t.Fatalf("%s was not stamped with the resolved site and owner", tc.target)
+			}
+		})
+		if tc.method != http.MethodPost {
+			continue
+		}
+		t.Run("checked/"+tc.name, func(t *testing.T) {
+			up := newAccessUpstream(t)
+			h := accessHandler(t, accessSite(nil), up.server.URL)
+
+			notJSON := accessRequest(tc.method, tc.target, "")
+			notJSON.Header.Set("Content-Type", "text/plain")
+			foreign := accessRequest(tc.method, tc.target, "")
+			foreign.Header.Set("Origin", "https://evil.example")
+			oversize := accessRequest(tc.method, tc.target, strings.Repeat("a", 64<<10+1))
+
+			if rec := serveAccess(h, notJSON); rec.Code != http.StatusUnsupportedMediaType {
+				t.Errorf("%s with a form content type = %d, want 415", tc.target, rec.Code)
+			}
+			if rec := serveAccess(h, foreign); rec.Code != http.StatusForbidden {
+				t.Errorf("%s from a foreign origin = %d, want 403", tc.target, rec.Code)
+			}
+			if rec := serveAccess(h, oversize); rec.Code != http.StatusRequestEntityTooLarge {
+				t.Errorf("%s with an oversize body = %d, want 413", tc.target, rec.Code)
+			}
+			if up.count() != 0 {
+				t.Errorf("%s reached the bff past a check", tc.target)
+			}
+		})
+	}
+
+	t.Run("the budget is the plain spelling's", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		encoded := func() *http.Request {
+			req := accessRequest(http.MethodPost, "/_memql%2Faccess", `{"code":"x"}`)
+			req.Header.Add("X-Forwarded-For", "203.0.113.9")
+			return req
+		}
+		for i := 0; i < 5; i++ {
+			if rec := serveAccess(h, accessUnlock("203.0.113.9")); rec.Code != http.StatusOK {
+				t.Fatalf("plain unlock %d = %d, want 200", i+1, rec.Code)
+			}
+			if rec := serveAccess(h, encoded()); rec.Code != http.StatusOK {
+				t.Fatalf("encoded unlock %d = %d, want 200", i+1, rec.Code)
+			}
+		}
+		if rec := serveAccess(h, encoded()); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the 11th unlock, encoded = %d, want 429: the two spellings are one budget", rec.Code)
+		}
+		if rec := serveAccess(h, accessUnlock("203.0.113.9")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the 12th unlock, plain = %d, want 429", rec.Code)
+		}
+		if up.count() != 10 {
+			t.Fatalf("the bff received %d unlocks, want 10", up.count())
+		}
+	})
+}
+
+// A QUERY STRING DOES NOT CHOOSE THE ROUTE. The pair is the method and the PATH;
+// whatever follows the question mark is data, so a query that spells another
+// route's path does not become that route, and every check still applies.
+func TestAccessAQueryStringDoesNotChooseTheRoute(t *testing.T) {
+	cases := []struct{ name, method, target, forwarded string }{
+		{"on unlock", http.MethodPost, "/_memql/access?code=abc", "/access/unlock"},
+		{"on session", http.MethodGet, "/_memql/access?x=1", "/access/session"},
+		{"on call", http.MethodPost, "/_memql/access/call?call=x", "/access/call"},
+		{"an empty one", http.MethodPost, "/_memql/access?", "/access/unlock"},
+		{"one that spells another route", http.MethodPost, "/_memql/access?/_memql/access/call", "/access/unlock"},
+		{"one that spells a bff path", http.MethodPost, "/_memql/access?path=/access/call", "/access/unlock"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			up := newAccessUpstream(t)
+			h := accessHandler(t, accessSite(nil), up.server.URL)
+
+			if rec := serveAccess(h, accessRequest(tc.method, tc.target, "")); rec.Code != http.StatusOK {
+				t.Fatalf("%s %s = %d, want 200", tc.method, tc.target, rec.Code)
+			}
+			hit := up.only(t)
+			if hit.path != tc.forwarded {
+				t.Fatalf("%s reached the bff as %q, want %q: the path chooses the route", tc.target, hit.path, tc.forwarded)
+			}
+			if hit.header.Get(AccessStampSiteHeader) != "site1" || hit.header.Get(AccessStampOwnerHeader) != "user-owner" {
+				t.Fatalf("%s was not stamped with the resolved site and owner", tc.target)
+			}
+
+			if tc.method == http.MethodPost {
+				notJSON := accessRequest(tc.method, tc.target, "")
+				notJSON.Header.Set("Content-Type", "text/plain")
+				if rec := serveAccess(h, notJSON); rec.Code != http.StatusUnsupportedMediaType {
+					t.Fatalf("%s with a form content type = %d, want 415: a query is no way past the checks", tc.target, rec.Code)
+				}
+				if up.count() != 1 {
+					t.Fatalf("the refused request reached the bff")
+				}
+			}
+		})
+	}
+}
+
+// CASE IS NOT FOLDED. The route is an exact match, so a path in another case, or
+// a lower-case method, is not one of the four pairs. With apiProxy on the generic
+// proxy forwards what is under the marker -- unstamped, and to a path the bff does
+// not serve -- and with it off the request gets what it always did: the 404, or
+// the bundle's own answer. Either way nothing reaches the bff's /access routes.
+func TestAccessCaseIsNotFolded(t *testing.T) {
+	cases := []struct{ name, method, target string }{
+		{"the marker in capitals", http.MethodPost, "/_MEMQL/access"},
+		{"the marker in mixed case", http.MethodPost, "/_Memql/access/call"},
+		{"the segment in capitals", http.MethodPost, "/_memql/ACCESS"},
+		{"the segment capitalised", http.MethodPost, "/_memql/Access"},
+		{"the leave segment capitalised", http.MethodPost, "/_memql/access/Leave"},
+		{"a lower-case method", "post", "/_memql/access"},
+		{"a lower-case GET", "get", "/_memql/access"},
+	}
+	for _, apiProxy := range []bool{false, true} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("apiProxy=%v/%s", apiProxy, tc.name), func(t *testing.T) {
+				up := newAccessUpstream(t)
+				h := accessHandler(t, accessSite(func(s *Site) { s.APIProxy = apiProxy }), up.server.URL)
+
+				serveAccess(h, accessRequest(tc.method, tc.target, ""))
+
+				for _, hit := range up.all() {
+					if strings.HasPrefix(hit.path, "/access/") {
+						t.Fatalf("%s %s reached the bff's access route %q", tc.method, tc.target, hit.path)
+					}
+					if hit.header.Get(AccessStampSiteHeader) != "" || hit.header.Get(AccessStampOwnerHeader) != "" {
+						t.Fatalf("%s %s was stamped: it entered the access surface", tc.method, tc.target)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A DOUBLED SLASH OR A DOT SEGMENT NEVER REACHES THE BFF. The path is not
+// repaired into a route: with apiProxy on the generic proxy refuses it (400,
+// since it does not survive cleaning), and with it off it is the 404 or the
+// bundle's answer, so in neither case is there a forwarded request to inspect.
+func TestAccessDoubledSlashesAndDotSegmentsNeverReachTheBff(t *testing.T) {
+	targets := []string{
+		"/_memql//access", "//_memql/access", "/_memql/access//leave", "/_memql/access/leave//",
+		"/_memql/access//call", "/_memql/./access", "/_memql/access/./leave", "/_memql/x/../access",
+		"/_memql/access/../access",
+	}
+	for _, apiProxy := range []bool{false, true} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, target := range targets {
+				t.Run(fmt.Sprintf("apiProxy=%v/%s %s", apiProxy, method, target), func(t *testing.T) {
+					up := newAccessUpstream(t)
+					h := accessHandler(t, accessSite(func(s *Site) { s.APIProxy = apiProxy }), up.server.URL)
+
+					serveAccess(h, accessRequest(method, target, ""))
+
+					if up.count() != 0 {
+						t.Fatalf("%s %s reached the bff as %q", method, target, up.all()[0].path)
+					}
+				})
+			}
+		}
+	}
+}
+
+// THE STAMP SURVIVES NO SPELLING OF ITS NAME. net/http canonicalises header names
+// as it reads them, so x-memql-access-site, X-MEMQL-ACCESS-SITE and the canonical
+// form are one header by the time the proxy sees them. Only a real connection
+// shows that: httptest.NewRequest builds the header map by hand, and a hand-built
+// map can hold a key no server would produce. The fake bff is a real server too,
+// so a forged line that survived would reach it as a second value.
+func TestAccessStampSurvivesNoSpellingOfItsName(t *testing.T) {
+	spellings := func(name string) []string {
+		return []string{strings.ToLower(name), strings.ToUpper(name), name, strings.ToLower(name[:1]) + strings.ToUpper(name[1:])}
+	}
+	raw := func(target string) string {
+		var b strings.Builder
+		b.WriteString("POST " + target + " HTTP/1.1\r\nHost: demo.example.com\r\n" +
+			"Content-Type: application/json\r\nContent-Length: 12\r\nConnection: close\r\n")
+		for i, name := range []string{AccessStampSiteHeader, AccessStampOwnerHeader} {
+			for j, spelling := range spellings(name) {
+				fmt.Fprintf(&b, "%s: forged-%d-%d\r\n", spelling, i, j)
+			}
+		}
+		b.WriteString("\r\n" + `{"code":"x"}`)
+		return b.String()
+	}
+	send := func(t *testing.T, h *Handler, request string) string {
+		t.Helper()
+		front := httptest.NewServer(h)
+		defer front.Close()
+		conn, err := net.Dial("tcp", strings.TrimPrefix(front.URL, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if _, err := conn.Write([]byte(request)); err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		reply, _ := io.ReadAll(conn)
+		return string(reply)
+	}
+
+	t.Run("on the surface", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		if reply := send(t, h, raw("/_memql/access")); !strings.HasPrefix(reply, "HTTP/1.1 200") {
+			t.Fatalf("reply = %q, want a 200", strings.SplitN(reply, "\r\n", 2)[0])
+		}
+		hit := up.only(t)
+		if got := hit.header.Values(AccessStampSiteHeader); len(got) != 1 || got[0] != "site1" {
+			t.Fatalf("the bff received site stamp %q, want exactly [site1]", got)
+		}
+		if got := hit.header.Values(AccessStampOwnerHeader); len(got) != 1 || got[0] != "user-owner" {
+			t.Fatalf("the bff received owner stamp %q, want exactly [user-owner]", got)
+		}
+	})
+
+	t.Run("on the generic path", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(func(s *Site) { s.APIProxy = true }), up.server.URL)
+
+		send(t, h, raw("/_memql/access/unlock"))
+
+		hit := up.only(t)
+		if hit.path != "/memql/access/unlock" {
+			t.Fatalf("the request reached the bff as %q, want the generic proxy's path", hit.path)
+		}
+		if got := hit.header.Values(AccessStampSiteHeader); len(got) != 0 {
+			t.Fatalf("a forged site stamp reached the bff: %q", got)
+		}
+		if got := hit.header.Values(AccessStampOwnerHeader); len(got) != 0 {
+			t.Fatalf("a forged owner stamp reached the bff: %q", got)
+		}
+	})
+}
+
+// A PREVIEW GRANT AND THE ACCESS SURFACE. The surface sits below the status
+// switch and the preview substitution, so a grant behaves as it does on every
+// other path: on a draft or live deployable it is what lets the request through,
+// and on one that is neither it is ignored and the status answers. So a gate can
+// be tried on a draft by whoever holds a grant for it, and a deployable that has
+// been paused or retired answers 503 or 404 to the grant as to everybody.
+func TestAccessUnderAPreviewGrant(t *testing.T) {
+	const candidate = "blob://sites/site1/v2/"
+	build := func(t *testing.T, status string) (*Handler, *accessUpstream, *stubPreviewExec) {
+		t.Helper()
+		up := newAccessUpstream(t)
+		exec := newStubPreviewExec()
+		h := NewHandler(Options{
+			Resolver: staticResolver{site: accessSite(func(s *Site) {
+				s.Status = status
+				s.BundleRef = "blob://sites/site1/v1/"
+				s.CandidateRef = candidate
+			})},
+			Opener:      mapOpener(map[string]string{"index.html": "ROOT"}),
+			Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+			APITarget:   up.server.URL,
+			PreviewExec: exec,
+		})
+		return h, up, exec
+	}
+	unlock := func(token string) *http.Request {
+		req := accessUnlock("")
+		if token != "" {
+			req.AddCookie(&http.Cookie{Name: memql.PreviewCookieName, Value: token})
+		}
+		return req
+	}
+
+	for _, status := range []string{"draft", "live"} {
+		t.Run(status+" with a grant reaches the surface", func(t *testing.T) {
+			h, up, exec := build(t, status)
+			token := exec.issue(t, PreviewGrant{ID: "g1", SiteID: "site1", CandidateRef: candidate})
+
+			rec := serveAccess(h, unlock(token))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			hit := up.only(t)
+			if hit.path != "/access/unlock" {
+				t.Fatalf("the bff received %q, want /access/unlock", hit.path)
+			}
+			if hit.header.Get(AccessStampSiteHeader) != "site1" || hit.header.Get(AccessStampOwnerHeader) != "user-owner" {
+				t.Fatalf("the request was not stamped with the resolved site and owner")
+			}
+			// A preview marks its answers private and unindexable, and the surface's
+			// own policy still holds: one Cache-Control, and it is no-store.
+			if got := rec.Header().Get("X-Robots-Tag"); !strings.Contains(got, "noindex") {
+				t.Errorf("X-Robots-Tag = %q, want the preview's noindex", got)
+			}
+			if got := rec.Header().Values("Cache-Control"); len(got) != 1 || got[0] != "no-store" {
+				t.Errorf("Cache-Control = %q, want exactly [no-store]", got)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		status string
+		want   int
+	}{
+		{"disabled", http.StatusServiceUnavailable},
+		{"archived", http.StatusNotFound},
+	} {
+		t.Run(tc.status+" with a grant gets the status", func(t *testing.T) {
+			h, up, exec := build(t, tc.status)
+			token := exec.issue(t, PreviewGrant{ID: "g1", SiteID: "site1", CandidateRef: candidate})
+
+			rec := serveAccess(h, unlock(token))
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d: a grant must not bring a %s deployable back", rec.Code, tc.want, tc.status)
+			}
+			if up.count() != 0 {
+				t.Fatalf("a %s deployable forwarded the request to the bff", tc.status)
+			}
+		})
+	}
+
+	// The controls: what made the draft reachable was the grant, and a grant for
+	// this deployable.
+	t.Run("draft with no grant is not reachable", func(t *testing.T) {
+		h, up, _ := build(t, "draft")
+
+		if rec := serveAccess(h, unlock("")); rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if up.count() != 0 {
+			t.Fatal("a draft deployable with no grant forwarded the request to the bff")
+		}
+	})
+	t.Run("draft with another deployable's grant is not reachable", func(t *testing.T) {
+		h, up, exec := build(t, "draft")
+		token := exec.issue(t, PreviewGrant{ID: "g2", SiteID: "some-other-site", CandidateRef: candidate})
+
+		if rec := serveAccess(h, unlock(token)); rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if up.count() != 0 {
+			t.Fatal("a grant for another deployable forwarded the request to the bff")
 		}
 	})
 }
