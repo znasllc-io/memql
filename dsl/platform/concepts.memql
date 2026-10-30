@@ -375,6 +375,17 @@ concept sitePreviewObservation {
 /// OWNER IS THE SITE'S, never the operator who asked -- the integration writes as the site's owner
 /// (the bff borrows exactly that authority to find the row again), and the person behind each act is
 /// recorded separately in `lastChangedBy`.
+///
+/// NOTHING BUT SERVER CODE WRITES IT. The concept is @serverWritten, which is what bars the raw
+/// insert and the second insert at an existing id: @serverOnly on a mutation bars only the NAMED call,
+/// and a site's owner who could write this row around the builtins could choose a digest and an
+/// expiry past the bounds, unremove a removed code, or skip the part, the organization check and the
+/// audit event. So every NAMED read and write a client can call over access codes is a builtin
+/// passing the same gate, and every query and mutation beneath those builtins is @serverOnly. (A raw
+/// read of the concept never reaches a named construct and is decided by the row tier alone, as it is
+/// for every concept outside the organization boundary; what it shows is a code's metadata and a
+/// digest, never a code.)
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="label", secondary="gate", tertiary="codeHint")
 concept siteAccessCode {
@@ -389,7 +400,7 @@ concept siteAccessCode {
   generation     int!     @description("Starts at 1 and is incremented by every regeneration. A session records the generation it was opened under and is honoured only while that equals this, so regenerating ends every session of the old secret at that instant, without enumerating them and without a sweep.")
   issuedAt       datetime!  @description("When THIS generation was minted. A regeneration moves it; changing the expiry does not.")
   expiresAt      datetime!  @description("When the code stops opening the site. REQUIRED: the honest bound on a bearer credential is its lifetime, so 'never' is not offered and a long engagement picks a far date. Compared against the engine's clock at request time with no grace and no leeway, and moved by siteAccessCodeSetExpiry without changing the code -- which revives an expired one.")
-  revokedAt      datetime   @description("When an operator removed the code, or empty. A SOFT end: the row stays as the record that the code existed, for which gate and subject, and until when, which is the question asked after the fact. The Access codes panel hides a removed code; this field is how it knows to.")
+  revokedAt      datetime   @description("When an operator removed the code, or empty. A SOFT end: the row stays as the record that the code existed, for which gate and subject, and until when, which is the question asked after the fact. FINAL: nothing writes it back to empty, a removed code is not regenerated, and the way to give somebody access again is a new code. The Access codes panel hides a removed code; this field is how it knows to.")
   lastUsedAt     datetime   @description("When a visitor last unlocked or used this code, or empty for one nobody has used. ABSENT MEANS NOBODY HAS USED IT, never 'a long time ago' -- sitePreviewGrant.lastSeenAt's rule, for its reason. Written by the bff at most once a minute per code and replica, so it answers 'has anybody used this' and is not a request counter. A regeneration does NOT clear it, because the row is the same code: whether the CURRENT secret has been used is `lastUsedAt` at or after `issuedAt`, the comparison a screen makes. A HEARTBEAT FIELD: it moves on its own, so it stays out of any list's change fingerprint.")
   lastChangedBy  string!  @description("The v1:identity:user behind the latest OPERATOR act on this code: whoever minted, regenerated, re-timed or removed it. Supplied by the integration from the authenticated caller, never by the wire -- the write runs as the site's owner, so the actor is not the person who asked. A visitor's use is not an operator's act and does not move it.")
 
@@ -418,14 +429,26 @@ concept siteAccessCode {
 /// ONE ROW PER SUCCESSFUL UNLOCK, AND A FAILED ATTEMPT WRITES NOTHING. Anybody on the internet can
 /// post a wrong code; letting that fill the graph would hand them a write primitive, and the reply
 /// is one indistinguishable `invalid` for the same reason. So the rows are bounded by people who
-/// held a code. @retention(ttl="30d") is the engine's declared version lifetime for them: the code
-/// is the record that matters, and a session is only evidence of one unlock.
+/// held a code.
+///
+/// THE ROW EXPIRES, AND THAT IS WHAT THE POLICY SAYS: @retention(ttl="30d", keepLatest=false,
+/// archive="none") deletes a session's whole row thirty days after it was written, with no copy in
+/// object storage. keepLatest=false is the part that matters -- the default keeps the newest version
+/// of every record forever, which would leave every session in the graph for good -- and
+/// archive="none" is honest about what is being thrown away: a session's digest has no value once the
+/// session has ended, and no session outlives 24 hours, so thirty days cannot touch a live one. The
+/// CODE carries no retention at all, because its row is the lasting record of who could get in.
 ///
 /// THE TIER HAS NO ACCOUNT ARM, unlike the code's. A session is the bff's bookkeeping about a visitor
 /// rather than something an operator manages, and the bff reads and writes it as the owner the edge
 /// stamped on the request -- so the owner arm decides it, and a cluster owner keeps the oversight arm.
+///
+/// NOTHING BUT SERVER CODE WRITES IT. The concept is @serverWritten for the code's reason, and the
+/// stakes are higher here: a session row is what the bff honours IN PLACE OF the code, so a raw insert
+/// of one with a digest the writer chose would be a way in that needs neither the code nor the part.
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
-@retention(ttl="30d")
+@retention(ttl="30d", keepLatest=false, archive="none")
 @displayCard(primary="siteId", secondary="codeId", tertiary="issuedAt")
 concept siteAccessSession {
   siteId       string!  @description("The v1:platform:site this session was opened on, copied from the code it was opened with. Required, and compared with the site the bff resolved for the request before anything else: a cookie is good for exactly one site, so a session replayed against another origin is `ended`.")

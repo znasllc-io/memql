@@ -233,9 +233,11 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		"removeCustomDomain": "app:deployables/domains",
 		// access (deployable access codes, design record 2026-10-29): the four
 		// operator acts, the gate listing the panel's Add form draws from, and
-		// the one client-callable read of the codes themselves. The server-only
-		// reads and writes beside them carry no part: nothing a person calls
-		// reaches them, and internal origin passes the gate anyway.
+		// the list of the codes themselves -- six builtins, and every one a
+		// builtin because the shared organization gate judges builtins and
+		// mutations and never a query. The server-only reads and writes beneath
+		// them carry no part: nothing a person calls reaches them, and internal
+		// origin passes the gate anyway.
 		"siteAccessCodeCreate":     "app:deployables/access",
 		"siteAccessCodeRegenerate": "app:deployables/access",
 		"siteAccessCodeSetExpiry":  "app:deployables/access",

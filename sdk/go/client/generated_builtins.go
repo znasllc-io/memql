@@ -8479,6 +8479,7 @@ func SiteAccessCodeCreateBuild(args SiteAccessCodeCreateArgs) string {
 // SiteAccessCodeRegenerate -- Replace a code's secret, keeping everything else (design record 2026-10-29-deployable-access-codes).
 // THIS IS HOW A CODE IS REVOKED AND REPLACED IN ONE ACT. The id, label, gate and subject survive, so rows a product stamped with the id stay attached; the secret is replaced and the generation moves on, which ends every session opened under the old one at the next request. The previous code stops working and anyone using it is taken out now.
 // THE EXPIRY IS KEPT unless a new one is given, and an EXPIRED code cannot simply be regenerated into a code that is expired too: it needs a new expiry, which is what `expiresAt` is for here. Same reply shape as minting, and the same rule about the plain code appearing once.
+// A REMOVED CODE IS NOT REGENERATED. Removal is final: the refusal says to add a new code, and that is why nothing ever needs to clear `revokedAt`.
 // Returns {codeId, code, expiresAt}.
 type SiteAccessCodeRegenerateArgs struct {
 	// The access code to regenerate.
@@ -8556,6 +8557,30 @@ func SiteAccessCodeSetExpiryBuild(args SiteAccessCodeSetExpiryArgs) string {
 	}
 	b.WriteString("expiresAt: ")
 	b.WriteString(quoteMemQL(args.ExpiresAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessCodesForSite -- The access codes of a deployable, for the Access codes panel (design record 2026-10-29-deployable-access-codes).
+// IT IS A BUILTIN RATHER THAN A QUERY, and the name is the one the query had, so the call a client makes did not change. The reason is the finding that moved it: the shared organization gate judges builtins and mutations and never a query, so a client-callable list let a person who held the part in one organization read the labels, hints and expiries of a site in another whose row tier admitted them. As a builtin it is judged against the site's organization exactly as minting is, and the handler reads the rows through siteAccessCodeRowsForSite -- a @serverOnly query -- with internal origin stamped and the caller's actor left untouched, so the tier still decides every row.
+// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed and when it was last used. NEVER THE CODE and never its digest. No order is promised; the panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this decides neither.
+// Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastUsedAt, createdAt}.
+type SiteAccessCodesForSiteArgs struct {
+	// The deployable to list the codes of.
+	SiteId string
+}
+
+// SiteAccessCodesForSite calls the engine builtin siteAccessCodesForSite.
+func (qc *QueryClient) SiteAccessCodesForSite(ctx context.Context, args SiteAccessCodesForSiteArgs) (*Result, error) {
+	call := SiteAccessCodesForSiteBuild(args)
+	return qc.executeNamed(ctx, "siteAccessCodesForSite", call)
+}
+
+func SiteAccessCodesForSiteBuild(args SiteAccessCodesForSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessCodesForSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
 	b.WriteString(")")
 	return b.String()
 }

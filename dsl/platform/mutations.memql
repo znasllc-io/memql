@@ -1146,7 +1146,14 @@ mutation sitePreviewObservation recordSitePreviewObservation {
 // such write. The four things an operator does are BUILTINS (siteAccessCodeCreate, Regenerate,
 // SetExpiry and Remove), because a builtin is where the code is minted, the gate is checked, the
 // organization is judged and the audit event is written -- and a reachable mutation would have
-// skipped all four.
+// skipped all four. So every named read and write a client can call over access codes is a builtin
+// passing the same gate (dsl/platform/builtins.memql), and every query and mutation beneath those
+// builtins is @serverOnly.
+//
+// @serverOnly BARS ONLY THE NAMED CALL, which is why both concepts are also @serverWritten
+// (dsl/platform/concepts.memql): an insert() that names the concept never consults it, and a second
+// insert at an existing id is an update. Without the concept's own gate, the site's owner could write
+// a code row with a digest and an expiry they chose, around every mutation below.
 //
 //   createSiteAccessCode       @serverOnly -- writes the digest of a bearer credential
 //   rotateSiteAccessCode       @serverOnly -- replaces it, and moves the generation sessions are held to
@@ -1228,6 +1235,13 @@ mutation siteAccessCode createSiteAccessCode {
 /// owner, so the owner arm admits it. What scoping cannot say is the thing this write claims -- that
 /// the digest is a freshly minted one, and that the expiry was computed rather than chosen -- and
 /// that is the integration's to establish, which is what @serverOnly names.
+///
+/// TWO FIELDS ARE LEFT ALONE ON PURPOSE, so a reader does not assume a rotation resets them.
+/// `lastUsedAt` is not cleared: the row is the same code, and the Access codes panel reads a
+/// `lastUsedAt` EARLIER than `issuedAt` as 'Not used yet', so the new secret starts unused without a
+/// write that would erase when the code was last in use. `revokedAt` is not cleared either, because
+/// it never needs to be: removal is final, and siteAccessCodeRegenerate refuses a removed code, so a
+/// rotation only ever lands on a live or an expired one.
 @serverOnly
 mutation siteAccessCode rotateSiteAccessCode {
   args {
@@ -1277,7 +1291,9 @@ mutation siteAccessCode setSiteAccessCodeExpiry {
 /// End a code (design record 2026-10-29-deployable-access-codes). A SOFT END, like revoking a preview:
 /// the row stays as the record that the code existed, for which gate and subject, and until when,
 /// which is what is asked after something unexpected has been seen. Every session opened with it
-/// stops being honoured at once, because the bff reads this field on every request.
+/// stops being honoured at once, because the bff reads this field on every request. REMOVAL IS FINAL:
+/// nothing writes `revokedAt` back to empty, and regenerating a removed code is refused, so the way
+/// to give somebody access again is to add a new code.
 ///
 /// THE ONE WRITE IN THIS GROUP THAT revokeSitePreviewGrant'S REASONING WOULD HAVE LEFT REACHABLE: it
 /// carries no credential, and it writes one timestamp. It is @serverOnly anyway because an operator

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // site_access_contract_db_test.go -- deployable access codes (design record
@@ -31,12 +33,16 @@ import (
 // act that is supposed to end it). actor.userId scoping reaches none of them:
 // every write below is stamped or scoped to the site's owner and is still
 // wrong to leave on the wire. So every write is @serverOnly, and the reachable
-// surface is the four builtins (siteAccessCode*), which mint, check and audit
-// before they write.
+// surface is the six builtins (siteAccess*), which mint, check, judge the
+// organization and audit before they write.
 //
-// The reads are @serverOnly for a different reason, and the test names it: the
+// The reads are @serverOnly for two reasons, and the test names both. The
 // by-hash and by-token lookups are the visitor's credential check, and a
 // client-callable one is an oracle for whether a guessed digest is a live code.
+// The by-id and the per-site reads are the operator handlers' rows, and they are
+// server-only because the shared organization gate judges builtins and mutations
+// and NEVER a query: a client-callable one would be a read that skips the check
+// (TestSiteAccessListIsJudgedByTheOrganizationGate is the proof of the gate).
 //
 // ===========================================================================
 // THE REFUSAL AND THE PASS ARE TESTED TOGETHER
@@ -152,7 +158,9 @@ func TestSiteAccessConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) 
 			"sessionId": ids.session, "endedAt": issuedAt,
 		}), "ending somebody else's session"},
 		{"siteAccessCodeById", siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": ids.code}),
-			"reading one code's metadata past the capability that guards the list"},
+			"reading one code's metadata past the gate that judges the builtins"},
+		{"siteAccessCodeRowsForSite", siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": ids.site}),
+			"listing a site's codes without the organization check -- the finding that made the list a builtin"},
 		{"siteAccessCodeByHash", siteAccessCall(t, "query", "siteAccessCodeByHash", map[string]any{
 			"siteId": ids.site, "codeHash": siteAccessDigest(0xa1),
 		}), "an oracle for whether a guessed digest is a live code"},
@@ -177,7 +185,7 @@ func TestSiteAccessConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) 
 	// The same calls pass the gate under internal origin, in lifecycle order.
 	// The first one has to create the row the rest act on.
 	for _, tc := range calls {
-		if strings.HasPrefix(tc.construct, "siteAccessCodeBy") || tc.construct == "siteAccessSessionByToken" {
+		if strings.HasPrefix(tc.construct, "siteAccessCodeBy") || tc.construct == "siteAccessSessionByToken" || tc.construct == "siteAccessCodeRowsForSite" {
 			continue
 		}
 		t.Run("an internal-origin "+tc.construct+" passes the gate", func(t *testing.T) {
@@ -247,7 +255,7 @@ func TestSiteAccessCodeViewNeverCarriesTheDigest(t *testing.T) {
 
 	byID := siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": ids.code})
 	byHash := siteAccessCall(t, "query", "siteAccessCodeByHash", map[string]any{"siteId": ids.site, "codeHash": digest})
-	forSite := siteAccessCall(t, "query", "siteAccessCodesForSite", map[string]any{"siteId": ids.site})
+	forSite := siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": ids.site})
 
 	for name, query := range map[string]string{"by id": byID, "by hash": byHash, "for site": forSite} {
 		t.Run(name, func(t *testing.T) {
@@ -282,6 +290,31 @@ func TestSiteAccessCodeViewNeverCarriesTheDigest(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, MaterializeRows(res), "a code opened a site it was not minted for")
 	})
+}
+
+// A PAGE CAP WOULD HIDE A LIVE CODE FROM THE PERSON WHO HAS TO REMOVE IT. The rows under
+// the list are @unbounded for that reason, and the reason has a number in it: an unmarked
+// list read is capped at 50 rows (MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP), so a deployable
+// with sixty codes would list fifty and say nothing. Sixty is asserted, not assumed.
+func TestSiteAccessCodeRowsForSiteIsNotPaged(t *testing.T) {
+	eng, _, ctx := sharedReadMergeEngine(t)
+	ids := newSiteAccessIDs("unbounded")
+	issued := time.Now().UTC().Truncate(time.Second)
+	owner := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, siteAccessAs(ids.owner, auth.RoleWriter)))
+
+	const codes = 60
+	for i := 0; i < codes; i++ {
+		_, err := eng.Execute(owner, siteAccessCall(t, "mutation", "createSiteAccessCode", map[string]any{
+			"codeId": fmt.Sprintf("%s-%02d", ids.code, i), "siteId": ids.site, "label": fmt.Sprintf("Code %02d", i), "gate": "dashboard",
+			"codeHash": siteAccessDigest(byte(i + 1)), "codeHint": "FBZA",
+			"issuedAt": issued.Format(time.RFC3339), "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+			"lastChangedBy": ids.owner,
+		}))
+		require.NoError(t, err)
+	}
+	res, err := eng.Execute(owner, siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": ids.site}))
+	require.NoError(t, err)
+	require.Len(t, MaterializeRows(res), codes, "the list stopped at its first page: a live code past it could not be removed")
 }
 
 // A code's life is a chain of small updates to one logical row. Each must
@@ -520,7 +553,7 @@ func TestSiteAccessCodesAreReadableByTheAccountsPeopleAndNotByAStranger(t *testi
 			require.NoError(t, err)
 			return resultBlob(t, res)
 		}
-		return run(siteAccessCall(t, "query", "siteAccessCodesForSite", map[string]any{"siteId": ids.site})),
+		return run(siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": ids.site})),
 			run(siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": ids.code})),
 			run(siteAccessCall(t, "query", "siteAccessCodeByHash", map[string]any{"siteId": ids.site, "codeHash": digest}))
 	}
@@ -553,5 +586,253 @@ func TestSiteAccessCodesAreReadableByTheAccountsPeopleAndNotByAStranger(t *testi
 		res, err := eng.Execute(caller, siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": untied}))
 		require.NoError(t, err)
 		require.NotContains(t, resultBlob(t, res), untied, "the account arm admitted a code that belongs to no account")
+	})
+}
+
+// installAccessExecutorRecorders stands a recording executor behind each named
+// siteAccess capability for one test: reaching it is the proof the gates admitted
+// the call, and NOT reaching it is the proof a refusal wrote and read nothing.
+// Set on the dispatch map directly, as installDeployRecorder does, because the
+// integration lives in a module component/memql cannot import and the shared
+// engine outlives the test.
+func installAccessExecutorRecorders(t *testing.T, eng *MemQLEngine, executors ...string) map[string]*int {
+	t.Helper()
+	if eng.builtinExecutorHandlers == nil {
+		if err := eng.initBuiltinExecutorHandlers(); err != nil {
+			t.Fatalf("init builtin handlers: %v", err)
+		}
+	}
+	reached := map[string]*int{}
+	for _, executor := range executors {
+		executor := executor
+		n := 0
+		reached[executor] = &n
+		previous, had := eng.builtinExecutorHandlers[executor]
+		eng.builtinExecutorHandlers[executor] = func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
+			n++
+			return nil, nil
+		}
+		t.Cleanup(func() {
+			if had {
+				eng.builtinExecutorHandlers[executor] = previous
+			} else {
+				delete(eng.builtinExecutorHandlers, executor)
+			}
+		})
+	}
+	return reached
+}
+
+// THE ORGANIZATION GATE JUDGES THE LIST, AS IT JUDGES MINTING (the automated
+// security review's finding on the first version of this contract).
+//
+// siteAccessCodesForSite was a client-callable QUERY, and the shared gate judges
+// builtins and mutations and never a query -- so a person who held the part in one
+// organization could read the labels, hints and expiries of a site in another whose
+// ROW TIER admitted them. This is that person, built literally: they OWN a site tied
+// to Beta (so the owner arm of the tier admits every code on it) while their only
+// standing, and the only place their group grant gives them the part, is Acme.
+//
+// The premise is asserted first, because the claim is meaningless without it: the
+// rows under the list ARE visible to this person through the tier alone. Then the
+// gate: the list, minting and the gate listing are all refused for Beta's site with
+// capability_not_held and reach no executor, and all three pass for Acme's, where
+// the same grant holds. A member of Beta who was never granted the part is refused
+// on Beta's own site, so the pass on Acme's is the GRANT's doing and not an accident
+// of the fixture.
+func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+
+	ids := newSiteAccessIDs("orggate")
+	acme, beta := "acme-"+ids.account, "beta-"+ids.account
+	person, betaMember := ids.owner, "beta-member-"+ids.owner
+	siteAcme, siteBeta := "v1:platform:site:"+ids.site+"-acme", "v1:platform:site:"+ids.site+"-beta"
+
+	seedPrincipal(t, eng, person, auth.RoleWriter)
+	seedPrincipal(t, eng, betaMember, auth.RoleWriter)
+	for _, account := range []string{acme, beta} {
+		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account,
+			map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}))
+		seedGroup(t, eng, "g-"+account, account, "account", account)
+	}
+	seedMembership(t, eng, "g-"+acme, person, "active")
+	seedMembership(t, eng, "g-"+beta, betaMember, "active")
+	// The part is held in ACME ONLY, by Acme's group grant. Nobody holds it in Beta.
+	writeGrant(t, eng, auth.SubjectKindGroup, "g-"+acme, auth.VerbExecute, "app:deployables/access", auth.GrantAllow)
+	for site, account := range map[string]string{siteAcme: acme, siteBeta: beta} {
+		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, site, map[string]any{
+			"hostname": BareShortId(site) + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft",
+			"bundleRef": "blob://site-access/v1", "ownerUserId": "v1:identity:user:" + person, "accountId": account,
+		}))
+	}
+
+	// THE PREMISE: a code on Beta's site, and the tier alone shows it to this person.
+	issued := time.Now().UTC().Truncate(time.Second)
+	internal := auth.ContextWithInternalOrigin(partGateActor(person, auth.RoleWriter))
+	_, err := eng.Execute(internal, siteAccessCall(t, "mutation", "createSiteAccessCode", map[string]any{
+		"codeId": ids.code, "siteId": siteBeta, "accountId": beta, "label": "Beta reviewers", "gate": "dashboard",
+		"codeHash": siteAccessDigest(0x61), "codeHint": "FBZA",
+		"issuedAt": issued.Format(time.RFC3339), "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+		"lastChangedBy": person,
+	}))
+	require.NoError(t, err)
+	rows, err := eng.Execute(internal, siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": siteBeta}))
+	require.NoError(t, err)
+	require.Contains(t, resultBlob(t, rows), ids.code,
+		"the premise failed: the row tier does not admit this person to Beta's code, so the gate below is not the only thing in the way")
+
+	acts := []struct {
+		builtin  string
+		executor string
+		call     func(site string) string
+	}{
+		{"siteAccessCodesForSite", "integration.siteAccess.list", func(site string) string {
+			return siteAccessCall(t, "builtin", "siteAccessCodesForSite", map[string]any{"siteId": site})
+		}},
+		{"siteAccessCodeCreate", "integration.siteAccess.create", func(site string) string {
+			return siteAccessCall(t, "builtin", "siteAccessCodeCreate", map[string]any{
+				"siteId": site, "label": "Probe", "gate": "dashboard", "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+			})
+		}},
+		{"siteAccessGates", "integration.siteAccess.gates", func(site string) string {
+			return siteAccessCall(t, "builtin", "siteAccessGates", map[string]any{"siteId": site})
+		}},
+	}
+	executors := make([]string, 0, len(acts))
+	for _, act := range acts {
+		executors = append(executors, act.executor)
+	}
+	reached := installAccessExecutorRecorders(t, eng, executors...)
+
+	refused := func(t *testing.T, err error, builtin string) {
+		t.Helper()
+		require.Error(t, err, "%s was admitted", builtin)
+		require.Contains(t, err.Error(), "capability_not_held", "%s was refused, but not by the capability gate", builtin)
+		require.Contains(t, err.Error(), builtin, "the refusal does not name the act")
+	}
+
+	// A CLIENT-ORIGIN CALL: internal origin skips the gate by design, and the gate is the point.
+	personCtx := partGateActor(person, auth.RoleWriter)
+	for _, act := range acts {
+		t.Run(act.builtin+" on a site in another organization is refused", func(t *testing.T) {
+			before := *reached[act.executor]
+			_, err := eng.Execute(personCtx, act.call(siteBeta))
+			refused(t, err, act.builtin)
+			require.Equal(t, before, *reached[act.executor], "the executor ran for a call the gate refused")
+		})
+		t.Run(act.builtin+" on a site in the organization that granted the part passes the gate", func(t *testing.T) {
+			before := *reached[act.executor]
+			_, err := eng.Execute(personCtx, act.call(siteAcme))
+			require.NoError(t, err, "%s was refused on the organization the grant belongs to", act.builtin)
+			require.Equal(t, before+1, *reached[act.executor], "the gate admitted the call but the executor was not reached")
+		})
+	}
+
+	t.Run("a member of the organization who was never granted the part is refused on its own site", func(t *testing.T) {
+		for _, act := range acts {
+			before := *reached[act.executor]
+			_, err := eng.Execute(partGateActor(betaMember, auth.RoleWriter), act.call(siteBeta))
+			refused(t, err, act.builtin)
+			require.Equal(t, before, *reached[act.executor], "the executor ran for a call the gate refused")
+		}
+	})
+
+	t.Run("a site that does not exist is refused, not answered empty", func(t *testing.T) {
+		_, err := eng.Execute(personCtx, siteAccessCall(t, "builtin", "siteAccessCodesForSite", map[string]any{"siteId": ids.site + "-nowhere"}))
+		refused(t, err, "siteAccessCodesForSite")
+	})
+}
+
+// A RAW WRITE IS A WRITE, AND @serverOnly BARS ONLY THE NAMED CALL.
+//
+// "Every client-callable write on access codes is a builtin" is only true if the
+// builtins are the only way in, and the mutations being @serverOnly does not make
+// them so: an insert() that names the concept never consults @serverOnly, and a
+// second insert at an existing id is an update. Both go through executeWrite, which
+// is where @serverWritten lives (it is how the pipelines and workbench concepts keep
+// service-authored rows out of reach, and what outbound_protected_row_write_guard.go
+// does for one more). Without it, the site's own OWNER -- the strongest caller the
+// row tier admits, and no more than a writer -- could mint a code with a digest they
+// chose and an expiry past the 366-day bound, forge a session for it, unremove a
+// removed code, or move an expiry, all with no part, no organization check and no
+// audit event.
+//
+// So this is asserted as the owner, with client origin, against both concepts, for a
+// create and for an update of a row that exists; and each refusal is checked to be
+// the @serverWritten one, and the stored row to be exactly what the builtin wrote.
+func TestSiteAccessRowsCannotBeWrittenAroundTheBuiltins(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	ids := newSiteAccessIDs("raw")
+	issued := time.Now().UTC().Truncate(time.Second)
+	stamp := func(d time.Duration) string { return issued.Add(d).Format(time.RFC3339) }
+	owner := "v1:identity:user:" + ids.owner
+	asOwner := partGateActor(ids.owner, auth.RoleWriter) // client origin
+	internal := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, siteAccessAs(ids.owner, auth.RoleWriter)))
+
+	// A real code and a real session, written the only way they may be.
+	res, err := eng.Execute(internal, siteAccessCall(t, "mutation", "createSiteAccessCode", map[string]any{
+		"codeId": ids.code, "siteId": ids.site, "label": "Real", "gate": "dashboard",
+		"codeHash": siteAccessDigest(0x91), "codeHint": "FBZA",
+		"issuedAt": stamp(0), "expiresAt": stamp(time.Hour), "lastChangedBy": ids.owner,
+	}))
+	require.NoError(t, err)
+	storedCode := res.Bundle.Nodes[0].Id
+	res, err = eng.Execute(internal, siteAccessCall(t, "mutation", "createSiteAccessSession", map[string]any{
+		"sessionId": ids.session, "siteId": ids.site, "codeId": ids.code, "generation": 1,
+		"tokenHash": siteAccessDigest(0x92), "issuedAt": stamp(0),
+	}))
+	require.NoError(t, err)
+	storedSession := res.Bundle.Nodes[0].Id
+	beforeCode := latestPayload(t, ctx, db, "v1:platform:siteAccessCode", storedCode)
+	beforeSession := latestPayload(t, ctx, db, "v1:platform:siteAccessSession", storedSession)
+
+	refused := func(t *testing.T, err error, what string) {
+		t.Helper()
+		require.Error(t, err, "%s was written around the builtins", what)
+		require.Contains(t, err.Error(), "@serverWritten", "%s was refused, but not by the concept's own write gate: %v", what, err)
+	}
+
+	t.Run("a code cannot be created by a raw insert", func(t *testing.T) {
+		refused(t, organizationInsert(t, eng, asOwner, "v1:platform:siteAccessCode", ids.code+"-forged", map[string]any{
+			"siteId": ids.site, "ownerUserId": owner, "label": "Forged", "gate": "dashboard",
+			"codeHash": siteAccessDigest(0x93), "codeHint": "AAAA", "generation": 1,
+			"issuedAt": stamp(0), "expiresAt": stamp(24 * 365 * 5 * time.Hour), "lastChangedBy": ids.owner,
+		}), "a code with a chosen digest and a five year expiry")
+	})
+	t.Run("a code cannot be moved or unremoved by a raw write at its id", func(t *testing.T) {
+		forged := map[string]any{}
+		for k, v := range beforeCode {
+			forged[k] = v
+		}
+		forged["expiresAt"] = stamp(24 * 365 * 5 * time.Hour)
+		forged["generation"] = 99
+		refused(t, organizationInsert(t, eng, asOwner, "v1:platform:siteAccessCode", ids.code, forged), "a raw update of a code")
+		require.Equal(t, beforeCode, latestPayload(t, ctx, db, "v1:platform:siteAccessCode", storedCode),
+			"the refused raw write changed the stored code")
+	})
+	t.Run("a session cannot be created by a raw insert", func(t *testing.T) {
+		refused(t, organizationInsert(t, eng, asOwner, "v1:platform:siteAccessSession", ids.session+"-forged", map[string]any{
+			"siteId": ids.site, "codeId": ids.code, "generation": 1, "ownerUserId": owner,
+			"tokenHash": siteAccessDigest(0x94), "issuedAt": stamp(0),
+		}), "a session with a chosen token digest")
+	})
+	t.Run("a session cannot be revived or rebound by a raw write at its id", func(t *testing.T) {
+		forged := map[string]any{}
+		for k, v := range beforeSession {
+			forged[k] = v
+		}
+		forged["generation"] = 99
+		refused(t, organizationInsert(t, eng, asOwner, "v1:platform:siteAccessSession", ids.session, forged), "a raw update of a session")
+		require.Equal(t, beforeSession, latestPayload(t, ctx, db, "v1:platform:siteAccessSession", storedSession),
+			"the refused raw write changed the stored session")
+	})
+	t.Run("the builtins' own writes still pass", func(t *testing.T) {
+		_, err := eng.Execute(internal, siteAccessCall(t, "mutation", "touchSiteAccessCode", map[string]any{
+			"codeId": ids.code, "lastUsedAt": stamp(time.Minute),
+		}))
+		require.NoError(t, err, "internal origin is refused by @serverWritten, which would leave every integration write dead")
 	})
 }

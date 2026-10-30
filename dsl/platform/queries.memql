@@ -452,6 +452,19 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 
 // ---- Access codes (design record 2026-10-29-deployable-access-codes) ----
 //
+// EVERY QUERY HERE IS @serverOnly, AND THAT IS THE POINT OF THE GROUP. Every NAMED read and write a
+// client can call over access codes is a BUILTIN passing one gate (dsl/platform/builtins.memql), and
+// every query and mutation beneath those builtins is @serverOnly. The reason is a property of the
+// shared organization gate, not of these rows: it judges builtins and mutations and NEVER a query.
+// The list used to be a client-callable query, and it let a person who held the part in one
+// organization read the labels, hints and expiries of a site in another whose row tier admitted
+// them. So the list is now the siteAccessCodesForSite builtin, and the rows under it are
+// siteAccessCodeRowsForSite below -- read by its handler with internal origin under the CALLER's
+// actor, so the tier still decides every row and the organization gate has already decided the call.
+// (A raw read of the concept never reaches a named construct and is decided by the row tier alone,
+// as for every concept outside the organization boundary; it shows a code's metadata and a digest,
+// never a code.)
+//
 // TWO CONCEPTS, TWO TIERS, AND THE READS FOLLOW THEIR CONCEPT.
 //
 // v1:platform:siteAccessCode declares the SITE'S composite tier, account arm included
@@ -466,44 +479,50 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 // v1:platform:siteAccessSession declares owner and clusterOwner and nothing more, so its one read
 // STATES that tier as a top-level conjunct, the way the preview reads do.
 //
-// EVERY READ CARRIES @cache(0), and the three the bff reaches are the access decision itself.
-// Whether a code is regenerated, removed or past its expiry has to be read from the database on
-// the request that asks, or "the moment the 10 minutes pass" is false for as long as a cache holds
-// the answer. The v1:platform:siteAccess prefix is also on the result cache's denylist, so the
-// default path would not have cached them either; the annotation says it where a reader of the
-// query will see it.
+// EVERY READ CARRIES @cache(0), and three of the four are the access decision itself. Whether a
+// code is regenerated, removed or past its expiry has to be read from the database on the request
+// that asks, or "the moment the 10 minutes pass" is false for as long as a cache holds the answer.
+// The v1:platform:siteAccess prefix is also on the result cache's denylist, so the default path
+// would not have cached them either; the annotation says it where a reader of the query will see it.
 //
-// THE THREE LOOKUPS BEHIND THE VISITOR PROTOCOL ARE @serverOnly, and the doc on each says why the
-// obvious fix -- scoping to actor.userId -- is not the answer. The bff reaches them with internal
-// origin stamped, under the site owner's borrowed actor; the operator acts reach the by-id read the
-// same way under the CALLER's actor, left untouched. Either way the tier still decides every row.
+// EACH DOC SAYS WHY THE OBVIOUS FIX -- scoping to actor.userId -- IS NOT THE ANSWER. The bff
+// reaches the lookups with internal origin stamped, under the site owner's borrowed actor; the
+// operator handlers reach the two code reads the same way under the CALLER's actor, left untouched.
+// Either way the tier still decides every row.
 
-/// The codes minted against one deployable, newest first -- what the Access codes panel lists so an
-/// operator can see who could get in and end it.
+/// The rows under the siteAccessCodesForSite builtin: every access code minted against one
+/// deployable, in the siteAccessCodeView shape, which never carries the digest. Read by that
+/// builtin's handler (integrations/siteaccess) after the shared organization gate has judged the
+/// call, with internal origin stamped and the CALLER's actor left untouched.
 ///
 /// EVERY CODE, INCLUDING THE ENDED ONES. Removal and expiry are shown rather than filtered, because
-/// the question this list answers after something unexpected happens is 'who could get in, and
-/// when', and a filtered list answers it for the live codes only. The OS hides a removed code and
-/// draws an expired one as expired; this read decides neither.
+/// the question a list answers after something unexpected happens is 'who could get in, and when',
+/// and a filtered list answers it for the live codes only. The OS hides a removed code and draws an
+/// expired one as expired; this read decides neither. NO ORDER IS PROMISED: `row.createdAt` is the
+/// time of a row's latest version, so it moves whenever a code is used or re-timed, and the
+/// Access codes panel sorts what it is given by label.
 ///
-/// THE SHAPE CARRIES NO DIGEST. siteAccessCodeView is what the panel renders, and a code read here
-/// is a row, never a secret: the plain code exists in exactly one reply, at the moment of minting.
+/// UNBOUNDED, BECAUSE A PAGE CAP WOULD HIDE A LIVE CODE from the person who has to remove it. The
+/// population is the codes one operator minted for one deployable, which is small; the failure to
+/// avoid is the list that quietly stops at its first page.
 ///
-/// NO CALLER TERM, for siteById's reason: the tier's account arm has no author spelling, so a restated
-/// `own || clusterOwner` would filter the people of the account back out of the codes of the sites
-/// they manage. The part (`execute app:deployables/access`) names the surface and the tier names the
-/// rows; the organization boundary on an ACT is the shared gate's, in
-/// component/memql/organization_action_capabilities.go.
+/// @serverOnly, and actor.userId scoping is not the fix: this concept's tier is the site's
+/// composite one, and its third arm is what admits the people of the account, so a caller term
+/// would hide the codes of every site the caller manages but does not personally own. The tier
+/// already decides the row for the caller the handler runs as. What the annotation withholds is the
+/// WIRE, and for a reason particular to this read: the shared organization gate never judges a
+/// query, so a client-callable list is a read of another organization's codes that nobody checked.
+/// The list a person calls is the builtin.
+@serverOnly
+@unbounded("every access code minted against one deployable -- the Access codes panel lists them all so an operator can end any live one, and a page cap would hide a code from the person who has to remove it")
 @actor
 @cache(0)
-@requiresCapability("execute", "app:deployables/access")
-query siteAccessCode siteAccessCodesForSite {
+query siteAccessCode siteAccessCodeRowsForSite {
   args {
     siteId  string!
   }
   filter  row => row.siteId == args.siteId
   shape   siteAccessCodeView
-  sort    "row.createdAt", "desc"
 }
 
 /// Resolve one access code by its own row id -- what the regenerate, re-time and remove acts read

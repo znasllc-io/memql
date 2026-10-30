@@ -604,20 +604,26 @@ builtin sitePreviewNoteOrder {
 
 // ---- Access codes (design record 2026-10-29-deployable-access-codes) ----
 //
-// Five capabilities over v1:platform:siteAccessCode, and the split between them and the
-// mutations beside them is the preview group's taken to its end: every WRITE is a @serverOnly
-// mutation (dsl/platform/mutations.memql), and every act an operator takes is a BUILTIN, because
-// a builtin is where the code is minted, the gate is checked, the organization is judged and the
-// audit event is written. Nothing here can be skipped by calling the mutation, since a client
+// Six capabilities over v1:platform:siteAccessCode, and EVERY NAMED READ AND WRITE A CLIENT CAN CALL
+// OVER ACCESS CODES IS ONE OF THEM, passing the same gate. The split between them and the constructs
+// beneath is the preview group's taken to its end: every WRITE is a @serverOnly mutation
+// (dsl/platform/mutations.memql), every READ beneath a builtin is a @serverOnly query
+// (dsl/platform/queries.memql), and the concepts are @serverWritten so a raw insert cannot go
+// around either. An act an operator takes is a BUILTIN because a builtin is where the code is
+// minted, the gate is checked, the organization is judged and the audit event is written -- and the
+// LIST is one too, for the reason that settled it: the shared organization gate judges builtins and
+// mutations and NEVER a query, so a list that was a query was a read of another organization's codes
+// that nobody checked. Nothing here can be skipped by calling what is underneath, since a client
 // cannot.
 //
 // AUTHORIZATION IS TWO LAYERS, as sitePreviewOpen's is, and a third for the organization.
 // @requiresCapability names the SURFACE (`execute app:deployables/access`, owner and developer).
 // The site and the code are read UNDER THE CALLER against their composite tier, so a person who
 // cannot read the deployable resolves zero rows and is refused by name before anything is minted.
-// And organization_action_capabilities.go names each builtin's TARGET -- the site for minting and
-// listing gates, the code for every act on an existing one -- so the shared gate judges the
-// organization the call selected rather than the caller's global capability alone.
+// And organization_action_capabilities.go names each builtin's TARGET -- the site for minting,
+// listing the codes and listing the gates, the code for every act on an existing one -- so the
+// shared gate judges the organization the call selected rather than the caller's global capability
+// alone. TestSiteAccessListIsJudgedByTheOrganizationGate is the proof it does.
 
 /// Mint an access code for one gate of a deployable (design record 2026-10-29-deployable-access-codes).
 ///
@@ -660,12 +666,15 @@ builtin siteAccessCodeCreate {
 /// into a code that is expired too: it needs a new expiry, which is what `expiresAt` is for here.
 /// Same reply shape as minting, and the same rule about the plain code appearing once.
 ///
+/// A REMOVED CODE IS NOT REGENERATED. Removal is final: the refusal says to add a new code, and
+/// that is why nothing ever needs to clear `revokedAt`.
+///
 /// Returns {codeId, code, expiresAt}.
 @sdk
 @executor("integration.siteAccess.regenerate")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/access")
-@description("Replace an access code's secret (design record 2026-10-29-deployable-access-codes). Keeps the code's id, label, gate and subject, stores the SHA-256 of the new code, advances the generation so every session opened with the old one ends at once, and returns the plain code once. Keeps the expiry unless a new one is given; a code already past its expiry needs one. Returns {codeId, code, expiresAt}.")
+@description("Replace an access code's secret (design record 2026-10-29-deployable-access-codes). Keeps the code's id, label, gate and subject, stores the SHA-256 of the new code, advances the generation so every session opened with the old one ends at once, and returns the plain code once. Keeps the expiry unless a new one is given; a code already past its expiry needs one. Refused for a removed code: removal is final, and the answer is to add a new code. Returns {codeId, code, expiresAt}.")
 builtin siteAccessCodeRegenerate {
   codeId     string!    @description("The access code to regenerate.")
   expiresAt  datetime   @description("A new expiry (RFC 3339), inside the same bounds as minting. Omit to keep the current one.")
@@ -724,6 +733,34 @@ builtin siteAccessCodeRemove {
 @description("List the gates a deployable declares with @accessGate (design record 2026-10-29-deployable-access-codes): for each, whether any of its constructs reads the accessSubject argument and the names of the constructs it opens. A read: it decides nothing, and minting checks the gate again. Answers no rows for a deployable that declares none. One row per gate: {gate, usesSubject, constructs}.")
 builtin siteAccessGates {
   siteId  string!  @description("The deployable to list the gates of.")
+}
+
+/// The access codes of a deployable, for the Access codes panel (design record
+/// 2026-10-29-deployable-access-codes).
+///
+/// IT IS A BUILTIN RATHER THAN A QUERY, and the name is the one the query had, so the call a client
+/// makes did not change. The reason is the finding that moved it: the shared organization gate judges
+/// builtins and mutations and never a query, so a client-callable list let a person who held the part
+/// in one organization read the labels, hints and expiries of a site in another whose row tier admitted
+/// them. As a builtin it is judged against the site's organization exactly as minting is, and the
+/// handler reads the rows through siteAccessCodeRowsForSite -- a @serverOnly query -- with internal
+/// origin stamped and the caller's actor left untouched, so the tier still decides every row.
+///
+/// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the
+/// label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was
+/// removed and when it was last used. NEVER THE CODE and never its digest. No order is promised; the
+/// panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this
+/// decides neither.
+///
+/// Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt,
+/// expiresAt, revokedAt, lastUsedAt, createdAt}.
+@sdk
+@executor("integration.siteAccess.list")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/access")
+@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt and lastUsedAt. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastUsedAt, createdAt}.")
+builtin siteAccessCodesForSite {
+  siteId  string!  @description("The deployable to list the codes of.")
 }
 
 /// Save a caller-owned GitHub installation grouping. Re-adding the same binding

@@ -11356,31 +11356,6 @@ QueryClient.prototype.signInIdentitiesForSelf = function (this: QueryClient, arg
   return this.executeNamed("signInIdentitiesForSelf", buildSignInIdentitiesForSelf(args), opts);
 };
 
-/** The codes minted against one deployable, newest first -- what the Access codes panel lists so an operator can see who could get in and end it.
-EVERY CODE, INCLUDING THE ENDED ONES. Removal and expiry are shown rather than filtered, because the question this list answers after something unexpected happens is 'who could get in, and when', and a filtered list answers it for the live codes only. The OS hides a removed code and draws an expired one as expired; this read decides neither.
-THE SHAPE CARRIES NO DIGEST. siteAccessCodeView is what the panel renders, and a code read here is a row, never a secret: the plain code exists in exactly one reply, at the moment of minting.
-NO CALLER TERM, for siteById's reason: the tier's account arm has no author spelling, so a restated `own || clusterOwner` would filter the people of the account back out of the codes of the sites they manage. The part (`execute app:deployables/access`) names the surface and the tier names the rows; the organization boundary on an ACT is the shared gate's, in component/memql/organization_action_capabilities.go. */
-// Bound concept: v1:platform:siteAccessCode (machine-readable: BoundConcepts["siteAccessCodesForSite"] in generated_concepts.ts).
-export interface SiteAccessCodesForSiteArgs {
-  siteId: string;
-}
-
-export function buildSiteAccessCodesForSite(args: SiteAccessCodesForSiteArgs): string {
-  const parts: string[] = [];
-  parts.push("siteId: " + renderMemQLValue(args.siteId));
-  return "query siteAccessCodesForSite(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    siteAccessCodesForSite(args: SiteAccessCodesForSiteArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.siteAccessCodesForSite = function (this: QueryClient, args: SiteAccessCodesForSiteArgs = {} as SiteAccessCodesForSiteArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("siteAccessCodesForSite", buildSiteAccessCodesForSite(args), opts);
-};
-
 /** Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request.
 The engine applies the site's organization boundary and app permissions. The edge resolves every served site under its synthetic routing actor; ordinary callers see only authorized organization sites or legacy untied rows admitted by their existing owner rules. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteByHostname"] in generated_concepts.ts).

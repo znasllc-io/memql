@@ -998,7 +998,6 @@ export const BoundConcepts = {
   shopifyUrlRedirectByGid: "v1:shopify:urlRedirect",
   shopifyUrlRedirectForStore: "v1:shopify:urlRedirect",
   signInIdentitiesForSelf: "v1:identity:identity",
-  siteAccessCodesForSite: "v1:platform:siteAccessCode",
   siteByHostname: "v1:platform:site",
   siteById: "v1:platform:site",
   sitePreviewGrantById: "v1:platform:sitePreviewGrant",

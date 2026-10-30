@@ -9,13 +9,19 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// integration.go -- the five DSL-callable capabilities:
+// integration.go -- the six DSL-callable capabilities:
 //
 //	integration.siteAccess.create      mint a code             (dsl builtin siteAccessCodeCreate)
 //	integration.siteAccess.regenerate  replace its secret      (dsl builtin siteAccessCodeRegenerate)
 //	integration.siteAccess.setExpiry   move its expiry         (dsl builtin siteAccessCodeSetExpiry)
 //	integration.siteAccess.remove      end it                  (dsl builtin siteAccessCodeRemove)
 //	integration.siteAccess.gates       the gates a site opens  (dsl builtin siteAccessGates)
+//	integration.siteAccess.list        the codes of a site     (dsl builtin siteAccessCodesForSite)
+//
+// Every named read and write a client can call over access codes is one of these, passing the shared
+// organization gate; the queries and mutations beneath them are @serverOnly. The list is a builtin,
+// and reads its rows through the @serverOnly siteAccessCodeRowsForSite with internal origin and the
+// caller's actor untouched, because that gate judges builtins and mutations and never a query.
 //
 // # Why every handler refuses for now
 //
@@ -91,6 +97,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler: notImplemented("siteAccessGates"),
 			ArgsSchema: map[string]string{
 				"siteId": "string (required) -- the deployable to list the gates of.",
+			},
+		},
+		{
+			Name: "list",
+			Description: "The access codes minted against a deployable, removed and expired ones included, one row per " +
+				"code and never the code or its digest. No order is promised.",
+			Handler: notImplemented("siteAccessCodesForSite"),
+			ArgsSchema: map[string]string{
+				"siteId": "string (required) -- the deployable to list the codes of.",
 			},
 		},
 	}

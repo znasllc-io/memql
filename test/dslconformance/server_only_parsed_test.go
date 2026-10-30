@@ -739,7 +739,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "touchSitePreviewGrant"}:        true,
 		{Path: "platform/mutations.memql", Name: "recordSitePreviewObservation"}: true,
 
-		// Deployable access codes (design record 2026-10-29). Ten constructs,
+		// Deployable access codes (design record 2026-10-29). Eleven constructs,
 		// and the arguments divide three ways. None of them is "caller scoping
 		// was inconvenient": every write is stamped or run as the SITE'S OWNER,
 		// so the composite tier already decides every row, and the annotation
@@ -777,12 +777,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// are the credential check itself, and a client-callable one is an
 		// oracle for whether a guessed digest is a live code or a live session.
 		//
-		// siteAccessCodeById is the operator acts' read of the row they are
-		// about to change. Its filter is the site's composite tier with no
-		// caller term -- a term would hide the codes of every site a developer
-		// manages but does not own -- so caller scoping is the wrong tool, and
-		// the annotation stops it being a way around the capability that
-		// guards the list: nothing a person does needs one code by id.
+		// siteAccessCodeById and siteAccessCodeRowsForSite are the operator
+		// handlers' reads of the rows they change and list. Their filters are the
+		// site's composite tier with no caller term -- a term would hide the
+		// codes of every site a developer manages but does not own -- so caller
+		// scoping is the wrong tool. The annotation is what keeps them from being
+		// a way AROUND the organization check: the shared gate judges builtins and
+		// mutations and never a query, so a client-callable read over these rows
+		// is a read nobody judged. Every named read and write a client can call
+		// over access codes is a builtin (siteAccessCodesForSite among them), and
+		// these are the rows beneath them.
 		{Path: "platform/mutations.memql", Name: "createSiteAccessCode"}:    true,
 		{Path: "platform/mutations.memql", Name: "rotateSiteAccessCode"}:    true,
 		{Path: "platform/mutations.memql", Name: "setSiteAccessCodeExpiry"}: true,
@@ -791,6 +795,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "createSiteAccessSession"}: true,
 		{Path: "platform/mutations.memql", Name: "endSiteAccessSession"}:    true,
 		{Path: "platform/queries.memql", Name: "siteAccessCodeById"}:        true,
+		{Path: "platform/queries.memql", Name: "siteAccessCodeRowsForSite"}: true,
 		{Path: "platform/queries.memql", Name: "siteAccessCodeByHash"}:      true,
 		{Path: "platform/queries.memql", Name: "siteAccessSessionByToken"}:  true,
 

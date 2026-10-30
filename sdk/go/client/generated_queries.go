@@ -12025,31 +12025,6 @@ func SignInIdentitiesForSelfBuild(args SignInIdentitiesForSelfArgs) string {
 	return "query signInIdentitiesForSelf()"
 }
 
-// SiteAccessCodesForSite -- The codes minted against one deployable, newest first -- what the Access codes panel lists so an operator can see who could get in and end it.
-// EVERY CODE, INCLUDING THE ENDED ONES. Removal and expiry are shown rather than filtered, because the question this list answers after something unexpected happens is 'who could get in, and when', and a filtered list answers it for the live codes only. The OS hides a removed code and draws an expired one as expired; this read decides neither.
-// THE SHAPE CARRIES NO DIGEST. siteAccessCodeView is what the panel renders, and a code read here is a row, never a secret: the plain code exists in exactly one reply, at the moment of minting.
-// NO CALLER TERM, for siteById's reason: the tier's account arm has no author spelling, so a restated `own || clusterOwner` would filter the people of the account back out of the codes of the sites they manage. The part (`execute app:deployables/access`) names the surface and the tier names the rows; the organization boundary on an ACT is the shared gate's, in component/memql/organization_action_capabilities.go.
-//
-// Bound concept: v1:platform:siteAccessCode (machine-readable: BoundConcepts["siteAccessCodesForSite"] in generated_concepts.go).
-type SiteAccessCodesForSiteArgs struct {
-	SiteId string
-}
-
-// SiteAccessCodesForSite calls the engine query siteAccessCodesForSite.
-func (qc *QueryClient) SiteAccessCodesForSite(ctx context.Context, args SiteAccessCodesForSiteArgs) (*Result, error) {
-	call := SiteAccessCodesForSiteBuild(args)
-	return qc.executeNamed(ctx, "siteAccessCodesForSite", call)
-}
-
-func SiteAccessCodesForSiteBuild(args SiteAccessCodesForSiteArgs) string {
-	var b strings.Builder
-	b.WriteString("query siteAccessCodesForSite(")
-	b.WriteString("siteId: ")
-	b.WriteString(quoteMemQL(args.SiteId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // SiteByHostname -- Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request.
 // The engine applies the site's organization boundary and app permissions. The edge resolves every served site under its synthetic routing actor; ordinary callers see only authorized organization sites or legacy untied rows admitted by their existing owner rules.
 //
