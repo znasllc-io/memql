@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // site_access_code.go -- the access code and the session token it trades for
@@ -46,15 +45,20 @@ import (
 // accessCodeAlphabet is Crockford's base32: the digits and the letters without
 // I, L, O and U.
 //
-// I, L and O are missing because people read them as 1, 1 and 0, and
-// NormalizeAccessCode folds them onto what they were meant as. That fold is why
-// they CANNOT be in the alphabet: a minted code carrying an O would be
-// rewritten to a zero when typed back and would never match its own digest. U
-// is left out as Crockford leaves it, to make an accidental obscenity less likely.
+// I, L and O are missing because NormalizeAccessCode rewrites them (O to zero, I
+// and L to one), and a symbol the normalizer rewrites is a second draw for a
+// string another symbol already produces: O and 0 would both come out as 0. A
+// code carrying one would still open, since its digest is taken of the normalized
+// spelling, but it would hold fewer than 125 bits -- about 123 for a single
+// swapped letter -- and nothing about it would look wrong. They are also the
+// characters people confuse, so a displayed code never asks anyone to tell them
+// apart. U is left out as Crockford leaves it, to make an accidental obscenity
+// less likely.
 //
 // It is exactly 32 symbols, which is what makes drawing one by keeping five bits
-// of a random byte exact. A different length needs a different draw; the test
-// beside this file holds the two together.
+// of a random byte exact: a shorter alphabet would be read past its end and a
+// longer one would never have its last symbols drawn. The test beside this file
+// holds the two together.
 const accessCodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 const (
@@ -103,24 +107,31 @@ func MintAccessCode() (code string, digest string, hint string, err error) {
 }
 
 // NormalizeAccessCode folds the ways people write a code down onto the one
-// spelling its digest is taken of: upper case, with whitespace and hyphens
-// removed and the look-alikes read as what they were meant to be -- O as zero,
-// I and L as one.
+// spelling its digest is taken of: ASCII letters in upper case, O read as zero
+// and I and L as one, and every character that is then not one of the 32 symbols
+// dropped.
 //
-// This is what lets a code survive being read over the phone, wrapped across a
-// line in an email or typed in lower case. NOTHING ELSE IS FORGIVEN. Any other
-// character stays in the string and makes the code wrong, because dropping it
-// would let input that is not a spelling of the code open the door anyway.
+// DROPPING EVERYTHING ELSE, rather than listing the separators to drop, is the
+// point (decision D2: a wrong-looking character must not read as a wrong code). A
+// code is read aloud, pasted from an email and retyped, and what comes along with
+// it is not a short list. Hyphens, spaces and line breaks, yes, but also an en
+// dash that an email client put where a hyphen was, a soft hyphen, a zero-width
+// space, a non-breaking space. The person often cannot see the difference, so
+// cannot fix it.
+//
+// It costs no entropy. A real code is exactly 25 symbols of the alphabet, so what
+// is left after dropping either IS those symbols in order or it is not, and a
+// wrong, short, long or reordered run of symbols still matches nothing. The whole
+// input is reduced to one string and hashed once -- nothing is searched for inside
+// it -- so a long input is not a way to try several codes in one request.
 //
 // Case is folded for ASCII only. strings.ToUpper would turn a dotless i into I,
-// and so into a one, and a long s into S: characters that are not among the
-// documented spellings of any symbol would start to open the door.
+// and so into a one, and a long s into S, so two characters nobody means as a
+// symbol would open the door as one. Here neither is a symbol, and both are
+// dropped like any other stray character.
 func NormalizeAccessCode(raw string) string {
 	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '-' || unicode.IsSpace(r):
-			return -1
-		case 'a' <= r && r <= 'z':
+		if 'a' <= r && r <= 'z' {
 			r -= 'a' - 'A'
 		}
 		switch r {
@@ -129,7 +140,10 @@ func NormalizeAccessCode(raw string) string {
 		case 'I', 'L':
 			return '1'
 		}
-		return r
+		if strings.ContainsRune(accessCodeAlphabet, r) {
+			return r
+		}
+		return -1
 	}, raw)
 }
 

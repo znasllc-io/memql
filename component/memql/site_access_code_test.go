@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // site_access_code_test.go -- the access code, how people type it, the session
@@ -67,10 +68,15 @@ func TestMintAccessCodeShape(t *testing.T) {
 }
 
 // WHAT PEOPLE DO TO A CODE BETWEEN BEING READ AND BEING TYPED must not read as a
-// wrong code, and nothing beyond that may read as the right one. The first half
-// is the reason for the format; the second is what keeps "forgiving" from
-// becoming "sloppy" -- an input that matches by dropping what it should have
-// refused is a wider door than the 125 bits behind it suggest.
+// wrong code (decision D2). A code comes through an email client, a chat window or
+// a phone call, and it arrives with separators the person cannot see to fix:
+// hyphens swapped for en dashes, a soft hyphen or a zero-width space in the middle
+// of a group, a line break. So the normalizer keeps only what can be part of a code
+// and drops every other character, and the rows below put the common ones through it.
+//
+// That costs no entropy. A real code is exactly 25 symbols, so an input opens it
+// only if its symbols, in order, ARE the code; the last group of rows checks that a
+// wrong, short, long or reordered run of symbols still opens nothing.
 func TestNormalizeAccessCodeForgivesHowPeopleTypeIt(t *testing.T) {
 	for name, typed := range map[string]string{
 		"as displayed":                            "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZA",
@@ -80,6 +86,11 @@ func TestNormalizeAccessCodeForgivesHowPeopleTypeIt(t *testing.T) {
 		"padded, mixed and wrapped across a line": "  k7q4m-2xpdn 8rt3v\nWJ6HC-9FBZA ",
 		"tabs and a trailing CRLF":                "\tK7Q4M-2XPDN-8RT3V-WJ6HC-9FBZA\r\n",
 		"a non-breaking space from a web page":    "K7Q4M-2XPDN\u00a08RT3V-WJ6HC-9FBZA",
+		"en dashes where the hyphens were":        "K7Q4M\u20132XPDN\u20138RT3V\u2013WJ6HC\u20139FBZA",
+		"em dashes where the hyphens were":        "K7Q4M\u20142XPDN\u20148RT3V\u2014WJ6HC\u20149FBZA",
+		"a zero-width space inside a group":       "K7Q4M-2XP\u200bDN-8RT3V-WJ6HC-9FBZA",
+		"a soft hyphen inside a group":            "K7Q\u00ad4M-2XPDN-8RT3V-WJ6HC-9FBZA",
+		"quoted, with a full stop after":          `"K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZA".`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := NormalizeAccessCode(typed); got != exampleAccessCode {
@@ -112,31 +123,76 @@ func TestNormalizeAccessCodeForgivesHowPeopleTypeIt(t *testing.T) {
 		})
 	}
 
-	// Nothing past those spellings is forgiven.
+	// A string with nothing in it that can be part of a code normalizes to
+	// nothing, not to whatever was there.
 	for name, typed := range map[string]string{
-		"empty":                         "",
-		"a stray mark between symbols":  "K7Q4M#2XPDN8RT3VWJ6HC9FBZA",
-		"U is not V":                    "K7Q4M2XPDN8RT3UWJ6HC9FBZA",
-		"a different last symbol":       "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZB",
-		"a truncated code":              "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZ",
-		"a code with a symbol too many": "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZAA",
-		"a dotless i is not a one":      "0\u0131" + "23456789ABCDEFGHJKMNPQR",
+		"empty":                                "",
+		"only separators":                      " - \t\r\n-- ",
+		"only dashes and invisible characters": "\u2013\u2014\u200b\u00ad\u00a0",
+		"only punctuation":                     `"#!?.,;:()[]{}`,
+		"only U, the letter with no symbol":    "Uu",
 	} {
-		t.Run("not forgiven: "+name, func(t *testing.T) {
+		t.Run("nothing left: "+name, func(t *testing.T) {
+			if got := NormalizeAccessCode(typed); got != "" {
+				t.Errorf("NormalizeAccessCode(%q) = %q, want nothing -- no character in it can be "+
+					"part of a code", typed, got)
+			}
+		})
+	}
+
+	// Dropping what is not a symbol is all that is forgiven. The symbols
+	// themselves are not: a different, missing, extra or reordered one is a
+	// different code.
+	for name, typed := range map[string]string{
+		"U is not V, and is dropped, so a symbol short": "K7Q4M2XPDN8RT3UWJ6HC9FBZA",
+		"a different last symbol":                       "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZB",
+		"the last two symbols swapped":                  "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBAZ",
+		"a truncated code":                              "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZ",
+		"a code with a symbol too many":                 "K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZAA",
+		"a dotless i is not a one, so a symbol short":   "0\u0131" + "23456789ABCDEFGHJKMNPQR",
+	} {
+		t.Run("different code: "+name, func(t *testing.T) {
 			got := AccessCodeDigest(typed)
 			if got == exampleAccessCodeDigest || got == lookalikeAccessCodeDigest {
-				t.Errorf("AccessCodeDigest(%q) matched a real code -- an input that is not a spelling "+
-					"of the code must not open it", typed)
+				t.Errorf("AccessCodeDigest(%q) matched a real code -- a different run of symbols "+
+					"must not open it", typed)
 			}
 		})
 	}
 
 	// Case is folded for ASCII only. strings.ToUpper would turn a dotless i into
-	// I, and so into a one, and a long s into S: characters that are not among the
-	// documented spellings of any symbol would start to open the door.
+	// I, and so into a one, and a long s into S, so two characters nobody means as
+	// a symbol would open the door as one. Neither is a symbol, and both are dropped.
 	for _, letter := range []string{"\u0131", "\u017f"} {
-		if got := NormalizeAccessCode(letter); got != letter {
-			t.Errorf("NormalizeAccessCode(%q) = %q, want it left alone -- only ASCII letters are folded", letter, got)
+		if got := NormalizeAccessCode(letter); got != "" {
+			t.Errorf("NormalizeAccessCode(%q) = %q, want nothing -- only ASCII letters are folded, "+
+				"and any other character outside the alphabet is dropped", letter, got)
+		}
+	}
+}
+
+// ONLY WHAT CAN BE PART OF A CODE SURVIVES. The claim is about every character
+// there is, so it is checked against every one rather than against the ones
+// somebody thought to list. Of all of Unicode, exactly the ASCII digits and the
+// ASCII letters other than U get through -- the letters because they are symbols
+// or fold onto one, the O, I and L that stand for a zero and a one among them --
+// and each leaves exactly one symbol of the alphabet. Every dash, every space,
+// every zero-width and look-alike character leaves nothing.
+func TestNormalizeAccessCodeKeepsOnlyWhatCanBePartOfACode(t *testing.T) {
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		got := NormalizeAccessCode(string(r))
+		survives := '0' <= r && r <= '9' ||
+			'A' <= r && r <= 'Z' && r != 'U' ||
+			'a' <= r && r <= 'z' && r != 'u'
+		if survives {
+			if len(got) != 1 || !strings.Contains(accessCodeAlphabet, got) {
+				t.Fatalf("U+%04X normalizes to %q, want exactly one symbol of the alphabet", r, got)
+			}
+			continue
+		}
+		if got != "" {
+			t.Fatalf("U+%04X normalizes to %q, want nothing -- a character that cannot be part of a "+
+				"code must be dropped, not carried into the digest", r, got)
 		}
 	}
 }
@@ -193,17 +249,23 @@ func TestMintAccessCodeDrawsEverySymbolEvenly(t *testing.T) {
 	}
 }
 
-// THE ALPHABET IS TIED TO TWO OTHER THINGS, and each tie fails silently.
+// THE ALPHABET IS TIED TO TWO OTHER THINGS, and each tie fails quietly.
 //
-// The draw masks five bits of a random byte, which is exact only for 32 symbols:
-// 31 or 36 would make some symbols likelier than others. And the normalizer
-// rewrites O, I and L, so a minted code that carried one would be rewritten when
-// typed back and would never match its own digest -- an operator would be handed
-// a code that is wrong from the moment it is shown.
+// The draw keeps five bits of a random byte, so it indexes exactly 32 symbols: a
+// shorter alphabet would be read past its end, and a longer one would never have
+// its last symbols drawn.
+//
+// And the normalizer rewrites O, I and L (and folds lower case), so a symbol of
+// the alphabet that it rewrites is a second draw for a string another symbol
+// already produces: O and 0 both come out as 0. A code carrying one would still
+// open, since its digest is taken of the normalized spelling, but it would hold
+// fewer than 125 bits (about 123 for a single swapped letter) and nothing about
+// it would look wrong.
 func TestAccessCodeAlphabetIsSafeToDrawAndToNormalize(t *testing.T) {
 	if len(accessCodeAlphabet) != 32 {
-		t.Fatalf("the alphabet has %d symbols, want 32 -- the draw masks five bits of a random byte, "+
-			"which is unbiased only for exactly 32", len(accessCodeAlphabet))
+		t.Fatalf("the alphabet has %d symbols, want 32 -- the draw keeps five bits of a random "+
+			"byte, which index exactly 32: a shorter alphabet is read past its end and a longer "+
+			"one never has its last symbols drawn", len(accessCodeAlphabet))
 	}
 	seen := map[rune]bool{}
 	for _, r := range accessCodeAlphabet {
@@ -215,8 +277,8 @@ func TestAccessCodeAlphabetIsSafeToDrawAndToNormalize(t *testing.T) {
 			t.Errorf("the alphabet carries %q, which is not a Crockford base32 symbol", r)
 		}
 		if got := NormalizeAccessCode(string(r)); got != string(r) {
-			t.Errorf("the symbol %q normalizes to %q -- a minted code carrying it would be rewritten "+
-				"when typed back and could never match its own digest", r, got)
+			t.Errorf("the symbol %q normalizes to %q -- two draws that normalize to the same string "+
+				"leave a code with fewer than 125 bits, and nothing about the code would look wrong", r, got)
 		}
 	}
 }
