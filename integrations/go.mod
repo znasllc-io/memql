@@ -124,7 +124,7 @@ require (
 	github.com/nats-io/nats.go v1.52.0 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/openai/openai-go/v3 v3.81.0 // indirect
+	github.com/openai/openai-go/v3 v3.86.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/petermattis/goid v0.0.0-20260725062400-500c67a39b75 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
