@@ -63,6 +63,10 @@ const app = (id: string, runnable = true, why = "") => ({
   subscription: "present",
   runnable,
   why,
+  readiness: "",
+  checkedAt: "",
+  resetsAt: "",
+  canSignIn: false,
 });
 
 function facts(over: Partial<RoutingFacts> = {}): RoutingFacts {

@@ -2214,6 +2214,81 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 	return b.String()
 }
 
+// FleetAppSignIn -- Start signing in to an app on YOUR OWN machine, and return at once with the id of the record to watch. The machine must be yours, connected, with the app allowed for this cluster and a Cockpit that can run a sign-in; each of those is refused before anything is written. The v1:worker:appSignIn row then carries the page to open and any code to enter. The app writes its own login on the machine, and no credential ever crosses to the cluster.
+type FleetAppSignInArgs struct {
+	// v1:worker:registration.id of the machine. Another user's answers exactly as a made-up one does.
+	RegistrationId string
+	// Enum: claude-code | codex
+	App string
+}
+
+// FleetAppSignIn calls the engine builtin fleetAppSignIn.
+func (qc *QueryClient) FleetAppSignIn(ctx context.Context, args FleetAppSignInArgs) (*Result, error) {
+	call := FleetAppSignInBuild(args)
+	return qc.executeNamed(ctx, "fleetAppSignIn", call)
+}
+
+func FleetAppSignInBuild(args FleetAppSignInArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetAppSignIn(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("app: ")
+	b.WriteString(quoteMemQL(args.App))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetAppSignInCancel -- Stop a sign-in you started on your machine. Nothing changes on the machine except that the app stops waiting.
+type FleetAppSignInCancelArgs struct {
+	SignInId string
+}
+
+// FleetAppSignInCancel calls the engine builtin fleetAppSignInCancel.
+func (qc *QueryClient) FleetAppSignInCancel(ctx context.Context, args FleetAppSignInCancelArgs) (*Result, error) {
+	call := FleetAppSignInCancelBuild(args)
+	return qc.executeNamed(ctx, "fleetAppSignInCancel", call)
+}
+
+func FleetAppSignInCancelBuild(args FleetAppSignInCancelArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetAppSignInCancel(")
+	b.WriteString("signInId: ")
+	b.WriteString(quoteMemQL(args.SignInId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetAppSignInCode -- Pass the code a sign-in page showed to the app waiting on your machine. It goes to that machine and nowhere else: it is in no row, no log line and no reply. It is useless without the verifier the process on the machine holds.
+type FleetAppSignInCodeArgs struct {
+	SignInId string
+	// What the sign-in page showed. Read once and passed on; never stored or echoed.
+	Code string
+}
+
+// FleetAppSignInCode calls the engine builtin fleetAppSignInCode.
+func (qc *QueryClient) FleetAppSignInCode(ctx context.Context, args FleetAppSignInCodeArgs) (*Result, error) {
+	call := FleetAppSignInCodeBuild(args)
+	return qc.executeNamed(ctx, "fleetAppSignInCode", call)
+}
+
+func FleetAppSignInCodeBuild(args FleetAppSignInCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetAppSignInCode(")
+	b.WriteString("signInId: ")
+	b.WriteString(quoteMemQL(args.SignInId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("code: ")
+	b.WriteString(quoteMemQL(args.Code))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetCapacity -- What each machine you can use can take on right now. One row: {machines, measuredAt}. Each machine says how many calls are in flight against its slots, the memory free for a model and the models already loaded (memory.reported is false when its cockpit does not report capacity, and it is then admitted on its slots alone), how fast it has answered over the last two hours, and whether it is degraded. Every route's fleet door admits machines on these figures before choosing one.
 type FleetCapacityArgs struct {
 }
@@ -2358,33 +2433,6 @@ func FleetRecommendedBuild(args FleetRecommendedArgs) string {
 	b.WriteString("builtin fleetRecommended(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// FleetRetryAppAvailability -- Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work.
-type FleetRetryAppAvailabilityArgs struct {
-	RegistrationId string
-	// Enum: claude-code | codex
-	App string
-}
-
-// FleetRetryAppAvailability calls the engine builtin fleetRetryAppAvailability.
-func (qc *QueryClient) FleetRetryAppAvailability(ctx context.Context, args FleetRetryAppAvailabilityArgs) (*Result, error) {
-	call := FleetRetryAppAvailabilityBuild(args)
-	return qc.executeNamed(ctx, "fleetRetryAppAvailability", call)
-}
-
-func FleetRetryAppAvailabilityBuild(args FleetRetryAppAvailabilityArgs) string {
-	var b strings.Builder
-	b.WriteString("builtin fleetRetryAppAvailability(")
-	b.WriteString("registrationId: ")
-	b.WriteString(quoteMemQL(args.RegistrationId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("app: ")
-	b.WriteString(quoteMemQL(args.App))
 	b.WriteString(")")
 	return b.String()
 }

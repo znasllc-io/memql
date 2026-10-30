@@ -261,6 +261,9 @@ func (p *sessionProvider) run(
 	var out AppSessionOutcome
 	var err error
 	var excluded []string
+	// Why the call failed outlives the selection that finds nothing left, for
+	// appProvider.call's reason.
+	var lastRefusal error
 	for {
 		selected := AppSelection{AppId: p.appId}
 		p.registry.mu.RLock()
@@ -270,6 +273,9 @@ func (p *sessionProvider) run(
 		if selector, ok := a.(AppSelector); ok {
 			selected, err = selector.SelectApp(ctx, request, true, excluded)
 			if err != nil {
+				if lastRefusal != nil {
+					return out, lastRefusal
+				}
 				return out, err
 			}
 		} else if p.appId == AppWildcardId {
@@ -305,14 +311,17 @@ func (p *sessionProvider) run(
 		if err == nil {
 			break
 		}
-		var quota *AppQuotaRefused
-		if p.appId != AppWildcardId || !errors.As(err, &quota) || ctx.Err() != nil {
+		// A pin stays its app: the selector is asked for p.appId every time.
+		// Anything but a proven pre-work refusal may have caused effects.
+		exclude, moves := appRefusalExclusion(err, selected)
+		if !moves || ctx.Err() != nil {
 			return out, err
 		}
 		if _, ok := a.(AppSelector); !ok {
 			return out, err
 		}
-		excluded = append(excluded, selected.AppId)
+		lastRefusal = err
+		excluded = append(excluded, exclude)
 		if len(excluded) >= 16 {
 			return out, err
 		}

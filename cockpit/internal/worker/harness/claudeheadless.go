@@ -74,6 +74,11 @@ const (
 	// and the working directory it runs in, which the recording uses.
 	claudeTypeSystem  = "system"
 	claudeSubtypeInit = "init"
+	// claudeTypeRateLimit is the app's own report of its plan's limits, and
+	// claudeErrorAuthFailed the word an assistant event carries when the login
+	// was refused (both as 2.1.304 printed them).
+	claudeTypeRateLimit   = "rate_limit_event"
+	claudeErrorAuthFailed = "authentication_failed"
 )
 
 // Content block types inside an assistant or user message. The last two
@@ -274,6 +279,7 @@ func (h *claudeHeadless) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 	// its stream (2.1.270), so the only value that could go here is the
 	// --effort this client passed, and a request is not a report.
 	res.Model = turn.servedModel()
+	res.Readiness = turn.readiness()
 
 	// A turn stopped because MemQL's server could not serve it failed for
 	// THAT reason, whatever status the stopped process exited with: the
@@ -572,6 +578,17 @@ type claudeTurn struct {
 	// cwd is the working directory every call this turn makes is recorded
 	// in: the workspace, until the app's own init event names it.
 	cwd string
+	// apiKeySource is what the init event says is paying: "none" for a
+	// subscription login. stopUnlessSubscription, set only on a ping, stops the
+	// process when it says anything else, and billingStopped records that it did.
+	apiKeySource           string
+	stopUnlessSubscription func()
+	billingStopped         bool
+	// rateLimit is the app's last rate_limit_event and authFailed its assistant
+	// event naming authentication_failed: its own statements about this turn,
+	// which readiness reads (readiness.go).
+	rateLimit  *claudeRateLimitEvent
+	authFailed bool
 	// mcpFailure is why MemQL's MCP server cannot serve this turn, as the
 	// init event reported it; empty while it can.
 	mcpFailure string
@@ -673,6 +690,11 @@ func (t *claudeTurn) route(line []byte) {
 			if m := strings.TrimSpace(init.Model); m != "" {
 				t.initModel = m
 			}
+			t.apiKeySource = strings.TrimSpace(init.APIKeySource)
+			if t.stopUnlessSubscription != nil && t.apiKeySource != "none" {
+				t.billingStopped = true
+				t.stopUnlessSubscription()
+			}
 		}
 		// The app names its working directory once, on init, and every
 		// call it makes is recorded there (see Action.Cwd for what that
@@ -701,9 +723,21 @@ func (t *claudeTurn) route(line []byte) {
 			}
 		}
 		t.emit(StreamEvent, line)
+	case claudeTypeRateLimit:
+		var limit claudeRateLimitEvent
+		if json.Unmarshal(trimmed, &limit) == nil {
+			t.rateLimit = &limit
+		}
+		t.emit(StreamEvent, line)
 	case claudeTypeAssistant, claudeTypeUser:
 		var env claudeRecordEnvelope
 		_ = decodeTolerant(trimmed, &env)
+		var apiError struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(trimmed, &apiError) == nil && apiError.Error == claudeErrorAuthFailed {
+			t.authFailed = true
+		}
 		if t.routeBlocks(ev.Message, env, line) {
 			return
 		}
@@ -987,8 +1021,9 @@ type claudeEvent struct {
 // runs on (2.1.270: `{"type":"system","subtype":"init","model":...}`),
 // decoded only from system lines.
 type claudeInitEvent struct {
-	Subtype string `json:"subtype"`
-	Model   string `json:"model"`
+	Subtype      string `json:"subtype"`
+	Model        string `json:"model"`
+	APIKeySource string `json:"apiKeySource"`
 }
 
 // claudeMessage keeps `content` raw for the same reason one level down:

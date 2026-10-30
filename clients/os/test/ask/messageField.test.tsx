@@ -18,7 +18,7 @@ const ROUTES: AskRouteOption[] = routeOptionsFrom({
   routes: [
     { id: "auto", name: "Auto", kind: "auto", scope: "cluster", ready: true, reason: "" },
     { id: "local", name: "Local", kind: "local", scope: "cluster", ready: true, reason: "" },
-    { id: "apps", name: "Apps", kind: "apps", scope: "cluster", ready: false, reason: "No signed-in app on your machines" },
+    { id: "apps", name: "Apps", kind: "apps", scope: "cluster", ready: false, reason: "No app is ready on your machines" },
     { id: "r1", name: "Emergency", kind: "custom", scope: "personal", ready: true, reason: "" },
   ],
 });
@@ -208,7 +208,7 @@ describe("the route and Where menus", () => {
     expect(list.querySelector(".os-select-group")?.textContent).toBe("Yours");
     const apps = within(list).getByRole("option", { name: /Apps/ });
     expect(apps.getAttribute("aria-disabled")).toBe("true");
-    expect(apps.textContent).toContain("No signed-in app on your machines");
+    expect(apps.textContent).toContain("No app is ready on your machines");
   });
 
   it("keeps Auto choosable when the cluster says nothing can answer, and says why", async () => {
@@ -470,12 +470,12 @@ describe("the SDK transport", () => {
     // The cluster answers one virtual row, {routes, revision}, in the builtin node envelope.
     const payload = { revision: 4, routes: [
       { id: "auto", name: "Auto", kind: "auto", scope: "cluster", description: "", ready: true, reason: "", customized: false, jobs: [] },
-      { id: "apps", name: "Apps", kind: "apps", scope: "cluster", description: "Claude Code or Codex", ready: false, reason: "No signed-in app on your machines", customized: false, jobs: [] },
+      { id: "apps", name: "Apps", kind: "apps", scope: "cluster", description: "Claude Code or Codex", ready: false, reason: "No app is ready on your machines", customized: false, jobs: [] },
       { id: "r9", name: "Night", kind: "custom", scope: "personal", description: "", ready: true, reason: "", customized: false, jobs: [] },
     ] };
     const sendAndWait = vi.fn(async (_request: unknown) => ({ queryResult: { result: { data: [{ routes: { id: "routes", concept: "v1:router:routeCatalog", type: "object", createdAt: "2026-10-18T12:00:00Z", payload } }] } } }));
     const routes = await new SdkAskTransport(() => ({ sendAndWait } as unknown as Dispatcher)).routes!();
     expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: "builtin routesForActor()" }) }), undefined);
-    expect(routes.map(route => [route.id, route.ready, route.reason])).toEqual([["auto", true, ""], ["apps", false, "No signed-in app on your machines"], ["r9", true, ""]]);
+    expect(routes.map(route => [route.id, route.ready, route.reason])).toEqual([["auto", true, ""], ["apps", false, "No app is ready on your machines"], ["r9", true, ""]]);
   });
 });

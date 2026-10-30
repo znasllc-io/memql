@@ -925,7 +925,7 @@ QueryClient.prototype.allWorkspaces = function (this: QueryClient, args: AllWork
   return this.executeNamed("allWorkspaces", buildAllWorkspaces(args), opts);
 };
 
-/** Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota. */
+/** Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota or an expired login. */
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appAvailabilityEvidence"] in generated_concepts.ts).
 export interface AppAvailabilityEvidenceArgs {
   workerId: string;
@@ -1031,6 +1031,50 @@ declare module "./query.js" {
 
 QueryClient.prototype.appSessionsForUser = function (this: QueryClient, args: AppSessionsForUserArgs = {} as AppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("appSessionsForUser", buildAppSessionsForUser(args), opts);
+};
+
+/** One of the caller's sign-ins, read fresh by the act that answers it. */
+// Bound concept: v1:worker:appSignIn (machine-readable: BoundConcepts["appSignInById"] in generated_concepts.ts).
+export interface AppSignInByIdArgs {
+  signInId: string;
+}
+
+export function buildAppSignInById(args: AppSignInByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("signInId: " + renderMemQLValue(args.signInId));
+  return "query appSignInById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appSignInById(args: AppSignInByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appSignInById = function (this: QueryClient, args: AppSignInByIdArgs = {} as AppSignInByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appSignInById", buildAppSignInById(args), opts);
+};
+
+/** The CALLER'S sign-ins for one machine, newest first. Backs the Sign in action on the machine's Apps page. */
+// Bound concept: v1:worker:appSignIn (machine-readable: BoundConcepts["appSignInsForWorker"] in generated_concepts.ts).
+export interface AppSignInsForWorkerArgs {
+  workerId: string;
+}
+
+export function buildAppSignInsForWorker(args: AppSignInsForWorkerArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query appSignInsForWorker(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    appSignInsForWorker(args: AppSignInsForWorkerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.appSignInsForWorker = function (this: QueryClient, args: AppSignInsForWorkerArgs = {} as AppSignInsForWorkerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("appSignInsForWorker", buildAppSignInsForWorker(args), opts);
 };
 
 /** One approval chain. */

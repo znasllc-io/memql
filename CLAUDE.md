@@ -831,7 +831,9 @@ the `mcp.<domain>` endpoint.
 - **The runnable app set is CLOSED in the engine** (`claude-code`, `codex`);
   unknown ids are stored on the registration and produce no routing label.
 - **A machine is selectable only when BOTH `allowed`** (its `policy.yaml
-  apps.allow`) **and `signedIn`.** Selection is the Fleet router asked for the
+  apps.allow`) **and `signedIn`, and measured `ready`.** Cockpit checks on a
+  schedule; only a Cockpit that predates the checks, which sends no word at all,
+  stays selectable unmeasured. Selection is the Fleet router asked for the
   `app:<id>` label. A session runs only on the replica holding that machine's
   stream; a machine on a sibling replica is SKIPPED, not failed.
 - **A run is a SESSION, not a dispatch.** `AppSessionStart / Chunk / Control /

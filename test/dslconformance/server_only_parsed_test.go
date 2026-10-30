@@ -1409,6 +1409,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "worker/mutations.memql", Name: "recordModelProbeProgress"}: true,
 		{Path: "worker/mutations.memql", Name: "finishModelProbe"}:         true,
 		{Path: "worker/mutations.memql", Name: "finishModelPull"}:          true,
+		// A sign-in's two writers, with the pull's reasoning. Caller-scoping does not
+		// help, because the caller IS the row's owner. createAppSignIn carries
+		// `targetNodeId`, which only the server can read off the machine's row.
+		// updateAppSignIn is a report from a machine that only the replica holding its
+		// stream has heard, and its `url` is an address its owner is about to follow.
+		{Path: "worker/mutations.memql", Name: "createAppSignIn"}: true,
+		{Path: "worker/mutations.memql", Name: "updateAppSignIn"}: true,
 		// epic memql#5327, finding M-2. setWorkerSharing writes the OWNER'S
 		// half of a machine's sharing consent, and its own comment used to
 		// assert that the write guard refuses any actor but the owner. It does

@@ -155,6 +155,15 @@ type Sender interface {
 	SendAppSessionEnd(end *memqlv1.AppSessionEnd) error
 }
 
+// SessionReadiness is what a session tells the machine's readiness tracker.
+type SessionReadiness interface {
+	SessionStarted(app string)
+	SessionEnded(app string)
+	Observe(app string, signal harness.ReadinessSignal)
+	// Recheck asks for a check at once, because a sign-in just finished.
+	Recheck(app string)
+}
+
 // Options configures a Manager.
 type Options struct {
 	Logger *slog.Logger
@@ -176,6 +185,12 @@ type Options struct {
 	// allowed, which is the default-deny posture the rest of the worker
 	// has.
 	Allowed func(appID string) bool
+	// Readiness hears about each session and what its turns said about the app,
+	// which stands in for a check (apps/readiness.go). Nil tells nobody.
+	Readiness SessionReadiness
+	// SignInLauncher overrides the supervisor a sign-in's processes come from.
+	// Tests set it; nil is CheckLauncher.
+	SignInLauncher harness.LaunchFunc
 	// Levels returns the machine owner's policy.yaml apps.levels entries
 	// for one app, and the levels those entries refuse, each with the
 	// sentence saying why (tools.Policy.AppLevels). The session lays the
@@ -247,6 +262,8 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	// signIns are the sign-ins this manager is running, by id (signin.go).
+	signIns map[string]*liveSignIn
 }
 
 // NewManager builds a Manager and sweeps whatever a previous process
@@ -466,6 +483,10 @@ type session struct {
 // run drives the whole session and is the only place End is sent.
 func (s *session) run(ctx context.Context) {
 	defer s.manager.forget(s.id)
+	if readiness := s.manager.opts.Readiness; readiness != nil {
+		readiness.SessionStarted(s.start.GetApp())
+		defer readiness.SessionEnded(s.start.GetApp())
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
 			// A panic here must still delete the MCP config and still
@@ -908,6 +929,9 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 	for {
 		res, err := h.Turn(ctx, prompt, sink)
 		s.recordTurn(res)
+		if readiness := s.manager.opts.Readiness; readiness != nil && res.Readiness != nil {
+			readiness.Observe(s.start.GetApp(), *res.Readiness)
+		}
 		// The app's REAL status, unnormalised. A harness whose process
 		// is still alive reports 0 for a protocol-level failure, and
 		// that is not a lie the engine acts on: it files a session with

@@ -503,6 +503,7 @@ func (r *Runner) runStream(ctx context.Context, conn *Connection) (healthy bool,
 			// keep working on somebody's machine with nothing watching
 			// it, which is precisely what cancel exists to prevent.
 			if r.sessions != nil {
+				r.sessions.StopSignIns()
 				r.sessions.StopAll("the worker's stream to the cluster was lost")
 			}
 			// The same argument for model calls, and it is the stronger
@@ -916,6 +917,18 @@ func (r *Runner) handleMessage(ctx context.Context, conn *Connection, msg *memql
 			break
 		}
 		r.sessions.Start(ctx, conn, payload.AppSessionStart)
+	case *memqlv1.WorkerServerMessage_AppSignInStart:
+		if r.sessions != nil {
+			r.sessions.StartSignIn(ctx, conn, payload.AppSignInStart)
+		}
+	case *memqlv1.WorkerServerMessage_AppSignInInput:
+		if r.sessions != nil {
+			r.sessions.SubmitSignInCode(conn, payload.AppSignInInput)
+		}
+	case *memqlv1.WorkerServerMessage_AppSignInCancel:
+		if r.sessions != nil {
+			r.sessions.CancelSignIn(payload.AppSignInCancel)
+		}
 	case *memqlv1.WorkerServerMessage_ModelCallStart:
 		if r.calls == nil {
 			r.logger.Warn("model call start received but this build serves no models",

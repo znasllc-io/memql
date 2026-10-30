@@ -235,6 +235,7 @@ func (s *server) admitRegistration(
 	w.SetModelCallFunc(session.openModelCall)
 	w.SetModelPullFunc(session.openModelPull)
 	w.SetModelProbeFunc(session.openModelProbe)
+	w.SetAppSignInFunc(session.sendAppSignIn)
 	s.registry.Add(w)
 
 	if err := stream.Send(&memqlv1.WorkerServerMessage{
@@ -491,6 +492,8 @@ type streamSession struct {
 	modelCalls       map[string]*ModelCallHandle
 	sharingChanged   chan struct{}
 	sharingStartedAt time.Time
+	// appSignIns are the sign-ins this stream started and has not heard the end of.
+	appSignIns map[string]struct{}
 	// modelPulls is the pull table. Separate from modelCalls because the
 	// id spaces are separate and a pull is not a call: conflating them
 	// would let a cancel for one reach the other.
@@ -694,6 +697,7 @@ func (s *streamSession) close(cause error) {
 		for _, h := range livePulls {
 			h.finish(ModelPullOutcome{Error: "worker_disconnected"}, ErrWorkerDisconnected)
 		}
+		s.failOpenAppSignIns()
 		s.clearConnectedNode()
 		// Log disconnect symmetrically to "worker registered" on the
 		// connect path. Without this the agent log was silent on
@@ -948,6 +952,8 @@ func (s *streamSession) handle(ctx context.Context, msg *memqlv1.WorkerClientMes
 		s.handleModelProbeProgress(payload.ModelProbeProgress)
 	case *memqlv1.WorkerClientMessage_ModelProbeEnd:
 		s.handleModelProbeEnd(payload.ModelProbeEnd)
+	case *memqlv1.WorkerClientMessage_AppSignInUpdate:
+		s.handleAppSignInUpdate(payload.AppSignInUpdate)
 	case *memqlv1.WorkerClientMessage_Pong:
 		s.handlePong(payload.Pong)
 	case *memqlv1.WorkerClientMessage_RotationRequest:
