@@ -19,33 +19,209 @@ paths and one task's acceptance criteria must not become routing rules.
 
 ## Delegation and return
 
+A delegated App can finish its operations but return an invalid terminal
+envelope. Both native lanes now retain that return before a separate format-only
+conversion. `agentWorkOutcomeRecovery` permits one attempt; the private reply
+stage records the attempt before inference, bound to the same execution and
+guidance as reply review. The structured Apps door has an empty tool scope and
+no inputs or images. Explicit model/effort routing and normal admission remain;
+the original whole-prompt override cannot replace the conversion contract.
+No operational provider is called again to fix a reporting format. A valid
+conversion still passes evidence/completion review with operational continuation
+disabled. A necessary substantive question uses the existing native feedback
+capability; a missing envelope is never a question for the owner.
+
+Source reads and stage writes fail closed. Another replica retains the consumed
+attempt, and newer/different source context or guidance cannot be overwritten
+with the saved draft. An uncertain inference attempt stops rather than granting
+a fresh attempt. Successful conversion survives a later evidence-review failure.
+The normalized conversion is also saved before rechecking guidance. If direction
+changes while the step runs, Retry can review those retained bytes against the
+new instructions without another conversion or operational turn. For the older
+write gap, the native reader admits exactly one successful `workOutcomeFormat`
+journal receipt after the same-generation consumed-attempt record, for the exact
+owner/run/step and retained input. The owner-scoped query is capped at two rows:
+zero or multiple matches, changed input/generation, cancellation, corrupt state,
+or an unsuccessful receipt leaves recovery stopped. It reads no App prompt or
+transcript and creates no new inference allowance. Fresh completion review is
+still mandatory; retained output is not proof that new instructions are fulfilled.
+This legacy journal adoption must originate in the step's first execution because
+older model receipts do not name a rerun generation. Later versions must already
+have their conversion in the durable stage; a timestamp alone cannot identify
+a late response from a previous execution.
+The version is read as of the consumed-attempt barrier: a reporting-only Retry
+increments the current step receipt while keeping that original attempt valid.
+`TestFormatRecoveryGuidanceRaceRetainsConversionWithoutReplay` covers the race,
+`TestFormatRecoveryConsumedAttemptReadsCompletedReceiptWithoutNewInference`
+covers the old gap, and `TestCompletedFormatReceiptRecoversOnlyOneOwnedAttemptOnPeer`
+checks the actual owner-scoped journal and refusal cases on another engine.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` changes recorded guidance during
+conversion in both provider lanes and verifies peer recovery through the real
+adapter with one production call and one conversion.
+Run-level reporting errors may outlive the recovered step. Before refusing an
+otherwise empty stage, recovery scans the current owned step's App receipts.
+An exhaustive scan with no operational App allows that new step to start; a
+completed App without its checkpoint still stops, as does an incomplete scan.
+The legacy recovery DB test and both adapter lanes cover this step boundary.
+If the saved reporting decision names a different step, the native reader first
+requires that exact owned origin to be done. Its run-level error then cannot
+block a later step merely because that step has older App receipts. An unknown
+decision binding or unfinished origin still stops; ordinary continuation gates
+remain responsible for the later step's prior effects.
+The exact pre-upgrade native `invalid delegated work outcome` failure can be
+upgraded from the latest owned operational App's native handover and public
+receipts. Its owner/run/goal/step/rerun/override and ended-success interval must
+match; ordinary new work, changed execution and Apps paused for native questions
+cannot borrow that result. There is no transcript fallback: absent prose remains
+unknown and only retained public receipts can support the reconstructed answer.
+The scan is bounded and missing proof leaves production stopped.
+The existing failure question's Retry preserves this execution request rather
+than minting a new rerun generation. The native recovery marker also selects a
+deterministic stopped-recovery path, so a classifier cannot reinterpret it as
+permission to redo operations. Budget and context ceilings still take precedence.
+`TestFormatFailureRetryPreservesCompletedExecutionBinding` verifies the approval
+write leaves model overrides, request, head and spend intact; the executing
+replica then performs the source and stage checks above. An inconclusive final
+completion review also stops without an operational continuation or replan. The
+native dispatcher also recognizes the saved reporting failure as ready after
+its Retry, without requiring the new version that an operational retry needs.
+The answer claim still arbitrates replicas; the agent still enforces retained
+source, generation and attempt checks. `TestWorkDBFailureRetryDispatchesOnceAndKeepsCompletedPrefix`
+exercises the actual decision, readiness, claim and executor path for both kinds.
+
+If dispatch never starts and the watchdog abandons the run, Nexus restores the
+existing Resume work control from the exact saved Retry. The native gate permits
+this only for watchdog abandonment, the same answered failure, an unchanged
+failed step written before that answer, and an open, unaccepted goal. It restores
+the reporting error for the agent's durable recovery, preserving request, model,
+head and spend. Newer execution, cancellation, changed decisions or accepted
+results refuse recovery. Reading the control never resumes work automatically.
+The database test covers a lost dispatch; the UI recovery tests cover reload and
+stale/cancelled controls.
+Both compact run queries include `humanResumeId`, so a fresh Nexus list can
+discover that saved answer without fetching execution inputs or private reply
+state. `TestRunSummaryDBExcludesExecutionPayloads` verifies the real projections
+and their owner gates as well as the compact response bound.
+
+`work_outcome_recovery_test.go` covers both lanes, failed conversion, failed
+review, restored attempt bounds, newer sources and substantive questions.
+`TestLegacyOutcomeRecoveryReadsExactOwnedSessionSourcesOnPeer` checks the real
+owned database path and rejects foreign, cancelled and superseded executions.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` exercises invalid as well as valid
+App returns through the real adapter and durable store on two engine instances,
+including the explicit model and effort at the formatting call. An inconclusive
+review regression proves that no operational replan or terminal reply escapes.
+These checks do not establish arbitrary model compliance or exactly-once delivery.
+An exhausted conversion, malformed format or inconclusive completion review is
+a reporting failure, not a failed mandatory journal write. Its marker prevents
+operational replanning while the executor records the failed step and stopped
+run. `ErrWorkCheckpointRequired` remains reserved for an unconfirmed journal or
+checkpoint boundary; using it for review uncertainty leaves a misleading live
+intent that the watchdog later abandons. Transport errors preserve their actual
+underlying cause, including a genuine mandatory-checkpoint failure.
+
+A completed operational turn now saves a private reply-review stage before its
+separate evidence-review call. A transient review failure previously restarted
+the entire operational turn on another replier. The checkpoint binds the full
+result, terminal envelope and exact source messages to owner, run, goal, step,
+rerun request, override and plan; a separate fingerprint covers current goal
+input and chronological owner guidance. The adapter reads fresh ownership,
+execution, cancellation and goal state before review and delivery. An answered
+continuation must still pass its exact native checkpoint proof. Review calls
+retain normal provider admission and spending gates; this record grants no tool
+permission, model calls, completion claim or owner acceptance.
+
+Both execution lanes save their exact final message sequence before handing a
+successful result to review. This barrier also covers direct App completion
+without a locally executed tool batch; an earlier progress marker alone is not
+the completed source. The App-door test exercises both lanes and compares the
+pending review's source with that durable final checkpoint, including exactly
+one completed assistant response. Cross-package Fleet fixtures explicitly wire
+their admission guard and verify reservation before dispatch; no production
+budget gate is disabled to exercise the final checkpoint.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` covers the real adapter and
+durable store in both lanes: an ordinary App greeting includes its final
+response once, then a peer delivers that retained result without another App
+session. A missing or failed final checkpoint prevents the review transition.
+
+An unchanged retry reviews the retained result without production. Changed
+guidance or appended operational receipts require fresh production from the
+latest compatible source, retaining completed exchanges. The latest progress
+checkpoint is never overwritten by an older draft: recovery counters, evidence
+and guidance watermarks remain intact. Review helper capacity recovery carries
+the current operational source in native context: its durable suspension names
+that source, not the helper's compacted prompt. Later owner guidance therefore
+resumes the operational checkpoint through the ordinary exact-proof path. If a
+legacy or otherwise incompatible checkpoint has replaced that source sequence,
+review-only retry remains possible, but fresh production is
+refused until the sources can be reconciled; there is no silent fresh-turn
+fallback. Evidence continuation remains bounded by the durable repair count.
+Each pending/retired transition receives a separate observation ID so repeated
+retirements cannot resurrect an intervening draft.
+
+The pending stage is retained after delivery until the workflow settles the
+step. A crash before that journal commit can cause another review and delivery,
+but not another production turn. This is not exactly-once user delivery or a
+general exactly-once tool guarantee. A failed initial checkpoint write stops
+before review/delivery; it cannot manufacture a saved result. Pre-upgrade work
+without this stage still follows ordinary source-checkpoint recovery. Malformed
+storage, cancelled/closed work and changed execution refuse before reuse.
+`TestReplyReviewRestartDoesNotRepeatCompletedProduction` reproduces the old
+duplicate-production failure; restart/progress tests cover newer receipts,
+guidance, missing proof and storage failure. `work_reply_checkpoint_db_test.go`
+checks fresh-replica ownership, generation and repeated retirement ordering.
+The integration test for helper recovery exercises real capacity suspension,
+fresh-replica guidance and exact continuation proof without replacing source.
+
 Human corrections sent through **Discuss in Ask → Send guidance** are durable
 instructions for unfinished work. Previously they survived only in the immediate
 decision checkpoint. A later permission receipt could make the older correction
 archivable, and a fresh Apps worker could resume the superseded task. The native
 guidance reader now retrieves answered corrections from the owner's approval
 journal, including the current run and its root, on every normal guidance read.
-An acknowledgment is not a delivery cursor: a later worker reads them again and
-deduplicates in its own active context. Retry and replan generation changes do
-not invalidate human direction about the remaining goal.
+An acknowledgment is not a delivery cursor. Each executing context reads the
+owner-scoped chronological journal in pages, then checkpoints the exact consumed
+prefix with its saved exchanges. Retry and replan generation changes do not
+invalidate human direction about the remaining goal.
 
 `workApprovalGuidanceForOwnerRun` selects only the owner's answered feedback,
 with the same owner as decision maker. The reader validates the typed guidance
 contract, decision time and run binding; approved commands and rejected requests
-are not instructions. These corrections have their own 16-message/16,000-rune
-context bound. The query reads an extra row so overflow refuses explicitly
-instead of silently dropping legitimate history. This is a context bound, not
-a goal lifetime limit. Routed messages, late optional answers and corrections
-are presented in human timestamp order so source-query order cannot reverse a
-later change of direction. Restoring feedback neither grants permission nor
-replays an operation. Existing ownership, cancellation and execution checks
-still gate the read and every effect.
+are not instructions. Approval and optional-answer queries follow every storage
+page rather than mistaking the first query page for the complete journal. Sources
+are ordered by human timestamp, then receipt ID for ties. The complete source
+read currently uses memory proportional to the scoped journal and remains subject
+to ordinary cancellation and read deadlines; active model delivery is bounded.
 
-`work_approval_guidance_db_test.go` reproduces the missing correction using real
-storage and verifies later approvals, retries, another replica, delegated child
-work, chronology, ownership and overflow. The regression uses document editing;
-no repository, language or feature-specific branch is involved. These checks
-establish delivery, not model adherence or a completed user task.
+The former 16-message/16,000-character lifetime ceiling could accept a correction
+and then prevent every subsequent resume before context recovery ran. Those
+numbers now bound delivery pages, not the goal's lifetime. Each page is saved
+verbatim with a constant-size count-and-digest cursor before compaction or another
+read. Ordinary context checkpoints retain exact originals before deriving memory.
+The agent drains the remaining pages before its operational model call. One
+indivisible instruction is never clipped; genuine provider or checkpoint limits
+still stop with its original retained. A late insertion invalidates the consumed
+prefix and causes chronological rereading instead of being skipped by a timestamp
+watermark. Final reply review rebuilds the same bounded, recallable context.
+
+A cursor is restored only with the owned, generation-checked continuation. Source
+identity, rather than rendered grouping or a growing lifetime ID array, controls
+recovery rearming. An unchanged prefix on another replica is not new progress.
+Acknowledgment revalidates that prefix and writes bounded batches; it makes no
+completion claim. Existing old checkpoint ID arrays are read once when continuing
+saved work, then replaced by the cursor. Storage failure stops before another
+operation. None of these receipts, summaries or cursors grants permission, changes
+spending limits, or authorizes replaying completed effects.
+
+`work_guidance_pages_test.go` covers Unicode page reconstruction, late insertion,
+changed source identity, storage pagination, another replica, and prefix-specific
+acknowledgment. The agent guidance tests cover both execution lanes and interruption
+between calls; recovery tests cover more than the former lifetime ID limit and
+unchanged-prefix replay. The `paged-guidance` case in
+`app/work_permission_guidance_db_test.go` resumes an actual suspended nested run
+on a peer after forty corrections, preserves completed effects, and still requires
+a new exact command grant. These tests establish delivery and enforcement, not
+model adherence or successful completion of arbitrary downstream work.
 
 The live Apps check exposed a second ordering seam: the newer correction was
 present, but compaction had archived an older additive step override, and the
@@ -703,6 +879,53 @@ old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
+A stale serving replica can still write a hard call/time stop using the retired
+lifetime policy. Refresh every role that serves the affected path: the BFF's
+interactive approval, the agent's execution and the planner's replan/remedy
+each need their actual runtime build identity verified. A fresh agent pod alone
+does not establish planner compatibility. Read startup build-identity logs;
+do not launch the engine with an assumed `--version` flag (older binaries ignore
+it and start another server). Local repairs use the supported role-scoped dev
+build and must preserve unrelated release candidates and active CI.
+
+After such a repair, the existing discussion action can reconsider a saved
+hard replan call/time stop only if fresh owned state proves its versioned, already
+renewed window covers recorded spend. The original approval remains unchanged;
+guidance neither adds a window nor clears spend, credits or the evidence epoch.
+The answer and release still use the ordinary receipt gate and exact wait, and
+recovery after a partial write repeats the same fresh check. Genuine monetary
+limits, exhausted windows, missing/malformed state, closed goals, cancellation,
+foreign ownership and result reviews refuse. The saved replan reason survives
+before the latest correction; inference still reconciles receipts and passes
+explicit provider caps at admission. `TestStaleProgressStopRechecksExistingWindowWithoutRenewal`
+and `TestProgressStopRecheckDBAcrossReplicas` cover this boundary, including a
+lost release, a newly tightened monetary cap, idempotent recovery and a provider
+hard cap that still refuses after recovery.
+
+An `unevaluated` admission stop is a failed check, not measured exhaustion.
+The same discussion gate may reconsider that saved replan inside its current
+initial or renewed allowance, with complete recorded usage and current owner,
+goal, wait and artifact checks. It never recognizes recovery by matching prose,
+rewrites the old question, grants a phase claim, renews a window or clears
+usage. New questions describe verification failure accurately and remain closed
+until that gate succeeds. The retried native phase must still pass fresh logical
+and provider admission; unavailable accounting or an explicit cap still refuses.
+`TestUnevaluatedStopRecheckDBAcrossReplicas` covers a saved answer, failed release,
+tightened monetary limit, peer recovery and unchanged cumulative accounting.
+
+Provider admission recognizes compiler ownership, a claimed remedy's exact wait,
+or an answer validator's exact completed version through private native context.
+Ordinary waiting/compiling contexts cannot mint that evidence. Remedy and answer
+check deadlines start before claim/preparation, so delays cannot extend their
+claim window. Compiler ownership is rechecked against its persisted node and
+heartbeat. Stale phases do not turn into execution authority when status changes.
+Only current execution, compilation and remedy phases can renew progress from
+fresh completed evidence; terminal answer validation cannot renew. The native
+cross-replica tests in `provider_phase_db_test.go` exercise admission, claim
+expiry, changed waits/owners/nodes, cancellation, progress-credit consumption
+and unchanged provider caps. Runtime role versions must include these gates;
+changing a saved run's status to bypass them is not a recovery procedure.
+
 Recovery observes that same current cumulative window. `ModelCallBudget`
 previously reloaded the original goal estimate after calculating the renewed
 allowance, so a run beyond its first window appeared permanently exhausted to
@@ -759,7 +982,9 @@ Provider admission also distinguishes execution from native work phases. A
 the receiving planner had correctly claimed a run whose status was still
 `compiling`. Widening that test to all waiting or finished runs would allow stale
 contexts to infer after work stopped. The native entry paths instead attach a
-private, call-local phase stamp after their existing admission gates:
+private, call-local phase stamp after their existing admission gates. The shared
+helper returns only binding data; each entry path creates its own context so
+the package's no-returned-authority-context check remains enforced:
 
 | Phase | Fresh evidence checked under the workload gate | Stop condition |
 | --- | --- | --- |
@@ -849,6 +1074,42 @@ separate fail-closed receipt tracking bound; it must not be described as
 unbounded in-memory tracking or as owner acceptance.
 
 ## Recovery boundaries and remaining limits
+
+An `inferenceUnavailable` wait with a retry time now reaches agents from its
+run event, as transient retry waits already did. The cron leader can be a node
+without an executor; asking only that leader to dispatch left restored
+subscriptions waiting indefinitely. Each agent arms one local timer per exact
+wait. A non-agent sweep reannounces an unchanged overdue wait with a heartbeat,
+so agents that restarted after the original event can recover it too. That
+backstop requires the updated sweep on the current cron leader. During a rolling
+deployment an older product node can take the lease, so an agent also rebuilds
+its timers from the durable in-flight projection after its own `system.startup`
+event. The read uses the existing compiled maintenance principal and passes no
+maintenance authority into execution. Each timer restores its run owner's actor.
+Projection readiness is retried within a one-minute startup operation; failure
+is logged and leaves the saved waits to later events or an updated sweep. Node
+readiness is not blocked, and provider work does not run under that watchdog.
+
+The timer re-reads under the restored owner's authority and claims a leased key
+bound to the run, approval, wait start and retry time. Bare event IDs and canonical
+projection IDs share one timer identity and the existing canonical claim spelling;
+otherwise a late event could claim the same wait a second time. The executor checks that
+identity and goal again; changed waits, cancellation, closed work and driver-owned
+runs are refused. Recovery preserves any existing rerun request, completed
+prefix, routing, overrides, usage and progress extensions. It does not consume a
+new human answer, select a paid provider, or treat a cost-ceiling approval without
+a retry time as automatic permission. A dead claimant leaves a lease for the
+sweep to retry; fresh events alone are not proof an external effect is repeatable.
+
+[`inference_waits_test.go`](../../../integrations/work/inference_waits_test.go)
+covers early/duplicate timers, stale waits, cancellation and missed events.
+[`TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix`](../../../app/work_inference_recovery_db_test.go)
+uses separate engines, the real Postgres claim and executor, a non-agent leader
+or startup recovery without any scheduler announcement,
+and held prior execution claims. It checks one unfinished effect under a saved
+rerun request, refusal to repeat an unclassified effect without that request,
+retained prefix, and unchanged usage/extension counts.
+These fixtures do not certify a provider's actual account availability.
 
 Failure Retry creates a new execution request but preserves the failed step's
 latest admitted version override. Creating that request with an empty override
@@ -2962,3 +3223,191 @@ Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
 `TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
 contract and in-process replica hop; they do not establish that a running
 installation has been upgraded.
+
+## Fleet workspace continuation
+
+The Fleet binding's original one-hour expiry accidentally ended productive
+work even while the owner-authorized goal remained active. The binding now keeps
+its owner, run and machine placement fixed while a native lifecycle renews the
+bounded lease when fewer than thirty minutes remain. Each renewal rechecks the
+active run, destination, enrollment and sharing. The receiver still enforces
+its five-minute idle limit, per-operation cancellation, machine capacity and
+pipeline exclusion. A longer-lived goal does not grant longer computer access.
+
+An expired binding or typed receiver state-loss receipt requires an explicit
+`workspace_recover` call naming the current generation. A row-version fence
+allows only one replica to advance that generation. Recovery repeats the fresh
+authority checks and prepares an empty generation on the same machine; it does
+not promise restored files or run a command. Retained Library evidence is the
+source for reconstruction. Completed effects and uncertain operations are never
+replayed automatically. A changed machine, inactive run, withdrawn sharing or
+stale generation refuses. Receiver tombstones remain; a new generation uses a
+different identity rather than deleting an old tombstone.
+
+The generation travels through both mesh forwarding and the machine constraint,
+so an old capacity-queued call cannot execute inside a replacement filesystem.
+`workerWorkbench` contract 2 requires generation-aware receivers. The database
+regression `TestWorkbenchBindingDBChoosesOneMachineAcrossReplicas` verifies
+native binding persistence, owner isolation and competing recovery. The tests
+in `workbench_continuation_test.go` cover loss, no replay, stale queued calls,
+sharing and cancellation. Cockpit's `TestActiveWorkbenchRenewsLeaseWithoutLosingFiles`
+uses a controlled clock beyond two hours, and
+`TestExplicitRecoveryUsesNewGenerationWithoutReplayingLostOperation` preserves
+tombstones and distinguishes the replacement container. These tests do not
+establish a two-hour live production run or restore ephemeral files.
+
+## Feedback after a finished, unaccepted result
+
+Ask routes a correction or request to continue to the latest finished result of
+an open goal as well as to active work. `activeWorkRun` retains its original
+meaning for queued-message projection. Closed/accepted goals, cancelled work,
+children, and older results are not automatic-continuation candidates. Unrelated
+requests still go to intake; ambiguous references still ask which goal. Discovery
+uses an owner-scoped, one-row existence query for newer or nonterminal work, so an
+older active run cannot disappear behind a page of terminal history.
+
+`work.continueRun` requires interactive owner feedback, the exact observed run
+version and an idempotency request id. Under one acquisition of the goal lifecycle,
+workload and provider gates, it rereads ownership, open/unaccepted state, result
+version, and conflicting work. Acceptance winning that gate prevents continuation;
+continuation winning it makes the old acceptance stale. Unlike an explicit step
+rerun, it never reopens accepted results. The request receipt and a native replan
+wait are written together on the same run. Duplicate payloads reuse that receipt;
+a changed payload under the same id refuses. All completed steps remain the fixed
+prefix, including the former final answer. The replanner appends the remaining
+work rather than asking the person to select a technical step or replaying an
+old effect. The sealed source must be available before a request can dispatch.
+
+Explicit feedback renews an execution window using the existing progress policy,
+reconciled with the provider ledger when present, without resetting cumulative
+usage, hard token/cost ceilings, permissions, or durable progress credits. Unknown
+or malformed provider attribution refuses; native inference admission still checks
+its actual phase, model route and operator limits before every call. The bounded
+active evidence index starts a new feedback epoch, as it does at a progress question.
+
+Each request has a stable observation identity and its original human timestamp.
+The handler journals an intent before the run write, then seals acceptance after
+it. The committed run receipt bridges a crash between those writes; an unrelated
+pending intent never becomes guidance. Before replacing that bridge, another
+continuation must seal the preceding receipt. Thus API-only feedback survives
+later requests, and a retry of any accepted id cannot renew or dispatch again.
+Observation phase writes use a timestamp strictly after the version read under
+the same gate, including when another replica's clock is behind. An accepted
+receipt never regresses to intent.
+
+The run write commits continuation. A subsequent seal failure returns an honest
+accepted response with `feedbackReceiptState: pending` and logs a repair diagnostic;
+it cannot tell Ask the message was refused after work already resumed. A retry
+seals that receipt without writing the run again. The guidance reader merges all
+accepted observations with the run bridge, always using the same stable identity
+and human time. A matching late Ask turn remains a delivery receipt but does not
+rename or duplicate its instruction, so acknowledged page prefixes stay valid.
+Routing reports continuation only after the handler acknowledges that same run.
+A refusal remains attached to the selected goal instead of silently opening another.
+
+Validation: `TestContinueFinishedResultDBAcrossReplicas` exercises two competing
+replicas, durable retry, usage/prefix preservation, native replan context and
+owner acceptance. `TestContinueConflictDBFindsOlderActiveRunBeyondHistoryPage`
+checks long history and abandoned older work. `TestContinueFeedbackWindowUsesProviderSpendAndKeepsHardLimits`
+checks actual provider counts and monetary refusals.
+`TestContinueReceiptDBRecoversPostCommitFailureAcrossSkewedReplicas` checks partial
+commit recovery, monotonic receipt phases, two API continuations and old-request
+retry. `TestAskResultFeedbackKeepsCursorAcrossSealTranscriptAndLaterAPIRequests`
+checks stable delivery across late transcript arrival and more than one query page.
+The Ask continuation tests also cover chronological guidance, transport retry,
+missing-transcript recovery, refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
+runs the real plan validator and proves the new resume point follows completed
+work. These are fixtures with the real database/plan validator; live rollout and
+completion-disposition verification are reported separately.
+
+## Current-step operation completion and retained partial effects
+
+An execution previously could finish after an honest answer said its requested
+operation was still unperformed. The operational step now requires a typed
+completion disposition from the existing bounded reply check, including specialist
+turns without a `respondToUser` envelope. Its contract combines the native current
+step task, owned running step, and current owner guidance. Information requests,
+conditional advice, later steps, and explicit owner deferrals do not require an
+unrequested effect. Direct self-contained quick replies retain their bypass through the compiled
+quick-reply recipe. Unclassified legacy agent turns receive the completion check;
+their prose alone cannot establish an information-only task. Adopted turns without
+a section task use the owned goal statement rather than treating a large source
+document as the task. Long native instructions remain intact for ordinary routed
+context admission and durable recovery; this adds no task-text length ceiling.
+
+A satisfied operation must cite available, attributed same-run tool receipts.
+Unused approvals, explicit transport errors, nonzero exits and truncated proof
+cannot satisfy it. Saved domain data that describes failures remains valid source
+data: only recognized receipt/transport status is checked mechanically. The model
+still judges relevance and sufficiency, including reuse of a previously retained
+artifact. This is a bounded semantic check, not transactional certification.
+
+The native feedback, scope, model-ceiling, Training and knowledge fixtures route
+reply review through the installed resolver and supply the strict completion
+contract. They retain review-call and saved-receipt assertions; a missing provider
+field must not be hidden by bypassing review or accepting a failed child step.
+`TestWorkDBHumanDispatchPreservesScheduledRecovery` obtains the inference wait
+identity from the installed event/timer path and retires its durable run after
+each case. This keeps the subsequent all-owner startup recovery test meaningful:
+it still rejects unexpected or duplicate deliveries instead of filtering them.
+These fixtures compile locally without a database; execution requires native CI.
+
+An unfinished disposition first uses the existing single durable checkpoint
+continuation. Its attempt count, completed exchanges and pending reply survive a
+replica change. If the operation remains unfinished, an encoded native control
+receipt selects the normal replan path instead of successful delivery. Native
+terminal and hard-limit signals retain precedence; quoted error strings inside
+the encoded explanation cannot change classification. The explanation is exposed
+only after that decision. Replanning spends the existing run retry budget; actual
+budget exhaustion still requires the ordinary owner decision. The check grants no
+permission and does not close or accept a goal.
+
+A failed top-level step can contain completed effects. Before replacing it, the
+planner reads bounded owner/run/step-scoped tool receipts, independently of model
+prose. After installation, the new execution binding receives retained same-run
+receipts independently of its generated replacement prompt. Completed prefix
+bindings remain fixed. Foreign run receipts cannot certify the operation; missing,
+oversized or crowded-out source previews explicitly require reconciliation before
+an uncertain write. Source reads fail closed. Neither reconstruction nor a new
+binding grants permission to replay a completed effect.
+
+The authored `replanGap` prompt also states the current call grammar. An
+observed replan tried `toString({ ... })`, which the language correctly refuses
+as the removed object-literal argument form. New assembled objects must be bound
+after the completed prefix and serialized through that binding. This is prompt
+guidance, not a compiler relaxation, source rewrite, extra automatic model
+attempt or permission to change completed definitions.
+`TestReplanSerializesRetainedObjectThroughUnfinishedBinding` exercises both the
+refused form and the valid replacement through compilation, Gate 1 and replan
+installation. A valid replacement resumes at the new binding and preserves its
+completed input and downstream consumer. This establishes accepted syntax and
+prefix preservation, not that every model-generated replan will be valid.
+
+Regression coverage includes `unfinished_step_test.go` at the real failure path
+(zero classifier calls, quoted vendor errors, terminal precedence and retry
+limits); `unfinished_operation_db_test.go` across independent engines through
+`LoadReplanContext`, `InstallReplan`, `PrepareRerun` and `ResumeFrom`; and prepared
+streaming/nonstreaming provider requests in `work_operation_sources_test.go`.
+Reply completion tests cover specialist output, owner deferral, direct quick
+replies, malformed dispositions, source attribution, refused/truncated evidence,
+saved reports containing failure data, and bounded omissions. The database fixture
+retains one first-file receipt and creates only the missing second-file receipt.
+It establishes the native handoff and preservation contract, not arbitrary model
+obedience or exactly-once effects. Live completion remains separately unverified
+until the repaired runtime performs and retains the requested operations.
+
+## Cost evidence and private machine research
+
+| Decision | Reason and resulting path | Implementation |
+| --- | --- | --- |
+| Attribute provider usage to one attempt | Concurrent calls and fallbacks must not borrow a shared provider's last model or cache counts. Each observed attempt carries its own receipt cell; actual response fields replace estimates only when reported. Anthropic and OpenAI input/cache conventions normalize once. | [Usage context](../../../core/common/provider_usage.go), [provider adapters](../../../component/memql/provider_cost_usage.go), [router observation](../../../component/router/observation.go) |
+| Estimate an API equivalent | Exact served-model mapping and dated official price snapshots permit reproduction. Unknown cache categories or aggregate context brackets produce ranges; aggregate model attribution is explicitly assumed. These estimates never establish actual billing or retrospectively price old unknown-model records. | [Token calculator](../../../core/costestimate/tokens.go), [reviewed quotes](../../../core/costestimate/prices.json) |
+| Research a machine's utility | A separate sealed owner profile protects the precise address. The private builtin requires resolved user/personal-token authority, including the post-rotation and cross-node stamp. Research receives only locality and can propose evidence, never attest owner verification or confirm a tariff. Location revisions reject delayed results after a move. | [Energy boundary](../../../component/memql/fleet_energy.go), [research tool](../../../dsl/worker/tools.memql), [settings UI](../../../clients/os/src/apps/fleet/machines/MachineElectricity.tsx) |
+| Admit a profile write | The native boundary validates ownership and bounds, fences both the machine registration and the energy-profile row (including its initial absence), then compares revisions before one owner-stamped internal upsert. A competing save invalidates that profile witness; a stale decision must be reread rather than retried as an overwrite. A concept-level raw-write guard prevents bypassing verification via another DSL spelling. Private builtin inputs declare `@secret`, which redacts diagnostics and excludes the callable from general capability discovery. Broader name-based diagnostic redaction is separate: ordinary `prompt` and `sectionKeys` remain discoverable without exposing their values in errors or logs. Public queries/events contain no private input projection. | [Mutation guard](../../../component/memql/executor_mutation.go), [builtin classification](../../../component/memql/builtin_converter.go), [redaction/discovery regression](../../../component/memql/builtin_input_privacy_test.go), [privacy tests](../../../component/memql/fleet_energy_test.go), [required-DB checks](../../../component/memql/fleet_energy_db_test.go), [prepared-decision race cases](../../../component/memql/fleet_energy_fence_db_test.go) |
+| Retain an evaluation snapshot | Explicit selected artifacts, source/quality/coverage, independent verdicts and outside interventions prevent a runtime success or later repair from erasing a failure. ZIP verification establishes byte identity, while attributed review covers private free text/media. New categories extend the existing corpus; unimplemented oracles stay unverified. | [Case protocol](../../public/overview/evaluation-case-records.md), [archive utility](../../../scripts/proving/archive_case.py), [scenario catalog](../../../test/proving/goals/catalog.json) |
+
+This slice is externally authored implementation. Local fixture screenshots and
+unit checks do not count as MemQL performing its own feature work or as a live
+utility lookup. Required-database checks and native CI must cover the final
+revision before integration. Shared test/runtime capacity and the active Ask
+run are not changed by this work.

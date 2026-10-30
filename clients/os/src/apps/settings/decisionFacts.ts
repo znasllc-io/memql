@@ -1,3 +1,4 @@
+import { costEstimateFrom, type CostEstimateData } from "../../kit/CostEstimate";
 import { useReadEffect } from "../../live/useReadEffect";
 import { useGraphRevision } from "../../live/useGraphRevision";
 import { useCallback, useState } from "react";
@@ -39,6 +40,8 @@ export interface ConsideredEntry {
 }
 
 export interface DecisionRow {
+  apiEquivalent?: CostEstimateData;
+  electricityEstimate?: CostEstimateData;
   id: string;
   createdAt: string;
   requestId: string;
@@ -124,6 +127,8 @@ export function decisionFromRow(raw: Row): DecisionRow {
     considered: consideredFrom(r["considered"]),
     touches: Array.isArray(touches) ? touches.filter((t): t is string => typeof t === "string") : [],
     totalCost: figureFrom(r, "totalCost"),
+    apiEquivalent: costEstimateFrom(r["apiEquivalent"]),
+    electricityEstimate: costEstimateFrom(r["electricityEstimate"]),
     totalDurationMs: figureFrom(r, "totalDurationMs"),
     outcome: str(r, "outcome"),
     billing: str(r, "billing"),
@@ -131,19 +136,7 @@ export function decisionFromRow(raw: Row): DecisionRow {
   };
 }
 
-/**
- * What a call actually cost the cluster, in words.
- *
- * THE POINT OF THE WHOLE PROGRAM IS LEGIBLE HERE OR NOWHERE. A call served by
- * a machine the person owns, or by a subscription they already pay for, cost
- * this cluster nothing -- and rendering `$0.00` for it would say "we measured
- * a cost and it was zero", which is a different claim and the wrong one. It
- * would also make a free call and a mis-priced metered call identical.
- *
- * `unknown` is its own answer and is never rounded to either side: it means
- * nobody reported, which happens when an app's usage report or a machine's
- * subscription signal is silent.
- */
+/** Billing category describes the execution door; it does not establish a bill. */
 export function billingWords(row: DecisionRow): string {
   // A CACHE HIT IS CHECKED FIRST, because the row's `billing` is the concept's
   // default of "metered" and that is not wrong -- it says which bucket the
@@ -151,26 +144,17 @@ export function billingWords(row: DecisionRow): string {
   // printing "$0.0000" for it would claim a metered call that cost nothing
   // rather than a call that never happened (memql#5581).
   if (row.cacheKind !== "") return "answered from the cache, nothing was sent";
-  if (row.billing === "local") return "your own machine, no charge";
-  if (row.billing === "subscription") return "your subscription, no charge here";
+  if (row.billing === "local") return "local inference; electricity estimate is separate";
+  if (row.billing === "subscription") return "subscription; actual billing is not established";
   if (row.billing === "unknown") return "not reported";
   return "";
 }
 
-/**
- * The same fact, sized for a column.
- *
- * SAY IT ONCE (DESIGN.md rule 7). The door column already says "your
- * machines" or "a signed-in app", so a cost column repeating "your own
- * machine" spends its width restating the column beside it -- and then
- * truncates, so it says "your own machi..." and restates it badly. What the
- * cost column is for is the money, and for a free call the whole answer is
- * that there is none. The long form stays for the hover and the accessible
- * name, where there is room for it.
- */
+/** Compact execution category. Estimates and billing evidence stay separate. */
 export function billingShort(row: DecisionRow): string {
   if (row.cacheKind !== "") return "from cache";
-  if (row.billing === "local" || row.billing === "subscription") return "no charge";
+  if (row.billing === "local") return "electricity";
+  if (row.billing === "subscription") return "subscription";
   if (row.billing === "unknown") return "not reported";
   return "";
 }

@@ -325,21 +325,21 @@ func TestCollectProduced_OnlyWhatTheRunChanged(t *testing.T) {
 	}
 }
 
-// TestCollectProduced_NeverTruncatesSilently. A bounded list that reads
+// TestCollectProduced_BoundedArchiveEntries. A bounded list that reads
 // as complete is worse than a shorter one that says what it dropped:
 // downstream, produced_artifact_ids is taken as the whole answer.
-func TestCollectProduced_NeverTruncatesSilently(t *testing.T) {
+func TestCollectProduced_BoundedArchiveEntries(t *testing.T) {
 	ws := t.TempDir()
 	before := snapshotWorkspace(ws)
-	for i := range maxPushFiles + 5 {
+	for i := range maxOutputEntries + 5 {
 		path := filepath.Join(ws, fmt.Sprintf("out-%03d.txt", i))
 		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 	}
 	produced, skipped := collectProduced(ws, before)
-	if len(produced) != maxPushFiles {
-		t.Errorf("produced = %d, want the cap of %d", len(produced), maxPushFiles)
+	if len(produced) != maxOutputEntries {
+		t.Errorf("produced = %d, want the cap of %d", len(produced), maxOutputEntries)
 	}
 	if len(skipped) != 5 {
 		t.Fatalf("skipped = %d entries, want the 5 that were dropped named", len(skipped))

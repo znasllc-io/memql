@@ -54,6 +54,10 @@ var nonPersonWaits = map[string]bool{"retry": true, "replan": true, "repair": tr
 // goal's request is what the turn that opened it asked of it: for a split
 // message, the part intake received.
 func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscript) ([]askRouteGoal, error) {
+	return e.askGoals(ctx, transcript, false)
+}
+
+func (e *MemQLEngine) askGoals(ctx context.Context, transcript askTranscript, includeFinished bool) ([]askRouteGoal, error) {
 	ctx = ContextWithFreshRead(ctx)
 	turns := transcript.Turns
 	// The turn that opened each run is the earliest that names it.
@@ -77,10 +81,23 @@ func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscri
 		if err != nil {
 			return nil, err
 		}
-		if len(rows) != 1 || !activeWorkRun(rows[0]) {
+		if len(rows) != 1 {
 			continue
 		}
 		run, opened := rows[0], turns[opening[key]]
+		continuation := ""
+		if !activeWorkRun(run) {
+			if !includeFinished {
+				continue
+			}
+			continuation, err = e.askContinuationVersion(ctx, run)
+			if err != nil {
+				return nil, err
+			}
+			if continuation == "" {
+				continue
+			}
+		}
 		request := askTurnRequest(opened)
 		title := runTitle(run)
 		if strings.TrimSpace(title) == "" {
@@ -90,15 +107,16 @@ func (e *MemQLEngine) activeAskGoals(ctx context.Context, transcript askTranscri
 			title = request
 		}
 		goals = append(goals, askRouteGoal{
-			Handle:   "g" + strconv.Itoa(len(goals)+1),
-			TurnID:   opened.ID,
-			GoalID:   BareShortId(stringArg(run, "goalId")),
-			RunID:    key,
-			Title:    askRouteClip(title, askRouteTitleRunes),
-			Request:  askRouteClip(request, askRouteSideRunes),
-			Run:      run,
-			Approval: e.pendingRunApproval(ctx, run),
-			Updates:  activeGoalUpdates(turns, key),
+			ContinueVersion: continuation,
+			Handle:          "g" + strconv.Itoa(len(goals)+1),
+			TurnID:          opened.ID,
+			GoalID:          BareShortId(stringArg(run, "goalId")),
+			RunID:           key,
+			Title:           askRouteClip(title, askRouteTitleRunes),
+			Request:         askRouteClip(request, askRouteSideRunes),
+			Run:             run,
+			Approval:        e.pendingRunApproval(ctx, run),
+			Updates:         activeGoalUpdates(turns, key),
 		})
 	}
 	return goals, nil
@@ -285,7 +303,7 @@ func guidanceTargetsLocked(conversationID string, transcript askTranscript, goal
 			target.ApprovalID, target.Status, target.Reason = BareShortId(stringArg(goal.Approval, "id")), routeNotDelivered, routeReasonRefused
 		case !guidanceReaches(run, conversationID):
 			target.Status, target.Reason = routeNotDelivered, routeReasonRefused
-		case guidanceFits(transcript, run, text):
+		case guidanceFits(text):
 			target.Status = routeQueued
 		default:
 			target.Status, target.Reason = routeNotDelivered, routeReasonLimit
@@ -304,20 +322,8 @@ func guidanceReaches(run map[string]any, conversationID string) bool {
 	return own != "" && own == BareShortId(conversationID)
 }
 
-// guidanceFits reports whether one more message stays within what the agent's
-// read accepts for run: exactly the targets workGuidanceTarget returns, at most
-// sixteen messages and 16,000 runes, and the message itself at most 4,000.
-func guidanceFits(transcript askTranscript, run map[string]any, text string) bool {
-	runes := utf8.RuneCountInString(text)
-	if runes > askRouteMessageRunes {
-		return false
-	}
-	messages := 1
-	for n := range transcript.Turns {
-		if target := workGuidanceTarget(&transcript.Turns[n], run); target != nil {
-			messages++
-			runes += utf8.RuneCountInString(target.Text)
-		}
-	}
-	return messages <= maxWorkGuidanceMessages && runes <= maxWorkGuidanceRunes
+// Each incoming message remains bounded. Existing durable history cannot make
+// later human direction undeliverable; the reader pages that history instead.
+func guidanceFits(text string) bool {
+	return utf8.RuneCountInString(text) <= askRouteMessageRunes
 }

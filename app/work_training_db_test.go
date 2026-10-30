@@ -34,6 +34,7 @@ import (
 type trainingContextProvider struct {
 	beforeText  func(context.Context, string) error
 	requests    [][]common.ChatMessage
+	reviews     [][]common.ChatMessage
 	origins     []auth.CallOrigin
 	beforeEmbed func(context.Context) error
 	vector      func(string) []float32
@@ -68,6 +69,20 @@ func (*trainingContextProvider) Dimensions() int { return 1024 }
 func (*trainingContextProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text model call")
 }
+
+// The installed review uses the same router as the primary turn. Reject other
+// structured requests so a new production operation cannot silently pass here.
+func (p *trainingContextProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if schema.Name != "work_reply_review" || !schema.Strict {
+		return "", fmt.Errorf("unexpected structured call: %s (strict=%v)", schema.Name, schema.Strict)
+	}
+	p.reviews = append(p.reviews, append([]common.ChatMessage(nil), messages...))
+	return `{"reply":"Synthetic evidence recorded","missingEvidence":"","completion":{"kind":"information","disposition":"satisfied","gap":"","sourceRefs":[]}}`, nil
+}
+
 func (p *trainingContextProvider) CallChatWithTools(ctx context.Context, m []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	p.requests = append(p.requests, append([]common.ChatMessage(nil), m...))
 	p.origins = append(p.origins, auth.OriginFromContext(ctx))
@@ -170,6 +185,7 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 	require.NoError(t, rules.Finalize())
 	rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, reader.Logger)
+	reader.SetAIResolver(rtr)
 	replier, err := agent.NewReplier(&CognitionEngineAdapter{Engine: reader}, rtr, reader.Logger)
 	require.NoError(t, err)
 	replier.ComputerUseStatus = func(context.Context, string) (string, string, string) { return "connected", "Synthetic worker", "" }
@@ -213,7 +229,10 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	turnPrompt := func(step, prompt string) string {
 		write("createWorkStep", map[string]any{"stepId": key + step, "runId": runID, "key": step, "seq": 0, "stepType": "automation", "status": "running", "attempt": 1, "version": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 		ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: step, Mode: common.RunModeLive})
+		beforeReviews := len(provider.reviews)
 		query(reader, ctx, "builtin", "runAgentTurn", map[string]any{"prompt": prompt})
+		require.Len(t, provider.reviews, beforeReviews+1, "the peer must independently review each completed reply")
+		require.Contains(t, fmt.Sprint(provider.reviews[beforeReviews]), "Synthetic evidence recorded")
 		require.NotEmpty(t, provider.requests)
 		require.Equal(t, auth.OriginClient, provider.origins[len(provider.origins)-1], "native Training origin cannot leak into the model/tool loop")
 		return provider.requests[len(provider.requests)-1][0].Content

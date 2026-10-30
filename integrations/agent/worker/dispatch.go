@@ -172,6 +172,7 @@ type Request struct {
 	computerConstraint  *permission.Scope
 	computerOwner       string
 	workbenchConstraint *memqlv1.WorkbenchConstraint
+	workbenchGeneration uint64
 	Tool                string
 	Action              string
 	// Purpose says WHO is asking, which decides which gates apply. Empty is an

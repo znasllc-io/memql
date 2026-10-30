@@ -688,3 +688,11 @@ query appSession appAvailabilityEvidence {
   paginate 1
   shape workerAppRoutingEvidence
 }
+
+/// Explicit owner predicate also restricts operator reads. No public projection.
+@actor
+query energyProfile workerEnergyProfile {
+  args { profileId string! }
+  filter row => row.id == args.profileId && row.ownerUserId == actor.userId
+  shape workerEnergyProfileFull
+}

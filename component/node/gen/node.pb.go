@@ -2816,8 +2816,10 @@ type WorkerForwardRequest struct {
 	Purpose string `protobuf:"bytes,14,opt,name=purpose,proto3" json:"purpose,omitempty"`
 	// Receipt ID only: the stream holder must claim fresh durable authority.
 	ComputerPermissionId string `protobuf:"bytes,15,opt,name=computer_permission_id,json=computerPermissionId,proto3" json:"computer_permission_id,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// The receiver must not move an already queued operation into a recovered workspace.
+	WorkbenchGeneration uint64 `protobuf:"varint,16,opt,name=workbench_generation,json=workbenchGeneration,proto3" json:"workbench_generation,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *WorkerForwardRequest) Reset() {
@@ -2953,6 +2955,13 @@ func (x *WorkerForwardRequest) GetComputerPermissionId() string {
 		return x.ComputerPermissionId
 	}
 	return ""
+}
+
+func (x *WorkerForwardRequest) GetWorkbenchGeneration() uint64 {
+	if x != nil {
+		return x.WorkbenchGeneration
+	}
+	return 0
 }
 
 // WorkerForwardResponse carries the dispatch result back to the originating
@@ -5342,7 +5351,7 @@ const file_node_proto_rawDesc = "" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"K\n" +
 	"\fNodeShutdown\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12#\n" +
-	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\x97\x04\n" +
+	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\xca\x04\n" +
 	"\x14WorkerForwardRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
@@ -5363,7 +5372,8 @@ const file_node_proto_rawDesc = "" +
 	"timeoutSec\x12G\n" +
 	"\tauthority\x18\r \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\x12\x18\n" +
 	"\apurpose\x18\x0e \x01(\tR\apurpose\x124\n" +
-	"\x16computer_permission_id\x18\x0f \x01(\tR\x14computerPermissionId\"\xbc\x02\n" +
+	"\x16computer_permission_id\x18\x0f \x01(\tR\x14computerPermissionId\x121\n" +
+	"\x14workbench_generation\x18\x10 \x01(\x04R\x13workbenchGeneration\"\xbc\x02\n" +
 	"\x15WorkerForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +

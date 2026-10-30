@@ -13,10 +13,15 @@ func ProgressFeedback(runID, stepKey string, breach CeilingBreach, now time.Time
 	return result
 }
 
-// A hard stop has no misleading keep-working choice. Its saved results remain
-// available to a new request with a narrower scope.
+// A stop has no unchecked keep-working choice. Saved results remain available;
+// fresh native checks decide whether a verification failure can be retried.
 func StopProgressFeedback(request *ApprovalRequest) {
 	request.Question = "I’ve saved the work so far, but can’t finish this request within its overall limits. You can use the saved results in a new request with a narrower scope."
+	if request.Subject["ceiling"] == CeilingUnevaluated {
+		// Failed verification is not measured exhaustion. Keep the stop closed;
+		// the current owned discussion gate decides whether a retry is valid.
+		request.Question = "I’ve saved the work so far, but couldn’t verify whether it can continue. The failed check needs to be resolved before work resumes."
+	}
 	request.Options = []map[string]any{{"value": "abandon", "label": "Stop here"}}
 	request.Subject["question"] = request.Question
 	request.Subject["options"] = request.Options

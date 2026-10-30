@@ -704,3 +704,7 @@ per platform.
 - [MCP connect](mcp-connect.md) — the endpoint the back-channel dials
 - [LLM cost control](../ai/llm-cost-control.md) — the layered spend guardrails
 - [Service-account JWTs](auth/service-account-jwt.md) — the credential class
+
+See [inference cost estimates](inference-cost-estimates.md) for the distinction
+between app-reported usage, a dated API-equivalent estimate and actual billing.
+A subscription or zero legacy cost report does not establish that work was free.

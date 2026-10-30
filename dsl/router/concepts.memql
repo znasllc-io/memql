@@ -94,6 +94,9 @@ concept call {
   model               string!  @description("Model identifier as sent to the vendor (e.g. gpt-5.4-mini, claude-sonnet-4-6).")
   providerName        string!  @description("MemQL provider registry name (e.g. stream54Mini, streamClaudeSonnet).")
 
+  apiEquivalent object @description("Dated official API-equivalent estimate for the served model; independent of billing, with source evidence, cache/context assumptions and freshness.")
+  electricityEstimate object @description("Local-inference electricity estimate with tariff and energy evidence. Missing watts or an applicable confirmed tariff is unavailable, never zero.")
+  actualBilling object @description("Billing receipt status. Unavailable without independent billing evidence; zero subscription cost is not free work.")
   inputTokens         int     @description("Tokens in the input/prompt.")
   outputTokens        int     @description("Tokens generated in the output.")
   cachedInputTokens   int     @description("Portion of input tokens served from the provider's prompt cache.")

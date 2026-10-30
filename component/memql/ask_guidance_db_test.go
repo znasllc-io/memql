@@ -253,9 +253,8 @@ func TestAcknowledgeWorkGuidanceCannotCrossConversationWhileWaitingForLock(t *te
 	}
 }
 
-// The recorder refuses past the cap. A transcript already over it fails loudly
-// instead of silently dropping part of a person's direction.
-func TestReadWorkGuidanceKeepsItsBounds(t *testing.T) {
+// Journal growth is delivered in bounded pages without dropping human direction.
+func TestReadWorkGuidanceKeepsAllOriginalsBeyondOnePage(t *testing.T) {
 	a, b, ctx, conversation, run, write := guidanceFixture(t)
 	queue := func(run, turnID, text string) {
 		routeTurn(t, a, ctx, conversation, AskTurn{ID: turnID, Prompt: text, Routed: &AskRouting{Targets: []AskRouteTarget{
@@ -270,8 +269,9 @@ func TestReadWorkGuidanceKeepsItsBounds(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, full, 4)
 	queue(run, "one-more", "x")
-	_, err = b.ReadWorkGuidance(runtime)
-	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+	all, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Len(t, all, 5)
 
 	counted := guidanceRootRun(write, conversation, "fixture-goal", "counted-plan", "running")
 	for n := range maxWorkGuidanceMessages {
@@ -281,8 +281,9 @@ func TestReadWorkGuidanceKeepsItsBounds(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sixteen, maxWorkGuidanceMessages)
 	queue(counted, "seventeenth", "Note.")
-	_, err = b.ReadWorkGuidance(guidanceRunContext(ctx, counted))
-	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+	all, err = b.ReadWorkGuidance(guidanceRunContext(ctx, counted))
+	require.NoError(t, err)
+	require.Len(t, all, 17)
 }
 
 // lateOptionalAnswer records the person's late answer to an optional question
@@ -306,10 +307,8 @@ func guidanceIDs(read []WorkGuidance) []string {
 	return ids
 }
 
-// Routed guidance and the run's late optional answers are bounded each on
-// their own, so neither makes the other's read fail: with routed guidance at
-// its cap a late answer is still read, and the agent can acknowledge all it
-// was handed. Past its own bound, each source still fails the read loudly.
+// All instruction sources survive past one delivery page; acknowledgment
+// remains a separately bounded operation.
 func TestReadWorkGuidanceBoundsLateAnswersOnTheirOwn(t *testing.T) {
 	a, b, ctx, conversation, run, write := guidanceFixture(t)
 	actor, _ := auth.AccessFromContext(ctx)
@@ -336,8 +335,9 @@ func TestReadWorkGuidanceBoundsLateAnswersOnTheirOwn(t *testing.T) {
 	require.Len(t, read, 32, "sixteen routed messages and sixteen late answers")
 	require.NoError(t, b.AcknowledgeWorkGuidance(runtime, guidanceIDs(read)))
 	lateOptionalAnswer(write, actor.UserId, run, "original-plan", 16)
-	_, err = b.ReadWorkGuidance(runtime)
-	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+	all, err := b.ReadWorkGuidance(runtime)
+	require.NoError(t, err)
+	require.Len(t, all, 33)
 }
 
 // A message sent while the goal is still compiling waits for the run to start

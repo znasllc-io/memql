@@ -2515,8 +2515,10 @@ type WorkbenchConstraint struct {
 	// Admission expires before dispatch; running work keeps its own deadline.
 	ExpiresUnix          int64 `protobuf:"varint,6,opt,name=expires_unix,json=expiresUnix,proto3" json:"expires_unix,omitempty"`
 	WorkspaceExpiresUnix int64 `protobuf:"varint,7,opt,name=workspace_expires_unix,json=workspaceExpiresUnix,proto3" json:"workspace_expires_unix,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Explicit recovery advances this identity; old filesystem contents are lost.
+	WorkspaceGeneration uint64 `protobuf:"varint,8,opt,name=workspace_generation,json=workspaceGeneration,proto3" json:"workspace_generation,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *WorkbenchConstraint) Reset() {
@@ -2594,6 +2596,13 @@ func (x *WorkbenchConstraint) GetExpiresUnix() int64 {
 func (x *WorkbenchConstraint) GetWorkspaceExpiresUnix() int64 {
 	if x != nil {
 		return x.WorkspaceExpiresUnix
+	}
+	return 0
+}
+
+func (x *WorkbenchConstraint) GetWorkspaceGeneration() uint64 {
+	if x != nil {
+		return x.WorkspaceGeneration
 	}
 	return 0
 }
@@ -6700,7 +6709,7 @@ const file_worker_proto_rawDesc = "" +
 	"\atimeout\x18\t \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12f\n" +
 	"\x13computer_permission\x18\n" +
 	" \x01(\v25.znasllc.memql.worker.v1.ComputerPermissionConstraintR\x12computerPermission\x12J\n" +
-	"\tworkbench\x18\v \x01(\v2,.znasllc.memql.worker.v1.WorkbenchConstraintR\tworkbench\"\x97\x02\n" +
+	"\tworkbench\x18\v \x01(\v2,.znasllc.memql.worker.v1.WorkbenchConstraintR\tworkbench\"\xca\x02\n" +
 	"\x13WorkbenchConstraint\x12\"\n" +
 	"\rowner_user_id\x18\x01 \x01(\tR\vownerUserId\x12$\n" +
 	"\x0ecaller_user_id\x18\x02 \x01(\tR\fcallerUserId\x12'\n" +
@@ -6709,7 +6718,8 @@ const file_worker_proto_rawDesc = "" +
 	"machine_id\x18\x04 \x01(\tR\tmachineId\x12\x15\n" +
 	"\x06run_id\x18\x05 \x01(\tR\x05runId\x12!\n" +
 	"\fexpires_unix\x18\x06 \x01(\x03R\vexpiresUnix\x124\n" +
-	"\x16workspace_expires_unix\x18\a \x01(\x03R\x14workspaceExpiresUnix\"=\n" +
+	"\x16workspace_expires_unix\x18\a \x01(\x03R\x14workspaceExpiresUnix\x121\n" +
+	"\x14workspace_generation\x18\b \x01(\x04R\x13workspaceGeneration\"=\n" +
 	"\n" +
 	"ToolCancel\x12\x17\n" +
 	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x16\n" +

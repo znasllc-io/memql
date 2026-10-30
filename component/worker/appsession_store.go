@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/costestimate"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -65,6 +66,8 @@ type AppSessionRow struct {
 	// StopReason is the machine's word for why the app stopped. It sets the two
 	// refusal stamps and is not stored apart from them.
 	StopReason          string
+	Model               string
+	Effort              string
 	Usage               AppSessionUsage
 	Billing             string
 	ExitCode            int
@@ -240,7 +243,10 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 			"inputTokens":  row.Usage.InputTokens,
 			"outputTokens": row.Usage.OutputTokens,
 			"costUSD":      row.Usage.CostUSD,
-			"known":        row.Usage.Known,
+			"servedModel":  row.Model, "servedEffort": row.Effort,
+			"apiEquivalent": costestimate.EstimateTokens(sessionVendor(row.App), row.Model, costestimate.Usage{Input: row.Usage.InputTokens, Output: row.Usage.OutputTokens, Known: row.Usage.Known, Aggregate: true}, time.Now()),
+			"actualBilling": map[string]any{"status": "unavailable", "reason": "No invoice or charge receipt."},
+			"known":         row.Usage.Known,
 		},
 		"billing":             row.Billing,
 		"transcriptFileId":    row.TranscriptFileId,
@@ -624,4 +630,14 @@ func (s *EngineStore) stampProducedArtifact(ctx context.Context, owner, artifact
 	}
 	args["artifactId"] = artifactId
 	return s.executeMutation(writeCtx, "stampArtifactProvenance", args)
+}
+
+func sessionVendor(app string) string {
+	if app == AppIdClaudeCode {
+		return "anthropic"
+	}
+	if app == AppIdCodex {
+		return "openai"
+	}
+	return "unknown"
 }

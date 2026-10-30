@@ -39,6 +39,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/costestimate"
 )
 
 // AppProviderType is the @type annotation value on the base provider.
@@ -718,6 +719,11 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 			return res, err
 		}
 	}
+	vendor := "openai"
+	if req.AppId == "claude-code" {
+		vendor = "anthropic"
+	}
+	common.ReportProviderUsage(ctx, common.ProviderUsage{Model: res.Model, Vendor: vendor, Usage: costestimate.Usage{Input: res.Usage.InputTokens, Output: res.Usage.OutputTokens, Known: res.Usage.Known, Aggregate: true}})
 	p.lastMu.Lock()
 	p.lastSurface = res.ExecutionSurface
 	p.lastUsage = res.Usage

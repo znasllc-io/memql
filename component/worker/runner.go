@@ -711,6 +711,8 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.Status = result.Status
 	row.ExitCode = result.ExitCode
 	row.Usage = result.Usage
+	row.Model = result.Model
+	row.Effort = result.Effort
 	row.Billing = result.Billing
 	row.TranscriptTruncated = result.TranscriptTruncated
 	row.ProducedArtifactIds = result.ProducedArtifactIds

@@ -30,16 +30,16 @@ action returns `gui_unavailable`.
 
 Source-of-truth code paths (this repo unless noted):
 
-- Dispatcher + consent + preflight: `cmd/memql/internal/worker/tools/dispatcher.go`, `preflight.go`, `cmd/memql/worker/consent/consent.go`
-- Action handlers: `cmd/memql/internal/worker/tools/computer_computeruse.go`, `window_computeruse_{darwin,linux,other}.go`, `wait.go`, `capabilities.go`
-- Coordinate model: `cmd/memql/internal/worker/tools/coords.go` (the package comment is the canonical contract)
+- Dispatcher + consent + preflight: `internal/worker/tools/dispatcher.go`, `preflight.go`, `internal/worker/consent/consent.go`
+- Action handlers: `internal/worker/tools/computer_computeruse.go`, `window_computeruse_{darwin,linux,other}.go`, `wait.go`, `capabilities.go`
+- Coordinate model: `internal/worker/tools/coords.go` (the package comment is the canonical contract)
 - Server-side scope policy: `integrations/agent/worker/scope.go` (memql repo)
 - Descriptor validation: `component/worker/capability_descriptor.go` (memql repo)
 
 ## Architecture
 
 A computer-use call travels from the agent runtime to the user's
-machine through five gates. Each gate fails with a structured error
+machine through consent, platform preflight and the target guard. Each gate fails with a structured error
 code rather than letting the failure surface downstream as an opaque
 RobotGo error.
 
@@ -77,7 +77,7 @@ RobotGo error.
         v
   per-build action router
     - computeruse build: computerActionHandlers map (computer_computeruse.go),
-                         RobotGo-backed handlers
+                         target guard for input; read-only capture/enumeration handlers
     - headless:          gui_unavailable for everything except the
                          build-agnostic capabilities + wait
 ```
@@ -87,12 +87,13 @@ RobotGo error.
 | Build | Tag | workerComputer surface |
 |---|---|---|
 | `memql` (headless, default) | none | `capabilities` + `wait` only; every other action returns `gui_unavailable`. Registers capability `HEADLESS`. |
-| `memql` | `computeruse` (CGO + RobotGo) | Full 16-action vocabulary. Registers `HEADLESS` + `COMPUTERUSE`. |
+| `memql` | `computeruse` (CGO + RobotGo) | 16-action dispatch vocabulary; supported input transactions are listed below. Registers `HEADLESS` + `COMPUTERUSE`. |
 
-The computer-use action table (`computerActionHandlers` in
-`computer_computeruse.go`) is the single source of truth: the dispatcher
-routes through it AND the capability descriptor derives its advertised
-action list from it, so the two can never drift.
+The computer-use action table in `computer_computeruse.go` retains the legacy
+dispatch vocabulary. The descriptor filters actions which now always refuse,
+including input on platforms without a targeted backend. Input and focus calls
+pass through the target guard before any legacy helper. `inputTargetPolicy`
+describes supported transactions and required arguments.
 
 ### Scoped host permissions from Nexus
 
@@ -215,9 +216,9 @@ these five actions (`key_type`, `key_hold`, `mouse_click`,
 Allow/Deny approval (30s timeout, default deny). `mouse_down`/
 `mouse_up`/`key_hold` are in the subset because they compose into
 clicks and chords -- leaving them out would let strict mode be
-bypassed by decomposition. A strict grant may carry a screen region;
-a `mouse_click` whose live cursor falls inside it skips the approval
-modal. See the consent section below.
+bypassed by decomposition. The legacy cursor-region exemption is disabled for target-addressed clicks:
+that cursor is unrelated to the explicit screenshot point. Strict grants
+still require per-call approval for these actions.
 
 Note: ordinary calls in both consent classes require an open consent window -- observe
 vs interact drives the audit stream and strict-mode behavior, not the
@@ -230,67 +231,154 @@ Scoped directory reads use the independent approval described above.
 All results are JSON objects in `Success.result_json`. Failures carry
 a structured `error_code` + message (see Troubleshooting).
 
-**`screenshot`** -- capture a display (or a region of it).
+### Target-bound input contract (version 1)
 
-- Args: `format` (`png` default | `jpeg`), `display` (int id from
-  `display_info`, default 0 = primary), `region` `{x, y, w, h}`
-  (optional sub-rect in logical coords relative to the chosen
-  display), `quality` (1-100, jpeg only, default 80), `maxLongEdge`
-  (downscale ceiling for the emitted long edge; default 1568, clamped
-  to [512, 8000]).
-- Result: `{format, display, width, height, sourceWidth, sourceHeight,
-  scale, logicalWidth, logicalHeight, bytesBase64, sizeBytes,
-  region?}`. `width`/`height` are the emitted dims (the space the
-  model speaks), `sourceWidth`/`sourceHeight` the captured dims,
-  `scale` = emitted/captured, `logicalWidth`/`logicalHeight` the
-  display's input-space dims.
-- A `maxLongEdge` override is for inspection/zoom only: mouse-action
-  mapping always assumes the default policy, so click targets must be
-  derived from default-policy screenshots.
+The computer-use build advertises `workerComputer.input_target: 1`.
+Input requires existing consent and a run ID, plus a one-action receipt:
 
-**`cursor_position`** -- no args. Result `{x, y}` in LOGICAL
-virtual-desktop input coordinates (raw `robotgo.Location()`), NOT in
-emitted-screenshot space.
+1. Enumerate windows with `window_list`. The intended window must be focused
+   before screenshot binding. On macOS, an unbound worker may perform one
+   guarded initial selection using the window-selection contract below.
+2. Call `screenshot` with that explicit `windowId`. The macOS backend checks
+   the actual Accessibility focused application, window and element before
+   and after capture. It matches the AX window to exactly one on-screen CG
+   window with the same PID and bounds; unavailable or ambiguous focus refuses.
+3. Pass the returned `inputTarget.id` as `inputTarget` on one input action.
+   It expires after 60 seconds and belongs to that dispatcher/enrollment and
+   run. An attempted transaction consumes it even on argument failure.
+4. Inspect a fresh screenshot before another action, including Enter after
+   typing. Every screenshot invalidates the preceding receipt.
 
-**`mouse_move`** -- `x`, `y` (required, emitted-screenshot space of
-the target display), `display` (default 0), `smooth` (bool). Result
-`{x, y, display, logicalX, logicalY, smooth}`.
+A screenshot without `windowId` remains read-only and grants no input target.
+The independent focus anchor survives read-only captures, new tokens and new
+runs. A detected app/window or geometry mismatch stops all desktop input
+until operator review and worker restart. A new screenshot cannot clear the
+interruption. Input is serialized across enrollments in one worker process.
+There is no automatic retry, focus stealing, or global-event fallback.
+Unobserved field changes also stop input, except for the bounded observation
+after a completed gesture described below.
 
-**`mouse_click`** -- `button` (`left` default | `right` | `middle`),
-`count` (1-3, clamped; 3 posts a real triple-click), legacy `double`
-bool honored as `count=2`, `modifiers` (optional string array of
-`cmd` | `shift` | `alt` | `ctrl`, held DOWN around the click so a
-cmd-click / shift-click composes into a real chord; an unknown
-modifier is a `bad_request`, never a silent plain click). Clicks at
-the CURRENT cursor position -- position with `mouse_move` first.
-Result `{button, count, double, modifiers?}`.
+An operator can inspect the running worker's exact-target acquisition with
+`memql worker control --action=input-target-status`. This explicit local control
+action uses the worker's own macOS permission identity and reports the failing
+AX stage/error or observed PID/window. It does not read element contents, mint
+a receipt, reset the interruption latch, activate a window, or send input.
+Ordinary `--action=status` does not acquire an AX target. Diagnostic success
+does not establish event delivery or authorize resuming an interrupted run.
+macOS diagnostics also compare a public NSWorkspace application snapshot with
+direct application AX reads and report elapsed time. That snapshot can be cached
+between main-run-loop turns; it is diagnostic only and never substitutes for
+the guard's focused-application read.
+`first_interruption` preserves the first stop's UTC time, action kind, phase and
+reason. AX failures additionally retain only the stage, numeric error and match
+count. It contains no keys, text, titles, field contents or receipt tokens, and
+later observations cannot overwrite it. `pending_observation` is not permission.
 
-**`mouse_down` / `mouse_up`** -- `button` (`left` default | `right` |
-`middle`). Deliberately stateless: a `mouse_up` with no preceding
-`mouse_down` is an OS-level no-op, not an error. Result `{button}`.
+The macOS computer-use `worker run` initializes AppKit on the original process
+thread with activation prohibited, then pumps its main run loop while the worker
+runs on a Go goroutine. It creates no windows and does not activate applications.
+Ordinary CLI commands and scoped-command children do not start this loop. The
+diagnostic reports loop progress; the AX target guard remains authoritative.
+If GUI initialization fails (for example, without a usable GUI session), host
+and inference services still start. Desktop operations are disabled for that
+process and its capabilities advertise only the platform-independent `wait`.
 
-**`mouse_drag`** -- `fromX`, `fromY`, `toX`, `toY` (required,
-emitted-screenshot space), `display` (default 0). Both endpoints must
-be on the SAME display; cross-display drags are deliberately
-inexpressible (the drag path across mismatched scale factors is
-undefined). Result includes the mapped logical endpoints.
+macOS delivery uses `CGEventPostToPid` for keyboard and mouse. Move/click
+packets are constructed with AppKit's public explicit-window factory, then
+converted to Quartz while preserving global logical coordinates, a private
+event source and explicit modifiers. Packet tests decode the result back to
+`NSEvent.windowNumber`: Quartz's two public mouse-window hints alone decode
+as window zero. Those hints are also retained. Quartz ignores those fields for
+scroll packets, which retain PID and
+point addressing with the same sampled-focus checks. Window hints do not
+acknowledge application delivery or atomically bind an AX field. Before each
+press/text event the guard checks the AX window and field; releases check the
+window and always address the original PID. Cleanup releases only an already
+attempted down event to that same PID. macOS also checks content-free HID event
+counters, held hardware input and a main-loop activation generation around
+capture and before each event. The worker's events use a private source.
 
-**`mouse_scroll`** -- `dx`, `dy` wheel-tick deltas (at least one
-non-zero). Not screen coordinates; no coordinate mapping applies.
-Result `{dx, dy}`.
+A completed click or key gesture can replace its field after the final release.
+Its input receipt is already spent. For 60 seconds after completion, a new
+screenshot in the same run may observe that change only if the exact retained
+AX app/window, PID, CG window and geometry still match, no hardware input or
+activation occurred, and focus stays stable across capture. The deadline is
+checked after capture too. This observation does not repeat input, activate an
+app or clear a latch. A fresh single-use receipt is required before more input.
+Text, move and scroll actions keep the strict field anchor; unsupported activity
+monitors retain the older strict behavior. Unavailable macOS monitoring, focus
+query errors, unstable capture, identity changes and human activity fail closed.
 
-**`key_type`** -- `text` (required). Types the string. The typed text
-is REDACTED from the result, the output preview, and the audit log
-(it frequently contains credentials); result is `{chars,
-text_redacted: true}`.
+For process-addressed move/click delivery, public `CGEventSetLocation` invalidates
+the packet's window-local point. The Darwin backend therefore dynamically resolves
+the private macOS `CGEventSetWindowLocation` / `CGEventGetWindowLocation` accessors
+to preserve both points. This is an explicit OS compatibility dependency: missing
+accessors, invalid window bounds, or a mismatched window/global/local round-trip
+refuse packet creation before posting. There is no global posting fallback.
+Local `pointer_coordinate_accessors` and capability `pointerCoordinateAccessors`
+report symbol availability only, not delivery success. Tests include a foreign
+producer and hidden receiving windows with title bars and nonzero origins; these
+construct/deserialize packets without posting events or activating windows.
 
-**`key_combo`** -- `keys` array; first element is the primary key,
-the rest are modifiers (e.g. `["t", "cmd"]`). Result `{keys}`.
+The passive `CGPreflightPostEventAccess` check is separate from AX inspection
+permission. The actual worker reports it in local `input-target-status` as
+`post_event_access` and capabilities as `inputTargetPolicy.postEventAccess`.
+A false result refuses the transaction before input and is checked again before
+each post. The probe never requests permission or displays a prompt; absent/null
+means this backend cannot report it, not permission granted.
 
-**`key_hold`** -- `key` (required), `durationMs` (clamped to
-[1, 10000]). Press, hold, release; a failed release reports
-`key_hold_failed` naming the release stage (a stuck key is
-operator-visible information). Result `{key, durationMs}`.
+**Limits:** process-addressed events have no delivery acknowledgement and
+are not atomically bound to an AX window or field. Checks sample focus; they
+cannot atomically attribute an application's field replacement or prevent every
+same-process race. HID counters and delivered activation notifications add
+interruption evidence; they are not an atomic OS input lock. Focus-query errors
+still stop input, including transient errors during navigation. The earlier live
+stops did not retain their initial reason, so their exact cause remains unknown.
+Pointer events do not warp the global cursor; applications may
+ignore synthetic hover/scroll delivery. This is not a claim of uninterrupted
+multi-app support or that automation can never compete with a user. Normal
+live interactions still require controlled validation before sustained use.
+Guard tests use fake event backends. Platform packet tests construct and inspect
+Quartz events without posting them; neither establishes application delivery.
+
+Linux and other platforms have no verified target-addressed input backend in
+this version and refuse input. Read-only capabilities remain as documented.
+`key_hold`, `mouse_down`, `mouse_up` and `mouse_drag` refuse.
+Legacy global input and app-only activation code is unreachable
+through the dispatcher. No consent or server scope requirement is relaxed.
+
+**`screenshot`** -- `format` (`png` default or `jpeg`), `display` (default
+0), `region: {x,y,w,h}` in display-local logical points, `quality` (JPEG,
+default 80), `maxLongEdge` (default 1568, clamped to 512–8000), and optional
+`windowId` to acquire an input receipt. Result includes `format`, `display`,
+`width/height` (emitted pixels), `sourceWidth/sourceHeight` (captured pixels),
+`logicalWidth/logicalHeight`, `logicalOriginX/logicalOriginY`, `scale`,
+`bytesBase64`, `sizeBytes`, optional `region`, and (when requested)
+`inputTarget: {id,windowId,pid,expiresAt,singleUse:true}`. `windowId` validates
+focus; it does not crop the capture to that window.
+
+**`cursor_position`** -- read-only; returns global LOGICAL `{x,y}`.
+These are not coordinates for the target-addressed pointer API.
+
+Supported inputs require `inputTarget`. Success reports `targetWindowId`,
+`targetPid`, `eventsSent`, `text_redacted:true`, `requiresFreshScreenshot:true`.
+It means events were posted, not that the app processed them.
+
+- **`mouse_move`**: explicit integer `x,y` from the receipt's screenshot.
+- **`mouse_click`**: explicit `x,y`, optional `button` (`left`, `right`,
+  `middle`) and `modifiers` (`cmd`, `ctrl`, `alt`, `shift`; aliases accepted).
+  One down/up pair; multiple clicks, global cursor clicks and legacy options
+  are refused rather than silently substituted.
+- **`mouse_scroll`**: explicit `x,y`, `dx`/`dy` line deltas in [-1000,1000],
+  at least one nonzero. Position comes from the bound image.
+- **`key_type`**: 1–4096 bytes of valid printable UTF-8. Control characters,
+  including newline/tab, are refused; use a separate reviewed `key_combo`.
+  Unicode keydown/up events preserve non-ASCII text. Results redact the text.
+- **`key_combo`**: `keys` string array, primary key first, then modifiers
+  (for example `["a","cmd"]`). Supports lowercase ANSI character key
+  positions, arrows, Enter, Escape, Tab, space, backspace/delete, navigation
+  keys and F1–F12. Shortcut character positions assume an ANSI layout;
+  `key_type` uses Unicode independently of layout. Unsupported keys refuse.
 
 **`display_info`** -- no args. Result `{width, height, displays:
 [{id, x, y, width, height, scale, primary}], primary}`. Top-level
@@ -300,7 +388,7 @@ negative for displays left of / above the primary). `scale` is the
 capture pixel density: the primary display's native scale (2.0 on
 Retina macOS), 1.0 for secondary displays (see platform matrix).
 
-**`window_list`** -- no args. Result `{windows: [{id, title, app,
+**`window_list`** -- normally no args. Result `{windows: [{id, title, app,
 pid, x, y, width, height, focused}]}`. Coordinates are LOGICAL
 (RobotGo input space), not emitted-screenshot space -- to click
 inside a window, still map through a screenshot. On macOS, `title`
@@ -309,9 +397,30 @@ for other apps' windows requires the Screen Recording permission
 window handle (CGWindowID / X window id), stable for the window's
 lifetime only.
 
-**`window_focus`** -- `windowId` (number or numeric string, from
-`window_list`). Result `{focused: true, id, app, method}` where
-`method` names the platform mechanism (see platform matrix).
+**Initial window selection (macOS, `workerComputer.window_selection: 1`)** --
+Call `window_list` with an explicit `windowId` and `pid` from an observed row.
+The worker re-enumerates the window, resolves exactly one matching AX window,
+and retains its AX and application-instance identities, geometry, foreground
+application identity, activation generation and content-free HID event counters.
+Ambiguity or held input refuses. The result includes `focusTarget.id`, bound to
+this dispatcher/enrollment and run, single-use and valid for 60 seconds. A new
+window list replaces an earlier selection receipt.
+
+**`window_focus`** -- requires that `focusTarget`, `windowId` and `pid`.
+Only an unbound, uninterrupted worker may use it. It invalidates any input
+receipt, checks for intervening activity or changed identities, and uses AX
+main/raise plus AppKit activation on the original main thread. It never posts
+keyboard/mouse events or falls back to app-only/global input. The exact AX
+focused application/window/element must be verified afterward; activation alone
+does not produce an input receipt. Take a fresh screenshot before input.
+
+An existing anchor can never be replaced by selection. Any detected interruption
+or unverified activation latches input off; a new token/run cannot recover it.
+Cancellation before main-thread execution skips the operation. Once execution
+starts, the call waits for completion, preventing a queued activation after the
+call returned. Checks remain sampled: macOS does not offer an atomic transaction
+covering user activity, activation and AX focus. HID counters do not include
+every special keyboard event. Live application delivery must still be proved.
 
 **`capabilities`** -- no args. Returns the capability descriptor
 (below). Works on every build and never runs preflights:
@@ -326,7 +435,7 @@ as multiple waits so each stays cancellable and audit-visible. Result
 ## Coordinate model
 
 Canonical contract: the package comment in
-`cmd/memql/internal/worker/tools/coords.go`.
+`internal/worker/tools/coords.go`.
 
 Model/tool coordinates are ALWAYS in the coordinate space of the most
 recently emitted screenshot image: `(0,0)..(emittedWidth-1,
@@ -341,42 +450,18 @@ differ:
   (long edge clamped to 1568 px by default). This is what the model
   actually sees and therefore the space it speaks.
 
-The worker maps emitted-space coordinates to logical input
-coordinates deterministically from the current display geometry plus
-the fixed downscale policy. The mapping is **stateless** and
-reproducible per call: no per-screenshot state is retained between a
-screenshot and the mouse action that follows it. Screenshot payloads
-report `width`/`height` (emitted), `sourceWidth`/`sourceHeight`
-(captured), `scale` (emitted/captured) and
-`logicalWidth`/`logicalHeight` so the mapping is reversible by the
-caller. Rounding is half-away-from-zero, with clamping into the
-display rect so edge pixels can never map past the display.
+The guard retains the exact image-to-logical mapping with its receipt,
+including `maxLongEdge`, display and region origin. Rounding is half away
+from zero, with clamping inside the logical capture rectangle. The input
+point must lie inside both the emitted image and the bound window.
 
-**Downscale policy:** screenshots are downscaled (CatmullRom, never
-upscaled) so the long edge does not exceed 1568 px -- the Anthropic
-vision sweet spot; larger images are downscaled by the API anyway, so
-shipping more pixels only bloats the payload. The per-call
-`maxLongEdge` override (clamped to [512, 8000]) exists for
-inspection/zoom, but mouse mapping always assumes the default policy.
+Screenshots are downscaled with CatmullRom and never upscaled. The default
+long edge is 1568 pixels. An override is valid for input because the mapping
+comes from that actual capture rather than a reconstructed default.
 
-**Multi-display:** `screenshot`, `mouse_move` and `mouse_drag` accept
-an optional `display` arg (an id from `display_info`; default 0 =
-primary). Coordinates are ALWAYS interpreted in the emitted-screenshot
-space OF THAT DISPLAY -- never in a cross-display virtual space -- so
-the mapping stays stateless: the worker never remembers which display
-was screenshotted last. The mapper for display D maps emitted coords
-into D-local logical coords, then offsets by D's origin in the
-virtual desktop (negative for displays left of / above the primary).
-When `display` is absent, the behavior is exactly the single-display
-behavior.
-
-**Bounds validation (`out_of_bounds`):** emitted-space points are
-validated against the emitted rect, and the mapped logical point is
-re-validated against the UNION of per-display rects -- deliberately
-not a bounding-box check. In an L-shaped or gapped layout, a point in
-a gap between monitors has no target and fails with a structured
-`out_of_bounds` naming every display rect, instead of silently
-landing somewhere undefined.
+For multiple displays, select the display during screenshot acquisition.
+The mapper adds its global origin (negative for displays left of or above
+the primary display). Do not send another `display` on the input action.
 
 ## Capability descriptor
 
@@ -394,6 +479,11 @@ The worker's structured self-description of its computer-use surface
 }
 ```
 
+- `inputTargetPolicy`: supported input actions, receipt acquisition and lifetime,
+  exact-image coordinates, guarded initial selection, interruption handling and
+  sampled-focus limitations. Included in live capabilities and registration
+  JSON; older servers may discard this additive field. The action contract
+  version remains available in `actionContracts`.
 - `platform`: `runtime.GOOS`.
 - `displayServer`: `quartz` (macOS) | `x11` | `wayland` | `none`,
   detected at call time. Headless builds always report `none`.
@@ -402,8 +492,8 @@ The worker's structured self-description of its computer-use surface
   that want "can I actually screenshot right now" must check
   `displayServer` too (a `computeruse` build on a Wayland session
   reports `computerUseAvailable: true, displayServer: "wayland"`).
-- `actions`: the dispatchable actions -- the computer-use router table
-  plus the build-agnostic `wait`, sorted. A headless build advertises
+- `actions`: supported actions, filtering always-refused legacy inputs and
+  platforms without a targeted backend, plus build-agnostic `wait`, sorted. A headless build advertises
   `["wait"]`, not `[]`. The meta `capabilities` action is
   deliberately NOT listed (it is the introspection channel itself and
   is unconditionally available).
@@ -440,23 +530,17 @@ Where it surfaces:
 | `capabilities`, `wait` | yes | yes | yes (no display needed) |
 | `screenshot` | yes (Screen Recording TCC; per-call preflight) | yes | no -- `display_server_unsupported` |
 | `cursor_position`, `display_info` | yes | yes | undefined (see note 3) |
-| mouse input (`mouse_*`) | yes (Accessibility TCC; per-call preflight) | yes (XTEST) | no -- `display_server_unsupported` |
-| keyboard input (`key_*`) | yes (Accessibility TCC; per-call preflight) | yes (XTEST) | no -- `display_server_unsupported` |
+| supported pointer transactions | target-addressed, Accessibility required | refused | refused |
+| `key_type`, `key_combo` | target-addressed, Accessibility required | refused | refused |
 | `window_list` | yes -- CGWindowList; titles need Screen Recording | yes -- EWMH `_NET_CLIENT_LIST` | no -- `unsupported_on_platform` |
-| `window_focus` | yes -- `method: "app_activate"` (note 1) | yes -- `method: "ewmh_active_window"` | no -- `unsupported_on_platform` |
+| `window_focus` | guarded initial selection only | refused | refused |
+| holds and drags | refused | refused | refused |
 | multi-display | yes (note 2) | yes (Xinerama; single-display fallback when absent) | n/a |
 
 Notes:
 
-1. **Focus semantics differ by platform** -- read the result's
-   `method` field. macOS v1 semantics are APP-LEVEL focus: the window
-   id is resolved to its owning pid and the application is activated
-   (`app_activate`), which raises that app's frontmost window; raising
-   a specific non-front window within a multi-window app needs
-   per-window AX targeting and is deferred. Linux/X11 is a true
-   per-window raise+focus via an `_NET_ACTIVE_WINDOW` request
-   (`ewmh_active_window`), honoring the window manager's
-   focus-stealing policy.
+1. **Focus recovery is disabled.** Guarded initial selection is available on
+   macOS only while unbound. It can never replace an anchor or clear a latch.
 2. **Secondary-display capture caveat (macOS)** -- the primary
    display captures through RobotGo's native path at physical pixels
    (Retina quality). Secondary displays capture through the
@@ -474,8 +558,8 @@ Notes:
    (decision recorded in #164/#168: RobotGo against XWayland is
    untested; if it proves workable this could soften to a warning).
    Input + screenshot fail the preflight with a structured
-   `display_server_unsupported`; `window_list`/`window_focus` do
-   their own detection and fail with `unsupported_on_platform`;
+   `display_server_unsupported`; `window_list` does
+   its own detection and fail with `unsupported_on_platform`;
    `capabilities` and `wait` work (and the descriptor advertises
    `displayServer: "wayland"`, `displays: 0` so consumers can refuse
    up front). `cursor_position`/`display_info` are NOT preflight-gated
@@ -485,8 +569,7 @@ Notes:
    hosts HEADLESS-only (`install-linux.sh` detects Wayland and does
    this automatically).
 
-Windows and other platforms: no computer-use backend; `window_list`/
-`window_focus` return `unsupported_on_platform`
+Windows and other platforms: no computer-use input backend; `window_list` returns `unsupported_on_platform`
 (`window_computeruse_other.go`), the descriptor reports
 `displayServer: "none"`.
 
@@ -621,7 +704,7 @@ worker.
 | `out_of_bounds` | Coordinates outside the emitted screenshot rect, or the mapped logical point falls in a gap between displays (union-of-rects validation). The message names the valid rect(s). | Take a fresh default-policy `screenshot` of the target display and derive coordinates from THAT image; pass the same `display` arg on the mouse action. Don't target dead zones between monitors. |
 | `gui_unavailable` | The connected worker is the headless build; only `capabilities` + `wait` exist there. (Error code retained for wire stability across the `gui` → `computeruse` rename.) | Install/run `memql` on the host (`make cockpit-computeruse`), then `worker setup` + `worker run`. Check `capabilities` first: `computerUseAvailable: false` means this build. |
 | `window_not_found` | The `windowId` is not in the current enumeration -- window ids change as windows open/close. | Re-run `window_list` and use a fresh id. |
-| `unsupported_on_platform` | `window_list`/`window_focus` on Wayland or a platform without a backend (no portable Wayland window-enumeration API exists). | Use an X11 session (Linux) or macOS; check the descriptor's `displayServer` before calling. |
+| `unsupported_on_platform` | `window_list` on Wayland or a platform without a backend (no portable Wayland window-enumeration API exists). | Use an X11 session (Linux) or macOS; check the descriptor's `displayServer` before calling. |
 | `unknown_action` (memql side) | The action is not in the memql scope table (`scope.go`) -- deny-by-default for unclassified actions. | Verify the action name; if it is a newly added cockpit action, the memql-side classification must land first (see "Evolving the contract"). |
 | `tool_panic` | A cgo/RobotGo path panicked (environment mismatch the preflights do not cover, e.g. RobotGo reads on Wayland). The dispatcher recovers it to keep the stream alive; the stack is on the cockpit's stderr. | Check the cockpit log for the stack; fix the environment (usually display-server related) and report a preflight gap if reproducible. |
 

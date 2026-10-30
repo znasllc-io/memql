@@ -5468,7 +5468,9 @@
       "concept": "v1:router:call",
       "file": "router/concepts.memql",
       "fields": [
+        "actualBilling",
         "agentId",
+        "apiEquivalent",
         "billing",
         "cacheKind",
         "cachedInputCost",
@@ -5477,6 +5479,7 @@
         "considered",
         "degraded",
         "door",
+        "electricityEstimate",
         "errorCategory",
         "errorMessage",
         "executionSurface",
@@ -8813,6 +8816,7 @@
         "errorMessage",
         "executionAuthority",
         "expectedFootprint",
+        "feedbackContinuation",
         "finishedAt",
         "forkAtStepKey",
         "forkedFromRunId",
@@ -8964,12 +8968,14 @@
       "file": "workbench/concepts.memql",
       "fields": [
         "expiresAt",
+        "generation",
         "machineId",
         "machineOwnerUserId",
         "ownerUserId",
         "registrationId",
         "resource",
-        "runId"
+        "runId",
+        "stateLost"
       ],
       "required": [
         "expiresAt",
@@ -9186,6 +9192,26 @@
       ],
       "required": [
         "ownerUserId"
+      ]
+    },
+    {
+      "concept": "v1:worker:energyProfile",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "encryptedAddress",
+        "locationRevision",
+        "ownerUserId",
+        "registrationId",
+        "research",
+        "revision",
+        "settings",
+        "tariff"
+      ],
+      "required": [
+        "locationRevision",
+        "ownerUserId",
+        "registrationId",
+        "revision"
       ]
     },
     {

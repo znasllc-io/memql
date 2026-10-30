@@ -610,6 +610,8 @@ message WorkerForwardRequest {
   string purpose = 14;
   // Receipt ID only: the stream holder must claim fresh durable authority.
   string computer_permission_id = 15;
+  // The receiver must not move an already queued operation into a recovered workspace.
+  uint64 workbench_generation = 16;
 }
 
 // WorkerForwardResponse carries the dispatch result back to the originating

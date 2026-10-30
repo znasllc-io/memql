@@ -261,3 +261,16 @@ shape appSession workerAppRoutingEvidence {
   quotaRefused
   authRefused
 }
+
+@row
+shape energyProfile workerEnergyProfileFull {
+  row.id
+  ownerUserId
+  registrationId
+  encryptedAddress
+  settings
+  research
+  tariff
+  revision
+  locationRevision
+}

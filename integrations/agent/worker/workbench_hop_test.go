@@ -52,7 +52,30 @@ func (s *workbenchHopStore) WorkbenchBinding(ctx context.Context, owner, run str
 	if err := s.CheckWorkbenchRun(ctx, owner, run); err != nil {
 		return workbenchBinding{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.binding, nil
+}
+
+func (s *workbenchHopStore) AdvanceWorkbenchBinding(ctx context.Context, owner, run string, expected workbenchBinding, action string) (workbenchBinding, error) {
+	if err := s.CheckWorkbenchRun(ctx, owner, run); err != nil {
+		return workbenchBinding{}, err
+	}
+	if action != "lost" {
+		if _, err := admittedWorkbench(ctx, s, owner, expected.RegistrationID); err != nil {
+			return workbenchBinding{}, err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expected.Generation != s.binding.Generation {
+		return s.binding, fmt.Errorf("generation changed")
+	}
+	b, err := nextWorkbenchBinding(s.binding, action, time.Now())
+	if err == nil {
+		s.binding = b
+	}
+	return b, err
 }
 
 func newWorkbenchHop(t *testing.T, call workerservice.DispatchFunc) (*Dispatcher, *workbenchHopStore, *workerservice.Worker) {

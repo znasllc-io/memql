@@ -131,7 +131,7 @@ export function AutoPage({
           <Head title="Auto" breadcrumbs={[{ label: "Routes", onSelect: onBack }, { label: "Auto" }]} back={{ label: "Routes", onSelect: onBack }}>
             <PageHelp title="How Auto decides">
               <p>For every call, Auto ranks the sources that could serve it by how fast and reliable they have been, what they cost and how strong they are, and takes the best one that can serve right now.</p>
-              <p>Your own machines and app subscriptions cost nothing here. With a monthly budget, Auto favours free sources as you near it and stops using vendors once it is reached.</p>
+              <p>Local machines and app subscriptions do not consume the vendor-spend budget. Their electricity and API-equivalent estimates are separate. With a monthly budget, Auto favours those sources as you near it and stops using vendors once it is reached.</p>
             </PageHelp>
           </Head>
           <p className="fleet-route-description">{route?.description || "Picks the best balance of speed, cost and quality for every call"}</p>

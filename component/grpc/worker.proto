@@ -509,6 +509,8 @@ message WorkbenchConstraint {
   // Admission expires before dispatch; running work keeps its own deadline.
   int64 expires_unix = 6;
   int64 workspace_expires_unix = 7;
+  // Explicit recovery advances this identity; old filesystem contents are lost.
+  uint64 workspace_generation = 8;
 }
 
 message ToolCancel {

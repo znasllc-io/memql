@@ -255,8 +255,8 @@ func TestCanDispatchStoredRunRecovery(t *testing.T) {
 		{"approval wait", "g", "waiting", "waiting", "approval", true, -time.Second, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := DispatchRequest{Status: tc.requested, Recovery: tc.recovery}
-			waiting := map[string]any{"approvalKind": tc.kind, "resumeAt": now.Add(tc.delay).UTC().Format(time.RFC3339Nano)}
+			waiting := map[string]any{"kind": "approval", "subject": "approval-1", "since": rfc(now.Add(-time.Hour)), "approvalKind": tc.kind, "resumeAt": now.Add(tc.delay).UTC().Format(time.RFC3339Nano)}
+			req := DispatchRequest{Status: tc.requested, Recovery: tc.recovery, GoalId: tc.goal, InferenceWait: inferenceWaitIdentity(waiting)}
 			if got := req.CanDispatchStoredRun(tc.goal, tc.status, waiting, now); got != tc.want {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}

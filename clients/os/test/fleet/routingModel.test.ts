@@ -66,6 +66,7 @@ const app = (id: string, runnable = true, why = "") => ({
   readiness: "",
   checkedAt: "",
   resetsAt: "",
+  readinessDetail: "",
   canSignIn: false,
 });
 

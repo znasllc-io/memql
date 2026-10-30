@@ -18,6 +18,7 @@ import (
 
 type workPromptEngine struct {
 	savedContinuation []common.ChatMessage
+	replyCheckpoint   memql.WorkReplyReviewCheckpoint
 	registryEngine
 	prompts       *memql.PromptRegistry
 	viewer        map[string]any
@@ -25,6 +26,23 @@ type workPromptEngine struct {
 	skills        any
 	skillError    error
 	delegatedWait error
+}
+
+func (e *workPromptEngine) ReadWorkReplyReview(ctx context.Context) (memql.WorkReplyReviewCheckpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return memql.WorkReplyReviewCheckpoint{}, err
+	}
+	state := e.replyCheckpoint
+	if state.Binding.Generation == "" {
+		state.Binding = memql.WorkReplyReviewBinding{Generation: "test-generation", Guidance: "test-guidance"}
+	}
+	state.Pending = append(json.RawMessage(nil), state.Pending...)
+	return state, nil
+}
+
+func (e *workPromptEngine) SaveWorkReplyReview(_ context.Context, binding memql.WorkReplyReviewBinding, value json.RawMessage) error {
+	e.replyCheckpoint = memql.WorkReplyReviewCheckpoint{Binding: binding, Saved: binding, Pending: append(json.RawMessage(nil), value...)}
+	return nil
 }
 
 func (e *workPromptEngine) DelegatedWorkHumanWait(context.Context, string) error {
@@ -305,4 +323,14 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 func (e *workPromptEngine) SaveWorkContinuation(_ context.Context, messages []common.ChatMessage) error {
 	e.savedContinuation = append([]common.ChatMessage(nil), messages...)
 	return nil
+}
+
+func (e *workPromptEngine) RestoreWorkContinuation(_ context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	// Lightweight prompt fixtures keep their supplied initial context. A
+	// post-turn review read must see the progress they actually saved; native
+	// proof/merge semantics are covered by the database continuation tests.
+	if len(messages) == 0 {
+		return append([]common.ChatMessage(nil), e.savedContinuation...), nil
+	}
+	return messages, nil
 }

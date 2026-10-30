@@ -1595,3 +1595,27 @@ mutation registration recordWorkerAppSelection {
     appSelection: {lastApp: args.app, selectedAt: now}
   }
 }
+
+/// Native validation and owner verification precede this fenced upsert.
+/// actor.userId scoping alone cannot enforce private credential classes, sealed
+/// addresses, revision fencing, or prevent delegated research from attesting owner
+/// verification. The native settings/research boundary validates those first;
+/// direct concept writes are also refused by the energy-profile write guard.
+@actor
+@serverOnly
+mutation energyProfile storeWorkerEnergyProfile {
+  args {
+    profileId string!
+    registrationId string!
+    encryptedAddress string
+    settings object!
+    research object!
+    tariff object!
+    revision string!
+    locationRevision string!
+  }
+  insert {
+    accept { registrationId, encryptedAddress, settings, research, tariff, revision, locationRevision }
+    stamp { id: args.profileId, ownerUserId: actor.userId }
+  }
+}

@@ -258,15 +258,16 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	}
 
 	dispatchRequest := Request{
-		Tool:          req.GetTool(),
-		Action:        req.GetAction(),
-		Purpose:       req.GetPurpose(),
-		Args:          innerArgs,
-		AgentId:       req.GetAgentId(),
-		OwnerUserId:   owner,
-		RunId:         req.GetRunId(),
-		StepId:        req.GetStepId(),
-		CorrelationId: req.GetCorrelationId(),
+		workbenchGeneration: req.GetWorkbenchGeneration(),
+		Tool:                req.GetTool(),
+		Action:              req.GetAction(),
+		Purpose:             req.GetPurpose(),
+		Args:                innerArgs,
+		AgentId:             req.GetAgentId(),
+		OwnerUserId:         owner,
+		RunId:               req.GetRunId(),
+		StepId:              req.GetStepId(),
+		CorrelationId:       req.GetCorrelationId(),
 	}
 	if id := req.GetComputerPermissionId(); id != "" {
 		dispatchRequest.computerPermission = &permission.Grant{ID: id}

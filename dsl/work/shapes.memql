@@ -54,6 +54,7 @@ shape run workRunFull {
   status
   waitingOn
   continuation
+  feedbackContinuation
   humanResumeId
   humanWaitMs
   spent
@@ -121,6 +122,9 @@ shape run workRunSummary {
   forkAtStepKey
   status
   waitingOn
+  // Nexus needs the saved answer identity to offer explicit recovery after
+  // a missed dispatch; the native decision gate still authorizes the resume.
+  humanResumeId
   spent
   nodeId
   heartbeatAt
@@ -347,4 +351,14 @@ shape approval workDocumentApprovalReceipt {
 @row
 shape goal workRevisionAmendment {
  input.requestId
+}
+
+/// Minimal existence witness for the continuation lifecycle gate.
+@row
+shape run workContinuationConflict {
+  row.id
+  row.createdAt
+  ownerUserId
+  goalId
+  status
 }
