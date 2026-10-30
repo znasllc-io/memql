@@ -146,7 +146,8 @@ func (a *App) transportBase() {
 	//   pair-aware    -- Authorization: Pair <code> redeems a
 	//                   worker pairing code without an existing
 	//                   JWT. Falls through on any other scheme.
-	//   session-revocation -- looks up the bearer's tokenHash in
+	//   session-revocation -- hands the stream to base, then looks up
+	//                   the bearer's tokenHash in
 	//                   v1:identity:authSession and rejects
 	//                   revoked tokens.
 	//   base          -- identity-issued JWT verification via JWKS.
@@ -224,13 +225,6 @@ func (a *App) transportBase() {
 		// verifierRequired=false branch (identity binary). Operator
 		// is the only admit path; everything else is rejected.
 		a.grpcServer.SetStreamInterceptor(memqlgrpc.NewOperatorAwareStreamInterceptor(memqlgrpc.NewRejectAllStreamInterceptor(a.Logger), a.Logger))
-	}
-
-	// Install session-revocation HTTP middleware after the verifier
-	// auth middleware (which ran earlier in configAndAuth). Engine is
-	// required so this only runs when a backing store is available.
-	if a.identityVerifier != nil && a.engine != nil {
-		a.middlewares = append(a.middlewares, memqlgrpc.NewSessionRevocationHTTPMiddleware(a.engine, a.Logger))
 	}
 
 	// Email delivery is wired through the email integration plug-in

@@ -570,11 +570,10 @@ func TestEveryMiddlewareRegistrationIsAccountedFor(t *testing.T) {
 		claimsPaths bool
 	}
 	accounted := map[string]middlewareNote{
-		"PanicRecoveryMiddleware":            {why: "wraps the chain; serves no path of its own"},
-		"SecurityHeadersMiddleware":          {why: "sets response headers; serves no path of its own"},
-		"identityHTTPMiddleware":             {why: "defers verifier construction until packs are anchored; gates paths, claims none"},
-		"NewSessionRevocationHTTPMiddleware": {why: "inspects the token on every request; claims no path"},
-		"Middleware":                         {why: "the gRPC gateway -- CLAIMS POST /memql/query via memqlgrpc.InterceptedPaths()", claimsPaths: true},
+		"PanicRecoveryMiddleware":   {why: "wraps the chain; serves no path of its own"},
+		"SecurityHeadersMiddleware": {why: "sets response headers; serves no path of its own"},
+		"identityHTTPMiddleware":    {why: "defers verifier construction until packs are anchored; gates paths and checks session revocation behind the verifier, claims none"},
+		"Middleware":                {why: "the gRPC gateway -- CLAIMS POST /memql/query via memqlgrpc.InterceptedPaths()", claimsPaths: true},
 	}
 	// Functions that feed a.middlewareRoutes, by name. Collected in the same
 	// walk so a claimsPaths middleware can be required to sit in one.

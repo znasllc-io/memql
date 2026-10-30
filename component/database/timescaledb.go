@@ -96,6 +96,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerWorkRunGoalLookupIndex(m, logger)
 	registerWorkRunOwnerWalkIndex(m, logger)
 	registerWorkRunSignatureLookupIndex(m, logger)
+	registerAuthSessionHashLookupIndex(m, logger)
 	registerWorkRunRevisionLookupIndex(m, logger)
 }
 

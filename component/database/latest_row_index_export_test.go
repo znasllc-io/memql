@@ -25,6 +25,7 @@ var (
 	EnsureWorkJournalLookupIndex      = ensureWorkJournalLookupIndex
 	EnsureEmailDigestLookupIndexes    = ensureEmailDigestLookupIndexes
 	EnsureEmailProviderLookupIndex    = ensureEmailProviderLookupIndex
+	EnsureAuthSessionHashLookupIndex  = ensureAuthSessionHashLookupIndex
 	EnsureWorkRunOwnerLookupIndex     = ensureWorkRunOwnerLookupIndex
 	EnsureWorkRunGoalLookupIndex      = ensureWorkRunGoalLookupIndex
 	EnsureWorkRunOwnerWalkIndex       = ensureWorkRunOwnerWalkIndex

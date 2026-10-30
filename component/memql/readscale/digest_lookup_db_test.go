@@ -179,3 +179,98 @@ func TestDigestLookupReadsOnlyTheMatchingRows(t *testing.T) {
 		})
 	}
 }
+
+// THE REVOCATION CHECK COSTS ITS SESSION, NOT EVERY SESSION.
+//
+// authSessionByTokenHash runs for every verified HTTP request and stream open.
+// With no lookup index it collapsed every session to its latest version before
+// comparing the digest: 474,699 buffers and 1.1 s at 120,000 sessions, hit or
+// miss, measured through a real bff. This fixture is 20,000 sessions of two
+// versions, in production's chunking across a year. Measured here: 98,404 buffers
+// for the concept-wide read, 2,130 for a lookup with no index behind it (a scan of
+// the concept's versions), and at most 317 through the index. So the bound below
+// fails the first two, and the fixture stays quick to seed.
+func TestAuthSessionLookupReadsOnlyTheMatchingRows(t *testing.T) {
+	const sessions = 20000
+	const bound = 1000
+	ctx := context.Background()
+	admin := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	t.Cleanup(func() { _ = admin.Close() })
+	if err := admin.PingContext(ctx); err != nil {
+		dbtest.Unreachable(t, "auth session lookup at scale", dbtest.DSN(), err)
+	}
+	var timescale bool
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='timescaledb')`).Scan(&timescale))
+	if !timescale {
+		t.Skip("requires TimescaleDB chunks, as production runs")
+	}
+	schema := fmt.Sprintf("readscale_%d", time.Now().UnixNano())
+	_, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = admin.ExecContext(ctx, `DROP SCHEMA `+schema+` CASCADE`) })
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()),
+		pgdriver.WithConnParams(map[string]any{"search_path": schema}), pgdriver.WithReadTimeout(5*time.Minute))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	// Every session has a created version and a later one; session 123 is revoked
+	// by that later version, as revokeAuthSession writes it.
+	digest := func(n int) string { return fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("token-%d", n)))) }
+	for _, stmt := range []string{
+		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
+		`CREATE TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`,
+		`SELECT public.create_hypertable('"MemoryNodes"','createdAt',chunk_time_interval=>interval '7 days')`,
+		fmt.Sprintf(`INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
+         SELECT 'v1:identity:authSession:s-'||n,'v1:identity:authSession',
+           TIMESTAMPTZ '2025-01-01'+(n %% 364)*interval '1 day'+n*interval '1 millisecond'+v*interval '1 hour','fixture','{}',
+           jsonb_build_object('subject','v1:identity:user:u-'||(n %% 500),'tokenHash',md5('token-'||n),'source','bff_exchange',
+             'expiresAt','2030-01-01T00:00:00Z','refreshTokenHash',md5('refresh-'||n||'-'||v),
+             'revokedReason',CASE WHEN n=123 AND v=1 THEN 'user_action' ELSE '' END,
+             'revokedAt',CASE WHEN n=123 AND v=1 THEN '2025-06-01T00:00:00Z' END)
+         FROM generate_series(1,%d) n CROSS JOIN generate_series(0,1) v`, sessions),
+		`VACUUM ANALYZE "MemoryNodes"`,
+	} {
+		_, err := db.ExecContext(ctx, stmt)
+		require.NoError(t, err)
+	}
+
+	_, err = memql.LoadUnifiedConcepts(nil)
+	require.NoError(t, err)
+	eng, err := memql.New(db)
+	require.NoError(t, err)
+	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	require.NoError(t, eng.Init(memorynodes.DefaultRegistry()))
+	hook := &scanCapture{}
+	db.AddQueryHook(hook)
+
+	reader := context.WithValue(context.Background(), captureKey{}, true)
+	for _, tc := range []struct {
+		name, hash, wantID, wantRevokedAt string
+	}{
+		{"live session", digest(9876), "v1:identity:authSession:s-9876", ""},
+		{"revoked session, at its latest version", digest(123), "v1:identity:authSession:s-123", "2025-06-01T00:00:00Z"},
+		{"a digest no session carries", digest(sessions + 1), "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := eng.Execute(reader, fmt.Sprintf(`query authSessionByTokenHash(tokenHash: "%s")`, tc.hash))
+			require.NoError(t, err)
+			nodes := result.Bundle.GetNodes()
+			if tc.wantID == "" {
+				require.Empty(t, nodes)
+			} else {
+				require.Len(t, nodes, 1)
+				require.Equal(t, tc.wantID, nodes[0].GetId())
+				require.Equal(t, tc.wantRevokedAt, nodes[0].GetPayload().GetFields()["revokedAt"].GetStringValue())
+			}
+			scans := hook.take()
+			require.NotEmpty(t, scans, "the read must reach the concept scan")
+			total := 0
+			for _, scan := range scans {
+				total += explainBuffers(t, db, scan)
+			}
+			t.Logf("%d buffers over %d scans", total, len(scans))
+			require.LessOrEqual(t, total, bound,
+				"a token hash lookup over %d sessions touched %d buffers: the read enumerated the concept instead of the digest's ids\n%s",
+				sessions, total, strings.Join(scans, "\n"))
+			require.Contains(t, scans[0], "(payload->>'tokenHash')", "the read must enumerate its ids through the token hash lookup")
+		})
+	}
+}

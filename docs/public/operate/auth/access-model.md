@@ -609,6 +609,42 @@ check runs at stream-open time only -- already-established streams
 keep their socket open until the JWT expires or the client
 disconnects.
 
+The lookup waits for the verifier, so a bearer the verifier refused
+costs no session read, and a path the verifier skips (a public or
+self-authenticated one) is not checked at all, a revoked bearer
+included: that path answers a caller with no credential the same way.
+The read goes through `memory_nodes_auth_session_hash_lookup_idx`, so it
+costs one session however many the cluster holds.
+
+**Building that index on a large table.** Migration
+`20261030140000_auth_session_hash_lookup_index` builds it one chunk per
+transaction, and **that is not free**:
+
+- **It scans every chunk's heap, whatever the chunk holds.** Being partial decides
+  what goes in, not what is read. The size of the table is what counts, not the
+  number of sessions.
+- **Writes wait, in two places; reads do not.** The build starts with a `ShareLock`
+  on the table itself, and a write already open holds it back while every later
+  write to any chunk queues behind it. It then holds a `ShareLock` on one chunk at a
+  time, so writes to the chunk being scanned wait.
+- **A build that outlives `MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS`** (30 s by
+  default) fails the migrate step. The build carries on server-side and finishes,
+  but the runner retains its lock, so every later attempt fails until somebody
+  [recovers it](../env-vars.md#database-tuning).
+
+On a table whose heap will not scan inside that deadline, build the index first, in
+a session of your own with no client deadline, and let the migration verify it:
+
+```sql
+CREATE INDEX memory_nodes_auth_session_hash_lookup_idx ON "MemoryNodes"
+  ((payload->>'tokenHash'), concept, id, "createdAt" DESC)
+  WITH (timescaledb.transaction_per_chunk)
+  WHERE concept = ANY (ARRAY['v1:identity:authSession'::text]);
+```
+
+An older engine ignores the index. An engine that reaches the read before the index
+exists still answers correctly, by scanning the versions of every session.
+
 ## Shared mailboxes and passkey-only sign-in
 
 An account can be registered with a group alias -- `team@example.com`,
