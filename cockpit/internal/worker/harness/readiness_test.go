@@ -407,15 +407,15 @@ func TestCodexTurnReportsWhatTheAppSaidAboutItself(t *testing.T) {
 		want string
 	}{
 		"a usage limit, as measured": {
-			completed("failed", `{\"message\":\"You have hit your usage limit. try again at Nov 3rd, 2026 11:52 PM.\",\"codexErrorInfo\":\"usageLimitExceeded\"}`),
+			completed("failed", `{"message":"You have hit your usage limit. try again at Nov 3rd, 2026 11:52 PM.","codexErrorInfo":"usageLimitExceeded"}`),
 			ReadinessOutOfUsage,
 		},
 		"no login, as measured": {
-			completed("failed", `{\"message\":\"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses\",\"codexErrorInfo\":{\"httpConnectionFailed\":{\"httpStatusCode\":401}}}`),
+			completed("failed", `{"message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses","codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":401}}}`),
 			ReadinessSignedOut,
 		},
 		"an expired login, as measured": {
-			completed("failed", `{\"message\":\"workspace routing discovery unauthorized (401)\",\"codexErrorInfo\":\"other\"}`),
+			completed("failed", `{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other"}`),
 			ReadinessSignedOut,
 		},
 		"a finished turn": {
@@ -426,7 +426,11 @@ func TestCodexTurnReportsWhatTheAppSaidAboutItself(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			binary, _ := fakeCodexAppServer(t, tt.body)
 			h := startCodexAppServer(t, codexSpec(t, binary))
-			res, _ := h.Turn(context.Background(), "hello", SinkFunc(func(string, []byte) {}))
+			// A fixture the client cannot read never finishes the turn. Without
+			// a deadline that hangs the whole package until its 10-minute alarm.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			res, _ := h.Turn(ctx, "hello", SinkFunc(func(string, []byte) {}))
 			if res.Readiness == nil || res.Readiness.State != tt.want {
 				t.Fatalf("got %+v", res.Readiness)
 			}
