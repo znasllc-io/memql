@@ -267,6 +267,20 @@ tool deskTool {
 			refused: []string{"deskBriefs", `DSL domain "desk"`, "desk (", "deskmore (", `"client-desk"`, "Rename one of them"},
 		},
 
+		{
+			// A call names a construct as namespace.name, and the namespace of a
+			// construct in a nested directory is a path, "desk/sub", which
+			// the call syntax cannot write: the slash reads as division. The
+			// gate could never call it, so it is refused where an author reads
+			// it and not left to fail as a visitor's 502.
+			name: "a construct in a nested directory",
+			more: map[string]string{
+				"desk/concepts.memql":       gateConceptSource,
+				"desk/sub/constructs.memql": gateImport + gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
+			},
+			refused: []string{"deskBriefs", "nested directory", `"desk/sub"`, "Move the construct"},
+		},
+
 		// ---- accepted ------------------------------------------------------
 		{
 			name: "a query and a mutation under one gate",
@@ -313,6 +327,11 @@ tool deskTool {
 		{
 			// A disabled construct is out of service, so it opens nothing and
 			// cannot collide with a live one that shares its name in its domain.
+			// It cannot break the live one's call either, which is a different
+			// thing and holds because the call is qualified: the engine's bare
+			// lookup counts a disabled sibling, and a lookup by namespace.name
+			// does not. TestAccessGateCallsReachTheirOwnConstructsThroughTheEngine
+			// runs a disabled sibling through the engine.
 			name:    "a disabled construct sharing a live one's name in one domain",
 			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter)},
 			more: map[string]string{
@@ -546,10 +565,45 @@ func TestAccessGateEntryNeedsABoundConceptAndTakesItsDomainFromIt(t *testing.T) 
 	if err != nil || entry.Domain != "partner" {
 		t.Fatalf("Domain = %q, %v; want partner, from v1:partner:thing and not from the file", entry.Domain, err)
 	}
+	// The NAMESPACE is the other way round: it is where the engine keeps the
+	// construct, which is the file's, and has nothing to do with the concept.
+	if entry.Namespace != "deskmore" {
+		t.Fatalf("Namespace = %q, want deskmore, from the file and not from the concept", entry.Namespace)
+	}
 	// A nested namespace belongs to its root, as it does for a shopper extension.
 	fn.BoundConcept = "v1:partner:orders:thing"
 	if entry, err := accessGateEntryFromFunction(fn); err != nil || entry.Domain != "partner" {
 		t.Fatalf("a nested namespace read as %q, %v; want its root, partner", entry.Domain, err)
+	}
+}
+
+// The call is namespace.name, and only a namespace that is one word can be
+// written in it. A real load reaches this with a construct in a nested
+// directory (the table row above); this pins the rule on the conversion and
+// shows the single-directory namespaces it leaves alone.
+func TestAccessGateEntryRefusesANamespaceTheCallSyntaxCannotWrite(t *testing.T) {
+	fn := gatedFunction("deskBriefs", "query", "client-desk", "dashboard")
+	for _, origin := range []string{
+		"unified:desk/sub/constructs.memql",
+		"unified:desk/sub/deeper/constructs.memql",
+	} {
+		fn.Origin = origin
+		_, err := accessGateEntryFromFunction(fn)
+		if err == nil {
+			t.Errorf("a construct loaded from %s was accepted", origin)
+			continue
+		}
+		for _, fragment := range []string{"deskBriefs", "nested directory", "Move the construct"} {
+			if !strings.Contains(err.Error(), fragment) {
+				t.Errorf("%s: the refusal does not carry %q: %v", origin, fragment, err)
+			}
+		}
+	}
+	for _, origin := range []string{"unified:desk/constructs.memql", "unified:client_desk2/queries.memql", ""} {
+		fn.Origin = origin
+		if _, err := accessGateEntryFromFunction(fn); err != nil {
+			t.Errorf("a construct loaded from %q was refused: %v", origin, err)
+		}
 	}
 }
 
@@ -623,9 +677,10 @@ func TestAccessGateRegistryAnswers(t *testing.T) {
 		}
 		want := AccessGateEntry{
 			Deployable: "client-desk", Gate: "dashboard", Construct: "deskBriefs", Kind: "query",
-			Domain:  "desk",
-			Args:    []string{"topic"},
-			Stamped: []string{"accessCodeId", "accessSubject"},
+			Domain:    "desk",
+			Namespace: "desk",
+			Args:      []string{"topic"},
+			Stamped:   []string{"accessCodeId", "accessSubject"},
 		}
 		if !reflect.DeepEqual(*got, want) {
 			t.Fatalf("entry = %+v\nwant   %+v", *got, want)
@@ -760,9 +815,9 @@ func TestAccessGateEachDomainAnswersOnlyForItsOwnDeclaration(t *testing.T) {
 }
 
 // A package that ships two domains declaring one name under one deployable has
-// two constructs the engine cannot tell apart by their bare name, so the call
-// would resolve to neither. The registry does not pick one: it opens neither,
-// and a gate it lists is a gate it can answer for.
+// two constructs a visitor's request cannot tell apart, because it names the
+// construct without a namespace. The registry does not pick one: it opens
+// neither, and a gate it lists is a gate it can answer for.
 func TestAccessGateAPackageShippingTwoDeclarationsOfOneNameOpensNeither(t *testing.T) {
 	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
 		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
@@ -839,6 +894,11 @@ func TestAccessGateEntryRecordsTheDomainOfItsBinding(t *testing.T) {
 	if got == nil || got.Domain != "desk" {
 		t.Fatalf("a construct bound to a desk concept is not desk': %+v", got)
 	}
+	// It belongs to desk, and the engine keeps it in deskmore, which
+	// is the name a call has to use to reach it.
+	if got.Namespace != "deskmore" || got.Call() != "query deskmore.deskBriefs" {
+		t.Fatalf("Namespace = %q, Call = %q; want deskmore and the call through it", got.Namespace, got.Call())
+	}
 	if AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"deskmore"}) != nil {
 		t.Error("the namespace of the file a construct is written in opened it")
 	}
@@ -904,6 +964,45 @@ func TestAccessGateSetForTestKeepsDomainsApart(t *testing.T) {
 	}
 	if n := len(AccessGateEntries()); n != 3 {
 		t.Errorf("the seam stored %d entries, want 3", n)
+	}
+}
+
+// Call is the exact text the handler renders before the arguments. It names
+// the construct as namespace.name, the engine's own form, because the engine
+// resolves a bare name cluster-wide and refuses an ambiguous one: a same-named
+// construct anywhere -- a sibling that is disabled, a core construct a later
+// release adds -- would otherwise break a product's gate.
+func TestAccessGateCallIsTheQualifiedNameOfTheConstruct(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		entry AccessGateEntry
+		want  string
+	}{
+		{"a query", AccessGateEntry{Kind: AccessKindQuery, Namespace: "desk", Construct: "deskBriefs"},
+			"query desk.deskBriefs"},
+		{"a mutation", AccessGateEntry{Kind: AccessKindMutation, Namespace: "desk", Construct: "deskNote"},
+			"desk.deskNote"},
+		{"a namespace that is not the domain", AccessGateEntry{Kind: AccessKindQuery, Domain: "desk", Namespace: "deskmore", Construct: "deskBriefs"},
+			"query deskmore.deskBriefs"},
+		{"an entry that has no namespace", AccessGateEntry{Kind: AccessKindQuery, Construct: "deskBriefs"},
+			"query deskBriefs"},
+	} {
+		if got := tc.entry.Call(); got != tc.want {
+			t.Errorf("%s: Call() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	// The text is built from the same two parts the function registry keys the
+	// construct by, so it names exactly the construct the entry was made from.
+	fn := gatedFunction("deskBriefs", "query", "client-desk", "dashboard")
+	fn.Origin = "unified:deskmore/constructs.memql"
+	entry, err := accessGateEntryFromFunction(fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registryKey := QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name)
+	if entry.Call() != AccessCallPrefix(entry.Kind)+registryKey {
+		t.Errorf("Call() = %q, but the registry keys the construct %q", entry.Call(), registryKey)
 	}
 }
 

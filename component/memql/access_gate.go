@@ -54,14 +54,24 @@ import (
 // and the only defence is that none is ever rendered that was not declared.
 // Args is that allow-list.
 //
-// Construct is the name as authored, and the engine resolves a bare name only
-// when one namespace declares it. Two gated constructs sharing a name under
-// one deployable in one domain are refused at load for exactly that reason. The
-// same name in two domains is a legal registry state -- two products -- and
-// each answers for its own domain, but a call for either only resolves while the
-// engine can tell the two namespaces apart. A package that ships BOTH domains
-// cannot tell them apart by that name either, so the lookup opens neither
-// rather than guess.
+// The call it renders is Call(): namespace.name, the engine's own qualified
+// form. The engine resolves a bare name CLUSTER-WIDE and refuses an ambiguous
+// one, so a bare call would let a same-named construct anywhere -- a sibling
+// that is disabled, a core construct a later release adds -- break a product's
+// gate, and two products' gates that share a name could not both be called at
+// all. A qualified call names the one construct the entry was made from.
+//
+// The qualified form has one limit, and the load enforces it. A nested
+// directory's namespace is a path ("desk/sub"), the call syntax reads the
+// slash as division, and no spelling reaches the construct, so a gated construct
+// lives in the top-level directory of its domain.
+//
+// What a short name still has to pick out is ONE entry, because a visitor's
+// request names a construct without a namespace. Two gated constructs sharing a
+// name under one deployable in one domain are refused at load for that reason.
+// The same name in two domains is a legal registry state -- two products -- and
+// each answers for its own domain; a package that ships BOTH domains cannot tell
+// them apart by that short name, so the lookup opens neither rather than guess.
 //
 // # The registry is rebuilt on every load
 //
@@ -114,8 +124,9 @@ type AccessGateEntry struct {
 	// belongs to and the gate whose codes reach it.
 	Deployable string
 	Gate       string
-	// Construct is the construct's name as authored, and the name the handler
-	// renders into the call. It comes from here and never from the request.
+	// Construct is the construct's name as authored: the short name a visitor's
+	// request is matched against. The call the handler renders is Call(), which
+	// comes from here and never from the request.
 	Construct string
 	// Kind is AccessKindQuery or AccessKindMutation, which decides the call's
 	// keyword (AccessCallPrefix).
@@ -126,6 +137,12 @@ type AccessGateEntry struct {
 	// from the file the construct is written in, as a shopper extension's
 	// declaring domain is.
 	Domain string
+	// Namespace is the namespace the engine resolves the construct in: the
+	// directory its file is in, which is what the function registry keys it by.
+	// It is the file's and not the concept's -- Domain is the concept's, and the
+	// two differ when a construct is written in one directory and bound to a
+	// concept of another domain -- and Call names the construct through it.
+	Namespace string
 	// Args are the argument names a caller may send, in declaration order: every
 	// name the construct declares except the reserved ones. The handler refuses
 	// any other key BEFORE it renders anything.
@@ -133,6 +150,20 @@ type AccessGateEntry struct {
 	// Stamped are the reserved names the construct declares, in declaration
 	// order: the names the handler stamps, last.
 	Stamped []string
+}
+
+// Call is the exact text the handler renders before the arguments: the call
+// keyword and the construct's qualified name, namespace.name, which is the form
+// the engine itself uses (`query platform.activeEmbedderBinding()`).
+//
+// QUALIFIED, because the engine resolves a bare name cluster-wide and refuses an
+// ambiguous one. A bare call would let a same-named construct anywhere -- a
+// sibling that is disabled, a core construct a later release adds -- break a
+// product's gate. The qualified form names the one construct this entry was made
+// from, by the registry's own key for it. An entry with no namespace, which only
+// a hand-built one has, renders bare.
+func (e AccessGateEntry) Call() string {
+	return AccessCallPrefix(e.Kind) + QualifyConstruct(e.Namespace, e.Construct)
 }
 
 func (e AccessGateEntry) clone() AccessGateEntry {
@@ -168,9 +199,9 @@ var (
 	accessGates  = map[accessGateSlot]AccessGateEntry{}
 )
 
-// domainSet is a package's domains as a set. A blank names no domain and must
-// never match an entry that lacks one, so it is dropped.
-func domainSet(domains []string) map[string]struct{} {
+// accessDomainSet is a package's domains as a set. A blank names no domain and
+// must never match an entry that lacks one, so it is dropped.
+func accessDomainSet(domains []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(domains))
 	for _, domain := range domains {
 		if domain != "" {
@@ -196,16 +227,16 @@ func domainSet(domains []string) map[string]struct{} {
 // declared one is a request for something nobody declared.
 //
 // A name two of the package's domains both declare under the deployable is a
-// miss too, whichever gate is asked for: the engine resolves a bare name only
-// when one namespace declares it, so the call would reach neither, and picking
-// one here would be a guess presented as an answer.
+// miss too, whichever gate is asked for: the request names the construct
+// without a namespace, so the name alone cannot say which of the two it means,
+// and picking one here would be a guess presented as an answer.
 func AccessGateFor(deployable, gate, construct string, domains []string) *AccessGateEntry {
 	accessGateMu.RLock()
 	defer accessGateMu.RUnlock()
 
 	var found AccessGateEntry
 	declared := 0
-	for domain := range domainSet(domains) {
+	for domain := range accessDomainSet(domains) {
 		if entry, ok := accessGates[accessGateSlot{domain, deployable, construct}]; ok {
 			found = entry
 			declared++
@@ -231,7 +262,7 @@ func AccessGateFor(deployable, gate, construct string, domains []string) *Access
 // reach.
 func AccessGatesFor(deployable string, domains []string) []AccessGateSummary {
 	out := []AccessGateSummary{}
-	inPackage := domainSet(domains)
+	inPackage := accessDomainSet(domains)
 	if deployable == "" || len(inPackage) == 0 {
 		return out
 	}
@@ -304,7 +335,9 @@ func AccessGateEntries() []AccessGateEntry {
 }
 
 // AccessCallPrefix is the keyword a gated construct's invocation carries, or ""
-// for a mutation -- `query deskBriefs(...)` versus `deskNote(...)`.
+// for a mutation -- `query desk.deskBriefs(...)` versus
+// `desk.deskNote(...)`. AccessGateEntry.Call joins it to the qualified
+// name; the handler renders that and not this on its own.
 //
 // HERE RATHER THAN IN THE HANDLER, because it is a property of the
 // declaration, exactly as ShopperCallPrefix is.

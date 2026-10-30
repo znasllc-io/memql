@@ -189,6 +189,26 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 			fn.Name, fn.BoundConcept)
 	}
 
+	// THE NAMESPACE IS WHERE THE ENGINE KEEPS THE CONSTRUCT, and a call names the
+	// construct through it (AccessGateEntry.Call): the engine resolves a bare
+	// name cluster-wide and refuses an ambiguous one, so the handler renders
+	// namespace.name. It is the file's directory and not the concept's domain;
+	// the two differ when a construct is written in one directory and bound to
+	// a concept of another.
+	//
+	// A NESTED DIRECTORY CANNOT BE NAMED. Its namespace is a path,
+	// "desk/sub", and the call syntax reads the slash as division, so
+	// `query desk/sub.name()` does not parse and no spelling reaches the
+	// construct. Refused here, where an author reads it, rather than left to
+	// fail as a visitor's 502.
+	namespace := ConstructNamespaceForOrigin(fn.Origin)
+	if strings.Contains(namespace, "/") {
+		return AccessGateEntry{}, fmt.Errorf("%q is declared in the nested directory %q, and a call names a "+
+			"construct as namespace.name, which cannot write a namespace with a \"/\" in it (the slash reads as "+
+			"division), so the gate could never call it. Move the construct to the top-level directory of its domain",
+			fn.Name, namespace)
+	}
+
 	// THE THREE THAT CONTRADICT A VISITOR'S CALL. It runs under the site
 	// owner's borrowed authority and never as internal origin (D6), and each of
 	// these is a statement about a different kind of caller.
@@ -218,6 +238,7 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 		Construct:  fn.Name,
 		Kind:       kind,
 		Domain:     domain,
+		Namespace:  namespace,
 	}
 	if fn.ArgsSchema == nil {
 		return entry, nil
@@ -378,7 +399,7 @@ func accessGateDuplicateFault(group []accessGateCandidate) error {
 		Kind:      describeFunctionKind(first.fn.FunctionKind),
 		File:      accessGateFile(first.fn.Origin),
 		Err: fmt.Errorf("@accessGate: %q is declared under the deployable %q in the DSL domain %q by %s. A "+
-			"visitor's call names its construct without a namespace, so one name under one deployable in one "+
+			"visitor's request names its construct without a namespace, so one name under one deployable in one "+
 			"domain has to reach one construct, and which of them ran would depend on load order, which "+
 			"nothing resolves. Rename one of them",
 			first.entry.Construct, first.entry.Deployable, first.entry.Domain, strings.Join(places, " and ")),
