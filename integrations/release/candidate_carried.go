@@ -47,6 +47,9 @@ const (
 
 // sameRelease: two attempts of one release share every identity a release
 // run key is built from, and the version and tag the release was cut at.
+// Retention holds a live candidate's attempts by the repository, commit and event
+// this requires (retentionHeldBackSQL, integrations/work), so a chain may not reach
+// beyond them without that hold changing too.
 func sameRelease(a, b carriedRun) bool {
 	return a.OwnerUserID == b.OwnerUserID && memql.BareShortId(a.PipelineID) == memql.BareShortId(b.PipelineID) &&
 		a.Repository == b.Repository && a.SHA == b.SHA && a.Mode == b.Mode && a.Event == b.Event &&
@@ -175,7 +178,9 @@ func decodeRow(row map[string]any, dst any) error {
 //     and package slice.
 //
 // Every read is the owner's, through the same fresh queries as the rest of
-// candidate evidence. An error names what failed; nothing is assumed.
+// candidate evidence. An error names what failed; nothing is assumed. The rows stay
+// readable for as long as the candidate is live, however long after it was cut,
+// because retention holds them for it (retentionHeldBackSQL, integrations/work).
 func (r candidateEvidenceReader) passedEarlier(ctx context.Context, owner, workRunID string, carried pl.ReleaseWorkReceipt) (candidateStepProof, error) {
 	workRow, err := r.oneRow(ctx, "workRunForOwner", map[string]any{"runId": workRunID})
 	if err != nil {

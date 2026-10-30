@@ -1151,7 +1151,8 @@ A work run with model-call or observation detail, a pending approval, a recent
 child, or a child with no owner or someone else's, is kept until that clears,
 and its goal with it. Pipeline and work journals also remain while their native
 artifact receipts still own bytes or await Library cleanup, and while a live release
-candidate [reused a step](release-candidates.md#reused-steps) from the run. Nothing is deleted without an archive the sweep has read
+candidate [reused a step](release-candidates.md#reused-steps) from the run or the run is
+an attempt of its release. Nothing is deleted without an archive the sweep has read
 back: a cluster with no archive container (`MEMQL_WORK_ARCHIVE_CONTAINER`, else
 `MEMQL_AZURE_BLOB_CONTAINER`) deletes nothing.
 

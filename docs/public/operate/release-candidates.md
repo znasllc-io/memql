@@ -305,17 +305,30 @@ back through its attempts stops at the attempt that reused it, and that attempt'
 start bounds the age. Every artifact in the candidate still comes from the run it
 names, and a reused step can name none.
 
-A live candidate keeps its sources' runs past
+A live candidate keeps two kinds of run past
 `MEMQL_PIPELINES_RUN_RETENTION_DAYS`, so it stays provable when an overlay is built
-from it later. With a shorter window, prepare the candidate before the source's rows
-leave, or preparation refuses it. A retired candidate holds nothing, and neither does
-an archived one: archival gives up its build inputs, so its own run's rows leave on
-their usual window.
+from it later:
 
-**A limit that is older than reuse:** a candidate prepared from a failed-only re-run
-also reads the release's earlier attempts on every read, and nothing holds those.
-Once they pass the retention window, a new overlay from that candidate is refused,
-naming the attempt it could not read.
+- **The runs it reused a step from.** With a shorter window, prepare the candidate
+  before the source's rows leave, or preparation refuses it.
+- **Every attempt of its release.** A candidate from a failed-only re-run names one
+  attempt, and coverage reads every earlier one on every read, including an attempt
+  refused before it opened any work. Retention keeps every release run at the repository
+  and commit of a component the candidate names, which can include another pipeline's
+  release of the same commit.
+
+A retired candidate holds nothing, and neither does an archived one: archival gives up
+its build inputs, so its own run's rows leave on their usual window.
+
+The attempts' hold reads only what a candidate's manifest has always named, so a
+candidate saved before it needs no change and is held from the next nightly pass. It
+cannot bring back rows that have already left. A candidate that lost an attempt that way
+is still refused, naming the attempt it could not read, so a new overlay needs a
+candidate from a later release.
+
+**A limit:** a run a candidate names that is not a release and has no retained artifact,
+such as a separate check suite on a push, has nothing to keep it. Once it passes the
+window, a new overlay from that candidate is refused with "release run is unavailable".
 
 **Rolling back to an engine from before tree hashes:**
 

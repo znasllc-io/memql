@@ -83,6 +83,7 @@ type carriedRunSpec struct {
 	noWorkTree            bool
 	startedAt, finishedAt time.Time
 	cancelRequested       bool
+	refused               bool // ended before it opened any work: a run row, and no journal
 	noWorkRun             bool
 }
 
@@ -172,6 +173,9 @@ func (f *carriedDB) run(spec carriedRunSpec) (string, string) {
 		args["finishedAt"] = spec.finishedAt.UTC().Format(time.RFC3339)
 	}
 	profileMutation(t, f.engine, "createPipelineRun", args)
+	if spec.refused {
+		return runID, ""
+	}
 	keys := make([]string, 0, len(spec.steps))
 	for key := range spec.steps {
 		keys = append(keys, key)
@@ -262,6 +266,12 @@ func (f *carriedDB) coverage(workRunID string) (candidateCoverage, error) {
 // coverageRecording is coverage of a candidate that records reused as the
 // provenance of each step key.
 func (f *carriedDB) coverageRecording(workRunID string, reused map[string]*pl.ReleaseReusedFrom) (candidateCoverage, error) {
+	f.t.Helper()
+	return f.reader.coverage(ownerCtx(), f.candidateRecording(workRunID, reused))
+}
+
+// candidateRecording is the candidate coverageRecording asks about.
+func (f *carriedDB) candidateRecording(workRunID string, reused map[string]*pl.ReleaseReusedFrom) pl.ReleaseCandidate {
 	t := f.t
 	t.Helper()
 	built, err := f.reader.read(ownerCtx(), workRunID, "build.image")
@@ -281,7 +291,7 @@ func (f *carriedDB) coverageRecording(workRunID string, reused map[string]*pl.Re
 		c.Evidence = append(c.Evidence, pl.ReleaseEvidence{Name: key, Component: "engine", WorkRunID: workRunID, StepKey: key, Attempt: receipt.Attempt,
 			ReceiptID: receipt.ReceiptID, ReceiptDigest: receipt.ReceiptDigest, DefinitionDigest: receipt.DefinitionDigest, ArtifactIntentIDs: receipt.ArtifactIntentIDs, ReusedFrom: reused[key]})
 	}
-	return f.reader.coverage(ownerCtx(), c)
+	return c
 }
 
 // executed is an artifact-free pass of test.full; image re-builds build.image.
