@@ -121,7 +121,7 @@ func (dr *runDriver) treeFingerprintOf(step pipelines.Step) string {
 		return ""
 	}
 	run := dr.run
-	run.Event, run.Mode, run.Version, run.InboundRequestID = "", "", "", ""
+	run.Event, run.Mode, run.Version, run.InboundRequestID, run.HeadBranch = "", "", "", "", ""
 	run.SHA = dr.run.TreeHash
 	step.DependsOn = nil
 	return dr.definitionForRun(step, run, evidenceScope)
