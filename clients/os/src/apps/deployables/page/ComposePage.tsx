@@ -48,6 +48,7 @@ import {
   appsToPlace,
   duplicateSource,
   dslOnlySelectionReady,
+  everyAppPlaced,
   hasInstallableDslChanges,
   movingStopFor,
   pathOf,
@@ -180,7 +181,7 @@ export interface ComposePageProps {
   packages?: readonly PackageRow[];
   packageFeed?: { state: string; error: string; retry: () => void };
   siteFeed?: { state: string; error: string };
-  placedSources?: readonly { packageId: string; name: string; siteId?: string }[];
+  placedSources?: readonly { packageId: string; name: string; siteId?: string; hostname?: string; status?: string }[];
   onOpenDeployable?: (siteId: string) => void;
 }
 
@@ -211,7 +212,7 @@ export function ComposePage(props: ComposePageProps) {
   // held so the bar answers the click immediately rather than a broadcast
   // later; neither inserts a row locally.
   const [activated, setActivated] = useState(false);
-  const [wentLive, setWentLive] = useState(false);
+  const [pressedGoLive, setWentLive] = useState(false);
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: WizardStep } | null>(null);
   const { access } = useSession();
@@ -376,6 +377,26 @@ export function ComposePage(props: ComposePageProps) {
   const appsKey = apps.join("|");
   const sourceName = parked ? parked.pkg.name : (source?.name ?? draft.name);
 
+  // NOTHING LEFT TO ASK (`everyAppPlaced`). A gate over apps that already have
+  // their sites used to open an Address step with no question on it and no
+  // Deploy on the bar, so the run could only be cancelled from here. The step
+  // reads as answered instead, with the addresses as its answer, and Deploy is
+  // offered at Review.
+  const everyPlaced = path === "package" && everyAppPlaced(report, placed, only ?? "");
+  const nothingToPlace = everyPlaced && phase === "awaiting_confirm";
+  const placedHere = (props.placedSources ?? []).filter(site => site.packageId === packageId && (!scoped || site.name === only));
+  const placedHosts = placedHere.map(site => site.hostname ?? "").filter(host => host !== "").join(", ");
+  const placedOutcomes: readonly DeployableOutcome[] = placedHere.map(site => ({
+    name: site.name, siteId: site.siteId ?? "", hostname: site.hostname ?? "", bundleRef: "", version: "", created: false,
+  }));
+  // A SITE THAT ALREADY SERVES HAS NO GO LIVE TO WAIT FOR. This flow always
+  // publishes to the serving version, so a live site is serving the new one the
+  // moment the run finishes, and "not live yet" would be untrue of it. A site
+  // that has never served still goes live as a step of its own, and a paused one
+  // stays out of this: it is not serving anything.
+  const alreadyServing = everyPlaced && placedHere.length > 0 && placedHere.every(site => site.status === "live");
+  const wentLive = pressedGoLive || (alreadyServing && phase === "published");
+
   // EVERY APP STARTS WITH A GENERATED NAME, and only a MISSING one:
   // re-seeding one they have edited would undo their typing every time the
   // report re-arrived on an event.
@@ -413,7 +434,11 @@ export function ComposePage(props: ComposePageProps) {
   // by hand, and it is why this could not be built until skip actually
   // reached the engine.
   const everyApp = useMemo(() => (report?.deployables ?? []).map((d) => d.name).filter((n) => n !== ""), [report]);
-  const placementApps = scoped ? everyApp : selectedSource ? [...new Set([...apps, ...placed])] : apps;
+  // The app a scoped flow is about sends an address only if it was asked for
+  // one. An app that already has its site is left to `withServingTargets`: an
+  // address entry here would carry `domains: []`, which the engine reads as
+  // opting this run out of the domains the manifest declares.
+  const placementApps = scoped ? everyApp.filter((app) => app !== only || apps.includes(app)) : selectedSource ? [...new Set([...apps, ...placed])] : apps;
   const placementAddresses = useMemo(() => {
     if (!scoped) {
       if (!selectedSource) return addresses;
@@ -452,7 +477,7 @@ export function ComposePage(props: ComposePageProps) {
     canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone) && (!selectedSource || placementsKnown) && (!selectedSource || selectedSource.declares.length === 0 || selectedSource.declares.some(app => !placed.includes(app.name)));
   const readyToRestoreSource = !fixedSource && !parked && !created.packageId && can.sources && sourceDone && placementsKnown &&
     selectedSource?.sourceRemoved === true && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name));
-  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : (placementsDone || dslOnly) && (!selectedSource || placementsKnown);
+  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : (placementsDone || dslOnly || nothingToPlace) && (!selectedSource || placementsKnown);
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
@@ -702,7 +727,7 @@ export function ComposePage(props: ComposePageProps) {
   const input: ComposeInput = {
     mode: "compose",
     only,
-    ...stopsFor(phase, path, sourceDone, report !== null, inactive || archivedSource),
+    ...stopsFor(phase, path, sourceDone, report !== null, inactive || archivedSource, nothingToPlace),
     probeReason: probeParked && probe.reply !== null ? probeNote(probe.reply) : "",
     report,
     problem: phase === "stopped" ? problemOf(run) : null,
@@ -712,6 +737,7 @@ export function ComposePage(props: ComposePageProps) {
       source: sourceAnswer(parked?.pkg ?? source ?? null, draft),
       ...(path === "handmade" ? { whatItIs: handMadeVerdict(draft) } : {}),
       ...(siteHostname === "" ? {} : { whereItLives: siteHostname }),
+      ...(everyPlaced && placedHosts !== "" ? { whereItLives: placedHosts } : {}),
       ...(phase === "published" && publishedHosts(outcomes).length > 0
         ? { whereItLives: publishedHosts(outcomes).join(", ") }
         : {}),
@@ -857,13 +883,14 @@ export function ComposePage(props: ComposePageProps) {
             accounts={accounts}
             canBindDomain={can.domains}
             clusterDomain={clusterDomain}
-            outcomes={outcomes}
+            outcomes={nothingToPlace ? placedOutcomes : outcomes}
             /* CHOSEN ONCE. The moment the flow has written something at these
                addresses -- a package run past its gate, or the hand-made
                draft site -- the fields become facts: editing a slug that
                `createSite` already claimed changes nothing, and a field that
-               accepts a value and does nothing is worse than no field. */
-            locked={placementsLocked}
+               accepts a value and does nothing is worse than no field. An app
+               that already has its site is the same fact, before the run. */
+            locked={placementsLocked || nothingToPlace}
             checks={checks}
             verdicts={verdicts}
           />
@@ -920,7 +947,7 @@ export function ComposePage(props: ComposePageProps) {
     : journeyStop === "sourceDetail" && readyToRestoreSource ? [{ label: "Restore source", tone: "primary", busy: repositoryRegistration.busy, onAct: () => void restoreSource() }]
     : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
-      : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" || phase === "composing" && path === "handmade")
+      : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" && !nothingToPlace || phase === "composing" && path === "handmade")
         ? [{ label: dslOnly ? "Review installation" : "Choose addresses", tone: "primary", onAct: () => chooseStop("whereItLives") }]
         : false
   ) || barActs;
@@ -1031,12 +1058,12 @@ export function ComposePage(props: ComposePageProps) {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   }));
   const detail = stepNeeds ? undefined : detailNeeds !== null ? detailNeeds.detail : finished && !held
-    ? completedMemqlOnly ? "No website was published." : finishedSentence(path, draft, outcomes, siteHostname, wentLive)
+    ? completedMemqlOnly ? "No website was published." : finishedSentence(path, draft, outcomes, siteHostname, wentLive, !alreadyServing)
     : inactive
       ? siteStateDetail("Inactive", "")
       : archivedSource
         ? "restore the source to deploy its apps again"
-        : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice, dslOnly);
+        : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice, dslOnly, alreadyServing);
 
   // Leave changes navigation only. Cancel targets this persisted run, and
   // remains separate from the request that started it and its busy state.
@@ -1249,6 +1276,7 @@ function composePhaseDetail(
   declared: boolean,
   choice = "-",
   dslOnly = false,
+  serving = false,
 ): string {
   // NOTHING IS CHOSEN YET, so the bar's word already says what is needed
   // ("Choose a method") and the three choices are on the page. What is worth
@@ -1256,6 +1284,7 @@ function composePhaseDetail(
   if (phase === "composing" && !declared && choice === "") return "nothing is deployed until you confirm";
   if (phase === "awaiting_confirm") {
     if (dslOnly) return "MemQL changes only; the services that use them will restart";
+    if (serving) return "visitors get this version as soon as it is deployed";
     if (apps.length > 1) {
       const going = apps.filter((app) => addresses[app]?.skip !== true).length;
       if (going === 0) return "pick at least one app to deploy";
@@ -1289,6 +1318,7 @@ function stopsFor(
   sourceDone: boolean,
   hasReport: boolean,
   held: boolean,
+  nothingToPlace = false,
 ): { answered: StopId[]; open: StopId | null } {
   // An inactive app, or one of an archived source, is a source answered and
   // nothing else asked: the bar's Activate (or the source's Restore) is the
@@ -1304,6 +1334,7 @@ function stopsFor(
     case "analyzing":
       return { answered: ["source"], open: null };
     case "awaiting_confirm":
+      if (nothingToPlace) return { answered: ["source", "whatItIs", "whereItLives"], open: null };
       return path === "handmade"
         ? { answered: ["source", "whatItIs", "whereItLives"], open: "live" }
         : { answered: ["source", "whatItIs"], open: "whereItLives" };
@@ -1435,6 +1466,7 @@ function finishedSentence(
   outcomes: readonly DeployableOutcome[],
   siteHostname: string,
   wentLive: boolean,
+  newToTheList = true,
 ): string {
   if (path === "handmade" && draft.choice === "ci") {
     return "The deployable is ready and its door is open. Nothing serves until your CI pushes. It is on the Deployables list now.";
@@ -1446,7 +1478,7 @@ function finishedSentence(
   // -- which is a real state, and a different one.
   const hosts = outcomes.length === 0 ? (siteHostname === "" ? [] : [siteHostname]) : publishedHosts(outcomes);
   if (hosts.length === 0) return "Nothing was put in place. It is on the Deployables list now.";
-  if (wentLive) return `${hosts.length === 1 ? "serving at" : "serving at"} ${hosts.join(", ")}. It is on the Deployables list now.`;
+  if (wentLive) return `${hosts.length === 1 ? "serving at" : "serving at"} ${hosts.join(", ")}.${newToTheList ? " It is on the Deployables list now." : ""}`;
   return `${hosts.length === 1 ? "in place at" : `${hosts.length} apps in place at`} ${hosts.join(", ")}, not live yet -- Go live starts serving`;
 }
 

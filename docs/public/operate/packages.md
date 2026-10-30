@@ -838,9 +838,13 @@ Off by default and off for every source that has never been switched.
 With it on, the update feeds start the run they have never been allowed to start
 -- requested by the source's **owner**, marked `automatic` on the row -- and the
 run **confirms itself only when the new analysis plans exactly what the last
-successful deploy planned**: the same apps by name, kind, path, build command and
-output directory, the same MemQL domains. Anything else parks at the confirm
-gate exactly as a person's deploy does, and the surface says why.
+successful deploy planned**: the same apps by name, display name, kind, path,
+build command, output directory, store bindings, deployment settings and external
+assets, the same MemQL domains. Anything else parks at the confirm gate exactly as
+a person's deploy does, and the surface says why. So a manifest that adds an asset
+waits for a person even though nothing about the build changed. When every app
+the run would publish already has its site, there is no address to choose and
+Deploy is on the Review step.
 
 The gate is not skipped. It is answered, and only by a plan somebody already
 said yes to. A changed build command is the case that matters most -- it is
