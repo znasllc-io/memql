@@ -44,6 +44,10 @@ func (a *App) transportBFF() {
 	a.mountEmailLinkEndpoints()
 	a.mountAzureEmailFeedback()
 	a.mountShopperSurface()
+	// A deployable's access surface (design record 2026-10-29, section 6). Bff-only for
+	// the shopper surface's reason: the edge forwards to this node, and the caller is a
+	// visitor with a code and no MemQL identity.
+	a.mountAccessSurface()
 	// Campaign open + click tracking (GET /t/o/{token}, GET /t/c/{token},
 	// memql#4823). Bff-only for the same reason the unsubscribe endpoint
 	// above is: the caller is the recipient's mail client or browser, and

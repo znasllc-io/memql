@@ -149,6 +149,22 @@ func HandlerAuthorizedPaths() []string {
 	// entry stops being true -- which is why TestFrontDoorPathsAreNotStale
 	// and the classification map are where that change would be caught.
 	paths = append(paths, ShopperSurfacePaths()...)
+	// POST /access/unlock, GET /access/session, POST /access/leave + POST /access/call
+	// -- a deployable's ACCESS SURFACE (design record 2026-10-29, section 6). The
+	// caller is a visitor with a code and no MemQL identity, so this cannot be an
+	// ordinary authenticated route.
+	//
+	// It qualifies under the rule above: with no credentials it fails CLOSED, and
+	// "credentials" here means the edge's stamp and then the session's cookie. A request
+	// with no stamp reaches no read and no write. A stamp is re-read UNDER the named
+	// owner and then COMPARED with the row's own owner, because the tier's account arm
+	// admits a forged owner who is a member. Past that, nothing runs without a session
+	// the store still honours, minted from a code an operator made.
+	//
+	// The same qualification as the entry above, and it is as real: the stamp is
+	// trusted because the route is classified servedButNotExternallyRouted, which is a
+	// property of the generated ingress rather than of this code.
+	paths = append(paths, AccessSurfacePaths()...)
 	paths = append(paths, UnsubscribePaths()...)
 	// GET /t/o/{token} + GET /t/c/{token} -- the campaign open- and
 	// click-tracking endpoints (memql#4823). Authorized by the HMAC-signed
@@ -276,7 +292,29 @@ func SelfAuthenticatedPaths() []string {
 	// GET is read-only and only a deliberate POST can change subscription state.
 	paths = append(paths, EmailLinkPaths()...)
 	paths = append(paths, AzureEmailFeedbackPaths()...)
+	paths = append(paths, AccessSelfAuthenticatedPaths()...)
 	return append(paths, ShopperSelfAuthenticatedPaths()...)
+}
+
+// AccessSelfAuthenticatedPaths returns the four exact routes of the access surface.
+//
+// WITHOUT THIS LIST THE SURFACE DOES NOT EXIST. The bff installs a verifier ahead of
+// its mux and a visitor carries no MemQL credential and never will
+// (app/auth_mode_edge.go), and HandlerAuthorizedPaths() is read only where no verifier
+// runs, so every request from a browser would be a 401 that names nothing. The bearer
+// verifier steps aside so AccessHandler can check the edge's stamp and the session
+// itself, which is the certification the third tier asks for.
+//
+// EXACT ROUTES, as ShopperSelfAuthenticatedPaths has, and no prefix: anything mounted
+// beneath /access/ later stays protected until somebody decides otherwise. They come
+// off the handler's own table, so the routes it answers and the routes exempted for it
+// cannot be two lists.
+func AccessSelfAuthenticatedPaths() []string {
+	var paths []string
+	for _, route := range accessRoutes {
+		paths = append(paths, pathsWithBase(route.path)...)
+	}
+	return paths
 }
 
 // ShopperSelfAuthenticatedPaths returns only the exact routes declared by packs.

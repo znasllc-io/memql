@@ -90,6 +90,25 @@ func TestHandlerExposesMetrics(t *testing.T) {
 	}
 }
 
+// The series is what section 10 of the access codes design points an operator at, and
+// a counter that is declared and not registered exports nothing and reads as nobody
+// having called. Its value helper is what the handler's test leans on, so this is what
+// says the two agree with the scrape.
+func TestSiteAccessRequestsAreExported(t *testing.T) {
+	before := SiteAccessRequestValue("unlock", "invalid")
+	SiteAccessRequest("unlock", "invalid")
+	if got := SiteAccessRequestValue("unlock", "invalid"); got != before+1 {
+		t.Fatalf("value = %v, want %v", got, before+1)
+	}
+
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	want := `memql_site_access_requests_total{op="unlock",result="invalid"}`
+	if !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("/metrics does not carry %s", want)
+	}
+}
+
 // readGauge reads a single-series gauge value out of the registry by name.
 func readGauge(t *testing.T, name string) float64 {
 	t.Helper()

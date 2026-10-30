@@ -292,6 +292,22 @@ var servedButNotExternallyRouted = map[string]declaration{
 		"Publishing an unauthenticated schema feed nobody dials is cost " +
 		"without benefit; route it the day an HTTP caller exists.",
 		server.ConceptAPIPaths},
+	"AccessSelfAuthenticatedPaths": {"The four exact routes of a deployable's access surface, " +
+		"where the bearer verifier steps aside so AccessHandler can check the edge's stamp and the " +
+		"session itself. They must stay edge-only just like AccessSurfacePaths; self-authentication " +
+		"does not permit a direct api.<domain> ingress.",
+		server.AccessSelfAuthenticatedPaths},
+	"AccessSurfacePaths": {"POST /access/unlock, GET /access/session, POST /access/leave and POST " +
+		"/access/call -- a deployable's access surface (design record 2026-10-29, section 6). The bff " +
+		"serves them and they are in HandlerAuthorizedPaths(), so this is the inverted pricing exactly: " +
+		"adding a rule here would not cost a 404, it would publish a route that decides who is let into " +
+		"a deployable at api.<domain>, with none of what the edge puts in front of it. The only intended " +
+		"caller is the EDGE, which reaches bff-http in-cluster having applied the Origin check, the body " +
+		"caps, both rate limits, and stamping the site and owner after stripping any copy the client " +
+		"sent. The handler still fails closed without the stamp, which is what earns its place in " +
+		"HandlerAuthorizedPaths(); this classification is what keeps that a defence in depth rather " +
+		"than the only control.",
+		server.AccessSurfacePaths},
 	"ShopperSelfAuthenticatedPaths": {"Exact pack-declared shopper routes use the handler's " +
 		"site/owner/store authorization. They must stay edge-only just like ShopperSurfacePaths; " +
 		"self-authentication does not permit a direct api.<domain> ingress.",
