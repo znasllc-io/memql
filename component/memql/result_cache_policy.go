@@ -53,6 +53,13 @@ const (
 //     must read live: a revoked session, a downgraded role, or a deleted
 //     credential cannot be served from a 60s-stale cache. This is the
 //     non-negotiable minimum the issue calls out.
+//   - "v1:platform:siteAccess" -- a hosted site's access codes and the
+//     sessions they open (design record 2026-10-29, D11). A code is checked
+//     against the database on every request so that one regenerated, removed
+//     or past its expiry stops opening the site at that instant; a cached
+//     read would keep it open for up to a minute, which makes "the moment the
+//     10 minutes pass" false. The prefix covers siteAccessCode and
+//     siteAccessSession.
 //
 // The denylist is a DEFAULT-CACHING guard only. It does NOT forbid an
 // explicit per-query @cache(ttl=N) -- if an author deliberately caches a
@@ -63,6 +70,7 @@ const (
 // erodes the cache hit ratio.
 var cacheDenylistedConceptPrefixes = []string{
 	"v1:identity:",
+	"v1:platform:siteAccess",
 }
 
 // isCacheDenylistedConcept reports whether a single concept id falls under

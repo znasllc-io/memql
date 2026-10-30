@@ -205,6 +205,16 @@ type Function struct {
 	// them (design record 2026-09-21).
 	ShopperFormExtension *ShopperFormExtensionDecl
 
+	// AccessGate is the gate a site's access code opens to reach this query or
+	// mutation -- `@accessGate(deployable="client-desk",
+	// gate="dashboard")`. Nil on every construct that declares none, which is
+	// nearly all of them (design record 2026-10-29, section 7).
+	//
+	// Whether the declaration is LEGAL is not known here: that depends on what
+	// else the construct carries and on every other gated construct, so the
+	// registration pass asks it once at boot (loadAccessGates).
+	AccessGate *AccessGateDecl
+
 	// Audit indicates all calls should be logged (mutations only)
 	Audit bool
 
@@ -280,6 +290,14 @@ func (f *Function) clone() *Function {
 		CacheTTL:             f.CacheTTL,
 		MCPPromoted:          f.MCPPromoted,
 		LatestMode:           f.LatestMode,
+		// LISTED BECAUSE THE REGISTRY HANDS OUT CLONES, as the notes above
+		// say: a gate that parsed, validated and then vanished from the
+		// clone would open nothing, and the only symptom would be a
+		// visitor's 404. Copied rather than shared, because this
+		// declaration decides which construct a code reaches and a holder of
+		// a clone must not be able to move it by writing through the
+		// pointer.
+		AccessGate: f.AccessGate.clone(),
 	}
 }
 

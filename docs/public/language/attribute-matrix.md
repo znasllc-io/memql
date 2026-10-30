@@ -25,6 +25,7 @@ One table per family of constructs, and one for the fields a construct declares.
 
 | Annotation | query | mutation | logic | automation |
 |---|---|---|---|---|
+| [`@accessGate`](#accessgate) | keywords | keywords |  |  |
 | [`@actor`](#actor) | flag | flag | flag | flag |
 | [`@addToSet`](#addtoset) |  | strings |  |  |
 | [`@appendFields`](#appendfields) |  | strings |  |  |
@@ -147,6 +148,7 @@ Every construct and every kind of field, with each annotation it accepts, how th
 
 | Annotation | Written as | Example |
 |---|---|---|
+| [`@accessGate`](#accessgate) | keyword arguments | `@accessGate(deployable="client-desk", gate="dashboard")` |
 | [`@actor`](#actor) | no arguments | `@actor` |
 | [`@cache`](#cache) | one number or keyword arguments | `@cache(300)` |
 | [`@description`](#description) | one string | `@description("List the caller's open tickets, newest first.")` |
@@ -164,6 +166,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 
 | Annotation | Written as | Example |
 |---|---|---|
+| [`@accessGate`](#accessgate) | keyword arguments | `@accessGate(deployable="client-desk", gate="dashboard")` |
 | [`@actor`](#actor) | no arguments | `@actor` |
 | [`@addToSet`](#addtoset) | one or more strings | `@addToSet("disabledDeployables")` |
 | [`@appendFields`](#appendfields) | one or more strings | `@appendFields("attachmentIds")` |
@@ -423,6 +426,21 @@ Written after a field's type in the body of a `builtin`.
 ## Annotations
 
 One entry per annotation, in alphabetical order: where it is accepted and how it is written there, its keys, and what it does. An annotation marked repeatable may be written more than once on one declaration; any other is refused the second time with `annotation_repeated`.
+
+### @accessGate
+
+| On | Written as | Example |
+|---|---|---|
+| [query](#query), [mutation](#mutation) | keyword arguments | `@accessGate(deployable="client-desk", gate="dashboard")` |
+
+`@accessGate` takes these keys, each written as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `deployable` | string | The deployable this gate belongs to, as its package names it: lowercase letters, digits and hyphens, e.g. "client-desk". |
+| `gate` | string | The part of that deployable's app an access code opens: lowercase letters, digits and hyphens, starting with a letter, e.g. "dashboard". |
+
+On a query or a mutation: a visitor holding a server-checked ACCESS CODE for this gate may call this construct from the deployable's own site -- @accessGate(deployable="client-desk", gate="dashboard"). The deployable is the name its package gives it and the gate is the part of that app a code opens; a code opens exactly one gate, so the annotation is how a product says which operations each part of its app may reach. It OPENS NO ENDPOINT: there is one engine-owned route family on the site's own origin, nothing runs without a live session minted from a code an operator created, and a deployable with no codes answers every call as it answers a stranger. The construct runs under the site owner's borrowed authority, never as internal origin, so it is refused beside @serverOnly (which bars the very call a visitor makes) and beside @requiresRank or @requiresCapability (a borrowed writer-role stand-in would make them mean something the author did not intend). Four argument names are RESERVED -- siteId, accessCodeId, accessGate and accessSubject -- and are stamped by the handler, last, when the construct declares them; each must be a string, and a caller that sends one is refused. They are how a product isolates data between codes: rows carry the stamped accessCodeId or match accessSubject, and the filter says so, because a gated construct that reads rows with neither opens them to everyone holding any code for that gate. Every other declared argument is the caller's, and is untrusted input. Written once, with both keys: deployable matches ^[a-z0-9][a-z0-9-]{0,62}$ and gate matches ^[a-z][a-z0-9-]{0,39}$, and two gated constructs may not share a name under one deployable. Format: @accessGate(deployable="client-desk", gate="dashboard").
 
 ### @actor
 

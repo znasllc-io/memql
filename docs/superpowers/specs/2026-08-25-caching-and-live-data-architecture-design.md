@@ -122,6 +122,7 @@ it is the one an author should ask before reaching for an annotation.
 | the fleet reads -- `myWorkersWithStatus`, `allWorkersWithStatus`, `workersForUser`, `routingPolicyForOwner` (`dsl/worker`) | 60s default | **keep** | Investigated as the leading `@nocache` candidate and cleared; see below. |
 | `liveAppSessionsForUser` (`dsl/worker`) | 60s default | **keep** | The concurrency-cap read. Every transition into or out of `starting`/`running` is a write to `v1:worker:appSession`, so the count the cap is checked against is evicted by the very events that change it. |
 | everything under `v1:identity:` | never cached | **keep the denylist** | Confirmed correct and confirmed load-bearing: `authSessionsForUser`'s `expiresAt>now` filter is itself a time-boundary read, so it is doubly right that this prefix never default-caches. |
+| everything under `v1:platform:siteAccess` (a site's access codes and the sessions they open; access codes design record, 2026-10-29, D11) | never cached | **add to the denylist** | A code's validity is a time-boundary read twice over: `expiresAt` against the clock, and a session ending at the earlier of that and 24 hours after it opened. A cached answer would keep a regenerated, removed or expired code opening the site for up to a minute, which makes the requirement that it stops at the instant false. The prefix covers `siteAccessCode` and `siteAccessSession`. |
 
 ### The class worth naming: invalidation-blind rows
 

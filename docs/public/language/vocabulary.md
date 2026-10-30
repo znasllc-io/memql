@@ -20,13 +20,13 @@ Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
 | Section | Entries |
 |---|---:|
 | [Constructs](#constructs) | 18 |
-| [Annotations](#annotations) | 80 |
+| [Annotations](#annotations) | 81 |
 | [Keywords](#keywords) | 37 |
 | [Operators](#operators) | 22 |
 | [Field types](#field-types) | 12 |
 | [Functions and methods](#functions-and-methods) | 46 |
 | [Builtins](#builtins) | 10 |
-| **Total** | **225** |
+| **Total** | **226** |
 
 ## Constructs
 
@@ -59,6 +59,7 @@ The `@name` directives a construct or a field carries. WHERE each is legal, and 
 
 | Name | Written | What it means |
 |---|---|---|
+| `@accessGate` | `@accessGate(deployable="client-desk", gate="dashboard")` | On a query or a mutation: a visitor holding a server-checked ACCESS CODE for this gate may call this construct from the deployable's own site -- @accessGate(deployable="client-desk", gate="dashboard"). The deployable is the name its package gives it and the gate is the part of that app a code opens; a code opens exactly one gate, so the annotation is how a product says which operations each part of its app may reach. It OPENS NO ENDPOINT: there is one engine-owned route family on the site's own origin, nothing runs without a live session minted from a code an operator created, and a deployable with no codes answers every call as it answers a stranger. The construct runs under the site owner's borrowed authority, never as internal origin, so it is refused beside @serverOnly (which bars the very call a visitor makes) and beside @requiresRank or @requiresCapability (a borrowed writer-role stand-in would make them mean something the author did not intend). Four argument names are RESERVED -- siteId, accessCodeId, accessGate and accessSubject -- and are stamped by the handler, last, when the construct declares them; each must be a string, and a caller that sends one is refused. They are how a product isolates data between codes: rows carry the stamped accessCodeId or match accessSubject, and the filter says so, because a gated construct that reads rows with neither opens them to everyone holding any code for that gate. Every other declared argument is the caller's, and is untrusted input. Written once, with both keys: deployable matches ^[a-z0-9][a-z0-9-]{0,62}$ and gate matches ^[a-z][a-z0-9-]{0,39}$, and two gated constructs may not share a name under one deployable. Format: @accessGate(deployable="client-desk", gate="dashboard"). Written as keyword arguments; legal on mutation and query. |
 | `@actor` | `@actor` | Declares that the body reads the authenticated actor (actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now). The actor-binding load rule refuses a body that reads actor.* without it (memql#2621). Written as no arguments; legal on automation, logic, mutation, query and shape. |
 | `@addToSet` | `@addToSet("disabledDeployables")` | On an update mutation: treat the named array-typed payload fields as SETS and UNION the written elements into the stored array -- deduped, existing order kept, new members appended in the order given. The membership half @appendFields is not: append is not deduped and has no counterpart that removes, so a toggle built on it duplicates on a double click. Pairs with @removeFromSet. Format: @addToSet("disabledDeployables"). See memql#4951. Both follow the same rules: - Only an update mutation may carry it; on an insert it is refused at load, because an insert has no stored set to change. - A field absent from the write is untouched: the stored array survives the read-merge. - Members compare by their rendered form, so `1` and `"1"` are one member. A stored number comes back from JSON as a float and its string spelling as a string, and keeping both would be a set that quietly grew. - A stored value that is not an array reads as empty, and a scalar written where an array is expected is one member, as with `@appendFields`. - A field named by two of `@appendFields`, `@addToSet` and `@removeFromSet` is refused at load: each rewrites the same key, so which one won would depend on the executor's order rather than on anything the mutation says. Written as one or more strings; legal on mutation. |
 | `@alias` | `@alias("memqlVersion")` | Additional name the builtin is registered under. Repeatable. Written as one string; legal on builtin. |

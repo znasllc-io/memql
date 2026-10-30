@@ -139,9 +139,9 @@ Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
                         | "@serverWritten" | "@type" | "@version" ) [ <annotation-args> ]
 <logic-annotation>    ::= ( "@actor" | "@description" | "@disabled" | "@eventField"
                         | "@requiresCapability" | "@requiresRank" ) [ <annotation-args> ]
-<mutation-annotation> ::= ( "@actor" | "@addToSet" | "@appendFields" | "@createOnly"
-                        | "@description" | "@disabled" | "@mcp" | "@mergeFields"
-                        | "@noUnset" | "@public" | "@removeFromSet"
+<mutation-annotation> ::= ( "@accessGate" | "@actor" | "@addToSet" | "@appendFields"
+                        | "@createOnly" | "@description" | "@disabled" | "@mcp"
+                        | "@mergeFields" | "@noUnset" | "@public" | "@removeFromSet"
                         | "@requiresCapability" | "@requiresRank" | "@scrubPii"
                         | "@serverOnly" | "@shopperFormExtension" ) [ <annotation-args> ]
 <policy-annotation>   ::= ( "@description" | "@fallback" | "@primary" ) [ <annotation-args> ]
@@ -149,9 +149,9 @@ Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
                         | "@templateFile" ) [ <annotation-args> ]
 <provider-annotation> ::= ( "@base" | "@default" | "@description" | "@disabled"
                         | "@extends" | "@modality" | "@model" | "@vendor" ) [ <annotation-args> ]
-<query-annotation>    ::= ( "@actor" | "@cache" | "@description" | "@disabled" | "@mcp"
-                        | "@public" | "@requiresCapability" | "@requiresRank"
-                        | "@serverOnly" | "@unbounded" ) [ <annotation-args> ]
+<query-annotation>    ::= ( "@accessGate" | "@actor" | "@cache" | "@description"
+                        | "@disabled" | "@mcp" | "@public" | "@requiresCapability"
+                        | "@requiresRank" | "@serverOnly" | "@unbounded" ) [ <annotation-args> ]
 <rule-annotation>     ::= ( "@description" | "@disabled" | "@exclude" | "@level"
                         | "@locked" | "@onUnavailable" | "@policy" | "@precedence"
                         | "@when" ) [ <annotation-args> ]

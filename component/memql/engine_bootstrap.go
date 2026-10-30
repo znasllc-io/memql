@@ -271,6 +271,22 @@ func (e *MemQLEngine) initFromTree(concepts concept.Registry, tree fs.FS, publis
 			"component", "memql.engine", "extensions", inert)
 	}
 
+	// Register every @accessGate (design record 2026-10-29): which queries and
+	// mutations a site's access code can reach. HERE for the reason the pass
+	// above runs here -- every construct is loaded and none of them has been
+	// used yet -- and rebuilt on every load, so a domain dropped from a bundle
+	// stops opening anything. A fault lands on the report, so strict boot
+	// refuses it and a package deploy's analysis reports it before anything is
+	// rolled. The refused construct is not in the registry: the break-glass
+	// that boots past a skip must never be what opens a gate.
+	for _, gateErr := range loadAccessGates(functionRegistry, publish) {
+		report.AddSkip(accessGateSkip(gateErr))
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("access gate does not register",
+				"component", "memql.engine", "error", gateErr)
+		}
+	}
+
 	e.tools = toolRegistry
 
 	// Boot self-check (memql#1156): a capability tool missing from the
