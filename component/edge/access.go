@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -215,8 +216,9 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 }
 
 // accessClientAddress is the address the access surface's budgets key on: the
-// RIGHT-MOST non-empty X-Forwarded-For entry across every header line, and the
-// peer when there is none.
+// RIGHT-MOST non-empty X-Forwarded-For entry across every header line, when that
+// entry is an IP address, in its canonical spelling; and the peer in every other
+// case.
 //
 // IT IS NOT THE SHOPPER'S RULE, and the difference is the point.
 // shopperClientAddress takes the leftmost entry and says plainly that a caller
@@ -228,20 +230,49 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 // can spend the site's sixty a minute until no real visitor can unlock. The
 // right-most entry is the one a caller cannot choose.
 //
+// ONLY THE RIGHT-MOST ENTRY IS CONSIDERED, and only if it is an address. A
+// caller who reaches the pod without the ingress writes that entry too, so it is
+// parsed (netip.ParseAddr) rather than trusted as text: a string of the caller's
+// choosing, as long as a header, would otherwise be a key held in the bucket map,
+// and an ip:port entry would be a new key on every connection. Anything that is
+// not an address -- a name, a port, brackets, an IPv6 zone, whose length is the
+// caller's -- is the peer. It is NOT passed over for the entry before it, since
+// walking left hands the choice back to the caller. The key is the canonical
+// spelling (lower case, compressed, an IPv4-mapped address as plain IPv4), so one
+// machine is one key and it is the same key the peer fallback gives it.
+//
 // EVERY HEADER LINE, last first, because a header may arrive as several lines
 // and an ingress may add its own rather than extend the caller's; reading only
 // the first would key on what the caller wrote. EMPTY ENTRIES ARE SKIPPED, so a
 // trailing comma or a blank line neither hides the entry before it nor becomes
-// an address of its own. It is scanned from the right without splitting, since
-// the header is the caller's and so is its length.
+// an address of its own.
 //
 // THE COST, stated rather than hidden: the right-most entry is the visitor only
 // when the ingress is the first thing to see them. A proxy added in front of the
 // ingress is the address the ingress records, and every visitor behind it then
 // shares one bucket -- ten unlocks a minute between them, and a share of the
-// site's sixty. With no entry at all the peer is the address, as the shopper's
+// site's sixty. An ingress that writes ip:port gets the peer, which is the same
+// shared bucket. With no usable entry the peer is the address, as the shopper's
 // is, which behind the ingress is the ingress itself.
 func accessClientAddress(r *http.Request) string {
+	if entry := accessRightMostForwarded(r); entry != "" {
+		if addr, err := netip.ParseAddr(entry); err == nil && addr.Zone() == "" {
+			return addr.Unmap().String()
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return host
+}
+
+// accessRightMostForwarded is the right-most non-empty entry of X-Forwarded-For
+// across every header line, or "" when there is none.
+//
+// It scans from the right without splitting, since the header is the caller's and
+// so is its length.
+func accessRightMostForwarded(r *http.Request) string {
 	lines := r.Header.Values("X-Forwarded-For")
 	for i := len(lines) - 1; i >= 0; i-- {
 		rest := lines[i]
@@ -256,11 +287,7 @@ func accessClientAddress(r *http.Request) string {
 			rest = rest[:comma]
 		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return strings.TrimSpace(r.RemoteAddr)
-	}
-	return host
+	return ""
 }
 
 // accessRetryAfter is the whole seconds one token takes to come back to a bucket

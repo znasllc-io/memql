@@ -843,6 +843,74 @@ func TestAccessRateLimitsUnlockPerAddressAndPerSite(t *testing.T) {
 		}
 	})
 
+	// WHAT IS NOT AN ADDRESS IS THE PEER. An entry that is new on every request and
+	// is not an address would otherwise be a key of its own each time: a name a
+	// caller who reaches the pod without the ingress makes up (and it can be as
+	// long as a header), or an ip:port whose port changes with every connection.
+	for _, tc := range []struct {
+		name  string
+		entry func(i int) string
+	}{
+		{"a name", func(i int) string { return fmt.Sprintf("not-an-address-%d", i) }},
+		// The entry before it is an address and rotates, and it must not be the key.
+		{"a name after a rotating address", func(i int) string { return fmt.Sprintf("10.66.0.%d, unknown", i) }},
+		{"an address and a port", func(i int) string { return fmt.Sprintf("203.0.113.9:%d", 40000+i) }},
+		{"a bracketed IPv6 address and a port", func(i int) string { return fmt.Sprintf("[2001:db8::1]:%d", 40000+i) }},
+		{"as long as a header", func(i int) string { return fmt.Sprintf("%s%d", strings.Repeat("a", 4096), i) }},
+		{"an address with a zone", func(i int) string { return fmt.Sprintf("fe80::1%%zone%d", i) }},
+	} {
+		t.Run("an entry that is "+tc.name+" buys no new budget", func(t *testing.T) {
+			up := newAccessUpstream(t)
+			h := accessHandler(t, accessSite(nil), up.server.URL)
+
+			for i := 0; i < 10; i++ {
+				if rec := serveAccess(h, accessUnlockVia(tc.entry(i))); rec.Code != http.StatusOK {
+					t.Fatalf("unlock %d = %d, want 200 inside the budget", i+1, rec.Code)
+				}
+			}
+			if rec := serveAccess(h, accessUnlockVia(tc.entry(10))); rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("unlock 11 with a fresh entry = %d, want 429: none of them is an address, so all are the peer", rec.Code)
+			}
+			// They were all the peer, so the peer is spent.
+			if rec := serveAccess(h, accessUnlock("")); rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("an unlock with no header = %d, want 429: the peer is the key that was spent", rec.Code)
+			}
+		})
+	}
+
+	// One machine is one key, however its address is spelled.
+	t.Run("spellings of one address are one address", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		spellings := []string{
+			"2001:db8::1", "2001:DB8:0:0:0:0:0:1", "2001:0db8:0000:0000:0000:0000:0000:0001",
+			"2001:db8::1", "2001:DB8::1",
+		}
+		for i := 0; i < 10; i++ {
+			if rec := serveAccess(h, accessUnlockVia(spellings[i%len(spellings)])); rec.Code != http.StatusOK {
+				t.Fatalf("unlock %d = %d, want 200 inside the budget", i+1, rec.Code)
+			}
+		}
+		if rec := serveAccess(h, accessUnlockVia("2001:0DB8:0::1")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("unlock 11 in another spelling = %d, want 429: it is the same address", rec.Code)
+		}
+
+		// An IPv4 address and its IPv4-mapped IPv6 form are the same machine too.
+		for i := 0; i < 10; i++ {
+			spelling := "203.0.113.9"
+			if i%2 == 1 {
+				spelling = "::ffff:203.0.113.9"
+			}
+			if rec := serveAccess(h, accessUnlockVia(spelling)); rec.Code != http.StatusOK {
+				t.Fatalf("mapped unlock %d = %d, want 200 inside the budget", i+1, rec.Code)
+			}
+		}
+		if rec := serveAccess(h, accessUnlockVia("::ffff:203.0.113.9")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("unlock 11 of the mapped address = %d, want 429", rec.Code)
+		}
+	})
+
 	t.Run("with no forwarded address the peer is the address", func(t *testing.T) {
 		up := newAccessUpstream(t)
 		h := accessHandler(t, accessSite(nil), up.server.URL)
@@ -1048,10 +1116,15 @@ func TestAccessRateLimitsOtherOperationsSeparately(t *testing.T) {
 }
 
 // THE ADDRESS THE BUDGETS KEY ON is the right-most non-empty X-Forwarded-For
-// entry across every header line, and the peer when there is none. This is the
-// function on its own, so the edges of the rule are each a row rather than a
-// request: spaces, empty entries, a header line with nothing in it, a second
-// line, and a peer with no port.
+// entry across every header line, when that entry is an IP address, in its
+// canonical spelling; and the peer in every other case. This is the function on
+// its own, so the edges of the rule are each a row rather than a request: spaces,
+// empty entries, a header line with nothing in it, a second line, a peer with no
+// port, and the entries that are not addresses.
+//
+// THE RIGHT-MOST ENTRY ALONE IS CONSIDERED. When it is not an address the key is
+// the peer, not the entry before it: walking left would hand the choice back to
+// the caller, which is the thing the rule exists to take away.
 func TestAccessClientAddress(t *testing.T) {
 	const peer = "198.51.100.7"
 	cases := []struct {
@@ -1078,6 +1151,28 @@ func TestAccessClientAddress(t *testing.T) {
 		{"a last line of separators hides nothing", peer + ":40000",
 			[]string{"203.0.113.9,", " , "}, "203.0.113.9"},
 		{"an empty first line is passed over", peer + ":40000", []string{"", "203.0.113.9"}, "203.0.113.9"},
+
+		// What counts as an address. Anything else is the peer, which bounds the
+		// key's bytes when a caller reaches the pod without the ingress, and keeps
+		// an entry that varies per connection from being a bucket per connection.
+		{"an ip:port entry is not an address", peer + ":40000", []string{"203.0.113.9:51234"}, peer},
+		{"a bracketed IPv6 with a port is not an address", peer + ":40000", []string{"[2001:db8::1]:443"}, peer},
+		{"a bracketed IPv6 is not an address", peer + ":40000", []string{"[2001:db8::1]"}, peer},
+		{"a name is not an address", peer + ":40000", []string{"unknown"}, peer},
+		{"an IPv4 octet with a leading zero is not an address", peer + ":40000", []string{"203.0.113.009"}, peer},
+		{"an entry the size of a header is not a key", peer + ":40000", []string{strings.Repeat("a", 64<<10)}, peer},
+		{"an IPv6 zone is not a key", peer + ":40000", []string{"fe80::1%" + strings.Repeat("z", 4096)}, peer},
+		{"the right-most entry alone decides", peer + ":40000", []string{"203.0.113.9, unknown"}, peer},
+		{"the right-most entry of the last line alone decides", peer + ":40000",
+			[]string{"203.0.113.9", "unknown"}, peer},
+		{"an address with a port after a good one is still not an address", peer + ":40000",
+			[]string{"203.0.113.9, 198.18.0.1:8080"}, peer},
+
+		// The key is the canonical spelling, so one machine is one key.
+		{"IPv6 is lower case and compressed", peer + ":40000", []string{"2001:DB8:0:0:0:0:0:1"}, "2001:db8::1"},
+		{"IPv6 spelled in full is the compressed one", peer + ":40000",
+			[]string{"2001:0db8:0000:0000:0000:0000:0000:0001"}, "2001:db8::1"},
+		{"an IPv4-mapped IPv6 address is the IPv4 address", peer + ":40000", []string{"::ffff:203.0.113.9"}, "203.0.113.9"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
