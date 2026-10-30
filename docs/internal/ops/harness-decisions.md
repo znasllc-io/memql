@@ -1142,6 +1142,59 @@ qualify a deployed integration or any consumer repository. Live runs and
 equivalent coverage must be verified separately. Required-check changes, merge,
 release publication and controller deployment remain separate decisions.
 
+## A queue controller outage costs a step time (2026-10-30)
+
+Kueue's webhooks on Jobs in `memql-pipelines` failed closed, so a restart of its one
+controller answered every Job write there with HTTP 500 `failed calling webhook`: for
+12.7 s after a pod delete, and 5.5 s past API readiness after a cluster restart. The
+runner reads any 5xx on a create as a create that may have landed, which is the right
+reading of a lost response, so a new step failed `pipeline_execution_uncertain` in under
+a second and the same attempt stayed failed. A replica with no isolation proof had its
+probe Job refused, and its step refused `pipeline_isolation_unenforced`. Running and
+suspended steps came through. The first installation with a queue holds 13 stranded
+creation claims since 17 October, up to three in one second. That is the shape this
+leaves, but other failures can leave it too, and they were not attributed.
+
+**`mjob.kb.io` and `vjob.kb.io` fail open** (`deploy/kueue/install/webhooks.yaml`). A
+queued Job needs neither hook to be safe: the runner creates it with `suspend: true`
+itself, so a Job a hook missed waits, and the controller makes its Workload and admits
+it in order when it returns. Only the workbench's Role can create a Job in that
+namespace, so nothing else can use the gap to start a labelled Job unsuspended. Every
+other hook stays `Fail`: no step writes those kinds, and a queue or flavor written during
+an outage would go unvalidated.
+
+Teaching the runner to wait was the alternative, since admission runs before storage and
+a 500 naming that webhook proves nothing was stored. About ten lines made new steps wait,
+but it reads an API server's sentence, and a takeover claim, a heartbeat and the probe
+are each Job writes that need the same. A second controller replica shortens a drain but
+not a cluster restart.
+
+**`imagePullPolicy: IfNotPresent`** (`deploy/kueue/install/controller.yaml`). A cluster
+restart makes a new pod, and upstream's `Always` then needs the registry: with none
+reachable the controller stayed in `ImagePullBackOff` and every new step was refused until
+the network returned. With this it was ready in 12 s, registry blocked. The kustomization
+pins the image by digest, so it is the same bytes.
+
+What survives: a Job created during an outage is an ordinary suspended Job with its
+Secret and claim, so a replica change adopts it as usual, and its execution timeout starts
+at admission. Its run's ceiling keeps counting. If the controller never returns, the step
+fails `pipeline_run_ceiling` at that ceiling; that is the stop condition.
+
+`TestAControllerOutageCannotRefuseAStepsJob` and
+`TestTheControllerRestartsWithoutItsRegistry` (`deploy/kueue/install`) hold the rendered
+values in CI, and `TestResourceQueueCreatesSuspendedJobAndReservesSidecars` holds the half
+that makes failing open safe. `TestNewStepsWaitThroughAControllerOutage` (opt-in) runs real
+runners against the real controller on both kinds of replica: it failed
+`pipeline_execution_uncertain` before this change and passes after it, with each step run
+once.
+
+Verified on a disposable k3d cluster at the pinned k3s and Kueue, with the operator applied
+directly. Not verified: AKS, reconciliation through Argo CD, a takeover by another replica
+during an outage, and a controller that accepts connections and never answers, which would
+cost each Job write up to the webhook timeout. An installation gets this when it moves its
+Kueue pin. Why a local cluster now wants this queue:
+`docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md`.
+
 ## A pipeline run says why it failed outside its steps (2026-10-27)
 
 A pipeline's workflow can fail after every step passed. On 2026-10-27 the

@@ -46,6 +46,9 @@ engine account. Kubernetes independently checks each budget change, including
 a policy change racing the UI. Saves compare the queue UID and resource version
 and are never automatically retried after an uncertain write.
 
+A controller outage does not stop a step being created: its Job waits, suspended,
+until the controller returns ([the operator's README](../../../kueue/README.md)).
+
 Lowering a budget does not stop running work. New work waits until reservations
 fit. `Hold` pauses admission without evicting admitted jobs. Unknown controller
 measurements are shown as unavailable rather than zero. A smaller budget can
