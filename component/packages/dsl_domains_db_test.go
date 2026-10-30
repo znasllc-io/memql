@@ -558,3 +558,205 @@ func TestARollbackRestoresTheDomainsFromTheReportItsDeploymentRecordedOnRealRows
 		t.Fatalf("after the rollback the package ships %v, want [acme realns] restored from the deployment's own report", list)
 	}
 }
+
+// NO CLIENT CAN WRITE A DEPLOYMENT ROW, SO A ROLLBACK CANNOT RETURN TO A FORGED
+// ONE (the automated security review of Task 9, third round).
+//
+// A rollback trusts the row it returns to: its dslVersion is the DSL it puts
+// back, and its report is where the list of domains comes from. Every one of the
+// pipeline's writers to the row is @serverOnly, and @serverOnly bars only the
+// NAMED call -- a raw insert() at an id creates a row, or read-merges onto a
+// run in flight, for any caller the package's tier admits. So a person could
+// create a succeeded run carrying whatever dslVersion and report they liked, or
+// rewrite one of their own runs still in flight into one, and a rollback would
+// restore it. The concept is @serverWritten for that reason: every write to it
+// needs the engine's own origin, which is what the pipeline writes under.
+//
+// What this pins is both halves. The clients -- a cluster owner, a developer who
+// does not own the package, a plain writer in its organization -- are refused
+// and nothing they sent is stored. And every writer the pipeline has, run
+// against the real engine as the store calls it, still lands, up to a rollback
+// to a real run restoring the real list.
+func TestNoClientCanWriteADeploymentRowSoARollbackCannotReturnToAForgedOne(t *testing.T) {
+	eng, db := dbEngine(t)
+	suffix := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	account := "dd-fd-acct-" + suffix
+	pkg := "v1:platform:package:dd-fd-" + suffix
+	run := func(tag string) string { return "dd-fd-" + tag + "-" + suffix }
+	// One forged run and one run in flight PER CLIENT, so a forgery that lands for
+	// one is not what refuses the next (a succeeded run takes no further writes).
+	//
+	// A package takes one live run at a time, so each client's run in flight is
+	// on a package of its own.
+	clients := []string{"cluster owner", "developer", "writer", "owner"}
+	runs := []string{run("real"), run("cancelled"), run("stranded")}
+	flightPkg := func(i int) string { return fmt.Sprintf("v1:platform:package:dd-fd-%d-%s", i, suffix) }
+	var packages []string
+	for i := range clients {
+		runs = append(runs, run(fmt.Sprintf("forged-%d", i)), run(fmt.Sprintf("flight-%d", i)))
+		packages = append(packages, flightPkg(i))
+	}
+	var ids []string
+	t.Cleanup(func() {
+		for _, id := range append(append(ids, pkg), packages...) {
+			_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+		}
+		for _, id := range runs {
+			for _, spelling := range []string{id, "v1:platform:packageDeployment:" + id} {
+				_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", spelling).Exec(context.Background())
+			}
+		}
+	})
+	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "dd fd")`, langparser.QuoteString(account))); err != nil {
+		t.Fatal(err)
+	}
+	group := "dd-fd-group-" + suffix
+	seedTieGroup(t, eng, group, account)
+	ids = append(ids, group)
+	person := func(tag string, role auth.Role) (string, context.Context) {
+		user := fmt.Sprintf("v1:identity:user:dd-fd-%s-%s", tag, suffix)
+		ids = append(ids, user)
+		seedTiePrincipal(t, eng, user, role)
+		if role == auth.RoleWriter {
+			seedTieMembership(t, eng, group, user)
+		}
+		return user, tieActorCtx(user, role)
+	}
+	owner, ownerCtx := person("owner", auth.RoleDeveloper)
+	developer, developerCtx := person("developer", auth.RoleDeveloper)
+	_, writerCtx := person("writer", auth.RoleWriter)
+	_, clusterOwnerCtx := person("cluster", auth.RoleOwner)
+	createTiedPackage(t, eng, ownerCtx, pkg, "dd-fd-"+suffix, account)
+	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
+
+	// The deployment as the person rolling back to it reads it.
+	readRun := func(ctx context.Context, id string) map[string]any {
+		t.Helper()
+		row, err := s.deploymentById(ctx, id)
+		if err != nil {
+			t.Fatalf("read deployment %s: %v", id, err)
+		}
+		return row
+	}
+	open := func(id string, on ...string) {
+		t.Helper()
+		packageId := pkg
+		if len(on) > 0 {
+			packageId = on[0]
+		}
+		if err := s.openDeployment(context.Background(), deploymentSeed{
+			DeploymentId: id, PackageId: packageId, OwnerUserId: owner, AccountId: account, RequestedBy: owner, StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("the pipeline could not open run %s: %v", id, err)
+		}
+	}
+
+	// ---- every writer the pipeline has, as the store calls it ----
+	tree := validPackage()
+	tree["dsl/pinneddir/concepts.memql"] = file(validConcepts)
+	tree["dsl/pinneddir/memql.toml"] = file(languageLine)
+	tree["dsl/pinneddir/namespace.pin"] = file("realns\n")
+	rep, err := Analyze(tree, Options{SourceVersion: "sha-1"})
+	if err != nil {
+		t.Fatalf("analysis: %v", err)
+	}
+	step := func(what string, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("the pipeline's own write (%s) was refused: %v", what, err)
+		}
+	}
+	// A run that goes the whole way.
+	open(run("real"))
+	step("advance", s.advance(ownerCtx, run("real"), StatusBuilding))
+	step("scope", s.recordScope(ownerCtx, run("real"), []string{"docs"}, []string{}))
+	step("report", s.recordReport(ownerCtx, run("real"), rep, ""))
+	step("heartbeat", s.heartbeatDeployment(ownerCtx, run("real"), time.Now()))
+	step("close", s.closeDeployment(ownerCtx, deploymentClose{
+		DeploymentId: run("real"), Status: StatusSucceeded,
+		DslVersion: "packages/acme/0123456789abcdef/ packages/pinneddir/0123456789abcdef/",
+		FinishedAt: time.Now(),
+	}))
+	// A run somebody stops, and one nobody is running any more.
+	open(run("cancelled"))
+	step("cancel request", s.requestDeploymentCancel(ownerCtx, run("cancelled")))
+	step("close as cancelled", s.closeDeployment(ownerCtx, deploymentClose{DeploymentId: run("cancelled"), Status: StatusCancelled, FinishedAt: time.Now()}))
+	open(run("stranded"))
+	step("abandon", s.abandonDeployment(ownerCtx, run("stranded"), StatusBuilding, &Problem{Code: CodeDeploymentCancelled, Message: "the node stopped"}, time.Now()))
+	// Runs still going, which is what a forger would rewrite.
+	for i := range clients {
+		createTiedPackage(t, eng, ownerCtx, flightPkg(i), fmt.Sprintf("dd-fd-%d-%s", i, suffix), account)
+		open(run(fmt.Sprintf("flight-%d", i)), flightPkg(i))
+		step("advance", s.advance(ownerCtx, run(fmt.Sprintf("flight-%d", i)), StatusBuilding))
+	}
+
+	// ---- the clients ----
+	forgedReport := `{"dslDomains":[{"domain":"forged","namespaces":["forged-raw"]}],"deployables":[],"problems":[],"ok":true}`
+	forged := func(packageId string) string {
+		return fmt.Sprintf(`{"packageId":%q,"status":"succeeded","sourceVersion":"forged","dslVersion":"packages/forged/0123456789abcdef/","report":%s}`,
+			packageId, forgedReport)
+	}
+	insert := func(ctx context.Context, id, payload string) error {
+		_, err := eng.Execute(ctx, fmt.Sprintf(`insert("v1:platform:packageDeployment", id=%s, payload=%s)`, langparser.QuoteString(id), payload))
+		return err
+	}
+	for i, who := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"a cluster owner", clusterOwnerCtx},
+		{"a developer who does not own the package", developerCtx},
+		{"a plain writer in its organization", writerCtx},
+		{"the package's owner", ownerCtx},
+	} {
+		forgedNew, inFlight := run(fmt.Sprintf("forged-%d", i)), run(fmt.Sprintf("flight-%d", i))
+		t.Run(who.name+" cannot create a succeeded run", func(t *testing.T) {
+			err := insert(who.ctx, forgedNew, forged(flightPkg(i)))
+			if err == nil || !strings.Contains(err.Error(), "@serverWritten requires internal origin") {
+				t.Fatalf("a raw insert of a succeeded run by %s was not refused by the concept: %v", who.name, err)
+			}
+			if row := readRun(developerCtx, forgedNew); row != nil {
+				t.Fatalf("the refused insert left a row: %v", row)
+			}
+		})
+		t.Run(who.name+" cannot rewrite a run in flight into a succeeded one", func(t *testing.T) {
+			err := insert(who.ctx, inFlight, forged(flightPkg(i)))
+			if err == nil || !strings.Contains(err.Error(), "@serverWritten requires internal origin") {
+				t.Fatalf("a raw rewrite of a run in flight by %s was not refused by the concept: %v", who.name, err)
+			}
+			row := readRun(developerCtx, inFlight)
+			if row == nil || rowString(row, "status") != StatusBuilding || rowString(row, "dslVersion") != "" {
+				t.Fatalf("the refused rewrite changed the run: %v", row)
+			}
+		})
+	}
+
+	// ---- and the rollback ----
+	stager := &fakeStager{active: map[string]string{"acme": "packages/acme/ffffffffffffffff/"}}
+	roller := &fakeRoller{}
+	publisher := &fakePublisher{}
+	deps := &Deps{Store: s, Stager: stager, Roller: roller, Publisher: publisher, Logger: discardLogger()}
+	rollbackTo := func(id string) error {
+		_, err := Rollback(developerCtx, deps, RollbackRequest{PackageId: pkg, DeploymentId: id, Actor: Actor{UserId: developer, MayDeployDsl: true}})
+		return err
+	}
+	// There is no forged run to return to.
+	if err := rollbackTo(run("forged-0")); RefusalCode(err) != CodeSourceUnreadable {
+		t.Fatalf("a rollback to a run no client could write: want %s, got %v", CodeSourceUnreadable, err)
+	}
+	if roller.rolls != 0 || stager.written != 0 || len(publisher.repointed) != 0 {
+		t.Fatalf("the refused rollback moved something: rolls %d, pointer writes %d, repointed %v", roller.rolls, stager.written, publisher.repointed)
+	}
+	// The run the pipeline wrote is still the one a rollback returns to, with
+	// the list its own report states.
+	if err := rollbackTo(run("real")); err != nil {
+		t.Fatalf("a rollback to a real run: %v", err)
+	}
+	after, err := s.packageById(ownerCtx, pkg)
+	if err != nil || after == nil {
+		t.Fatalf("read the package: %v (%v)", err, after)
+	}
+	if list, _ := dslDomainsOf(after); !reflect.DeepEqual(list, []string{"acme", "realns"}) {
+		t.Fatalf("after the rollback the package ships %v, want [acme realns] from the run the pipeline recorded", list)
+	}
+}

@@ -431,6 +431,13 @@ re-reads the snapshot it already stored (memql#4954, memql#4955). One row per
 attempt is what makes the timeline readable, and it is what makes a Retry's
 promise survive the click that acts on it.
 
+**Only the pipeline writes a run's row.** `packageDeployment` is
+`@serverWritten`, so a raw `insert` from any caller -- a cluster owner included
+-- is refused with `@serverWritten requires internal origin`. A rollback puts
+back the DSL a recorded run names and restores the list of domains its report
+states, so a run a client could write would be a rollback target a client could
+choose. Reading a run is unchanged: the tier still decides who sees it.
+
 ### If the connection closes after confirmation
 
 In `0.31.2`, background Analyze can finish after the browser disconnects, but

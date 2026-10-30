@@ -59,8 +59,8 @@ func validatePackageDslDomainsServerOnly(ctx context.Context, delta map[string]a
 			"written only by a package deploy or rollback, under internal origin, through "+
 			"recordPackageDslDomains: the bff opens an access code only for a gate whose domain is in "+
 			"it, so a caller who could name it would choose which gates answer for the package's sites. "+
-			"@serverOnly bars only that named call; a raw insert() or update() at the package's id "+
-			"read-merges its delta onto the stored row, so the delta is judged here. A write that does "+
-			"not name the field leaves it as it is",
+			"@serverOnly bars only that named call; a raw insert() at the package's id read-merges its "+
+			"delta onto the stored row, so the delta is judged here. A write that does not name the "+
+			"field leaves it as it is",
 		conceptPlatformPackage, packageDslDomainsField)
 }

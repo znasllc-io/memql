@@ -2465,9 +2465,10 @@ mutation package recordPackageDeployables {
 /// node still restarting onto new DSL has no registry entry for a gate that DSL adds, so the list
 /// arriving first opens nothing early. It writes only when the run changes what a visitor is served --
 /// a serving version published, or nothing published and DSL carried -- so a run that publishes only
-/// candidates leaves it alone. A rollback rewrites it from the deployment it returns to, after that
-/// deployment's DSL is back or found already live -- and not at all when it puts no DSL back, so the
-/// list never describes DSL that is not running.
+/// candidates leaves it alone. A rollback rewrites it from the report of the deployment it returns
+/// to -- a row only the pipeline can write, since the deployment concept is @serverWritten -- after
+/// that deployment's DSL is back or found already live, and not at all when it puts no DSL back, so
+/// the list never describes DSL that is not running.
 /// recordPackageDeployables is the analysis's write and is kept apart from this one for that reason:
 /// it records what the manifest DECLARES, which is true of a tree whether or not anyone deploys it.
 ///
