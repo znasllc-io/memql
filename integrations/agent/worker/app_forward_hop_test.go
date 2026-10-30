@@ -164,9 +164,10 @@ type machineHarness struct {
 	controls []*memqlv1.AppSessionControl
 	// answer is the structured result a session returns; hang leaves the
 	// session running until it is cancelled.
-	answer      string
-	hang        bool
-	quotaApp    string
+	answer string
+	hang   bool
+	// refusals are the outcomes an app reports before it does any work.
+	refusals    map[string]workerservice.AppSessionOutcome
 	streamUntil <-chan struct{}
 }
 
@@ -178,7 +179,7 @@ func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionR
 	m.mu.Lock()
 	m.starts = append(m.starts, req)
 	m.actors = append(m.actors, actor)
-	hang, answer, quotaApp, streamUntil := m.hang, m.answer, m.quotaApp, m.streamUntil
+	hang, answer, refusals, streamUntil := m.hang, m.answer, m.refusals, m.streamUntil
 	m.mu.Unlock()
 
 	var finish func(workerservice.AppSessionOutcome)
@@ -192,8 +193,8 @@ func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionR
 	})
 	if !hang {
 		go func() {
-			if req.App == quotaApp {
-				finish(workerservice.AppSessionOutcome{ExitCode: 1, Error: "You've hit your weekly limit", Usage: workerservice.AppSessionUsage{Known: true}})
+			if refusal, refused := refusals[req.App]; refused {
+				finish(refusal)
 				return
 			}
 			seq := uint64(1)
