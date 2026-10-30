@@ -1254,12 +1254,16 @@ func TestACodeOfASiteThatLostItsOwnerCanStillBeEnded(t *testing.T) {
 	w := newWorld(t, "ownerlost")
 	site := "ac-ownerless-" + w.suffix
 	w.siteRow(site, map[string]any{"ownerUserId": nil})
-	for name, caller := range map[string]context.Context{
-		"a cluster operator":                        actorContext(w.operator, auth.RoleOwner),
-		"a member of the deployable's organization": actorContext(w.member, auth.RoleWriter),
+	for _, tc := range []struct {
+		name, slug string
+		caller     context.Context
+	}{
+		{"a cluster operator", "operator", actorContext(w.operator, auth.RoleOwner)},
+		{"a member of the deployable's organization", "member", actorContext(w.member, auth.RoleWriter)},
 	} {
-		t.Run(name, func(t *testing.T) {
-			codeID := "ac-code-" + strings.ReplaceAll(name, " ", "-") + "-" + w.suffix
+		caller := tc.caller
+		t.Run(tc.name, func(t *testing.T) {
+			codeID := "ac-code-" + tc.slug + "-" + w.suffix
 			w.forgeCode(site, codeID, w.account, time.Now(), time.Now().Add(time.Hour))
 			before := w.row(codeID)
 
@@ -1446,8 +1450,8 @@ func persona(t *testing.T, id string, role auth.Role) context.Context {
 // store's own reads and updates run as the cluster acting, and a stream's forwarded
 // authority names the persona: left on that context it is an assertion the service actor
 // cannot honour, and every such call was refused, so a persona on their own site could not
-// list a code that had one. So it is blanked there, and that must not turn into a way
-// around the persona's limits: each thing a persona could not otherwise do is refused here.
+// even list its codes. So it is blanked there, and that must not turn into a way around the
+// persona's limits: each thing a persona could not otherwise do is refused here.
 func TestATestPersonaIsJudgedWhereTheActIsAuthorized(t *testing.T) {
 	w := newWorld(t, "persona")
 	validator := &personaValidator{}
