@@ -1029,7 +1029,7 @@ one check at a time.
 
 | Decision | Trigger | Why | Test |
 |---|---|---|---|
-| Codex every 5 minutes, Claude Code hourly | the cadence | a check's price sets its rate; an hour-stale "ready" costs one failed turn at zero tokens, which then corrects the answer | `TestTrackerChecksOnEachAppsOwnCadence` |
+| Codex every 5 minutes, Claude Code hourly while working and every 15 minutes otherwise | the cadence | a check's price sets its rate; an hour-stale "ready" costs one failed turn at zero tokens, which then corrects the answer | `TestTrackerChecksOnEachAppsOwnCadence` |
 | Skip while a session runs | the session brackets itself | the session will report what it finds | `TestTrackerSkipsAppsWithARunningSession` |
 | A real turn counts as a check | `TurnResult.Readiness` | a busy machine never pings | `TestTrackerReusesARealTurnInsteadOfPinging` |
 | At most 30 spending pings in 24 hours | a persisted log of checks that may have spent | the spend stays bounded whatever triggers a check | `TestTrackerStopsPingingAtTheCeiling` |
@@ -1039,12 +1039,24 @@ one check at a time.
 | Re-check on a login file change only while signed out | stat of the login files | a sign-in in a terminal tells nobody, and every Claude Code rewrites `~/.claude.json` | `TestTrackerRechecksASignedOutAppWhenItsLoginFileChanges`, `TestTrackerIgnoresLoginFileChangesWhileReady` |
 | No ping during metered overage | `isUsingOverage` | each ping would be paid for | `TestTrackerDoesNotPingThroughMeteredOverage` |
 
-**Fail open, deliberately.** `unknown` and absent stay selectable, because absent is
-every Cockpit that has not upgraded. A check that cannot tell replaces an earlier
-answer rather than leaving it standing, so a stale negative cannot keep a working app
-off a machine with nothing left to clear it. For the same reason a limit whose reset
-has passed reads `unknown` before any check confirms it. The cost of a wrong "unknown"
-is one failed turn, which the call moves past.
+**Only `ready` is admitted, with one exception.** Owner, 2026-10-30: "I shouldn't be
+able to reach an app that is not online, that meaning like does not, is not ready, is
+not connected." So a Cockpit that measures is taken at its word, and `unknown` is not
+routed to. **The exception is a Cockpit that predates the checks,** which sends no word:
+refusing it would take every current machine out of routing until it upgraded, which the
+same brief ruled out, so it keeps the file-based answer it always had and a call it
+refuses moves on. A Cockpit that measures always sends a word, `unknown` before its
+first check, so the exception cannot admit an app a machine could not vouch for. It can
+be deleted once no machine in a fleet reports silence. This replaced a first design
+that left `unknown` selectable too. Tests: `TestRunnableHonoursWhatTheMachineMeasured`,
+`TestAnAppThatCouldNotBeCheckedGetsNoDoor`, `TestTrackerReportsUnknownBeforeTheFirstCheck`.
+
+**One check that cannot tell does not change the answer.** With `unknown` refused, a
+ping timing out on a busy machine would take a working app away for 15 minutes. It keeps
+the last answer and looks again within a minute, and a second one in a row is the
+answer, because the app has then gone too long unchecked to vouch for. The checks then
+return to the ordinary cadence, since an app on an API key will never say more. Test:
+`TestTrackerKeepsItsAnswerThroughOneCheckThatCouldNotTell`.
 
 **Routing** (`component/worker/apps.go`). `Runnable` adds the measurement, so the
 `app:` label, doors, the session gate and the machine refusal are one answer. It takes
@@ -1056,10 +1068,21 @@ predating the field is right too. Tests: `TestRunnableHonoursWhatTheMachineMeasu
 `TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor`,
 `TestAnAppThatReportsNoReadinessKeepsItsDoor`.
 
-**A newer measurement ends an older refusal** (`appMeasuredReadyAt`). The block in the
-section above reads session rows, and buying a reset or signing in writes none. So a
-`ready` measured after the refusal clears it, and an older check or one that could not
-tell does not. Test: `TestAppRefusalDBClearsOnANewerMeasurement`.
+**On a machine that measures, only a check ends a refusal** (`appBlockedUntil`). Owner,
+2026-10-30: "we should keep a state and an interval checking for it until it becomes
+available, then it can be used again." The block in the section above reads session
+rows, and buying a reset or signing in writes none. So a `ready` measured after the
+refusal clears it, and neither an older check, nor one that could not tell, nor the
+reset passing does: any of those would send a person's real call to find out what the
+machine reports anyway. The state lives on the row and in `app-readiness.json`, and an
+exhausted app is asked every 15 minutes (Codex every 5) because a refused ask is free.
+Credits count: Codex's plan window stays at 100% after they are bought, so the read
+takes them first, and only spending being stopped outranks them. A Cockpit that predates
+the checks has only the clock of the section above, so a real call still finds out
+there, and a refusal moves on. Tests: `TestAppRefusalDBClearsOnANewerMeasurement`,
+`TestAppRefusalDBOutlivesItsResetUntilTheMachineSaysSo`,
+`TestTrackerRechecksAnExhaustedAppOnTheShortInterval`,
+`TestCodexLimitsReadCreditsAndSpendControl`.
 
 **The row moves for answers, not for checks.** A changed answer lands on the next beat
 as a routing change. A check that only moved its time rewrites the row at most every 30
@@ -1078,8 +1101,9 @@ written. A machine keeps the old unit until the installer runs again.
 
 **Limits.** The cadence is a judgement, and a login that lapses on an idle machine reads
 ready for up to an hour. Claude Code's refused-limit stream is shaped from the event's
-own vocabulary, not recorded, because no plan here was out of usage. Whether a LaunchAgent
-can refresh a Keychain login was not measured. The checks ran for real through
+own vocabulary, not recorded, because no plan here was out of usage. A Codex account
+holding credits was not observed, so what a turn does then is reasoned from the read's
+fields. Whether a LaunchAgent can refresh a Keychain login was not measured. The checks ran for real through
 `memql worker apps --check` on this Mac and, against fabricated expired logins, under both
 units in a Linux VM (systemd 255). They have not run on the fleet, and neither a real
 successful Claude Code turn on Linux nor the tracker's schedule on a real machine has been

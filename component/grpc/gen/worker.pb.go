@@ -1369,10 +1369,12 @@ type AppInfo struct {
 	Allowed bool `protobuf:"varint,5,opt,name=allowed,proto3" json:"allowed,omitempty"`
 	// readiness is what the machine last MEASURED about whether this app can take
 	// a call: "ready", "signed_out", "out_of_usage" or "unknown". A cockpit that
-	// measured nothing, or predates the field, sends nothing, and the engine reads
-	// that as unknown: selectable, because refusing on silence would take every
-	// machine that has not upgraded out of routing. A cockpit reporting signed_out
-	// also clears signed_in, so an engine that predates this field is right too.
+	// predates the field sends nothing, and that alone stays selectable, because
+	// refusing it would take every machine that has not upgraded out of routing. A
+	// cockpit that measures ALWAYS sends a word, "unknown" before its first check, and
+	// routing admits only "ready" from it (component/worker AppInfo.Runnable). A
+	// cockpit reporting signed_out also clears signed_in, so an engine that predates
+	// this field is right too.
 	Readiness string `protobuf:"bytes,6,opt,name=readiness,proto3" json:"readiness,omitempty"`
 	// readiness_checked_at is when that was measured, by a check or a real turn.
 	ReadinessCheckedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=readiness_checked_at,json=readinessCheckedAt,proto3" json:"readiness_checked_at,omitempty"`
@@ -1380,8 +1382,11 @@ type AppInfo struct {
 	// app did not say. The machine owns the clock: it re-checks then and reports
 	// the change, so the engine compares nothing against this. It is for a person.
 	UsageResetsAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=usage_resets_at,json=usageResetsAt,proto3" json:"usage_resets_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// readiness_detail is the machine's sentence for an answer that is not ready, for a
+	// person wondering why an app is not being used. It decides nothing.
+	ReadinessDetail string `protobuf:"bytes,9,opt,name=readiness_detail,json=readinessDetail,proto3" json:"readiness_detail,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AppInfo) Reset() {
@@ -1468,6 +1473,13 @@ func (x *AppInfo) GetUsageResetsAt() *timestamppb.Timestamp {
 		return x.UsageResetsAt
 	}
 	return nil
+}
+
+func (x *AppInfo) GetReadinessDetail() string {
+	if x != nil {
+		return x.ReadinessDetail
+	}
+	return ""
 }
 
 type PlatformInfo struct {
@@ -6244,7 +6256,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x11structured_result\x18\x03 \x01(\bR\x10structuredResult\x12\x1d\n" +
 	"\n" +
 	"follow_ups\x18\x04 \x01(\bR\tfollowUps\x12%\n" +
-	"\x0einference_only\x18\x05 \x01(\bR\rinferenceOnly\"\xbe\x02\n" +
+	"\x0einference_only\x18\x05 \x01(\bR\rinferenceOnly\"\xe9\x02\n" +
 	"\aAppInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +
@@ -6253,7 +6265,8 @@ const file_worker_proto_rawDesc = "" +
 	"\aallowed\x18\x05 \x01(\bR\aallowed\x12\x1c\n" +
 	"\treadiness\x18\x06 \x01(\tR\treadiness\x12L\n" +
 	"\x14readiness_checked_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x12readinessCheckedAt\x12B\n" +
-	"\x0fusage_resets_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rusageResetsAt\"N\n" +
+	"\x0fusage_resets_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rusageResetsAt\x12)\n" +
+	"\x10readiness_detail\x18\t \x01(\tR\x0freadinessDetail\"N\n" +
 	"\fPlatformInfo\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x02 \x01(\tR\x04arch\x12\x1a\n" +

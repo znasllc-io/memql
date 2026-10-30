@@ -379,10 +379,99 @@ func TestTrackerDoesNotPingThroughMeteredOverage(t *testing.T) {
 	}
 }
 
-func TestTrackerReportsNothingBeforeTheFirstCheck(t *testing.T) {
+// A Cockpit that measures always sends a word. Silence is how the engine recognises
+// a Cockpit that predates the checks, and that one stays selectable, so silence here
+// would let an app nobody has checked take a real call.
+func TestTrackerReportsUnknownBeforeTheFirstCheck(t *testing.T) {
 	f := newTrackerFixture(t)
-	if _, ok := f.Report(IDClaudeCode); ok {
-		t.Fatal("no check has run, so there is nothing to report")
+	report, ok := f.Report(IDClaudeCode)
+	if !ok || report.State != harness.ReadinessUnknown || !report.CheckedAt.IsZero() || report.Detail == "" {
+		t.Fatalf("got %+v, %v", report, ok)
+	}
+}
+
+// Selection refuses anything but ready, so one check that timed out on a busy machine
+// must not take a working app away. It gets one quick second look.
+func TestTrackerKeepsItsAnswerThroughOneCheckThatCouldNotTell(t *testing.T) {
+	f := newTrackerFixture(t)
+	f.allowed[IDCodex] = false
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessReady, Spent: true}
+	f.tick()
+	checked := f.now
+
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessUnknown, Detail: "the check timed out"}
+	f.advance(time.Hour)
+	if f.log.count(IDClaudeCode) != 2 {
+		t.Fatalf("the hourly check did not run: %d", f.log.count(IDClaudeCode))
+	}
+	report, _ := f.Report(IDClaudeCode)
+	if report.State != harness.ReadinessReady || !report.CheckedAt.Equal(checked) {
+		t.Fatalf("one inconclusive check changed the answer: %+v", report)
+	}
+
+	// The second look comes within a minute, and a second one that cannot tell is an
+	// answer: the app has gone unchecked for too long to vouch for.
+	f.advance(time.Minute)
+	if f.log.count(IDClaudeCode) != 3 {
+		t.Fatalf("no second look after a minute: %d", f.log.count(IDClaudeCode))
+	}
+	report, _ = f.Report(IDClaudeCode)
+	if report.State != harness.ReadinessUnknown || report.Detail != "the check timed out" {
+		t.Fatalf("got %+v", report)
+	}
+
+	// From there it is the ordinary cadence, not a check a minute for an app that
+	// cannot be measured, such as one on an API key.
+	f.advance(10 * time.Minute)
+	if f.log.count(IDClaudeCode) != 3 {
+		t.Fatalf("kept looking every minute: %d", f.log.count(IDClaudeCode))
+	}
+	f.advance(5 * time.Minute)
+	if f.log.count(IDClaudeCode) != 4 {
+		t.Fatalf("stopped looking: %d", f.log.count(IDClaudeCode))
+	}
+
+	// A good answer settles it, and the next hiccup gets its own second look.
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessReady, Spent: true}
+	f.advance(15 * time.Minute)
+	if report, _ := f.Report(IDClaudeCode); report.State != harness.ReadinessReady {
+		t.Fatalf("got %+v", report)
+	}
+}
+
+// The owner: "we should keep a state and an interval checking for it until it becomes
+// available." A refused ping spends nothing, so an exhausted app is looked at more
+// often than a working one, and buying credits does not wait for an hour.
+func TestTrackerRechecksAnExhaustedAppOnTheShortInterval(t *testing.T) {
+	f := newTrackerFixture(t)
+	f.allowed[IDCodex] = false
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessOutOfUsage, ResetsAt: f.now.Add(72 * time.Hour)}
+	f.tick()
+	f.advance(14 * time.Minute)
+	if f.log.count(IDClaudeCode) != 1 {
+		t.Fatalf("checked early: %d", f.log.count(IDClaudeCode))
+	}
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessReady, Spent: true}
+	f.advance(time.Minute)
+	report, _ := f.Report(IDClaudeCode)
+	if f.log.count(IDClaudeCode) != 2 || report.State != harness.ReadinessReady {
+		t.Fatalf("a bought reset waited for the reset it replaced: %d %+v", f.log.count(IDClaudeCode), report)
+	}
+}
+
+func TestTrackerExplainsWhyAnAnswerIsNotReady(t *testing.T) {
+	f := newTrackerFixture(t)
+	reset := f.now.Add(10 * time.Minute)
+	f.log.answers[IDClaudeCode] = harness.ReadinessSignal{State: harness.ReadinessOutOfUsage, ResetsAt: reset, Detail: "the plan is out of usage"}
+	f.tick()
+	if report, _ := f.Report(IDClaudeCode); report.Detail != "the plan is out of usage" {
+		t.Fatalf("got %+v", report)
+	}
+	// A limit that has passed reads unknown until a check confirms it, and says so.
+	f.SessionStarted(IDClaudeCode)
+	f.now = reset.Add(time.Second)
+	if report, _ := f.Report(IDClaudeCode); report.State != harness.ReadinessUnknown || report.Detail == "" {
+		t.Fatalf("got %+v", report)
 	}
 }
 

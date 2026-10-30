@@ -381,16 +381,29 @@ func TestEmbeddingCandidatesAreTheOnlineEmbeddersInOrder(t *testing.T) {
 	}
 }
 
-func TestAnAppOutOfUsageIsConfiguredAndNotLive(t *testing.T) {
+func TestAnAppThatCannotAnswerIsConfiguredAndNotLive(t *testing.T) {
+	for _, readiness := range []string{"out_of_usage", "unknown"} {
+		lanes := InferenceLanes(InferenceInput{Now: fixedNow, Registrations: []RegistrationFacts{{
+			ConnectedNodeId: "agent-1", LastSeenAt: fixedNow,
+			Apps: []RegistrationApp{{Id: "codex", Allowed: true, SignedIn: true, Readiness: readiness}},
+		}}})
+		lane := laneNamed(t, lanes, InferenceLaneApp)
+		if !lane.Complete {
+			t.Fatalf("%s: the app is still set up, and setup must not ask for it again", readiness)
+		}
+		if lane.Slots[0].Present {
+			t.Fatalf("%s: nothing can answer through it, so the door must not read as live", readiness)
+		}
+	}
+}
+
+// A Cockpit that predates the checks says nothing, and stays in routing.
+func TestAnAppWithNoMeasurementStaysLive(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{Now: fixedNow, Registrations: []RegistrationFacts{{
 		ConnectedNodeId: "agent-1", LastSeenAt: fixedNow,
-		Apps: []RegistrationApp{{Id: "codex", Allowed: true, SignedIn: true, Readiness: "out_of_usage"}},
+		Apps: []RegistrationApp{{Id: "codex", Allowed: true, SignedIn: true}},
 	}}})
-	lane := laneNamed(t, lanes, InferenceLaneApp)
-	if !lane.Complete {
-		t.Fatal("a plan out of usage is still set up, and setup must not ask for it again")
-	}
-	if lane.Slots[0].Present {
-		t.Fatal("nothing can answer through it, so the door must not read as live")
+	if lane := laneNamed(t, lanes, InferenceLaneApp); !lane.Slots[0].Present {
+		t.Fatal("silence took the door away from a machine that has not upgraded")
 	}
 }

@@ -197,26 +197,32 @@ func (e *MemQLEngine) CheckMachineAppRouting(ctx context.Context, registration, 
 		return fmt.Errorf("this machine's app settings do not allow %s", app)
 	}
 	if appMeasuredNotReady(row, app) {
-		return fmt.Errorf("%s on this machine is signed out or out of usage", app)
+		return fmt.Errorf("%s on this machine is not ready", app)
 	}
 	return nil
 }
 
 // appMeasuredNotReady reads what the machine last measured about an app off its
-// registration row, and only that: absent or unknown is not a refusal, because that
-// is what every Cockpit predating the checks reports.
+// registration row: any word but "ready". No word at all is not a refusal, because
+// that is what a Cockpit predating the checks sends, and refusing it would take every
+// current machine out of routing (worker.AppInfo.Runnable has the rule and its end).
 //
 // THE ROW IS THE ONE ANSWER ACROSS REPLICAS. Selection runs on a replica that may
 // hold no stream for this machine, and the doors it was handed may be a beat older
 // than this read, so it asks here rather than trusting them. Regression test:
 // TestAppSelectionDBReadsReadinessOffTheRow.
 func appMeasuredNotReady(row map[string]any, app string) bool {
-	entry := appRowEntry(row, app)
-	switch mapString(entry, "readiness") {
-	case "signed_out", "out_of_usage":
-		return true
+	switch mapString(appRowEntry(row, app), "readiness") {
+	case "", "ready":
+		return false
 	}
-	return false
+	return true
+}
+
+// appMeasures reports whether this machine measures this app at all. A refusal on
+// one that does waits for its next check rather than for the clock (appBlockedUntil).
+func appMeasures(row map[string]any, app string) bool {
+	return mapString(appRowEntry(row, app), "readiness") != ""
 }
 
 // appMeasuredReadyAt is when the machine last measured the app working, zero when
@@ -264,7 +270,7 @@ func (e *MemQLEngine) FilterAppDoors(ctx context.Context, doors []AppDoor) ([]Ap
 				continue
 			}
 			settings, _ := row["appRouting"].(map[string]any)
-			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent, appMeasuredReadyAt(row, door.AppId))
+			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
 			if err != nil {
 				return nil, err
 			}
@@ -340,7 +346,7 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 					continue
 				}
 				settings, _ := row["appRouting"].(map[string]any)
-				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent, appMeasuredReadyAt(row, door.AppId))
+				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
 				if err != nil {
 					return AppSelection{}, err
 				}

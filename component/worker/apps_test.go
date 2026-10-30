@@ -361,9 +361,12 @@ func TestKnownAppIdsDeriveFromTheRoutingVocabulary(t *testing.T) {
 func TestRunnableHonoursWhatTheMachineMeasured(t *testing.T) {
 	base := AppInfo{Id: AppIdClaudeCode, Allowed: true, SignedIn: true}
 	for readiness, want := range map[string]bool{
-		"":                     true, // a Cockpit that predates the field must stay in routing
-		AppReadinessUnknown:    true,
-		AppReadinessReady:      true,
+		// A Cockpit that predates the field cannot say. Refusing it would take every
+		// current machine out of routing, so it stays, as the one exception.
+		"":                true,
+		AppReadinessReady: true,
+		// A Cockpit that measures and has no answer has not said the app can answer.
+		AppReadinessUnknown:    false,
 		AppReadinessSignedOut:  false,
 		AppReadinessOutOfUsage: false,
 	} {
@@ -375,6 +378,17 @@ func TestRunnableHonoursWhatTheMachineMeasured(t *testing.T) {
 		if _, labelled := AppLabels([]AppInfo{app})[AppLabelKey(AppIdClaudeCode)]; labelled != want {
 			t.Errorf("readiness %q: label present = %v, want %v", readiness, labelled, want)
 		}
+	}
+}
+
+func TestNotRunnableReasonSaysWhatTheMachineSaid(t *testing.T) {
+	app := AppInfo{Id: AppIdCodex, Allowed: true, SignedIn: true, Readiness: AppReadinessUnknown, ReadinessDetail: "the app-server could not start"}
+	if got := app.NotRunnableReason(); !strings.Contains(got, "could not be checked") || !strings.Contains(got, "the app-server could not start") {
+		t.Fatalf("got %q", got)
+	}
+	app.ReadinessDetail = ""
+	if got := app.NotRunnableReason(); !strings.Contains(got, "could not be checked") {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -428,6 +442,11 @@ func TestAppsEqualIgnoresACheckInsideTheRowRefresh(t *testing.T) {
 	}
 	if appsEqual([]AppInfo{base}, changed(func(a *AppInfo) { a.UsageResetsAt = at(50) })) {
 		t.Fatal("a changed reset must land now")
+	}
+	// A detail can carry a temporary path, and a row version for each is a write
+	// nothing reads. It lands with the next answer or the next refresh.
+	if !appsEqual([]AppInfo{base}, changed(func(a *AppInfo) { a.ReadinessDetail = "a different sentence" })) {
+		t.Fatal("a reworded detail rewrote the row")
 	}
 }
 

@@ -983,6 +983,9 @@ func appsAsMaps(apps []AppInfo) []map[string]any {
 		if a.UsageResetsAt != "" {
 			row["usageResetsAt"] = a.UsageResetsAt
 		}
+		if a.ReadinessDetail != "" {
+			row["readinessDetail"] = a.ReadinessDetail
+		}
 		out = append(out, row)
 	}
 	return out

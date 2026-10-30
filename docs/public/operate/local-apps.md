@@ -94,12 +94,19 @@ really answer, and reports `readiness` on the same entry:
 | `ready` | signed in with usage left, as of the last check or real turn | yes |
 | `signed_out` | no login, or an expired one. `signedIn` is false too | no |
 | `out_of_usage` | signed in with no usage left. `usageResetsAt` says until when, if the app did | no |
-| `unknown` | the check could not tell | yes |
-| absent | a Cockpit that has not measured, or predates the checks | yes |
+| `unknown` | the machine has not checked yet, or its check could not tell. `readinessDetail` says why | no |
+| absent | a Cockpit that predates the checks | yes, as the one exception |
 
-**Silence stays selectable.** Reading it as "not ready" would take every machine out
-of routing until its Cockpit upgraded, and a wrong "unknown" costs one failed turn,
-which the call moves past.
+**Selection admits only `ready`.** An app that is offline, signed out, out of usage or
+unchecked cannot be reached, and Ask's Apps route reads as not ready when no app can
+answer.
+
+**A Cockpit that predates the checks is the one exception.** It sends no word at all,
+and refusing it would take every current machine out of routing until it upgraded. So
+it keeps the file-based answer it always had, reads as *Not checked* in Fleet, and a
+call it refuses moves on to the next app. A Cockpit that measures always sends a word,
+`unknown` before its first check, so this cannot admit an app a machine could not vouch
+for. The exception can be removed once no machine in a fleet reports silence.
 
 The answer lives on the registration row, so a replica without the machine's stream
 reads the same thing, and selection reads the row again rather than trusting a door
@@ -107,11 +114,19 @@ built a moment earlier. The engine compares no clock: the machine re-checks at a
 reset and reports the change.
 
 Codex's check spends nothing and runs every 5 minutes. Claude Code has no free way to
-ask, so it is pinged hourly when idle for about 600 tokens, at most 30 times a day per
-machine, and never with anything that could bill API credit. A running session
-suppresses the check, and every real turn counts as one, so a busy machine never
-pings. [The machine side](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/local-apps.md)
+ask, so it is pinged hourly while it works, for about 600 tokens, at most 30 times a day
+per machine, and never with anything that could bill API credit. An app that is not
+working is asked every 15 minutes, because a refused ping is free. A running session
+suppresses the check, and every real turn counts as one, so a busy machine never pings.
+One check that cannot tell keeps the last answer and is repeated within a minute, so a
+timeout on a busy machine does not take a working app away.
+[The machine side](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/local-apps.md)
 has the details.
+
+**An exhausted app stays out until its machine says otherwise.** The state is durable:
+the machine's check keeps asking, and its reset time and credits decide when the app
+comes back. A reset passing does not send anybody's real call to find out, and neither
+does a timer. Buying credits or a reset shows within that app's check interval.
 
 Signing into an app takes effect on the **next heartbeat**, not the next
 reconnect: an inventory change is applied to the live registry immediately and
@@ -131,8 +146,12 @@ caused effects, so it is returned rather than run again.
 
 | What the app said | What the rest of the call skips | How long that machine's app is skipped |
 |---|---|---|
-| Out of usage | that app on every machine, because a limit belongs to the account | until the reset the app names, or 15 minutes if it names none |
-| Signed out or expired | that app on that machine, because a login belongs to one machine | 15 minutes, then the next call tries again; a successful session clears it sooner |
+| Out of usage | that app on every machine, because a limit belongs to the account | until a check on that machine says it can answer |
+| Signed out or expired | that app on that machine, because a login belongs to one machine | until a check on that machine says it can answer |
+
+A Cockpit that predates the checks has only the clock: a limit lasts until the reset the
+app names, or 15 minutes if it names none, and a login lasts 15 minutes. The next call
+after that is what finds out, and a refusal then moves on to the next app.
 
 A call pinned to one app stays on that app and may only move to another machine.
 When nothing is left, the call fails with the app's own sentence.

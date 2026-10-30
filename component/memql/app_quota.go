@@ -75,6 +75,8 @@ func AppQuotaReset(message string, reportedAt time.Time) time.Time {
 // appRefusalUntil is when a failed session's refusal stops blocking its app on
 // its machine, or zero for a row that is not a refusal.
 //
+// This is the clock a machine that measures nothing is left with (appBlockedUntil).
+//
 // A LOGIN HAS NO RESET, so it takes the bounded recheck: a sign-in in a terminal
 // writes no row here, and the next call after the window is what finds it. A
 // reset the sentence names that has ALREADY PASSED takes the recheck too, because
@@ -98,9 +100,25 @@ func appRefusalUntil(row map[string]any) time.Time {
 	return end.Add(appRefusalRecheck)
 }
 
+// appBlockedUntilMeasured is the end of a refusal on a machine that measures: no
+// time at all, because its next check says when it is over (appBlockedUntil).
+var appBlockedUntilMeasured = time.Date(9999, time.January, 1, 0, 0, 0, 0, time.UTC)
+
 // Latest quota/success evidence is read independently of the rolling usage
 // window. Hundreds of other calls, restarts and replica changes cannot erase it.
-func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, settings map[string]any, recent []map[string]any, measuredReadyAt time.Time) (time.Time, error) {
+//
+// ON A MACHINE THAT MEASURES, THE CHECK ENDS A REFUSAL AND THE CLOCK DOES NOT. The
+// owner: "we should keep a state and an interval checking for it until it becomes
+// available, then it can be used again." A reset passing, or the fifteen-minute
+// recheck, would otherwise send a person's real call to find out, for an answer the
+// machine reports anyway. So the block holds until a "ready" measured after the
+// refusal. If those checks stop, the app stays out, and a machine that went quiet is
+// offline anyway. Tests: TestAppRefusalDBOutlivesItsResetUntilTheMachineSaysSo,
+// TestAppRefusalDBClearsOnANewerMeasurement.
+//
+// A Cockpit that predates the checks has only the clock (appRefusalUntil), so on it a
+// real call still finds out, and a refusal then moves on to the next app.
+func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, settings map[string]any, recent []map[string]any, measures bool, measuredReadyAt time.Time) (time.Time, error) {
 	call, _ := parser.RenderCall("appAvailabilityEvidence", map[string]any{"workerId": registration, "app": app})
 	res, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
@@ -132,7 +150,11 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 	if !measuredReadyAt.IsZero() && !measuredReadyAt.Before(latestAt) {
 		return time.Time{}, nil
 	}
-	return appRefusalUntil(latest), nil
+	until := appRefusalUntil(latest)
+	if measures && !until.IsZero() {
+		return appBlockedUntilMeasured, nil
+	}
+	return until, nil
 }
 
 func (e *MemQLEngine) evaluateFleetRetryAppAvailability(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {

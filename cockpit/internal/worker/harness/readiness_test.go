@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -346,6 +347,46 @@ func TestCodexCheckReadsTheAccountAndItsLimits(t *testing.T) {
 				t.Fatalf("a check opened a thread: %s", wire)
 			}
 		})
+	}
+}
+
+// The owner: "The probe's reset time and credits drive when it comes back." The plan's
+// window stays exhausted after credits are bought, and ordinaryUsageAllowed stays false
+// because this is no longer ordinary usage, so the credits have to be read.
+func TestCodexLimitsReadCreditsAndSpendControl(t *testing.T) {
+	const window = `"primary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":1793775123},"secondary":null`
+	read := func(ordinary, rest string) codexRateLimitsRead {
+		var limits codexRateLimitsRead
+		raw := `{"ordinaryUsageAllowed":` + ordinary + `,"rateLimits":{` + window + `,` + rest + `}}`
+		if err := json.Unmarshal([]byte(raw), &limits); err != nil {
+			t.Fatal(err)
+		}
+		return limits
+	}
+	for name, tt := range map[string]struct {
+		limits codexRateLimitsRead
+		want   string
+	}{
+		"no credits, as measured on an exhausted plan": {
+			read("false", `"credits":{"hasCredits":false,"unlimited":false,"balance":"0"},"spendControlReached":false,"rateLimitReachedType":"rate_limit_reached"`),
+			ReadinessOutOfUsage,
+		},
+		"credits bought after the plan ran out": {
+			read("false", `"credits":{"hasCredits":true,"unlimited":false,"balance":"12"},"spendControlReached":false,"rateLimitReachedType":"rate_limit_reached"`),
+			ReadinessReady,
+		},
+		"unlimited credits": {
+			read("false", `"credits":{"hasCredits":false,"unlimited":true,"balance":"0"},"spendControlReached":false`),
+			ReadinessReady,
+		},
+		"credits with spending stopped": {
+			read("false", `"credits":{"hasCredits":true,"unlimited":false,"balance":"12"},"spendControlReached":true`),
+			ReadinessOutOfUsage,
+		},
+	} {
+		if got := tt.limits.signal().State; got != tt.want {
+			t.Errorf("%s: got %s, want %s", name, got, tt.want)
+		}
 	}
 }
 

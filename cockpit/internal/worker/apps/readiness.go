@@ -18,10 +18,21 @@ import (
 //
 // THE CADENCE IS THE COST. Codex's read spends nothing, so it runs every five
 // minutes and buying a reset shows within that. A Claude Code ping spends about 600
-// tokens of the owner's plan, so it runs hourly on an idle machine, at most about
-// 14,400 tokens a day. Hourly is enough because an hour-stale "ready" costs little:
-// the first real call on a lapsed login fails in milliseconds for no tokens, the
-// engine moves it to the next app, and this tracker learns from that turn at once.
+// tokens of the owner's plan, so it runs hourly on an idle, working machine, at most
+// about 14,400 tokens a day. Hourly is enough because an hour-stale "ready" costs
+// little: the first real call on a lapsed login fails in milliseconds for no tokens,
+// the engine moves it to the next app, and this tracker learns from that turn at once.
+// An app that is NOT working is asked every 15 minutes, because a refused ping is free
+// and the owner wants it back as soon as it can answer.
+//
+// THE ENGINE ADMITS ONLY "READY" FROM A MACHINE THAT MEASURES (worker.AppInfo.Runnable),
+// which sets two rules here. Report always answers with a word, "unknown" before the
+// first check, because silence is how the engine recognises a Cockpit that predates
+// the checks, and that one stays selectable. And one check that cannot tell does not
+// change the answer: a ping that timed out on a busy machine would otherwise take a
+// working app away for 15 minutes. It gets a second look within a minute, and a second
+// one that cannot tell is the answer, because the app has then gone too long unchecked
+// to vouch for.
 //
 // A REAL TURN BEATS A PING. Every turn reports what it found (TurnResult.Readiness)
 // and counts as a check, and no check runs while that app has a session, so a busy
@@ -41,8 +52,8 @@ const (
 	// ClaudePingInterval is how often an idle, working Claude Code is pinged.
 	ClaudePingInterval = time.Hour
 	// ClaudeRecheckInterval is how often a Claude Code that is not known to be
-	// working is asked again. Not spending is what lets it be shorter: a signed-out
-	// app answers from `auth status`, and a refused ping is free.
+	// working is asked again, out of usage included. Not spending is what lets it be
+	// shorter: a signed-out app answers from `auth status`, and a refused ping is free.
 	ClaudeRecheckInterval = 15 * time.Minute
 	// MaxClaudePingsPerDay is the ceiling on pings that may have spent, in any
 	// rolling 24 hours. Above the hourly cadence so sign-ins and restarts fit
@@ -63,6 +74,8 @@ const (
 	// readinessCheckTimeout is the watchdog on one check, covering every process
 	// it runs. A ping took under 3 seconds when measured.
 	readinessCheckTimeout = 90 * time.Second
+	// readinessSecondLook is how soon a check that could not tell is repeated.
+	readinessSecondLook = time.Minute
 )
 
 // ReadinessReport is what this machine last measured about one app.
@@ -71,10 +84,12 @@ type ReadinessReport struct {
 	CheckedAt time.Time
 	// ResetsAt is when the limit behind out_of_usage resets, zero when unknown.
 	ResetsAt time.Time
+	// Detail is the machine's sentence for an answer that is not ready.
+	Detail string
 }
 
-// ReadinessSource answers for Detect what has been measured about an app. ok is
-// false when nothing has been, which is what a Cockpit with no tracker reports.
+// ReadinessSource answers for Detect what has been measured about an app. ok is false
+// only with no tracker at all (ReadinessTracker.Report always answers).
 type ReadinessSource interface {
 	Report(id string) (ReadinessReport, bool)
 }
@@ -109,6 +124,7 @@ type readinessEntry struct {
 	CheckedAt      time.Time   `json:"checkedAt,omitempty"`
 	ResetsAt       time.Time   `json:"resetsAt,omitempty"`
 	MeteredOverage bool        `json:"meteredOverage,omitempty"`
+	Detail         string      `json:"detail,omitempty"`
 	Spends         []time.Time `json:"spends,omitempty"`
 
 	sessions     int
@@ -116,6 +132,8 @@ type readinessEntry struct {
 	stamp        string
 	loginChanged bool
 	ceilingAt    time.Time
+	// secondLook is when a check that could not tell is repeated, zero otherwise.
+	secondLook time.Time
 }
 
 // ReadinessTracker keeps the answers and runs the checks, one at a time, for the
@@ -306,6 +324,9 @@ func (t *ReadinessTracker) due(id string) bool {
 	if e.CheckedAt.IsZero() {
 		return true
 	}
+	if !e.secondLook.IsZero() && !now.Before(e.secondLook) {
+		return true
+	}
 	// A sign-in in a terminal writes no row and tells nobody. It does change this
 	// file, and for a signed-out app that is worth asking about at once. Not for a
 	// working one: every interactive Claude Code rewrites ~/.claude.json, and a ping
@@ -325,7 +346,7 @@ func nextCheck(id string, e *readinessEntry) time.Time {
 	interval := CodexCheckInterval
 	if id == IDClaudeCode {
 		interval = ClaudeRecheckInterval
-		if e.State == harness.ReadinessReady || e.State == harness.ReadinessOutOfUsage {
+		if e.State == harness.ReadinessReady {
 			interval = ClaudePingInterval
 		}
 	}
@@ -364,6 +385,18 @@ func (t *ReadinessTracker) record(id string, signal harness.ReadinessSignal) {
 	if signal.Spent {
 		e.Spends = append(e.Spends, now)
 	}
+	// The first check that cannot tell after a real answer keeps that answer and asks
+	// again soon. Anything else is an answer, and a second "cannot tell" in a row falls
+	// back to the ordinary cadence, because an app on an API key will never say more.
+	if signal.State == harness.ReadinessUnknown && e.State != harness.ReadinessUnknown && e.secondLook.IsZero() {
+		e.secondLook = now.Add(readinessSecondLook)
+		if e.State != "" {
+			t.save()
+			return
+		}
+	} else {
+		e.secondLook = time.Time{}
+	}
 	t.apply(id, e, signal, now)
 }
 
@@ -379,6 +412,7 @@ func (t *ReadinessTracker) Observe(id string, signal harness.ReadinessSignal) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.entry(id)
+	e.secondLook = time.Time{}
 	t.apply(id, e, signal, t.now())
 	if id == IDCodex && signal.State == harness.ReadinessOutOfUsage && signal.ResetsAt.IsZero() {
 		e.recheck = true
@@ -394,6 +428,7 @@ func (t *ReadinessTracker) apply(id string, e *readinessEntry, signal harness.Re
 	e.CheckedAt = now
 	e.ResetsAt = signal.ResetsAt
 	e.MeteredOverage = signal.MeteredOverage
+	e.Detail = signal.Detail
 	t.save()
 }
 
@@ -447,13 +482,17 @@ func (t *ReadinessTracker) Report(id string) (ReadinessReport, bool) {
 	defer t.mu.Unlock()
 	e, ok := t.entries[id]
 	if !ok || e.State == "" {
-		return ReadinessReport{}, false
+		return ReadinessReport{State: harness.ReadinessUnknown, Detail: "not checked yet"}, true
 	}
-	report := ReadinessReport{State: e.State, CheckedAt: e.CheckedAt, ResetsAt: e.ResetsAt}
+	report := ReadinessReport{State: e.State, CheckedAt: e.CheckedAt, ResetsAt: e.ResetsAt, Detail: e.Detail}
+	if e.State == harness.ReadinessReady {
+		report.Detail = ""
+	}
 	if e.State != harness.ReadinessOutOfUsage {
 		report.ResetsAt = time.Time{}
 	} else if !e.ResetsAt.IsZero() && !t.now().Before(e.ResetsAt) {
 		report.State, report.ResetsAt = harness.ReadinessUnknown, time.Time{}
+		report.Detail = "its limit has reset, and the next check confirms it"
 	}
 	return report, true
 }
@@ -480,7 +519,7 @@ func (t *ReadinessTracker) load() {
 			continue
 		}
 		if now.Sub(e.CheckedAt) > readinessMaxAge {
-			e.State, e.CheckedAt, e.ResetsAt, e.MeteredOverage = "", time.Time{}, time.Time{}, false
+			e.State, e.CheckedAt, e.ResetsAt, e.MeteredOverage, e.Detail = "", time.Time{}, time.Time{}, false, ""
 		}
 		t.entries[id] = e
 	}

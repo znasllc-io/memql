@@ -94,9 +94,10 @@ On `Register` and on **every** heartbeat:
 | `signed_in` | the app's own state files (see below) |
 | `subscription` | what the app REPORTS; `unknown` when it said nothing |
 | `allowed` | `policy.yaml apps.homes.<this cluster>.allow` — each cluster is told its own |
-| `readiness` | what this machine last **measured**: `ready`, `signed_out`, `out_of_usage` or `unknown` (see below); nothing until the first check |
+| `readiness` | what this machine last **measured**: `ready`, `signed_out`, `out_of_usage` or `unknown` (see below), `unknown` until the first check. A Cockpit older than this sends nothing |
 | `readiness_checked_at` | when that was measured, by a check or by a real turn |
 | `usage_resets_at` | when the limit behind `out_of_usage` resets, when the app said |
+| `readiness_detail` | this machine's sentence for an answer that is not ready, shown in Fleet |
 
 `Register` also carries one **app descriptor** per app — the harness this
 machine drives it through and whether that harness can return a structured
@@ -144,7 +145,7 @@ file to read.
 |---|---|---|
 | The question | `claude auth status` (no network, no tokens), then a ping: `claude -p ok` on the cheapest model with no tools, settings, MCP servers or saved session | `codex app-server`: `account/read`, then `account/rateLimits/read`. No thread and no turn |
 | What it spends | about 600 tokens of your plan when it answers; nothing when refused | nothing |
-| How often | hourly when working or out of usage, every 15 minutes otherwise | every 5 minutes |
+| How often | hourly when working, every 15 minutes otherwise | every 5 minutes |
 | Bound | at most 30 pings that may have spent in any 24 hours, kept across restarts | none needed |
 
 - **A busy machine never pings.** No check runs while that app has a session, and
@@ -161,12 +162,20 @@ file to read.
   `~/.codex/auth.json`) triggers a check on the next look, every 30 seconds. On a
   working app it does not, because every interactive Claude Code rewrites
   `~/.claude.json`.
-- **A limit that has passed clears itself.** At the reset the app reads `unknown` until
-  a check confirms it, even if a session or the ceiling is holding that check off.
-- **A check that cannot tell says `unknown`,** and unknown stays selectable: no network,
-  a timeout, a flag an older CLI does not know, an API-key login. So does a Cockpit
-  with no checks at all. The engine then moves past a failure if one happens, which
-  costs one failed turn.
+- **A limit that has passed does not hold an app out.** At the reset the app reads
+  `unknown` and the check runs then, unless a session or the ceiling is holding it off.
+  Until a check says `ready`, the engine does not send it a call.
+- **Credits count.** Codex's plan window stays at 100% after credits are bought, so the
+  check reads the credits too: with credits or an unlimited balance the app is ready,
+  unless spending has been stopped. Having credits was not observed on a real account.
+- **A check that cannot tell says `unknown`:** no network, a timeout, a flag an older
+  CLI does not know, an API-key login. **The engine admits only `ready`,** so `unknown`
+  is not routed to, and `readinessDetail` says why. One such check keeps the last answer
+  and is repeated within a minute, so a timeout on a busy machine does not take a
+  working app away. A second one in a row is the answer, and the checks fall back to
+  the ordinary cadence.
+- **A worker always sends a word,** `unknown` before its first check, because the engine
+  reads no word at all as a Cockpit that predates the checks, which stays selectable.
 
 The answers and the spending log live in `app-readiness.json` at the machine's state
 root (mode 0600), which holds states and times and never a credential. They survive a
@@ -820,7 +829,7 @@ resources rather than Library copies of a repository.
 
 | What you see | What it means |
 |---|---|
-| `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false, or it was measured as out of usage; the badge says which |
+| `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false, or its last check did not say ready; the badge says which |
 | `Read-only file system` or `read-only file system`, from a session or a check on Linux | the machine still has the old service unit. Run the installer again ([the service unit](#on-linux-the-service-unit)) |
 | `memql worker apps --check` says `could not tell: ... could bill API credit; not pinged` | an API-key or proxy setting in the worker's environment. Correct refusal: a check never spends API credit, and the app stays selectable |
 | The machine never appears at all | `claude` / `codex` is in none of the directories the worker searches. A service does not get your shell's `PATH`: the worker searches its own, with `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin` appended at start, and logs the result once (`worker PATH extended`). An app installed anywhere else needs that directory in the service's own `PATH` |

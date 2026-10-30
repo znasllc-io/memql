@@ -60,18 +60,27 @@ that lasts days blocks for days. A reset that has already passed takes the
 ## Piece 2: readiness probes (Cockpit, row, selection)
 
 `AppInfo` gains `readiness` (`ready`, `signed_out`, `out_of_usage`, `unknown`),
-when it was measured and when the limit resets. **A Cockpit that reports nothing
-reads as unknown, and unknown stays selectable**, or every current machine would
-leave routing. `signed_out` also clears `signed_in`, so an older engine gets the
-right answer too. `Runnable` adds usage, so labels, doors, the session gate and a
-replica without the stream all read one answer from the row. The machine owns
-the clock: it re-checks at the reset and reports the change.
+when it was measured, when the limit resets and why it is not ready. **Selection
+admits only `ready`** (owner, 2026-10-30: "I shouldn't be able to reach an app that is
+not online, that meaning like does not, is not ready, is not connected"). **A Cockpit
+that predates the checks sends no word and stays selectable**, as the one exception,
+or every current machine would leave routing. A Cockpit that measures always sends a
+word, `unknown` before its first check. `signed_out` also clears `signed_in`, so an
+older engine gets the right answer too. `Runnable` carries the rule, so labels, doors,
+the session gate and a replica without the stream all read one answer from the row. The
+machine owns the clock: it re-checks at the reset and reports the change.
+
+**An exhausted app is durable state, not a retry through somebody's request** (owner,
+2026-10-30: "we should keep a state and an interval checking for it until it becomes
+available, then it can be used again"). On a machine that measures, a refusal holds
+until a `ready` measured after it. Neither a reset passing nor a timer ends it. A
+Cockpit that predates the checks has only piece 1's clock.
 
 Cadence, on one machine, one check at a time:
 
 - Codex: every 5 minutes, at no token cost.
-- Claude Code: hourly when idle, about 600 tokens, so at most about 14,400 tokens
-  a day per machine. A hard ceiling of 30 pings in a rolling day stops anything
+- Claude Code: hourly when idle and working, about 600 tokens, so at most about
+  14,400 tokens a day per machine. Every 15 minutes when not working, which is free. A hard ceiling of 30 pings in a rolling day stops anything
   that would exceed it.
 - No check while that app has a session running. A real turn's own report counts
   as a check and defers the next one, so a busy machine never pings.
@@ -87,7 +96,9 @@ init event reports `apiKeySource` other than `none` is stopped. While a plan is
 on metered overage, pings wait for the reset.
 
 A check that fails for any other reason (no network, a timeout, a flag an older
-CLI does not know) reports `unknown`. It never blocks.
+CLI does not know) reports `unknown`, which selection does not route to. One such
+check keeps the last answer and looks again within a minute, so a timeout on a busy
+machine does not take a working app away.
 
 ## Piece 3: Sign in from Fleet
 

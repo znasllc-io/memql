@@ -238,6 +238,7 @@ func (i *Info) applyReadiness(report ReadinessReport) {
 	i.Readiness = report.State
 	i.ReadinessCheckedAt = report.CheckedAt
 	i.UsageResetsAt = report.ResetsAt
+	i.ReadinessDetail = Truncate(report.Detail)
 	switch report.State {
 	case harness.ReadinessSignedOut:
 		i.SignedIn = false

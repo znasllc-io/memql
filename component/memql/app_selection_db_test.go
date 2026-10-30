@@ -125,7 +125,7 @@ func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {
 	machine := AppMachine{RegistrationId: registration, Online: true, LocalStream: true, StructuredResult: true}
 	doors := []AppDoor{{AppId: "claude-code", Machines: []AppMachine{machine}}, {AppId: "codex", Machines: []AppMachine{machine}}}
 	req := AppCallRequest{ActingUserId: owner, AppId: "*"}
-	untilWithoutRecent, err := peer.appBlockedUntil(ctx, registration, "claude-code", nil, nil, time.Time{})
+	untilWithoutRecent, err := peer.appBlockedUntil(ctx, registration, "claude-code", nil, nil, false, time.Time{})
 	require.NoError(t, err)
 	require.Equal(t, reset, untilWithoutRecent, "quota was lost without rolling usage history")
 	// Receipt is older than the rolling two-hour window, with non-zero work.
@@ -141,7 +141,7 @@ func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {
 	// Another user's receipts and another machine's receipts never block this one.
 	_, err = peer.evaluateFleetRetryAppAvailability(auth.ContextWithUserActor(context.Background(), "stranger"), map[string]any{"registrationId": registration, "app": "claude-code"})
 	require.Error(t, err)
-	until, err := peer.appBlockedUntil(ctx, registration+"-other", "claude-code", nil, nil, time.Time{})
+	until, err := peer.appBlockedUntil(ctx, registration+"-other", "claude-code", nil, nil, false, time.Time{})
 	require.NoError(t, err)
 	require.True(t, until.IsZero())
 	// A deliberate credit refresh is durable across replicas and scoped to one app.
@@ -204,7 +204,7 @@ func TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas(t *testing.T) {
 	}}}
 	req := AppCallRequest{ActingUserId: owner, AppId: "*"}
 	for _, e := range []*MemQLEngine{eng, peer} {
-		until, err := e.appBlockedUntil(ctx, black, "claude-code", nil, nil, time.Time{})
+		until, err := e.appBlockedUntil(ctx, black, "claude-code", nil, nil, false, time.Time{})
 		require.NoError(t, err)
 		require.Equal(t, refused.Add(15*time.Minute).Truncate(time.Millisecond), until.Truncate(time.Millisecond))
 		selected, err := e.SelectAppForCall(ctx, req, false, nil, doors)
@@ -220,7 +220,7 @@ func TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas(t *testing.T) {
 	require.ErrorIs(t, err, ErrAppUnavailable)
 	// A later success on that machine is the proof the login works again.
 	insert("v1:worker:appSession", "v1:worker:appSession:"+key+"-recovered", map[string]any{"ownerUserId": owner, "workerId": black, "app": "claude-code", "status": "ended", "endedAt": time.Now().UTC().Format(time.RFC3339Nano)})
-	until, err := peer.appBlockedUntil(ctx, black, "claude-code", nil, nil, time.Time{})
+	until, err := peer.appBlockedUntil(ctx, black, "claude-code", nil, nil, false, time.Time{})
 	require.NoError(t, err)
 	require.True(t, until.IsZero(), "success did not clear the refusal")
 }
@@ -259,7 +259,7 @@ func TestAppSelectionDBReadsReadinessOffTheRow(t *testing.T) {
 	doors := []AppDoor{{AppId: "claude-code", Machines: []AppMachine{machine}}, {AppId: "codex", Machines: []AppMachine{machine}}}
 	req := AppCallRequest{ActingUserId: owner, AppId: "*"}
 
-	for _, measured := range []string{"out_of_usage", "signed_out"} {
+	for _, measured := range []string{"out_of_usage", "signed_out", "unknown"} {
 		write([]map[string]any{app("claude-code", measured), app("codex", "ready")})
 		time.Sleep(2 * time.Millisecond)
 		selected, err := peer.SelectAppForCall(ctx, req, false, nil, doors)
@@ -273,7 +273,7 @@ func TestAppSelectionDBReadsReadinessOffTheRow(t *testing.T) {
 		require.NoError(t, peer.CheckMachineAppRouting(ctx, registration, "codex"))
 	}
 
-	for _, silent := range []string{"", "unknown", "ready"} {
+	for _, silent := range []string{"", "ready"} {
 		write([]map[string]any{app("claude-code", silent)})
 		time.Sleep(2 * time.Millisecond)
 		filtered, err := eng.FilterAppDoors(ctx, doors)
@@ -331,4 +331,61 @@ func TestAppRefusalDBClearsOnANewerMeasurement(t *testing.T) {
 	selected, err := eng.SelectAppForCall(ctx, AppCallRequest{ActingUserId: owner, AppId: "*"}, false, nil, doors)
 	require.NoError(t, err)
 	require.Equal(t, "codex", selected.AppId)
+}
+
+// The owner: "we should keep a state and an interval checking for it until it
+// becomes available, then it can be used again." A reset passing does not end a
+// refusal on a machine that measures: its next check does, so nobody's real call is
+// what finds out. A Cockpit that measures nothing has only the clock.
+func TestAppRefusalDBOutlivesItsResetUntilTheMachineSaysSo(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	key := uniqueSuffix("app-outlives")
+	owner := "v1:identity:user:" + key
+	registration := WorkerRegistrationConcept + ":" + key
+	var ids []string
+	insert := func(concept, id string, payload map[string]any) {
+		ids = append(ids, id)
+		raw, _ := json.Marshal(payload)
+		row := memorynodes.MemoryNode{ID: id, Concept: concept, CreatedAt: time.Now().UTC(), CreatedBy: owner, Type: memorynodes.NodeTypeObject, Payload: raw}
+		_, err := db.NewInsert().Model(&row).Exec(context.Background())
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			_, err := db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+			require.NoError(t, err)
+		}
+	})
+	refused := time.Now().UTC().Add(-2 * time.Hour)
+	reset := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	insert("v1:worker:appSession", "v1:worker:appSession:"+key+"-refused", map[string]any{"ownerUserId": owner, "workerId": registration, "app": "codex", "status": "failed", "quotaRefused": true, "endedAt": refused.Format(time.RFC3339Nano), "errorMessage": "usage limit resets at " + reset.Format(time.RFC3339), "usage": map[string]any{"known": true}})
+	registrationRow := func(readiness string, checkedAt time.Time) {
+		entry := map[string]any{"id": "codex", "allowed": true, "signedIn": true, "subscription": "present"}
+		if readiness != "" {
+			entry["readiness"] = readiness
+			entry["readinessCheckedAt"] = checkedAt.Format(time.RFC3339)
+		}
+		insert(WorkerRegistrationConcept, registration, map[string]any{"ownerUserId": owner, "identityId": "test", "name": "Outlives test", "capabilities": []string{"HEADLESS"}, "concurrency": map[string]any{}, "registeredAt": time.Now().UTC().Format(time.RFC3339Nano), "apps": []map[string]any{entry}, "appRouting": map[string]any{"mode": "auto", "revision": "r1"}})
+		time.Sleep(2 * time.Millisecond)
+	}
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	doors := []AppDoor{{AppId: "codex", Machines: []AppMachine{{RegistrationId: registration, Online: true, Forwardable: true, StructuredResult: true}}}}
+
+	// The machine measures, and has not yet said anything since the refusal.
+	registrationRow("ready", refused.Add(-time.Minute))
+	filtered, err := eng.FilterAppDoors(ctx, doors)
+	require.NoError(t, err)
+	require.Empty(t, filtered[0].Machines, "the reset passing sent a real call to find out")
+
+	// Its next check is what ends it.
+	registrationRow("ready", refused.Add(time.Minute))
+	filtered, err = eng.FilterAppDoors(ctx, doors)
+	require.NoError(t, err)
+	require.Len(t, filtered[0].Machines, 1)
+
+	// A Cockpit that predates the checks will never say, so the reset is all there is.
+	registrationRow("", time.Time{})
+	filtered, err = eng.FilterAppDoors(ctx, doors)
+	require.NoError(t, err)
+	require.Len(t, filtered[0].Machines, 1, "a machine that measures nothing stayed blocked past the reset")
 }

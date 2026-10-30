@@ -251,9 +251,10 @@ func InferenceLanes(in InferenceInput) []LaneReport {
 		for _, app := range reg.Apps {
 			if knownAppIds[strings.TrimSpace(app.Id)] && app.Allowed && app.SignedIn {
 				appConfigured = true
-				// Out of usage is still set up, and nothing can answer through it:
-				// the app's label is gone for the same reason.
-				if live && app.Readiness != "out_of_usage" {
+				// An app that is not ready is still set up, and nothing can answer
+				// through it: its label is gone for the same reason. No word at all is
+				// a Cockpit that predates the checks, which stays (AppInfo.Runnable).
+				if live && (app.Readiness == "" || app.Readiness == "ready") {
 					appLive = true
 				}
 			}

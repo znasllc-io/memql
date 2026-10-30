@@ -139,6 +139,34 @@ func TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor(t *testing.T) {
 }
 
 // Every machine reports nothing until its Cockpit upgrades, and none may disappear.
+// The owner: "I shouldn't be able to reach an app that ... is not ready." A Cockpit
+// that measures and could not tell has not said the app can answer.
+func TestAnAppThatCouldNotBeCheckedGetsNoDoor(t *testing.T) {
+	h := newAppHop(t)
+	apps := []workerservice.AppInfo{{Id: "claude-code", Allowed: true, SignedIn: true, Readiness: "unknown", ReadinessDetail: "the check timed out"}, {Id: "codex", Allowed: true, SignedIn: true, Readiness: "ready"}}
+	h.senderStore.machines[0].Apps = apps
+	h.holderStore.machines[0].Apps = apps
+	h.registry.WorkerById(hopMachine).SetApps(apps)
+	ctx, cancel := plannerCtx(t)
+	defer cancel()
+	doors, err := h.remote.selectionDoors(ctx, hopOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, door := range doors {
+		if door.AppId == "claude-code" && len(door.Machines) != 0 {
+			t.Fatalf("an unchecked app got a door on a replica without the stream: %+v", door)
+		}
+		if door.AppId == "codex" && len(door.Machines) != 1 {
+			t.Fatalf("the ready app lost its door: %+v", door)
+		}
+	}
+	why := appCandidateRefusal(h.senderStore.machines[0], hopOwner, memqlengine.AppCallRequest{AppId: "claude-code"}, fleetNow(), false)
+	if !strings.Contains(why, "could not be checked") || !strings.Contains(why, "the check timed out") {
+		t.Fatalf("the refusal must say why: %q", why)
+	}
+}
+
 func TestAnAppThatReportsNoReadinessKeepsItsDoor(t *testing.T) {
 	h := newAppHop(t)
 	ctx, cancel := plannerCtx(t)

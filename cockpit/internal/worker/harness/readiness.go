@@ -322,6 +322,7 @@ type codexRateLimitsRead struct {
 		Primary              *codexLimitWindow `json:"primary"`
 		Secondary            *codexLimitWindow `json:"secondary"`
 		RateLimitReachedType *string           `json:"rateLimitReachedType"`
+		SpendControlReached  bool              `json:"spendControlReached"`
 		Credits              *struct {
 			HasCredits bool `json:"hasCredits"`
 			Unlimited  bool `json:"unlimited"`
@@ -333,8 +334,15 @@ type codexRateLimitsRead struct {
 }
 
 // signal decides from Codex's own answer. ordinaryUsageAllowed is the plain word
-// for it on 0.162.1; a Codex that does not state it is read from its windows, where
-// credits still let a turn run past an exhausted window.
+// for it on 0.162.1; a Codex that does not state it is read from its windows.
+//
+// CREDITS ARE READ BEFORE ALL OF THAT, because they are how a person brings an
+// exhausted plan back without waiting: the window stays at 100% and the word stays
+// false, since this is no longer ordinary usage. Only spending being stopped outranks
+// them. A plan with no credits was measured; one with credits was not, because none
+// were bought here. If Codex refused a turn on credits anyway, the turn would read out
+// of usage and the next check ready, so a real call would meet one refusal every five
+// minutes, which costs nothing and moves on to the next app.
 func (r codexRateLimitsRead) signal() ReadinessSignal {
 	var latest int64
 	exhausted := false
@@ -349,11 +357,14 @@ func (r codexRateLimitsRead) signal() ReadinessSignal {
 	if latest == 0 && r.RateLimitUpsell != nil {
 		latest = r.RateLimitUpsell.ResetAt
 	}
-	blocked := r.RateLimits.RateLimitReachedType != nil
-	if r.OrdinaryUsageAllowed != nil {
-		blocked = blocked || !*r.OrdinaryUsageAllowed
-	} else if credits := r.RateLimits.Credits; exhausted && (credits == nil || (!credits.HasCredits && !credits.Unlimited)) {
-		blocked = true
+	blocked := r.RateLimits.SpendControlReached
+	if credits := r.RateLimits.Credits; credits == nil || (!credits.HasCredits && !credits.Unlimited) {
+		blocked = blocked || r.RateLimits.RateLimitReachedType != nil
+		if r.OrdinaryUsageAllowed != nil {
+			blocked = blocked || !*r.OrdinaryUsageAllowed
+		} else {
+			blocked = blocked || exhausted
+		}
 	}
 	if !blocked {
 		return ReadinessSignal{State: ReadinessReady}

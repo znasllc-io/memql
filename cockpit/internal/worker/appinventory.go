@@ -163,6 +163,8 @@ func appsToProto(inventory []apps.Info) []*memqlv1.AppInfo {
 			Subscription: apps.NormalizeSubscription(a.Subscription),
 			Allowed:      a.Allowed,
 			Readiness:    a.Readiness,
+
+			ReadinessDetail: a.ReadinessDetail,
 		}
 		if !a.ReadinessCheckedAt.IsZero() {
 			entry.ReadinessCheckedAt = timestamppb.New(a.ReadinessCheckedAt)

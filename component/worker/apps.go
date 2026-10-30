@@ -51,10 +51,10 @@ const (
 	SubscriptionPresent = "present"
 
 	// AppReadinessReady and its siblings are the closed set of what a machine
-	// measured about an app (AppInfo.Readiness). Empty is a machine that said
-	// nothing, and unknown one that could not tell. Both stay selectable: every
-	// current machine reports nothing, and refusing on silence would take the
-	// whole fleet out of routing until it upgraded.
+	// measured about an app (AppInfo.Readiness). See AppInfo.Runnable for which of
+	// them routing admits. Empty is a Cockpit that measures nothing, and unknown is
+	// one that measures and has no answer yet. A Cockpit that measures always sends
+	// a word, so the two cannot be confused.
 	AppReadinessReady      = "ready"
 	AppReadinessSignedOut  = "signed_out"
 	AppReadinessOutOfUsage = "out_of_usage"
@@ -87,10 +87,24 @@ type AppInfo struct {
 	Readiness          string `json:"readiness,omitempty"`
 	ReadinessCheckedAt string `json:"readinessCheckedAt,omitempty"`
 	UsageResetsAt      string `json:"usageResetsAt,omitempty"`
+	// ReadinessDetail is the machine's sentence for an answer that is not ready,
+	// bounded by maxAppFieldLen, so a person can see why an app is not being used.
+	ReadinessDetail string `json:"readinessDetail,omitempty"`
 }
 
 // Runnable reports whether the engine can drive this app: the id is
 // one the engine knows AND the machine will actually run it.
+//
+// READINESS IS A HARD FILTER. The owner: "I shouldn't be able to reach an app that is
+// not online, that meaning like does not, is not ready, is not connected." So only
+// "ready" is admitted, with one exception for a machine that cannot say.
+//
+// THE EXCEPTION IS A COCKPIT THAT PREDATES THE CHECKS, which sends no word at all.
+// Refusing it would take every current machine out of routing until it upgraded, so
+// it keeps the file-based answer it always had, reads as "Not checked" in Fleet, and
+// a call it refuses moves on. A Cockpit that measures always sends a word, "unknown"
+// included, so this exception can never admit an app a machine could not vouch for.
+// Delete it once no machine in a fleet reports silence.
 //
 // IT TAKES NO CLOCK. The machine re-checks at a reset and reports the change, so a
 // limit that has passed clears on the next beat, and a machine that went quiet is
@@ -99,7 +113,7 @@ type AppInfo struct {
 // themselves.
 func (a AppInfo) Runnable() bool {
 	return IsKnownAppId(a.Id) && a.Allowed && a.SignedIn &&
-		a.Readiness != AppReadinessSignedOut && a.Readiness != AppReadinessOutOfUsage
+		(a.Readiness == "" || a.Readiness == AppReadinessReady)
 }
 
 // NotRunnableReason says why Runnable is false, in words for a refusal.
@@ -111,14 +125,18 @@ func (a AppInfo) NotRunnableReason() string {
 		return a.Id + " is out of usage"
 	case a.Readiness == AppReadinessSignedOut:
 		return a.Id + " is signed out"
+	case a.Readiness == AppReadinessUnknown && a.ReadinessDetail != "":
+		return a.Id + " could not be checked: " + a.ReadinessDetail
+	case a.Readiness == AppReadinessUnknown:
+		return a.Id + " could not be checked yet"
 	}
 	return a.Id + " is not allowed and signed in"
 }
 
 // NormalizeAppReadiness clamps a reported word to the closed set. Empty stays
 // empty, because silence is a different statement from "could not tell", and a word
-// from a newer cockpit reads as unknown: a word this engine cannot act on must not
-// take a machine out of routing.
+// from a newer cockpit reads as unknown: routing admits only what this engine can
+// read as ready.
 func NormalizeAppReadiness(s string) string {
 	switch s = strings.TrimSpace(s); s {
 	case "", AppReadinessReady, AppReadinessSignedOut, AppReadinessOutOfUsage, AppReadinessUnknown:
@@ -143,6 +161,7 @@ func AppInfoFromMap(m map[string]any) (AppInfo, bool) {
 	readiness, _ := m["readiness"].(string)
 	checkedAt, _ := m["readinessCheckedAt"].(string)
 	resetsAt, _ := m["usageResetsAt"].(string)
+	detail, _ := m["readinessDetail"].(string)
 	return AppInfo{
 		Id:                 id,
 		Version:            version,
@@ -152,6 +171,7 @@ func AppInfoFromMap(m map[string]any) (AppInfo, bool) {
 		Readiness:          NormalizeAppReadiness(readiness),
 		ReadinessCheckedAt: checkedAt,
 		UsageResetsAt:      resetsAt,
+		ReadinessDetail:    detail,
 	}, true
 }
 
@@ -207,6 +227,7 @@ func AppsFromProto(in []*memqlv1.AppInfo) []AppInfo {
 			Readiness:          NormalizeAppReadiness(a.GetReadiness()),
 			ReadinessCheckedAt: appTimestamp(a.GetReadinessCheckedAt()),
 			UsageResetsAt:      appTimestamp(a.GetUsageResetsAt()),
+			ReadinessDetail:    truncate(strings.TrimSpace(a.GetReadinessDetail()), maxAppFieldLen),
 		})
 		if len(out) >= maxReportedApps {
 			break
@@ -323,6 +344,9 @@ func appsEqual(a, b []AppInfo) bool {
 		stored, reported := a[i], b[i]
 		if readinessCheckIsRecent(stored.ReadinessCheckedAt, reported.ReadinessCheckedAt) {
 			reported.ReadinessCheckedAt = stored.ReadinessCheckedAt
+			// A detail can carry a temporary path, so it travels with an answer
+			// or a refresh and never moves the row by itself.
+			reported.ReadinessDetail = stored.ReadinessDetail
 		}
 		if stored != reported {
 			return false
