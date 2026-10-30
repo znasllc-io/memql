@@ -960,8 +960,9 @@ what each app really reports.
 A failed session may move to another app or machine only when nothing ran: no
 served model, no structured result, no recorded or dropped action, no tokens, and
 no prose except the refusal's own sentence. Anything else may have caused effects
-and is returned as it is, because running it again would repeat them.
-`usage.known` is not part of the proof. A Codex turn refused by its limit reports
+and is not run again, because that would repeat them. A step that stopped partway on
+its usage or login is handed over rather than run again ("An app that stops partway
+hands its work over", below). `usage.known` is not part of the proof. A Codex turn refused by its limit reports
 no usage at all, which is why failover never fired for it. Stated tokens still
 disprove it. The alternative, trusting the sentence alone, would replay a turn
 that had already started tools. Tests:
@@ -1167,6 +1168,75 @@ account's setting; a refusal then reads as the app's own sentence. The row takes
 holder and the bff can both write it, so a `waiting` write already in flight when a cancel
 lands could land after it. The row would then read as waiting until the person cancels again
 or it expires. That is reasoned from the code and has not been observed.
+
+## An app that stops partway hands its work over (2026-10-30)
+
+Owner: "If during usage we run out of credits, then that's fine. We get the error
+message, but actually what should happen is that instead of just saying, oh, I run out
+of credits for Codex, it should now attempt Claude, for Claude Code to take over." Before
+this, only a refusal proven to precede any work moved, and a step that had done work
+failed with the app's sentence. Recorded actions have effects, so the next app is not
+given the step as if nothing happened: it gets the step, what is established to have
+happened, and where the work is, and it carries on (`component/memql/app_takeover.go`).
+
+| Situation | What happens | Why |
+|---|---|---|
+| The app stopped on its usage or login, with a complete record | The next ready app takes over, told what ran | Those reasons are about the app, and it has finished its turn with no call in flight |
+| The same, with a dropped action, an unread or short journal, or outputs not all in the Library | The step fails with the app's sentence, and says why nothing took over | Nobody could tell the next app what happened |
+| Refused before any work | The next app gets the same prompt | Nothing happened, so there is nothing to tell |
+| Any other failure, a crash or a timeout included | The step fails. Never run again automatically | An action may be half done |
+| The stop has a structured answer | The step fails as before | It already has an answer |
+| A pin or an Only strategy | Stays that app, and may only move machines on a login | A person chose it |
+| A chat turn that ran no action | The same prompt goes to the next app, unless part of an answer was already shown | Nothing but tokens was spent, and a shown answer cannot be taken back |
+| A chat turn that ran an action | Fails | It has no step, so it has no record to hand over |
+| Nothing else is ready | The step fails with the app's sentence and "no other app is ready to take over" | The record stays on its run |
+
+**The machine's word, not the sentence** (`AppSessionEnd.stop_reason`). Before any work a
+sentence is enough, because nothing can be lost. After work, a failure whose words only
+resemble a limit would put a second agent on top of whatever the first left half done. So
+only the app's own protocol counts: `TurnResult.Readiness` on a failed turn. A Cockpit
+that predates the field gets no takeover. The machine withdraws the word when an output
+did not reach the Library, because a takeover carries on from what was left. Tests:
+`TestSessionEndSaysWhenTheAppStoppedOnItsUsageOrLogin`,
+`TestSessionEndWithdrawsTheStopWhenOutputsDidNotReachTheLibrary`,
+`TestAppStoppedMidWorkTakesTheMachinesWordAndACompleteRecord`.
+
+**What establishes what happened** (`completeStop`). The journal: the actions the machine
+reported, and the MemQL tool calls the MCP node recorded, read from the rows on whichever
+replica holds the session. A recording write that fails is logged and swallowed, so a
+journal holding fewer of the machine's actions than it reported takes the takeover back.
+The app's own words travel too, marked as its account and not evidence, as the existing
+rule says of a delegated narrative. The brief is bounded, keeps the most recent actions,
+leaves out reads, and counts what it cuts. It goes on after any override, because a
+person's whole-prompt replacement must not erase what has already happened. Tests:
+`TestDelegateTakesBackAStopWithoutACompleteRecord`, `TestTheRecordSurvivesAWholePromptOverride`,
+`TestAppWorkJournalDBReadsWhatAnotherReplicaWrote`,
+`TestAppTakeoverBriefIsBoundedAndCountsWhatItLeavesOut`.
+
+**Which machine.** A run's sessions share one directory on a machine, so the machine
+holding the work is asked first, and the next app finds the files as they were left.
+Another machine may carry on when it is the only one with a ready app: what reached the
+Library is delivered as inputs, and the brief says the rest stayed behind. Chosen over
+failing the step, because work there is usually redoable and the record warns against
+repeating what reached outside. A session runs only on a stream this replica holds, so a
+machine on a sibling replica is passed over, as it is for any session. Tests:
+`TestAppSelectionDBPrefersTheMachineHoldingTheWork`,
+`TestDelegateDeliversWhatReachedTheLibraryToAnotherMachine`.
+
+**What a person sees.** The parent run gets a note naming both apps and both records, and
+the child run of each session stays. The next app is asked to say in one sentence that it
+took over. A takeover's recording starts in the middle, so its child run carries no goal
+signature and procedure learning never mines it. Tests:
+`TestDelegateGivesTheNextAppTheRecordOnTheSameMachine`,
+`TestATakeoverSessionIsNoRecordingOfTheGoal`.
+
+**Limits.** No real limit has been hit partway through a real turn: the streams are shaped
+from the recorded refused turn with tokens added. A session has one chance at the machine
+holding its stream, so with two replicas the other's machines are not considered. A person's
+own route listing `app:codex` then `app:claude-code` stays on the first, because a session
+winner's chain is itself alone; only the Apps route's `app:*` moves between apps. An action
+that started a background process cannot be seen stopping. If pulling a delivered file fails
+on another machine, that session fails as an ordinary failure.
 
 ## Pipeline AI runs local first (2026-10-29)
 

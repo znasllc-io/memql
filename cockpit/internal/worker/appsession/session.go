@@ -478,6 +478,8 @@ type session struct {
 	// last turn that reported a model, kept as a pair -- see recordTurn.
 	servedModel  string
 	servedEffort string
+	// stopReason is why the app stopped, when it said so: AppSessionEnd.stop_reason.
+	stopReason string
 }
 
 // run drives the whole session and is the only place End is sent.
@@ -495,6 +497,7 @@ func (s *session) run(ctx context.Context) {
 			s.logger.Error("app session panicked", "panic", rec)
 			s.teardown()
 			s.keepWorkspace("the session panicked before its outputs were pushed")
+			s.withdrawStop()
 			s.sendEnd(-1, fmt.Sprintf("cockpit panic during session: %v", rec), nil)
 		}
 	}()
@@ -514,6 +517,7 @@ func (s *session) run(ctx context.Context) {
 	// app made.
 	if pushErr != nil {
 		s.keepWorkspace("its outputs could not all be pushed to the Library")
+		s.withdrawStop()
 	} else {
 		s.releaseWorkspace()
 	}
@@ -932,6 +936,9 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 		if readiness := s.manager.opts.Readiness; readiness != nil && res.Readiness != nil {
 			readiness.Observe(s.start.GetApp(), *res.Readiness)
 		}
+		if err != nil {
+			s.recordStop(res)
+		}
 		// The app's REAL status, unnormalised. A harness whose process
 		// is still alive reports 0 for a protocol-level failure, and
 		// that is not a lie the engine acts on: it files a session with
@@ -959,6 +966,32 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 		}
 		prompt = next
 	}
+}
+
+// recordStop keeps why a failed turn stopped, when the app itself said it was its
+// usage or its login. Those are about the app and not about the work, and the app has
+// finished its turn with no call in flight, which is what lets the engine hand the rest
+// of the step to another app. Only the app's own statement counts: the harness reads it
+// off the protocol (TurnResult.Readiness), and any other failure leaves this empty.
+func (s *session) recordStop(res harness.TurnResult) {
+	if res.Readiness == nil {
+		return
+	}
+	switch res.Readiness.State {
+	case harness.ReadinessOutOfUsage, harness.ReadinessSignedOut:
+		s.usageMu.Lock()
+		s.stopReason = res.Readiness.State
+		s.usageMu.Unlock()
+	}
+}
+
+// withdrawStop takes the reason back when this machine cannot vouch for what the app
+// left behind. A takeover carries on from it, so one whose outputs did not all reach
+// the Library is reported as an ordinary failure, and its directory is kept.
+func (s *session) withdrawStop() {
+	s.usageMu.Lock()
+	s.stopReason = ""
+	s.usageMu.Unlock()
 }
 
 // turnFailure reports what a turn's failure should end the session with.

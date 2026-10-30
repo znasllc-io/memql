@@ -275,3 +275,22 @@ func TestSessionStoreMarksQuotaIndependentlyOfReplaySafety(t *testing.T) {
 		}
 	}
 }
+
+// An app can say usageLimitExceeded around a sentence no list knows, and the machine's
+// word has to block that app the way the sentence would.
+func TestAppSessionRefusalStampsTakeTheMachinesWord(t *testing.T) {
+	for reason, want := range map[string]string{
+		AppStopOutOfUsage: "quotaRefused: true",
+		AppStopSignedOut:  "authRefused: true",
+	} {
+		recorder := &recordingExecutor{}
+		store := &EngineStore{Engine: recorder}
+		err := store.EndAppSession(context.Background(), AppSessionRow{ID: "session", OwnerUserId: "alice", Status: AppSessionStatusFailed, ErrorMessage: "a sentence no list knows", StopReason: reason})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recorder.statements) != 1 || !strings.Contains(recorder.statements[0], want) {
+			t.Fatalf("%s: %v", reason, recorder.statements)
+		}
+	}
+}

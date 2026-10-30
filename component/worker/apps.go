@@ -133,6 +133,23 @@ func (a AppInfo) NotRunnableReason() string {
 	return a.Id + " is not allowed and signed in"
 }
 
+// The reasons a machine may give for an app stopping partway (AppSessionEnd.stop_reason).
+const (
+	AppStopOutOfUsage = AppReadinessOutOfUsage
+	AppStopSignedOut  = AppReadinessSignedOut
+)
+
+// NormalizeAppStopReason clamps a reported reason to the closed set. Anything else is
+// no reason at all: a takeover acts on this word, so one it cannot read does not move
+// a step that has already done work.
+func NormalizeAppStopReason(s string) string {
+	switch s = strings.TrimSpace(s); s {
+	case AppStopOutOfUsage, AppStopSignedOut:
+		return s
+	}
+	return ""
+}
+
 // NormalizeAppReadiness clamps a reported word to the closed set. Empty stays
 // empty, because silence is a different statement from "could not tell", and a word
 // from a newer cockpit reads as unknown: routing admits only what this engine can

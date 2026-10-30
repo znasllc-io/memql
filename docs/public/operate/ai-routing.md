@@ -360,9 +360,13 @@ independent of that history.
 
 Each active session stays with its app. New calls receive their full supplied
 conversation and contract, and delegated steps receive their inputs and
-workspace context. A fallback repeats that same handover only after a confirmed
-quota refusal with known zero usage, no served model, no result, and no recorded
-or dropped actions. An uncertain interruption is never automatically replayed.
+workspace context. A fallback repeats that same handover only after a refusal
+proven to precede any work: no served model, no result, no tokens, and no recorded
+or dropped actions. An app that runs out of usage or loses its login partway hands
+the step to the next ready app with a record of what already ran, so the next app
+carries on rather than starting again
+([local apps](local-apps.md#when-an-app-stops-partway)). An uncertain interruption is
+never automatically replayed.
 The existing per-level model mapping remains in the app harness, and records
 name the model actually reported by the app.
 

@@ -3934,7 +3934,14 @@ type AppSessionEnd struct {
 	// same rule. An app that states no effort (Claude Code's headless output
 	// states none) or that ignored the one it was given leaves this EMPTY --
 	// never the requested value, never a guess.
-	Effort        string `protobuf:"bytes,9,opt,name=effort,proto3" json:"effort,omitempty"`
+	Effort string `protobuf:"bytes,9,opt,name=effort,proto3" json:"effort,omitempty"`
+	// stop_reason says the app stopped for a reason outside the work, and that this
+	// machine can vouch for what it left behind: "out_of_usage" or "signed_out".
+	// Empty for any other failure, and when the session's outputs did not all reach
+	// the Library. It is the one thing that lets the engine hand a step that has
+	// already done work to another app (component/memql/app_takeover.go), so a
+	// cockpit sends it only when the app itself said so and it has finished its turn.
+	StopReason    string `protobuf:"bytes,10,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4028,6 +4035,13 @@ func (x *AppSessionEnd) GetModel() string {
 func (x *AppSessionEnd) GetEffort() string {
 	if x != nil {
 		return x.Effort
+	}
+	return ""
+}
+
+func (x *AppSessionEnd) GetStopReason() string {
+	if x != nil {
+		return x.StopReason
 	}
 	return ""
 }
@@ -6800,7 +6814,7 @@ const file_worker_proto_rawDesc = "" +
 	"needs_code\x18\x05 \x01(\bR\tneedsCode\x129\n" +
 	"\n" +
 	"expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error\"\xcc\x02\n" +
+	"\x05error\x18\a \x01(\tR\x05error\"\xed\x02\n" +
 	"\rAppSessionEnd\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
@@ -6812,7 +6826,10 @@ const file_worker_proto_rawDesc = "" +
 	"\vresult_json\x18\a \x01(\tR\n" +
 	"resultJson\x12\x14\n" +
 	"\x05model\x18\b \x01(\tR\x05model\x12\x16\n" +
-	"\x06effort\x18\t \x01(\tR\x06effort\"\x8a\x01\n" +
+	"\x06effort\x18\t \x01(\tR\x06effort\x12\x1f\n" +
+	"\vstop_reason\x18\n" +
+	" \x01(\tR\n" +
+	"stopReason\"\x8a\x01\n" +
 	"\x0fAppSessionUsage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x19\n" +

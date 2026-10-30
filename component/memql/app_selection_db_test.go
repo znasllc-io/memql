@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"sync"
 	"testing"
 	"time"
@@ -376,4 +377,105 @@ func TestAppRefusalDBOutlivesItsResetUntilTheMachineSaysSo(t *testing.T) {
 	filtered, err = eng.FilterAppDoors(ctx, doors)
 	require.NoError(t, err)
 	require.Len(t, filtered[0].Machines, 1, "a machine that measures nothing stayed blocked past the reset")
+}
+
+// The machine holding a step's work comes first when anything there can take it over,
+// on a replica that reads it off the rows, and another machine serves when nothing can.
+func TestAppSelectionDBPrefersTheMachineHoldingTheWork(t *testing.T) {
+	_, db, _ := sharedReadMergeEngine(t)
+	peer, err := New(db)
+	require.NoError(t, err)
+	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	key := uniqueSuffix("app-prefer")
+	owner := "v1:identity:user:" + key
+	machineA, machineB := WorkerRegistrationConcept+":"+key+"-a", WorkerRegistrationConcept+":"+key+"-b"
+	var ids []string
+	write := func(id string, apps []map[string]any) {
+		ids = append(ids, id)
+		raw, _ := json.Marshal(map[string]any{"ownerUserId": owner, "identityId": "test", "name": "Prefer test", "capabilities": []string{"HEADLESS"}, "concurrency": map[string]any{}, "registeredAt": time.Now().UTC().Format(time.RFC3339Nano), "apps": apps, "appRouting": map[string]any{"mode": "auto", "revision": "r1"}})
+		row := memorynodes.MemoryNode{ID: id, Concept: WorkerRegistrationConcept, CreatedAt: time.Now().UTC(), CreatedBy: owner, Type: memorynodes.NodeTypeObject, Payload: raw}
+		_, err := db.NewInsert().Model(&row).Exec(context.Background())
+		require.NoError(t, err)
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			_, err := db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+			require.NoError(t, err)
+		}
+	})
+	ready := func(id string) map[string]any {
+		return map[string]any{"id": id, "version": "1", "signedIn": true, "allowed": true, "subscription": "present", "readiness": "ready", "readinessCheckedAt": time.Now().UTC().Format(time.RFC3339)}
+	}
+	write(machineA, []map[string]any{ready("claude-code"), ready("codex")})
+	write(machineB, []map[string]any{ready("claude-code"), ready("codex")})
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	a := AppMachine{RegistrationId: machineA, Online: true, LocalStream: true, StructuredResult: true}
+	b := AppMachine{RegistrationId: machineB, Online: true, LocalStream: true, StructuredResult: true}
+	doors := []AppDoor{{AppId: "claude-code", Machines: []AppMachine{b, a}}, {AppId: "codex", Machines: []AppMachine{b, a}}}
+
+	// Codex ran out on the machine holding the work, and Claude Code there is free.
+	selected, err := peer.SelectAppForCall(ctx, AppCallRequest{ActingUserId: owner, AppId: "*", PreferRegistrationId: machineB}, true, []string{"codex"}, doors)
+	require.NoError(t, err)
+	require.Equal(t, AppSelection{"claude-code", machineB}, selected)
+	selected, err = peer.SelectAppForCall(ctx, AppCallRequest{ActingUserId: owner, AppId: "*", PreferRegistrationId: machineA}, true, []string{"codex"}, doors)
+	require.NoError(t, err)
+	require.Equal(t, AppSelection{"claude-code", machineA}, selected)
+
+	// Nothing on that machine can: another one serves rather than failing the step.
+	write(machineA, []map[string]any{{"id": "claude-code", "version": "1", "signedIn": false, "allowed": true, "subscription": "present", "readiness": "signed_out"}, ready("codex")})
+	selected, err = peer.SelectAppForCall(ctx, AppCallRequest{ActingUserId: owner, AppId: "*", PreferRegistrationId: machineA}, true, []string{"codex"}, doors)
+	require.NoError(t, err)
+	require.Equal(t, AppSelection{"claude-code", machineB}, selected)
+}
+
+// The journal is what a takeover presents as fact. Its rows are written on the replica
+// holding the session and, for MCP calls, on the MCP node, so the read must answer on
+// any replica at once, and only for their owner.
+func TestAppWorkJournalDBReadsWhatAnotherReplicaWrote(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	peer, err := New(db)
+	require.NoError(t, err)
+	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	key := uniqueSuffix("app-journal")
+	owner := "v1:identity:user:" + key
+	runId := "v1:work:run:" + key
+	var ids []string
+	t.Cleanup(func() {
+		for _, id := range ids {
+			_, err := db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+			require.NoError(t, err)
+		}
+	})
+	record := func(writer *MemQLEngine, name, tool, actionId string, seq int) {
+		id := "v1:work:observation:" + key + "-" + name
+		ids = append(ids, id)
+		call, err := parser.RenderCall("createWorkObservation", map[string]any{
+			"observationId": key + "-" + name, "runId": runId, "stepKey": "session", "kind": "tool_result",
+			"content": "The app ran " + tool + " successfully.",
+			"data":    map[string]any{"tool": tool, "appActionId": actionId, "seq": seq, "isError": false, "args": `{"path":"a"}`},
+		})
+		require.NoError(t, err)
+		_, err = writer.Execute(auth.ContextWithUserActor(auth.ContextWithInternalOrigin(context.Background()), owner), "mutation "+call)
+		require.NoError(t, err)
+	}
+	// An empty read first, so a cache could only answer wrongly.
+	journal, err := ReadAppWorkJournal(context.Background(), peer, owner, runId)
+	require.NoError(t, err)
+	require.Empty(t, journal)
+
+	record(eng, "one", "exec", "toolu_1", 1)
+	record(peer, "two", "mcp", "mcp-createThing-2", 2)
+	record(eng, "three", "fs_write", "toolu_2", 3)
+	journal, err = ReadAppWorkJournal(context.Background(), peer, owner, runId)
+	require.NoError(t, err)
+	require.Len(t, journal, 3)
+	require.Equal(t, "exec", journal[0].Tool)
+	require.Equal(t, "fs_write", journal[2].Tool)
+	require.True(t, AppJournalComplete(journal, 2))
+	require.False(t, AppJournalComplete(journal, 3), "the MCP node's step hid a lost action")
+
+	stranger, err := ReadAppWorkJournal(context.Background(), peer, "v1:identity:user:"+key+"-other", runId)
+	require.NoError(t, err)
+	require.Empty(t, stranger, "another person read the journal")
 }

@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
@@ -249,7 +250,11 @@ type AppCallRequest struct {
 	ActingUserId   string
 	AppId          string
 	RegistrationId string
-	Messages       []common.ChatMessage
+	// PreferRegistrationId is the machine selection should use when anything on it
+	// can serve the call: the one holding a step's work, on a takeover
+	// (app_takeover.go). It is a preference, and RegistrationId is the answer.
+	PreferRegistrationId string `json:"-"`
+	Messages             []common.ChatMessage
 	// Schema is set for a structured call. Its presence is what makes the
 	// call require a harness that can return a structured final answer.
 	Schema  *common.StructuredSchema
@@ -653,6 +658,16 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		}
 	}
 
+	// AN ANSWER ALREADY SHOWN CANNOT BE TAKEN BACK, so a stream that has shown part of
+	// one does not move to another app, whose answer would follow it. The doc's rule for
+	// a model call: a partial streamed response is not retried automatically.
+	var shown atomic.Bool
+	if onContent := req.OnContent; onContent != nil {
+		req.OnContent = func(delta string) {
+			shown.Store(true)
+			onContent(delta)
+		}
+	}
 	var res AppCallResult
 	var err error
 	var excluded []string
@@ -691,7 +706,7 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		// machine and never a different app. Anything but a proven pre-work
 		// refusal may have caused effects and is returned as it is.
 		exclude, moves := appRefusalExclusion(err, selected)
-		if !moves || ctx.Err() != nil {
+		if !moves || ctx.Err() != nil || shown.Load() {
 			return res, err
 		}
 		if _, ok := a.(AppSelector); !ok {

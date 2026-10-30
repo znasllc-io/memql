@@ -254,6 +254,8 @@ func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.Execut
 
 	if refusal := appPreWorkRefusal(result); refusal != nil {
 		runErr = refusal
+	} else if stop := appStoppedMidWork(result, appId); stop != nil {
+		runErr = stop
 	}
 
 	// The ledger row is written on EVERY outcome, failures included.

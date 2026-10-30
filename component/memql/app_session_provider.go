@@ -96,6 +96,10 @@ type AppSessionHandover struct {
 	// pin and the person who made it. The delegate's app gate refuses a pin
 	// the session's owner did not make, before anything is opened.
 	Pin AppDoorPin
+	// TakingOverFrom lists the sessions of this step that stopped partway
+	// (app_takeover.go), oldest first. The delegate adds what they did to the
+	// prompt once it has settled, because a person's override can replace it.
+	TakingOverFrom []*AppStoppedMidWork
 }
 
 // AppSessionOutcome is what the session produced.
@@ -264,15 +268,22 @@ func (p *sessionProvider) run(
 	// Why the call failed outlives the selection that finds nothing left, for
 	// appProvider.call's reason.
 	var lastRefusal error
+	// The sessions of this step that stopped partway, and the machine holding the
+	// last one's work (app_takeover.go).
+	var stopped []*AppStoppedMidWork
+	holdingWork := ""
 	for {
 		selected := AppSelection{AppId: p.appId}
 		p.registry.mu.RLock()
 		a := p.registry.apps
 		p.registry.mu.RUnlock()
-		request := AppCallRequest{ActingUserId: actingUser, AppId: p.appId, Level: p.req.Level, Effort: p.req.Effort, RunId: p.req.RunId, StepId: p.req.StepId, Schema: schema}
+		request := AppCallRequest{ActingUserId: actingUser, AppId: p.appId, Level: p.req.Level, Effort: p.req.Effort, RunId: p.req.RunId, StepId: p.req.StepId, Schema: schema, PreferRegistrationId: holdingWork}
 		if selector, ok := a.(AppSelector); ok {
 			selected, err = selector.SelectApp(ctx, request, true, excluded)
 			if err != nil {
+				if len(stopped) > 0 {
+					return out, fmt.Errorf("%w; no other app is ready to take over, and the work so far is kept on its run", lastRefusal)
+				}
 				if lastRefusal != nil {
 					return out, lastRefusal
 				}
@@ -302,6 +313,7 @@ func (p *sessionProvider) run(
 			ToolScope:      scope,
 			ResponseSchema: schema,
 			Pin:            p.req.Pin,
+			TakingOverFrom: stopped,
 		})
 		if err == nil || out.SessionId != "" {
 			p.lastMu.Lock()
@@ -312,7 +324,8 @@ func (p *sessionProvider) run(
 			break
 		}
 		// A pin stays its app: the selector is asked for p.appId every time.
-		// Anything but a proven pre-work refusal may have caused effects.
+		// Anything but a proven pre-work refusal, or a stop with a complete record,
+		// may have left an action half done.
 		exclude, moves := appRefusalExclusion(err, selected)
 		if !moves || ctx.Err() != nil {
 			return out, err
@@ -324,6 +337,11 @@ func (p *sessionProvider) run(
 		excluded = append(excluded, exclude)
 		if len(excluded) >= 16 {
 			return out, err
+		}
+		var stop *AppStoppedMidWork
+		if errors.As(err, &stop) {
+			stopped = append(stopped, stop)
+			holdingWork = selected.RegistrationId
 		}
 	}
 	return out, nil

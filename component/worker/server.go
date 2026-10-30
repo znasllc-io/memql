@@ -1812,8 +1812,9 @@ func (s *streamSession) handleAppSessionEnd(end *memqlv1.AppSessionEnd) {
 		// What the APP said it ran, verbatim (design D9). An older cockpit
 		// sends neither and both stay empty, which is read as unknown rather
 		// than as the level or the model that was asked for.
-		Model:  end.GetModel(),
-		Effort: end.GetEffort(),
+		Model:      end.GetModel(),
+		Effort:     end.GetEffort(),
+		StopReason: NormalizeAppStopReason(end.GetStopReason()),
 	}
 	// Carried whatever the exit code says. A harness can answer the schema
 	// and still exit non-zero, and dropping the answer because the run

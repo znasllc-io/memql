@@ -45,6 +45,7 @@ var failureWords = map[string]string{
 	memql.AppRefusalCode:              "the app could not answer",
 	memql.AppQuotaRefusalCode:         "the app's plan is out of usage",
 	memql.AppAuthRefusalCode:          "the app's login on that machine is missing or expired",
+	memql.AppStoppedMidWorkCode:       "the app stopped partway on its usage or login, and nothing could take over",
 	memql.AppVisionStagingRefusalCode: "the images could not be placed in the session workspace",
 	memql.RefusalCodeNoLocalModel:     "no machine could serve the model",
 	// A machine's own codes for a call it started and then failed (the

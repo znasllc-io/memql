@@ -258,4 +258,6 @@ shape appSession workerAppRoutingEvidence {
   endedAt
   usage
   errorMessage
+  quotaRefused
+  authRefused
 }

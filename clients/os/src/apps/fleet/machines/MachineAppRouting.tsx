@@ -70,7 +70,7 @@ export function MachineAppRouting({ machine }: { machine: MachineRow }) {
     <PageHelp title="App routing">
       <p>This machine chooses an app when a new call or step starts. An active session stays with its app. Each new call receives the relevant conversation, instructions and artifacts.</p>
       <p>Auto balances reported token usage, response time and successful calls from the last two hours. Keep at least one weight above zero. Usage is not a remaining-credit estimate.</p>
-      <p>Auto and Round robin use only an app this machine has found ready. An app out of usage stays out until the machine's own check finds it working again, and nobody's request is used to find out. An interrupted session that may have performed work is not automatically replayed. An Only choice never falls through to the other app.</p>
+      <p>Auto and Round robin use only an app this machine has found ready. An app out of usage stays out until the machine's own check finds it working again, and nobody's request is used to find out. An app that runs out of usage or loses its login partway hands its work to the next ready app, with a record of what already ran. Any other interrupted session may have left work half done and is not automatically replayed. An Only choice never falls through to the other app.</p>
       <p>After adding credits or signing in, there is nothing to press. The machine keeps checking, within five minutes for Codex and fifteen for Claude Code, and the app comes back when a check finds it working.</p>
     </PageHelp>
     <fieldset className="fleet-app-routing-fields" disabled={!editable || saving}>

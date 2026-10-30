@@ -479,3 +479,20 @@ func TestAppNotRunnableSaysWhichHalf(t *testing.T) {
 		}
 	}
 }
+
+// A takeover acts on this word, so one this engine cannot read moves nothing.
+func TestNormalizeAppStopReasonIsClosed(t *testing.T) {
+	for reported, want := range map[string]string{
+		"out_of_usage": AppStopOutOfUsage,
+		"signed_out":   AppStopSignedOut,
+		" signed_out ": AppStopSignedOut,
+		"":             "",
+		"ready":        "",
+		"unknown":      "",
+		"a new reason": "",
+	} {
+		if got := NormalizeAppStopReason(reported); got != want {
+			t.Errorf("%q: got %q, want %q", reported, got, want)
+		}
+	}
+}

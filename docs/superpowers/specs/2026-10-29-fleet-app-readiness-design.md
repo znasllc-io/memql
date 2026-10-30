@@ -114,6 +114,26 @@ Fleet shows each app's state, with the reset time when out of usage, and replace
 availability" with Sign in. A `ready` measured after a refusal ends that refusal's block, which
 is what makes the retry unnecessary. No browser opens on the machine, so it works from anywhere.
 
+## Piece 4: an app that stops partway hands over
+
+Owner, 2026-10-30: "If during usage we run out of credits, then that's fine. We get the
+error message, but actually what should happen is that instead of just saying, oh, I run
+out of credits for Codex, it should now attempt Claude, for Claude Code to take over."
+
+Recorded actions have effects, so this cannot be a replay. The chosen design is a handover
+with a clear rule, not a rule per step type. A takeover needs the machine's word that the
+app stopped on its usage or login (`AppSessionEnd.stop_reason`), a complete record (no
+dropped action, a journal holding all the machine reported, every output in the Library),
+and a door that allows it (not a pin, not an Only strategy, not a chat turn with actions).
+The next app gets the step, the journal as fact, the first app's last words as its account,
+and where the work is: the same machine first, whose directory is the run's, then another
+machine with what reached the Library delivered as inputs. Anything else that failed may
+have left an action half done and is not continued. The decision map has the full table.
+
+Rejected: replaying the step in the next app (its actions would run twice), resuming the
+first app's own session in another app (the two have no shared format), and asking the
+person each time (the owner asked for it to happen).
+
 ## Linux service hardening
 
 Measured under the unit the installer wrote (systemd 255, Claude Code 2.1.314,

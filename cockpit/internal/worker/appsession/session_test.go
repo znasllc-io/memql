@@ -2288,3 +2288,69 @@ exit 1
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// The engine hands a step that has already done work to another app only on this
+// machine's word, so the word has to be exact: the app's own statement, and nothing
+// that merely looks like it. The turn may have done anything before it stopped.
+func TestSessionEndSaysWhenTheAppStoppedOnItsUsageOrLogin(t *testing.T) {
+	const initEvent = `{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}`
+	for name, tt := range map[string]struct {
+		stream string
+		want   string
+	}{
+		"a limit partway through": {
+			initEvent + "\n" +
+				`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1793487600,"rateLimitType":"seven_day","overageStatus":"rejected","isUsingOverage":false}}` + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"You've hit your weekly limit · resets Oct 31 at 4pm (America/Phoenix)","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"out_of_usage",
+		},
+		"a lapsed login partway through": {
+			initEvent + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"signed_out",
+		},
+		"any other failure": {
+			initEvent + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"the model produced something the app could not parse","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeApp(t, "claude", "cat <<'CLAUDE_JSON'\n"+tt.stream+"\nCLAUDE_JSON\nexit 1\n")
+			h := newRig(t)
+			end := h.start(t, nil)
+			if end.GetError() == "" {
+				t.Fatal("the turn was meant to fail")
+			}
+			if got := end.GetStopReason(); got != tt.want {
+				t.Fatalf("stop_reason = %q, want %q (error %q)", got, tt.want, end.GetError())
+			}
+			h.settled(t)
+		})
+	}
+}
+
+// A takeover needs what the app left behind, so an output that did not reach the
+// Library means nothing may take over from this session. Its directory is kept.
+func TestSessionEndWithdrawsTheStopWhenOutputsDidNotReachTheLibrary(t *testing.T) {
+	fakeApp(t, "claude", `
+echo made > notes.md
+cat <<'CLAUDE_JSON'
+{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":120,"output_tokens":40}}
+CLAUDE_JSON
+exit 1
+`)
+	h := newRig(t)
+	down := failingLibrary(t)
+	h.manager.opts.LibraryBase = down.URL
+	h.manager.opts.HTTPClient = preflightFixtureClient(h.library.server)
+	end := h.start(t, nil)
+	if !strings.Contains(end.GetError(), "pushing outputs to the Library failed") {
+		t.Fatalf("end error = %q, want the failed push", end.GetError())
+	}
+	if got := end.GetStopReason(); got != "" {
+		t.Fatalf("stop_reason = %q with outputs left behind", got)
+	}
+	h.settled(t)
+}

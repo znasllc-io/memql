@@ -187,6 +187,15 @@ it found. It answers to no cadence or ceiling, because you asked, so it spends a
 
 ---
 
+### When an app stops partway
+
+A failed turn whose app reported its limit or a lapsed login ends the session with
+`stop_reason` (`out_of_usage` or `signed_out`). That word is what lets the engine hand a
+step that has already done work to another app, so it is sent only on the app's own
+statement. It is withdrawn when an output did not reach the Library, because the next app
+carries on from what was left, and that session's directory is kept. The directory of a run
+outlives the session, so an app taking over on this machine finds the files as they were.
+
 ## Signing in from Fleet
 
 A machine's Apps page offers **Sign in** when an app reads as signed out. It works when

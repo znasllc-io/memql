@@ -81,7 +81,9 @@ func AppQuotaReset(message string, reportedAt time.Time) time.Time {
 // early, and no block at all would have every call meet the refusal again.
 func appRefusalUntil(row map[string]any) time.Time {
 	message := mapString(row, "errorMessage")
-	quota, signedOut := IsAppQuotaRefusal(message), IsAppAuthRefusal(message)
+	quotaFlag, _ := row["quotaRefused"].(bool)
+	authFlag, _ := row["authRefused"].(bool)
+	quota, signedOut := quotaFlag || IsAppQuotaRefusal(message), authFlag || IsAppAuthRefusal(message)
 	if mapString(row, "status") != "failed" || (!quota && !signedOut) {
 		return time.Time{}
 	}

@@ -182,6 +182,32 @@ the agent holding the machine's stream, whichever replica took your call
 There is no button to retry an app, because the machine checks on its own. A `ready`
 measured after a refusal ends the block that refusal started.
 
+### When an app stops partway
+
+A step that has already done work cannot simply be run again, because its actions have
+effects. So when an app runs out of usage or loses its login partway through a step, the
+next ready app **takes over**: it gets the same step, the record of what ran, and where the
+work is, and it carries on.
+
+- **The machine has to say so.** The app's own protocol must report the limit or the
+  login. Any other failure, a crash or a timeout included, may have left an action half
+  done and is never taken over. A Cockpit that predates this reports nothing, so the step
+  fails as before.
+- **The record has to be complete.** The journal of what ran is what the next app is told
+  as fact, and what the first app wrote travels as its own account, not as evidence. If an
+  action was dropped, or an output did not reach the Library, nothing takes over and the
+  step fails saying why.
+- **The next app is on the same machine if it can be,** in the same working directory,
+  with the files as they were left. Otherwise another of your machines carries on, with what
+  reached the Library delivered to its working directory.
+- **A choice stays a choice.** An app you pinned, or an Only strategy, stays that app.
+- **You can see it.** The run gets a note naming both apps, each session's record stays on
+  its own child run, and the next app says that it took over.
+
+A chat turn with no step has no record to hand over. One that ran no action sends the same
+prompt to the next app, unless part of an answer was already shown. If nothing else is ready,
+the step fails with the app's own sentence, and the work so far is kept.
+
 ### Which machine, and on which replica
 
 Selection is the **Fleet router**

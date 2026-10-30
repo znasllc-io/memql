@@ -804,6 +804,13 @@ message AppSessionEnd {
   // states none) or that ignored the one it was given leaves this EMPTY --
   // never the requested value, never a guess.
   string effort = 9;
+  // stop_reason says the app stopped for a reason outside the work, and that this
+  // machine can vouch for what it left behind: "out_of_usage" or "signed_out".
+  // Empty for any other failure, and when the session's outputs did not all reach
+  // the Library. It is the one thing that lets the engine hand a step that has
+  // already done work to another app (component/memql/app_takeover.go), so a
+  // cockpit sends it only when the app itself said so and it has finished its turn.
+  string stop_reason = 10;
 }
 
 // AppSessionUsage is what the app REPORTED about its own spend.

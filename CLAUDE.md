@@ -841,6 +841,9 @@ the `mcp.<domain>` endpoint.
   duplicate chunks are DROPPED.
 - **Delegation is a PREFERENCE WITH A FALLBACK** (`v1:worker:delegationPolicy`):
   no allowed, signed-in, online machine means the task runs in-process.
+- **An app that stops partway hands over; nothing else moves work that was done**
+  (`component/memql/app_takeover.go`). On the machine's `stop_reason` and a complete
+  journal, the next ready app carries on with the record of what ran.
 - **The back-channel credential's `sub` is the OWNING USER's id**, so row authz
   applies to the app as to their browser; the surface pin plus `role=system`
   keep it off every credential mutation and cluster-owner gate. Minted via

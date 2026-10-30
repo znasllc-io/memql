@@ -394,6 +394,7 @@ func (s *session) sendEnd(code int, message string, artifacts []string) {
 	ref := s.appRef
 	result := s.result
 	model, effort := s.servedModel, s.servedEffort
+	stopReason := s.stopReason
 	s.usageMu.Unlock()
 	if strings.TrimSpace(ref) == "" {
 		ref = s.start.GetAppSessionRef()
@@ -409,6 +410,7 @@ func (s *session) sendEnd(code int, message string, artifacts []string) {
 		ResultJson:          string(result),
 		Model:               model,
 		Effort:              effort,
+		StopReason:          stopReason,
 	}
 	if err := s.sender.SendAppSessionEnd(end); err != nil {
 		s.logger.Warn("app session end could not be sent", "error", err, "session_error", end.GetError())

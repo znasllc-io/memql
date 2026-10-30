@@ -481,6 +481,9 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 	if refusal := appPreWorkRefusal(result); refusal != nil {
 		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, refusal
 	}
+	if refusal := appStoppedWithNoActions(result); refusal != nil {
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, refusal
+	}
 	if err != nil {
 		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true,
 			fmt.Errorf("%w: %s on %s: %v", memqlengine.ErrAppUnavailable, req.AppId, w.Name, err)
@@ -541,6 +544,53 @@ func appPreWorkRefusal(result workerservice.RunResult) error {
 	case memqlengine.IsAppQuotaRefusal(result.ErrorMessage):
 		return &memqlengine.AppQuotaRefused{Reason: result.ErrorMessage}
 	case memqlengine.IsAppAuthRefusal(result.ErrorMessage):
+		return &memqlengine.AppAuthRefused{Reason: result.ErrorMessage}
+	}
+	return nil
+}
+
+// appStoppedMidWork is the typed stop for a session that did work on a step and then
+// stopped on its usage or login, or nil. It is the second proof that lets a step move,
+// and a takeover carries on rather than starting again (memql's app_takeover.go).
+//
+// THE MACHINE'S WORD, NOT THE SENTENCE. Before any work a sentence is enough, because
+// nothing can be lost. After work, a failure whose words merely resemble a limit would
+// put a second agent on top of whatever the first left half done, so only the app's own
+// protocol counts, and a Cockpit that predates the field gets no takeover.
+//
+// A DROPPED ACTION OR A STRUCTURED ANSWER STOPS IT. The first means nobody can say what
+// happened, and the second means the step has an answer. The delegate checks the journal
+// itself once it has read it (completeStop).
+func appStoppedMidWork(result workerservice.RunResult, appId string) *memqlengine.AppStoppedMidWork {
+	if result.Status != workerservice.AppSessionStatusFailed || result.StopReason == "" ||
+		result.DroppedActions != 0 || len(result.Result) != 0 {
+		return nil
+	}
+	return &memqlengine.AppStoppedMidWork{
+		AppId:           appId,
+		RegistrationId:  result.WorkerId,
+		Kind:            result.StopReason,
+		Reason:          result.ErrorMessage,
+		SessionId:       result.SessionId,
+		RecordedActions: result.RecordedActions,
+		LastWords:       result.Answer,
+		ArtifactIds:     result.ProducedArtifactIds,
+	}
+}
+
+// appStoppedWithNoActions is the chat door's case: one model call that stopped on its
+// usage or login having run no action, so nothing but tokens was spent and the next app
+// can simply answer the same prompt. A chat call with actions has no step to hand over,
+// and is returned as the failure it is.
+func appStoppedWithNoActions(result workerservice.RunResult) error {
+	if result.Status != workerservice.AppSessionStatusFailed || result.RecordedActions != 0 ||
+		result.DroppedActions != 0 || len(result.Result) != 0 {
+		return nil
+	}
+	switch result.StopReason {
+	case workerservice.AppStopOutOfUsage:
+		return &memqlengine.AppQuotaRefused{Reason: result.ErrorMessage}
+	case workerservice.AppStopSignedOut:
 		return &memqlengine.AppAuthRefused{Reason: result.ErrorMessage}
 	}
 	return nil

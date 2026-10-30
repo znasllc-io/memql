@@ -137,6 +137,9 @@ func AppSelectionExcluded(excluded []string, app, registration string) bool {
 // MACHINE'S, so the same app on another machine may well answer, and that is
 // the common case of a fleet where one laptop's login lapsed.
 //
+// A stop partway through a step (app_takeover.go) rules out the same things for the
+// same reasons, and carries its record to the next app.
+//
 // Everything else is refused here: the session may have caused effects, and
 // running it again would repeat them.
 func appRefusalExclusion(err error, selected AppSelection) (string, bool) {
@@ -147,6 +150,13 @@ func appRefusalExclusion(err error, selected AppSelection) (string, bool) {
 	var signedOut *AppAuthRefused
 	if errors.As(err, &signedOut) {
 		return selected.AppId + appExclusionSeparator + selected.RegistrationId, true
+	}
+	var stopped *AppStoppedMidWork
+	if errors.As(err, &stopped) {
+		if stopped.Kind == AppStopSignedOut {
+			return selected.AppId + appExclusionSeparator + selected.RegistrationId, true
+		}
+		return selected.AppId, true
 	}
 	return "", false
 }
@@ -366,6 +376,19 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 		}
 		if len(candidates) == 0 {
 			return AppSelection{}, &AppUnavailable{AppId: req.AppId, LastError: "no enabled app matches this machine's strategy and current availability"}
+		}
+		// The machine holding a step's work comes first when anything there can take
+		// it over (app_takeover.go). Its directory is not on any other machine.
+		if prefer := strings.TrimSpace(req.PreferRegistrationId); prefer != "" {
+			var there []candidate
+			for _, c := range candidates {
+				if c.RegistrationId == prefer {
+					there = append(there, c)
+				}
+			}
+			if len(there) > 0 {
+				candidates = there
+			}
 		}
 		sort.SliceStable(candidates, func(i, j int) bool {
 			a, b := candidates[i], candidates[j]
