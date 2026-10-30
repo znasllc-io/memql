@@ -305,8 +305,9 @@ func (w *world) mutate(ctx context.Context, name string, args map[string]any) {
 	require.NoError(w.t, err, "mutation %s", name)
 }
 
-// asOwner is how a write that is not under test reaches a row: as the site's
-// owner with internal origin, which is what the handlers themselves do.
+// asOwner is how a write that is not under test reaches a row: as the site's owner,
+// with internal origin. It is a fixture's shortcut, and it is what the handlers do for
+// the two creates and nothing else: their updates run as the cluster acting.
 func (w *world) asOwner() context.Context {
 	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(context.Background(), w.owner))
 }
@@ -1243,25 +1244,61 @@ func TestACodeOfADeletedSiteIsRefusedWithoutSendingAnyoneAnywhere(t *testing.T) 
 	require.Equal(t, before, w.row(codeID))
 }
 
-// AN ACT NEEDS NO OWNER FROM THE SITE ANY MORE. It only ever needed one to run its write
-// as. Such a site cannot have a code minted, but one that lost its owner may still have
-// one, and a code nobody can end blocks a move for good.
+// ONLY REMOVAL IS LEFT TO A SITE THAT LOST ITS OWNER. Such a site cannot have a code
+// minted, and the edge serves it nothing, so a code it still carries opens nothing: a
+// regenerate would hand somebody a code that does not work, and a new date would say the
+// same thing more quietly. But removing it needs nothing from the owner, and a code nobody
+// can end blocks a move for good. All of this is asserted for the two people who reach it,
+// a cluster operator and a member of the site's organization.
 func TestACodeOfASiteThatLostItsOwnerCanStillBeEnded(t *testing.T) {
 	w := newWorld(t, "ownerlost")
-	operator := actorContext(w.operator, auth.RoleOwner)
 	site := "ac-ownerless-" + w.suffix
 	w.siteRow(site, map[string]any{"ownerUserId": nil})
-	codeID := "ac-code-" + w.suffix
-	w.forgeCode(site, codeID, w.account, time.Now(), time.Now().Add(time.Hour))
+	for name, caller := range map[string]context.Context{
+		"a cluster operator":                        actorContext(w.operator, auth.RoleOwner),
+		"a member of the deployable's organization": actorContext(w.member, auth.RoleWriter),
+	} {
+		t.Run(name, func(t *testing.T) {
+			codeID := "ac-code-" + strings.ReplaceAll(name, " ", "-") + "-" + w.suffix
+			w.forgeCode(site, codeID, w.account, time.Now(), time.Now().Add(time.Hour))
+			before := w.row(codeID)
 
-	nodes, err := w.in.handleList(operator, map[string]any{"siteId": site}, 0)
-	require.NoError(t, err)
-	require.Len(t, nodes, 1)
-	_, err = w.in.handleRemove(operator, map[string]any{"codeId": codeID}, 0)
-	require.NoError(t, err)
-	row := w.row(codeID)
-	require.NotEmpty(t, row["revokedAt"])
-	require.Equal(t, w.owner, bare(row["ownerUserId"]), "the update moved the row's owner")
+			nodes, err := w.in.handleRegenerate(caller, map[string]any{"codeId": codeID}, 0)
+			require.Nil(t, nodes, "a regenerate handed back a code that opens nothing")
+			require.Contains(t, requireSentence(t, err), "no owner", "refused, but not for this reason")
+			nodes, err = w.in.handleRegenerate(caller, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+			require.Nil(t, nodes, "a regenerate with a new expiry handed back a code that opens nothing")
+			require.Contains(t, requireSentence(t, err), "no owner")
+			nodes, err = w.in.handleSetExpiry(caller, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+			require.Nil(t, nodes, "a code that opens nothing was given a new date")
+			require.Contains(t, requireSentence(t, err), "no owner")
+			require.Equal(t, before, w.row(codeID), "a refused act changed the row")
+			require.Empty(t, w.events(codeID), "a refused act was audited")
+
+			listed, err := w.in.handleList(caller, map[string]any{"siteId": site}, 0)
+			require.NoError(t, err)
+			require.NotEmpty(t, listed, "the code cannot be seen, so nobody can end it")
+
+			_, err = w.in.handleRemove(caller, map[string]any{"codeId": codeID}, 0)
+			require.NoError(t, err, "the one act left to this code was refused")
+			row := w.row(codeID)
+			require.NotEmpty(t, row["revokedAt"])
+			require.Equal(t, w.owner, bare(row["ownerUserId"]), "the update moved the row's owner")
+			require.Len(t, w.events(codeID), 1, "removing it was not audited")
+		})
+	}
+
+	// WHICH REASON IS SAID MATTERS WHEN BOTH ARE TRUE. Sending a person to find the site an
+	// owner, only to tell them next that the code was stale all along, is a wasted errand.
+	t.Run("a code that is stale as well", func(t *testing.T) {
+		moved := "ac-ownerless-moved-" + w.suffix
+		w.siteRow(moved, map[string]any{"ownerUserId": nil, "accountId": nil})
+		codeID := "ac-code-stale-ownerless-" + w.suffix
+		w.forgeCode(moved, codeID, w.account, time.Now(), time.Now().Add(time.Hour))
+		nodes, err := w.in.handleRegenerate(actorContext(w.operator, auth.RoleOwner), map[string]any{"codeId": codeID}, 0)
+		require.Nil(t, nodes)
+		require.Contains(t, requireSentence(t, err), "another organization", "told the reason that can change")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,6 +1316,13 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 	before, versions, events := w.row(codeID), w.versions(codeID, 0), len(w.events(codeID))
 	require.NotEmpty(t, auth.MaintenanceAutomationNames(), "there is no maintenance actor to try")
 
+	// THE PREMISE of the operator credential's row: it is an owner, with no flag to say it
+	// is not a person, so only its id gives it away.
+	credential, ok := auth.AccessFromContext(operatorCredential())
+	require.True(t, ok)
+	require.False(t, credential.Synthetic, "the premise failed: this actor is flagged, so a flag check would catch it")
+	require.Equal(t, auth.RoleOwner, credential.Role)
+
 	callers := map[string]context.Context{
 		"a caller with no id":      auth.ContextWithAccess(context.Background(), &auth.AccessContext{Role: auth.RoleOwner}),
 		"no caller at all":         context.Background(),
@@ -1287,6 +1331,7 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 		"the cluster acting":       auth.ContextWithSystemActor(context.Background(), "some-part-of-the-cluster"),
 		"the cluster, trusted":     auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "some-part-of-the-cluster")),
 		"a maintenance automation": auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.MaintenanceAutomationNames()[0])),
+		"the operator credential":  operatorCredential(),
 	}
 	acts := map[string]func(context.Context) ([]memorynodes.MemoryNode, error){
 		"minting": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
@@ -1311,6 +1356,26 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 			})
 		}
 	}
+
+	// THROUGH THE DISPATCH AT CLIENT ORIGIN, which is how that credential got through: it
+	// holds every capability, the organization gate admits it, and it is the handler's
+	// question alone. It may still read, since a read records nobody.
+	for builtin, args := range map[string]map[string]any{
+		"siteAccessCodeCreate":     w.createArgs(nil),
+		"siteAccessCodeRegenerate": {"codeId": codeID},
+		"siteAccessCodeSetExpiry":  {"codeId": codeID, "expiresAt": after(2 * time.Hour)},
+		"siteAccessCodeRemove":     {"codeId": codeID},
+	} {
+		t.Run(builtin+" with the operator credential, through the dispatch", func(t *testing.T) {
+			rows, err := w.builtin(operatorCredential(), builtin, args)
+			require.Nil(t, rows, "the operator credential was answered")
+			require.Contains(t, requireSentence(t, err), "person", "refused, but not for this reason")
+		})
+	}
+	listed, err := w.builtin(operatorCredential(), "siteAccessCodesForSite", map[string]any{"siteId": w.site})
+	require.NoError(t, err, "the operator credential can no longer read the list, and nothing asked for that")
+	require.Len(t, listed, 1)
+
 	require.Equal(t, before, w.row(codeID), "an act by nobody changed the row")
 	require.Equal(t, versions, w.versions(codeID, 0), "an act by nobody wrote a version")
 	require.Len(t, w.events(codeID), events, "an act by nobody was audited")
@@ -1319,9 +1384,214 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 	// THE REACHABLE POSITIVE. Each of the four, by somebody, is the rest of this file; this
 	// one is the shape a server path borrows: a real person's id, with no role of their own.
 	borrowed := auth.ContextWithUserActor(context.Background(), w.owner)
-	_, err := w.in.handleSetExpiry(borrowed, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
+	_, err = w.in.handleSetExpiry(borrowed, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
 	require.NoError(t, err, "borrowed authority names a person, and it was refused as though it named nobody")
 	require.Equal(t, w.owner, bare(w.row(codeID)["lastChangedBy"]))
+}
+
+// operatorCredential is the actor a stream admitted with MEMQL_OPERATOR_KEY resolves to,
+// built the way ensureAccess builds it (component/grpc): the subject the interceptor
+// stamps, through FallbackFromClaims, because no user row is behind it. That is why it
+// carries no Synthetic flag, though the interceptor's own doc calls it synthetic.
+func operatorCredential() context.Context {
+	claims := map[string]any{
+		"sub": "cluster:operator", "role": string(auth.RoleOwner), "roles": []string{string(auth.RoleOwner)},
+		"name": "Cluster Operator", "identity.operator": map[string]any{"source": "operator_key"},
+	}
+	ctx := auth.ContextWithClaims(context.Background(), claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, auth.FallbackFromClaims(claims))
+}
+
+// ---------------------------------------------------------------------------
+// a test persona
+// ---------------------------------------------------------------------------
+
+// personaValidator answers the shared session check a persona is held to on every
+// engine call, and says when one has ended.
+type personaValidator struct {
+	mu    sync.Mutex
+	ended bool
+}
+
+func (v *personaValidator) ValidateRoleTest(context.Context, string, string, auth.Role) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.ended {
+		return errors.New("test ended")
+	}
+	return nil
+}
+
+func (v *personaValidator) end() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.ended = true
+}
+
+// persona builds a role-test caller the way a stream does: the forwarded authority
+// bindQueryAuthority stamps (component/grpc/work_authority.go) is on the context, which is
+// what the cluster-acting calls below must not present as their own.
+func persona(t *testing.T, id string, role auth.Role) context.Context {
+	t.Helper()
+	access := &auth.AccessContext{UserId: id, Role: role, RoleTestSessionID: "access-code-session"}
+	assertion, err := auth.ForwardedAuthorityForUser(access, auth.RoleTestClass, "", time.Now().Add(time.Hour), time.Now())
+	require.NoError(t, err)
+	ctx := auth.BindForwardedContext(context.Background(), assertion.Principal().Claims, access, assertion)
+	require.True(t, auth.IsRoleTestContext(ctx), "the premise failed: this context is not a persona's")
+	return ctx
+}
+
+// A PERSONA IS JUDGED WHERE AN ACT IS AUTHORIZED, UNDER THE CALLER, AND NOWHERE ELSE. The
+// store's own reads and updates run as the cluster acting, and a stream's forwarded
+// authority names the persona: left on that context it is an assertion the service actor
+// cannot honour, and every such call was refused, so a persona on their own site could not
+// list a code that had one. So it is blanked there, and that must not turn into a way
+// around the persona's limits: each thing a persona could not otherwise do is refused here.
+func TestATestPersonaIsJudgedWhereTheActIsAuthorized(t *testing.T) {
+	w := newWorld(t, "persona")
+	validator := &personaValidator{}
+	auth.SetRoleTestValidator(validator)
+	t.Cleanup(func() { auth.SetRoleTestValidator(nil) })
+
+	developerID := auth.RoleTestUserPrefix + "developer-" + w.suffix
+	writerID := auth.RoleTestUserPrefix + "writer-" + w.suffix
+	w.principal(developerID, auth.RoleDeveloper)
+	w.principal(writerID, auth.RoleWriter)
+	developer := persona(t, developerID, auth.RoleDeveloper)
+	writer := persona(t, writerID, auth.RoleWriter)
+
+	own := "ac-own-" + w.suffix
+	w.siteRow(own, map[string]any{"ownerUserId": "v1:identity:user:" + developerID})
+
+	var codeID string
+	t.Run("a developer persona does all of it on their own site, through the dispatch", func(t *testing.T) {
+		rows, err := w.builtin(developer, "siteAccessCodeCreate", w.createArgs(map[string]any{"siteId": own}))
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		codeID = fmt.Sprint(rows[0]["codeId"])
+
+		rows, err = w.builtin(developer, "siteAccessCodesForSite", map[string]any{"siteId": own})
+		require.NoError(t, err, "a persona could not list a site with a code on it")
+		require.Len(t, rows, 1)
+
+		_, err = w.builtin(developer, "siteAccessCodeSetExpiry", map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)})
+		require.NoError(t, err, "a persona could not re-time their own code")
+		rows, err = w.builtin(developer, "siteAccessCodeRegenerate", map[string]any{"codeId": codeID})
+		require.NoError(t, err, "a persona could not regenerate their own code")
+		require.Equal(t, memql.AccessCodeDigest(fmt.Sprint(rows[0]["code"])), w.row(codeID)["codeHash"])
+
+		row := w.row(codeID)
+		require.Equal(t, developerID, bare(row["ownerUserId"]))
+		require.Equal(t, developerID, bare(row["lastChangedBy"]), "the persona is who asked")
+
+		_, err = w.builtin(developer, "siteAccessCodeRemove", map[string]any{"codeId": codeID})
+		require.NoError(t, err, "a persona could not remove their own code")
+		require.NotEmpty(t, w.row(codeID)["revokedAt"])
+		require.Len(t, w.events(codeID), 4, "the persona's acts were not audited")
+	})
+
+	// Each row below is something a persona cannot do; the row above is what it can.
+	theirs, _ := w.mint(actorContext(w.operator, auth.RoleOwner), nil)
+	before := w.row(theirs)
+
+	t.Run("a persona whose role lacks the part is refused at the gate", func(t *testing.T) {
+		_, err := w.builtin(writer, "siteAccessCodeRegenerate", map[string]any{"codeId": theirs})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "capability_not_held")
+	})
+
+	t.Run("a persona the tier does not admit reads nothing, and so does nothing", func(t *testing.T) {
+		// A stranger to the site's organization, with no gate in front of the handler: the
+		// reads under the caller are all that stands here, and they still do.
+		nodes, err := w.in.handleRegenerate(writer, map[string]any{"codeId": theirs}, 0)
+		require.Nil(t, nodes, "a persona was handed a code on a site it cannot read")
+		require.Contains(t, requireSentence(t, err), "No access code you can read")
+		nodes, err = w.in.handleList(writer, map[string]any{"siteId": w.site}, 0)
+		require.Nil(t, nodes)
+		requireSentence(t, err)
+		nodes, err = w.in.handleCreate(writer, w.createArgs(nil), 0)
+		require.Nil(t, nodes, "a persona was handed a code on a site it cannot read")
+		requireSentence(t, err)
+	})
+
+	t.Run("a persona cannot mint for an owner it is not, whatever the row tier admits", func(t *testing.T) {
+		// The mint runs as the site's owner, and a persona may not borrow anybody else. It
+		// is the one act a real developer can do here and this one cannot, so it is refused
+		// in words that do not send them to try again.
+		nodes, err := w.in.handleCreate(developer, w.createArgs(nil), 0)
+		require.Nil(t, nodes, "a persona was handed a code for a site somebody else owns")
+		require.Contains(t, requireSentence(t, err), "test persona")
+	})
+	require.Equal(t, before, w.row(theirs), "a refused persona changed the row")
+
+	t.Run("a persona whose session has ended reaches no write", func(t *testing.T) {
+		live := "ac-live-" + w.suffix
+		w.forgeCode(own, live, w.account, time.Now(), time.Now().Add(time.Hour))
+		beforeLive := w.row(live)
+		writes := []string{"rotateSiteAccessCode", "setSiteAccessCodeExpiry", "removeSiteAccessCode"}
+		acts := map[string]func(*Integration) ([]memorynodes.MemoryNode, error){
+			"regenerate": func(in *Integration) ([]memorynodes.MemoryNode, error) {
+				return in.handleRegenerate(developer, map[string]any{"codeId": live}, 0)
+			},
+			"set expiry": func(in *Integration) ([]memorynodes.MemoryNode, error) {
+				return in.handleSetExpiry(developer, map[string]any{"codeId": live, "expiresAt": after(2 * time.Hour)}, 0)
+			},
+			"remove": func(in *Integration) ([]memorynodes.MemoryNode, error) {
+				return in.handleRemove(developer, map[string]any{"codeId": live}, 0)
+			},
+		}
+
+		// BETWEEN THE AUTHORIZING READ AND THE WRITE, the one window the engine's own check
+		// on each call does not cover, since the write runs as somebody else.
+		for name, act := range acts {
+			t.Run(name+", ended after the read that authorized it", func(t *testing.T) {
+				revocable := &personaValidator{}
+				auth.SetRoleTestValidator(revocable)
+				spy := &spyEngine{inner: &afterRead{inner: liveEngine{w.eng}, prefix: "query siteById(", onRead: revocable.end}}
+				nodes, err := act(NewIntegration(spy, discardLogger()))
+				require.Nil(t, nodes, "an ended persona was answered")
+				requireSentence(t, err)
+				for _, write := range writes {
+					require.Empty(t, spy.named(write), "an ended persona reached %s", write)
+				}
+				require.Equal(t, beforeLive, w.row(live), "an ended persona changed the row")
+			})
+		}
+
+		// AND WITH THE ANSWER IN HAND: a session that ended while the cluster's read ran was
+		// the session it was for, and the row it read is not for anybody else.
+		t.Run("the list, ended while it read when a code was last opened", func(t *testing.T) {
+			// One code, so that this is the last read the list makes, and no later read
+			// under the persona's own context can be what refuses it.
+			single := "ac-own-one-code-" + w.suffix
+			w.siteRow(single, map[string]any{"ownerUserId": "v1:identity:user:" + developerID})
+			w.forgeCode(single, "ac-only-code-"+w.suffix, w.account, time.Now(), time.Now().Add(time.Hour))
+
+			revocable := &personaValidator{}
+			auth.SetRoleTestValidator(revocable)
+			in := NewIntegration(&afterRead{inner: liveEngine{w.eng}, prefix: "query siteAccessSessionLatestForCode(", onRead: revocable.end}, discardLogger())
+			nodes, err := in.handleList(developer, map[string]any{"siteId": single}, 0)
+			require.Nil(t, nodes, "an ended persona was told when a code was last opened")
+			requireSentence(t, err)
+		})
+
+		// AND ONCE IT HAS ENDED, every read under the caller refuses, so nothing starts.
+		validator.end()
+		auth.SetRoleTestValidator(validator)
+		for name, act := range acts {
+			t.Run(name+", ended before it began", func(t *testing.T) {
+				spy := &spyEngine{inner: liveEngine{w.eng}}
+				nodes, err := act(NewIntegration(spy, discardLogger()))
+				require.Nil(t, nodes, "an ended persona was answered")
+				requireSentence(t, err)
+				for _, write := range writes {
+					require.Empty(t, spy.named(write), "an ended persona reached %s", write)
+				}
+				require.Equal(t, beforeLive, w.row(live), "an ended persona changed the row")
+			})
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1649,21 +1919,29 @@ func TestAStreamDroppedAfterTheWriteStillRecordsTheAct(t *testing.T) {
 	operator := actorContext(w.operator, auth.RoleOwner)
 	codeID, _ := w.mint(operator, nil)
 
+	// Each act answers the code it landed on, because a mint's is not known until it has.
 	acts := []struct {
 		name string
-		act  func(*Integration, context.Context) error
+		act  func(*Integration, context.Context) (string, error)
 	}{
-		{"regenerating", func(in *Integration, ctx context.Context) error {
+		{"minting", func(in *Integration, ctx context.Context) (string, error) {
+			nodes, err := in.handleCreate(ctx, w.createArgs(map[string]any{"label": "Minted as the stream dropped"}), 0)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprint(onlyPayload(t, nodes)["codeId"]), nil
+		}},
+		{"regenerating", func(in *Integration, ctx context.Context) (string, error) {
 			_, err := in.handleRegenerate(ctx, map[string]any{"codeId": codeID}, 0)
-			return err
+			return codeID, err
 		}},
-		{"re-timing", func(in *Integration, ctx context.Context) error {
+		{"re-timing", func(in *Integration, ctx context.Context) (string, error) {
 			_, err := in.handleSetExpiry(ctx, map[string]any{"codeId": codeID, "expiresAt": after(2 * time.Hour)}, 0)
-			return err
+			return codeID, err
 		}},
-		{"removing", func(in *Integration, ctx context.Context) error {
+		{"removing", func(in *Integration, ctx context.Context) (string, error) {
 			_, err := in.handleRemove(ctx, map[string]any{"codeId": codeID}, 0)
-			return err
+			return codeID, err
 		}},
 	}
 	for _, tc := range acts {
@@ -1683,14 +1961,19 @@ func TestAStreamDroppedAfterTheWriteStillRecordsTheAct(t *testing.T) {
 					_, bounded = call.ctx.Deadline()
 				}
 			}
-			events := len(w.events(codeID))
-			require.NoError(t, tc.act(in, ctx))
+			before := len(w.events(codeID))
+			landedOn, err := tc.act(in, ctx)
+			require.NoError(t, err)
 			require.Error(t, ctx.Err(), "the premise failed: the request was not cancelled")
 
 			require.Len(t, spy.named("createAuditEvent"), 1)
 			require.NoError(t, atTheWrite, "the audit write was left waiting on the request that was dropped")
 			require.True(t, bounded, "a write that outlives its request has no bound of its own")
-			require.Len(t, w.events(codeID), events+1, "the act happened and its audit event did not land")
+			if landedOn == codeID {
+				require.Len(t, w.events(codeID), before+1, "the act happened and its audit event did not land")
+			} else {
+				require.Len(t, w.events(landedOn), 1, "the mint happened and its audit event did not land")
+			}
 		})
 	}
 }
@@ -2160,16 +2443,22 @@ func TestTwoRegeneratesFromOneReadDoNotBothSucceed(t *testing.T) {
 	})
 }
 
-// afterRead lets a test hold a handler right after it has read the code it is
-// about to decide from.
+// afterRead lets a test do something right after a handler has made one read: hold it
+// after it has read the code it is about to decide from, say. With no prefix given, that
+// is the read it waits for.
 type afterRead struct {
 	inner  Engine
+	prefix string
 	onRead func()
 }
 
 func (a *afterRead) Execute(ctx context.Context, query string) (any, error) {
 	res, err := a.inner.Execute(ctx, query)
-	if strings.HasPrefix(query, "query siteAccessCodeById(") {
+	prefix := a.prefix
+	if prefix == "" {
+		prefix = "query siteAccessCodeById("
+	}
+	if strings.HasPrefix(query, prefix) {
 		a.onRead()
 	}
 	return res, err
@@ -2399,7 +2688,7 @@ func TestTheSameCallTwiceIsAnsweredTwice(t *testing.T) {
 // the store the bff reads through
 // ---------------------------------------------------------------------------
 
-func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
+func TestTheStoreFindsCodesAndSessions(t *testing.T) {
 	w := newWorld(t, "store")
 	operator := actorContext(w.operator, auth.RoleOwner)
 	store := NewGraphStore(liveEngine{w.eng})
@@ -2489,6 +2778,7 @@ func TestTheStoreFindsCodesAndSessionsAsTheOwner(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, found, "an ended session must still resolve, so the handler can say 'ended'")
 		require.True(t, found.Ended)
+		require.Equal(t, w.owner, w.sessionOwner(session), "ending a session moved its owner")
 	})
 
 	t.Run("a session with no id is given one", func(t *testing.T) {

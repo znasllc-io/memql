@@ -243,6 +243,14 @@ func (i *Integration) mint(ctx context.Context, actor, siteID string, args map[s
 	if site.OwnerUserID == "" {
 		return minted{}, refuse("This deployable has no owner, so it cannot have access codes. Give it an owner, then add the code.")
 	}
+	// A TEST PERSONA CAN ONLY MINT WHAT IS ITS OWN. The row is stamped with the site's
+	// owner by running as them, and a persona may not borrow anybody else
+	// (auth.ContextWithUserActor), so the engine would refuse the write whatever came next,
+	// and the sentence for that says to try again. The acts on a code that exists do not
+	// borrow anybody, so this one is all a persona loses against the role it stands in for.
+	if auth.IsRoleTestContext(ctx) && actor != site.OwnerUserID {
+		return minted{}, refuse("A test persona can only add an access code to a deployable it owns, because the code belongs to the deployable's owner. Add it as yourself.")
+	}
 	if site.DeployableName == "" {
 		return minted{}, refuse("This deployable was not deployed from a package, so it has no gates for a code to open. Deploy it from a source that declares a gate with @accessGate, then add the code.")
 	}
@@ -343,7 +351,7 @@ func (i *Integration) readTarget(ctx context.Context, codeID string) (target, er
 	return target{code: code, site: site}, nil
 }
 
-// refuseIfEnded is the two reasons a code cannot be given a future.
+// refuseIfEnded is the three reasons a code cannot be given a future.
 //
 // REMOVAL IS FINAL, and that is what lets nothing ever have to clear `revokedAt`.
 //
@@ -352,12 +360,21 @@ func (i *Integration) readTarget(ctx context.Context, codeID string) (target, er
 // something that looks like a working code and is not. Removing it is the one act that
 // helps, and the shared gate leaves only a cluster operator able to reach it, since it
 // judges the copy.
+//
+// NOR DOES THE CODE OF A SITE WITH NO OWNER, for the same reason and with the same one act
+// left: the edge has no owner to stamp and the bff no owner to compare it with, so no
+// visitor gets as far as the code. A regenerate here would put that code in the reply.
+// It comes last because it is the one that can change: a stale code stays stale once the
+// site has an owner, and nobody should be sent to find one before they are told that.
 func refuseIfEnded(t target) error {
 	if t.code.Revoked {
 		return refuse("This access code was removed, and removal is final. To give someone access again, add a new code.")
 	}
 	if t.code.AccountID != t.site.AccountID {
 		return refuse("This access code was minted while its deployable belonged to another organization, so it opens nothing. Remove it and add a new code.")
+	}
+	if t.site.OwnerUserID == "" {
+		return refuse("This deployable has no owner, so this access code opens nothing. Give it an owner and try again, or remove the code.")
 	}
 	return nil
 }
@@ -892,10 +909,14 @@ func refuseInARun(ctx context.Context, instead string) error {
 // requireCaller is the person behind an act, bare, for `lastChangedBy`.
 //
 // AN ACT ON A CODE BELONGS TO A PERSON. The write does not run as them, so this is the
-// only record of who asked, and a connector, an anonymous actor and the cluster acting on
-// its own have nobody to name. It is asked first, though no person would think to: the
-// reads after it would refuse the same callers, in words about a site or a row tier that
-// say nothing about what is wrong, or admit the cluster and write its name on the row.
+// only record of who asked, and a connector, an anonymous actor, the cluster acting on
+// its own and the operator credential have nobody to name. It is asked first, though no
+// person would think to: the reads after it would refuse some of these callers, in words
+// about a site or a row tier that say nothing about what is wrong, and admit the rest and
+// write their name on the row.
+//
+// THE COST IS ACCEPTED: tooling that holds the operator key can read a list, and it can
+// no longer end a code. A person signs in and does that.
 func requireCaller(ctx context.Context) (string, error) {
 	actor := memql.BareShortId(callerUserID(ctx))
 	if actor == "" {
@@ -905,12 +926,15 @@ func requireCaller(ctx context.Context) (string, error) {
 }
 
 // callerUserID is the authenticated person calling, or "" when there is none.
+//
+// THE ID IS ASKED AS WELL AS THE FLAG, and the flag alone is not enough. A stream admitted
+// with the operator key resolves to an owner named `cluster:operator` with no Synthetic
+// flag, since no user row is behind it, so it holds every part, passes the organization
+// gate and is admitted by every tier: nothing else here would stop it writing that name on
+// a row. auth.ActsForNoPerson asks both, the gate component/repositoryauthority also uses.
 func callerUserID(ctx context.Context) string {
 	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil {
-		return ""
-	}
-	if ac.IsAnonymousActor() || ac.IsConnector() || ac.Synthetic {
+	if !ok || ac == nil || ac.IsAnonymousActor() || ac.IsConnector() || auth.ActsForNoPerson(ctx, ac.UserId) {
 		return ""
 	}
 	return strings.TrimSpace(ac.UserId)

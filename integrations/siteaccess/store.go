@@ -44,7 +44,9 @@ import (
 // arm. So nothing here compares an owner: the bff's handler compares the edge's stamp
 // with the site's own ownerUserId before it calls in, and THAT IS WHAT CHECKS THE OWNER.
 // These reads answer for anybody who reaches them, which is why they are @serverOnly and
-// why a caller outside this package holds only the five functions below.
+// why a caller outside this package holds only the five functions below. A test persona
+// is judged under the caller, at the reads above, and only asked after that whether its
+// session is still live: see asCluster.
 //
 // THE TWO CREATES RUN AS THE SITE'S OWNER, so a row is stamped with the site's owner at
 // birth and never the operator's. That stamp stays where it landed: ownership transfer
@@ -109,8 +111,54 @@ func NewGraphStore(engine Engine) *GraphStore { return &GraphStore{engine: engin
 
 // asCluster is the context the store's own reads and updates run under: the cluster
 // acting, with internal origin. See the file note for why a row's owner has no say.
-func asCluster(ctx context.Context) context.Context {
-	return auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(ctx, systemActorName))
+//
+// THE CALLER'S FORWARDED AUTHORITY STAYS BEHIND. A stream stamps it on the context
+// (component/grpc/work_authority.go), and under a test persona it is an assertion the
+// service actor cannot honour: the engine would refuse every one of these calls as an actor
+// who differs from its session, and a persona could not so much as list a site with a code
+// on it. So this call presents none, as library review history and the fleet catalog do.
+//
+// THE PERSONA IS STILL ASKED, HERE, BECAUSE NOTHING AFTER THIS WILL. The engine judges a
+// session on the context it is handed, and this one no longer names it, so the session that
+// authorized an act could end before the act's write and the write would land. Reads under
+// the caller have already judged what the persona may reach. This judges only that it is
+// still there.
+func asCluster(ctx context.Context) (context.Context, error) {
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, fmt.Errorf("siteaccess: the test persona behind this call: %w", err)
+	}
+	blank := auth.ContextWithForwardedAuthority(ctx, auth.ForwardedAuthority{})
+	return auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(blank, systemActorName)), nil
+}
+
+// readAsCluster is one of the store's own reads.
+//
+// THE PERSONA IS ASKED AGAIN WITH THE ANSWER IN HAND, for the precedents' reason
+// (integrations/library/reviewstore): a session that ended while this ran was the session
+// this was for, and it gets nothing.
+func (s *GraphStore) readAsCluster(ctx context.Context, what, call string, rendered error) ([]map[string]any, error) {
+	cluster, err := asCluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.read(cluster, what, call, rendered)
+	if err != nil {
+		return nil, err
+	}
+	if err := auth.ValidateRoleTestContext(ctx); err != nil {
+		return nil, fmt.Errorf("siteaccess: the test persona behind this call: %w", err)
+	}
+	return rows, nil
+}
+
+// asClusterAgainst is the context one of the store's updates of a code runs under: the
+// cluster acting, carrying the version of the row it was decided from.
+func asClusterAgainst(ctx context.Context, codeID string, version time.Time) (context.Context, error) {
+	cluster, err := asCluster(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return witnessed(cluster, codeConcept, codeID, version)
 }
 
 // asOwner is the context the two creates run under, so the row they write is stamped
@@ -136,7 +184,7 @@ func asOwner(ctx context.Context, owner string) (context.Context, bool) {
 // stamp with the site's ownerUserId, made before this is called, that checks the owner.
 func (s *GraphStore) CodeByHash(ctx context.Context, siteID, codeHash string) (*Code, error) {
 	call, err := langparser.RenderCall("siteAccessCodeByHash", map[string]any{"siteId": siteID, "codeHash": codeHash})
-	rows, err := s.read(asCluster(ctx), "a code by its digest", call, err)
+	rows, err := s.readAsCluster(ctx, "a code by its digest", call, err)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -147,11 +195,13 @@ func (s *GraphStore) CodeByHash(ctx context.Context, siteID, codeHash string) (*
 // CodeByID resolves the code a session was opened with. A miss is (nil, nil). It reads
 // as the cluster acting, for CodeByHash's reason.
 func (s *GraphStore) CodeByID(ctx context.Context, codeID string) (*Code, error) {
-	view, found, err := s.codeByID(asCluster(ctx), codeID)
-	if err != nil || !found {
+	call, err := langparser.RenderCall("siteAccessCodeById", map[string]any{"codeId": codeID})
+	rows, err := s.readAsCluster(ctx, "the access code", call, err)
+	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	return &view.Code, nil
+	code := codeFromRow(rows[0]).Code
+	return &code, nil
 }
 
 // SessionByTokenHash finds a session by the digest of the cookie presented. A
@@ -160,7 +210,7 @@ func (s *GraphStore) CodeByID(ctx context.Context, codeID string) (*Code, error)
 // reads as the cluster acting, for CodeByHash's reason.
 func (s *GraphStore) SessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error) {
 	call, err := langparser.RenderCall("siteAccessSessionByToken", map[string]any{"tokenHash": tokenHash})
-	rows, err := s.read(asCluster(ctx), "a session by its digest", call, err)
+	rows, err := s.readAsCluster(ctx, "a session by its digest", call, err)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -212,11 +262,15 @@ func (s *GraphStore) CreateSession(ctx context.Context, owner string, in Session
 // was stamped with. Ending one that has already ended writes the time again, which
 // nothing reads as a change.
 func (s *GraphStore) EndSession(ctx context.Context, sessionID string, at time.Time) error {
+	cluster, err := asCluster(ctx)
+	if err != nil {
+		return err
+	}
 	call, err := langparser.RenderCall("endSiteAccessSession", map[string]any{
 		"sessionId": sessionID,
 		"endedAt":   wholeSecond(at),
 	})
-	return s.write(asCluster(ctx), "the end of the session", call, err)
+	return s.write(cluster, "the end of the session", call, err)
 }
 
 // ---------------------------------------------------------------------------
@@ -316,13 +370,8 @@ func (s *GraphStore) packageDomains(ctx context.Context, packageID string) ([]st
 // codeForCaller resolves one code with internal origin, under the caller's actor.
 // A miss is (codeView{}, false, nil), for siteForCaller's reason.
 func (s *GraphStore) codeForCaller(ctx context.Context, codeID string) (codeView, bool, error) {
-	return s.codeByID(auth.ContextWithInternalOrigin(ctx), codeID)
-}
-
-// codeByID is the one read of a code by id: which actor it runs as is its caller's.
-func (s *GraphStore) codeByID(ctx context.Context, codeID string) (codeView, bool, error) {
 	call, err := langparser.RenderCall("siteAccessCodeById", map[string]any{"codeId": codeID})
-	rows, err := s.read(ctx, "the access code", call, err)
+	rows, err := s.read(auth.ContextWithInternalOrigin(ctx), "the access code", call, err)
 	if err != nil || len(rows) == 0 {
 		return codeView{}, false, err
 	}
@@ -352,7 +401,7 @@ func (s *GraphStore) codesForSite(ctx context.Context, siteID string) ([]codeVie
 // already authorized the person asking, under the caller, and this says only when.
 func (s *GraphStore) lastOpened(ctx context.Context, codeID string, generation int) (string, error) {
 	call, err := langparser.RenderCall("siteAccessSessionLatestForCode", map[string]any{"codeId": codeID, "generation": generation})
-	rows, err := s.read(asCluster(ctx), "when the code was last opened", call, err)
+	rows, err := s.readAsCluster(ctx, "when the code was last opened", call, err)
 	if err != nil || len(rows) == 0 {
 		return "", err
 	}
@@ -429,7 +478,7 @@ type rotation struct {
 // rotateCode replaces a code's secret, as the cluster acting, against the version it
 // was decided from. The row keeps the owner it was stamped with.
 func (s *GraphStore) rotateCode(ctx context.Context, r rotation, version time.Time) error {
-	guarded, err := witnessed(asCluster(ctx), codeConcept, r.CodeID, version)
+	guarded, err := asClusterAgainst(ctx, r.CodeID, version)
 	if err != nil {
 		return err
 	}
@@ -447,7 +496,7 @@ func (s *GraphStore) rotateCode(ctx context.Context, r rotation, version time.Ti
 
 // setCodeExpiry moves a code's expiry, as rotateCode writes.
 func (s *GraphStore) setCodeExpiry(ctx context.Context, codeID string, expiresAt time.Time, changedBy string, version time.Time) error {
-	guarded, err := witnessed(asCluster(ctx), codeConcept, codeID, version)
+	guarded, err := asClusterAgainst(ctx, codeID, version)
 	if err != nil {
 		return err
 	}
@@ -461,7 +510,7 @@ func (s *GraphStore) setCodeExpiry(ctx context.Context, codeID string, expiresAt
 
 // removeCode ends a code, as rotateCode writes.
 func (s *GraphStore) removeCode(ctx context.Context, codeID string, at time.Time, changedBy string, version time.Time) error {
-	guarded, err := witnessed(asCluster(ctx), codeConcept, codeID, version)
+	guarded, err := asClusterAgainst(ctx, codeID, version)
 	if err != nil {
 		return err
 	}
