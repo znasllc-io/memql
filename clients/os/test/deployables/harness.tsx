@@ -10,7 +10,7 @@ import { OS_REGISTRY } from "../../src/apps/registry";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { PipelinesApp } from "../../src/apps/pipelines/PipelinesApp";
 import { installSeededAccess } from "../seededAccess";
-import { setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
+import { holdsForOrganization, setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
 
 // The Deployables app's test harness.
 //
@@ -425,6 +425,27 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   let accessMints = 0;
   const nextAccessCode = (): string => FIXTURE_ACCESS_CODES[accessMints++ % FIXTURE_ACCESS_CODES.length]!;
   const sites = seed.sites ?? [];
+  // `refuseOrganizationActionCapability`: an act on a code is judged by the organization
+  // copied onto the code when it was minted, and a code nobody can find is refused alike.
+  const codePastTheGate = (construct: string, codeId: string): Row => {
+    const row = seed.accessCodes?.find((r) => r["id"] === codeId);
+    const copied = String(row?.["accountId"] ?? "");
+    const capable = holdsForOrganization(copied, "read", "data") && holdsForOrganization(copied, "read", "app:deployables") && holdsForOrganization(copied, "execute", "app:deployables/access");
+    if (row === undefined || !capable) {
+      throw new Error(refusedByEngine(construct, `capability_not_held: "${construct}" is not permitted for the selected organization's target`));
+    }
+    return row;
+  };
+  const refuseIfEnded = (construct: string, row: Row): void => {
+    const refuse = (sentence: string): never => {
+      throw new Error(refusedByEngine(construct, sentence));
+    };
+    if (row["revokedAt"]) refuse("This access code was removed, and removal is final. To give someone access again, add a new code.");
+    const site = sites.find((candidate) => candidate["id"] === row["siteId"]);
+    if (site === undefined) return;
+    if (String(row["accountId"] ?? "") !== String(site["accountId"] ?? "")) refuse("This access code was minted while its deployable belonged to another organization, so it opens nothing. Remove it and add a new code.");
+    if (String(site["ownerUserId"] ?? "") === "") refuse("This deployable has no owner, so this access code opens nothing. Give it an owner and try again, or remove the code.");
+  };
   const artifacts = seed.artifacts ?? [];
   const domains = seed.domains ?? [];
   const installationRows = (credentialId: string): Row[] => {
@@ -657,6 +678,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       // the seed's own rows, with what the handlers write: a regenerate moves the
       // hint and `issuedAt` and takes `lastOpenedAt` away, because the handler
       // reads it from the sessions of the CURRENT generation.
+      //
+      // AND THEY REFUSE WHAT THE ENGINE REFUSES, in its order: the shared gate on
+      // the organization COPIED onto the code, then `refuseIfEnded` for the two
+      // acts it covers. A fake that let these through passed a test of a Remove the
+      // engine would have refused. `refuseIfEnded` asks about the site, so a seed
+      // that names no site says nothing about one.
       if (call.startsWith("builtin siteAccessCodesForSite(")) {
         if (seed.accessCodesError !== undefined) throw new Error(seed.accessCodesError);
         const id = /siteId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -669,6 +696,10 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin siteAccessCodeCreate(")) {
         if (seed.accessCreateError !== undefined) throw new Error(seed.accessCreateError);
         const arg = (name: string) => new RegExp(`${name}: "([^"]*)"`).exec(call)?.[1] ?? "";
+        const minting = sites.find((row) => row["id"] === arg("siteId"));
+        if (minting !== undefined && String(minting["ownerUserId"] ?? "") === "") {
+          throw new Error(refusedByEngine("siteAccessCodeCreate", "This deployable has no owner, so it cannot have access codes. Give it an owner, then add the code."));
+        }
         const code = nextAccessCode();
         const codeId = `code-minted-${accessMints}`;
         const expiresAt = arg("expiresAt");
@@ -681,9 +712,8 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin siteAccessCodeRegenerate(")) {
         if (seed.accessRegenerateError !== undefined) throw new Error(seed.accessRegenerateError);
         const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
-        const row = seed.accessCodes?.find((r) => r["id"] === codeId);
-        if (!row) throw new Error(refusedByEngine("siteAccessCodeRegenerate", "No access code you can read has that id, so nothing changed. Reload the list and choose one you can see."));
-        if (row["revokedAt"]) throw new Error(refusedByEngine("siteAccessCodeRegenerate", "This access code was removed, and removal is final. To give someone access again, add a new code."));
+        const row = codePastTheGate("siteAccessCodeRegenerate", codeId);
+        refuseIfEnded("siteAccessCodeRegenerate", row);
         const code = nextAccessCode();
         const expiresAt = /expiresAt: "([^"]*)"/.exec(call)?.[1];
         if (expiresAt !== undefined) row["expiresAt"] = expiresAt;
@@ -697,15 +727,15 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         if (seed.accessSetExpiryError !== undefined) throw new Error(seed.accessSetExpiryError);
         const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
         const expiresAt = /expiresAt: "([^"]*)"/.exec(call)?.[1] ?? "";
-        const row = seed.accessCodes?.find((r) => r["id"] === codeId);
-        if (row) row["expiresAt"] = expiresAt;
+        const row = codePastTheGate("siteAccessCodeSetExpiry", codeId);
+        refuseIfEnded("siteAccessCodeSetExpiry", row);
+        row["expiresAt"] = expiresAt;
         return siteAccessReply("setExpiry", "codeId", [{ codeId, expiresAt }]);
       }
       if (call.startsWith("builtin siteAccessCodeRemove(")) {
         if (seed.accessRemoveError !== undefined) throw new Error(seed.accessRemoveError);
         const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
-        const row = seed.accessCodes?.find((r) => r["id"] === codeId);
-        if (row) row["revokedAt"] = new Date().toISOString();
+        codePastTheGate("siteAccessCodeRemove", codeId)["revokedAt"] = new Date().toISOString();
         return siteAccessReply("remove", "codeId", [{ codeId }]);
       }
 

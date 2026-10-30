@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { readTheBar, useFakeDate } from "../readTheBar";
-import { seededAccessWithout } from "../seededAccess";
+import { seededAccessFor, seededAccessWithout } from "../seededAccess";
 import { chooseOption, openSelect, selectedLabel } from "../selectControl";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -23,6 +23,7 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { siteFromRow } from "../../src/apps/deployables/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { formatMoment } from "../../src/kit/format";
+import { setEffectiveCapabilities, type OrganizationCapability } from "../../src/system/roles";
 import {
   FIXTURE_ACCESS_CODES,
   PLATFORM_SITE,
@@ -85,6 +86,27 @@ function mountPanel(seed: FakeSeed, opts: { site?: Row; connection?: FakeConnect
   h.connection = connection;
   const view = render(withSession(<AccessCodesPanel site={siteFromRow(opts.site ?? DESK)} />));
   return { connection, ...view };
+}
+
+/** Decisions for a person who holds the access part in these organizations and no others. */
+function holdingIn(...accounts: string[]): OrganizationCapability[] {
+  return accounts.flatMap((accountId) =>
+    [["read", "data"], ["read", "app:deployables"], ["update", "data"], ["execute", "app:deployables/access"]].map(([verb, resource]) => ({
+      accountId,
+      verb: verb!,
+      resource: resource!,
+      effect: "allow" as const,
+    })),
+  );
+}
+
+/** The panel as somebody who is no cluster operator sees it: their organizations decide. */
+function mountHolding(seed: FakeSeed, site: Row, ...accounts: string[]) {
+  const connection = fakeConnection(seed);
+  h.connection = connection;
+  const tree = withSession(<AccessCodesPanel site={siteFromRow(site)} />, { role: "writer" });
+  setEffectiveCapabilities(seededAccessFor("writer"), holdingIn(...accounts));
+  return { connection, ...render(tree) };
 }
 
 const addControl = () => screen.findByRole("button", { name: "Add an access code" });
@@ -373,6 +395,16 @@ describe("a failed read does not look empty; loading is a skeleton; no gates exp
     expect(await screen.findByText("Client reviewers")).toBeTruthy();
     expect(screen.getByText(FIRST_CODE)).toBeTruthy();
     expect(screen.queryByText("The cluster did not answer.")).toBeNull();
+  });
+
+  it("reads a coded refusal in this app's words, without the code", async () => {
+    mountPanel({
+      accessGates: [DASHBOARD],
+      accessCodesError: refusedByEngine("siteAccessCodesForSite", 'capability_not_held: "siteAccessCodesForSite" is not permitted for the selected organization\'s target'),
+    });
+    expect(await screen.findByText(/you have not been granted/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("capability_not_held");
+    expect(screen.queryByText("No access codes yet")).toBeNull();
   });
 
   it("does not print the socket's words when the connection drops under a read", async () => {
@@ -1263,19 +1295,54 @@ describe("a code whose gate is no longer declared still lists and says so", () =
 
 describe("a code minted under another organization", () => {
   const ACME_SITE = siteRow({ ...DESK, id: "site-desk", accountId: "acme" } as never);
+  const staleSeed = (): FakeSeed => ({ sites: [ACME_SITE], accessGates: [DASHBOARD], accessCodes: [reviewers({ accountId: "borden", expiresAt: inDays(5) })] });
 
-  it("says it opens nothing and offers only Remove, the one act that helps", async () => {
-    mountPanel({ accessGates: [DASHBOARD], accessCodes: [reviewers({ accountId: "borden", expiresAt: inDays(5) })] }, { site: ACME_SITE });
+  it("says it opens nothing and offers a cluster operator only Remove, the one act that helps, which lands", async () => {
+    const { connection } = mountPanel(staleSeed(), { site: ACME_SITE });
     const row = await rowOf("Client reviewers");
     expect(row.textContent).toContain("opens nothing");
+    expect(row.textContent).not.toContain("cluster operator");
     expect(within(row).queryByRole("button", { name: "Regenerate Client reviewers" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Change expiry of Client reviewers" })).toBeNull();
-    expect(within(row).getByRole("button", { name: "Remove Client reviewers" })).toBeTruthy();
     expect(row.textContent).not.toContain("Expires in");
+
+    await answerYes("Client reviewers", "Remove");
+    await waitFor(() => expect(screen.queryByText("Client reviewers")).toBeNull());
+    expect(connection.callsNamed("siteAccessCodeRemove")).toHaveLength(1);
+  });
+
+  it("says a cluster operator must remove it, and offers nothing, to somebody the gate would refuse", async () => {
+    const { connection } = mountHolding(staleSeed(), ACME_SITE, "acme");
+    const row = await rowOf("Client reviewers");
+    expect(row.textContent).toContain("opens nothing");
+    expect(row.textContent).toContain("A cluster operator must remove it");
+    expect(within(row).queryAllByRole("button")).toEqual([]);
+    expect(connection.callsNamed("siteAccessCodeRemove")).toHaveLength(0);
+  });
+
+  it("offers Remove to somebody who holds the part in the organization on the code, and it lands", async () => {
+    mountHolding(staleSeed(), ACME_SITE, "acme", "borden");
+    const row = await rowOf("Client reviewers");
+    expect(row.textContent).not.toContain("cluster operator");
+    await answerYes("Client reviewers", "Remove");
+    await waitFor(() => expect(screen.queryByText("Client reviewers")).toBeNull());
+    expect(document.body.textContent).not.toContain("capability_not_held");
+  });
+
+  it("does not print the engine's code when the part is taken away after the question opened", async () => {
+    mountHolding(staleSeed(), ACME_SITE, "acme", "borden");
+    const row = await ask("Client reviewers", "Remove");
+    setEffectiveCapabilities(seededAccessFor("writer"), holdingIn("acme"));
+    await click(within(row).getByRole("button", { name: "Remove" }));
+
+    expect(await within(row).findByText(/you have not been granted/)).toBeTruthy();
+    expect(row.textContent).toContain("Nothing was changed.");
+    expect(document.body.textContent).not.toContain("capability_not_held");
+    expect(document.body.textContent).not.toContain("siteAccessCodeRemove");
   });
 
   it("does not say removing it takes anyone out, because it already opens nothing", async () => {
-    mountPanel({ accessGates: [DASHBOARD], accessCodes: [reviewers({ accountId: "borden", expiresAt: inDays(5) })] }, { site: ACME_SITE });
+    mountPanel(staleSeed(), { site: ACME_SITE });
     const row = await ask("Client reviewers", "Remove");
     const group = within(row).getByRole("group", { name: "Remove Client reviewers?" });
     expect(group.textContent).toContain("It already opens nothing.");
@@ -1293,6 +1360,58 @@ describe("a code minted under another organization", () => {
   it("is the same organization when neither side has one", async () => {
     mountPanel({ accessGates: [DASHBOARD], accessCodes: [reviewers()] });
     expect((await rowOf("Client reviewers")).textContent).not.toContain("opens nothing");
+  });
+});
+
+describe("a deployable with no owner", () => {
+  const OWNERLESS = siteRow({ ...DESK, id: "site-desk", ownerUserId: "" } as never);
+  const ownerlessSeed = (codes: Row[]): FakeSeed => ({ sites: [OWNERLESS], accessGates: [DASHBOARD], accessCodes: codes });
+
+  it("offers no Add and says why, whatever gates it declares", async () => {
+    mountPanel(ownerlessSeed([]), { site: OWNERLESS });
+    expect(await screen.findByText("This deployable has no owner")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add an access code" })).toBeNull();
+    expect(screen.queryByText("No access codes yet")).toBeNull();
+  });
+
+  it("says once that its codes open nothing, offers only Remove, and keeps what each row knows", async () => {
+    mountPanel(ownerlessSeed([reviewers({ expiresAt: inDays(5) }), pilot()]), { site: OWNERLESS });
+    const row = await rowOf("Client reviewers");
+    expect(screen.getAllByText(/has no owner, so its codes open nothing/)).toHaveLength(1);
+    expect(row.textContent).toContain("Unlocks dashboard");
+    expect(row.textContent).toContain("Expires in 5 days");
+    expect(within(row).queryByRole("button", { name: "Regenerate Client reviewers" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Change expiry of Client reviewers" })).toBeNull();
+    expect(within(row).getByRole("button", { name: "Remove Client reviewers" })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText(/could not be read/)).toBeNull());
+    expect(screen.queryByRole("button", { name: "Add an access code" })).toBeNull();
+  });
+
+  it("removes a code, and the question says it already opens nothing", async () => {
+    const { connection } = mountPanel(ownerlessSeed([reviewers(), pilot()]), { site: OWNERLESS });
+    const row = await ask("Pilot client", "Remove");
+    const group = within(row).getByRole("group", { name: "Remove Pilot client?" });
+    expect(group.textContent).toContain("It already opens nothing.");
+    expect(group.textContent).not.toContain("taken out");
+    await click(within(group).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.queryByText("Pilot client")).toBeNull());
+    expect(connection.callsNamed("siteAccessCodeRemove")).toHaveLength(1);
+    expect(screen.getByText("Client reviewers")).toBeTruthy();
+  });
+
+  it("does not offer the gates' explanation's way forward over codes it could not add to", async () => {
+    mountPanel({ sites: [OWNERLESS], accessGates: [], accessCodes: [reviewers()] }, { site: OWNERLESS });
+    await rowOf("Client reviewers");
+    await waitFor(() => expect(document.querySelector(".os-record-skeleton")).toBeNull());
+    expect(screen.queryByText(/@accessGate/)).toBeNull();
+  });
+
+  it("offers everything again once the same row carries an owner", async () => {
+    mountPanel(ownerlessSeed([reviewers()]), { site: DESK });
+    const row = await rowOf("Client reviewers");
+    expect(screen.queryByText(/has no owner/)).toBeNull();
+    expect(within(row).getByRole("button", { name: "Regenerate Client reviewers" })).toBeTruthy();
+    expect(await addControl()).toBeTruthy();
   });
 });
 

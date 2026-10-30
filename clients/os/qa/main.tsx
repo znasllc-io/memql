@@ -34,7 +34,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import "../src/styles/index.css";
 import { applyPackStyles, resolveThemePack } from "../src/themes/registry";
 import { Button, Notice, Panel } from "../src/kit";
-import { setRoleLadder } from "../src/system/roles";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { setEffectiveCapabilities, setRoleLadder } from "../src/system/roles";
+import { seededAccessFor } from "../test/seededAccess";
 import { SEEDED_LADDER } from "../test/seededLadder";
 import {
   DEV_STORE,
@@ -755,11 +757,17 @@ function accessUnanswered() {
   return connection;
 }
 
-function AccessPage() {
+/** Somebody who holds the part in one organization, so the code on another's is not theirs to remove. */
+const ACCESS_MEMBER = [["read", "data"], ["read", "app:deployables"], ["update", "data"], ["execute", "app:deployables/access"]]
+  .map(([verb, resource]) => ({ accountId: "acme", verb: verb!, resource: resource!, effect: "allow" as const }));
+
+const ACCESS_NO_OWNER = siteRow({ ...ACCESS_SITE, id: "site-desk", ownerUserId: "" } as never);
+
+function AccessPage({ site = ACCESS_SITE }: { site?: Row }) {
   return (
     <WindowBody fallback="Deployables">
       <DeployablePage
-        site={siteFromRow(ACCESS_SITE)}
+        site={siteFromRow(site)}
         pkg={null}
         credentials={[]}
         viewerUserId="u-me"
@@ -1262,6 +1270,17 @@ const VIEWS: Record<
   "access-no-gates": { seed: { accessGates: [], accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-refused": { seed: ACCESS_REFUSED, framed: true, render: () => <AccessPage /> },
   "access-unanswered": { connect: accessUnanswered, framed: true, render: () => <AccessPage /> },
+  "access-no-owner": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage site={ACCESS_NO_OWNER} /> },
+  "access-no-owner-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage site={ACCESS_NO_OWNER} /> },
+  "access-member": {
+    seed: ACCESS_SEED,
+    wrap: (el, role) => {
+      const tree = withSession(el, { role, userId: "u-me" });
+      setEffectiveCapabilities(seededAccessFor(role), ACCESS_MEMBER);
+      return tree;
+    },
+    render: () => <AccessPage />,
+  },
   store: { seed: BOUND, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   picker: { seed: UNBOUND, render: () => <StorePane site={siteFromRow(UNBOUND_SITE)} canBind /> },

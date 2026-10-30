@@ -9,7 +9,8 @@ import { formatMoment } from "../../../kit/format";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { browserZone, instantToLocal } from "../../email/when";
-import type { SiteRow } from "../rows";
+import { partsForOrganization, useDeployableParts, type PartsHeld } from "../parts";
+import { siteIsClusterOwned, type SiteRow } from "../rows";
 import { CUSTOM_EXPIRY, DEFAULT_EXPIRY, EXPIRY_PRESETS, expiryFromDraft, expiryWord, hasExpired, lastOpenedWord, type ExpiryDraft } from "./expiry";
 import { useAccessCodes, type AccessCodeRow, type AccessCodes, type AccessGateRow, type WriteOutcome } from "./useAccessCodes";
 
@@ -58,6 +59,7 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   onBusyChange?: (busy: boolean) => void;
 }) {
   const access = useAccessCodes(site);
+  const held = useDeployableParts();
   const now = useNow(CLOCK_MS).getTime();
   const holding = access.busy !== null || access.minted !== null;
   useEffect(() => {
@@ -93,7 +95,10 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   const codes = access.codes.value;
   const gates = access.gates.value;
   const noGates = gates !== null && gates.length === 0;
-  const canAdd = gates !== null && gates.length > 0;
+  // ABSENT WITH NO OWNER (rule 12). The engine refuses a mint on a site with no owner,
+  // and a code's row is written as that owner, so there is nobody to write it as.
+  const ownerless = siteIsClusterOwned(site);
+  const canAdd = gates !== null && gates.length > 0 && !ownerless;
   const gatesOut = gates === null && access.gates.state !== "failed";
 
   // A REFUSAL WHOSE ROW HAS GONE. The re-read after a refused regenerate of a code
@@ -115,7 +120,8 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   } else if (codes.length > 0) {
     body = (
       <>
-        {noGates ? <Caption><NoGates /></Caption> : null}
+        {/* Said once, over the list: it is true of every row. */}
+        {ownerless ? <Notice tone="warn" sentence="This deployable has no owner, so its codes open nothing and no code can be added. Give it an owner to use them." /> : noGates ? <Caption><NoGates /></Caption> : null}
         <RecordList as="ul" label="Access codes">
           {codes.map((code) => (
             <CodeEntry
@@ -123,6 +129,7 @@ export function AccessCodesPanel({ site, onBusyChange }: {
               code={code}
               site={site}
               gates={gates}
+              held={held}
               now={now}
               access={access}
               asked={asked?.codeId === code.id ? asked.act : null}
@@ -145,6 +152,12 @@ export function AccessCodesPanel({ site, onBusyChange }: {
         </RecordList>
       </>
     );
+  } else if (ownerless) {
+    body = (
+      <EmptyState title="This deployable has no owner" icon={Lock}>
+        It cannot have access codes until it has one. Give it an owner, then add a code here.
+      </EmptyState>
+    );
   } else if (gatesOut) {
     // What an empty list means depends on the gates, so it is not said until they land.
     body = <RecordListSkeleton label="Loading access codes" />;
@@ -164,8 +177,8 @@ export function AccessCodesPanel({ site, onBusyChange }: {
 
   return (
     <div className="access-codes" ref={root} tabIndex={-1}>
-      {/* No heading over nothing: with no gates and no codes, the explanation is the panel. */}
-      {noGates && codes !== null && codes.length === 0 ? null : (
+      {/* No heading over nothing: with no codes and no way to add one, the explanation is the panel. */}
+      {(noGates || ownerless) && codes !== null && codes.length === 0 ? null : (
         <Subhead
           actions={
             canAdd && !adding ? (
@@ -244,11 +257,21 @@ function NoGates() {
  * have been read: not knowing is not the same as no, and the row's expiry would be
  * the wrong thing to doubt. An organization that differs is D15's race, a code that
  * opens nothing at all, so it draws no expiry and offers only the one act that helps.
+ *
+ * THAT ACT IS NOT EVERYBODY'S. The shared gate judges the organization COPIED onto the
+ * code, which on this row is not the site's, so the page having admitted this person says
+ * nothing about it. `partsForOrganization` asks what the gate asks: somebody with that
+ * organization, or an operator, who has no scoped decisions and passes as they hold.
+ *
+ * A SITE WITH NO OWNER leaves the same one act, and it is the state that can change: give
+ * the site an owner and the code works again, so the row keeps its facts and its time, and
+ * what is true of every row is said once, over the list.
  */
 function CodeEntry({
   code,
   site,
   gates,
+  held,
   now,
   access,
   asked,
@@ -259,6 +282,7 @@ function CodeEntry({
   code: AccessCodeRow;
   site: SiteRow;
   gates: readonly AccessGateRow[] | null;
+  held: PartsHeld;
   now: number;
   access: AccessCodes;
   asked: RowAct | null;
@@ -268,7 +292,10 @@ function CodeEntry({
 }) {
   // `sameEntityId` answers false for two empties, and a site with no organization
   // and a code that copied none are the same organization.
-  const opensNothing = (code.accountId !== "" || site.accountId !== "") && !sameEntityId(code.accountId, site.accountId);
+  const stale = (code.accountId !== "" || site.accountId !== "") && !sameEntityId(code.accountId, site.accountId);
+  const ownerless = siteIsClusterOwned(site);
+  const opensNothing = stale || ownerless;
+  const canRemove = !stale || partsForOrganization(code.accountId, held).access;
   const undeclared = gates !== null && !gates.some((gate) => gate.gate === code.gate);
   const expired = hasExpired(code.expiresAt, now);
   const writing = access.busy !== null;
@@ -280,8 +307,10 @@ function CodeEntry({
         name={code.label}
         secondary={
           <span className="os-record-facts">
-            {opensNothing || undeclared ? (
-              <span className="access-code-warn">{opensNothing ? "Minted under another organization, so it opens nothing" : `${unlocks}, which this app no longer declares`}</span>
+            {stale ? (
+              <span className="access-code-warn">Minted under another organization, so it opens nothing{canRemove ? "" : ". A cluster operator must remove it"}</span>
+            ) : undeclared ? (
+              <span className="access-code-warn">{unlocks}, which this app no longer declares</span>
             ) : (
               <span>{unlocks}</span>
             )}
@@ -292,10 +321,10 @@ function CodeEntry({
             )}
           </span>
         }
-        state={opensNothing ? undefined : expiryWord(code.expiresAt, now)}
+        state={stale ? undefined : expiryWord(code.expiresAt, now)}
         tone={expired ? "warn" : "muted"}
         stateTitle={formatMoment(code.expiresAt)}
-        stateExtra={opensNothing ? undefined : <span className="access-code-opened" title={code.lastOpenedAt === "" ? undefined : formatMoment(code.lastOpenedAt)}>{lastOpened}</span>}
+        stateExtra={stale ? undefined : <span className="access-code-opened" title={code.lastOpenedAt === "" ? undefined : formatMoment(code.lastOpenedAt)}>{lastOpened}</span>}
         actions={
           <>
             {opensNothing ? null : (
@@ -308,9 +337,11 @@ function CodeEntry({
                 </IconButton>
               </>
             )}
-            <IconButton label={`Remove ${code.label}`} disabled={writing} aria-expanded={asked === "remove"} onClick={(event) => onAsk(event, "remove")}>
-              <Trash2 size={16} aria-hidden />
-            </IconButton>
+            {canRemove ? (
+              <IconButton label={`Remove ${code.label}`} disabled={writing} aria-expanded={asked === "remove"} onClick={(event) => onAsk(event, "remove")}>
+                <Trash2 size={16} aria-hidden />
+              </IconButton>
+            ) : null}
           </>
         }
       />

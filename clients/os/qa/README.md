@@ -106,8 +106,10 @@ The `access*` views are a deployable's Access codes (design record
 2026-10-29-deployable-access-codes), opened over the real page: `access` holds a
 code in every reading a row has, long values included, `access-empty` has gates
 and no codes, `access-no-gates` has neither, `access-refused` is both reads
-refused, `access-minted` presses its way to the one screen a code is ever on, and
-`access-unanswered` is a regenerate whose reply was lost. Every code is the fake's. `&click=Regenerate Acme`, `&click=Change expiry of
+refused, `access-minted` presses its way to the one screen a code is ever on,
+`access-unanswered` is a regenerate whose reply was lost, `access-no-owner` and
+`access-no-owner-empty` are a site with no owner, and `access-member` is somebody
+who holds the part in one organization only. Every code is the fake's. `&click=Regenerate Acme`, `&click=Change expiry of
 Acme` and `&click=Add an access code` open the question or the form.
 
 The `github-*` and `settings-*` views are the cluster's GitHub App in each

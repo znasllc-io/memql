@@ -3,6 +3,8 @@ import { isTransportInterruption, refusalSentence, rowString, type QueryClient, 
 
 import { useReading, type Reading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
+import { describe } from "../packages/actions";
+import { copyFor } from "../packages/refusals";
 import type { SiteRow } from "../rows";
 
 // The reads and the writes behind a deployable's Access codes (design record
@@ -112,6 +114,22 @@ const UNANSWERED: Readonly<Record<AccessAct, string>> = {
 
 /** A write the cluster accepted without the reply it owed: it landed, and nothing shows it. */
 class NoCodeInReply extends Error {}
+
+/**
+ * The sentence a refused call gives a person.
+ *
+ * THE BUILTINS' OWN REFUSALS ARE ALREADY SENTENCES, and come through as written. A CODED
+ * one comes from the gate in front of them (`capability_not_held: "siteAccessCodeRemove"
+ * is not permitted...`), which is a code and a construct's name to anybody reading it, so
+ * it reads in this app's words for that code. The panel hides what the viewer does not
+ * hold, so this is a stale shell or a grant taken away mid-session.
+ */
+function refusalWords(err: unknown, construct: string): string {
+  const { code, message } = describe(err);
+  const copy = copyFor(code);
+  if (copy !== null) return `${copy.title}. ${copy.next === "" ? message : copy.next}`;
+  return refusalSentence(err, construct).trim();
+}
 
 export interface NewAccessCode {
   label: string;
@@ -228,7 +246,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
         }
         // An engine frame with nothing in it answers "", and a refusal has to say
         // something: the draft is still on screen, waiting for a reason.
-        setRefusal({ codeId, sentence: refusalSentence(err, construct).trim() || "That did not complete. Try again.", unknown: false });
+        setRefusal({ codeId, sentence: refusalWords(err, construct) || "That did not complete. Try again.", unknown: false });
         return "refused";
       } finally {
         inFlight.current = false;
@@ -291,8 +309,8 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   // that failed has to say so rather than draw an empty panel.
   const readFailures = [
     ...new Set([
-      ...(codes.state === "failed" ? [refusalSentence(codes.error, "siteAccessCodesForSite").trim() || "The access codes could not be read."] : []),
-      ...(gates.state === "failed" ? [refusalSentence(gates.error, "siteAccessGates").trim() || "The gates this app declares could not be read."] : []),
+      ...(codes.state === "failed" ? [refusalWords(codes.error, "siteAccessCodesForSite") || "The access codes could not be read."] : []),
+      ...(gates.state === "failed" ? [refusalWords(gates.error, "siteAccessGates") || "The gates this app declares could not be read."] : []),
     ]),
   ];
 
