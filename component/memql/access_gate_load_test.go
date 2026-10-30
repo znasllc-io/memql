@@ -48,6 +48,12 @@ const (
 	gateDashboard = `@accessGate(deployable="client-desk", gate="dashboard")`
 	gateOverview  = `@accessGate(deployable="client-desk", gate="overview")`
 
+	// gateImport is the file-top line that lets a construct declared in one
+	// file namespace bind to the desk domain's concept. A gate is bound to
+	// its package through the domain of the concept, not through the file it is
+	// written in, and this is the fixture that tells the two apart.
+	gateImport = "use desk.concepts.{ deskBrief }\n\n"
+
 	// codeArgs and codeFilter agree on purpose: a declared argument the body
 	// never reads is a load error of its own, which would drown the rule a row
 	// is about.
@@ -69,8 +75,9 @@ func gateMutation(header, name, args, stamps string) string {
 		"  insert {\n    accept { title }\n    stamp {\n" + stamps + "      ownerUserId: actor.userId\n    }\n  }\n}\n"
 }
 
-// gateOpens is one thing a bundle that loads clean must open.
-type gateOpens struct{ deployable, gate, construct, kind string }
+// gateOpens is one thing a bundle that loads clean must open, for the one
+// domain that declares it.
+type gateOpens struct{ deployable, gate, construct, kind, domain string }
 
 // restoreAccessGatesAfter puts the live registry back when the test ends.
 // Publishing is what a boot does, and the registry is process-wide, so a test
@@ -157,6 +164,9 @@ tool deskTool {
 	cases := []struct {
 		name    string
 		domains map[string]string
+		// more are extra files by path, beside the standard domains: a second
+		// file namespace that binds to a domain's concept through an import.
+		more map[string]string
 		// refused: the fragments the single problem carries. Empty means the
 		// bundle must load clean and open every gate in opens.
 		refused []string
@@ -244,15 +254,17 @@ tool deskTool {
 			refused: []string{"deskBriefs", "accessCodeId", "int", "Declare it as string"},
 		},
 		{
-			name: "two constructs named alike under one deployable",
-			domains: map[string]string{
-				// Different gates on purpose: the call names the construct and
-				// not the gate, so the rule is about the name under the
-				// deployable, whichever gate each one opens.
-				"desk":     gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
-				"deskmore": gateQuery(gateOverview, "deskBriefs", codeArgs, codeFilter),
+			// Two file namespaces, one domain: the second construct binds to the
+			// desk concept through an import, so both belong to desk.
+			// Different gates on purpose: the call names the construct and not
+			// the gate, so the rule is about the name under the deployable in
+			// the domain, whichever gate each one opens.
+			name:    "two constructs named alike under one deployable in one domain",
+			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter)},
+			more: map[string]string{
+				"deskmore/constructs.memql": gateImport + gateQuery(gateOverview, "deskBriefs", codeArgs, codeFilter),
 			},
-			refused: []string{"deskBriefs", "desk", "deskmore", `"client-desk"`, "Rename one of them"},
+			refused: []string{"deskBriefs", `DSL domain "desk"`, "desk (", "deskmore (", `"client-desk"`, "Rename one of them"},
 		},
 
 		// ---- accepted ------------------------------------------------------
@@ -262,8 +274,8 @@ tool deskTool {
 				gateMutation(gateDashboard, "deskNote", codeArgs+"    title string!\n",
 					"      accessCodeId: args.accessCodeId\n")},
 			opens: []gateOpens{
-				{"client-desk", "dashboard", "deskBriefs", "query"},
-				{"client-desk", "dashboard", "deskNote", "mutation"},
+				{"client-desk", "dashboard", "deskBriefs", "query", "desk"},
+				{"client-desk", "dashboard", "deskNote", "mutation", "desk"},
 			},
 		},
 		{
@@ -274,31 +286,49 @@ tool deskTool {
 					"deskBriefs", codeArgs, codeFilter),
 			},
 			opens: []gateOpens{
-				{"client-desk", "dashboard", "deskBriefs", "query"},
-				{"shipping-desk", "dashboard", "deskBriefs", "query"},
+				{"client-desk", "dashboard", "deskBriefs", "query", "desk"},
+				{"shipping-desk", "dashboard", "deskBriefs", "query", "shipping"},
+			},
+		},
+		{
+			// The same name under the same deployable and gate in a second DSL
+			// domain is another product's declaration, not a collision. Neither
+			// is closed by the other, and each opens for its own domain alone.
+			name: "the same construct name and deployable in two domains",
+			domains: map[string]string{
+				"desk": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
+				"partner":   gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
+			},
+			opens: []gateOpens{
+				{"client-desk", "dashboard", "deskBriefs", "query", "desk"},
+				{"client-desk", "dashboard", "deskBriefs", "query", "partner"},
 			},
 		},
 		{
 			name: "a reserved argument declared as an optional string",
 			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
 				codeArgs+"    accessSubject string\n", codeFilter+` && row.accessSubject == args.accessSubject`)},
-			opens: []gateOpens{{"client-desk", "dashboard", "deskBriefs", "query"}},
+			opens: []gateOpens{{"client-desk", "dashboard", "deskBriefs", "query", "desk"}},
 		},
 		{
 			// A disabled construct is out of service, so it opens nothing and
-			// cannot collide with a live one that shares its name.
-			name: "a disabled construct sharing a live one's name",
-			domains: map[string]string{
-				"desk":     gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
-				"deskmore": gateQuery(gateOverview+"\n@disabled", "deskBriefs", codeArgs, codeFilter),
+			// cannot collide with a live one that shares its name in its domain.
+			name:    "a disabled construct sharing a live one's name in one domain",
+			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter)},
+			more: map[string]string{
+				"deskmore/constructs.memql": gateImport + gateQuery(gateOverview+"\n@disabled", "deskBriefs", codeArgs, codeFilter),
 			},
-			opens: []gateOpens{{"client-desk", "dashboard", "deskBriefs", "query"}},
+			opens: []gateOpens{{"client-desk", "dashboard", "deskBriefs", "query", "desk"}},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			problems := loadGateBundle(t, gateBundleDomains(tc.domains), true)
+			files := gateBundleDomains(tc.domains)
+			for path, src := range tc.more {
+				files[path] = src
+			}
+			problems := loadGateBundle(t, files, true)
 
 			if len(tc.refused) > 0 {
 				if len(problems) != 1 {
@@ -316,13 +346,14 @@ tool deskTool {
 				t.Fatalf("a bundle that must load clean was refused:\n  %s", strings.Join(problems, "\n  "))
 			}
 			for _, want := range tc.opens {
-				got := AccessGateFor(want.deployable, want.gate, want.construct)
+				got := AccessGateFor(want.deployable, want.gate, want.construct, []string{want.domain})
 				if got == nil {
-					t.Errorf("%s/%s/%s opens nothing", want.deployable, want.gate, want.construct)
+					t.Errorf("%s/%s/%s opens nothing for %s", want.deployable, want.gate, want.construct, want.domain)
 					continue
 				}
-				if got.Kind != want.kind {
-					t.Errorf("%s/%s/%s Kind = %q, want %q", want.deployable, want.gate, want.construct, got.Kind, want.kind)
+				if got.Kind != want.kind || got.Domain != want.domain {
+					t.Errorf("%s/%s/%s is a %s of %s, want a %s of %s", want.deployable, want.gate, want.construct,
+						got.Kind, got.Domain, want.kind, want.domain)
 				}
 			}
 		})
@@ -339,27 +370,38 @@ func TestAccessGateARefusedConstructOpensNothing(t *testing.T) {
 	if len(problems) != 1 {
 		t.Fatalf("setup: want the one refusal, got %v", problems)
 	}
-	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs"); got != nil {
+	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"desk"}); got != nil {
 		t.Fatalf("a refused construct opens a gate anyway: %+v", got)
 	}
-	if got := AccessGatesFor("client-desk"); len(got) != 0 {
+	if got := AccessGatesFor("client-desk", []string{"desk"}); len(got) != 0 {
 		t.Fatalf("a refused construct is listed as a gate: %+v", got)
 	}
 }
 
-// Both of two same-named constructs are refused, and neither opens. Keeping
-// whichever loaded first would let load order decide which construct a code
-// reaches, and nothing resolves load order.
-func TestAccessGateTwoConstructsWithOneNameBothStayClosed(t *testing.T) {
-	problems := loadGateBundle(t, gateBundleDomains(map[string]string{
-		"desk":     gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
-		"deskmore": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
-	}), true)
+// Both of two same-named constructs in one domain are refused, and neither
+// opens. Keeping whichever loaded first would let load order decide which
+// construct a code reaches, and nothing resolves load order.
+//
+// The refusal stops at the domain. A second product's construct with the same
+// name under the same deployable is not part of the collision, so it stays
+// open: closing it would let any other package shut a gate that is not theirs.
+func TestAccessGateTwoConstructsOfOneDomainWithOneNameBothStayClosed(t *testing.T) {
+	files := gateBundleDomains(map[string]string{
+		"desk": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
+		"partner":   gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter),
+	})
+	files["deskmore/constructs.memql"] = gateImport + gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter)
+
+	problems := loadGateBundle(t, files, true)
 	if len(problems) != 1 {
 		t.Fatalf("want one problem naming both, got %v", problems)
 	}
-	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs"); got != nil {
+	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"desk"}); got != nil {
 		t.Fatalf("one of two colliding constructs opens a gate: %+v", got)
+	}
+	got := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"partner"})
+	if got == nil || got.Domain != "partner" {
+		t.Fatalf("another domain's construct was closed by a collision that is not its own: %+v", got)
 	}
 }
 
@@ -401,6 +443,7 @@ func gatedFunction(name, kind, deployable, gate string) *Function {
 		Name:         name,
 		FunctionKind: kind,
 		Enabled:      true,
+		BoundConcept: "v1:desk:deskBrief",
 		Origin:       "unified:desk/constructs.memql",
 		AccessGate:   &AccessGateDecl{Deployable: deployable, Gate: gate},
 	}
@@ -471,6 +514,45 @@ func TestAccessGateEntryRefusesAnythingButAQueryOrAMutation(t *testing.T) {
 	}
 }
 
+// A gate is bound to the package that ships it through the DSL domain of the
+// concept the construct is bound to, as a shopper extension's declaring domain
+// is taken. A construct bound to no concept has no domain to bind to, and a gate
+// that belonged to no package could be reached from every one. Every query and
+// mutation a real load produces carries a signature concept, so this is the
+// conversion's own copy of the rule, for a Function built some other way.
+func TestAccessGateEntryNeedsABoundConceptAndTakesItsDomainFromIt(t *testing.T) {
+	for _, bound := range []string{"", "deskBrief", "v1:desk"} {
+		fn := gatedFunction("deskBriefs", "query", "client-desk", "dashboard")
+		fn.BoundConcept = bound
+		_, err := accessGateEntryFromFunction(fn)
+		if err == nil {
+			t.Errorf("a construct bound to %q was accepted; its domain is unknowable", bound)
+			continue
+		}
+		for _, fragment := range []string{"deskBriefs", "binds no concept", "Bind the construct to a concept"} {
+			if !strings.Contains(err.Error(), fragment) {
+				t.Errorf("bound to %q, the refusal does not carry %q: %v", bound, fragment, err)
+			}
+		}
+	}
+
+	// The domain is the concept's and not the file's. A construct written in
+	// one file namespace and bound to another domain's concept belongs to the
+	// domain of the concept, which is the package that ships it.
+	fn := gatedFunction("deskBriefs", "query", "client-desk", "dashboard")
+	fn.Origin = "unified:deskmore/constructs.memql"
+	fn.BoundConcept = "v1:partner:thing"
+	entry, err := accessGateEntryFromFunction(fn)
+	if err != nil || entry.Domain != "partner" {
+		t.Fatalf("Domain = %q, %v; want partner, from v1:partner:thing and not from the file", entry.Domain, err)
+	}
+	// A nested namespace belongs to its root, as it does for a shopper extension.
+	fn.BoundConcept = "v1:partner:orders:thing"
+	if entry, err := accessGateEntryFromFunction(fn); err != nil || entry.Domain != "partner" {
+		t.Fatalf("a nested namespace read as %q, %v; want its root, partner", entry.Domain, err)
+	}
+}
+
 // The names are checked again where the entry is made, because a Function can
 // be built without going through the reader that checks them.
 func TestAccessGateEntryChecksTheNamesAgain(t *testing.T) {
@@ -507,8 +589,11 @@ func TestAccessGateEntryChecksTheNamesAgain(t *testing.T) {
 
 // registryBundle is a bundle with every shape the registry answers about: a
 // query that declares caller, code and subject arguments, a mutation that
-// declares a caller argument and a code, a second gate, and another
-// deployable's gate that must stay out of this one's answers.
+// declares a caller argument and a code, a second gate, another deployable's
+// gate that must stay out of this one's answers, and a second DSL domain that
+// names the SAME deployable, the same gate and the same construct as the
+// first. That last one is the collision the domain binding exists for: two
+// products that happen to name a deployable alike.
 func registryBundle() map[string]string {
 	return gateBundleDomains(map[string]string{
 		"desk": gateQuery(gateDashboard, "deskBriefs",
@@ -519,6 +604,9 @@ func registryBundle() map[string]string {
 			gateQuery(gateOverview, "deskOverview", codeArgs, codeFilter),
 		"shipping": gateQuery(`@accessGate(deployable="shipping-desk", gate="desk")`,
 			"shippingDeskBriefs", codeArgs, codeFilter),
+		"partner": gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter) +
+			gateQuery(`@accessGate(deployable="client-desk", gate="partner-only")`,
+				"partnerOnlyBriefs", codeArgs, codeFilter),
 	})
 }
 
@@ -526,14 +614,16 @@ func TestAccessGateRegistryAnswers(t *testing.T) {
 	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
 		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
 	}
+	ko := []string{"desk"}
 
-	t.Run("a hit carries the declaration", func(t *testing.T) {
-		got := AccessGateFor("client-desk", "dashboard", "deskBriefs")
+	t.Run("a hit carries the declaration and its domain", func(t *testing.T) {
+		got := AccessGateFor("client-desk", "dashboard", "deskBriefs", ko)
 		if got == nil {
 			t.Fatal("a declared gate opens nothing")
 		}
 		want := AccessGateEntry{
 			Deployable: "client-desk", Gate: "dashboard", Construct: "deskBriefs", Kind: "query",
+			Domain:  "desk",
 			Args:    []string{"topic"},
 			Stamped: []string{"accessCodeId", "accessSubject"},
 		}
@@ -543,7 +633,7 @@ func TestAccessGateRegistryAnswers(t *testing.T) {
 	})
 
 	t.Run("Args exclude the reserved names and Stamped lists them", func(t *testing.T) {
-		note := AccessGateFor("client-desk", "dashboard", "deskNote")
+		note := AccessGateFor("client-desk", "dashboard", "deskNote", ko)
 		if note == nil {
 			t.Fatal("the mutation opens nothing")
 		}
@@ -551,30 +641,43 @@ func TestAccessGateRegistryAnswers(t *testing.T) {
 			!reflect.DeepEqual(note.Stamped, []string{"accessCodeId"}) {
 			t.Fatalf("mutation entry = %+v", *note)
 		}
-		overview := AccessGateFor("client-desk", "overview", "deskOverview")
+		overview := AccessGateFor("client-desk", "overview", "deskOverview", ko)
 		if overview == nil || len(overview.Args) != 0 || !reflect.DeepEqual(overview.Stamped, []string{"accessCodeId"}) {
 			t.Fatalf("a construct with no caller argument has Args = %+v", overview)
 		}
 	})
 
 	t.Run("it misses, and a miss is nil", func(t *testing.T) {
-		for _, miss := range []struct{ name, deployable, gate, construct string }{
-			{"the wrong deployable", "shipping-desk", "dashboard", "deskBriefs"},
-			{"the wrong gate", "client-desk", "overview", "deskBriefs"},
-			{"an unknown construct", "client-desk", "dashboard", "deskMissing"},
-			{"another deployable's construct", "client-desk", "desk", "shippingDeskBriefs"},
-			{"a different case", "client-desk", "dashboard", "deskbriefs"},
-			{"a padded name", "client-desk", "dashboard", " deskBriefs"},
-			{"nothing at all", "", "", ""},
+		for _, miss := range []struct {
+			name                        string
+			deployable, gate, construct string
+			domains                     []string
+		}{
+			{"the wrong deployable", "shipping-desk", "dashboard", "deskBriefs", ko},
+			{"the wrong gate", "client-desk", "overview", "deskBriefs", ko},
+			{"an unknown construct", "client-desk", "dashboard", "deskMissing", ko},
+			{"another deployable's construct", "client-desk", "desk", "shippingDeskBriefs", ko},
+			{"a different case", "client-desk", "dashboard", "deskbriefs", ko},
+			{"a padded name", "client-desk", "dashboard", " deskBriefs", ko},
+			{"nothing at all", "", "", "", ko},
+			// The package's domains are what bind a gate to a site. A construct
+			// declared by a domain the package does not ship opens nothing, and
+			// so does a package whose domains are not known.
+			{"a domain outside the list", "client-desk", "overview", "deskOverview", []string{"partner"}},
+			{"a domain that declares nothing here", "client-desk", "dashboard", "deskNote", []string{"shipping"}},
+			{"a domain spelled differently", "client-desk", "dashboard", "deskBriefs", []string{"Desk"}},
+			{"an empty list", "client-desk", "dashboard", "deskBriefs", []string{}},
+			{"no list at all", "client-desk", "dashboard", "deskBriefs", nil},
+			{"a list of blanks", "client-desk", "dashboard", "deskBriefs", []string{"", ""}},
 		} {
-			if got := AccessGateFor(miss.deployable, miss.gate, miss.construct); got != nil {
+			if got := AccessGateFor(miss.deployable, miss.gate, miss.construct, miss.domains); got != nil {
 				t.Errorf("%s: opened %+v", miss.name, got)
 			}
 		}
 	})
 
 	t.Run("a gate lists its constructs and whether it uses a subject", func(t *testing.T) {
-		got := AccessGatesFor("client-desk")
+		got := AccessGatesFor("client-desk", ko)
 		want := []AccessGateSummary{
 			{Gate: "dashboard", UsesSubject: true, Constructs: []string{"deskBriefs", "deskNote"}},
 			{Gate: "overview", UsesSubject: false, Constructs: []string{"deskOverview"}},
@@ -582,30 +685,226 @@ func TestAccessGateRegistryAnswers(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("gates = %+v\nwant    %+v", got, want)
 		}
-		if other := AccessGatesFor("shipping-desk"); len(other) != 1 || other[0].Gate != "desk" {
+		if other := AccessGatesFor("shipping-desk", []string{"shipping"}); len(other) != 1 || other[0].Gate != "desk" {
 			t.Errorf("another deployable's gates = %+v", other)
 		}
-		if none := AccessGatesFor("nobody-here"); len(none) != 0 {
-			t.Errorf("an unknown deployable has gates: %+v", none)
-		}
-		if none := AccessGatesFor(""); len(none) != 0 {
-			t.Errorf("an empty deployable has gates: %+v", none)
+		for _, none := range []struct {
+			name       string
+			deployable string
+			domains    []string
+		}{
+			{"an unknown deployable", "nobody-here", ko},
+			{"an empty deployable", "", ko},
+			{"an empty list", "client-desk", []string{}},
+			{"no list at all", "client-desk", nil},
+			{"a list of blanks", "client-desk", []string{""}},
+			{"a domain that declares nothing under it", "client-desk", []string{"shipping"}},
+		} {
+			if got := AccessGatesFor(none.deployable, none.domains); len(got) != 0 {
+				t.Errorf("%s has gates: %+v", none.name, got)
+			}
 		}
 	})
 
 	t.Run("what comes back is a copy", func(t *testing.T) {
-		got := AccessGateFor("client-desk", "dashboard", "deskBriefs")
+		got := AccessGateFor("client-desk", "dashboard", "deskBriefs", ko)
 		got.Args[0], got.Stamped[0] = "tampered", "tampered"
-		again := AccessGateFor("client-desk", "dashboard", "deskBriefs")
+		again := AccessGateFor("client-desk", "dashboard", "deskBriefs", ko)
 		if again.Args[0] != "topic" || again.Stamped[0] != "accessCodeId" {
 			t.Fatalf("a caller rewrote the registry through a returned entry: %+v", again)
 		}
-		gates := AccessGatesFor("client-desk")
+		gates := AccessGatesFor("client-desk", ko)
 		gates[0].Constructs[0] = "tampered"
-		if AccessGatesFor("client-desk")[0].Constructs[0] != "deskBriefs" {
+		if AccessGatesFor("client-desk", ko)[0].Constructs[0] != "deskBriefs" {
 			t.Fatal("a caller rewrote the registry through a returned summary")
 		}
 	})
+}
+
+// Two products can name a deployable alike, and then a gate, and then a
+// construct. The registry holds both, and a site's package decides which one a
+// code reaches by the domains it ships: each answers for its own domain alone.
+func TestAccessGateEachDomainAnswersOnlyForItsOwnDeclaration(t *testing.T) {
+	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
+		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
+	}
+
+	desk := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"desk"})
+	partner := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"partner"})
+	if desk == nil || partner == nil {
+		t.Fatalf("a domain's own declaration does not open for it: desk=%+v partner=%+v", desk, partner)
+	}
+	if desk.Domain != "desk" || partner.Domain != "partner" {
+		t.Errorf("the entries do not record their own domain: %q and %q", desk.Domain, partner.Domain)
+	}
+	if !reflect.DeepEqual(desk.Stamped, []string{"accessCodeId", "accessSubject"}) || len(desk.Args) != 1 {
+		t.Errorf("desk answered with another declaration: %+v", desk)
+	}
+	if !reflect.DeepEqual(partner.Stamped, []string{"accessCodeId"}) || len(partner.Args) != 0 {
+		t.Errorf("partner answered with another declaration: %+v", partner)
+	}
+
+	// The partner's declarations are its own: nothing of desk' leaks into
+	// its answers, and nothing of the partner's into desk'.
+	if AccessGateFor("client-desk", "dashboard", "deskNote", []string{"partner"}) != nil {
+		t.Error("the partner's package reaches a construct only desk declares")
+	}
+	if AccessGateFor("client-desk", "partner-only", "partnerOnlyBriefs", []string{"desk"}) != nil {
+		t.Error("desk' package reaches a construct only the partner declares")
+	}
+
+	// Naming a domain twice is naming it once.
+	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"partner", "partner"}); got == nil || got.Domain != "partner" {
+		t.Errorf("a list naming one domain twice answered %+v", got)
+	}
+}
+
+// A package that ships two domains declaring one name under one deployable has
+// two constructs the engine cannot tell apart by their bare name, so the call
+// would resolve to neither. The registry does not pick one: it opens neither,
+// and a gate it lists is a gate it can answer for.
+func TestAccessGateAPackageShippingTwoDeclarationsOfOneNameOpensNeither(t *testing.T) {
+	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
+		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
+	}
+	both := []string{"desk", "partner"}
+
+	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs", both); got != nil {
+		t.Errorf("a name two of the package's domains declare opened for %s: %+v", got.Domain, got)
+	}
+	// The order of the list does not matter: it is the NAME that is ambiguous,
+	// whichever declaration comes first.
+	if got := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"partner", "desk"}); got != nil {
+		t.Errorf("the order of the list decided an ambiguous name: %+v", got)
+	}
+	// What only one of them declares is not ambiguous.
+	if got := AccessGateFor("client-desk", "dashboard", "deskNote", both); got == nil || got.Domain != "desk" {
+		t.Errorf("an unambiguous construct was closed along with the ambiguous one: %+v", got)
+	}
+
+	// The operator surface lists what the call can reach. The one construct on
+	// the dashboard gate that stamps a subject is the ambiguous one, so the gate
+	// no longer offers a subject either.
+	want := []AccessGateSummary{
+		{Gate: "dashboard", UsesSubject: false, Constructs: []string{"deskNote"}},
+		{Gate: "overview", UsesSubject: false, Constructs: []string{"deskOverview"}},
+		{Gate: "partner-only", UsesSubject: false, Constructs: []string{"partnerOnlyBriefs"}},
+	}
+	if got := AccessGatesFor("client-desk", both); !reflect.DeepEqual(got, want) {
+		t.Errorf("gates = %+v\nwant    %+v", got, want)
+	}
+}
+
+// AccessGatesFor reads one package's domains and nothing else. A gate another
+// domain declares under the same deployable, with the same name, is not merged
+// into it, and neither is what that other domain's constructs stamp.
+func TestAccessGatesForFiltersByDomain(t *testing.T) {
+	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
+		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
+	}
+
+	partner := AccessGatesFor("client-desk", []string{"partner"})
+	wantPartner := []AccessGateSummary{
+		// No subject: the dashboard construct desk stamps one on is not the partner's.
+		{Gate: "dashboard", UsesSubject: false, Constructs: []string{"deskBriefs"}},
+		{Gate: "partner-only", UsesSubject: false, Constructs: []string{"partnerOnlyBriefs"}},
+	}
+	if !reflect.DeepEqual(partner, wantPartner) {
+		t.Errorf("the partner's gates = %+v\nwant            %+v", partner, wantPartner)
+	}
+
+	desk := AccessGatesFor("client-desk", []string{"desk"})
+	wantDesk := []AccessGateSummary{
+		{Gate: "dashboard", UsesSubject: true, Constructs: []string{"deskBriefs", "deskNote"}},
+		{Gate: "overview", UsesSubject: false, Constructs: []string{"deskOverview"}},
+	}
+	if !reflect.DeepEqual(desk, wantDesk) {
+		t.Errorf("desk' gates = %+v\nwant            %+v", desk, wantDesk)
+	}
+}
+
+// A gate is bound to its package through the domain of the concept its
+// construct is bound to, and not through the file the construct is written in.
+func TestAccessGateEntryRecordsTheDomainOfItsBinding(t *testing.T) {
+	files := gateBundleDomains(map[string]string{
+		"desk": gateQuery(gateOverview, "deskOverview", codeArgs, codeFilter),
+	})
+	// Written in the deskmore namespace, bound to a desk concept.
+	files["deskmore/constructs.memql"] = gateImport + gateQuery(gateDashboard, "deskBriefs", codeArgs, codeFilter)
+	if problems := loadGateBundle(t, files, true); len(problems) != 0 {
+		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
+	}
+
+	got := AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"desk"})
+	if got == nil || got.Domain != "desk" {
+		t.Fatalf("a construct bound to a desk concept is not desk': %+v", got)
+	}
+	if AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"deskmore"}) != nil {
+		t.Error("the namespace of the file a construct is written in opened it")
+	}
+}
+
+// AccessGateEntries is what package analysis reads: every entry, in an order
+// that does not change between boots, as copies.
+func TestAccessGateEntriesAreSortedCopies(t *testing.T) {
+	restoreAccessGatesAfter(t)
+	SetAccessGatesForTest()
+	if got := AccessGateEntries(); got == nil || len(got) != 0 {
+		t.Fatalf("an empty registry lists %#v, want an empty list", got)
+	}
+
+	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
+		t.Fatalf("setup: the bundle was refused:\n  %s", strings.Join(problems, "\n  "))
+	}
+	var got []string
+	entries := AccessGateEntries()
+	for _, entry := range entries {
+		got = append(got, entry.Deployable+"/"+entry.Gate+"/"+entry.Construct+"@"+entry.Domain)
+	}
+	want := []string{
+		"client-desk/dashboard/deskBriefs@desk",
+		"client-desk/dashboard/deskBriefs@partner",
+		"client-desk/dashboard/deskNote@desk",
+		"client-desk/overview/deskOverview@desk",
+		"client-desk/partner-only/partnerOnlyBriefs@partner",
+		"shipping-desk/desk/shippingDeskBriefs@shipping",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("entries = %v\nwant     %v", got, want)
+	}
+
+	entries[0].Construct, entries[0].Args = "tampered", []string{"tampered"}
+	entries[1].Stamped = []string{"tampered"}
+	again := AccessGateEntries()
+	if again[0].Construct != "deskBriefs" || len(again[0].Args) != 1 || again[0].Args[0] != "topic" ||
+		len(again[1].Stamped) != 1 || again[1].Stamped[0] != "accessCodeId" {
+		t.Fatalf("a caller rewrote the registry through a returned entry: %+v", again[:2])
+	}
+}
+
+// The test seam keys entries as the boot pass does, so a package that stands a
+// gate up with it gets the registry's real behaviour: two domains' entries stay
+// apart, and an entry with no domain is out of every site's reach.
+func TestAccessGateSetForTestKeepsDomainsApart(t *testing.T) {
+	restoreAccessGatesAfter(t)
+	mine := AccessGateEntry{Deployable: "d", Gate: "g", Construct: "c", Kind: AccessKindQuery, Domain: "mine"}
+	theirs := mine
+	theirs.Domain, theirs.Stamped = "theirs", []string{AccessArgCodeID}
+	orphan := AccessGateEntry{Deployable: "d", Gate: "g", Construct: "orphan", Kind: AccessKindQuery}
+	SetAccessGatesForTest(mine, theirs, orphan)
+
+	if got := AccessGateFor("d", "g", "c", []string{"mine"}); got == nil || got.Domain != "mine" || len(got.Stamped) != 0 {
+		t.Errorf("mine answered %+v", got)
+	}
+	if got := AccessGateFor("d", "g", "c", []string{"theirs"}); got == nil || got.Domain != "theirs" || len(got.Stamped) != 1 {
+		t.Errorf("theirs answered %+v", got)
+	}
+	if got := AccessGateFor("d", "g", "orphan", []string{"mine", "theirs", ""}); got != nil {
+		t.Errorf("an entry with no domain was reached: %+v", got)
+	}
+	if n := len(AccessGateEntries()); n != 3 {
+		t.Errorf("the seam stored %d entries, want 3", n)
+	}
 }
 
 func TestAccessGateCallPrefixMirrorsTheShopperOne(t *testing.T) {
@@ -640,7 +939,7 @@ func TestAccessGateRegistryIsRebuiltOnLoad(t *testing.T) {
 	if problems := loadGateBundle(t, registryBundle(), true); len(problems) != 0 {
 		t.Fatalf("setup: %v", problems)
 	}
-	if AccessGateFor("client-desk", "dashboard", "deskBriefs") == nil {
+	if AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"desk"}) == nil {
 		t.Fatal("setup: the gate was not published")
 	}
 
@@ -652,10 +951,10 @@ func TestAccessGateRegistryIsRebuiltOnLoad(t *testing.T) {
 		if problems := loadGateBundle(t, candidate, false); len(problems) != 0 {
 			t.Fatalf("the candidate was refused: %v", problems)
 		}
-		if AccessGateFor("client-desk", "candidate", "deskCandidate") != nil {
+		if AccessGateFor("client-desk", "candidate", "deskCandidate", []string{"desk"}) != nil {
 			t.Error("validating a candidate opened its gate on the live node")
 		}
-		if AccessGateFor("client-desk", "dashboard", "deskBriefs") == nil {
+		if AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"desk"}) == nil {
 			t.Error("validating a candidate closed a gate the live node serves")
 		}
 	})
@@ -667,16 +966,20 @@ func TestAccessGateRegistryIsRebuiltOnLoad(t *testing.T) {
 		if problems := loadGateBundle(t, next, true); len(problems) != 0 {
 			t.Fatalf("the next load was refused: %v", problems)
 		}
-		if AccessGateFor("client-desk", "overview", "deskOverview") == nil {
+		if AccessGateFor("client-desk", "overview", "deskOverview", []string{"desk"}) == nil {
 			t.Error("the new load did not publish its gate")
 		}
-		for _, dropped := range []struct{ deployable, gate, construct string }{
-			{"client-desk", "dashboard", "deskBriefs"},
-			{"client-desk", "dashboard", "deskNote"},
-			{"shipping-desk", "desk", "shippingDeskBriefs"},
+		for _, dropped := range []struct {
+			deployable, gate, construct, domain string
+		}{
+			{"client-desk", "dashboard", "deskBriefs", "desk"},
+			{"client-desk", "dashboard", "deskNote", "desk"},
+			{"client-desk", "dashboard", "deskBriefs", "partner"},
+			{"shipping-desk", "desk", "shippingDeskBriefs", "shipping"},
 		} {
-			if AccessGateFor(dropped.deployable, dropped.gate, dropped.construct) != nil {
-				t.Errorf("%s/%s/%s survived a load that no longer declares it", dropped.deployable, dropped.gate, dropped.construct)
+			if AccessGateFor(dropped.deployable, dropped.gate, dropped.construct, []string{dropped.domain}) != nil {
+				t.Errorf("%s/%s/%s of %s survived a load that no longer declares it",
+					dropped.deployable, dropped.gate, dropped.construct, dropped.domain)
 			}
 		}
 	})
@@ -687,8 +990,11 @@ func TestAccessGateRegistryIsRebuiltOnLoad(t *testing.T) {
 		}), true); len(problems) != 0 {
 			t.Fatalf("the plain load was refused: %v", problems)
 		}
-		if got := AccessGatesFor("client-desk"); len(got) != 0 {
+		if got := AccessGatesFor("client-desk", []string{"desk", "partner"}); len(got) != 0 {
 			t.Errorf("a bundle with no @accessGate left gates open: %+v", got)
+		}
+		if got := AccessGateEntries(); len(got) != 0 {
+			t.Errorf("a bundle with no @accessGate left entries behind: %+v", got)
 		}
 	})
 }
@@ -782,7 +1088,7 @@ func TestAccessGateFaultsRefuseAPackageDeploy(t *testing.T) {
 		if len(result.Diagnostics) != 0 {
 			t.Fatalf("a clean bundle was refused: %+v", result.Diagnostics)
 		}
-		if AccessGateFor("client-desk", "dashboard", "deskBriefs") != nil {
+		if AccessGateFor("client-desk", "dashboard", "deskBriefs", []string{"candidategate"}) != nil {
 			t.Error("analysing a candidate opened its gate on the live node")
 		}
 	})

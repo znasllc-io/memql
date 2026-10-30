@@ -140,8 +140,8 @@ func accessGateDeclaration(funcDef *languageParser.FunctionDef) (*AccessGateDecl
 //
 // PURE, and deliberately: everything it refuses is a property of the construct
 // alone, so the refusals are testable without an engine. What it CANNOT know --
-// whether another construct claims the same name under the deployable --
-// belongs to loadAccessGates, which holds them all.
+// whether another construct in its domain claims the same name under the
+// deployable -- belongs to loadAccessGates, which holds them all.
 //
 // Every refusal names the construct and says what to change, because the
 // reader is an author with a bundle open, not the engine's developer.
@@ -173,6 +173,22 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 		return AccessGateEntry{}, fmt.Errorf("%q: %w", fn.Name, err)
 	}
 
+	// THE DOMAIN THAT DECLARED THE GATE IS THE DOMAIN OF THE CONCEPT THE
+	// CONSTRUCT IS BOUND TO (D5), taken from the binding as a shopper
+	// extension's is: a binding is a fact about the construct, where a file
+	// path is a fact about a checkout. It is what ties a gate to the package
+	// that ships it, so that a deployable name two products happen to share
+	// does not put one product's constructs in reach of the other's codes. A
+	// construct bound to no concept has no domain to be tied by, and a gate
+	// belonging to no package would be reachable from every one.
+	domain := conceptRootDomain(fn.BoundConcept)
+	if domain == "" {
+		return AccessGateEntry{}, fmt.Errorf("%q carries @accessGate but binds no concept (%q) from which a DSL "+
+			"domain can be read. A gate belongs to the package that ships it, through the domain of the concept "+
+			"the construct reads or writes. Bind the construct to a concept of the domain that declares it",
+			fn.Name, fn.BoundConcept)
+	}
+
 	// THE THREE THAT CONTRADICT A VISITOR'S CALL. It runs under the site
 	// owner's borrowed authority and never as internal origin (D6), and each of
 	// these is a statement about a different kind of caller.
@@ -201,6 +217,7 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 		Gate:       decl.Gate,
 		Construct:  fn.Name,
 		Kind:       kind,
+		Domain:     domain,
 	}
 	if fn.ArgsSchema == nil {
 		return entry, nil
@@ -269,7 +286,7 @@ type accessGateCandidate struct {
 // past a skipped construct must never be the thing that opens a gate somebody
 // was told was refused.
 func loadAccessGates(functions *FunctionRegistry, publish bool) []error {
-	view := map[string]AccessGateEntry{}
+	view := map[accessGateSlot]AccessGateEntry{}
 	if publish {
 		defer func() { publishAccessGates(view) }()
 	}
@@ -289,8 +306,8 @@ func loadAccessGates(functions *FunctionRegistry, publish bool) []error {
 	})
 
 	var problems []error
-	groups := map[string][]accessGateCandidate{}
-	var order []string
+	groups := map[accessGateSlot][]accessGateCandidate{}
+	var order []accessGateSlot
 	for _, fn := range declared {
 		// Judged whether or not it is enabled: @disabled takes a construct out
 		// of service, not out of the tree, and it stays a construct that must
@@ -307,15 +324,19 @@ func loadAccessGates(functions *FunctionRegistry, publish bool) []error {
 		if !fn.Enabled {
 			continue
 		}
-		key := accessGateKey(entry.Deployable, entry.Construct)
-		if _, seen := groups[key]; !seen {
-			order = append(order, key)
+		// A collision is a collision INSIDE one domain. The same name under the
+		// same deployable in another domain is another product's declaration,
+		// and the package that ships that domain does not ship this one, so
+		// neither can close the other.
+		slot := accessGateSlot{entry.Domain, entry.Deployable, entry.Construct}
+		if _, seen := groups[slot]; !seen {
+			order = append(order, slot)
 		}
-		groups[key] = append(groups[key], accessGateCandidate{fn: fn, entry: entry})
+		groups[slot] = append(groups[slot], accessGateCandidate{fn: fn, entry: entry})
 	}
 
-	for _, key := range order {
-		group := groups[key]
+	for _, slot := range order {
+		group := groups[slot]
 		if len(group) > 1 {
 			// BOTH STAY CLOSED. Keeping whichever loaded first would let load
 			// order decide which construct a code reaches, and nothing
@@ -323,7 +344,7 @@ func loadAccessGates(functions *FunctionRegistry, publish bool) []error {
 			problems = append(problems, accessGateDuplicateFault(group))
 			continue
 		}
-		view[key] = group[0].entry
+		view[slot] = group[0].entry
 	}
 	return problems
 }
@@ -338,8 +359,9 @@ func newAccessGateFault(fn *Function, err error) error {
 }
 
 // accessGateDuplicateFault refuses two gated constructs that share a name under
-// one deployable, naming BOTH places: the author has to know which two
-// declarations to reconcile, and one name sends them looking for the other.
+// one deployable in one DSL domain, naming BOTH places: the author has to know
+// which two declarations to reconcile, and one name sends them looking for the
+// other.
 func accessGateDuplicateFault(group []accessGateCandidate) error {
 	first := group[0]
 	places := make([]string, 0, len(group))
@@ -355,10 +377,11 @@ func accessGateDuplicateFault(group []accessGateCandidate) error {
 		Construct: first.entry.Construct,
 		Kind:      describeFunctionKind(first.fn.FunctionKind),
 		File:      accessGateFile(first.fn.Origin),
-		Err: fmt.Errorf("@accessGate: %q is declared under the deployable %q by %s. A visitor's call names its "+
-			"construct without a namespace, so one name under one deployable has to reach one construct, and "+
-			"which of them ran would depend on load order, which nothing resolves. Rename one of them",
-			first.entry.Construct, first.entry.Deployable, strings.Join(places, " and ")),
+		Err: fmt.Errorf("@accessGate: %q is declared under the deployable %q in the DSL domain %q by %s. A "+
+			"visitor's call names its construct without a namespace, so one name under one deployable in one "+
+			"domain has to reach one construct, and which of them ran would depend on load order, which "+
+			"nothing resolves. Rename one of them",
+			first.entry.Construct, first.entry.Deployable, first.entry.Domain, strings.Join(places, " and ")),
 	}
 }
 

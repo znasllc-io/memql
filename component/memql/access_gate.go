@@ -27,14 +27,23 @@ import (
 // 404 as one for a construct that does not exist (D4). Deny by default, and a
 // refusal teaches a stranger nothing.
 //
-// # Keyed by deployable (D5)
+// # Bound to the package that declared it (D5)
 //
 // Gate names are short ("dashboard", "overview") and will collide between
-// products. The key is the deployable and the construct, and the handler
-// refuses a construct whose deployable is not the site's own
-// packageDeployableName, so one product's code cannot reach another product's
-// operations. v1:platform:package records no DSL domains to scope by, which is
-// why the annotation names its deployable instead of inferring it.
+// products, and so will deployable names and construct names. So a gate names
+// its deployable AND records the DSL domain that declared it: the domain of
+// the concept the construct is bound to, taken the way a shopper extension's
+// declaring domain is taken. The bff reads the domains the site's package ships
+// with the site, on every call, and asks this registry only about those. A
+// construct another product declared is not in reach however its deployable
+// happens to be spelled, and a package whose domains are unknown -- an empty
+// list -- reaches nothing, so an unknown package fails closed.
+//
+// This is not a defense against a hostile author: DSL is already cluster-wide
+// authority. It stops one product's code reaching another's operations by
+// accident, and stops a colliding name from closing somebody else's gate -- a
+// duplicate is a fault inside ONE domain, and the same name in another domain
+// is that product's own declaration.
 //
 // # The construct's name, and what is allowed to be said about it
 //
@@ -47,9 +56,12 @@ import (
 //
 // Construct is the name as authored, and the engine resolves a bare name only
 // when one namespace declares it. Two gated constructs sharing a name under
-// one deployable are refused at load for exactly that reason; the same name
-// under two deployables is a legal registry state, and a call for either only
-// resolves while the engine can tell the two namespaces apart.
+// one deployable in one domain are refused at load for exactly that reason. The
+// same name in two domains is a legal registry state -- two products -- and
+// each answers for its own domain, but a call for either only resolves while the
+// engine can tell the two namespaces apart. A package that ships BOTH domains
+// cannot tell them apart by that name either, so the lookup opens neither
+// rather than guess.
 //
 // # The registry is rebuilt on every load
 //
@@ -108,6 +120,12 @@ type AccessGateEntry struct {
 	// Kind is AccessKindQuery or AccessKindMutation, which decides the call's
 	// keyword (AccessCallPrefix).
 	Kind string
+	// Domain is the DSL domain of the concept the construct is bound to, which
+	// is the package that ships it: the lookup considers an entry only for a
+	// site whose package ships this domain. Taken from the binding and not
+	// from the file the construct is written in, as a shopper extension's
+	// declaring domain is.
+	Domain string
 	// Args are the argument names a caller may send, in declaration order: every
 	// name the construct declares except the reserved ones. The handler refuses
 	// any other key BEFORE it renders anything.
@@ -139,60 +157,108 @@ type AccessGateSummary struct {
 	Constructs []string
 }
 
+// accessGateSlot identifies one gated construct: the domain that declared it,
+// the deployable it names and its own name. Two products' constructs that share
+// a deployable name and a construct name differ in the first field, so neither
+// can overwrite or close the other.
+type accessGateSlot struct{ domain, deployable, construct string }
+
 var (
 	accessGateMu sync.RWMutex
-	// accessGates is keyed by deployable and construct, because the handler's
-	// question is "does this deployable declare this construct, and for which
-	// gate" and a gate-keyed map would answer it with a scan. A deployable
-	// name holds no "/" and a construct name is camelCase, so the key is
-	// unambiguous.
-	accessGates = map[string]AccessGateEntry{}
+	accessGates  = map[accessGateSlot]AccessGateEntry{}
 )
 
-func accessGateKey(deployable, construct string) string {
-	return deployable + "/" + construct
+// domainSet is a package's domains as a set. A blank names no domain and must
+// never match an entry that lacks one, so it is dropped.
+func domainSet(domains []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(domains))
+	for _, domain := range domains {
+		if domain != "" {
+			set[domain] = struct{}{}
+		}
+	}
+	return set
 }
 
-// AccessGateFor resolves one request: the construct a deployable's gate
-// reaches, or nil.
+// AccessGateFor resolves one request: the construct a deployable's gate reaches
+// among the DSL domains the site's package ships, or nil.
 //
-// NIL ON ANY MISS, and the three misses are deliberately one answer: a
-// construct nobody declared, one declared on another gate, and one declared on
-// another deployable. The handler turns all three into the same 404, so a
-// holder of one gate's code learns nothing about what another gate reaches.
-// Matching is exact -- no trimming, no folding -- because a name that is
-// "nearly" a declared one is a request for something nobody declared.
-func AccessGateFor(deployable, gate, construct string) *AccessGateEntry {
+// domains are those the caller read with the site (package.dslDomains). An
+// empty list reaches nothing, so a package whose domains are not known fails
+// closed rather than falling back to every domain.
+//
+// NIL ON ANY MISS, and the misses are deliberately one answer: a construct
+// nobody declared, one declared on another gate, one declared on another
+// deployable, and one declared by a domain the package does not ship. The
+// handler turns all of them into the same 404, so a holder of one gate's code
+// learns nothing about what another gate, or another product, reaches. Matching
+// is exact -- no trimming, no folding -- because a name that is "nearly" a
+// declared one is a request for something nobody declared.
+//
+// A name two of the package's domains both declare under the deployable is a
+// miss too, whichever gate is asked for: the engine resolves a bare name only
+// when one namespace declares it, so the call would reach neither, and picking
+// one here would be a guess presented as an answer.
+func AccessGateFor(deployable, gate, construct string, domains []string) *AccessGateEntry {
 	accessGateMu.RLock()
-	entry, declared := accessGates[accessGateKey(deployable, construct)]
-	accessGateMu.RUnlock()
-	if !declared || entry.Gate != gate {
+	defer accessGateMu.RUnlock()
+
+	var found AccessGateEntry
+	declared := 0
+	for domain := range domainSet(domains) {
+		if entry, ok := accessGates[accessGateSlot{domain, deployable, construct}]; ok {
+			found = entry
+			declared++
+		}
+	}
+	if declared != 1 || found.Gate != gate {
 		return nil
 	}
-	out := entry.clone()
+	out := found.clone()
 	return &out
 }
 
-// AccessGatesFor lists the gates a deployable declares, sorted by gate, for the
-// operator surface: a code can only be minted for a gate that appears here.
-// A deployable that declares none, or an empty name, yields an empty list.
-func AccessGatesFor(deployable string) []AccessGateSummary {
+// AccessGatesFor lists the gates a deployable declares in the DSL domains a
+// package ships, sorted by gate, for the operator surface: a code can only be
+// minted for a gate that appears here. A deployable that declares none, an
+// empty name and an empty list of domains all yield an empty list.
+//
+// It reads the same domains AccessGateFor does and nothing else. A gate another
+// domain declares under the same deployable, with the same name, is not merged
+// into it, and neither is what that domain's constructs stamp. It offers only
+// what AccessGateFor can answer for: a name two of the package's domains both
+// declare is left out, so a gate the operator can pick is a gate a call can
+// reach.
+func AccessGatesFor(deployable string, domains []string) []AccessGateSummary {
 	out := []AccessGateSummary{}
-	if deployable == "" {
+	inPackage := domainSet(domains)
+	if deployable == "" || len(inPackage) == 0 {
 		return out
 	}
-	byGate := map[string]*AccessGateSummary{}
+
 	accessGateMu.RLock()
-	for _, entry := range accessGates {
-		if entry.Deployable != deployable {
+	byName := map[string][]AccessGateEntry{}
+	for slot, entry := range accessGates {
+		if slot.deployable != deployable {
 			continue
 		}
+		if _, shipped := inPackage[slot.domain]; !shipped {
+			continue
+		}
+		byName[slot.construct] = append(byName[slot.construct], entry)
+	}
+	byGate := map[string]*AccessGateSummary{}
+	for name, entries := range byName {
+		if len(entries) != 1 {
+			continue
+		}
+		entry := entries[0]
 		summary := byGate[entry.Gate]
 		if summary == nil {
 			summary = &AccessGateSummary{Gate: entry.Gate}
 			byGate[entry.Gate] = summary
 		}
-		summary.Constructs = append(summary.Constructs, entry.Construct)
+		summary.Constructs = append(summary.Constructs, name)
 		for _, stamped := range entry.Stamped {
 			if stamped == AccessArgSubject {
 				summary.UsesSubject = true
@@ -206,6 +272,34 @@ func AccessGatesFor(deployable string) []AccessGateSummary {
 		out = append(out, *summary)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Gate < out[j].Gate })
+	return out
+}
+
+// AccessGateEntries lists every gated construct the node serves, whatever its
+// domain, sorted by deployable, gate, construct and domain, as copies. Package
+// analysis reads it; a request never does, because a request is always scoped
+// to a site's package.
+func AccessGateEntries() []AccessGateEntry {
+	accessGateMu.RLock()
+	out := make([]AccessGateEntry, 0, len(accessGates))
+	for _, entry := range accessGates {
+		out = append(out, entry.clone())
+	}
+	accessGateMu.RUnlock()
+
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Deployable != b.Deployable {
+			return a.Deployable < b.Deployable
+		}
+		if a.Gate != b.Gate {
+			return a.Gate < b.Gate
+		}
+		if a.Construct != b.Construct {
+			return a.Construct < b.Construct
+		}
+		return a.Domain < b.Domain
+	})
 	return out
 }
 
@@ -223,7 +317,7 @@ func AccessCallPrefix(kind string) string {
 
 // publishAccessGates replaces the whole view atomically, so a request never
 // sees half of a reload.
-func publishAccessGates(next map[string]AccessGateEntry) {
+func publishAccessGates(next map[accessGateSlot]AccessGateEntry) {
 	accessGateMu.Lock()
 	defer accessGateMu.Unlock()
 	accessGates = next
@@ -234,10 +328,13 @@ func publishAccessGates(next map[string]AccessGateEntry) {
 // boot pass is the one writer, and it validates. It exists so a package that
 // consumes the registry (the access handler, the operator integration) can
 // stand up a gate without loading a whole DSL tree.
+//
+// An entry needs its Domain, as on a node: a lookup considers only the domains
+// it is given, so an entry with none is one no site's package can reach.
 func SetAccessGatesForTest(entries ...AccessGateEntry) {
-	next := make(map[string]AccessGateEntry, len(entries))
+	next := make(map[accessGateSlot]AccessGateEntry, len(entries))
 	for _, entry := range entries {
-		next[accessGateKey(entry.Deployable, entry.Construct)] = entry.clone()
+		next[accessGateSlot{entry.Domain, entry.Deployable, entry.Construct}] = entry.clone()
 	}
 	publishAccessGates(next)
 }
