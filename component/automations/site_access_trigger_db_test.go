@@ -37,6 +37,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -78,10 +79,10 @@ func TestNoAutomationTriggersOnAnAccessCodeOrSession(t *testing.T) {
 	watch := func(name, event, conceptName string) string {
 		name = fmt.Sprintf("%s%d", name, nonce)
 		src := fmt.Sprintf(`
-@trigger(event=%q, concept=%q)
+@trigger(event=%s, concept=%s)
 automation %s {
   run := logic sandboxNoopLogic(event: event)
-}`, event, conceptName, name)
+}`, langparser.QuoteString(event), langparser.QuoteString(conceptName), name)
 		if err := s.Activate(authoredAutomationConstruct(author, name, src)); err != nil {
 			t.Fatalf("Activate %s: %v", name, err)
 		}
