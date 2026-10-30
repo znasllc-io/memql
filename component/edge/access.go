@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -162,10 +163,12 @@ func accessRouteFor(method, p string) (accessRoute, bool) {
 // replicas each allow the configured rate, so the cluster-wide ceiling is the
 // rate times the replica count.
 //
-// THEY BOUND LOAD, NOT GUESSING. The address is the leftmost X-Forwarded-For,
-// which a client can write, so a determined caller has as many per-address
-// budgets as it has made-up addresses -- which is the reason the per-site unlock
-// bucket exists. What stops guessing is 125 bits of code, not a counter.
+// THEY BOUND LOAD, NOT GUESSING. The address is the right-most X-Forwarded-For
+// entry (accessClientAddress): the hop the ingress itself recorded, which a
+// caller cannot choose, so rotating a header buys no fresh per-address budget.
+// Callers who really are at different addresses each still get one, and the
+// per-site unlock bucket is the cap on what they spend together. What stops
+// guessing is 125 bits of code, not a counter.
 //
 // UNLOCK DRAWS ON TWO, ADDRESS FIRST, and the order is the point. If the site's
 // bucket were spent first, one machine sending a hundred requests would drain
@@ -208,6 +211,55 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 		return false, accessRetryAfter(accessOtherPerMinutePerAddress)
 	}
 	return true, 0
+}
+
+// accessClientAddress is the address the access surface's budgets key on: the
+// RIGHT-MOST non-empty X-Forwarded-For entry across every header line, and the
+// peer when there is none.
+//
+// IT IS NOT THE SHOPPER'S RULE, and the difference is the point.
+// shopperClientAddress takes the leftmost entry and says plainly that a caller
+// can write it. The edge sits behind an ingress that APPENDS the address it saw
+// to whatever the caller already sent, so everything left of the last entry is
+// the caller's to choose and the last entry is the ingress's own record of who
+// connected. Keyed on the leftmost, a caller who rotates a made-up value gets a
+// fresh per-address budget on every request, never meets the limit of ten, and
+// can spend the site's sixty a minute until no real visitor can unlock. The
+// right-most entry is the one a caller cannot choose.
+//
+// EVERY HEADER LINE, last first, because a header may arrive as several lines
+// and an ingress may add its own rather than extend the caller's; reading only
+// the first would key on what the caller wrote. EMPTY ENTRIES ARE SKIPPED, so a
+// trailing comma or a blank line neither hides the entry before it nor becomes
+// an address of its own. It is scanned from the right without splitting, since
+// the header is the caller's and so is its length.
+//
+// THE COST, stated rather than hidden: the right-most entry is the visitor only
+// when the ingress is the first thing to see them. A proxy added in front of the
+// ingress is the address the ingress records, and every visitor behind it then
+// shares one bucket -- ten unlocks a minute between them, and a share of the
+// site's sixty. With no entry at all the peer is the address, as the shopper's
+// is, which behind the ingress is the ingress itself.
+func accessClientAddress(r *http.Request) string {
+	lines := r.Header.Values("X-Forwarded-For")
+	for i := len(lines) - 1; i >= 0; i-- {
+		rest := lines[i]
+		for {
+			comma := strings.LastIndexByte(rest, ',')
+			if entry := strings.TrimSpace(rest[comma+1:]); entry != "" {
+				return entry
+			}
+			if comma < 0 {
+				break
+			}
+			rest = rest[:comma]
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return host
 }
 
 // accessRetryAfter is the whole seconds one token takes to come back to a bucket
@@ -391,9 +443,10 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 		return
 	}
 
-	// shopperClientAddress is the shared helper, used as it is: the leftmost
-	// X-Forwarded-For, falling back to the peer. Spoofable, and said so there.
-	if allowed, wait := h.accessRate.allow(route.op, site.ID, shopperClientAddress(r)); !allowed {
+	// accessClientAddress and not the shopper's helper: the right-most
+	// X-Forwarded-For entry, which the caller cannot write, where the shopper's
+	// leftmost one is the caller's to rotate. See there for the cost.
+	if allowed, wait := h.accessRate.allow(route.op, site.ID, accessClientAddress(r)); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(wait))
 		writeAccessRefusal(w, accessRefusalRateLimited)
 		return

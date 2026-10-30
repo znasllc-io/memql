@@ -158,11 +158,23 @@ func accessRequest(method, path, body string) *http.Request {
 	return req
 }
 
-// accessUnlock is an unlock from a given claimed address.
+// accessUnlock is an unlock that arrived from one address: a single
+// X-Forwarded-For entry, so it is the right-most as well as the only one. An
+// empty addr sends no header at all, which leaves the peer as the address.
 func accessUnlock(addr string) *http.Request {
+	if addr == "" {
+		return accessUnlockVia()
+	}
+	return accessUnlockVia(addr)
+}
+
+// accessUnlockVia is an unlock that arrived with the given X-Forwarded-For
+// header lines, one per argument, in the order they were written. What a caller
+// wrote is on the left and what the ingress recorded is on the right.
+func accessUnlockVia(lines ...string) *http.Request {
 	req := accessRequest(http.MethodPost, "/_memql/access", `{"code":"x"}`)
-	if addr != "" {
-		req.Header.Set("X-Forwarded-For", addr)
+	for _, line := range lines {
+		req.Header.Add("X-Forwarded-For", line)
 	}
 	return req
 }
@@ -676,9 +688,12 @@ func TestAccessGivesTheBffABodyOfKnownLength(t *testing.T) {
 }
 
 // UNLOCK: 10 PER MINUTE PER (SITE, ADDRESS), AND 60 PER MINUTE PER SITE. The
-// address is the leftmost X-Forwarded-For, which a client can write, and that
-// is why the second bucket exists: spoofing 60 addresses spends it, and past
-// that nobody gets in until it refills. These bound load, not guessing.
+// address is the RIGHT-MOST X-Forwarded-For entry: the hop the ingress itself
+// recorded, and the one entry a caller cannot choose. Keyed on the leftmost,
+// which a caller writes, a rotating made-up value would buy a fresh per-address
+// budget on every request, never meet the ten, and spend the site's sixty until
+// no real visitor could unlock. The second bucket is the cap on what many REAL
+// addresses spend together. These bound load, not guessing.
 func TestAccessRateLimitsUnlockPerAddressAndPerSite(t *testing.T) {
 	t.Run("ten per address", func(t *testing.T) {
 		up := newAccessUpstream(t)
@@ -698,15 +713,67 @@ func TestAccessRateLimitsUnlockPerAddressAndPerSite(t *testing.T) {
 			t.Fatalf("error = %q, want rate_limited", got)
 		}
 
-		// The leftmost entry is the address; what a hop appended is not.
-		if rec := serveAccess(h, accessUnlock("203.0.113.9, 10.0.0.1")); rec.Code != http.StatusTooManyRequests {
-			t.Fatalf("the same address with a hop appended = %d, want the same bucket", rec.Code)
-		}
 		if rec := serveAccess(h, accessUnlock("203.0.113.10")); rec.Code != http.StatusOK {
 			t.Fatalf("another address = %d, want its own budget", rec.Code)
 		}
 		if up.count() != 11 {
 			t.Fatalf("the bff received %d unlocks, want 10 + 1 from the other address", up.count())
+		}
+	})
+
+	// THE CASE A SECURITY REVIEW FOUND. What a caller writes is on the left of
+	// the header and what the ingress recorded is on the right, so a caller who
+	// rotates the left-hand value is still one address.
+	t.Run("rotating the leftmost entry buys no new budget", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		rotating := func(i int) *http.Request {
+			return accessUnlockVia(fmt.Sprintf("10.66.0.%d, 203.0.113.9", i))
+		}
+		for i := 0; i < 10; i++ {
+			if rec := serveAccess(h, rotating(i)); rec.Code != http.StatusOK {
+				t.Fatalf("unlock %d = %d, want 200 inside the budget", i+1, rec.Code)
+			}
+		}
+		for i := 10; i < 15; i++ {
+			if rec := serveAccess(h, rotating(i)); rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("unlock %d with a fresh leftmost entry = %d, want 429: it is the same address", i+1, rec.Code)
+			}
+		}
+		// The right-most entry is the key, so the same made-up left-hand value in
+		// front of another recorded address is another visitor.
+		if rec := serveAccess(h, accessUnlockVia("10.66.0.0, 203.0.113.10")); rec.Code != http.StatusOK {
+			t.Fatalf("another recorded address = %d, want its own budget", rec.Code)
+		}
+		if up.count() != 11 {
+			t.Fatalf("the bff received %d unlocks, want 10 + 1 from the other address", up.count())
+		}
+	})
+
+	// A second header line is not a place to hide. The ingress may add its own
+	// line rather than extend the caller's, so the address is the last entry of
+	// the LAST line; reading only the first would key on whatever the caller wrote.
+	t.Run("the last header line has the last entry", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		for i := 0; i < 10; i++ {
+			serveAccess(h, accessUnlock("203.0.113.9"))
+		}
+		if rec := serveAccess(h, accessUnlockVia("10.66.0.1", "203.0.113.9")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("a caller's line then the ingress's = %d, want 429: the last line names the spent address", rec.Code)
+		}
+		if rec := serveAccess(h, accessUnlockVia("203.0.113.9", "198.18.9.9")); rec.Code != http.StatusOK {
+			t.Fatalf("the spent address in the first line only = %d, want 200: the last line names another", rec.Code)
+		}
+		if rec := serveAccess(h, accessUnlockVia("203.0.113.9", "10.66.0.2, 198.18.9.10")); rec.Code != http.StatusOK {
+			t.Fatalf("a last line of several entries = %d, want its last entry to be the address", rec.Code)
+		}
+		// A last line with nothing in it hides nothing: the entry before it is
+		// still the right-most one there is.
+		if rec := serveAccess(h, accessUnlockVia("10.66.0.3, 203.0.113.9", " ")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("an empty last line = %d, want 429: it must not hide the line before", rec.Code)
 		}
 	})
 
@@ -720,6 +787,17 @@ func TestAccessRateLimitsUnlockPerAddressAndPerSite(t *testing.T) {
 		if rec := serveAccess(h, accessUnlock("")); rec.Code != http.StatusTooManyRequests {
 			t.Fatalf("the 11th from one peer = %d, want 429", rec.Code)
 		}
+		// A header with no entry in it is no header, not an address of its own.
+		if rec := serveAccess(h, accessUnlockVia(" , ")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("a header with nothing in it = %d, want it to fall back to the spent peer", rec.Code)
+		}
+		// The address is the host: every new connection from one machine arrives
+		// from a new source port, and none of them is a new visitor.
+		sameHost := accessUnlock("")
+		sameHost.RemoteAddr = "198.51.100.7:51234"
+		if rec := serveAccess(h, sameHost); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the same peer from another port = %d, want the same bucket", rec.Code)
+		}
 		other := accessUnlock("")
 		other.RemoteAddr = "198.51.100.8:40000"
 		if rec := serveAccess(h, other); rec.Code != http.StatusOK {
@@ -727,18 +805,22 @@ func TestAccessRateLimitsUnlockPerAddressAndPerSite(t *testing.T) {
 		}
 	})
 
-	t.Run("sixty per site, whatever addresses are claimed", func(t *testing.T) {
+	t.Run("sixty per site, however many addresses spend it", func(t *testing.T) {
 		up := newAccessUpstream(t)
 		h := accessHandler(t, accessSite(nil), up.server.URL)
 
+		// The same made-up left-hand value in front of 60 different recorded
+		// addresses: each has a budget of its own, and together they have the
+		// site's sixty.
 		for i := 0; i < 60; i++ {
-			if rec := serveAccess(h, accessUnlock(fmt.Sprintf("203.0.113.%d", i))); rec.Code != http.StatusOK {
+			req := accessUnlockVia(fmt.Sprintf("10.66.0.1, 203.0.113.%d", i))
+			if rec := serveAccess(h, req); rec.Code != http.StatusOK {
 				t.Fatalf("unlock %d from its own address = %d, want 200 inside the site's budget", i+1, rec.Code)
 			}
 		}
 		// A 61st from an address that has spent nothing: its own bucket is full,
 		// so this is the SITE'S refusal.
-		rec := serveAccess(h, accessUnlock("198.18.0.1"))
+		rec := serveAccess(h, accessUnlockVia("10.66.0.1, 198.18.0.1"))
 		if rec.Code != http.StatusTooManyRequests {
 			t.Fatalf("the 61st unlock for the site = %d, want 429", rec.Code)
 		}
@@ -756,14 +838,17 @@ func TestAccessRateLimitsUnlockPerAddressAndPerSite(t *testing.T) {
 	// floods must be stopped by its OWN bucket before it reaches the site's, or
 	// a single machine drains the whole site's budget in a second and nobody
 	// else can get in. Spent site-first, A's hundred requests would take all
-	// sixty and leave nothing for the fifty that follow.
+	// sixty and leave nothing for the fifty that follow. The flood rotates its
+	// leftmost entry on every request, as the attack this guards against does:
+	// it is still one address.
 	t.Run("one address cannot spend the site's budget", func(t *testing.T) {
 		up := newAccessUpstream(t)
 		h := accessHandler(t, accessSite(nil), up.server.URL)
 
 		passed := 0
 		for i := 0; i < 100; i++ {
-			if serveAccess(h, accessUnlock("203.0.113.9")).Code == http.StatusOK {
+			req := accessUnlockVia(fmt.Sprintf("10.66.%d.%d, 203.0.113.9", i/250, i%250))
+			if serveAccess(h, req).Code == http.StatusOK {
 				passed++
 			}
 		}
@@ -865,9 +950,81 @@ func TestAccessRateLimitsOtherOperationsSeparately(t *testing.T) {
 		}
 	})
 
-	// The 600 a minute ceiling, and that session, leave and call share it, is
-	// asserted exactly in TestAccessLimitsKeyAndRefill, where a token costs no
-	// request. Here the claim is only that the budgets are not the same budget.
+	// THE SAME KEY AS UNLOCK'S, at the real ceiling. The frozen clock makes 600
+	// an exact count rather than a count plus whatever refilled while the loop ran.
+	t.Run("the address is the right-most entry here too", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		poll := func(left, recorded string) *http.Request {
+			req := accessRequest(http.MethodGet, "/_memql/access", "")
+			req.Header.Add("X-Forwarded-For", left+", "+recorded)
+			return req
+		}
+		for i := 0; i < 600; i++ {
+			rec := serveAccess(h, poll(fmt.Sprintf("10.66.%d.%d", i/250, i%250), "203.0.113.9"))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("poll %d = %d, want 200 inside the 600", i+1, rec.Code)
+			}
+		}
+		rec := serveAccess(h, poll("10.66.9.9", "203.0.113.9"))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("poll 601 with a fresh leftmost entry = %d, want 429: it is the same address", rec.Code)
+		}
+		mustRetryAfter(t, rec)
+		if rec := serveAccess(h, poll("10.66.9.9", "203.0.113.10")); rec.Code != http.StatusOK {
+			t.Fatalf("a poll from another recorded address = %d, want its own budget", rec.Code)
+		}
+	})
+
+	// That session, leave and call share the 600, and the key, are asserted
+	// without the requests in TestAccessLimitsKeyAndRefill.
+}
+
+// THE ADDRESS THE BUDGETS KEY ON is the right-most non-empty X-Forwarded-For
+// entry across every header line, and the peer when there is none. This is the
+// function on its own, so the edges of the rule are each a row rather than a
+// request: spaces, empty entries, a header line with nothing in it, a second
+// line, and a peer with no port.
+func TestAccessClientAddress(t *testing.T) {
+	const peer = "198.51.100.7"
+	cases := []struct {
+		name   string
+		remote string
+		lines  []string
+		want   string
+	}{
+		{"no header is the peer", peer + ":40000", nil, peer},
+		{"a peer with no port is itself", peer, nil, peer},
+		{"an IPv6 peer", "[2001:db8::7]:40000", nil, "2001:db8::7"},
+		{"one entry", peer + ":40000", []string{"203.0.113.9"}, "203.0.113.9"},
+		{"the right-most of several", peer + ":40000", []string{"10.66.0.1, 10.66.0.2, 203.0.113.9"}, "203.0.113.9"},
+		{"spaces around the entries", peer + ":40000", []string{"  10.66.0.1 ,   203.0.113.9  "}, "203.0.113.9"},
+		{"empty entries on the right are skipped", peer + ":40000", []string{"203.0.113.9, , ,"}, "203.0.113.9"},
+		{"empty entries between are skipped", peer + ":40000", []string{"10.66.0.1,,203.0.113.9"}, "203.0.113.9"},
+		{"a header with only separators is no header", peer + ":40000", []string{" , "}, peer},
+		{"an empty header is no header", peer + ":40000", []string{""}, peer},
+		{"the last line wins", peer + ":40000", []string{"10.66.0.1", "203.0.113.9"}, "203.0.113.9"},
+		{"the last entry of the last line", peer + ":40000",
+			[]string{"10.66.0.1, 10.66.0.2", "10.66.0.3, 203.0.113.9"}, "203.0.113.9"},
+		{"an empty last line hides nothing", peer + ":40000",
+			[]string{"10.66.0.1, 203.0.113.9", ""}, "203.0.113.9"},
+		{"a last line of separators hides nothing", peer + ":40000",
+			[]string{"203.0.113.9,", " , "}, "203.0.113.9"},
+		{"an empty first line is passed over", peer + ":40000", []string{"", "203.0.113.9"}, "203.0.113.9"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/_memql/access", nil)
+			req.RemoteAddr = tc.remote
+			for _, line := range tc.lines {
+				req.Header.Add("X-Forwarded-For", line)
+			}
+			if got := accessClientAddress(req); got != tc.want {
+				t.Fatalf("accessClientAddress = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 // EVERY REPLY CARRIES no-store AND nosniff, the bff's and the edge's own. No
