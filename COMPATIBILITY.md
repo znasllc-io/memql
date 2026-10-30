@@ -10,6 +10,25 @@ a single global version number — repos version independently
 (see [VERSIONING.md](VERSIONING.md)) and coherence is maintained by
 explicit pins rather than lockstep.
 
+## Fleet pipeline resource contract
+
+The shared-capacity implementation requires
+`actionContracts["workerHost.pipeline_step"] = 5` on opted-in workers. It adds
+enforced container CPU/memory bounds and shared host admission. The controller
+requires that exact action contract; a registration label or a version string
+does not replace it. Contract 4 workers and controllers must be upgraded in a
+coordinated idle window before Fleet intake resumes. Cockpit source now lives
+in this repository's `cockpit/` module; its release artifacts remain separate.
+
+Deploy the capability before enabling manifest `placement: pool`, selecting an
+installed `computePlacement` policy, or switching the admission writer to
+version 2. Every agent and workbench must understand the scoped admission file
+and `pipelineStepV11` train identity first. Legacy train allowances remain valid
+for train Jobs; a version-2 cloud hold still denies every new cloud allocation. See [the pipeline reference](docs/public/operate/pipelines.md#operator-run-admission)
+and [worker admission](cockpit/docs/pipelines.md#shared-host-admission). These
+contracts describe source behavior, not evidence that an installation has
+already been upgraded.
+
 ## Fleet permission evidence (September 2026)
 
 MemQL engine **0.22.0** and Cockpit **0.15.1** are the coordinated release for

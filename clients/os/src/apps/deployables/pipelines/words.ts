@@ -1,4 +1,5 @@
-import type { Compute, Delivery, RunRow, StageRow, StageStatus, StepRow } from "./rows";
+import { copyFor } from "../packages/refusals";
+import type { Compute, Delivery, RunRow, StageRow, StageStatus, StepAttempt, StepRow } from "./rows";
 
 // THE ONE VOCABULARY for pipelines in this app (epic memql#5479), the way
 // `../words.ts` is the one vocabulary for a deployable. The Runs list, the run
@@ -45,6 +46,46 @@ export function durationWords(ms: number): string {
 /** Comma-joined, blanks dropped: the house separator for a run's facts. */
 export function joinWords(...parts: readonly string[]): string {
   return parts.filter((p) => p.trim() !== "").join(", ");
+}
+
+/** "a", "a and b", "a, b and c". */
+export function andList(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The switch the engine's router calls "Host commands": the machine's
+ * **Commands and files**, under Owner-only features in its Settings in Fleet.
+ *
+ * THE POINTER IS THE LABEL FLEET DRAWS, because copy that sent somebody to a name
+ * that is not on the screen would point at nothing. One constant, held to the
+ * Fleet label by `words.test.ts`, so a rename there fails here.
+ */
+export const HOST_COMMANDS_SWITCH = "Commands and files";
+
+/**
+ * Why a machine whose own policy allows pipelines still takes no step: its
+ * owner switched Host commands off. A pipeline step is a command on the machine,
+ * so the router skips it, and the fix is a switch in Fleet, not the policy file.
+ *
+ * "Host commands" first, because that is what the engine's own refusal says and
+ * so what the owner may already have read on a failed step; the switch by its
+ * label second, because that is what the owner will find in Fleet. Said in two
+ * halves so a caller can continue the second ("..., or change these steps"):
+ * the reason, and the fix without its full stop.
+ */
+export function hostCommandsOffReason(machines: readonly string[]): string {
+  return `Host commands are off for ${andList(machines)}.`;
+}
+
+export function hostCommandsOffFix(machines: readonly string[]): string {
+  return `Turn on ${HOST_COMMANDS_SWITCH} in ${machines.length === 1 ? "its" : "each machine's"} Fleet settings`;
+}
+
+/** The reason and the fix as two sentences; the sentence it sits in says what follows from it (a step cannot run, the fleet is not offered). */
+export function hostCommandsOffWords(machines: readonly string[]): string {
+  return `${hostCommandsOffReason(machines)} ${hostCommandsOffFix(machines)}.`;
 }
 
 /**
@@ -192,7 +233,17 @@ export function stageWord(status: StageStatus): string {
   return STAGE_WORDS[status];
 }
 
-/** A step's state in one word. A step carried from an earlier attempt, or reused from another run of the same source, passed earlier. */
+/**
+ * A step's state in one word. A step carried from an earlier attempt, or reused
+ * from another run of the same source, passed earlier.
+ *
+ * A RUNNING STEP WITH AN ATTEMPT RECORDED IS RETRYING. The engine records an
+ * attempt on the step's row only once it has ended, and keeps the step running
+ * only when another will follow (a step that ends for good is written finished
+ * with its last attempt), so a running row with a history has failed once and
+ * is waiting for, or in, its next attempt. The check run says "Retrying" for the
+ * same state (component/pipelines summary.go), so the word is one word.
+ */
 export function stepWord(step: StepRow): string {
   switch (step.status) {
     case "done":
@@ -202,7 +253,7 @@ export function stepWord(step: StepRow): string {
     case "cancelled":
       return "Cancelled";
     case "running":
-      return "In progress";
+      return step.attempts.length > 0 ? "Retrying" : "In progress";
     case "skipped":
       if (step.errorCode === "pipeline_passed_earlier") return "Passed earlier";
       if (step.errorCode === "pipeline_stage_blocked") return "Not run";
@@ -240,6 +291,81 @@ export function whereWords(step: StepRow, machineName?: (workerId: string) => st
     return name !== "" ? `Fleet: ${name}` : "Fleet";
   }
   return "";
+}
+
+// ---------------------------------------------------------------------------
+// A step's attempts
+// ---------------------------------------------------------------------------
+
+/**
+ * The attempt count beside where a step ran: "2 attempts" once it took more
+ * than one, "Attempt 2" for a step going again (the attempt after the last that
+ * ended), and nothing for a step that ran once -- one record has no story.
+ */
+export function attemptCountWords(step: StepRow): string {
+  const ended = step.attempts.length;
+  if (step.status === "running") return ended > 0 ? `Attempt ${ended + 1}` : "";
+  return ended >= 2 ? `${ended} attempts` : "";
+}
+
+/**
+ * The attempts the page lists under a step: its whole history once it has two or
+ * more, and for a step still going the attempts behind it, which "Retrying"
+ * stands on. A step that ran once is not annotated: its row already says where it
+ * ran and how it ended.
+ */
+export function shownAttempts(step: StepRow): StepAttempt[] {
+  return step.attempts.length >= 2 || (step.status === "running" && step.attempts.length >= 1) ? step.attempts : [];
+}
+
+/** Where an attempt ran, as prose: "the cluster", the machine's name, or "your fleet" when it cannot be named. */
+function attemptPlace(attempt: StepAttempt, machineName?: (workerId: string) => string): string {
+  if (attempt.surface === "cluster") return "the cluster";
+  if (attempt.surface !== "fleet") return "";
+  const name = attempt.workerId !== "" && machineName ? machineName(attempt.workerId) : "";
+  return name !== "" ? name : "your fleet";
+}
+
+/** The number of the last attempt the step recorded. */
+function lastAttempt(step: StepRow): number {
+  return step.attempts.reduce((n, a) => Math.max(n, a.attempt), 0);
+}
+
+/**
+ * Whether an attempt is the one the step's own account is about: the last
+ * attempt of a step that failed, or was cancelled with a reason. That account
+ * -- the notice, the last lines and the way to the whole log, drawn under the
+ * attempts -- says why and offers the log, so the attempt's own line says only
+ * how the step ended and offers no second link to the same file (DESIGN.md
+ * rule 7, say it once). Every earlier attempt has no such account and says its
+ * own.
+ */
+export function isAccountedBelow(step: StepRow, attempt: StepAttempt): boolean {
+  return attempt.attempt === lastAttempt(step) && (step.status === "failed" || (step.status === "cancelled" && step.errorMessage !== ""));
+}
+
+/**
+ * One attempt in a sentence: which, where, and how it ended --
+ * "Attempt 1 on MSI Raider: The repository could not be fetched at this commit."
+ *
+ * HOW IT ENDED IS NEVER A CODE. The last attempt of a step that passed is
+ * "Passed"; the one the step's own account is about says the step's word
+ * (`isAccountedBelow`); a code this build has copy for says that copy's headline
+ * (the same words a failed step's notice leads with, so one failure reads alike
+ * in both places); otherwise the attempt's own message, the server's words, as
+ * `packages/refusals.ts` does for an unknown code; and "Failed" when it carried
+ * neither. A machine the feed cannot name is "your fleet": the id is not a name.
+ */
+export function attemptSentence(step: StepRow, attempt: StepAttempt, machineName?: (workerId: string) => string): string {
+  const passed = step.status === "done" && attempt.attempt === lastAttempt(step) && attempt.code === "";
+  const copy = attempt.code !== "" ? copyFor(attempt.code) : null;
+  const reason = isAccountedBelow(step, attempt) ? stepWord(step)
+    : passed ? "Passed"
+    : copy ? copy.title
+    : attempt.message.trim() !== "" ? attempt.message.trim()
+    : "Failed";
+  const where = attemptPlace(attempt, machineName);
+  return `Attempt ${attempt.attempt}${where !== "" ? ` on ${where}` : ""}: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}`;
 }
 
 export function deliveryWords(delivery: Delivery): string {

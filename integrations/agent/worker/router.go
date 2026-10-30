@@ -19,17 +19,28 @@ package worker
 //   - the label matcher was never fed. The dispatch builtins had no way to
 //     express a requirement, so MatchesLabels ran on nil forever.
 //
-// WHAT IT DELIBERATELY DOES NOT DO. It never accepts a machine id. The
-// builtins take requireLabels / preferLabels and nothing else (design D4), so
-// a model naming a machine is not a failure mode this surface has. The worst a
-// wrong label can do is empty the candidate set, which is reported as
+// WHAT IT DELIBERATELY DOES NOT DO. It never accepts a machine id from a model.
+// The builtins take requireLabels / preferLabels and nothing else (design D4),
+// so a model naming a machine is not a failure mode this surface has. The worst
+// a wrong label can do is empty the candidate set, which is reported as
 // no_worker_available with every machine considered and the reason each was
 // rejected.
 //
+// THE ONE NARROWING BY REGISTRATION ID IS THE ENGINE'S OWN. A pipeline step's
+// retry may be pinned to the machine its last attempt ran on, or exclude the
+// machines it has already tried (RoutePlan.PinRegistration /
+// ExcludeRegistrations). The ids are the ones earlier attempts reported, the
+// purpose is the pipeline's alone (purposeRefusal refuses either field on every
+// other), and both only subtract from a plan that already enforced every
+// requirement, so they choose among machines the owner's consents admit and
+// never admit one.
+//
 // RE-PICK ONLY BEFORE SIDE EFFECTS (design D5). The loop in dispatch.go moves
-// to the next candidate on `worker_busy` and on a stream that went away BEFORE
-// the call started. It never re-picks after the wire carried the dispatch: an
-// exec that lost its stream mid-run may have run, and running it again on
+// to the next candidate on `worker_busy`, on a stream that went away BEFORE
+// the call started, and on a machine whose owner switched the feature off
+// (refused at admission, before anything was sent). It never re-picks after
+// the wire carried the dispatch: an exec that lost its stream mid-run, or was
+// cancelled by the owner's switch, may have run, and running it again on
 // another machine is a second side effect, not a retry.
 
 import (
@@ -550,23 +561,54 @@ func LabelsFromArgs(v any) map[string]string {
 
 // RequireRepository narrows a plan using the machine-reported action scope.
 // Missing metadata is unknown consent, and cannot be repaired by labels.
+//
+// THE REASONS THIS FILE GIVES FOR A PIPELINE STEP'S NARROWING (this, the contract,
+// the native platform) NAME THE MACHINE BY checkRunName, not Label(). They become
+// the plan's Rejected text, which noCandidateMessage puts into the dispatch's
+// error message, which the fleet executor quotes into a failed step's message --
+// printed in a check run that is public for a public repository. Label() falls
+// back to the name the machine reported, its hostname (machine_words.go).
 func (p *RoutePlan) RequireRepository(action, repository string) {
 	p.filterCandidates(func(candidate Candidate) string {
 		if candidate.RepositoryScopes.Accepts(action, repository) {
 			return ""
 		}
-		return fmt.Sprintf("%s's reported repository policy does not accept %s for %s", candidate.Label(), repository, action)
+		return fmt.Sprintf("%s's reported repository policy does not accept %s for %s", checkRunName(candidate), repository, action)
 	})
 }
 
 // RequireActionContract excludes older implementations that might silently
 // ignore newer request fields. Operator labels cannot override this metadata.
+//
+// An agent's computer-use calls narrow by it too, and the same wording serves
+// them: a machine its owner never named is "machine 3f9c2ab0" in their
+// rejection as well, with the full registration id beside it in the message.
 func (p *RoutePlan) RequireActionContract(action string, version int) {
 	p.filterCandidates(func(candidate Candidate) string {
 		if candidate.ActionContracts.Supports(action, version) {
 			return ""
 		}
-		return fmt.Sprintf("%s has not reported %s contract %d", candidate.Label(), action, version)
+		return fmt.Sprintf("%s has not reported %s contract %d", checkRunName(candidate), action, version)
+	})
+}
+
+// RequireHostCommands drops machines whose owner switched "Host commands" off in
+// Fleet settings, naming the setting as the reason so the routing record and
+// no_worker_available say what to turn back on.
+//
+// The row can be up to a heartbeat behind the owner's click, so this is the
+// router's early skip and not the guarantee: the replica holding the machine's
+// stream reads the setting again at admission and refuses before anything is
+// sent (component/worker RefusedBeforeSendError), which the dispatcher treats as
+// a reason to move on. It narrows the machines waiting for a connection as well:
+// a pipeline must not keep waiting for a machine its owner has told not to run
+// commands.
+func (p *RoutePlan) RequireHostCommands() {
+	p.filterCandidates(func(candidate Candidate) string {
+		if candidate.HostCommandsOff {
+			return "Host commands are off in Fleet settings"
+		}
+		return ""
 	})
 }
 
@@ -578,7 +620,53 @@ func (p *RoutePlan) RequireNativePlatform(platform string) {
 		if platform != "" && candidate.NativePlatform == platform {
 			return ""
 		}
-		return fmt.Sprintf("%s has not reported native platform %s", candidate.Label(), platform)
+		return fmt.Sprintf("%s has not reported native platform %s", checkRunName(candidate), platform)
+	})
+}
+
+// PinRegistration keeps only the machine a same-machine retry is pinned to and
+// turns every other away as "not the machine this retry is pinned to".
+//
+// It subtracts from the plan and never looks a machine up, which is what keeps
+// a pin from being a way round a consent. A pinned machine the requirements
+// ruled out (revoked, labels, contract, Host commands off) is in neither set and
+// keeps its own reason in Rejected, so the dispatch reports THAT; one that is
+// eligible but disconnected stays in OfflineCandidates alone, which is what lets
+// the dispatcher tell a pipeline to wait for it (Result.WaitForConnection) and
+// for no other machine.
+//
+// The id is matched as sameRegistration does, because a registration id is
+// spelled canonically on one side of a seam and bare on the other. A blank id
+// matches no machine: a pin that lost its value must not become "any machine".
+func (p *RoutePlan) PinRegistration(id string) {
+	p.filterCandidates(func(candidate Candidate) string {
+		if sameRegistration(candidate.RegistrationId, id) {
+			return ""
+		}
+		return "not the machine this retry is pinned to"
+	})
+}
+
+// ExcludeRegistrations drops the machines a step has already been tried on,
+// naming "already tried in this step" as the reason, so an attempt that must
+// move does not come back to a machine it left. It narrows the machines waiting
+// for a connection as well: a pipeline must not wait for a machine it has
+// already tried.
+//
+// Ids match as in PinRegistration, since an exclusion that failed to match would
+// send the retry back to the machine it meant to avoid. A blank id names no
+// machine and excludes none.
+func (p *RoutePlan) ExcludeRegistrations(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	p.filterCandidates(func(candidate Candidate) string {
+		for _, id := range ids {
+			if sameRegistration(candidate.RegistrationId, id) {
+				return "already tried in this step"
+			}
+		}
+		return ""
 	})
 }
 

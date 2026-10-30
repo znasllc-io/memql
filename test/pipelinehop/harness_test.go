@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -80,6 +81,9 @@ var (
 	runUpdated     = events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, pipelinerun.RunConcept)
 	inboundConcept = "v1:platform:inboundRequest"
 	stagedCreated  = events.BuildTopicWithConcept(events.TopicGraphNodeCreated, inboundConcept)
+
+	// workStepConcept is a work run's step: one row per pipeline step.
+	workStepConcept = "v1:work:step"
 )
 
 // githubSource is the inbound source a GitHub App's webhook arrives on: the
@@ -314,6 +318,15 @@ type source struct {
 // writes the row.
 func (c *cluster) connect(t *testing.T, label, delivery string) *source {
 	t.Helper()
+	return c.connectWith(t, label, delivery, "", tinyRepository())
+}
+
+// connectWith is connect for a repository that serves files at every commit,
+// its pipeline connected under compute: the owner's consent to the fleet
+// (compute cluster_and_fleet), or "" for the cluster alone, which is what a
+// connect that names no compute gets.
+func (c *cluster) connectWith(t *testing.T, label, delivery string, compute pipelines.Compute, files fstest.MapFS) *source {
+	t.Helper()
 	c.seq++
 	scope := c.run + "-" + label
 	s := &source{
@@ -330,7 +343,7 @@ func (c *cluster) connect(t *testing.T, label, delivery string) *source {
 		tags:    map[string]string{},
 		commits: map[string]bool{s.base: true},
 		changed: []string{"main.go"},
-		files:   tinyRepository(),
+		files:   files,
 	})
 	if _, err := c.a.eng.Execute(seedCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: %s)`,
 		langparser.QuoteString(account), langparser.QuoteString("Pipelines hop "+label))); err != nil {
@@ -342,7 +355,7 @@ func (c *cluster) connect(t *testing.T, label, delivery string) *source {
 		langparser.QuoteString("https://github.com/"+s.name), langparser.QuoteString(credential))); err != nil {
 		t.Fatalf("createPackage: %v", err)
 	}
-	res, err := c.a.integ.Connect(signedIn(s.owner), pipelinerun.ConnectRequest{PackageID: pkg, Delivery: delivery})
+	res, err := c.a.integ.Connect(signedIn(s.owner), pipelinerun.ConnectRequest{PackageID: pkg, Delivery: delivery, Compute: compute})
 	if err != nil {
 		t.Fatalf("connect %s: %v", s.name, err)
 	}
@@ -353,8 +366,12 @@ func (c *cluster) connect(t *testing.T, label, delivery string) *source {
 	if err != nil || p == nil {
 		t.Fatalf("the connected pipeline %s, read on the agent: %+v %v", res.PipelineID, p, err)
 	}
-	if p.InstallationID != s.installation || p.Delivery != delivery || !p.Active() {
-		t.Fatalf("the pipeline row = %+v; want installation %d, delivery %s, active", p, s.installation, delivery)
+	wantCompute := compute
+	if wantCompute == "" {
+		wantCompute = pipelines.ComputeCluster
+	}
+	if p.InstallationID != s.installation || p.Delivery != delivery || p.Compute != wantCompute || !p.Active() {
+		t.Fatalf("the pipeline row = %+v; want installation %d, delivery %s, compute %s, active", p, s.installation, delivery, wantCompute)
 	}
 	s.pipeline = *p
 	return s
@@ -667,6 +684,40 @@ func (c *cluster) versions(t *testing.T, runID string) []runVersion {
 	}
 	if len(out) == 0 {
 		t.Fatalf("run %s has no stored version", runID)
+	}
+	return out
+}
+
+// stepVersions is every stored version of one step of a work run, oldest
+// first, each its stored payload. The step is one row: each attempt's intent,
+// the outcome recorded between two attempts and the receipt are its versions,
+// so the table holds the step's whole history as the run's driver wrote it.
+func (c *cluster) stepVersions(t *testing.T, workRunID, key string) []map[string]any {
+	t.Helper()
+	rows, err := c.direct.Query(`SELECT payload::text FROM "MemoryNodes"
+		WHERE concept = $1 AND payload->>'key' = $2 AND payload->>'runId' LIKE $3 ORDER BY "createdAt"`,
+		workStepConcept, key, "%"+memql.BareShortId(workRunID))
+	if err != nil {
+		t.Fatalf("reading the versions of step %s of work run %s: %v", key, workRunID, err)
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			t.Fatalf("a stored version of step %s: %v", key, err)
+		}
+		out = append(out, payload)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 {
+		t.Fatalf("step %s of work run %s has no stored version", key, workRunID)
 	}
 	return out
 }

@@ -305,3 +305,19 @@ automation pipelineIndependentReviewPolicy {
   args { repository string! pipelineId string! ownerUserId string! }
   return ""
 }
+
+/// The installation's limits on where, and how hard, a run's steps are tried.
+/// Only an installed policy may permit a pool step to fall back from opted-in
+/// Fleet capacity to cloud Jobs; the portable default spends no cloud budget.
+/// Its retries limit EVERY command step: sameMachine retries in the same place
+/// (0 to 3), each after the next of delaysSeconds (one to three delays of 0 to
+/// 900 seconds, the last repeating), then otherMachines lets a fleet or pool
+/// step try an eligible machine it has not tried. An installed policy may leave
+/// retries out and gets the values below; once it writes retries it writes all
+/// three. The engine caps any step at 8 attempts whatever this says. Live
+/// machine consent and the operator's cloud admission still apply.
+@template
+automation pipelineComputePlacementPolicy {
+  args { repository string! pipelineId string! ownerUserId string! event string! }
+  return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}}
+}

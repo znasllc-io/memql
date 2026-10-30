@@ -936,9 +936,15 @@ release publication or installation authority.
   with three steps. **Repository** reads `memql-package.yaml` at the default
   branch's head with `pipelinesPreview`, so the stages show before anything is
   confirmed. **Compute** offers *Cluster* and, only when one of your machines
-  reports `pipelines=allowed`, *Cluster and your fleet* -- the fleet alone
+  reports `pipelines=allowed` and has not had Host commands switched off (the
+  machine's **Commands and files** setting in Fleet), *Cluster and your fleet*
+  -- the fleet alone
   when a step names a need, which the cluster refuses -- and waits for a
-  choice, because running steps on your own machines is consent. **Confirm**
+  choice, because running steps on your own machines is consent. When that
+  switch is the only thing keeping a machine out, Compute and **Settings →
+  Pipelines** say so (*Host commands are off for MSI Raider. Turn on Commands
+  and files in its Fleet settings.*) in place of pointing at the policy file.
+  **Confirm**
   names the check, the stages and the secrets the steps read, and asks how
   changes arrive. A refusal lands at the stop it is about, with its remedy: a
   fleet code at Compute, a secret code at Confirm, everything else at
@@ -950,8 +956,10 @@ release publication or installation authority.
 - **A run’s page** draws the stages down the left, or across a narrow window,
   read from the step rows; the open stop's steps say where each ran and for how long; a failed
   step shows its last lines -- read from its full log, which the runner keeps in
-  your Library -- with **Open the full log**; a skipped step says why; a run
-  that failed with no step at fault says why above the stages
+  your Library -- with **Open the full log**; a step that took more than one
+  attempt lists them under it, each with the machine it ran on, why it ended
+  and its own log, and reads **Retrying** while it goes again; a skipped step
+  says why; a run that failed with no step at fault says why above the stages
   ([A run can fail with every step passed](#a-run-can-fail-with-every-step-passed)); the
   artifacts open in Files. One bar carries the state and the acts the run
   allows: **Open on GitHub**, **Re-run**, **Re-run failed**, or **Cancel** while
@@ -1061,6 +1069,7 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 | `image` | The toolchain image container steps run in. Pin it by digest | none | -- |
 | `services` | Named sidecars a step may ask for, each with `image` (required), `env` (plain `NAME: value` configuration, never a secret) and `ready` (a shell probe the runner waits on before the step's command starts) | none | A name that breaks the rule, a service with no image, or an `env` name that is not upper-case letters, digits and underscores starting with a letter or underscore: `pipeline_step_invalid`, scoped `services` or `services/<name>` |
 | `caches` | Default caches inherited by steps, such as `go` and `npm` | none | -- |
+| `repeatable` | Default for every command step: running its command again is harmless, even while an earlier copy may still be running elsewhere. A step's own `repeatable` overrides it ([Retries and failover](#retries-and-failover)) | `false` | Non-boolean values fail manifest parsing |
 | `select` | How steps choose what to run. Required once a step names `packages` | none | [Below](#select) |
 | `stages` | The stages, in the order they run. At least one | required | Absent or empty: `pipeline_stage_invalid` |
 
@@ -1086,9 +1095,12 @@ verified webhook has no check, inspect its intake journal before redelivering
 it; a settings failure is different from a failed test run.
 
 Optional roles are `supersession`, `reconciliation`, `maintenance`,
-`evidenceReuse` and, since `0.31.1`, `independentReview`. Their default behavior
-preserves affected-PR supersession, cancels an invalidated queue ref, and performs
-no repair, evidence reuse or ordinary-PR AI review.
+`evidenceReuse`, `independentReview` (since `0.31.1`) and `computePlacement`.
+Their default behavior
+preserves affected-PR supersession, cancels an invalidated queue ref, retries a
+failed step within the portable limits ([Retries and failover](#retries-and-failover)),
+and performs no repair, evidence reuse, ordinary-PR AI review or pool-to-cloud
+fallback.
 A resolver cannot change merge-group coverage mode away from `full` or grant
 repository write access.
 Source manifests declare commands and artifacts; they cannot replace this binding.
@@ -1136,7 +1148,9 @@ determine the check. Such steps must use digest-pinned cluster containers and
 services, and cannot request secrets, repository tokens, artifacts or native
 fleet execution. Run-, event- and version-dependent environment variables are
 removed. The declaration is an author assertion: network-dependent or otherwise
-nondeterministic commands should not use it.
+nondeterministic commands should not use it. A verification step is
+`repeatable`, because such a command only recomputes an answer; declaring
+`repeatable: false` beside it is refused.
 
 A verification step's environment also leaves out the commit. Its receipt can stand
 for another commit with the same tree, so a command must not depend on which commit
@@ -1227,10 +1241,10 @@ cannot satisfy the required PR or merge-queue check.
 | `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
 | `githubReadToken` | Give a command `MEMQL_GITHUB_READ_TOKEN`, or an image build the BuildKit secret `github_read_token`, for this repository only | false | Cluster container commands and image builds with an installed source repository. Fixed permissions: contents, checks and pull requests read. It cannot write or reach other installation repositories; queued grants refresh before admission and logs redact them |
 | `checkoutHistory` | Set `full` to fetch complete commit ancestry, tags and the comparison base during the trusted checkout | shallow | Cluster container steps only. The command receives history without the installation token; it should scan that local history without fetching again. The existing run deadline and workspace limits bound checkout |
-| `memoryMiB` | Explicit memory request and limit for the cluster command container, in MiB; zero keeps namespace defaults. A command past its limit fails `pipeline_step_memory_exceeded` | `0` | Nonzero values below 128, above 1048576, or on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (8192 MiB by default) before creating a Job |
-| `cpuMilli` | Explicit CPU request and limit for the cluster command or image-build container, in millicores; 1000 means one CPU. Zero keeps namespace defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on fleet/native steps are invalid. The Workbench separately refuses values above its operator-configured maximum (4000 by default) before creating a Job. Scheduling accounts for the whole request; it does not silently fall back to a smaller allocation |
+| `memoryMiB` | Explicit memory reservation and container limit, in MiB, on cluster or Fleet; zero retains the selected runner's defaults. A cluster command past its limit fails `pipeline_step_memory_exceeded` | `0` | Nonzero values below 128, above 1048576, or on native steps are invalid. Both runners refuse values above the installation's configured maximum (8192 MiB by default). Fleet additionally requires current shared host capacity |
+| `cpuMilli` | Explicit CPU reservation and container limit on cluster or Fleet, in millicores; 1000 means one CPU. Zero retains runner defaults for commands and the fixed request of one CPU / limit of two CPUs for image builds | `0` | Values below zero, above 256000, or nonzero values on native steps are invalid. Both runners refuse values above the installation's configured maximum (4000 by default). Scheduling accounts for the full reservation; it does not silently reduce the requested allocation |
 | `image` | Container image for this step; pin by digest when reproducibility matters | pipeline image | Explicit image on a native step: `pipeline_step_invalid` |
-| `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
+| `placement` | `cluster`, `fleet` or explicit `pool`; pool prefers eligible Fleet containers and permits cloud fallback only through captured installed policy | fleet for native execution or host needs, otherwise cluster | Fleet and pool require consent. Pool requires a declared Linux architecture and a portable container command, without host needs, image builds, repository tokens, private pull credentials or full checkout history |
 | `platform` | Step OS/architecture; overrides the pipeline platform | pipeline platform | Fleet requires an explicit platform; containers require Linux |
 | `imageBuild` | One rootless Dockerfile build: `{ context, dockerfile, target?, args? }`; produces an OCI archive and metadata | none | Requires explicit Linux architecture, cluster placement, memory at least 512 MiB and the operator profile. No command, image override, services, caches, secrets, pull credential, package selection or artifact override; see [Image builds](pipelines-substrate.md#image-builds) |
 | `run` | A shell command, run in a fresh working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required unless `imageBuild` is present | Blank without `imageBuild`: `pipeline_step_invalid` |
@@ -1238,13 +1252,14 @@ cannot satisfy the required PR or merge-queue check.
 | `only` | `db-gated` or `not-db-gated`: keep the selected packages under a `select.dbGated` tree, or the rest | none | Another value, or set without `packages`: `pipeline_step_invalid`. No `select.dbGated`: `pipeline_select_invalid` |
 | `shards` | Split the packages over up to this many steps, at most 8. 0 and 1 mean one step | one step | Below 0 or above 8, or above 1 without `packages`: `pipeline_step_invalid` |
 | `when` | `{ bucket: <name> }`: skip the step on a pull request that touches nothing in the bucket | always runs | A bucket `select.buckets` does not declare: `pipeline_bucket_unknown` |
-| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` to request an ordinary Docker container on a worker. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
+| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` or an eligible `pool` step for a container on a worker. A need set `false` is the same as none | declared placement, otherwise cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `caches` | Overrides the pipeline's cache list; `[]` disables inherited caches, including for a native image build beside container test steps | pipeline caches | Native steps with nonempty effective caches: `pipeline_step_invalid` |
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 6 hours. The run ceiling remains an independent bound. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `6h`: `pipeline_step_invalid` |
+| `repeatable` | `true` declares that running the command again is harmless, even while an earlier copy may still be running elsewhere, so a retry may follow an attempt whose outcome is unknown; `false` overrides a pipeline's `true` ([Retries and failover](#retries-and-failover)) | the pipeline's `repeatable`; always `true` with `verification: true` | `false` beside `verification: true`, or any value on a `sarif` or `repositoryChange` step: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
 | `secrets` | Names of secrets the step's environment receives, each under its own name ([Secrets](#secrets)) | none | A name that is not upper-case letters, digits and underscores starting with a letter (at most 128 characters), or that begins `MEMQL_`: `pipeline_secret_invalid`. A name the pipeline does not allow: `pipeline_secret_not_allowed` |
-| `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using fleet/native execution is refused |
+| `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using Fleet, pool or native execution is refused |
 
 Two keys share the word `needs`: a stage's names earlier stages, a step's names
 what the machine running it must offer.
@@ -1689,16 +1704,119 @@ secrets explicitly as environment secrets in a different step.
 
 `compute` is set when the pipeline is connected:
 
-- **`cluster`**, the default: every step runs on the cluster. A step naming a
-  need fails the run's compile with `pipeline_fleet_not_consented`, scoped to
-  the step -- nothing about somebody's laptop is a default.
-- **`cluster_and_fleet`**: a step naming a need may run on a machine in the
-  owner's fleet that offers it; every other step stays on the cluster. How the
-  step reaches a machine, and what the machine must allow, is
-  [the fleet](pipelines-substrate.md#the-fleet).
+- **`cluster`**, the default: steps use cluster execution. Native execution,
+  host needs, `placement: fleet` and `placement: pool` require additional consent
+  and fail compilation with `pipeline_fleet_not_consented`.
+- **`cluster_and_fleet`**: dedicated Fleet steps may use an opted-in machine
+  matching their declared platform, runtime and needs. Explicit `pool` steps
+  prefer eligible Fleet container capacity and consult the captured installed
+  policy before any cloud fallback. Undeclared placement still defaults to the
+  cluster, except for native execution or host needs. Current machine consent
+  and capacity checks remain mandatory; see [the fleet](pipelines-substrate.md#the-fleet)
+  and [operator admission](#operator-run-admission).
 
 A need outside the closed set is refused (`pipeline_need_unknown`), never routed
 by guesswork.
+
+## Retries and failover
+
+A command step whose attempt fails for a transient reason is tried again, a
+bounded number of times, and may move: to the same place after a delay, then to
+another of the owner's machines, then, for a `pool` step, to the cluster. A
+notify, SARIF or repository-change step is the driver's own and is not retried.
+
+**What ended the attempt decides.** The executor knows whether the step reached
+a machine and what the machine or its Job answered, so it gives every attempt
+that did not pass one class:
+
+| Class | When | Retried |
+|---|---|---|
+| Nothing ran | The command provably never started. On a machine: the fetch of the commit failed, the cache or runtime was unavailable, the machine was busy or short of headroom, its policy or its owner's settings refused the step, or no machine could take it. On the cluster: only when no runner took the step | Every step |
+| Retry requested | The command exited 75 (`EX_TEMPFAIL`), its own word that another run is safe | Every step |
+| Outcome unknown | The command may have run: the connection to the machine ended after the step was sent, the machine needs recovery (`pipeline_recovery_required`), on a machine the command exited 0 and its artifacts did not arrive intact, or an earlier driver may have started it (`pipeline_execution_uncertain`). On the cluster, also `pipeline_node_lost`, `pipeline_image_pull_failed`, `pipeline_service_failed`, `pipeline_job_unschedulable`, `pipeline_clone_failed` and a runner's `pipeline_runner_unavailable` | A `repeatable` step only |
+| Final | Any other exit, a timeout, the run's ceiling, a cancel, an engine refusal, a secret failure, and anything not listed above | Never |
+
+The cluster reports most failures while the step's Job is still alive, and can
+still start the command until the Job is deleted, so those are an unknown
+outcome rather than nothing ran. A timeout is final, because a hang and a stall
+look alike from outside. A command that knows it stalled exits 75, as the editor
+host tests do when their VS Code download stalls or runs out of time.
+
+**Where the next attempt goes.** A place is one machine, or the cluster. After
+nothing ran or a requested retry at place P:
+
+1. P again, up to `sameMachine` times, each after the next of `delaysSeconds`
+   (the last one repeats), unless P refused for a reason a delay does not change
+   (its own policy or limits, Host commands off, pipelines no longer allowed, a
+   local model call that may still be running there) or a wait for it ran out;
+2. then, for a fleet or pool step with `otherMachines`, any eligible machine not
+   yet tried, at once;
+3. then, for a pool step whose installation allows cloud (`cloudFallback`), the
+   cluster, once;
+4. otherwise the step fails with its last attempt's failure, or, when that
+   attempt only looked for a free machine and found none, with the failure
+   before it.
+
+After an unknown outcome only a `repeatable` step goes on, and any other step
+fails. A repeatable fleet or pool step goes to a machine it has not tried (with
+`otherMachines`), then back to P once if `sameMachine` is at least 1; the machine
+refuses while it still holds the old command. A repeatable `placement: cluster`
+step retries the cluster up to `sameMachine` times, with the same delays. Then
+rule 3.
+
+A `fleet` step stays on the owner's machines, so a macOS step's failover ends at
+the Macs. A `cluster` step retries on the cluster only. A `pool` step reaches
+the cluster at most once, whatever ended its attempt there. Its first attempt
+waits while no machine can take it (all busy, fenced, offline or without their
+runtime, or none eligible at all) up to `fleetWaitSeconds`, then goes on to the
+cluster when `cloudFallback` allows; without it, it waits on for a busy or
+offline machine, up to the run's ceiling, and when no machine of yours could
+take it at all it ends at once, as a fleet step's does. A machine that refuses
+it for another reason (its limits or policy,
+Host commands off) ends that attempt with nothing run, and the order above takes
+over. A retry pinned to one machine waits for it, busy or offline, at most the
+longest delay, and so does a move to another machine, except a pool step's while
+its one cluster attempt is still ahead (its installation allows the cloud), which
+waits at most `fleetWaitSeconds`. Each waits at least a second. A wait
+that runs out counts as nothing ran, and after a move no other machine is tried:
+the cluster follows where the policy allows it, and otherwise the step fails.
+Every attempt counts against the run's ceiling, and no step makes more than 8.
+
+**The limits are the installation's.** The installed policy's `retries` set
+them ([Operator run admission](#operator-run-admission)). The portable default
+is:
+
+```memql fragment
+return {fleetWaitSeconds: 0, cloudFallback: false, retries: {sameMachine: 2, delaysSeconds: [30, 120], otherMachines: true}}
+```
+
+An installation whose policy names no `retries`, or that has no placement policy
+at all, gets those values. `sameMachine` is an integer from 0 to 3,
+`delaysSeconds` one to three integers from 0 to 900 seconds, and `otherMachines`
+a boolean. Once `retries` is written, all three are required and nothing else is
+accepted. `sameMachine: 0` with `otherMachines: false` stops every retry but a
+pool step's one move to the cluster, which `cloudFallback` decides. A policy
+that cannot be read refuses every run with a command step, as
+`pipeline_stage_invalid` scoped `computePlacement`, naming the field. A run
+keeps the policy it started with, on every replica.
+
+**The manifest and the command each have one say.** `repeatable` (on the
+pipeline, or on a step) and exit 75 ask for a retry; neither widens the
+installation's limits or spends cloud the policy does not allow.
+`repeatable: true` declares that running the command again is harmless even
+while an earlier copy may still be running elsewhere: a step that may have run
+on a machine the engine can no longer reach moves on without waiting for that
+copy to stop, and the copy's late answer and files are never kept.
+`verification: true` implies it. Leave it off a step that publishes, deploys or
+spends.
+
+**Between attempts** the step reads running, on its page and in the check run,
+which says it is retrying
+([A step that took more than one attempt](#a-step-that-took-more-than-one-attempt)).
+Each attempt keeps its own record and log. Cancelling the run during the wait
+cancels the step. An agent replica that takes the run over continues from the
+step's row: the attempts it records, and when the next one may start. Scheduled
+scans take the same route as every other run.
 
 ## Delivery: webhook or poll
 
@@ -1753,20 +1871,25 @@ alone, and Nexus's re-run and branch refuse it. Re-run a pipeline run with
 
 ## Operator run admission
 
-An installation can hold new CI/CD runs before they acquire a driver lease or
-start their execution deadline. Set `MEMQL_PIPELINES_ADMISSION_FILE` on **every
-agent replica** to an operator-owned JSON file:
+An installation can pause all new CI/CD runs before they acquire a driver lease
+or start their execution deadline, or hold only new cloud spending while Fleet
+work continues. Set `MEMQL_PIPELINES_ADMISSION_FILE` on **every agent and
+workbench replica** to the same operator-owned JSON file. Version 2 separates the
+two decisions:
 
 ```json
-{"allowNewRuns":false,"validUntil":"2026-10-21T23:00:00Z","reason":"Monthly development allowance reserved"}
+{"version":2,"allowNewRuns":true,"allowCloud":false,"validUntil":"2026-10-21T23:00:00Z","reason":"Cloud allowance reserved; Fleet remains available"}
 ```
 
-The file contains one object, at most 4 KiB. `allowNewRuns` is a required boolean;
-`validUntil` is a required RFC3339 timestamp, strictly in the future and no more
-than two hours away. `reason` is optional explanatory text. Unknown fields,
-unreadable files, invalid values and expired decisions hold new runs. Unset
-configuration preserves ordinary admission. A writer must refresh an allowance
-before it expires; stopping the writer cannot leave admission open indefinitely.
+The file contains one object, at most 4 KiB. Both allowances are required
+booleans. `validUntil` is a required RFC3339 timestamp, strictly in the future
+and no more than two hours away; the example timestamp must be replaced with a
+fresh expiry. `reason` is optional explanatory text. Unknown versions or fields,
+unreadable files, invalid values and expired decisions fail closed. A legacy
+object containing only `allowNewRuns`, `validUntil` and optional `reason` retains
+its global meaning: the same allowance gates new runs and new cloud Jobs. Unset
+configuration preserves ordinary admission. A stopped writer cannot leave an
+allowance open indefinitely.
 
 An optional boolean `allowTrainRuns` admits [release train](#release-trains)
 runs while `allowNewRuns` holds every other run: a train run is the pull
@@ -1774,40 +1897,82 @@ request run of a `train/` branch, and trains are scheduled, so a cost guard can
 budget them apart. Without the field, a train run is admitted exactly as any
 other run. Install an engine that reads `allowTrainRuns` before any writer
 emits it: an older engine refuses the unknown field and holds every run.
+The train allowance also admits that train's cloud commands and isolation
+probes under a legacy decision. With version 2, cloud allocation requires
+`(allowNewRuns OR the run's allowTrainRuns) AND allowCloud`; an explicit
+`allowCloud:false` holds trains too. Ordinary runs cannot borrow this allowance
+from command environment variables or a shared isolation probe. The agent
+forwards the saved run's event and head branch, and recovery binds that identity.
+A shared probe may use a train's allowance only while that train still waits;
+a completed proof is a reusable isolation fact, never spending permission.
 
 ```mermaid
 flowchart LR
     S[Webhook, poll or manual request] --> Q[Durable queued pipeline run]
-    P[Operator decision file on every agent] --> G{Admission allowed?}
-    Q --> G
+    Q --> G{Run or train allowance open?}
     G -->|Hold or unavailable| Q
-    G -->|Allow| C[Claim lease, then start execution clock]
-    C --> K[Existing step execution and resource queue]
-    R[Recovery of an already-started run] --> K
+    G -->|Allow| C[Claim lease and start run clock]
+    C --> F[Eligible opted-in Fleet capacity]
+    C --> B{New cloud work allowed?}
+    B -->|Hold or unavailable| W[Durable bounded wait]
+    W --> B
+    B -->|Allow| K[Cloud Job resource queue]
+    R[Recovery of existing cloud Job] --> K
 ```
 
-The claim reads the file afresh inside the existing cross-replica run gate.
-A Kubernetes installation should project the same ConfigMap as a **directory**
-on all agents, read-only and without `subPath`; environment values and subPath
-mounts do not follow runtime updates. Projection is eventually consistent, so
-allow for propagation delay in the spending reserve. No Azure credential or
-Azure-specific cost policy is required in the engine. An external observer may
-publish this decision using its own narrowly scoped credentials.
+The agent reads run and train admission afresh inside the cross-replica run gate.
+The workbench separately reads the applicable run allowance and cloud decision before every new command Job and
+isolation-probe Job, including later steps of an already-started run. A hold
+does not prevent adoption, settlement or cancellation of work already created.
+Before waiting, the runner preserves its existing durable queued marker, so a
+new replica can prove that no command was sent. An unknown previous dispatch
+still requires reconciliation; absence of a Job is not permission to repeat it.
 
-The gate covers new pipeline runs on both cluster and fleet compute, including
-release and manual pipeline runs. It does not gate application requests, agent
-goals, backups, database work or already-started pipelines. Those pipelines
-continue their later steps and can recover on a different replica while new
-admission is held. Cancellation remains available, and a held run stays queued
-without consuming `MEMQL_PIPELINES_RUN_MAX_MINUTES`. The usual poll retries
-admission after an allowance appears; existing deduplication and supersession
-rules still apply, so an obsolete PR run may be cancelled by a newer commit.
+Project the ConfigMap as a read-only **directory**, without `subPath`, on every
+agent and workbench. Environment values and subPath mounts do not follow
+runtime updates. Projection is eventually consistent, so spending reserves must
+allow for propagation delay. The engine needs no cloud billing credentials or
+provider-specific budget policy; an external observer publishes the decision.
+Deploy an engine that understands version 2 before changing the writer.
 
-Kueue capacity and operator pauses are separate controls. Holding individual
-Jobs after a run starts still consumes the run deadline. Use run admission for
-long budget waits; do not describe a Kueue Job hold as an indefinite pipeline
-pause. The unfinished-run recovery page prioritizes started runs before queued
-ones, so a backlog of budget-held runs does not hide running work from recovery.
+A global hold with no train allowance covers new runs on both cluster and Fleet
+compute, including release and manual runs. It does not stop application requests, agent goals,
+backups or database work. A globally held run stays queued without consuming
+`MEMQL_PIPELINES_RUN_MAX_MINUTES`; the usual poll, deduplication and supersession
+rules still apply. A cloud-only hold allows the run to start and use Fleet.
+Waiting for Fleet, cloud admission or Kueue capacity then consumes the existing
+run deadline; it does not consume the command's own execution timeout before a
+Job starts. These waits are bounded, not an indefinite pause. Started-run
+recovery remains prioritized over queued runs.
+
+The optional installed delivery role `computePlacement` selects
+`pipelineComputePlacementPolicy`. Its captured template receives `repository`,
+`pipelineId`, `ownerUserId` and `event`, and returns
+`{fleetWaitSeconds: 60, cloudFallback: true}` and, optionally, `retries` (wait
+seconds must be an integer from 0 through 3600). The two capacity fields choose
+capacity for explicit `placement: pool` steps only; `retries` limits every
+command step ([Retries and failover](#retries-and-failover)). The portable
+default and older snapshots allow no cloud fallback. A repository cannot replace
+this installed policy.
+The immutable policy source survives retries and replica changes. Its validated
+answer also enters the step's recovery definition: a changed answer, such as one
+derived from the clock, refuses recovery instead of changing a pending effect.
+Current machine consent, resource limits and cloud admission still govern each effect. Dedicated
+placements retain their declared execution contract. A policy decision is not
+proof that any eligible machine is connected or that the live path is qualified.
+
+Activate pool placement in two steps: first deploy and verify the engine's
+capability, leaving repository manifests on their supported dedicated placements.
+Then select the matching installed policy and change eligible manifest steps to
+`placement: pool` through a separate verified change. Older runners cannot parse
+`pool`, so the capability release must not depend on a manifest they cannot run.
+Version-2 admission writing likewise follows deployment of its readers on every
+agent and workbench; a partial upgrade is not permission to bypass either gate.
+The engine and every machine's Cockpit switch to worker contract 5 together,
+behind a hold ([Contract 5 switches in lockstep](pipelines-substrate.md#contract-5-switches-in-lockstep)).
+A `verification: true` step cannot be `pool`: reusable verification requires
+`placement: cluster`, so such a step is refused with `pipeline_step_invalid`.
+Retries need no activation: the deploy turns them on with the portable limits.
 
 ## The check run
 
@@ -1834,7 +1999,8 @@ OS, `https://os.<domain>/?pipelineRun=<run id>`.
 | Refused | *Refused: \<what\> (\<where\>)* |
 
 The summary is one line saying which run, then the stage table, then the failed
-steps, each with its message and code:
+steps, each with its message and code, then the steps that took more than one
+attempt:
 
 ```text
 Mode full · Push to the default branch · Commit 3f9c2ab
@@ -1897,6 +2063,55 @@ few seconds. A step makes two or three writes, paced at one a second per run:
 the per-minute secondary limit, not the hourly budget, is the one that matters,
 and a commit with more than a thousand check runs makes GitHub's own listings
 incomplete, which a manifest of a few hundred steps per event could reach.
+### A step that took more than one attempt
+
+A step the driver retried says how it got there. One that passed after a retry
+is listed under **Retried steps**, after the failed steps, with the attempt it
+passed on and what ended each attempt before it. A failed step lists every
+attempt, the one it failed on included, under its own line. A step that ran once
+says nothing of attempts.
+
+```text
+### Failed steps
+
+- `tests.go-tests#2`: The step's command exited with status 1.
+  - Attempt 1: `pipeline_clone_failed` on MSI Raider.
+  - Attempt 2: failed on CyberPC.
+
+### Retried steps
+
+- `tests.go-tests#1`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on MSI Raider.
+```
+
+While a step waits for its next attempt the check already says so. The driver
+publishes as soon as the attempt's outcome is stored, before the wait, so the
+check never promises a retry the step's row does not hold. The GitHub call comes
+out of the wait; a failover to another machine has no wait, so for it the call
+delays the next attempt. A GitHub outage bounds each call at two minutes, and
+publishes go one at a time, so several steps retrying at once can queue behind
+each other:
+
+```text
+- `tests.go-tests#1`: Retrying: attempt 1 failed (`pipeline_clone_failed` on MSI Raider); attempt 2 starts after 30s.
+```
+
+*Starts after* is the wait the driver scheduled, and stays true while the
+attempt runs: nothing publishes again when it begins, because that would delay
+the attempt by a GitHub round trip. The line goes when that attempt's own
+outcome is recorded, whether the step then passes or goes again. A retry that
+waits for nothing (another machine) says the next attempt *follows*. A machine
+is named by the display name its owner gave it in Fleet: the dispatcher records
+that name with each attempt, beside the registration id, and the cluster is *the
+cluster*. The check run is public on GitHub for a public repository, so the name
+a machine reported, which is its hostname unless the owner replaced it, is never
+published. A machine its owner gave no display name is called by the first eight
+characters of its registration id, as is an attempt recorded before names were,
+unless another attempt of the same step has a name for that machine. The
+sentences the engine words itself about a machine that could not take a step
+follow the same rule (*machine 3f9c2ab0 is no longer connected to this replica*,
+or the owner's name in its place), because a failed step quotes them into the
+check run. A replica that takes a run over does not restate *Retrying* before
+the step settles, and the step's receipt then carries its whole history.
 
 ### A run can fail with every step passed
 
@@ -1919,8 +2134,16 @@ Mode affected · Pull request #42 · Commit 3f9c2ab
 
 ### Run failure
 
-Pipeline workflow failed: every_door_shut: no door to a model is open for this call (`pipeline_executor_error`)
+Pipeline workflow failed: failed when called: every_door_shut: no door to a model is open for this call (`pipeline_executor_error`)
 ```
+
+When the independent review's model call fails, the line carries only a stable
+code and the router's own words (*failed when called: upstream: the provider
+failed*, *failed when called: timeout: timed out*), never a machine's name, a
+path or a request id: the check run is public on GitHub for a public
+repository. The original error is logged at warn level, tagged with the
+pipeline, repository, pull request and head commit, so the owner finds it in
+[Logs](logs.md); the run's own record carries the worded text.
 
 A failed step keeps the title, and the run's own reason is listed before the
 failed steps. The run page says *The run failed outside its steps* above the
@@ -1942,9 +2165,9 @@ unobtainable -- records `checkRunState: unavailable`, and its check run still
 shows it unfinished, which holds a merge on a required check. The every-minute
 recovery on an agent replica republishes the final report of each such run
 concluded in the last 24 hours, trying less often while it keeps failing, and
-records `written` once it lands. The republished report carries the stage table
-and each failed step's message and code, but not the log excerpt, which only
-the agent that drove the run held.
+records `written` once it lands. The republished report carries the stage table,
+each failed step's message and code, and every step's attempts, but not the log
+excerpt, which only the agent that drove the run held.
 
 **A journal outage stops advancement.** The driver requires a stored intent
 before starting a command or staging a notification, a stored receipt before
@@ -2034,8 +2257,8 @@ failed and no step reported why
 | Code | Kind | Meaning | What to do |
 |---|---|---|---|
 | `pipeline_not_declared` | refusal | `memql-package.yaml` has no `pipeline:` block | Add one, or disconnect the pipeline |
-| `pipeline_stage_invalid` | refusal | No stages; or a stage missing a name, misnamed or repeated, needing itself, a later stage or no stage, with both or neither of `steps` and `channel`, or naming a misnamed channel | Correct the stage the scope names |
-| `pipeline_step_invalid` | refusal | A step missing a name, misnamed or repeated in its stage, with no command, or with a bad `packages`, `only`, `shards` or `timeout`; or a service misnamed, with no image, or with a bad `env` name | Correct the step or service the scope names |
+| `pipeline_stage_invalid` | refusal | No stages; or a stage missing a name, misnamed or repeated, needing itself, a later stage or no stage, with both or neither of `steps` and `channel`, or naming a misnamed channel. Scoped `computePlacement`: the installed compute policy could not be read, which refuses every run with a command step | Correct the stage the scope names; for `computePlacement`, the installed policy's field the sentence names |
+| `pipeline_step_invalid` | refusal | A step missing a name, misnamed or repeated in its stage, with no command, with a bad `packages`, `only`, `shards` or `timeout`, or with `repeatable: false` beside `verification: true`; or a service misnamed, with no image, or with a bad `env` name | Correct the step or service the scope names |
 | `pipeline_select_invalid` | refusal | `select` names an unknown Go selection, a `dbGated` entry that is no directory, a misnamed or empty bucket, or a glob that cannot be read; or a step uses `only` with no `dbGated` | Correct the entry the scope names |
 | `pipeline_select_missing` | refusal | A step names `packages`, and the block has no `select: { go: import-graph }` | Add it |
 | `pipeline_event_unknown` | refusal | A stage's `on` names neither an event nor a mode | Use one the sentence lists |

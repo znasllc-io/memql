@@ -216,9 +216,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	// Refused BEFORE START, so the sender moves the step on to a machine that
 	// does consent.
 	if req.GetPurpose() == PurposePipeline && !machineAllowsPipelines(w, innerArgs) {
-		h.sendRefusal(send, requestId, codePipelinesNotAllowed,
-			"the machine does not advertise "+PipelinesLabel+"="+PipelinesAllowed+
-				" with pipeline action contract 2 and the requested native platform on its connection here")
+		h.sendRefusal(send, requestId, codePipelinesNotAllowed, pipelinesNotAllowedWords("the machine"))
 		return
 	}
 
@@ -316,7 +314,12 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		activity.end("failed")
 	}
 	h.send(send, &nodev1.WorkerForwardResponse{
-		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err) || workbenchRefusedBeforeStart(req.GetPurpose(), out, err),
+		// The sender re-picks on this field alone, so it is true only where this
+		// replica is CERTAIN nothing ran. refusedBeforeSend is that for the
+		// owner's feature switch, whichever purpose asked: it comes from
+		// admission, before the send. A call the switch cancelled while it ran
+		// is a plain error and goes back false.
+		RefusedBeforeStart: refusedBeforeSend(err) || pipelineRefusedBeforeStart(req.GetPurpose(), out, err) || workbenchRefusedBeforeStart(req.GetPurpose(), out, err),
 		RequestId:          requestId,
 		Ok:                 out.OK,
 		OutputJson:         []byte(out.OutputJSON),

@@ -66,6 +66,79 @@ func TestStepResultWireNamesArePinned(t *testing.T) {
 	}
 }
 
+// An attempt is told where to go and answers what became of it, in the same
+// two documents: the driver's request carries a Placement, and the executor's
+// result carries a class. The driver and the executor are two halves of one
+// protocol that a rolling deploy may leave on different versions, so the names
+// and the class vocabulary are pinned here instead of rediscovered as a retry
+// that silently never happens.
+func TestAttemptWireNamesArePinned(t *testing.T) {
+	raw, err := json.Marshal(StepRequest{Placement: &AttemptPlacement{
+		Surface: PlacementFleet, PinWorker: "w", ExcludeWorkers: []string{"x"}, MaxWaitSeconds: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request map[string]any
+	if err := json.Unmarshal(raw, &request); err != nil {
+		t.Fatal(err)
+	}
+	placement, ok := request["placement"].(map[string]any)
+	if !ok {
+		t.Fatalf("a request's placement on the wire = %v in %s, want an object under \"placement\"", request["placement"], raw)
+	}
+	if keys := sortedKeys(placement); !reflect.DeepEqual(keys, []string{"excludeWorkers", "maxWaitSeconds", "pinWorker", "surface"}) {
+		t.Errorf("AttemptPlacement JSON keys = %v, want [excludeWorkers maxWaitSeconds pinWorker surface]", keys)
+	}
+
+	raw, err = json.Marshal(StepResult{AttemptClass: AttemptNothingRan, NotRetriedHere: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["attemptClass"] != "nothing_ran" || result["notRetriedHere"] != true {
+		t.Errorf("a classified result on the wire = %s, want attemptClass nothing_ran and notRetriedHere true", raw)
+	}
+
+	// A first attempt and a plain result say nothing about either: an older
+	// peer, and the driver reading "no class" as final, both depend on it.
+	raw, err = json.Marshal(StepRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "placement") {
+		t.Errorf("a request with no placement carries the key anyway: %s", raw)
+	}
+	raw, err = json.Marshal(StepResult{Status: OutcomeSucceeded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "attemptClass") || strings.Contains(string(raw), "notRetriedHere") {
+		t.Errorf("an unclassified result carries a class key anyway: %s", raw)
+	}
+
+	// The vocabulary itself. A rename here is a protocol change on both sides.
+	for class, want := range map[AttemptClass]string{
+		AttemptNothingRan:     "nothing_ran",
+		AttemptRetryRequested: "retry_requested",
+		AttemptOutcomeUnknown: "outcome_unknown",
+		AttemptFinal:          "final",
+	} {
+		if string(class) != want {
+			t.Errorf("attempt class %q is spelled %q on the wire, want %q", class, string(class), want)
+		}
+	}
+	if ExitRetryRequested != 75 {
+		t.Errorf("ExitRetryRequested = %d, want 75 (EX_TEMPFAIL, sysexits.h)", ExitRetryRequested)
+	}
+	if MaxStepAttempts != 8 {
+		t.Errorf("MaxStepAttempts = %d, want 8 (spec D6)", MaxStepAttempts)
+	}
+}
+
 // A compiled step crosses NodeService inside the request and is kept on the
 // run's journal, so a notify step's links are on the wire too. Their names are
 // pinned, and a step that carries none says nothing about them.

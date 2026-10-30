@@ -88,12 +88,18 @@ var localStorageEviction = regexp.MustCompile(`^(Usage of EmptyDir volume "[^"]*
 //     OOMKilled: the step ran out of memory (pl.CodeStepMemoryExceeded), its
 //     exit code kept.
 //  5. The Job completed: succeeded.
-//  6. Something in the pod means the step can never run: an image that
-//     cannot be pulled (pl.CodeImagePullFailed), a container that cannot be
-//     created or the step's cache directory (pl.CodeJobRejected), the clone
+//  6. Something in the pod is wrong enough to report the step failed now
+//     rather than hold it until its deadline: an image that cannot be pulled
+//     (pl.CodeImagePullFailed), a container that cannot be created or the
+//     step's cache directory (pl.CodeJobRejected), the clone
 //     (pl.CodeCloneFailed), a service that stopped before the step started
 //     (pl.CodeServiceFailed), a pod nobody can schedule
-//     (pl.CodeJobUnschedulable).
+//     (pl.CodeJobUnschedulable). These are verdicts about the pod AS READ, not
+//     proof that the step cannot start: the Job and its pod are still alive when
+//     the runner reports them, and the kubelet and the scheduler keep working on
+//     the pod. attempt_class.go says why the agent reads the pull, service,
+//     unschedulable and clone verdicts as an unknown outcome and not as
+//     "nothing ran".
 //  7. The step container runs: running.
 //  8. The Job or its pod failed and nothing above says why -- rejected by the
 //     kubelet, deleted, gone with its node: the cluster lost the step
@@ -276,8 +282,11 @@ func deadlineSentence(job Job) string {
 	return "the step did not finish within its deadline"
 }
 
-// podFailure is the first reason, in rule 4's order, that the pod can never
-// run the step, or nil.
+// podFailure is the first reason, in rule 6's order, to report the step failed
+// because of the pod as read, or nil. It is a verdict about the pod's state, not a
+// proof that the step cannot start later: it reads every container of the pod,
+// service sidecars included, and runs even while the step is running (see rule 6
+// above, and attempt_class.go for what the agent may conclude from it).
 func podFailure(pod *Pod, step *ContainerStatus, created, now time.Time, cfg Config) *pl.Failure {
 	all := make([]ContainerStatus, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses))
 	all = append(append(all, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...)

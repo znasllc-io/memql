@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 )
 
 func TestPipelineCapacityHelper(t *testing.T) {
@@ -75,7 +78,7 @@ func TestPipelineCapacityReconcilesOnlyItsOwnDaemonAndContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	container := "memql-step-" + strings.Repeat("a", 32)
-	if err = reservation.begin(pipelineAttemptRecord{Execution: "container", DockerID: "daemon-original", Container: container, Workspace: dir}); err != nil {
+	if err = reservation.begin(pipelineAttemptRecord{Execution: "container", DockerID: "daemon-original", DockerEndpoint: "unix:///tmp/memql-pipeline-test.sock", Container: container, Workspace: dir}); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "removed")
@@ -299,5 +302,47 @@ func TestPipelineLocalBuildFenceDoesNotReclassifyOtherAdmissionFailures(t *testi
 				t.Fatalf("unrelated admission started checkout: %v", err)
 			}
 		})
+	}
+}
+
+// A build waits for a local model call that may still be running, until the
+// time its fence names; past it the fence is removed and the build admitted.
+// The build holds pipeline.lock exclusively, so no model call can be writing a
+// new record while the stale one is removed.
+func TestPipelineCapacityWaitsForAnInferenceFenceUntilItsEnd(t *testing.T) {
+	isolatePipelineCapacity(t)
+	root, _ := pipelineCapacityRoot()
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, capacity.InferenceActivityFile)
+	write := func(until time.Time) {
+		t.Helper()
+		data, err := capacity.InferenceRecord("0123456789abcdef0123456789abcdef", until)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(time.Now().Add(time.Hour))
+	if reservation, err := acquirePipelineReservation(); !errors.Is(err, capacity.ErrInferenceUnreconciled) {
+		if reservation != nil {
+			reservation.close()
+		}
+		t.Fatalf("a build was admitted beside a model call that may still be running: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("a fence in force was removed", err)
+	}
+	write(time.Now().Add(-time.Second))
+	reservation, err := acquirePipelineReservation()
+	if err != nil {
+		t.Fatalf("a fence past its end refused the build: %v", err)
+	}
+	reservation.close()
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("the stale fence was kept: %v", err)
 	}
 }

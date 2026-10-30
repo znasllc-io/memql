@@ -851,6 +851,12 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	if dispatch == nil {
 		return nil, fmt.Errorf("worker: nil dispatch")
 	}
+	// ADMISSION, and only admission, is a refusal BEFORE SEND: the owner's
+	// Host-commands (or computer-use) switch is read here, nothing has left this
+	// replica, and the error comes back typed (RefusedBeforeSendError) so the
+	// dispatcher may try another machine -- on this replica and, through the
+	// forward, on a sibling. Everything after the send below is NOT: see the
+	// select at the end of this function.
 	ctx, releaseFeature, err := s.admitOwnerFeature(ctx, ownerFeatureForTool(dispatch))
 	if err != nil {
 		return nil, err
@@ -889,6 +895,12 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	}()
 
 	s.markSharingChanged()
+	// Nothing has been sent here either, and the cause is still left PLAIN: this
+	// check cannot tell the owner's withdrawal landing in the short window since
+	// admission from the caller's own cancel or deadline without inspecting the
+	// cause. A plain error reads as "may have run", the conservative answer: it
+	// can cost one failed attempt in a narrow window, and can never execute a
+	// command twice.
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
 	}
@@ -913,6 +925,11 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 				},
 			},
 		})
+		// AFTER THE SEND, the cause stays whatever cancelled the call. When the
+		// owner switched the feature off mid-call (ApplyOwnerFeaturePolicy) that
+		// is the plain featureDisabled error, never a RefusedBeforeSendError: the
+		// machine has the command and may have run it, and a refusal here would
+		// have the dispatcher run it a second time on another machine.
 		return nil, context.Cause(ctx)
 	case <-s.ctx.Done():
 		return nil, ErrWorkerDisconnected

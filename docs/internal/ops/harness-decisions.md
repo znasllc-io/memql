@@ -2502,3 +2502,463 @@ releases should flag findings, not fail on them.
   `TestNPMAuditRejectsFindingsAndIncompleteReports` covers `--report-only`
   (findings pass, an unreadable report fails). Not verified here: a live release
   run with a finding.
+## Pipeline capacity selection and spending holds
+
+Only an explicit manifest `placement: pool` asks for shared capacity preference.
+The driver's optional `computePlacement` role comes from the captured installed
+delivery policy, evaluated with immutable run identity and no native operations.
+The bounded result is copied into each step request and included in its existing
+execution-definition fingerprint. If an authored clock expression changes that
+answer on recovery, the journal refuses divergence before effects. An old snapshot or portable
+default grants no cloud fallback; repository code cannot widen the operator's
+policy. Dedicated native, image-build and privileged checkout paths keep their
+own contracts. Current machine consent and resources remain independent gates.
+
+Version 2 of the operator admission file separates a global new-run pause from
+cloud spending. Cost holds can therefore leave eligible Fleet work running.
+The optional release-train allowance still admits train runs under a global
+hold, but never overrides an explicit version 2 `allowCloud:false`; that hold can
+therefore leave an admitted train waiting for capacity
+(`TestTrainAllowancePreservesIndependentCloudHold`; how a legacy decision treats
+trains is in the release-train section below).
+Workbench reads the live cloud decision again before each command or isolation
+probe Job, including a later step in an already-started run. A held attempt saves
+its exact queued definition before waiting; a new replica can recover that
+positive evidence, while an uncertain dispatch remains uncertain. Existing Job
+adoption, settlement and cancellation do not allocate and remain available.
+Global waits precede the run clock; capacity and cloud waits after admission use
+the existing run ceiling, without spending a command timeout before creation.
+
+`TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate` covers the versioned and
+legacy admission boundary. `TestComputePlacementUsesCapturedPolicyAcrossReplicas`
+and `TestComputePlacementRejectsUnboundedOrAmbiguousPolicy` cover captured source
+and strict output bounds; `TestComputePlacementDecisionIsPartOfPoolRecoveryDefinition`
+checks the recovery binding. `TestCloudAdmissionWaitSurvivesReplicaAndLateHold`,
+`TestCloudAdmissionDoesNotBlockAdoptionOrCancellation` and
+`TestCloudAdmissionRechecksIsolationProbeAllocation` cover the cloud effects.
+These source regressions do not establish live Fleet availability, installed
+policy activation or a completed Fleet-to-cloud CI journey; those require
+separate verification against the selected deployment.
+
+Fleet CI owns the host build lock exclusively. Local model calls share that
+lock with persistent workspaces, serialize inference separately, and reserve
+every workspace slot's full RAM cap. This keeps a goal's model/tool/model cycle
+working without treating a live workspace as abandoned or charging host RAM
+against a discrete GPU's VRAM. Unlocked retained workspace records still refuse
+inference. `TestModelToolModelKeepsSameWorkbench` exercises both managers and
+retained files; `TestInferenceReservesEveryWorkbenchSlotWithoutChargingVRAM`
+covers the resource boundary.
+
+A runtime's terminal response is separate from answer validity and delivery.
+The activity witness clears after confirmed completion even when schema
+validation or delivery fails, preserving that original error. Cancellation,
+truncation and a reply lost before completion leave the witness fenced until
+the time it records: the call's own deadline, at which its request is cut off
+(that the runtime then stops is not verified; see below), or 30 minutes after it
+began for a context with no deadline (no Cockpit limit bounds a local call, so the bound is chosen). A
+fence only success cleared turned one routine cancel into a machine refusing
+pipeline steps, workbenches and model calls until someone removed the file by
+hand. Past its time the witness reads as absent; a reader that excludes every
+writer (it holds `inference.lock`, or `pipeline.lock` exclusively) removes it,
+and the workbench, which shares `pipeline.lock` with model calls, only ignores
+it, because a path-based removal there could remove a record a call has just
+written. The local build guard (`scripts/lib/host_build_guard.py`, which
+`make dev` runs) reads the end by the same rule for every record the Cockpit
+writes, and leaves a witness past its end in place: it is another program's
+record, which the Cockpit's next exclusive reader removes
+(`test_inference_witness_past_its_end_admits_a_build_and_is_kept`,
+`test_inference_witness_with_no_time_ends_the_bound_after_it_was_written`). On
+text no Cockpit writes, its parser and Go's can disagree. A witness with no time (an older Cockpit's, or a write that did not
+complete) ends 30 minutes after its file was written, so an upgrade clears it; a
+symlink or directory is never read or removed. The headroom checks still
+measure what is actually free, so a generation still finishing after its
+deadline is bounded by them. `TestManagerReleasesOnlyCompletedRuntimeErrors`
+exercises real runtime responses and a second manager against the durable
+witness; `TestACancelledCallFencesTheMachineUntilItsDeadline`,
+`TestAnInferenceFenceEndsAtTheTimeItNames`,
+`TestAnInferenceRecordWithNoTimeEndsTheBoundAfterItWasWritten`,
+`TestPipelineCapacityWaitsForAnInferenceFenceUntilItsEnd` and
+`TestWorkbenchIgnoresAnInferenceFencePastItsEndWithoutRemovingIt` cover the
+expiry. Not verified: a live runtime that keeps generating past its caller's
+deadline.
+
+On macOS the pipeline headroom gate refuses a step for memory pressure only at
+the kernel's critical level (4). At warn (2), which a busy Mac reads for long
+stretches, the available-versus-reserve check decides, and a level the worker
+does not know reads as pressure (`TestDarwinPressureBlocksOnlyAtCritical`). The
+model-call admission keeps its own reading, in which warn is pressure: a local
+call waits for headroom, up to its deadline, rather than being refused at once.
+That reading is unchanged.
+
+## Pipeline step attempts, retries and failover
+
+A command step that fails for a transient reason is tried again, a bounded
+number of times: in the same place, then on another eligible machine, then, for
+a `pool` step whose installation allows cloud, on the cluster. Design record:
+`docs/superpowers/specs/2026-10-28-pipeline-fleet-first-retries-failover-design.md`.
+What owners and operators see is in
+[Retries and failover](../../public/operate/pipelines.md#retries-and-failover)
+and [the fleet](../../public/operate/pipelines-substrate.md#the-fleet).
+
+**Trigger.** An attempt of a command step that did not succeed. The driver runs
+the attempts (`runStep`, `component/pipelinerun/driver.go`). The steps it
+delivers itself (a notification, a SARIF report, a repository change) never
+reach the executor and are never retried; the manifest refuses `repeatable` on
+the last two rather than ignore it.
+
+**Evidence: the attempt's class and the row's history, nothing else.** The
+executor classifies every attempt that did not succeed (`pipelines.AttemptClass`:
+nothing ran, retry requested, outcome unknown, final), because only it knows
+whether a dispatch reached a machine and what came back. It drops any class on a
+runner's reply, and the driver reads an empty or unknown class as final, so a
+replica of another version cannot make an ordinary failure retryable. "Nothing
+ran" needs proof, since a wrong one runs a release step twice and a missed one
+costs one retry. On the cluster almost nothing proves it: the runner reports
+while the Job and its pod are alive, and the kubelet or the scheduler can still
+start the command until the acknowledgement deletes them. The cluster's one
+"nothing ran" is the agent's own `pipeline_runner_unavailable`, made before any
+runner took the step and never on a recovery. On a machine the dispatcher's
+`RefusedBeforeStart` verdict decides, and `pipeline_recovery_required` is an
+unknown outcome because the Cockpit answers it after a command too. The codes
+the engine itself makes when it refuses before sending (`worker_feature_disabled`,
+`worker_feature_unavailable`, `pipelines_not_allowed`) are nothing ran only
+beside that verdict: a reply carrying one unflagged takes the default class, so
+another version's sibling cannot make an ordinary failure retryable. A refusal
+that will not change within a retry's delay marks the machine not retried here:
+Host commands off, pipelines no longer allowed, the machine's own policy or
+container caps (`denied_by_policy`), and a reservation it cannot take
+(`pipeline_capacity_unavailable`, which a local model call's fence answers until
+its deadline). Exit 75 is a requested retry without `repeatable`, because the
+command vouches; a timeout is final, because a hang and a stall look alike from
+outside. The reasoning for
+each code is in `integrations/pipelinesteps/attempt_class.go` and
+`attempt_class_fleet.go`. The history is the row's `binding.attempts`; each
+attempt's place is recomputed from the records before it (`placementOf`), never
+stored.
+
+**Chosen path.** The order is in the public page and in `chooseNext`'s comment
+(`component/pipelinerun/attempts.go`), a pure function of the step, the run's
+captured policy and the records, so every replica decides alike. Its less
+obvious choices:
+
+- After an unknown outcome on a machine, untried machines come before one return
+  to it: only that machine's own reservation, refusing a second command, guards
+  against two copies there.
+- A repeatable `placement: cluster` step retries the cluster after an unknown
+  outcome, up to `sameMachine` times, each after the previous attempt's Job,
+  Secret and pods are confirmed gone. Otherwise it would get no retries, since
+  nearly every cluster failure is an unknown outcome.
+- A `pool` step reaches the cluster at most once, whatever ended its attempt
+  there: the owner's cost bound on the one place that spends cloud.
+- An unpinned failover answered nothing ran and not retried here, or naming no
+  machine, means the fleet is exhausted for the rest of the step. The cluster
+  rung comes next, never a pin on the last busy machine the wait named.
+- A pool step's first attempt goes on to the cluster inside itself only when
+  the fleet stayed full through `fleetWaitSeconds` and `cloudFallback` allows
+  it: the fleet's own answer, which names no machine (`fleetPreferenceRanOut`).
+  A refusal one machine made before start for another reason (its container
+  caps, its policy, Host commands off), which the dispatcher verified
+  (`RefusedBeforeStart`, not `RefusedByGate`), ends that attempt nothing ran,
+  naming the machine, and the order decides: the same machine or another, then
+  the cluster where `cloudFallback` allows, which covers a failed fleet as well
+  as a full one. It was a final `pipeline_executor_error`, so a step declaring
+  more than a machine's caps failed for good, while the same refusal on a later
+  attempt read nothing ran. A refusal by the engine's own gate stays final.
+- Waits, each at least a second because zero would mean no bound: a pinned
+  machine at most the largest delay; a failover to another machine at most the
+  largest delay too, or `fleetWaitSeconds` for a pool step whose policy allows
+  the cloud and whose one cluster attempt is still ahead, because the cluster
+  follows it; once that attempt is spent, the largest delay. A fleet step's
+  failover used to
+  wait until the run's ceiling, holding its stage's slot for hours where the
+  step had failed at once, and a pool step's with no cloud one second, which
+  ended the step on any busy fleet. No wait shortens a started command.
+- A pool step whose installation allows no cloud waits for a busy or offline
+  machine up to the run's ceiling, but its first attempt ends at once, nothing
+  ran, when no machine could take it at all (no candidate and none offline:
+  `noMachineToWaitFor`), as a fleet step's does. The retry order then routes
+  once more after the first delay and ends the step. It used to wait until the
+  ceiling, holding its stage's slot for a machine nobody was bringing; the
+  owner chose to end it at once (2026-10-29). With the cloud allowed, the Fleet
+  preference still waits `fleetWaitSeconds` for a machine before the cluster.
+  `TestANoCloudPoolStepWithNoMachineAtAllEndsAtOnce` and the no-cloud rows of
+  `TestChooseNextFollowsTheRetryOrder` cover it.
+- A step whose last attempt only found the fleet exhausted settles with the
+  failure before it (`failureToSettle`), so its receipt and the check run say
+  three failed fetches, not `pipeline_no_machine_for_need`. The search stays in
+  the history, and its own resources are acknowledged.
+- Nothing widens: the executor refuses a place the step's placement or the
+  captured `cloudFallback` does not allow (`refusePlacement`, a final
+  `pipeline_step_invalid`).
+
+**Alternatives rejected.** Retry loops in the DSL workflow: every installation's
+workflow would change, recovery would rebuild loops over finished steps, and the
+safety rules would still live in Go, so twice. Attempts inside the executor: the
+journal would never see them, so a takeover would lose its place and the check
+run could not show them. Accepting worker contracts 4 and 5 together:
+`ActionContracts.Supports` is exact, so it would take a second requirement and
+argument encoding per step kind, and the pre-release rule forbids compatibility
+shims on Go wire contracts.
+
+**Stop conditions.** `MaxStepAttempts` (8) whatever the policy says; the run's
+ceiling (no wait begins into its last second, and no attempt starts with less
+than a second left); the captured policy's limits; and `repeatable` for any
+retry after an unknown outcome. A cancel during a wait settles the step
+cancelled. A lost lease, a refused journal write, an unconfirmed cleanup or the
+end of the workflow call running the step writes nothing more, and the row says
+what comes next.
+
+**The policy.** `pipelineComputePlacementPolicy` gains `retries`, and the driver
+now reads the policy for every run with a command step (`selectComputePlacement`,
+`readPlan`), because the limits apply to every step. So a policy phase that
+errors refuses every such run, as `pipeline_stage_invalid` scoped
+`computePlacement` and naming the field, rather than run it without the
+operator's limits. A snapshot with no placement phase takes the portable
+defaults (`sameMachine: 2`, `delaysSeconds: [30, 120]`, `otherMachines: true`,
+no cloud): "no limits named" is the case defaults are for, and "no retries"
+would let deleting a policy change how steps fail. Once a policy writes
+`retries`, all three limits are required and a null is refused
+(`parseRetryPolicy`), so the policy source always says how hard the installation
+retries. The policy is captured with the run and bound into each step's recovery
+definition, so no replica decides under other limits. Verification fingerprints
+leave it out: evidence binds what a command computes, not where or how often it
+ran.
+
+**Invariants.** A command whose outcome is unknown runs again only when its step
+is repeatable. `repeatable` means harmless to run again even while an earlier
+copy may still be running elsewhere: a failover after an unknown outcome on a
+machine does not wait for that copy to stop, because the machine is usually
+unreachable, and a stop that cannot be proved would block the failovers that
+matter. The earlier copy's late answer and artifacts are never filed. Between
+attempts the row never reads finished, so the stage workflow and the check run,
+which treat a failed step as final, see a running step.
+
+**A qualification is read again before every attempt.** A qualification run's
+authority is mutable (its pull request's head and base, the App, the source's
+owner) and it expires, and a retry is a new effect that starts up to minutes
+after the first was authorized. So `runStep` reads `attemptDeadline` at the
+executor boundary of each attempt, not once for the step: a changed authority or
+a passed expiry ends the step `pipeline_qualification_refused` having started
+nothing more, and an attempt's deadline never outlives the expiry. Reading it
+once would have let a retry start under an approval that no longer holds: a
+pull request that moved or closed, a pipeline revoked, a qualification expired.
+Covered by `TestAQualificationIsRecheckedBeforeARetry`.
+
+**Ownership and consent.** Only the engine's pipeline purpose may pin or exclude
+machines: `purposeRefusal` refuses either field on any other purpose
+(`denied_pipeline_purpose`), so a model still cannot name a machine. Both narrow
+the router's plan after its consent, contract and Host-commands checks and admit
+nothing, and the replica receiving a forward re-checks all three. The router
+skips a machine whose owner turned Host commands off (`HostCommandsOff`, also
+true for a malformed setting, as admission reads it). One turned off after
+planning refuses before send on the holding replica with the typed
+`worker_feature_disabled`, locally or forwarded, and the dispatch moves on; an
+agent's call does too, under its owner's fallback.
+
+**What survives a replica change: the row.** Its attempt number,
+`binding.attempts` (each record: attempt, class, code, message, surface,
+workerId, machineName, nodeId, jobName, startedAt, finishedAt, logFileId and
+notRetriedHere, every string masked) and `binding.nextAttemptAt`. The time is in
+the binding, not the step's `resumeAt`, which the work spine's sweeps read for
+parked work, and the binding is replaced whole on every write that names it, so
+a receipt cannot keep a stale timer. A replica that takes the run over sends an
+attempt with no record again as recover-only (on the cluster it adopts that Job
+by name; on a machine the outcome is unknown, so a repeatable step continues and
+any other fails `pipeline_execution_uncertain`), continues a recorded attempt at
+the next once its resources are confirmed gone again and `nextAttemptAt` has
+passed, and keeps a finished receipt. A history that does not lead to the row's
+attempt diverges the run rather than guess.
+
+**Retained and temporary.** Retained: each attempt's record, its own log file in
+the Library, and for a machine attempt its own `v1:worker:invocation`, whose
+`reroutedFrom` names the last machine it moved from. Temporary: the check run's
+*Retrying* line, published once the outcome is durable, gone when the next
+attempt's own outcome is recorded, and not restated by a takeover.
+
+**Published names.** The check run is public on GitHub for a public repository,
+so it names a machine only by the display name its owner chose in Fleet, else
+the first eight characters of its registration id, never the name the machine
+reported, which is usually its hostname. `pipelines.MachineWords`
+(`component/pipelines/machine_words.go`) is the one place that rule is written;
+the attempt lines and the dispatcher's and router's refusal sentences, which a
+failed step quotes whole, all call it, and the `pipelines_not_allowed` sentence
+takes its contract number from `PipelineStepContract`. The independent review's
+failed model call reaches the run-failure line as a stable code and the
+router's own words (`router.FailureReason`, for example *failed when called:
+every_door_shut: no door to a model is open for this call*), never as its text
+(`TestAFailedReviewModelCallIsReportedByItsCodeNotItsText`). The original is
+logged at warn level, tagged with the pipeline, repository, pull request and
+head commit, and the router's call ledger keeps the provider's own message. When Host commands off is the
+only reason a machine cannot take pipeline steps, MemQL OS names it and points
+at the Fleet switch, not at `policy.yaml`.
+
+**Queue priority and scheduled scans.** Each attempt is a new Job with its
+event's Kueue priority class, set when it is created and never changed, so an
+installation's controller that promotes waiting Jobs near the run's deadline
+promotes a retry's Job like any other. Scheduled scans take the same route:
+nothing in placement or the retry order reads the event, apart from the
+installed policy, which receives it.
+
+**Exit 75 for a stalled VS Code download.** The editor host runners exit with
+`exitCodeFor(error)` (`scripts/vscode/download.cjs`). It answers 75 only for a
+failure marked as it leaves `downloadVSCode`: a stall (a 2-minute idle limit, at
+most three attempts), a transport failure, or the 20-minute total time limit. A
+bad version, a missing receipt, a failed host test and anything thrown elsewhere
+stay 1. `scripts/ci/editor-host.sh` passes the status through. Known limitation:
+the 20-minute limit asks for a retry only when it ends before the step's own
+`timeout: 25m` (the editor-host steps in `memql-package.yaml`). Everything before
+the download counts against those 25 minutes (the dependencies, two `npm ci`
+runs and the compiles, uncached on the darwin steps, which declare `caches: []`),
+so with more than about five minutes of setup the step times out first, and a
+timeout is final. The stall path is unaffected.
+
+**Rollout.** With no other change, the deploy turns retries on through the
+portable default policy, and an installed policy that names no `retries` gets
+the same values. Placement does not change until a manifest marks a step `pool`,
+which follows the deploy because an older engine's strict manifest decoder
+refuses the key. Worker contract 5 is exact, so the engine and every machine's
+Cockpit switch together: operator hold; let in-flight runs finish; deploy the
+engine; upgrade every Cockpit; release the hold and watch the first run,
+holding again if it fails. A hold cannot let exactly one run through (an
+allowance admits every queued run), so the check follows the release. Only the
+old engine's hold stops nothing but new runs: under this engine a hold also
+stops new cloud Jobs of runs already started (the workbench reads the run
+allowance before every new Job), so holding again after the release leaves
+those runs' cluster steps waiting under their ceiling until it is released.
+The contract-5 Cockpit release is cut while production still runs the old
+engine, because its macOS steps need today's machines. The engine change leaves
+`cockpit/VERSION` as it is: the contract-5 Cockpit release bumps it in its own
+release PR, as memql#6372 did, because the version belongs to the release, and
+eligibility keys on the contract number, not the version. The 0.21.1 it reads was
+stamped by memql#6384 for the last contract-4 release, so that number never names
+a contract-5 Cockpit: a release cut from this code needs the bump first. The manifest change
+cannot move a `verification: true` step: reusable verification requires
+`placement: cluster` (`component/pipelines/verification.go`). Twenty steps
+carry it, the Go and database tests and the node builds and tests among them,
+so moving those waits on an owner decision: give up evidence reuse for them, or
+extend reusable verification to evidence a machine produced.
+
+**Regression tests.** Classification (`integrations/pipelinesteps`):
+`TestAttemptClassTable`, `TestFleetAttemptClassTable`,
+`TestAClusterVerdictMadeWhileTheJobIsAliveIsAnUnknownOutcome`,
+`TestAClusterRunnerUnavailableIsNothingRanOnlyWhenTheAgentMadeIt`,
+`TestAMachinesRefusalEndsAPoolStepsFirstAttempt`,
+`TestAPoolStepOverAMachinesCapsReachesTheCluster` (agent tag). Order, stops
+and waits: `TestChooseNextFollowsTheRetryOrder`, `TestAFailingStepStopsAtTheEngineCap`,
+`TestAFailoverWaitsTheLongestDelayWhenNoCloudFollows`,
+`TestAPoolStepRefusedOverAMachinesCapsReachesTheCluster`,
+`TestAStepThatOnlyFoundTheFleetFullEndsWithItsRealFailure`,
+`TestRunCeilingStopsTheRetries`, `TestCancelDuringARetryWaitSettlesCancelled`,
+`TestARepeatableClusterStepRetriesAnUnknownOutcomeOnTheCluster`,
+`TestHeldCloudGateMakesTheCloudFailoverWait`,
+`TestAPlacedFleetAttemptNeverSpillsToTheCluster`,
+`TestACloudAttemptOfAPoolStepNeedsThePoliciesLeave`,
+`TestPinnedOfflineMachineWaitIsBoundedToo`. Policy and manifest:
+`TestRetriesParseStrictly`, `TestEveryRunGetsAPolicyEvenWithoutPoolSteps`,
+`TestRetryPolicyIsPartOfTheRecoveryDefinition`, `TestRepeatableManifestKey`.
+Journal and takeover: `TestStepAttemptsAreVersionsOfOneRow`,
+`TestResumeBetweenAttemptsContinuesAtTheNextAttempt`,
+`TestAResumedRetryConfirmsTheEndedAttemptsCleanupFirst` and, with
+`MEMQL_REQUIRE_DB=1`, `TestATakeoverMidRetryResumesOverRealRows`,
+`TestATakeoverOfAnInFlightFleetAttempt`,
+`TestATakeoverAdoptsTheClusterJobOfTheCurrentAttempt`,
+`TestBetweenAttemptsTheStepNeverReadsFinished`. Two agent replicas in process
+(`integrations/agent/worker`): `TestPinnedRetryReachesTheSiblingHoldingTheMachine`,
+`TestExcludedMachinesAreSkippedAcrossReplicas`,
+`TestPinAndExcludeAreRefusedOutsideThePipelinePurpose`,
+`TestHostCommandsOffIsSkippedByTheRouterForPipelines`,
+`TestHostCommandsTurnedOffAfterPlanningMovesOnAcrossReplicas`,
+`TestMidCallFeatureWithdrawalIsNeverRepicked`. What is published:
+`TestTheCheckRunNeverPromisesARetryTheRowDoesNotHold`,
+`TestAStepReportSaysRetryingOnlyWhileItIs`, `TestMachineWords`,
+`TestARefusalNeverNamesAMachineByWhatItReported`, the run page and Compute tests
+in `clients/os/test/deployables/pipelines/`, and the exit-75 cases in
+`scripts/vscode/download.test.cjs`. Across the mesh, with `MEMQL_REQUIRE_DB=1`:
+`TestAFleetStepRetriedOnTheAgentReplica` (`test/pipelinehop`: a push delivered
+on the bff, the run driven on the agent under the policy the bff captured, a
+first attempt that ran nothing retried on the same machine). Scheduled scans:
+`TestAScheduledPoolStepGoesToTheFleet` (`integrations/pipelinesteps`, agent
+tag).
+
+**Known limitations.**
+
+- A repeatable cluster step's earlier attempt can start after its runner
+  reported and before its Job was deleted, so it may have run in part; the two
+  never overlap. Follow-up: the runner stops the pod when it decides a failure
+  before start, so those codes could read nothing ran.
+- `pipeline_recovery_required` is one Cockpit code for before and after a
+  command, so a non-repeatable step meeting a machine that needs recovery fails
+  as it did before retries. Follow-up: split the code. Likewise a runner site
+  that answers `pipeline_runner_unavailable` before any Job exists reads as
+  unknown until it has a code of its own.
+- An unknown outcome on the only eligible machine cannot fail over: a macOS step
+  with one Mac allowing pipelines fails as it does without retries.
+- A step waiting between attempts keeps its stage's slot, and each machine still
+  runs one step at a time.
+- A step wrongly marked repeatable can run twice, and a dishonest exit 75 is
+  retried within the limits; review owns both.
+- A failover to another machine waits for the check run's *Retrying* publish:
+  one GitHub call, bounded at two minutes in an outage, and publishes go one at
+  a time, so several steps retrying at once can queue behind each other.
+- The model and app door texts (`fleet_inference.go`, `fleet_context_allocation.go`
+  and `app_forward.go` in `integrations/agent/worker`) keep a machine's reported
+  name, because they
+  serve the owner's own screens, and words a machine's own Cockpit composes are
+  quoted as they arrive.
+- A wait for a busy machine that runs out marks that machine not retried for
+  the rest of the step, although nothing ran there; a machine that frees up
+  later is not tried again by that step.
+- A failover onto a fleet that stays busy for longer than the longest retry
+  delay (or `fleetWaitSeconds`, for a pool step the cloud follows) ends the
+  step, or sends a pool step on to the cluster. That is never worse than no
+  retry.
+- After a takeover, a step whose attempt was in flight and whose secrets then
+  fail to resolve settles without re-attaching to that attempt, so its Job N can
+  go on running unacknowledged. It is bounded by the Job's
+  `activeDeadlineSeconds` and `ttlSecondsAfterFinished`
+  (`integrations/pipelinesteps/jobspec.go`): a leaked Job, not a second run.
+- A pool step's attempt on a machine still asks the workbench to confirm its
+  cluster cleanup (`AcknowledgeReceipt`, `integrations/pipelinesteps/receipt.go`),
+  because a pool step does not require the fleet. With the workbench
+  unreachable, the step stops the drive for recovery instead of retrying on the
+  fleet. The step's final acknowledgement already depends on it the same way.
+- A step settled with an earlier attempt's record (after a takeover, or after a
+  last attempt that only found the fleet exhausted) reads failed even when that
+  attempt was refused: the record keeps the attempt's class and code, not its
+  outcome. Its code, words, place and log are that attempt's own; the check run
+  says "failed" where the attempt said "refused".
+
+**Not verified.** These tests prove the source contract and in-process replica
+hops. Live fleet-to-cloud failover and a production maintenance window for the
+contract-5 switch are not verified.
+
+## Release-train allowance across cloud allocation (2026-10-28)
+
+The separate Fleet/cloud spending gate must preserve main's existing train
+allowance. A legacy `allowNewRuns:false, allowTrainRuns:true` admits the train's
+run, probe and cloud commands. Version 2 additionally requires `allowCloud`, so
+an explicit spending hold wins even for a train. Ordinary runs do not inherit
+the train allowance.
+
+The driver forwards the immutable run event and head branch in `StepRequest`
+and `StepRun`, independent of command environment. Execution and queued-effect
+fingerprints bind both, so a replacement replica cannot widen a retained
+attempt's admission class. Reusable verification excludes these run-only facts
+because its command still receives neither event nor branch. The coordinated
+workbench action is `pipelineStepV11`; older actions cannot silently discard
+this identity.
+
+A shared isolation proof retains each current waiter's class and cancellation
+context, rechecking the live operator decision before every probe POST. A train
+can fund that proof only while waiting; after cancellation, ordinary waiters
+need their own allowance. A cached successful probe is only isolation evidence,
+and every command rechecks its own spending gate after using it. Recovery of
+existing Jobs and cleanup remain independent of new-allocation admission.
+
+Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
+`TestTrainAdmissionIdentityComesFromSavedRunAndBindsRecovery`,
+`TestTrainCloudAdmissionSurvivesForwardAndFundsIsolation`,
+`TestTrainCloudRecoveryBindsEventAndHeadBranch`, and
+`TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
+contract and in-process replica hop; they do not establish that a running
+installation has been upgraded.

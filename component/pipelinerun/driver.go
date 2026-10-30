@@ -36,17 +36,18 @@ import (
 // EVERY FACT A RUN NEEDS TO CONTINUE IS ON A ROW. The lease is the run row's;
 // the plan is the manifest at the commit, read again; what finished is the
 // work steps' receipts; the package slice a step was given is on its step's
-// call. So a replica that dies mid-run strands nothing: another claims the
-// run once the lease is stale (recover.go), keeps every step that has a
-// receipt, and re-sends the one that was running with the SAME attempt, which
-// the runner re-attaches by (run, step key, attempt).
+// call; where a step's attempts stand is on its step's binding. So a replica
+// that dies mid-run strands nothing: another claims the run once the lease is
+// stale (recover.go), keeps every step that has a receipt, re-sends an attempt
+// that was running with the SAME attempt number, which the runner re-attaches
+// by (run, step key, attempt), and continues a step left between two attempts
+// at the next one (resume).
 //
 // SECRET VALUES LIVE IN ONE PLACE: the StepRequest handed to the executor for
 // one step (secrets.go). They are never written to a row and never logged;
 // everything the runner reports back that a person reads -- a failure's
 // message, a note, the log tail the check run quotes -- is masked with every
-// value this drive resolved before it is written or published (Review Focus
-// 5).
+// value this drive resolved before it is written or published.
 
 const (
 	// maxConcurrentSteps bounds one stage's steps in flight at once.
@@ -254,8 +255,14 @@ type runDriver struct {
 	facts         requestFacts
 
 	workflow *workflowProgram
-	stages   []stageTracks
-	tracks   []*stepTrack
+	// computePlacement is the installed compute policy, read once per drive
+	// (readPlan) for any plan with a command step and nil for one without. Its
+	// capacity half serves a pool step; its retry limits serve every command step.
+	// It is bound into each command step's recovery definition (definitionOf) and
+	// copied into each command step's request (request).
+	computePlacement *pipelines.ComputePlacementPolicy
+	stages           []stageTracks
+	tracks           []*stepTrack
 	// abandonedInFlight: this drive ends steps a previous driver handed to
 	// the runner without re-sending them, so the runner must be told to stop
 	// them (reopenFromRows, conclude). The drive's goroutine only.
@@ -266,6 +273,15 @@ type runDriver struct {
 
 	maskMu sync.Mutex
 	masks  []string
+
+	// progressMu serializes progress (the run's stage table and its check run),
+	// whoever asks: the workflow's reportProgress after a step settles, and
+	// runStep after it records a retry. Each call snapshots the steps and then
+	// writes GitHub, so two at once could land the older snapshot last and leave
+	// the check run showing a step as it was. It lives on the driver, not on the
+	// workflow host that used to own it, for that reason: the second caller is
+	// not the host's.
+	progressMu sync.Mutex
 
 	timingsMu sync.Mutex
 	observed  map[string]float64
@@ -566,7 +582,17 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			dr.setFacts()
 			clean := true
 			for _, track := range dr.tracks {
-				if track.finished() && track.step.Kind == pipelines.StepCommand {
+				// Every attempt whose end the rows record is acknowledged again
+				// before this drive starts anything: a finished step's last, and
+				// the attempt a step between two attempts last ended. The replica
+				// that recorded the outcome may have lost the run before it
+				// confirmed that attempt's Job, Secret and pods gone, or failed to
+				// confirm it, and a cluster attempt's acknowledgement returns only
+				// once they are. So the step's next attempt is never sent beside a
+				// Job of its last that may still start its command or hold its
+				// slot, and an unconfirmed one stops this drive (below) with the
+				// row as it was, for recovery.
+				if track.step.Kind == pipelines.StepCommand && (track.finished() || track.betweenAttempts) {
 					if !dr.confirmReceiptCleanup(ctx, pipelines.CurrentExecutor(), dr.request(track, nil)) {
 						clean = false
 						if dr.lease.isLost() {
@@ -871,14 +897,52 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 	return out
 }
 
-// resume lays the step rows a previous driver wrote over the plan read again:
-// a step with a receipt keeps it and is not run again, and every other step is
-// carried out as its ROW says the run planned it -- the slice it was given,
-// and whether it was a skip. So a step that was running with no receipt is
-// re-sent, with the same attempt, even when the plan read now would skip it:
-// it was handed to the runner, and its outcome is the run's. It answers why
-// the run cannot be resumed, or "": a step the rows hold and the plan does
-// not is work the run began and could no longer account for.
+// resume lays the step rows a previous driver wrote over the plan read again.
+// Every step is carried out as its ROW says the run planned it -- the slice it
+// was given, and whether it was a skip -- from where its row says its attempts
+// stand. It answers why the run cannot be resumed, or "": a step the rows hold
+// and the plan does not is work the run began and could no longer account for.
+//
+// A STEP'S ROW IS IN ONE OF THREE STATES, and each decides what this drive
+// does with the step (spec 2026-10-28-pipeline-fleet-first-retries-failover-
+// design.md, section 3):
+//
+//   - FINISHED: the receipt is kept, and the step is not run again.
+//   - ATTEMPT N BEGUN, NO RECORD OF IT: the row is running and its history
+//     holds attempts 1 to N-1 only. Attempt N was handed to the runner, which
+//     may still be at it, so it is sent again as a RECOVERY of attempt N
+//     (sent: RecoverOnly), placed where it was sent -- even when the plan read
+//     now would skip the step, because its outcome is the run's. The runner
+//     re-attaches to attempt N's Job by its name; a machine holds no Job to
+//     re-attach to and answers the outcome unknown, so a repeatable step goes
+//     on to N+1 and any other step fails pipeline_execution_uncertain
+//     (chooseNext).
+//   - ATTEMPT N RECORDED, N+1 NOT BEGUN: the row is still running (a step with
+//     an attempt to come never reads finished), its history ends with attempt
+//     N's record, and its binding says when N+1 may start. Attempt N is not sent
+//     again in any form: its end is recorded, and a recovery of it would find
+//     its Job answered and released, read the outcome as unknown, and end a
+//     step whose next attempt is due. The step continues at N+1
+//     (betweenAttempts, runStep's continueAttempts), once attempt N's resources
+//     are confirmed gone again (openWork) -- the replica that recorded the
+//     outcome may have stopped before it confirmed them -- and once the row's
+//     nextAttemptAt has come.
+//
+// A pending row never began, and its step runs from attempt 1.
+//
+// WHAT SURVIVES A REPLICA CHANGE is the row, and only the row: the attempt
+// number, the record of every attempt that ended, and when the next is due.
+// Nothing in the old replica's memory is needed. Each attempt's placement is
+// recomputed from the records before it (placementOf), never stored, and is
+// exactly the one the old replica chose because the recovery definition
+// compared below binds both the engine revision and the run's captured retry
+// policy (definitionOf): a replica that would decide under other rules diverges
+// instead. The history is loaded into the track (StepState.Attempts) for every
+// row, so every write this drive makes of the step restates it: the binding is
+// replaced whole on each write, and a write without the history would erase the
+// earlier records or keep a stale nextAttemptAt. A history that does not lead
+// to the row's attempt (attemptsOfRow) cannot say which attempt to send or
+// where, and the run diverges rather than guess.
 func (dr *runDriver) resume(rows []WorkStep) string {
 	stored := make(map[string]WorkStep, len(rows))
 	for _, row := range rows {
@@ -909,7 +973,7 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 			return "the journal has no definition for step " + t.step.Key
 		}
 		t.attempt = max(row.Attempt, 1)
-		t.sent = row.Status == WorkStepRunning
+		t.sent, t.betweenAttempts, t.nextAttemptAt, t.placement = false, false, time.Time{}, nil
 		t.step.Packages = slices.Clone(row.Packages)
 		t.step.Skip = nil
 		if row.Skip != nil {
@@ -927,10 +991,40 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 		// a release that candidate coverage refuses as no longer matching its
 		// declared execution.
 		t.verification, t.tree, t.evidenceRunID = row.VerificationFingerprint, row.TreeFingerprint, row.EvidenceRunID
-		if row.Finished() {
+		records, _ := attemptsFromBinding(row.Binding)
+		t.setAttempts(records)
+		switch {
+		case row.Finished():
 			t.set(stateFromRow(t.snapshot(), row))
+		case row.Status == WorkStepRunning:
+			if why := dr.resumeAttempts(t, row); why != "" {
+				return why
+			}
 		}
 	}
+	return ""
+}
+
+// resumeAttempts lays a running row's attempts over its step's track (resume):
+// the attempt the row names, sent again as a recovery when nothing records its
+// end, or continued from when its end is recorded; and where it was sent.
+func (dr *runDriver) resumeAttempts(t *stepTrack, row WorkStep) string {
+	at, ok := attemptsOfRow(row)
+	if !ok {
+		return fmt.Sprintf("the attempts recorded for step %s do not lead to its attempt %d", t.step.Key, t.attempt)
+	}
+	before := at.records
+	if at.ended {
+		before = at.records[:len(at.records)-1]
+	}
+	placement, ok := placementOf(t.step, dr.retryPolicy(), before)
+	if !ok {
+		return fmt.Sprintf("the attempts recorded for step %s are not ones this run's retry rules make", t.step.Key)
+	}
+	t.placement = placement
+	t.sent = !at.ended
+	t.betweenAttempts = at.ended
+	t.nextAttemptAt = at.next
 	return ""
 }
 
@@ -961,6 +1055,13 @@ func (dr *runDriver) diverged(ctx context.Context, why string) verdict {
 // adoptRows makes the work run's step ROWS this drive's steps, in their plan
 // order: what a drive reports and settles when it has no plan of its own to
 // lay over them.
+//
+// Each step carries what its row says of its attempts -- its history, and
+// whether it was in flight or between two attempts -- because these steps are
+// settled without being run (diverged, settleStoredWork), and the receipt that
+// settles one must restate the history and name no next attempt: the binding is
+// replaced whole, and a receipt that named none would keep the row's
+// nextAttemptAt for an attempt that will never start.
 func (dr *runDriver) adoptRows(rows []WorkStep) {
 	sorted := slices.Clone(rows)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Seq < sorted[j].Seq })
@@ -980,7 +1081,6 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			tree:          row.TreeFingerprint,
 			evidenceRunID: row.EvidenceRunID,
 			attempt:       max(row.Attempt, 1),
-			sent:          row.Status == WorkStepRunning,
 			state:         StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
 		}
 		if row.Skip != nil {
@@ -990,6 +1090,16 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			// check for one).
 			skip := *row.Skip
 			t.step.Skip = &skip
+		}
+		records, _ := attemptsFromBinding(row.Binding)
+		t.setAttempts(records)
+		if row.Status == WorkStepRunning {
+			// A history that does not lead to the row's attempt reads as in
+			// flight: the step is settled, never run, so all that matters is
+			// that the runner is told to stop it (reopenFromRows).
+			rowAt, ok := attemptsOfRow(row)
+			t.betweenAttempts = ok && rowAt.ended
+			t.sent = !t.betweenAttempts
 		}
 		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))
@@ -1037,13 +1147,17 @@ func (dr *runDriver) settleStoredWork(ctx context.Context, rec receipt) bool {
 // queued it wrote them -- a declaration the journal does not hold would write
 // the default type over the row's. Its callers settle every unfinished step
 // without re-sending it, so a step the runner was handed and never answered
-// for is ABANDONED here, and the runner is told to stop it (conclude).
+// for is ABANDONED here, and the runner is told to stop the run's work
+// (conclude). So is a step left between two attempts: this drive confirmed
+// nothing of its last attempt's resources, which the replica that recorded the
+// outcome may not have confirmed gone either, and stopping the run's work is
+// what releases them.
 func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
 	dr.adoptRows(rows)
 	decls := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
 		decls = append(decls, workjournal.StepDecl{Key: t.step.Key, Kind: workjournal.KindDeterministic, StepType: "exec"})
-		if t.sent && !t.finished() {
+		if (t.sent || t.betweenAttempts) && !t.finished() {
 			dr.abandonedInFlight = true
 		}
 	}
@@ -1091,20 +1205,42 @@ type stageTracks struct {
 
 // stepTrack is one compiled step as this drive follows it.
 type stepTrack struct {
-	step         pipelines.Step
+	step pipelines.Step
+	// attempt is the attempt in flight, or about to be sent: 1 for a step this
+	// drive planned, the row's for one it resumed, raised by runStep before each
+	// retry. Only the step's goroutine moves it.
 	attempt      int
 	definition   string
 	verification string
 	// tree is the step's fingerprint across commits (treeFingerprintOf).
 	tree          string
 	evidenceRunID string
-	// sent: the rows say running with no receipt -- a previous driver handed
-	// it to the runner, which may still be at it. Re-sent with the same
-	// attempt when the run goes on; when the run ends instead, the runner is
-	// told to stop it.
+	// sent: the rows say the attempt t names is running and record no outcome
+	// for it -- a previous driver handed it to the runner, which may still be
+	// at it. Re-sent as a recovery of that same attempt (RecoverOnly) when the
+	// run goes on; when the run ends instead, the runner is told to stop it. A
+	// retry this drive starts is a new attempt, never a recovery, so runStep
+	// clears it before one.
 	sent bool
-	// handle is the step's journal handle once its intent is written. Only
-	// the goroutine settling the step touches it.
+	// betweenAttempts: the rows say the attempt t names has ENDED with another
+	// to come -- its record is the last of the step's history (StepState.
+	// Attempts) and the row says when the next may start (nextAttemptAt, the
+	// zero time when it names none). A previous driver left the step between
+	// two attempts. runStep sends no copy of this attempt, not even a recovery:
+	// it continues at the next one (continueAttempts), which clears both. Set
+	// only by resume and adoptRows, and only where the history ends at t's
+	// attempt (attemptsOfRow), so that history is never empty.
+	betweenAttempts bool
+	nextAttemptAt   time.Time
+	// placement is where the attempt in flight was sent (chooseNext): nil for
+	// a first attempt, which goes where its manifest placed it. For a step a
+	// previous driver began, resume recomputes it from the row's history.
+	// Only the step's goroutine touches it.
+	placement *pipelines.AttemptPlacement
+	// handle is the journal handle of the attempt in flight, once its intent
+	// is written: each attempt's intent returns its own (StepAttempt), and the
+	// receipt finishes the last one. Only the goroutine settling the step
+	// touches it.
 	handle *workjournal.Step
 
 	mu    sync.Mutex
@@ -1120,6 +1256,34 @@ func (t *stepTrack) snapshot() StepState {
 func (t *stepTrack) set(s StepState) {
 	t.mu.Lock()
 	t.state = s
+	t.mu.Unlock()
+}
+
+// setAttempts records the step's attempt history in its state, a copy of
+// history's.
+//
+// IT ENDS THE WORD THAT ANOTHER ATTEMPT FOLLOWS (Retrying, RetryAfter). That
+// word was set for the outcome of the attempt before the one whose record has
+// just arrived, and runStep leaves it up while that next attempt runs; once the
+// next attempt's record is in the history the word is about an outcome nobody
+// is waiting on any more. Left up, a progress another step publishes before
+// this step's receipt (or before the outcome that sends it round again is
+// durable) says attempt N failed and attempt N+1 follows, for a step that may
+// be about to pass. The order "outcome durable, then setRetrying" is unchanged:
+// the word is set again, about the new record, only after the next Retrying is
+// written. Covered by TestARecordedAttemptEndsTheWordThatAnotherFollows.
+func (t *stepTrack) setAttempts(history []attemptRecord) {
+	t.mu.Lock()
+	t.state.Attempts = slices.Clone(history)
+	t.state.Retrying, t.state.RetryAfter = false, 0
+	t.mu.Unlock()
+}
+
+// setRetrying records in the step's state that another attempt follows, after
+// the wait the driver scheduled: what the check run reads (StepState.Retrying).
+func (t *stepTrack) setRetrying(after time.Duration) {
+	t.mu.Lock()
+	t.state.Retrying, t.state.RetryAfter = true, after
 	t.mu.Unlock()
 }
 
@@ -1151,7 +1315,52 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 	}
 }
 
-// runStep takes one step from pending to its receipt.
+// runStep takes one step from pending to its receipt, through as many
+// attempts as its retry rules give it (attempts.go; spec
+// 2026-10-28-pipeline-fleet-first-retries-failover-design.md, section 3).
+//
+// EACH ATTEMPT IS JOURNALED BEFORE IT STARTS AND ITS OUTCOME BEFORE THE NEXT
+// ONE STARTS, as versions of the step's one row: the intent of attempt N
+// (StepAttempt: running, attempt N, the records of 1 to N-1), then, when an
+// attempt follows, N's outcome (Retrying: still running, N's record added,
+// nextAttemptAt), and only then the next intent. So a replica that takes the
+// run over finds on the row which attempt was in flight or which one is due,
+// and never repeats an attempt whose end was recorded.
+//
+// BETWEEN ATTEMPTS THE ROW NEVER READS FINISHED: the stage workflow, the check
+// run and a takeover all treat a failed step as final, and the step has not
+// ended. Its state in memory stays running too.
+//
+// THE ATTEMPT'S RESOURCES ARE ACKNOWLEDGED BEFORE THE NEXT ONE IS SENT: for a
+// cluster attempt the acknowledgement returns only once its Job, Secret and
+// pods are gone, so no waiting retry holds a cluster slot and two Jobs of one
+// step never run at once. It follows the outcome's record because the
+// acknowledgement contract releases resources only behind a durable record of
+// how they ended (pipelines.ReceiptAcknowledger).
+//
+// A STEP A PREVIOUS DRIVER LEFT BETWEEN TWO ATTEMPTS (betweenAttempts, resume)
+// enters the loop where that driver stopped, at the wait for the next attempt
+// (continueAttempts): no intent of the attempt that ended is written again, and
+// no copy of it is sent. Its resources were confirmed gone before this drive
+// started anything (openWork).
+//
+// THE LOOP STOPS, and the step ends with its last attempt's receipt (or, when
+// that attempt only found the fleet full, the failure before it:
+// endingReceipt), when the attempt passed or ended for good (its class), when
+// chooseNext gives the step no more attempts (the policy's limits,
+// MaxStepAttempts), or when the next attempt could not start with a second of
+// the run's ceiling left -- a wait into the ceiling is never begun, and one the
+// process slept past starts nothing. A cancel between attempts settles the step
+// cancelled. A lost lease, an intent or outcome the journal refused, or a
+// cleanup that could not be confirmed stops the drive with nothing more
+// written, and the run stays unfinished for recovery. So does the end of the
+// workflow call that runs the step, during a wait: nothing more is written
+// (beginNextAttempt).
+//
+// ONE WRITER: every journal write of the step, every attempt's included, is
+// made here, on the step's own goroutine. The workflow's other writers of a
+// step (its skip, the cancel sweep after it returns) wait for this to return:
+// the step's lock and the workflow's wait for its branches.
 func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	if dr.lease.isLost() || dr.lease.isCancelled() || dr.cleanupFailed.Load() {
 		return
@@ -1178,14 +1387,16 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		return
 	}
 
-	// The intent, before anything the step does.
-	if !dr.stillHolds(ctx) {
-		return
-	}
-	var journalErr error
-	t.handle, journalErr = dr.work().Step(ctx, step.Key)
-	if journalErr != nil {
-		dr.journalUnavailable(step.Key, journalErr)
+	// The intent, before anything the step does -- unless the rows left the step
+	// between two attempts: the attempt t names has ended and its outcome is on
+	// the row, so nothing begins until the next attempt, whose intent is the
+	// step's next write. Writing this attempt's intent again would read as the
+	// attempt begun once more, and would drop the row's nextAttemptAt. With no
+	// write here there is no bare ownership read either: one that failed for a
+	// moment would leave the step unreported; the next attempt's intent, made
+	// under the journal's write guard, is the ownership check.
+	resumed := t.betweenAttempts
+	if !resumed && (!dr.stillHolds(ctx) || !dr.recordIntent(ctx, t)) {
 		return
 	}
 	running := t.snapshot()
@@ -1212,48 +1423,279 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		return
 	}
 
-	// Secret resolution and journaling may wait; refresh mutable authority at
-	// the actual executor boundary, rather than relying on the earlier read.
-	if err := dr.qualificationFence(ctx); err != nil {
-		dr.settle(ctx, t, failReceipt(qualificationRefusal, err.Error()))
+	ceiling := pipelines.ParseRunCeiling(os.Getenv(pipelines.EnvRunCeiling))
+	ceilingAt := dr.runCeilingAt(ceiling)
+	policy := dr.retryPolicy()
+	if resumed && !dr.continueAttempts(ctx, t, policy, ceilingAt) {
 		return
 	}
-	ceiling := pipelines.ParseRunCeiling(os.Getenv(pipelines.EnvRunCeiling))
-	req := dr.request(t, secrets)
-	deadline := dr.stepDeadline(ceiling)
-	if dr.run.Qualification != nil {
-		q, err := readQualification(dr.run.Qualification)
+	for {
+		// Secret resolution, journaling and a retry's wait all take time, and a
+		// retry is a new effect, so a qualification's mutable authority and its
+		// expiry are read at the executor boundary of EVERY attempt rather than
+		// once for the step. Covered by
+		// TestAQualificationIsRecheckedBeforeARetry.
+		deadline, err := dr.attemptDeadline(ctx, ceiling)
 		if err != nil {
 			dr.settle(ctx, t, failReceipt(qualificationRefusal, err.Error()))
 			return
 		}
-		if remaining := q.ExpiresAt.Sub(dr.d.now()); remaining < deadline {
-			deadline = remaining
+		req := dr.request(t, secrets)
+		began := dr.d.now()
+		end := dr.execStep(exec, req, deadline)
+		if end.kind == endLost {
+			return // the attempt is the replica taking the run over's to re-attach to
+		}
+		rec := dr.attemptReceipt(end, ceiling, len(step.Artifacts) > 0)
+		history := append(slices.Clone(t.snapshot().Attempts), dr.attemptOf(req, end, rec, began))
+		t.setAttempts(history)
+
+		next, nextAt, retry := dr.nextAttempt(step, policy, end, rec, history, ceilingAt)
+		if !retry {
+			// The step's receipt: this attempt's, restating the whole history
+			// (settle) -- or, when this attempt only found the fleet full, the
+			// failure before it (endingReceipt). A runner's answer releases this
+			// attempt's resources once recorded; a timeout, an error or a cancel
+			// leaves them to the run's cancel.
+			if dr.settle(ctx, t, dr.endingReceipt(step, policy, history, rec)) && end.kind == endResult {
+				dr.acknowledgeReceipt(ctx, exec, req)
+			}
+			return
+		}
+
+		// The attempt's outcome, durable before anything of the next: the step
+		// is still running, its history holds this attempt, and the row says
+		// when the next may start.
+		if err := t.handle.Retrying(ctx, attemptsBinding(nil, history, nextAt)); err != nil {
+			dr.journalUnavailable(step.Key, err)
+			return
+		}
+		dr.log.Info("pipelines: a step's attempt failed and the step is tried again",
+			"step", step.Key, "attempt", t.attempt, "class", string(history[len(history)-1].Class),
+			"code", history[len(history)-1].Code, "next", describePlacement(next), "nextAttemptAt", nextAt)
+		// The check run says so now. Nothing else would for up to minutes: the
+		// workflow publishes progress when a step settles, and this one has not, so a
+		// person reading the check saw the step as it stood before its first attempt
+		// until the wait and the attempt after it were over. It is said only here,
+		// once the outcome is DURABLE (a Retrying the journal refused returned above,
+		// so the check run never promises a retry the row does not hold), and before
+		// the cleanup and the wait, so GitHub's latency comes out of the wait rather
+		// than adding to it. A failover to another machine has no wait, so for it the
+		// publish delays the next attempt directly, by one GitHub round trip. The
+		// bound is githubCallTimeout (2 minutes) PER PUBLISH CALL, not per attempt:
+		// progress is serialized by progressMu, so several steps retrying at once
+		// queue behind each other's publishes, and during a GitHub outage the last
+		// waits one bound for each. It is a cost only a step that is going again pays.
+		// Retrying stays set while the next attempt runs, and its wording claims only
+		// what stays true (retrySentence), because nothing publishes again when that
+		// attempt begins: a publish there would delay the attempt itself by a GitHub
+		// round trip. It ends when that attempt's record arrives (setAttempts) or with
+		// the receipt (settle). A takeover does not restate it before the step
+		// settles; the row's history, which the OS reads, is not affected. Covered by
+		// TestTheCheckRunSaysAStepIsRetryingWhileItWaits.
+		t.setRetrying(max(nextAt.Sub(dr.d.now()), 0))
+		dr.progress(ctx)
+		// Its resources, before the next attempt can claim the same slot or
+		// machine. Unconfirmed, nothing more is started: confirmReceiptCleanup
+		// leaves the run for recovery, whose replica finds this outcome on the
+		// row and continues from it once the cleanup is confirmed.
+		if !dr.confirmReceiptCleanup(ctx, exec, req) || dr.cleanupFailed.Load() {
+			return
+		}
+		if !dr.beginNextAttempt(ctx, t, next, nextAt, ceilingAt, dr.endingReceipt(step, policy, history, rec)) {
+			return
 		}
 	}
-	if dr.run.Qualification != nil && deadline <= 0 {
-		dr.settle(ctx, t, failReceipt(qualificationRefusal, "The qualification expired before executor handoff."))
-		return
+}
+
+// continueAttempts carries on a step a previous driver left between two
+// attempts (resume): the attempt t names ended, its record is the history's
+// last, and its resources were confirmed gone before this drive started
+// anything (openWork). The next attempt goes where chooseNext places it -- from
+// the same history and the same captured policy the driver that recorded the
+// outcome decided from, so at the place that driver chose -- once the row's
+// nextAttemptAt has come, under every stop the loop has between two attempts
+// (beginNextAttempt). A step chooseNext gives no next attempt, or whose next
+// attempt could not start with a second of the run's ceiling left (this
+// replica's ceiling may be shorter), ends now with the ended attempt's failure
+// (or, after a search that only found the fleet full, the one before it:
+// endingReceipt), rebuilt from its record. It answers false when the step's
+// goroutine is done.
+func (dr *runDriver) continueAttempts(ctx context.Context, t *stepTrack, policy pipelines.ComputePlacementPolicy, ceilingAt time.Time) bool {
+	history := t.snapshot().Attempts
+	nextAt := t.nextAttemptAt
+	t.betweenAttempts, t.nextAttemptAt = false, time.Time{}
+	last := dr.endingReceipt(t.step, policy, history, dr.recordReceipt(history[len(history)-1]))
+	next, _, ok := chooseNext(t.step, policy, history)
+	switch {
+	case !ok:
+		dr.log.Warn("pipelines: a resumed step has no next attempt by its retry rules; it ends with the attempt its row records",
+			"step", t.step.Key, "attempt", t.attempt)
+		dr.settle(ctx, t, last)
+		return false
+	case ceilingAt.Sub(nextAt) < time.Second:
+		dr.log.Info("pipelines: a step's retries stop at its run's ceiling", "step", t.step.Key, "attempt", t.attempt, "nextAttemptAt", nextAt)
+		dr.settle(ctx, t, last)
+		return false
 	}
-	end := dr.execStep(exec, req, deadline)
-	switch end.kind {
-	case endLost:
-		return
-	case endCancelled:
+	dr.log.Info("pipelines: a step resumed between two attempts continues at the next",
+		"step", t.step.Key, "attempt", t.attempt+1, "next", describePlacement(next), "nextAttemptAt", nextAt)
+	return dr.beginNextAttempt(ctx, t, next, nextAt, ceilingAt, last)
+}
+
+// beginNextAttempt waits until the step's next attempt may start and then
+// writes its intent: a new attempt, never a recovery, placed where chooseNext
+// said. last is the receipt that ends the step when the next cannot start: the
+// attempt that just ended, or the failure before it when that attempt only found
+// the fleet full (endingReceipt). It answers false when the step's goroutine is
+// done, having written:
+//
+//   - nothing, when the workflow call that runs the step ended during the wait
+//     (ctx): the execution is stopping around the step, and a write on an ended
+//     call would only fail and read as a journal outage; the row still says when
+//     the next attempt is due, for whichever drive carries the run on;
+//   - nothing, when the lease was lost: the replica holding the run now starts
+//     the next attempt from the row;
+//   - a cancelled receipt, on a cancel that came as the attempt ended or during
+//     the wait (the wait returns at once on one): the step had an attempt to
+//     come, so no failure ended it -- the cancel did;
+//   - nothing, when another step's cleanup failed during the wait: the drive
+//     admits no new work and stops for recovery, which starts this step's next
+//     attempt from the row;
+//   - last, when the wait outlasted the run (a process that slept through it):
+//     no attempt starts with less than a second of the ceiling left, and the
+//     step ends with the failure whose resources were acknowledged before the
+//     wait.
+//
+// The intent's write is the ownership check: the journal's write guard reads
+// the lease fresh under the run's gate, and a write it cannot make stops the
+// drive for recovery rather than leave the step running here.
+func (dr *runDriver) beginNextAttempt(ctx context.Context, t *stepTrack, next *pipelines.AttemptPlacement, nextAt, ceilingAt time.Time, last receipt) bool {
+	dr.awaitNextAttempt(ctx, nextAt, ceilingAt)
+	switch {
+	case ctx.Err() != nil:
+		return false
+	case dr.lease.isLost():
+		return false
+	case dr.lease.isCancelled():
 		dr.settle(ctx, t, cancelReceipt())
-	case endTimeout:
-		dr.settle(ctx, t, failReceipt(pipelines.CodeRunCeiling, fmt.Sprintf(
-			"The step did not report before its run's %s ceiling and the %s the runner is given past it, so the driver stopped waiting for it.",
-			ceiling, stepGrace)))
-	case endError:
-		dr.settle(ctx, t, failReceipt(pipelines.CodeExecutorError,
-			"The runner could not report how the step ended: "+dr.mask(end.err.Error())))
-	default:
-		needsReceipts := len(t.step.Artifacts) > 0
-		if dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed, needsReceipts)) {
-			dr.acknowledgeReceipt(ctx, exec, req)
-		}
+		return false
+	case dr.cleanupFailed.Load():
+		return false
+	case ceilingAt.Sub(dr.d.now()) < time.Second:
+		dr.log.Info("pipelines: a step's retries stop at its run's ceiling", "step", t.step.Key, "attempt", t.attempt)
+		dr.settle(ctx, t, last)
+		return false
 	}
+	t.attempt++
+	t.sent, t.placement = false, next
+	return dr.recordIntent(ctx, t)
+}
+
+// recordIntent writes the intent of the attempt t is about to send: its number,
+// and the records of every attempt before it. The binding names no
+// nextAttemptAt, which replaces a Retrying's (the binding is replaced whole). A
+// first attempt has no history, so its intent is exactly what Step has always
+// written. A failed write stops the drive: an attempt that cannot be recorded
+// must not start.
+func (dr *runDriver) recordIntent(ctx context.Context, t *stepTrack) bool {
+	handle, err := dr.work().StepAttempt(ctx, t.step.Key, t.attempt, attemptsBinding(nil, t.snapshot().Attempts, time.Time{}))
+	if err != nil {
+		dr.journalUnavailable(t.step.Key, err)
+		return false
+	}
+	t.handle = handle
+	return true
+}
+
+// attemptReceipt is the receipt one attempt would end its step with.
+// requiresVerifiedArtifacts is whether the step declares artifacts (receiptFor).
+func (dr *runDriver) attemptReceipt(end stepEnd, ceiling time.Duration, requiresVerifiedArtifacts bool) receipt {
+	switch end.kind {
+	case endCancelled:
+		return cancelReceipt()
+	case endTimeout:
+		return failReceipt(pipelines.CodeRunCeiling, fmt.Sprintf(
+			"The step did not report before its run's %s ceiling and the %s the runner is given past it, so the driver stopped waiting for it.",
+			ceiling, stepGrace))
+	case endError:
+		return failReceipt(pipelines.CodeExecutorError,
+			"The runner could not report how the step ended: "+dr.mask(end.err.Error()))
+	}
+	return dr.receiptFor(end.result, end.elapsed, requiresVerifiedArtifacts)
+}
+
+// endingReceipt is the receipt a step that ends now settles with: rec, its last
+// attempt's, unless that attempt only found the fleet exhausted, when it is the
+// failure before it, rebuilt from its record (failureToSettle, recordReceipt).
+// Every path that ends a step after an attempt asks it: no next attempt, and
+// the run's ceiling before the next one, here or on a replica that took the
+// run over (continueAttempts).
+func (dr *runDriver) endingReceipt(step pipelines.Step, policy pipelines.ComputePlacementPolicy, history []attemptRecord, rec receipt) receipt {
+	if r, ok := failureToSettle(step, policy, history); ok {
+		return dr.recordReceipt(r)
+	}
+	return rec
+}
+
+// nextAttempt is where the step's next attempt goes and when it may start, or
+// false when the step ends with this attempt. Only a runner's answer that
+// failed is retried, and only as the executor classified it (chooseNext); a
+// timeout, an error and a cancel are final. A next attempt that could not start
+// with a second of the run's ceiling left is no next attempt: the wait is not
+// begun, so the step ends now with its failure (endingReceipt) rather than at
+// the ceiling with nothing more to show.
+func (dr *runDriver) nextAttempt(step pipelines.Step, policy pipelines.ComputePlacementPolicy, end stepEnd, rec receipt, history []attemptRecord, ceilingAt time.Time) (*pipelines.AttemptPlacement, time.Time, bool) {
+	if end.kind != endResult || rec.status != WorkStepFailed {
+		return nil, time.Time{}, false
+	}
+	next, delay, ok := chooseNext(step, policy, history)
+	if !ok {
+		return nil, time.Time{}, false
+	}
+	nextAt := dr.d.now().Add(delay)
+	if ceilingAt.Sub(nextAt) < time.Second {
+		dr.log.Info("pipelines: a step's retries stop at its run's ceiling", "step", step.Key, "attempt", history[len(history)-1].Attempt, "nextAttemptAt", nextAt)
+		return nil, time.Time{}, false
+	}
+	return next, nextAt, true
+}
+
+// awaitNextAttempt waits until the next attempt may start, never into the last
+// second of the run's ceiling, and returns early when the drive stops -- the
+// lease's stop channel closes on a cancel and on a lost lease alike -- or when
+// the workflow call that runs the step ends (ctx). The caller reads which, and
+// the ceiling, when it returns. Deps.retryTimer stands in for the timer in a
+// test.
+func (dr *runDriver) awaitNextAttempt(ctx context.Context, nextAt, ceilingAt time.Time) {
+	now := dr.d.now()
+	wait := min(nextAt.Sub(now), ceilingAt.Add(-time.Second).Sub(now))
+	if wait <= 0 {
+		return
+	}
+	var fired <-chan time.Time
+	if dr.d.retryTimer != nil {
+		fired = dr.d.retryTimer(wait)
+	} else {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		fired = timer.C
+	}
+	select {
+	case <-fired:
+	case <-dr.lease.stop:
+	case <-ctx.Done():
+	}
+}
+
+// retryPolicy is the run's captured compute placement policy, whose retry
+// limits every command step is held to, or the zero policy -- no retries --
+// for a drive that captured none.
+func (dr *runDriver) retryPolicy() pipelines.ComputePlacementPolicy {
+	if dr.computePlacement == nil {
+		return pipelines.ComputePlacementPolicy{}
+	}
+	return dr.computePlacement.Clone()
 }
 
 func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) bool {
@@ -1292,21 +1734,37 @@ func (dr *runDriver) confirmReceiptCleanup(ctx context.Context, exec pipelines.E
 	return true
 }
 
-// settle writes a step's receipt -- its intent first, for a step that ends
-// without having run, so every declared step reads as begun and ended -- and
+// settle writes a step's receipt -- its intent first, for a step this drive
+// has not begun, so every declared step reads as begun and ended -- and
 // records it in memory, the artifacts it names included: a notify stage later
 // in the run lists them. On a lost lease it writes nothing.
+//
+// A step the executor was handed has an attempt history (StepState.Attempts),
+// and its receipt restates all of it beside where the last attempt ran,
+// whatever ended the step -- the last attempt's answer, a cancel between
+// attempts, the cancel sweep after the workflow, a resumed run ended without
+// running it. The binding is replaced whole on every write that names it, so a
+// receipt without the history would erase it, and one that named no binding
+// would keep the nextAttemptAt of the wait it ended (attempts.go).
 func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) bool {
 	if !dr.stillHolds(ctx) {
 		return false
 	}
 	if t.handle == nil {
+		// The intent names the attempt the step is at and restates its history.
+		// For a step that never ran that is attempt 1 and none, exactly what Step
+		// writes. For one a previous driver took to attempt 3, the row must not
+		// read as attempt 1 from here on, and an intent with no binding would
+		// keep the stored one, nextAttemptAt included, until the receipt.
 		var err error
-		t.handle, err = dr.work().Step(ctx, t.step.Key)
+		t.handle, err = dr.work().StepAttempt(ctx, t.step.Key, t.attempt, attemptsBinding(nil, t.snapshot().Attempts, time.Time{}))
 		if err != nil {
 			dr.journalUnavailable(t.step.Key, err)
 			return false
 		}
+	}
+	if attempts := t.snapshot().Attempts; len(attempts) > 0 {
+		rec.binding = attemptsBinding(rec.binding, attempts, time.Time{})
 	}
 	if rec.result == nil {
 		rec.result = map[string]any{}
@@ -1321,6 +1779,8 @@ func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) bool
 	s := t.snapshot()
 	s.Status, s.Code, s.Message, s.DurationMs, s.LogTail = rec.report, rec.code, rec.message, rec.durationMs, rec.logTail
 	s.ArtifactFileIDs = slices.Clone(rec.artifactFileIDs)
+	// The receipt ends any retry: whatever the step settled as, it is not going again.
+	s.Retrying, s.RetryAfter = false, 0
 	t.set(s)
 	return true
 }
@@ -1424,11 +1884,19 @@ func (dr *runDriver) execStep(exec pipelines.Executor, req pipelines.StepRequest
 // start that every request carries, so the driver and the executor bound a
 // step by the same moment.
 func (dr *runDriver) stepDeadline(ceiling time.Duration) time.Duration {
+	return dr.runCeilingAt(ceiling).Add(stepGrace).Sub(dr.d.now())
+}
+
+// runCeilingAt is the moment the run reaches its ceiling: its start, as every
+// request carries it, plus the ceiling. The executor refuses to start a step
+// past it, so the driver neither waits into it for a retry nor starts one in
+// its last second (runStep).
+func (dr *runDriver) runCeilingAt(ceiling time.Duration) time.Time {
 	started, err := time.Parse(time.RFC3339, dr.facts.startedAt)
 	if err != nil {
 		started = dr.d.now()
 	}
-	return started.Add(ceiling + stepGrace).Sub(dr.d.now())
+	return started.Add(ceiling)
 }
 
 // requestFacts are the run's facts every StepRequest carries, fixed once the
@@ -1485,27 +1953,51 @@ func (dr *runDriver) setFacts() {
 // secrets are this step's resolved values and exist nowhere else.
 func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.StepRequest {
 	f := dr.facts
+	// A step receives its own value: an executor cannot mutate the captured
+	// placement decision observed by a sibling step or a resumed driver (Clone
+	// copies the retry delays too; they are a slice). Every command step is handed
+	// the policy, not only a pool step, because its retry limits apply to all of
+	// them; the executor reads the capacity half for a pool step alone
+	// (TestAPolicyOnADedicatedStepChangesNoRoute). Recovery binds the policy for
+	// the same steps (definitionForRun), so what is sent is what is bound.
+	var placement *pipelines.ComputePlacementPolicy
+	if dr.computePlacement != nil && t.step.Kind == pipelines.StepCommand {
+		copy := dr.computePlacement.Clone()
+		placement = &copy
+	}
+	// The attempt's own place, chooseNext's for a retry and none for a first
+	// attempt, copied for the reason the policy is: what the executor is handed
+	// is its own.
+	var attemptPlacement *pipelines.AttemptPlacement
+	if t.placement != nil {
+		copy := *t.placement
+		copy.ExcludeWorkers = slices.Clone(t.placement.ExcludeWorkers)
+		attemptPlacement = &copy
+	}
 	return pipelines.StepRequest{
-		RecoverOnly:    t.sent,
-		RunID:          f.runID,
-		WorkRunID:      f.workRunID,
-		StepKey:        t.step.Key,
-		Attempt:        t.attempt,
-		RunAttempt:     f.attempt,
-		RunStartedAt:   f.startedAt,
-		PipelineID:     f.pipelineID,
-		OwnerUserID:    f.owner,
-		Repository:     f.repository,
-		SHA:            f.sha,
-		BaseSHA:        f.baseSHA,
-		Mode:           f.mode,
-		Event:          f.event,
-		Version:        f.version,
-		Domain:         f.domain,
-		InstallationID: f.installation,
-		Compute:        f.compute,
-		Step:           t.step,
-		Secrets:        secrets,
+		ComputePlacement: placement,
+		Placement:        attemptPlacement,
+		RecoverOnly:      t.sent,
+		RunID:            f.runID,
+		WorkRunID:        f.workRunID,
+		StepKey:          t.step.Key,
+		Attempt:          t.attempt,
+		RunAttempt:       f.attempt,
+		RunStartedAt:     f.startedAt,
+		PipelineID:       f.pipelineID,
+		OwnerUserID:      f.owner,
+		Repository:       f.repository,
+		SHA:              f.sha,
+		BaseSHA:          f.baseSHA,
+		Mode:             f.mode,
+		Event:            f.event,
+		HeadBranch:       f.branch,
+		Version:          f.version,
+		Domain:           f.domain,
+		InstallationID:   f.installation,
+		Compute:          f.compute,
+		Step:             t.step,
+		Secrets:          secrets,
 	}
 }
 
@@ -1863,8 +2355,11 @@ func (dr *runDriver) writeRun(ctx context.Context, patch RunPatch) error {
 	})
 }
 
-// progress records the stages as they stand and moves the check run.
+// progress records the stages as they stand and moves the check run, one caller
+// at a time (progressMu).
 func (dr *runDriver) progress(ctx context.Context) {
+	dr.progressMu.Lock()
+	defer dr.progressMu.Unlock()
 	if err := dr.writeRun(ctx, RunPatch{Stages: ptr(dr.stageSummaries())}); err != nil {
 		if !driveStopped(err) {
 			dr.log.Warn("pipelines: the run's stage table was not recorded", "error", err)

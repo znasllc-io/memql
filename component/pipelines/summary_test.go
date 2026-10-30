@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -439,6 +440,212 @@ func TestCheckOutputFitsGitHubsLimit(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// A step's attempts
+// ---------------------------------------------------------------------------
+
+// A step that passed after a retry says how it got there: the attempt it passed
+// on, and what ended each attempt before it. A step that ran once is not
+// annotated, whatever else the run carries.
+func TestCheckOutputNamesARetriedStep(t *testing.T) {
+	r := RunReport{
+		Pipeline: "storefront", Mode: ModeFull, Event: EventMergeGroup, SHA: goldenMerged,
+		Status: "completed", Conclusion: "success",
+		Steps: []StepReport{
+			// One record is a step that ran once: it has nothing to say.
+			{Key: "checks.build-vet", Stage: "checks", Status: "succeeded", DurationMs: 62_000,
+				Attempts: []AttemptReport{{Attempt: 1, Where: "the cluster"}}},
+			{Key: "tests.go-tests#1", Stage: "tests", Status: "succeeded", DurationMs: 251_000,
+				Attempts: []AttemptReport{
+					{Attempt: 1, Code: CodeCloneFailed, Where: "MSI Raider"},
+					{Attempt: 2, Where: "MSI Raider"},
+				}},
+			{Key: "tests.go-tests#2", Stage: "tests", Status: "succeeded", DurationMs: 245_000},
+			{Key: "tests.os-checks", Stage: "tests", Status: "succeeded", DurationMs: 180_000,
+				Attempts: []AttemptReport{
+					{Attempt: 1, Code: CodeNodeLost, Where: "the cluster"},
+					{Attempt: 2, Where: "the cluster"},
+					{Attempt: 3, Where: "the cluster"},
+				}},
+		},
+	}
+	title, summary, text := CheckOutput(r)
+	wantSummary := "Mode full · Merge queue · Commit a944ae3\n" +
+		"\n" +
+		"| Stage | Status | Steps | Time |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| checks | Passed | 1 passed | 1m 02s |\n" +
+		"| tests | Passed | 3 passed | 4m 11s |\n" +
+		"\n" +
+		"### Retried steps\n" +
+		"\n" +
+		"- `tests.go-tests#1`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on MSI Raider.\n" +
+		// An attempt before the passing one with no code of its own failed all
+		// the same, and the sentence says so rather than skip it.
+		"- `tests.os-checks`: Passed on attempt 3 of 3. Attempt 1: `pipeline_node_lost` on the cluster. Attempt 2: failed on the cluster.\n"
+	assertOutput(t, title, summary, text, "Passed: 2 stages in 5m 13s", wantSummary, "")
+}
+
+// A failed step lists every attempt, the one it failed on included, with where
+// each ran and what ended it: the step's own line says only how it ended.
+func TestCheckOutputListsEveryAttemptOfAFailedStep(t *testing.T) {
+	r := failedPushRun()
+	r.Steps[2].Code = CodeExecutorError
+	r.Steps[2].Attempts = []AttemptReport{
+		{Attempt: 1, Code: CodeCloneFailed, Where: "MSI Raider"},
+		{Attempt: 2, Code: CodeCloneFailed, Where: "MSI Raider"},
+		{Attempt: 3, Code: CodeExecutorError, Where: "CyberPC"},
+		{Attempt: 4, Where: "CyberPC"},
+		{Attempt: 5},
+	}
+	title, summary, _ := CheckOutput(r)
+	if title != "Failed at tests: tests.go-tests#2" {
+		t.Errorf("title %q, want the failed step's", title)
+	}
+	want := "### Failed steps\n" +
+		"\n" +
+		"- `tests.go-tests#2`: The command exited with status 1 (`pipeline_executor_error`).\n" +
+		"  - Attempt 1: `pipeline_clone_failed` on MSI Raider.\n" +
+		"  - Attempt 2: `pipeline_clone_failed` on MSI Raider.\n" +
+		"  - Attempt 3: `pipeline_executor_error` on CyberPC.\n" +
+		"  - Attempt 4: failed on CyberPC.\n" +
+		"  - Attempt 5: failed.\n"
+	if !strings.HasSuffix(summary, want) {
+		t.Errorf("summary:\n--- got ---\n%s\n--- want it to end ---\n%s", summary, want)
+	}
+	if strings.Contains(summary, "Retried steps") {
+		t.Errorf("a failed step is listed with the failures, not with the steps that passed:\n%s", summary)
+	}
+
+	// A failed step that ran once is the line it always was.
+	once := failedPushRun()
+	once.Steps[2].Attempts = []AttemptReport{{Attempt: 1, Where: "the cluster"}}
+	_, plain, _ := CheckOutput(failedPushRun())
+	if _, got, _ := CheckOutput(once); got != plain {
+		t.Errorf("a step that ran once is annotated:\n--- got ---\n%s\n--- want ---\n%s", got, plain)
+	}
+}
+
+// A running step with a failed attempt behind it says it is retrying, and when
+// the next attempt starts: the check run otherwise shows a plain running step
+// for the whole wait, which is up to minutes.
+func TestCheckOutputSaysARunningStepIsRetrying(t *testing.T) {
+	retrying := func(after time.Duration, attempts ...AttemptReport) StepReport {
+		return StepReport{Key: "tests.go-tests#1", Stage: "tests", Status: "running", Retrying: true, RetryAfter: after, Attempts: attempts}
+	}
+	cases := []struct {
+		name string
+		step StepReport
+		want string
+	}{
+		{"after a wait", retrying(30*time.Second, AttemptReport{Attempt: 1, Code: CodeCloneFailed, Where: "MSI Raider"}),
+			"Retrying: attempt 1 failed (`pipeline_clone_failed` on MSI Raider); attempt 2 starts after 30s."},
+		{"the latest attempt is the one named", retrying(2*time.Minute,
+			AttemptReport{Attempt: 1, Code: CodeCloneFailed, Where: "MSI Raider"}, AttemptReport{Attempt: 2, Code: CodeNodeLost, Where: "the cluster"}),
+			"Retrying: attempt 2 failed (`pipeline_node_lost` on the cluster); attempt 3 starts after 2m 00s."},
+		// A failover to another machine waits for nothing, and a wait the driver
+		// did not record is not guessed: both just say the next attempt follows.
+		{"at once", retrying(0, AttemptReport{Attempt: 1, Code: CodeCloneFailed, Where: "MSI Raider"}),
+			"Retrying: attempt 1 failed (`pipeline_clone_failed` on MSI Raider); attempt 2 follows."},
+		{"a failure with no code", retrying(30*time.Second, AttemptReport{Attempt: 1, Where: "CyberPC"}),
+			"Retrying: attempt 1 failed on CyberPC; attempt 2 starts after 30s."},
+		{"a code with no place", retrying(30*time.Second, AttemptReport{Attempt: 1, Code: CodeCloneFailed}),
+			"Retrying: attempt 1 failed (`pipeline_clone_failed`); attempt 2 starts after 30s."},
+		{"nothing known of it", retrying(30*time.Second, AttemptReport{Attempt: 1}),
+			"Retrying: attempt 1 failed; attempt 2 starts after 30s."},
+	}
+	for _, c := range cases {
+		r := RunReport{Mode: ModeAffected, Event: EventPullRequest, SHA: goldenPRHead, PullRequest: 42, Status: "in_progress",
+			Steps: []StepReport{
+				{Key: "checks.build-vet", Stage: "checks", Status: "succeeded", DurationMs: 62_000},
+				c.step,
+				{Key: "tests.go-tests#2", Stage: "tests", Status: "running"},
+			}}
+		title, summary, text := CheckOutput(r)
+		wantSummary := "Mode affected · Pull request #42 · Commit c5fa05f\n" +
+			"\n" +
+			"| Stage | Status | Steps | Time |\n" +
+			"| --- | --- | --- | --- |\n" +
+			"| checks | Passed | 1 passed | 1m 02s |\n" +
+			"| tests | Running | 2 running | - |\n" +
+			"\n" +
+			"### Retried steps\n" +
+			"\n" +
+			"- `tests.go-tests#1`: " + c.want + "\n"
+		if title != "Running: tests" || summary != wantSummary || text != "" {
+			t.Errorf("%s:\n title %q\n--- got ---\n%s\n--- want ---\n%s", c.name, title, summary, wantSummary)
+		}
+	}
+}
+
+// What is not a retry is not said to be one: a running step whose driver has not
+// recorded another attempt (its last record is its final one, an instant before
+// its receipt), a step still waiting, and a step that settled some other way.
+func TestCheckOutputKeepsTheStepsThatAreNotRetriedPlain(t *testing.T) {
+	attempts := []AttemptReport{{Attempt: 1, Code: CodeCloneFailed, Where: "MSI Raider"}}
+	for _, step := range []StepReport{
+		{Key: "tests.a", Stage: "tests", Status: "running", Attempts: attempts},
+		{Key: "tests.a", Stage: "tests", Status: "pending", Retrying: true, Attempts: attempts},
+		{Key: "tests.a", Stage: "tests", Status: "cancelled", Retrying: true, Attempts: attempts},
+		{Key: "tests.a", Stage: "tests", Status: "skipped", Code: CodeNotAffected, Attempts: attempts},
+		// Retrying with no attempt behind it has nothing to name.
+		{Key: "tests.a", Stage: "tests", Status: "running", Retrying: true},
+	} {
+		_, summary, _ := CheckOutput(RunReport{Status: "in_progress", Steps: []StepReport{step}})
+		if strings.Contains(summary, "Retr") || strings.Contains(summary, "pipeline_clone_failed") {
+			t.Errorf("a %s step (retrying %v) is described as retried:\n%s", step.Status, step.Retrying, summary)
+		}
+	}
+}
+
+// Text a runner supplied is quoted literally here as everywhere: an attempt's
+// code and place cannot open a link, an image, an HTML tag or a table cell, or
+// close the code span they sit in.
+func TestCheckOutputKeepsAttemptTextLiteral(t *testing.T) {
+	hostile := []AttemptReport{
+		{Attempt: 1, Code: "bad`code", Where: `<img src="https://t.example.test/p.gif"> [x](https://x.example.test) | *bold*`},
+		{Attempt: 2, Where: "ok"},
+	}
+	r := RunReport{Status: "completed", Conclusion: "success", Steps: []StepReport{
+		{Key: "tests.a", Stage: "tests", Status: "succeeded", DurationMs: 1_000, Attempts: hostile},
+	}}
+	_, summary, _ := CheckOutput(r)
+	want := "- `tests.a`: Passed on attempt 2 of 2. Attempt 1: ``bad`code`` on " +
+		"\\<img src=\"https://t.example.test/p.gif\"\\> \\[x\\](https://x.example.test) \\| \\*bold\\*.\n"
+	if !strings.HasSuffix(summary, want) {
+		t.Errorf("summary:\n%s\nwant it to end\n%s", summary, want)
+	}
+
+	// A run's worth of text is cut, marked, rather than allowed to fill the field.
+	long := strings.Repeat("é", 500)
+	r.Steps[0].Attempts = []AttemptReport{{Attempt: 1, Code: long, Where: long}, {Attempt: 2}}
+	_, summary, _ = CheckOutput(r)
+	if len(summary) > 1_500 || !utf8.ValidString(summary) || !strings.Contains(summary, "...") {
+		t.Errorf("an attempt's text is not bounded: %d bytes", len(summary))
+	}
+}
+
+// Many retried steps keep every field under GitHub's limit, as valid text, with
+// the failed steps listed first and a count of the retried ones left out.
+func TestCheckOutputFitsGitHubsLimitWithManyRetriedSteps(t *testing.T) {
+	r := RunReport{Mode: ModeFull, Event: EventPush, SHA: goldenMerged, Status: "completed", Conclusion: "success"}
+	var attempts []AttemptReport
+	for a := 1; a <= 8; a++ {
+		attempts = append(attempts, AttemptReport{Attempt: a, Code: CodeCloneFailed, Where: strings.Repeat("Raider é ", 20)})
+	}
+	for i := 1; i <= 800; i++ {
+		r.Steps = append(r.Steps, StepReport{Key: fmt.Sprintf("tests.go-tests#%d", i), Stage: "tests", Status: "succeeded",
+			DurationMs: 1_000, Attempts: attempts})
+	}
+	_, summary, _ := CheckOutput(r)
+	if len(summary) > checkOutputLimit || !utf8.ValidString(summary) {
+		t.Errorf("summary is %d bytes (limit %d), valid UTF-8 %v", len(summary), checkOutputLimit, utf8.ValidString(summary))
+	}
+	if !strings.Contains(summary, "more retried steps are listed on the run page") {
+		t.Errorf("the summary does not say what it left out:\n...%s", summary[len(summary)-300:])
+	}
+}
+
 // Plain text indicators only: no emoji, no pictographic arrows or checks.
 func TestCheckOutputUsesNoEmoji(t *testing.T) {
 	reports := []RunReport{
@@ -450,6 +657,10 @@ func TestCheckOutputUsesNoEmoji(t *testing.T) {
 		{Status: "completed", Conclusion: "cancelled", Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "cancelled"}}},
 		{Status: "completed", Conclusion: "failure", Failure: &RunFailure{Code: CodeExecutorError, Message: "m"},
 			Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "succeeded", DurationMs: 1}}},
+		{Status: "completed", Conclusion: "success", Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "succeeded", DurationMs: 1,
+			Attempts: []AttemptReport{{Attempt: 1, Code: CodeCloneFailed, Where: "the cluster"}, {Attempt: 2}}}}},
+		{Status: "in_progress", Steps: []StepReport{{Key: "a.b", Stage: "a", Status: "running", Retrying: true, RetryAfter: time.Second,
+			Attempts: []AttemptReport{{Attempt: 1, Code: CodeCloneFailed, Where: "the cluster"}}}}},
 	}
 	for code := range codeClasses {
 		reports = append(reports, RunReport{Status: "completed", Conclusion: "failure", Refusal: &Refusal{Code: code, Detail: "d"}})

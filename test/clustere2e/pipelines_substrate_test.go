@@ -119,6 +119,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -705,7 +706,8 @@ func testSubstrateReportMapping(t *testing.T) {
 	}}
 	for _, c := range cases {
 		c.want.Key, c.want.Stage, c.want.Name = step.Key, step.Stage, step.Name
-		if got := c.s.report(values); got != c.want {
+		// DeepEqual: a report carries its step's attempts, a list.
+		if got := c.s.report(values); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", c.name, got, c.want)
 		}
 	}

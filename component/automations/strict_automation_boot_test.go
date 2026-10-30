@@ -256,7 +256,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // measured by the strict loader in PR #6288 CI on 2026-10-24.
 // 193 -> 194: tickPipelineTrains, the release train's one-minute step
 // (design record 2026-10-27).
-const shippedAutomationCount = 194
+// 194 -> 195: pipelineComputePlacementPolicy, the Fleet/cloud placement policy.
+const shippedAutomationCount = 195
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

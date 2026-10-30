@@ -9,6 +9,8 @@ import {
   computeOf,
   deliveryCaption,
   fleetAvailable,
+  fleetHostCommandsOff,
+  fleetNotOffered,
   fleetReason,
   movementOf,
   needersOf,
@@ -27,7 +29,7 @@ import {
 } from "../../../src/apps/deployables/pipelines/connect/flow";
 import { machineFromRow } from "../../../src/apps/fleet/rows";
 import { SHA_A } from "./fixtures";
-import { PIPELINE_STEP_CONTRACT } from "../../../src/apps/deployables/pipelines/fleet";
+import { PIPELINE_STEP_CONTRACT, allowsPipelines, machinesAllowingPipelines } from "../../../src/apps/deployables/pipelines/fleet";
 
 // THE CONNECT RAIL'S READING, on values (issue memql#5502). Every claim here is
 // about a function in connect/flow.ts; connectPage.test.tsx asserts what a
@@ -382,7 +384,7 @@ describe("the fleet", () => {
       ownerUserId: "v1:identity:user:u-me",
       name: "studio-mac",
       labels: { pipelines: "allowed" },
-      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 4 } },
+      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 5 } },
       operatorLabels: {},
       lastSeenAt: "2026-10-04T11:59:50Z",
       ...over,
@@ -396,12 +398,71 @@ describe("the fleet", () => {
   });
 
   it("does not treat labels or unknown action versions as an execution contract", () => {
-    for (const version of [undefined, 0, 1, 2, 3, 5, "4", 4.5]) {
+    for (const version of [undefined, 0, 1, 2, 3, 4, 6, "5", 5.5]) {
       expect(fleetAvailable([machine({
         capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": version } },
-        operatorLabels: { "workerHost.pipeline_step": "4" },
+        operatorLabels: { "workerHost.pipeline_step": "5" },
       })], "u-me")).toBe(false);
     }
+  });
+
+  // THE ROUTER SKIPS A MACHINE WHOSE OWNER TURNED "HOST COMMANDS" OFF
+  // (ownerFeatures.headless, Fleet settings), so "your fleet" must not count it:
+  // read the way the engine reads the setting (OwnerFeaturesFromRow) -- a setting
+  // never saved is on, one that is not a plain `true` is off.
+  it("is not offered by a machine whose owner turned Host commands off", () => {
+    expect(fleetAvailable([machine({ ownerFeatures: { headless: false } })], "u-me")).toBe(false);
+    expect(fleetAvailable([machine({ ownerFeatures: { headless: false, apps: true, computerUse: true } })], "u-me")).toBe(false);
+    expect(machinesAllowingPipelines([machine({ ownerFeatures: { headless: false } }), machine({ id: "v1:worker:registration:m2" })], "u-me")).toBe(1);
+    // The other two switches steer no pipeline step.
+    expect(fleetAvailable([machine({ ownerFeatures: { headless: true, apps: false, computerUse: false } })], "u-me")).toBe(true);
+  });
+
+  it("reads a missing Host commands setting as on, and a malformed one as off, as the engine does", () => {
+    for (const saved of [undefined, null, {}, { apps: false }, { headless: true }]) {
+      expect(fleetAvailable([machine({ ownerFeatures: saved })], "u-me"), JSON.stringify(saved)).toBe(true);
+    }
+    for (const saved of [[], "on", 0, false, { headless: "true" }, { headless: 1 }, { headless: null }]) {
+      expect(fleetAvailable([machine({ ownerFeatures: saved })], "u-me"), JSON.stringify(saved)).toBe(false);
+    }
+  });
+
+  it("counts a hand-built machine that names no setting as on, like a Candidate the router was given without one", () => {
+    const reading = { ownerUserId: "u-me", revokedAt: "", reportedLabels: { pipelines: "allowed" }, pipelineContract: PIPELINE_STEP_CONTRACT };
+    expect(allowsPipelines(reading)).toBe(true);
+    expect(allowsPipelines({ ...reading, ownerFeatures: { headless: false, apps: true, computerUse: true, updatedAt: "" } })).toBe(false);
+  });
+
+  // WHEN HOST COMMANDS IS THE ONLY REASON A MACHINE TAKES NO STEP, SAY SO. A
+  // machine whose own policy allows pipelines, which its owner then switched
+  // Host commands off for, is the one case the policy copy blames the wrong
+  // thing for: the fix is a switch in Fleet. Only such a machine is named.
+  describe("a machine kept out only by its owner's Host commands switch", () => {
+    const off = { ownerFeatures: { headless: false } };
+    const names = (rows: ReturnType<typeof machine>[], owner = "u-me") => fleetHostCommandsOff(rows, owner);
+
+    it("is named, by the name Fleet shows", () => {
+      expect(names([machine({ ...off, displayName: "MSI Raider" })])).toEqual(["MSI Raider"]);
+      // The name it reported when the owner gave it none, and its id when it reported none.
+      expect(names([machine({ ...off, displayName: "", name: "studio-mac" })])).toEqual(["studio-mac"]);
+      expect(names([machine({ ...off, displayName: "", name: "", id: "v1:worker:registration:m9" })])).toEqual(["v1:worker:registration:m9"]);
+      expect(names([machine({ ...off, id: "v1:worker:registration:m1", displayName: "MSI Raider" }), machine({ ...off, id: "v1:worker:registration:m2", displayName: "CyberPC" })]))
+        .toEqual(["MSI Raider", "CyberPC"]);
+    });
+
+    it("is not named when something else keeps it out too, or it is not the owner's, or it is gone", () => {
+      // Policy is not allowing it: fixing the switch would not help, and the copy about the policy stands.
+      expect(names([machine({ ...off, labels: {} })])).toEqual([]);
+      expect(names([machine({ ...off, labels: { pipelines: "denied" } })])).toEqual([]);
+      expect(names([machine({ ...off, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 4 } } })])).toEqual([]);
+      expect(names([machine({ ...off, revokedAt: "2026-10-01T00:00:00Z" })])).toEqual([]);
+      expect(names([machine({ ...off, ownerUserId: "v1:identity:user:someone-else" })])).toEqual([]);
+      expect(names([machine({ ...off })], "")).toEqual([]);
+    });
+
+    it("is not named while its owner has Host commands on, or never said", () => {
+      expect(names([machine(), machine({ ownerFeatures: { headless: true } }), machine({ ownerFeatures: undefined }), machine({ ownerFeatures: { apps: false } })])).toEqual([]);
+    });
   });
 
   it("is not offered by a revoked machine, another label, an operator's label or somebody else's machine", () => {
@@ -442,6 +503,27 @@ describe("words", () => {
       "No compatible worker allows pipelines. Update Cockpit and allow pipeline work in its policy.yaml, or change these steps to use cluster containers without host requirements.",
     );
     expect(fleetReason(["os-checks needs docker"])).toContain("cluster containers without host requirements");
+  });
+
+  // When Host commands off is why a machine takes no step, the remedy says so and
+  // points at the switch, and does not blame the policy file. The policy wording
+  // above stays for every case where the policy is the cause.
+  it("names Host commands as the remedy when that is what keeps a machine out, and leaves the policy wording for the rest", () => {
+    expect(needsRemedy(["os-checks needs docker"], ["MSI Raider"])).toBe(
+      "Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings, or change these steps to use cluster containers without host requirements.",
+    );
+    expect(needsRemedy(["os-checks needs docker"], ["MSI Raider", "CyberPC"])).not.toContain("policy.yaml");
+    expect(needsRemedy(["os-checks needs docker"], [])).toContain("policy.yaml");
+    expect(fleetNotOffered([])).toBe("Your fleet is offered once one of your machines allows pipelines in its policy.yaml.");
+    expect(fleetNotOffered(["MSI Raider"])).toBe(
+      "Your fleet is not offered. Host commands are off for MSI Raider. Turn on Commands and files in its Fleet settings.",
+    );
+  });
+
+  it("carries the machines Host commands is off for into Compute", () => {
+    const withOff = facts({ fleet: { known: true, available: false, hostCommandsOff: ["MSI Raider"] } });
+    expect(computeOf(withOff, preview())).toMatchObject({ options: [], hostCommandsOff: ["MSI Raider"] });
+    expect(computeOf(facts(), preview()).hostCommandsOff).toEqual([]);
   });
 
   it("says what each delivery does, and what polling cannot see", () => {

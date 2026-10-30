@@ -985,6 +985,50 @@ connection failures do not become a claim of read-only access or empty history.
   full log" and says the log is saved, rather than offering to save it; a
   failed step's last lines are the tail of that file, read through the
   Library's content route with one suffix Range.
+- **A STEP'S ATTEMPTS ARE ON ITS ROW, AND THE PAGE ONLY READS THEM.** A step the
+  engine retried carries every ended attempt in `binding.attempts`
+  (`stepFromRow` -> `StepRow.attempts`, malformed entries dropped), and the
+  run page lists them under the step in the failure account's own column and
+  type -- one line each, where it ran (the machines feed's NAME, "your fleet"
+  when it cannot name one, never an id), how it ended in the page's words (a
+  code's copy headline, else the attempt's own message, else "Failed"; never
+  the code) and a link to that attempt's own log. Only a step with two or more
+  attempts, or one still going, is annotated; a step that ran once has one
+  record and no story. A running step with an attempt behind it reads
+  **Retrying** (the check run says the same word for the same state), on the
+  attempt after the last that ended. **The last attempt of a failed step says
+  only "Failed" and offers no link**: the account below it already says why
+  and offers the same log (rule 7). Covered by `runPage.test.tsx` and
+  `words.test.ts`; rendered with `pipeline-run-retried` / `-retrying`. Not
+  verified live: a cluster with a real fleet failing over.
+- **"YOUR FLEET" MIRRORS THE ENGINE'S ROUTER, HOST COMMANDS INCLUDED.**
+  `pipelines/fleet.ts` counts a machine only if the router would offer it a
+  step: unrevoked, contract 5, its own `pipelines` label, and the owner has not
+  switched Host commands off (`ownerFeatures.headless`, read as the engine reads
+  it: a setting never saved is on, a malformed one is off). The connect flow
+  and Settings > Pipelines read the one rule.
+- **WHEN THE SWITCH IS WHAT KEEPS A MACHINE OUT, THE COPY SAYS SO.** A machine
+  whose own policy allows pipelines and whose owner switched Host commands off
+  needs a switch in Fleet, not a policy edit, so `machinesWithHostCommandsOff`
+  names the machines that switch ALONE keeps out (a machine its policy also
+  refuses is not named: turning the switch on would change nothing for it) and
+  the copy points at it instead of `policy.yaml` -- Compute's remedy and its
+  "your fleet is not offered" caption (`needsRemedy`, `fleetNotOffered`), and
+  Settings > Pipelines' fleet line (`fleetSentence`), which says it only when
+  no machine takes steps: while another does, a machine its owner switched off
+  is a choice and not a problem. Every case where the policy is the cause keeps
+  its wording and its pinned test. **THE ENGINE'S "HOST COMMANDS" IS FLEET'S
+  "COMMANDS AND FILES"**: the router and its refusals say Host commands, and
+  the machine's Settings (Owner-only features) label the same switch Commands
+  and files. The copy says both, once each -- "Host commands are off for MSI
+  Raider. Turn on Commands and files in its Fleet settings" -- so the owner who
+  read the engine's words on a failed step can find the control. The control's
+  label is one constant, `HOST_COMMANDS_SWITCH`, held to Fleet's label by
+  `words.test.ts`. Rendered with `pipeline-connect-host-commands-off`
+  (`&click=Connect pipeline`) and `settings-pipelines-host-commands-off`. Fleet's
+  own per-machine "Pipeline steps" fact still reports the machine's POLICY ("Allowed
+  by this machine's policy") and is untouched; "Commands and files: Disabled"
+  stands beside it.
 - **NOTHING HERE IS A SECOND COPY OF A RUN'S STATE OR OF ITS RULES.** The
   words are `pipelines/words.ts` (the check run's own words), the bar is the
   pure `pipelines/acts.ts` (an act the engine would refuse is absent: no re-run

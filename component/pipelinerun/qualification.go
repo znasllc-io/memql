@@ -425,6 +425,31 @@ func qualificationSourceFence(ctx context.Context, d Deps, p Pipeline, q PullReq
 	return nil
 }
 
+// attemptDeadline is how long one attempt of a step may run: the step's deadline,
+// cut short by a qualification's expiry. It refuses the attempt when mutable
+// authority no longer holds or the qualification has already expired, so a
+// retry cannot run on an approval that lapsed during the wait before it.
+func (dr *runDriver) attemptDeadline(ctx context.Context, ceiling time.Duration) (time.Duration, error) {
+	if err := dr.qualificationFence(ctx); err != nil {
+		return 0, err
+	}
+	deadline := dr.stepDeadline(ceiling)
+	if dr.run.Qualification == nil {
+		return deadline, nil
+	}
+	q, err := readQualification(dr.run.Qualification)
+	if err != nil {
+		return 0, err
+	}
+	if remaining := q.ExpiresAt.Sub(dr.d.now()); remaining < deadline {
+		deadline = remaining
+	}
+	if deadline <= 0 {
+		return 0, errors.New("The qualification expired before executor handoff.")
+	}
+	return deadline, nil
+}
+
 // qualificationFence is deliberately outside row gates: provider calls must
 // not monopolize the shared lock pool. Each executable step and final success
 // rechecks it; recovery does not inherit an earlier process's observation.
