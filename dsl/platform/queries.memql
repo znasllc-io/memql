@@ -465,8 +465,9 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 // A READ THAT NAMES NO CONSTRUCT IS CLOSED THE SAME WAY, by the engine and not by this file: a raw
 // read of either concept, parentOf, sort(paginate(...)), asOf and a subscription never reach a builtin,
 // so they pass neither the part nor the organization gate, and the engine refuses them to every caller
-// but internal origin and an unranked actor (clientUnreadableConcepts, component/memql; design D14).
-// Internal origin is how every query in this group is reached, and nothing a request carries can be it.
+// but internal origin and the cluster acting on its own (clientUnreadableConcepts, component/memql;
+// design D14). Borrowed authority is not an exit: a visitor's gated call runs under it. Internal origin
+// is how every query in this group is reached, and nothing a request carries can be it.
 //
 // TWO CONCEPTS, TWO TIERS, AND THE READS FOLLOW THEIR CONCEPT.
 //

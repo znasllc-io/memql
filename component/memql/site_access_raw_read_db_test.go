@@ -32,9 +32,9 @@ import (
 // the same read dressed differently. No working code was exposed, only digests.
 //
 // The ruling reverses an earlier acceptance of that gap: both concepts are
-// readable only by internal origin or an unranked actor
-// (clientUnreadableConcepts, site_access_guards.go), which is what the server's
-// own readers are and what no request can be. These tests assert it for every
+// readable only by internal origin or by the cluster acting on its own, a
+// synthetic actor (clientUnreadableConcepts, site_access_guards.go), which is
+// what the server's own readers are and what no request can be. These tests assert it for every
 // read shape the review named, for the four people who matter, with the
 // server's own paths held up as controls so a pass cannot be an empty fixture.
 
@@ -241,12 +241,13 @@ func TestNoSubscriptionDeliversAnAccessCodeOrSessionRow(t *testing.T) {
 	}
 }
 
-// THE SERVER STILL READS. The clause has two exits, internal origin and an
-// unranked actor, and each is the way a real server reader gets in: every
-// handler under the builtins and the bff stamps internal origin on its reads, and
-// the retention sweep runs as the maintenance actor, which is unranked. A clause
-// that refused either would leave the feature inert -- no list, no unlock, and a
-// session table that never empties -- with nothing in a log to say why.
+// THE SERVER STILL READS. The clause has two exits, internal origin and the
+// cluster acting on its own, and each is the way a real server reader gets in:
+// every handler under the builtins and the bff's store stamp internal origin on
+// their reads, and the retention sweep runs as the maintenance actor, which is
+// synthetic. A clause that refused either would leave the feature inert -- no
+// list, no unlock, and a session table that never empties -- with nothing in a
+// log to say why.
 func TestTheServerStillReadsAccessCodesAndSessions(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	f := newAccessReadFixture(t, eng, "serverreads")
@@ -293,6 +294,103 @@ func TestTheServerStillReadsAccessCodesAndSessions(t *testing.T) {
 			require.True(t, AdmitSourceRow(sweep, node), "the sweep's principal is refused a %s row", concept)
 			require.False(t, AdmitSourceRow(rankActorCtx(f.owner, auth.RoleWriter), node),
 				"the owner reading a %s row as a client is admitted by AdmitSourceRow", concept)
+		}
+	})
+}
+
+// BORROWED AUTHORITY IS NOT AN EXIT (design D14, narrowed by the ruling on the review's
+// follow-up). auth.ContextWithUserActor lets server code act for a named person, and it is
+// also exactly what a visitor's gated call runs under: the site owner's authority, lent to a
+// request a stranger made, at CLIENT origin. It is unranked, so a clause that let every
+// unranked actor through would admit it and leave the row tier to decide -- and the tier's
+// owner arm admits the owner, so a gated construct that read these concepts would hand a
+// visitor the labels and digests of the site's codes and the digests of live cookies.
+//
+// So the exit is the cluster acting (a synthetic actor), and a read under borrowed authority
+// is a client read until internal origin is stamped on it, which is what the store behind the
+// handlers and the bff does. Asserted three ways: the borrowed owner is refused every read
+// shape at client origin; the same actor with internal origin reads (so the refusal is the
+// origin's absence and not a broken fixture); and the cluster acting -- the retention sweep's
+// maintenance actor and an automation's system actor -- still reads with no origin at all.
+func TestBorrowedAuthorityReadsAccessCodesAndSessionsOnlyWithInternalOrigin(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	f := newAccessReadFixture(t, eng, "borrowed")
+	borrowed := auth.ContextWithUserActor(context.Background(), f.owner)
+	internalBorrowed := auth.ContextWithInternalOrigin(borrowed)
+
+	// THE PREMISE: the actor is the one the ruling is about -- unranked, and not the cluster
+	// -- and it IS the site's owner, so the row tier alone would admit it.
+	access, ok := auth.AccessFromContext(borrowed)
+	require.True(t, ok)
+	require.True(t, access.Unranked && !access.Synthetic,
+		"ContextWithUserActor is no longer unranked-and-not-synthetic, so this test no longer measures borrowed authority")
+	require.Equal(t, f.owner, BareShortId(access.UserId))
+
+	leaks := []string{f.ids.code, f.ids.session, f.digest, f.tokenDigest, f.label}
+	forms := []struct{ name, query string }{
+		{"a raw code read by site", fmt.Sprintf(`concept==v1:platform:siteAccessCode && siteId==%q`, f.site)},
+		{"a raw session read by site", fmt.Sprintf(`concept==v1:platform:siteAccessSession && siteId==%q`, f.site)},
+		{"a raw session read by token digest", fmt.Sprintf(`concept==v1:platform:siteAccessSession && tokenHash==%q`, f.tokenDigest)},
+		{"parentOf the session", fmt.Sprintf(`parentOf(concept==v1:platform:siteAccessSession && id==%q)`, f.sessionStore)},
+	}
+	for _, form := range forms {
+		t.Run(form.name, func(t *testing.T) {
+			// The control: with internal origin the same actor reads the row.
+			res, err := eng.Execute(internalBorrowed, form.query)
+			require.NoError(t, err, "the control read failed, so the refusal below proves nothing")
+			require.NotZero(t, len(MaterializeRows(res)), "the control read returned no rows: %s", resultBlob(t, res))
+
+			// Without it, the borrowed owner is a client.
+			res, err = eng.Execute(borrowed, form.query)
+			if err != nil {
+				return // a refusal is a refusal
+			}
+			blob := resultBlob(t, res)
+			require.Zero(t, len(MaterializeRows(res)), "borrowed authority at client origin read rows through %s: %s", form.name, blob)
+			for _, leak := range leaks {
+				require.NotContains(t, blob, leak, "borrowed authority at client origin was handed %q through %s", leak, form.name)
+			}
+		})
+	}
+
+	nodes := map[string]memorynodes.MemoryNode{}
+	for concept, row := range map[string]struct {
+		id      string
+		payload map[string]any
+	}{
+		siteAccessCodeConcept:    {f.codeStored, map[string]any{"siteId": f.site, "ownerUserId": f.owner, "accountId": f.ids.account}},
+		siteAccessSessionConcept: {f.sessionStore, map[string]any{"siteId": f.site, "ownerUserId": f.owner, "codeId": f.ids.code}},
+	} {
+		raw, err := json.Marshal(row.payload)
+		require.NoError(t, err)
+		nodes[concept] = memorynodes.MemoryNode{ID: row.id, Concept: concept, Payload: raw}
+	}
+
+	t.Run("the per-row admission agrees, for a read and for a subscription", func(t *testing.T) {
+		for concept, node := range nodes {
+			require.False(t, AdmitSourceRow(borrowed, node), "borrowed authority at client origin is admitted a %s row", concept)
+			require.True(t, AdmitSourceRow(internalBorrowed, node), "borrowed authority with internal origin is refused a %s row, so the store behind the handlers could not read it", concept)
+			require.Equal(t, SubscriptionDeny,
+				AdmitSubscriptionRow(eng.SubscriptionRankContext(context.Background()), access, concept, node.ID, node.Payload),
+				"a stream running under borrowed authority is delivered a %s event", concept)
+		}
+	})
+
+	t.Run("the cluster acting still reads, with no origin at all", func(t *testing.T) {
+		// The retention sweep's principal.
+		sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("retireDeclaredConceptVersions"))
+		for concept, node := range nodes {
+			require.True(t, AdmitSourceRow(sweep, node), "the sweep's principal is refused a %s row", concept)
+		}
+		// An automation's system actor, through a real read.
+		system := auth.ContextWithSystemActor(context.Background(), "an-automation")
+		for _, query := range []string{
+			fmt.Sprintf(`concept==v1:platform:siteAccessCode && siteId==%q`, f.site),
+			fmt.Sprintf(`concept==v1:platform:siteAccessSession && siteId==%q`, f.site),
+		} {
+			res, err := eng.Execute(system, query)
+			require.NoError(t, err)
+			require.NotZero(t, len(MaterializeRows(res)), "a system actor read nothing through %q: %s", query, resultBlob(t, res))
 		}
 	})
 }

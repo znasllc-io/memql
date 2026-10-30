@@ -265,8 +265,15 @@ func TestSiteAccessCodeViewNeverCarriesTheDigest(t *testing.T) {
 			require.Contains(t, blob, ids.code, "the owner cannot read their own code %s: %s", name, blob)
 			require.NotContains(t, blob, "codeHash", "the view carries the digest %s: %s", name, blob)
 			require.NotContains(t, blob, digest, "the digest itself is in the reply %s: %s", name, blob)
-			for _, field := range []string{"label", "gate", "subject", "codeHint", "generation", "issuedAt", "expiresAt"} {
+			for _, field := range []string{"label", "gate", "subject", "codeHint", "generation", "issuedAt", "expiresAt", "accountId"} {
 				require.Contains(t, blob, field, "the view lacks %q %s: %s", field, name, blob)
+			}
+			// THE COPIED ORGANIZATION IS IN THE VIEW, and who owns the row and who last
+			// changed it are not: the first is the tier's key, which the tier has already
+			// decided by the time a row is projected, and the second is the audit log's.
+			require.Contains(t, blob, ids.account, "the view carries a different organization than the one the code was minted with %s: %s", name, blob)
+			for _, absent := range []string{"ownerUserId", "lastChangedBy"} {
+				require.NotContains(t, blob, absent, "the view carries %q %s: %s", absent, name, blob)
 			}
 
 			// THE TIER DECIDES THE ROW. Another person asking for the same code
@@ -291,6 +298,100 @@ func TestSiteAccessCodeViewNeverCarriesTheDigest(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, MaterializeRows(res), "a code opened a site it was not minted for")
 	})
+}
+
+// THE MOVE AND THE MINT CAN RACE, AND THE VIEW IS WHAT MAKES THAT HARMLESS (design D15).
+// The scan that refuses a site's move runs before a mint that is already copying the old
+// organization has committed, so one stale copy can exist. Nothing is locked for it: every
+// shaped read of a code carries `accountId`, so the bff's handler can refuse a code whose
+// copy differs from its site's current organization, and the acts re-read the site under the
+// caller. This is the half that belongs to this task -- the copy is readable from each read a
+// handler uses, in a form that can be compared with the site's -- and it is asserted with the
+// stale copy built literally: a code minted for Acme on a site that is Beta's now.
+func TestSiteAccessCodeViewCarriesTheCopiedAccountSoAStaleCopyCanBeSeen(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	ids := newSiteAccessIDs("stalecopy")
+	issued := time.Now().UTC().Truncate(time.Second)
+	acme, beta := "acme-"+ids.account, "beta-"+ids.account
+	site := "v1:platform:site:" + ids.site
+	seedPrincipal(t, eng, ids.owner, auth.RoleWriter)
+	for _, account := range []string{acme, beta} {
+		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account,
+			map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}))
+	}
+	// The site is Beta's now.
+	require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, site, map[string]any{
+		"hostname": ids.site + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft",
+		"bundleRef": "blob://site-access/v1", "ownerUserId": "v1:identity:user:" + ids.owner, "accountId": beta,
+	}))
+	owner := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, siteAccessAs(ids.owner, auth.RoleWriter)))
+	mint := func(code string, account string, seed byte) {
+		t.Helper()
+		args := map[string]any{
+			"codeId": code, "siteId": site, "label": "Reviewers", "gate": "dashboard",
+			"codeHash": siteAccessDigest(seed), "codeHint": "FBZA",
+			"issuedAt": issued.Format(time.RFC3339), "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+			"lastChangedBy": ids.owner,
+		}
+		if account != "" {
+			args["accountId"] = account
+		}
+		_, err := eng.Execute(owner, siteAccessCall(t, "mutation", "createSiteAccessCode", args))
+		require.NoError(t, err)
+	}
+	stale, current, untied := ids.code+"-stale", ids.code+"-current", ids.code+"-untied"
+	mint(stale, acme, 0x61)
+	mint(current, beta, 0x62)
+	mint(untied, "", 0x63)
+
+	// What a handler holds to compare against: the site's current organization, read from
+	// the store (a handler reads the site under the caller, which this fixture's owner, not
+	// being a member of Beta, would not be admitted to).
+	siteAccount := BareShortId(fmt.Sprint(latestPayload(t, ctx, db, conceptPlatformSite, site)["accountId"]))
+	require.Equal(t, BareShortId(beta), siteAccount)
+
+	copyOf := func(rows []map[string]any, code string) (string, bool) {
+		for _, row := range rows {
+			if BareShortId(fmt.Sprint(row["id"])) == code {
+				account, present := row["accountId"]
+				if !present || account == nil {
+					return "", true
+				}
+				return BareShortId(fmt.Sprint(account)), true
+			}
+		}
+		return "", false
+	}
+	read := func(name, call string, code string) string {
+		t.Helper()
+		res, err := eng.Execute(owner, call)
+		require.NoError(t, err, name)
+		copied, found := copyOf(MaterializeRows(res), code)
+		require.True(t, found, "%s did not return the code %s: %s", name, code, resultBlob(t, res))
+		return copied
+	}
+	for _, tc := range []struct{ name, code, want string }{
+		{"the code minted before the move", stale, BareShortId(acme)},
+		{"the code minted after it", current, BareShortId(beta)},
+		{"a code minted for a site with no organization", untied, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for name, call := range map[string]string{
+				"by id":    siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": tc.code}),
+				"for site": siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": site}),
+			} {
+				require.Equal(t, tc.want, read(name, call, tc.code), "the copied organization is not what the view says %s", name)
+			}
+		})
+	}
+	byHash := siteAccessCall(t, "query", "siteAccessCodeByHash", map[string]any{"siteId": site, "codeHash": siteAccessDigest(0x61)})
+	require.Equal(t, BareShortId(acme), read("by hash", byHash, stale))
+
+	// THE COMPARISON a handler makes: only the stale copy differs from the site's.
+	require.NotEqual(t, siteAccount, read("by id", siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": stale}), stale),
+		"the stale copy cannot be told from a current one")
+	require.Equal(t, siteAccount, read("by id", siteAccessCall(t, "query", "siteAccessCodeById", map[string]any{"codeId": current}), current),
+		"a current copy looks stale")
 }
 
 // A PAGE CAP WOULD HIDE A LIVE CODE FROM THE PERSON WHO HAS TO REMOVE IT. The rows under

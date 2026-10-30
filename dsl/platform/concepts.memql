@@ -386,9 +386,11 @@ concept sitePreviewObservation {
 /// the row tier alone would show the site's owner, a cluster owner and the people of the account every
 /// label and digest of a site that another organization manages. So every client-callable read and
 /// write on access codes is a builtin passing the same gate, every query and mutation beneath those
-/// builtins is @serverOnly, and the rows are read by internal origin or an unranked actor and by
-/// nothing else -- which is how the handlers under the builtins, the bff and the retention sweep read
-/// them. The tier below still decides every row they read; the clause grants nothing.
+/// builtins is @serverOnly, and the rows are read by internal origin or by the cluster acting on its
+/// own (a synthetic actor) and by nothing else -- which is how the handlers under the builtins, the
+/// bff's store and the retention sweep read them. Borrowed authority is not an exit, because a
+/// visitor's gated call runs under it. The tier below still decides every row they read; the clause
+/// grants nothing.
 ///
 /// NOTHING A VISITOR DOES WRITES THIS ROW. A write to a code is a read-merge of the whole row, so a
 /// write on a visitor's schedule (a 'last used' stamp on every unlock) races every operator act on
@@ -404,14 +406,18 @@ concept sitePreviewObservation {
 /// code is minted, and the tier's account arm and the organization gate both judge an act on the
 /// code from that copy. Moving the site would leave the copy naming the organization it left, so the
 /// move is refused until the deployable's codes are removed (validateOrganizationTransfer,
-/// component/memql); a removed code stops blocking.
+/// component/memql); a removed code stops blocking. The scan behind that refusal can pass just before
+/// a mint that is already copying the old organization commits, and no lock is taken for it: the view
+/// carries `accountId`, the bff refuses a code whose copy differs from its site's current
+/// organization, and every act re-reads the site under the caller, so the one stale copy such a race can
+/// leave is refused wherever it would matter.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="label", secondary="gate", tertiary="codeHint")
 concept siteAccessCode {
   siteId         string!  @description("The v1:platform:site this code opens a part of. Required: a code naming no deployable is a credential for nothing, and the bff matches it against the site it just resolved before it looks at anything else -- so a code minted for one site opens nothing on another, and an unknown code and another site's code are the same refusal.")
   ownerUserId    string!  @description("The v1:identity:user who owns the site this code belongs to -- the row-authz key. STAMPED by the write from the actor it runs as, never an argument, and the integration runs the write as the site's owner: this is the SITE'S owner and not the operator who asked. The bff finds the row again under the owner the edge stamped on a request. THE TIER IS NOT WHAT KEEPS A FORGED OWNER OUT: its account arm admits any member of the code's account, so a stamp naming one of them still reads the row, and the bff compares the stamp it was given with the site's own owner before it relies on the tier to scope anything. The operator is `lastChangedBy`.")
-  accountId      string   @description("The v1:accounts:account organization the site is tied to, COPIED from the site at mint time, or empty for a site that has none. It is the composite tier's third arm: it admits the people of the account to the codes of the sites they manage exactly as it admits them to the sites, and the organization capability check reads it to judge an act on a code against the organization the call selected.")
+  accountId      string   @description("The v1:accounts:account organization the site is tied to, COPIED from the site at mint time, or empty for a site that has none. It is the composite tier's third arm: it admits the people of the account to the codes of the sites they manage exactly as it admits them to the sites, and the organization capability check reads it to judge an act on a code against the organization the call selected. siteAccessCodeView carries it, so that a reader can compare it with the site's CURRENT organization and refuse a code whose copy differs.")
   label          string!  @description("The operator's name for the code, for instance `Client reviewers`. One to 80 characters, checked where the code is minted. NEVER SENT TO A VISITOR: it is the operator's note to self, and nothing in the visitor protocol reads it.")
   gate           string!  @description("Which gate this code opens: the `gate` an @accessGate annotation declares on constructs of this deployable. Checked against the gates declared for the site's deployable when the code is minted, and RE-CHECKED on every call -- a gate whose domain was later dropped from the bundle simply stops opening anything, and the code keeps listing with an honest word instead of vanishing.")
   subject        string   @description("Optional scope within the gate, stamped on a gated construct's `accessSubject` argument: whose details this code shows, for a product with one code per client. Empty means the gate is not scoped to anyone in particular. At most 120 characters. The code carries it and does not interpret it.")

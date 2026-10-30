@@ -186,4 +186,46 @@ func TestASiteWithLiveAccessCodesCannotChangeOrganization(t *testing.T) {
 		require.NoError(t, move(groupSeedCtx(), synthetic, beta), "a removed code still blocks the cluster")
 		require.Equal(t, BareShortId(beta), accountOf(synthetic))
 	})
+
+	t.Run("clearing the organization is refused while a code is live and works once none is", func(t *testing.T) {
+		// Clearing is the change most likely to be skipped, because the new organization is
+		// empty. A person is stopped by the ownership rule after this check, so the sentence
+		// is asserted for the person only where this check comes first, and for the cluster,
+		// which is the one actor that can clear, in every case.
+		cleared := addSite("clear", acme)
+		code := ids.code + "-clear"
+		mint(code, cleared, acme, issued.Add(time.Hour))
+
+		refused(t, move(operatorCtx, cleared, ""), "a person clearing the organization of a site with a live code")
+		refused(t, move(groupSeedCtx(), cleared, ""), "the cluster clearing the organization of a site with a live code")
+		require.Equal(t, BareShortId(acme), accountOf(cleared))
+
+		remove(code)
+		require.NoError(t, move(groupSeedCtx(), cleared, ""), "clearing the organization of a site with no live code stopped working")
+		require.Empty(t, accountOf(cleared))
+	})
+
+	t.Run("a null or a value that is not a string in the place of the organization is a change too", func(t *testing.T) {
+		// The read-merge stores a delta key as given, so a null clears the organization as
+		// surely as an empty string does. Reading a key that is not a string as 'no change'
+		// let such a write skip this check, and the write was stopped only by the layers
+		// after it (the schema's type check for the cluster, the ownership rule for a person).
+		// The check must not depend on them, so the sentence is asserted, not just a refusal.
+		// A raw write is the only way to send one: the mutation says `args.accountId ?? ""`.
+		withCode := addSite("nullcode", acme)
+		mint(ids.code+"-nullcode", withCode, acme, issued.Add(time.Hour))
+		for name, value := range map[string]any{"a null": nil, "a number": 7} {
+			err := organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, withCode, map[string]any{"accountId": value})
+			refused(t, err, "the cluster clearing the organization of a site with a live code with "+name)
+			require.Equal(t, BareShortId(acme), accountOf(withCode))
+		}
+
+		// With no live code the check has nothing to say, and the write goes on to the layers
+		// after it, which refuse it for its type. The refusal must not be this check's.
+		noCode := addSite("nullfree", acme)
+		err := organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, noCode, map[string]any{"accountId": nil})
+		require.Error(t, err, "a null in the place of the organization was accepted")
+		require.NotContains(t, err.Error(), "organization_transfer_refused", "the codes check refused a site that has no live code")
+		require.Equal(t, BareShortId(acme), accountOf(noCode))
+	})
 }

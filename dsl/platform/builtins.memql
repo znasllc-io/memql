@@ -753,13 +753,13 @@ builtin siteAccessGates {
 /// regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and
 /// draws an expired one as expired, so this decides neither.
 ///
-/// Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt,
-/// expiresAt, revokedAt, lastOpenedAt, createdAt}.
+/// Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation,
+/// issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.
 @sdk
 @executor("integration.siteAccess.list")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/access")
-@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt and lastOpenedAt -- when a visitor last opened the code's current secret, absent for one nobody has opened. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.")
+@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt and lastOpenedAt -- when a visitor last opened the code's current secret, absent for one nobody has opened. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. accountId is the organization copied from the deployable when the code was minted. Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.")
 builtin siteAccessCodesForSite {
   siteId  string!  @description("The deployable to list the codes of.")
 }

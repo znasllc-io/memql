@@ -42,22 +42,21 @@ const (
 // the one clause that closes it rather than the argument that it is harmless.
 //
 // WHO STILL READS. The server does, and says so twice over: internal origin, which
-// every handler under the builtins and the bff stamp on their own reads (and which
-// the organization gate has already judged by then), and an unranked actor, which
-// is how the retention sweep and the seed materializer are built and which no
-// request can construct. Neither is reachable from the wire, so neither widens
-// what a client sees.
+// every handler under the builtins and the bff's store stamp on their own reads (and
+// which the organization gate has already judged by then), and the cluster acting on
+// its own -- a SYNTHETIC actor, which is how the retention sweep, the seed
+// materializer and an automation's system actor are built. No request can be either,
+// so neither widens what a client sees.
 //
-// ONE EXIT IS WIDER THAN IT NEEDS TO BE, and it is recorded here rather than left
-// to be found. Unranked also covers BORROWED AUTHORITY (auth.ContextWithUserActor),
-// which server code uses to act for a named person and which production code
-// constructs in dozens of places. None of them runs a raw query a client wrote
-// today, so none reaches these rows; one that did (an agent tool that executes a
-// person's own MemQL, say) would be admitted by this clause and decided by the
-// row tier alone. Narrowing the exit to the cluster acting (Synthetic: the
-// maintenance, seed and automation actors) closes that, costs the sweep nothing,
-// and is a one-word change below. It is not made here because the ruling this
-// implements names "an unranked actor".
+// BORROWED AUTHORITY IS NOT AN EXIT. auth.ContextWithUserActor lets server code act
+// for a named person, and it is also what a visitor's gated call runs under: the site
+// owner's authority, lent to a request a stranger made, at client origin. It is
+// unranked but not synthetic, so a clause that let every unranked actor through would
+// admit it and leave the row tier -- whose owner arm admits the owner -- to decide,
+// and a gated construct that read these concepts would hand a visitor the digests of
+// the site's codes and of live cookies. A read under borrowed authority is therefore a
+// client read until internal origin is stamped on it, which is what the store behind
+// the handlers does.
 //
 // WHAT THIS IS NOT. It is not a tier: it grants nothing, and a caller that passes
 // it is still decided by the concept's @rowAuthz row by row. It is the read-side
@@ -68,13 +67,25 @@ var clientUnreadableConcepts = map[string]string{
 }
 
 // clientReadRefused reports whether this caller is a CLIENT asking for a row of a
-// concept no client reads. Internal origin and an unranked actor are not clients;
-// see clientUnreadableConcepts for what each is and why neither can be forged.
+// concept no client reads. Internal origin and the cluster acting are not clients;
+// see clientUnreadableConcepts for what each is, why neither can be forged, and why
+// borrowed authority is neither.
 func clientReadRefused(ctx context.Context, conceptName string) bool {
 	if _, listed := clientUnreadableConcepts[strings.TrimSpace(conceptName)]; !listed {
 		return false
 	}
-	return !auth.OriginFromContext(ctx).IsInternal() && !rowAuthzActorIsUnranked(ctx)
+	return !auth.OriginFromContext(ctx).IsInternal() && !actorIsTheClusterActing(ctx)
+}
+
+// actorIsTheClusterActing reports whether the caller is the cluster acting on its own
+// rather than a person or a person's borrowed authority: a Synthetic actor, which only
+// the maintenance, seed and automation-system constructors set and nothing a request
+// carries can reach. It is NOT rowAuthzActorIsUnranked, which also admits borrowed
+// authority (auth.ContextWithUserActor); the two are different properties, as
+// auth.AccessContext.Synthetic says at length.
+func actorIsTheClusterActing(ctx context.Context) bool {
+	ac, _ := auth.AccessFromContext(ctx)
+	return ac != nil && ac.Synthetic
 }
 
 // errSiteHasLiveAccessCodes is the refusal of a change to a site's organization

@@ -331,8 +331,14 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 	if !synthetic && !e.OrganizationCapable(ctx, old, auth.VerbUpdate, auth.ResourceData) {
 		return ErrOrganizationRowForbidden
 	}
-	next, present := delta["accountId"].(string)
-	if !present || BareShortId(next) == BareShortId(old) {
+	// A key that is PRESENT is a change whenever its normalized value differs
+	// from the stored one, a null or a value that is not a string included: the
+	// read-merge stores a delta key as given, so such a key clears the
+	// organization as surely as an empty string does, and reading it as 'no
+	// change' let a clear skip the check below.
+	rawNext, hasKey := delta["accountId"]
+	next, isString := rawNext.(string)
+	if !hasKey || BareShortId(next) == BareShortId(old) {
 		return nil
 	}
 	// A deployable's access codes copy its accountId when they are minted, and
@@ -346,6 +352,15 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 		}
 	}
 	if synthetic {
+		return nil
+	}
+	// The dependent-record scan below reads a string organization only, as it
+	// always has. A key that is not a string is left to the schema's type check
+	// and to the ownership rule that stop it later, exactly as before the check
+	// above learned to see it: widening the scan to it would change which
+	// refusal a person sees for the other dependents, and is a decision of its
+	// own.
+	if !isString {
 		return nil
 	}
 	if e.database() == nil {
