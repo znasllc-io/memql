@@ -632,7 +632,8 @@ func TestAFleetStepRetriedOnTheAgentReplica(t *testing.T) {
 		retryingLine = "- `tests.unit`: Retrying: attempt 1 failed (`pipeline_clone_failed` on machine laptop); attempt 2 "
 		passedLine   = "- `tests.unit`: Passed on attempt 2 of 2. Attempt 1: `pipeline_clone_failed` on machine laptop.\n"
 	)
-	writes := c.github.writesFor(s.name)
+	// The per-step checks are asserted apart, after these.
+	writes := c.github.runCheckWrites(s.name)
 	if len(writes) < 3 {
 		t.Fatalf("GitHub saw %d check-run writes for %s; want a create and at least two updates\n%s", len(writes), s.name, c.diagnose(s, run.ID))
 	}
@@ -658,6 +659,18 @@ func TestAFleetStepRetriedOnTheAgentReplica(t *testing.T) {
 	}
 	if last.Status != pipelinerun.StatusCompleted || last.Conclusion != "success" || !strings.Contains(summary, passedLine) {
 		t.Errorf("the last check-run write is %s/%s, its summary:\n%s\nwant completed/success, saying %q", last.Status, last.Conclusion, summary, passedLine)
+	}
+
+	// The retried step's own check waits with the step: a pull request never
+	// lists as failed a step that went on to pass. Every step check is the
+	// driving agent's, as on a run with no retry.
+	for _, w := range c.github.stepCheckWrites(s.name) {
+		if w.Node != nodeB {
+			t.Errorf("step check %d (%s) was written by %s; want %s, the agent driving the run", w.ID, w.Run.Name, w.Node, nodeB)
+		}
+		if w.Run.Status == pipelinerun.StatusCompleted && w.Run.Conclusion != "success" {
+			t.Errorf("step check %d (%s) concluded %s; every step of this run passes, %s on its second attempt", w.ID, w.Run.Name, w.Run.Conclusion, retriedStep)
+		}
 	}
 
 	t.Logf("run %s: push received on %s, driven by %s; %s ran %d times (%v), attempt 2 due %s after attempt 1 ended; check run %d written %d times",

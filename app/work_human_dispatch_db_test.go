@@ -211,8 +211,14 @@ func TestWorkDBHumanDispatchPreservesScheduledRecovery(t *testing.T) {
 				waiting["kind"] = "approval"
 				waiting["approvalKind"] = "inferenceUnavailable"
 			}
-			templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkGoal", map[string]any{"goalId": key + "goal", "statement": "Synthetic scheduled recovery", "origin": "user"})
-			templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkRun", map[string]any{"runId": key, "goalId": key + "goal", "automationName": "fixture", "templateFingerprint": "fixture", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "status": "waiting", "mode": "live", "waitingOn": waiting})
+			run := map[string]any{"runId": key, "automationName": "fixture", "templateFingerprint": "fixture", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "status": "waiting", "mode": "live", "waitingOn": waiting}
+			// A scheduler's journal has no goal: that is what keeps an answer on
+			// it out of the human-resume path, and what this case holds.
+			if kind != "scheduler answer" {
+				templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkGoal", map[string]any{"goalId": key + "goal", "statement": "Synthetic scheduled recovery", "origin": "user"})
+				run["goalId"] = key + "goal"
+			}
+			templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkRun", run)
 			// Startup recovery scans all owners. Retire every fixture even if
 			// an assertion fails, rather than leaving another test eligible work.
 			t.Cleanup(func() {
