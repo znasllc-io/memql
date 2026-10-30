@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access":
 		return true
 	}
 	return false
@@ -47,6 +47,15 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		switch fn.Name {
 		case "sitePublishFromArtifact", "siteArchive", "siteRestore", "siteDelete", "sitePreviewOpen":
 			return "v1:platform:site", "siteId"
+		// Access codes (design record 2026-10-29-deployable-access-codes). Minting
+		// and listing the gates are asked about the SITE, since no code exists yet;
+		// every act on an existing code is asked about the CODE, whose accountId was
+		// copied off its site at mint time, so the organization resolves without
+		// reading the site a second time.
+		case "siteAccessCodeCreate", "siteAccessGates":
+			return "v1:platform:site", "siteId"
+		case "siteAccessCodeRegenerate", "siteAccessCodeSetExpiry", "siteAccessCodeRemove":
+			return "v1:platform:siteAccessCode", "codeId"
 		case "packageAnalyze", "packageDeploy", "packageCancelDeployment", "packageRollback", "packageArchive", "packageDeactivateDeployable", "packageRestore", "packageSetAutoDeploy":
 			return "v1:platform:package", "packageId"
 		}

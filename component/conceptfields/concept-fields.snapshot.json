@@ -5085,6 +5085,59 @@
       }
     },
     {
+      "concept": "v1:platform:siteAccessCode",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "accountId",
+        "codeHash",
+        "codeHint",
+        "expiresAt",
+        "gate",
+        "generation",
+        "issuedAt",
+        "label",
+        "lastChangedBy",
+        "lastUsedAt",
+        "ownerUserId",
+        "revokedAt",
+        "siteId",
+        "subject"
+      ],
+      "required": [
+        "codeHash",
+        "codeHint",
+        "expiresAt",
+        "gate",
+        "generation",
+        "issuedAt",
+        "label",
+        "lastChangedBy",
+        "ownerUserId",
+        "siteId"
+      ]
+    },
+    {
+      "concept": "v1:platform:siteAccessSession",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "codeId",
+        "endedAt",
+        "generation",
+        "issuedAt",
+        "ownerUserId",
+        "siteId",
+        "tokenHash"
+      ],
+      "required": [
+        "codeId",
+        "generation",
+        "issuedAt",
+        "ownerUserId",
+        "siteId",
+        "tokenHash"
+      ]
+    },
+    {
       "concept": "v1:platform:siteHealth",
       "file": "platform/concepts.memql",
       "fields": [

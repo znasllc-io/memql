@@ -739,6 +739,61 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "touchSitePreviewGrant"}:        true,
 		{Path: "platform/mutations.memql", Name: "recordSitePreviewObservation"}: true,
 
+		// Deployable access codes (design record 2026-10-29). Ten constructs,
+		// and the arguments divide three ways. None of them is "caller scoping
+		// was inconvenient": every write is stamped or run as the SITE'S OWNER,
+		// so the composite tier already decides every row, and the annotation
+		// withholds the WIRE.
+		//
+		// THE CREDENTIAL WRITES -- createSiteAccessCode, rotateSiteAccessCode,
+		// setSiteAccessCodeExpiry. createSitePreviewGrant's case, with a code
+		// for a token: the digest is the stored form of a bearer credential
+		// for part of somebody's site and `expiresAt` is the only bound it has.
+		// A caller who picks the digest picks the code; a caller who picks the
+		// expiry picks the lifetime, outside the bounds the integration
+		// enforces. rotateSiteAccessCode adds `generation`, which is what ends
+		// every session of the secret being replaced -- a caller who wrote it
+		// could keep sessions open past a regeneration. The reachable surface
+		// is the four siteAccessCode* builtins.
+		//
+		// removeSiteAccessCode carries no credential, which is
+		// revokeSitePreviewGrant's reason for staying reachable, and is server-only
+		// regardless: an operator act that ends access must reach the audit log,
+		// and only the builtin writes the event. Reachable, it would end a code
+		// with no trace of who. The person behind the act is an ARGUMENT
+		// (`lastChangedBy`) because the write runs as the site's owner, so the
+		// actor is not them -- and an argument naming who made a change is a
+		// claim a client could otherwise make about anybody.
+		//
+		// THE VISITOR'S WRITES AND LOOKUPS -- createSiteAccessSession,
+		// endSiteAccessSession, touchSiteAccessCode, siteAccessCodeByHash,
+		// siteAccessSessionByToken. A visitor has no actor. The bff writes and
+		// reads as the owner the edge stamped on the request, re-checked against
+		// the site, so the owner tier DOES scope them, to that owner; what that
+		// scope cannot establish is what the call CLAIMS: that a valid code was
+		// just presented (a session), that the cookie's holder is the one
+		// leaving (an end), that the deployment observed a use (touch, which
+		// touchSitePreviewGrant's reasoning covers exactly). The two lookups
+		// are the credential check itself, and a client-callable one is an
+		// oracle for whether a guessed digest is a live code or a live session.
+		//
+		// siteAccessCodeById is the operator acts' read of the row they are
+		// about to change. Its filter is the site's composite tier with no
+		// caller term -- a term would hide the codes of every site a developer
+		// manages but does not own -- so caller scoping is the wrong tool, and
+		// the annotation stops it being a way around the capability that
+		// guards the list: nothing a person does needs one code by id.
+		{Path: "platform/mutations.memql", Name: "createSiteAccessCode"}:    true,
+		{Path: "platform/mutations.memql", Name: "rotateSiteAccessCode"}:    true,
+		{Path: "platform/mutations.memql", Name: "setSiteAccessCodeExpiry"}: true,
+		{Path: "platform/mutations.memql", Name: "removeSiteAccessCode"}:    true,
+		{Path: "platform/mutations.memql", Name: "touchSiteAccessCode"}:     true,
+		{Path: "platform/mutations.memql", Name: "createSiteAccessSession"}: true,
+		{Path: "platform/mutations.memql", Name: "endSiteAccessSession"}:    true,
+		{Path: "platform/queries.memql", Name: "siteAccessCodeById"}:        true,
+		{Path: "platform/queries.memql", Name: "siteAccessCodeByHash"}:      true,
+		{Path: "platform/queries.memql", Name: "siteAccessSessionByToken"}:  true,
+
 		// The per-account front door (epic memql#5168). Every write on a door's
 		// walk is the reconciler's: what a client-reachable one would buy is the
 		// ability to declare a door live without its three hostnames ever having

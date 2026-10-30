@@ -318,6 +318,34 @@ var tierDecidesTheRead = map[string]string{
 	"packageDeploymentsAwaitingConfirm": "memql#5303, as packageDeployments.",
 	"packageDeploymentById":             "memql#5303, as packageDeployments -- the confirm gate's read.",
 	"packageDeploymentsInFlight":        "memql#5303, as packageDeployments -- the abandoned sweep's read, under the maintenance actor the clusterOwner arm admits.",
+
+	// The access code reads (deployable access codes, design record
+	// 2026-10-29), siteById's case over another concept.
+	//
+	// v1:platform:siteAccessCode declares the SITE'S tier verbatim --
+	// `owner="ownerUserId", clusterOwner, account="accountId"` -- because the
+	// spec's rule is that whoever manages a deployable sees all of its codes. So
+	// the argument is the one the Deployables block above makes: the tier is the
+	// WHOLE answer for every caller (the owner's own rows, every row for a
+	// cluster owner, and the rows tied to an account whose group the caller is
+	// in, developers and above being standing members of every such group), the
+	// account arm has no author spelling, and a written-out `own ||
+	// clusterOwner` would be the tier minus that arm. The cost of the
+	// conjunct is concrete here: the code's owner is the SITE'S owner, so a
+	// developer who manages a client's deployable but did not create it would
+	// open the Access codes panel to an EMPTY list -- a refusal wearing the
+	// costume of 'no codes yet', on the surface built to make an absence
+	// legible (the memql#5216 shape).
+	//
+	// The test that fails if this reasoning is wrong is
+	// TestSiteAccessCodesAreReadableByTheAccountsPeopleAndNotByAStranger
+	// (site_access_contract_db_test.go): the owner, a member of the account's
+	// group and a developer read the code and a stranger gets zero rows, for the
+	// list and for both lookups.
+	"siteAccessCodesForSite": "Deployable access codes, as siteById over v1:platform:siteAccessCode: the site's composite tier decides every row, and the account arm is what admits the people who manage the deployable but did not create it. TestSiteAccessCodesAreReadableByTheAccountsPeopleAndNotByAStranger.",
+	"siteAccessCodeById":     "Deployable access codes, as siteAccessCodesForSite -- the by-id read the regenerate, re-time and remove acts resolve their target through under the CALLER's actor, so the gate an act runs behind admits the same people the list does.",
+	"siteAccessCodeByHash":   "Deployable access codes, as siteAccessCodesForSite. @serverOnly, read by the bff under the owner the edge stamped, which the owner arm admits; a forged owner reads zero rows because the tier, not the filter, decides.",
+
 	// Organization-owned reads deliberately admit authorized peer members.
 	// PR #5598; TestOrganizationPersistedAttributionAndCrossReplicaMembership
 	// exercises actual SQL, named reads, grants, and a separate receiver.

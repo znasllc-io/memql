@@ -425,6 +425,48 @@ shape sitePreviewObservation sitePreviewObservationFull {
   row.createdAt
 }
 
+/// An access code as everything but a visitor sees it (design record 2026-10-29-deployable-access-codes).
+///
+/// `codeHash` IS ABSENT, and its absence is the decision, sitePreviewGrantFull's reasoning once more.
+/// The digest cannot be presented, but it is the stored form of a bearer credential, and projecting
+/// it would put it on every screen and into every log line that renders a code, for no reader who
+/// needs it. The bff FILTERS on it (siteAccessCodeByHash) and never reads it back.
+///
+/// `ownerUserId`, `accountId` and `lastChangedBy` are absent too. The first two decide who may see
+/// the row, and the tier has already decided that by the time it is projected; the third is the
+/// audit log's answer to 'who did that', and the log is where it is read.
+@row
+shape siteAccessCode siteAccessCodeView {
+  row.id
+  siteId
+  label
+  gate
+  subject
+  codeHint
+  generation
+  issuedAt
+  expiresAt
+  revokedAt
+  lastUsedAt
+  row.createdAt
+}
+
+/// An access session as the bff reads it to answer one request (design record
+/// 2026-10-29-deployable-access-codes).
+///
+/// `tokenHash` and `ownerUserId` are ABSENT. The bff FILTERS on the digest and never reads it back,
+/// and the owner is the stamp it already holds; neither belongs in a projection that exists to say
+/// which code, which site, which generation and whether it ended.
+@row
+shape siteAccessSession siteAccessSessionFull {
+  row.id
+  siteId
+  codeId
+  generation
+  issuedAt
+  endedAt
+}
+
 /// Public source selection facts; credentials are referenced only by ID.
 @row
 shape sourceConnection sourceConnectionCard {

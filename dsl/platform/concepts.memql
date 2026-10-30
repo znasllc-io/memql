@@ -344,6 +344,103 @@ concept sitePreviewObservation {
   @relationship(type="references", as="observedOn", field="siteId", target=site, direction="outgoing")
 }
 
+/// AN ACCESS CODE: one random credential that opens ONE gate of a deployable to whoever holds it
+/// (design record 2026-10-29-deployable-access-codes).
+///
+/// WHY A ROW AND NOT A SIGNED TOKEN, sitePreviewGrant's argument with a sharper edge. A signature
+/// verifies on every replica with no read, and the price is that it can be neither revoked nor made
+/// to end at an instant. Both are requirements here: a code that is regenerated, removed or past its
+/// expiry must stop opening the site on the very next request, so validity is read from this row on
+/// EVERY request and nothing in the decision is cached -- the v1:platform:siteAccess prefix is on the
+/// result cache's denylist, and every server read of these rows carries @cache(0). The row is also
+/// what makes a code LISTABLE ("who could get in, and when" is a question asked after the fact) and
+/// what every v1:platform:siteAccessSession hangs off.
+///
+/// THE CODE IS HASHED AND RETURNED ONCE, as a preview token and a worker token are: the plain
+/// 25-symbol code goes back to the operator in the reply of siteAccessCodeCreate or
+/// siteAccessCodeRegenerate and nowhere else, ever, and only its SHA-256 is stored. A row read -- by
+/// an operator, out of a backup, in a log line -- hands nobody a working code. Unsalted is right
+/// because the input has 125 bits of entropy. A lost code is regenerated, never recovered.
+///
+/// A CODE OPENS EXACTLY ONE GATE, optionally for one subject. The gate says which part of the app
+/// opens, and the product's front end connects each code to its own gate and UI; the subject says
+/// whose, which is what one code per client needs without a code knowing anything about clients.
+///
+/// REGENERATING KEEPS THE ROW. The id, label, gate and subject survive and only the secret is
+/// replaced, so rows a product stamped with this id stay attached across a rotation and the operator
+/// reconfigures nothing. `generation` is what ends every session opened under the old secret.
+///
+/// THE TIER IS THE SITE'S, account arm included, so whoever manages a deployable sees every code
+/// minted against it: its owner, a cluster owner, and the people of the account it is tied to. THE
+/// OWNER IS THE SITE'S, never the operator who asked -- the integration writes as the site's owner
+/// (the bff borrows exactly that authority to find the row again), and the person behind each act is
+/// recorded separately in `lastChangedBy`.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="label", secondary="gate", tertiary="codeHint")
+concept siteAccessCode {
+  siteId         string!  @description("The v1:platform:site this code opens a part of. Required: a code naming no deployable is a credential for nothing, and the bff matches it against the site it just resolved before it looks at anything else -- so a code minted for one site opens nothing on another, and an unknown code and another site's code are the same refusal.")
+  ownerUserId    string!  @description("The v1:identity:user who owns the site this code belongs to -- the row-authz key. STAMPED by the write from the actor it runs as, never an argument, and the integration runs the write as the site's owner: this is the SITE'S owner and not the operator who asked. The bff finds the row again under the owner the edge stamped on a request, and a forged owner reads zero rows. The operator is `lastChangedBy`.")
+  accountId      string   @description("The v1:accounts:account organization the site is tied to, COPIED from the site at mint time, or empty for a site that has none. It is the composite tier's third arm: it admits the people of the account to the codes of the sites they manage exactly as it admits them to the sites, and the organization capability check reads it to judge an act on a code against the organization the call selected.")
+  label          string!  @description("The operator's name for the code, for instance `Client reviewers`. One to 80 characters, checked where the code is minted. NEVER SENT TO A VISITOR: it is the operator's note to self, and nothing in the visitor protocol reads it.")
+  gate           string!  @description("Which gate this code opens: the `gate` an @accessGate annotation declares on constructs of this deployable. Checked against the gates declared for the site's deployable when the code is minted, and RE-CHECKED on every call -- a gate whose domain was later dropped from the bundle simply stops opening anything, and the code keeps listing with an honest word instead of vanishing.")
+  subject        string   @description("Optional scope within the gate, stamped on a gated construct's `accessSubject` argument: whose details this code shows, for a product with one code per client. Empty means the gate is not scoped to anyone in particular. At most 120 characters. The code carries it and does not interpret it.")
+  codeHash       string!  @description("SHA-256, lowercase hex, of the NORMALIZED plain code: uppercased, O read as 0, I and L as 1, every character outside the alphabet dropped (component/memql/site_access_code.go). THE PLAIN CODE IS NEVER STORED and comes back exactly once. The bff hashes what a visitor typed and looks the row up by this and the site, so a leaked ROW is not a leaked code. Absent from siteAccessCodeView.")
+  codeHint       string!  @description("The last 4 symbols of the plain code, so an operator can tell two codes apart on the screen without anything that opens a door. Not a secret on its own: 4 symbols of 25 leave 105 bits unknown.")
+  generation     int!     @description("Starts at 1 and is incremented by every regeneration. A session records the generation it was opened under and is honoured only while that equals this, so regenerating ends every session of the old secret at that instant, without enumerating them and without a sweep.")
+  issuedAt       datetime!  @description("When THIS generation was minted. A regeneration moves it; changing the expiry does not.")
+  expiresAt      datetime!  @description("When the code stops opening the site. REQUIRED: the honest bound on a bearer credential is its lifetime, so 'never' is not offered and a long engagement picks a far date. Compared against the engine's clock at request time with no grace and no leeway, and moved by siteAccessCodeSetExpiry without changing the code -- which revives an expired one.")
+  revokedAt      datetime   @description("When an operator removed the code, or empty. A SOFT end: the row stays as the record that the code existed, for which gate and subject, and until when, which is the question asked after the fact. The Access codes panel hides a removed code; this field is how it knows to.")
+  lastUsedAt     datetime   @description("When a visitor last unlocked or used this code, or empty for one nobody has used. ABSENT MEANS NOBODY HAS USED IT, never 'a long time ago' -- sitePreviewGrant.lastSeenAt's rule, for its reason. Written by the bff at most once a minute per code and replica, so it answers 'has anybody used this' and is not a request counter. A regeneration does NOT clear it, because the row is the same code: whether the CURRENT secret has been used is `lastUsedAt` at or after `issuedAt`, the comparison a screen makes. A HEARTBEAT FIELD: it moves on its own, so it stays out of any list's change fingerprint.")
+  lastChangedBy  string!  @description("The v1:identity:user behind the latest OPERATOR act on this code: whoever minted, regenerated, re-timed or removed it. Supplied by the integration from the authenticated caller, never by the wire -- the write runs as the site's owner, so the actor is not the person who asked. A visitor's use is not an operator's act and does not move it.")
+
+  @relationship(type="parent", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", as="lastChangedBy", field="lastChangedBy", target=user, direction="outgoing")
+}
+
+/// AN ACCESS SESSION: one successful unlock of one code, in one browser (design record
+/// 2026-10-29-deployable-access-codes).
+///
+/// IT AUTHENTICATES NOBODY TO MEMQL. A session is not a JWT, names no actor, opens no stream and
+/// reaches no route but the one handler for the one site it was opened on -- app/auth_mode_edge.go
+/// records the decision this keeps: a hosted site's visitor carries no MemQL credential and never
+/// will. What it proves is narrower and is all the bff asks of it: the holder of this cookie
+/// presented a code that was valid at that moment.
+///
+/// IT IS A ROW SO THAT IT CAN END. Everything the bff needs to answer `ended` is a comparison against
+/// something that moves: the generation it was opened under against the code's, `endedAt`, and the
+/// code it points at, whose revocation and expiry are read on every request. THERE IS NO EXPIRY ON
+/// THE SESSION. It ends at the earlier of the code's expiry and 24 hours after `issuedAt`, both
+/// computed at request time, so shortening a code's expiry reaches a session already open and
+/// nothing has to sweep to be on time.
+///
+/// ONE ROW PER SUCCESSFUL UNLOCK, AND A FAILED ATTEMPT WRITES NOTHING. Anybody on the internet can
+/// post a wrong code; letting that fill the graph would hand them a write primitive, and the reply
+/// is one indistinguishable `invalid` for the same reason. So the rows are bounded by people who
+/// held a code. @retention(ttl="30d") is the engine's declared version lifetime for them: the code
+/// is the record that matters, and a session is only evidence of one unlock.
+///
+/// THE TIER HAS NO ACCOUNT ARM, unlike the code's. A session is the bff's bookkeeping about a visitor
+/// rather than something an operator manages, and the bff reads and writes it as the owner the edge
+/// stamped on the request -- so the owner arm decides it, and a cluster owner keeps the oversight arm.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d")
+@displayCard(primary="siteId", secondary="codeId", tertiary="issuedAt")
+concept siteAccessSession {
+  siteId       string!  @description("The v1:platform:site this session was opened on, copied from the code it was opened with. Required, and compared with the site the bff resolved for the request before anything else: a cookie is good for exactly one site, so a session replayed against another origin is `ended`.")
+  codeId       string!  @description("The v1:platform:siteAccessCode this session was opened with. The bff reads the code on every request and requires it neither removed nor past its expiry, which is how removing a code, or shortening its expiry, reaches a session that is already open.")
+  generation   int!     @description("The code's `generation` at the moment of unlock. The session is honoured only while it equals the code's current generation, so a regeneration ends every session opened under the old secret by changing one number on the code.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key, STAMPED from the actor the write runs as and never an argument. The bff writes a session under the owner the edge stamped on the request (a pointer it re-checks against the site), so this is the site's owner and never a visitor: a visitor has no identity to stamp.")
+  tokenHash    string!  @description("SHA-256, lowercase hex, of the plain `mql_acs_<43>` cookie value this session was opened with. THE PLAIN TOKEN IS NEVER STORED: it exists in the unlock reply's Set-Cookie and in the visitor's browser. The bff hashes the cookie it was presented and looks the row up by this, so a leaked ROW is not a leaked session. Absent from siteAccessSessionFull.")
+  issuedAt     datetime!  @description("When the unlock happened. The 24 hour cap on a session is counted from here.")
+  endedAt      datetime   @description("When the visitor left, or empty for a session nothing has ended. A SOFT end, as everywhere: the row stays, and an ended session resolves as `ended`. Expiry, regeneration and removal do not depend on it -- they are comparisons made at request time, so there is no sweep to run and nothing to be late.")
+
+  @relationship(type="parent", field="codeId", target=siteAccessCode, direction="outgoing")
+  @relationship(type="references", as="openedOn", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}
+
 @rowAuthz(clusterOwner)
 @displayCard(primary="hostname", secondary="siteId", tertiary="failureReason", status="status")
 concept customDomain {

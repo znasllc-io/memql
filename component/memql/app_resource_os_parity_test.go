@@ -145,7 +145,7 @@ func assertKnownResourcesNameEveryApp(t *testing.T, known []string) {
 			t.Errorf("knownResources does not list %s", resource)
 		}
 	}
-	for _, part := range []string{"deploy", "publish", "retire", "domains", "store"} {
+	for _, part := range []string{"deploy", "publish", "retire", "domains", "store", "access"} {
 		if !vocabularyHas(known, "app:deployables/"+part) {
 			t.Errorf("knownResources does not list app:deployables/%s; the Deployables part is not seeded on any role", part)
 		}
@@ -231,6 +231,17 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		// domains
 		"customDomainAdd":    "app:deployables/domains",
 		"removeCustomDomain": "app:deployables/domains",
+		// access (deployable access codes, design record 2026-10-29): the four
+		// operator acts, the gate listing the panel's Add form draws from, and
+		// the one client-callable read of the codes themselves. The server-only
+		// reads and writes beside them carry no part: nothing a person calls
+		// reaches them, and internal origin passes the gate anyway.
+		"siteAccessCodeCreate":     "app:deployables/access",
+		"siteAccessCodeRegenerate": "app:deployables/access",
+		"siteAccessCodeSetExpiry":  "app:deployables/access",
+		"siteAccessCodeRemove":     "app:deployables/access",
+		"siteAccessGates":          "app:deployables/access",
+		"siteAccessCodesForSite":   "app:deployables/access",
 		// pipelines (task memql#5498): one part per consequence
 		"pipelinesPreview":        "app:pipelines/connect",
 		"pipelinesConnect":        "app:pipelines/connect",

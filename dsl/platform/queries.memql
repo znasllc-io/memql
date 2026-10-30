@@ -450,6 +450,150 @@ query sitePreviewObservation sitePreviewObservationsForSite {
   sort    "observedAt", "desc"
 }
 
+// ---- Access codes (design record 2026-10-29-deployable-access-codes) ----
+//
+// TWO CONCEPTS, TWO TIERS, AND THE READS FOLLOW THEIR CONCEPT.
+//
+// v1:platform:siteAccessCode declares the SITE'S composite tier, account arm included
+// (owner, clusterOwner, account). So its reads are siteById's and not
+// sitePreviewGrantByToken's: NO CALLER TERM, because the third arm has no author spelling and a
+// restated `own || clusterOwner` is the tier minus one arm -- it would filter the people of the
+// account back out of the codes of the sites they manage, which is exactly the regression
+// memql#5303 removed from the site reads. tierDecidesTheRead (component/memql) records each, and
+// TestSiteAccessCodesAreReadableByTheAccountsPeopleAndNotByAStranger reads them against a real
+// database for the owner, a member of the account's group, a developer and a stranger.
+//
+// v1:platform:siteAccessSession declares owner and clusterOwner and nothing more, so its one read
+// STATES that tier as a top-level conjunct, the way the preview reads do.
+//
+// EVERY READ CARRIES @cache(0), and the three the bff reaches are the access decision itself.
+// Whether a code is regenerated, removed or past its expiry has to be read from the database on
+// the request that asks, or "the moment the 10 minutes pass" is false for as long as a cache holds
+// the answer. The v1:platform:siteAccess prefix is also on the result cache's denylist, so the
+// default path would not have cached them either; the annotation says it where a reader of the
+// query will see it.
+//
+// THE THREE LOOKUPS BEHIND THE VISITOR PROTOCOL ARE @serverOnly, and the doc on each says why the
+// obvious fix -- scoping to actor.userId -- is not the answer. The bff reaches them with internal
+// origin stamped, under the site owner's borrowed actor; the operator acts reach the by-id read the
+// same way under the CALLER's actor, left untouched. Either way the tier still decides every row.
+
+/// The codes minted against one deployable, newest first -- what the Access codes panel lists so an
+/// operator can see who could get in and end it.
+///
+/// EVERY CODE, INCLUDING THE ENDED ONES. Removal and expiry are shown rather than filtered, because
+/// the question this list answers after something unexpected happens is 'who could get in, and
+/// when', and a filtered list answers it for the live codes only. The OS hides a removed code and
+/// draws an expired one as expired; this read decides neither.
+///
+/// THE SHAPE CARRIES NO DIGEST. siteAccessCodeView is what the panel renders, and a code read here
+/// is a row, never a secret: the plain code exists in exactly one reply, at the moment of minting.
+///
+/// NO CALLER TERM, for siteById's reason: the tier's account arm has no author spelling, so a restated
+/// `own || clusterOwner` would filter the people of the account back out of the codes of the sites
+/// they manage. The part (`execute app:deployables/access`) names the surface and the tier names the
+/// rows; the organization boundary on an ACT is the shared gate's, in
+/// component/memql/organization_action_capabilities.go.
+@actor
+@cache(0)
+@requiresCapability("execute", "app:deployables/access")
+query siteAccessCode siteAccessCodesForSite {
+  args {
+    siteId  string!
+  }
+  filter  row => row.siteId == args.siteId
+  shape   siteAccessCodeView
+  sort    "row.createdAt", "desc"
+}
+
+/// Resolve one access code by its own row id -- what the regenerate, re-time and remove acts read
+/// before they write, so the gate an act runs behind admits the same people the list does.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: this concept's tier is the site's
+/// composite one, and its third arm is what admits the people of the account, so a caller term
+/// would hide the codes of every site the caller manages but does not personally own. The tier
+/// already decides the row for the caller the handler runs as. What the annotation withholds is the
+/// WIRE: nothing a person does needs one code's metadata by id past the list the capability
+/// guards, and a client-callable by-id read is a way around that capability for anyone who can
+/// guess or learn an id.
+@serverOnly
+@unbounded("access code by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query siteAccessCode siteAccessCodeById {
+  args {
+    codeId  string!
+  }
+  filter  row => row.id == args.codeId
+  shape   siteAccessCodeView
+}
+
+/// Resolve a code by the SHA-256 of what a visitor typed, for the bff (design record
+/// 2026-10-29-deployable-access-codes, section 6). THE FIRST HALF OF THE ACCESS DECISION.
+///
+/// THE DIGEST IS THE ARGUMENT, never the code. The bff normalizes what it was given, hashes it and
+/// asks this, so the plain code is in a request body and a visitor's clipboard and nowhere else.
+/// The SITE is an argument too, and it is the reason this cannot be a lookup by digest alone: a code
+/// minted for one deployable must open nothing on another, and a miss because the site differs is
+/// the same empty answer as a miss because the digest does.
+///
+/// IT IS NOT THE WHOLE DECISION. This answers 'is there a code with this digest on this site'. A
+/// removed code still answers, and so does an expired one: the handler compares the row against the
+/// clock and against `revokedAt`, because 'invalid' (no such code, a removed one, another site's)
+/// and 'expired' (only somebody holding the exact code can learn it) are different replies, and
+/// that is a decision about the reply rather than about which rows exist.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: this is the visitor's credential check, a
+/// visitor has no actor, and the handler runs it as the site's owner borrowed from the edge's
+/// stamp -- so the tier DOES scope it, to that owner, which is why a forged owner header reads
+/// zero rows. What the annotation withholds is the wire: a client-callable lookup by digest is an
+/// oracle for whether a guessed digest is a live code, for a caller who never held the code.
+@serverOnly
+@unbounded("access code by site and digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
+@actor
+@cache(0)
+query siteAccessCode siteAccessCodeByHash {
+  args {
+    siteId    string!
+    codeHash  string!
+  }
+  filter  row => row.siteId == args.siteId && row.codeHash == args.codeHash
+  shape   siteAccessCodeView
+}
+
+/// Resolve a session by the SHA-256 of the cookie presented, for the bff (design record
+/// 2026-10-29-deployable-access-codes, section 6). THE FIRST HALF OF EVERY REQUEST AFTER THE UNLOCK.
+///
+/// THE DIGEST IS THE ARGUMENT, never the token: the plain `mql_acs_<43>` is the visitor's cookie
+/// and nowhere else, so a read of the row hands nobody a working session. An ENDED session still
+/// answers -- `endedAt` is in the shape, and the handler turns it into `ended` and clears the
+/// cookie -- because a cookie with no row at all is also `ended`, and the two must not be told
+/// apart by a visitor.
+///
+/// IT IS NOT THE WHOLE DECISION either. Whether the session's generation still equals the code's,
+/// whether the code is removed or past its expiry, and whether 24 hours have passed are
+/// comparisons against the code and the clock, made in the handler on every request.
+///
+/// The owner tier is stated as a top-level conjunct, as sitePreviewGrantByToken states it, because
+/// this concept's tier has no account arm to make a restatement a narrowing.
+///
+/// @serverOnly, and actor.userId scoping is already here -- the filter IS owner-scoped, to the
+/// owner the edge stamped, which the bff re-checks against the site. What the annotation withholds
+/// is the wire: a client-callable lookup by digest is an oracle for whether a guessed token is a
+/// live session.
+@serverOnly
+@unbounded("access session by token digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
+@actor
+@cache(0)
+query siteAccessSession siteAccessSessionByToken {
+  args {
+    tokenHash  string!
+  }
+  filter  row => row.tokenHash == args.tokenHash
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   siteAccessSessionFull
+}
+
 // ---- Custom domains (epic memql#4805) ----
 //
 // v1:platform:customDomain is clusterOwner tier, so every read below states

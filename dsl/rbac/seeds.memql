@@ -713,6 +713,21 @@ seed capability cap-owner-execute-app-deployables-preview { roleSlug: "owner"  v
 @description("developer: the preview part of the Deployables app -- publish a candidate version, exercise it against a development store, open and end a preview (memql#5531).")
 seed capability cap-developer-execute-app-deployables-preview { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/preview"  predefined: true }
 
+// ---- app:deployables/access -- mint, regenerate, re-time and remove a deployable's access codes ----
+//
+// OWNER AND DEVELOPER, like every part above, and its own part rather than a borrowed one for the
+// reason `store` and `domains` are: it is a different CONSEQUENCE. Publishing a build changes what
+// the public is served; a code lets a named visitor into part of a site the public cannot see,
+// and ends them. A person may be trusted to deploy and to publish without being trusted to hand
+// somebody in. The part reaches only the codes -- not the bundle, the status or the settings,
+// which stay behind their own parts, and not another organization's codes, because the shared
+// organization gate judges every act against the organization the call selected
+// (component/memql/organization_action_capabilities.go).
+@description("owner: the access part of the Deployables app -- mint, regenerate, re-time and remove the access codes that open part of a deployable to a named visitor (deployable access codes, design record 2026-10-29).")
+seed capability cap-owner-execute-app-deployables-access { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/access"  predefined: true }
+@description("developer: the access part of the Deployables app -- mint, regenerate, re-time and remove the access codes that open part of a deployable to a named visitor (deployable access codes, design record 2026-10-29).")
+seed capability cap-developer-execute-app-deployables-access { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/access"  predefined: true }
+
 // ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
 //
 // OWNER AND DEVELOPER, like the parts above (Connect Shopify design, D3). It
