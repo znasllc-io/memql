@@ -34,14 +34,18 @@ EnvironmentFile=-__STATE_DIR__/../worker.env
 LimitNOFILE=4096
 TasksMax=128
 
-# Hardening directives. The headless worker doesn't need write
-# access to the system tree or other users' home dirs; tighten
-# accordingly. The GUI build (computer_use_embodied) drives the
-# user's desktop and may need to relax ProtectHome; the headless
-# install path uses the values below.
+# Hardening directives. Other users' home directories and the system tree stay
+# read-only, and the worker keeps no way to gain privileges. Its own home is
+# writable because the apps it drives keep their login there (~/.claude,
+# ~/.claude.json, ~/.codex), and refresh it on any call; a session's workspace
+# defaults to ~/.local/share/memql. MemoryDenyWriteExecute and RestrictNamespaces
+# are deliberately absent: the first kills Node.js, the second refuses the
+# bubblewrap sandbox a session's shell commands run in. See
+# cockpit/docs/local-apps.md. The GUI build (computer_use_embodied) drives the
+# user's desktop on top of this.
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=__STATE_DIR__
+ReadWritePaths=%h
 NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictSUIDSGID=yes
@@ -49,9 +53,7 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=yes
 RestrictRealtime=yes
-RestrictNamespaces=yes
 SystemCallArchitectures=native
 
 [Install]

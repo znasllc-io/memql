@@ -264,6 +264,24 @@ message AppInfo {
   string subscription = 4;
   // allowed mirrors `policy.yaml apps.allow` on the machine.
   bool allowed = 5;
+  // readiness is what the machine last MEASURED about whether this app can take
+  // a call: "ready", "signed_out", "out_of_usage" or "unknown". A cockpit that
+  // predates the field sends nothing, and that alone stays selectable, because
+  // refusing it would take every machine that has not upgraded out of routing. A
+  // cockpit that measures ALWAYS sends a word, "unknown" before its first check, and
+  // routing admits only "ready" from it (component/worker AppInfo.Runnable). A
+  // cockpit reporting signed_out also clears signed_in, so an engine that predates
+  // this field is right too.
+  string readiness = 6;
+  // readiness_checked_at is when that was measured, by a check or a real turn.
+  google.protobuf.Timestamp readiness_checked_at = 7;
+  // usage_resets_at is when the limit behind out_of_usage resets, absent when the
+  // app did not say. The machine owns the clock: it re-checks then and reports
+  // the change, so the engine compares nothing against this. It is for a person.
+  google.protobuf.Timestamp usage_resets_at = 8;
+  // readiness_detail is the machine's sentence for an answer that is not ready, for a
+  // person wondering why an app is not being used. It decides nothing.
+  string readiness_detail = 9;
 }
 
 message PlatformInfo {

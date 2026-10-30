@@ -54,14 +54,33 @@ func (p AppRoutingPolicy) allows(app string) bool {
 	return p.Mode == "auto" || p.Mode == "roundRobin" || p.Mode == app
 }
 
-// AppQuotaRefused means the app reported a quota refusal with zero model
-// usage, no served model and no structured result. Other failures may have
-// caused effects and are never safe to replay in another app.
+// AppQuotaRefused means the app refused a turn on its usage limit before any
+// work: no model served it, it produced no result and no recorded or dropped
+// action. Other failures may have caused effects and are never safe to replay
+// in another app. See integrations/agent/worker appPreWorkRefusal for the proof.
 type AppQuotaRefused struct{ Reason string }
 
 func (e *AppQuotaRefused) Error() string { return e.Reason }
-func (e *AppQuotaRefused) Code() string  { return "app_quota_refused" }
+func (e *AppQuotaRefused) Code() string  { return AppQuotaRefusalCode }
 func (e *AppQuotaRefused) Unwrap() error { return ErrAppUnavailable }
+
+// AppAuthRefused means the app refused a turn because its login is missing or
+// expired, under the same pre-work proof as AppQuotaRefused.
+//
+// IT IS A SEPARATE ANSWER FROM A USAGE LIMIT because the remedy and the scope
+// differ. A limit belongs to the account and passes with time; a login belongs
+// to one machine and stays broken until somebody signs in there.
+type AppAuthRefused struct{ Reason string }
+
+func (e *AppAuthRefused) Error() string { return e.Reason }
+func (e *AppAuthRefused) Code() string  { return AppAuthRefusalCode }
+func (e *AppAuthRefused) Unwrap() error { return ErrAppUnavailable }
+
+// The stable tags these refusals cross the app-call hop under.
+const (
+	AppQuotaRefusalCode = "app_quota_refused"
+	AppAuthRefusalCode  = "app_auth_refused"
+)
 
 func IsAppQuotaRefusal(message string) bool {
 	message = strings.ToLower(message)
@@ -71,6 +90,65 @@ func IsAppQuotaRefusal(message string) bool {
 		}
 	}
 	return false
+}
+
+// IsAppAuthRefusal reports whether a failed session's own words say its login
+// is missing or expired.
+//
+// The phrases are what Claude Code 2.1.304 and codex-cli 0.162.1 printed for an
+// expired login and an empty home (measured 2026-10-29, pinned by
+// TestIsAppAuthRefusalNamesTheMeasuredSentences). Neither app gives a code that
+// reaches this seam, only its sentence, so an unfamiliar sentence reads as an
+// ordinary failure: no failover, and no block. A word like "credential" or
+// "auth" alone is deliberately not a phrase, because MemQL's own MCP back-channel
+// credential fails in those words and no sign-in fixes that.
+func IsAppAuthRefusal(message string) bool {
+	message = strings.ToLower(message)
+	for _, phrase := range []string{"failed to authenticate", "oauth session expired", "not logged in", "run /login", "401 unauthorized", "unauthorized (401)", "could not be refreshed", "sign in again", "signing in again", "authentication required"} {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// appExclusionSeparator joins an app and a registration in an exclusion that
+// names one machine's app, where a bare id names the app on every machine.
+const appExclusionSeparator = "@"
+
+// AppSelectionExcluded reports whether an exclusion list rules out this app on
+// this machine, for the rest of one call.
+func AppSelectionExcluded(excluded []string, app, registration string) bool {
+	for _, entry := range excluded {
+		if entry == app || entry == app+appExclusionSeparator+registration {
+			return true
+		}
+	}
+	return false
+}
+
+// appRefusalExclusion says what a failed selection rules out for the rest of
+// the call, and ok=false when the failure may not move at all.
+//
+// The two pre-work refusals rule out different things because they are about
+// different things. A usage limit is the ACCOUNT'S, and the machines of one
+// owner are normally signed into one account, so trying each would spend a
+// session on each to hear the same refusal: the app is out. A login is ONE
+// MACHINE'S, so the same app on another machine may well answer, and that is
+// the common case of a fleet where one laptop's login lapsed.
+//
+// Everything else is refused here: the session may have caused effects, and
+// running it again would repeat them.
+func appRefusalExclusion(err error, selected AppSelection) (string, bool) {
+	var quota *AppQuotaRefused
+	if errors.As(err, &quota) {
+		return selected.AppId, true
+	}
+	var signedOut *AppAuthRefused
+	if errors.As(err, &signedOut) {
+		return selected.AppId + appExclusionSeparator + selected.RegistrationId, true
+	}
+	return "", false
 }
 
 type appSignal struct {
@@ -118,6 +196,56 @@ func (e *MemQLEngine) CheckMachineAppRouting(ctx context.Context, registration, 
 	if mapString(row, "revokedAt") != "" || features["apps"] == false || !AppRoutingPolicyFrom(row["appRouting"]).allows(app) {
 		return fmt.Errorf("this machine's app settings do not allow %s", app)
 	}
+	if appMeasuredNotReady(row, app) {
+		return fmt.Errorf("%s on this machine is not ready", app)
+	}
+	return nil
+}
+
+// appMeasuredNotReady reads what the machine last measured about an app off its
+// registration row: any word but "ready". No word at all is not a refusal, because
+// that is what a Cockpit predating the checks sends, and refusing it would take every
+// current machine out of routing (worker.AppInfo.Runnable has the rule and its end).
+//
+// THE ROW IS THE ONE ANSWER ACROSS REPLICAS. Selection runs on a replica that may
+// hold no stream for this machine, and the doors it was handed may be a beat older
+// than this read, so it asks here rather than trusting them. Regression test:
+// TestAppSelectionDBReadsReadinessOffTheRow.
+func appMeasuredNotReady(row map[string]any, app string) bool {
+	switch mapString(appRowEntry(row, app), "readiness") {
+	case "", "ready":
+		return false
+	}
+	return true
+}
+
+// appMeasures reports whether this machine measures this app at all. A refusal on
+// one that does waits for its next check rather than for the clock (appBlockedUntil).
+func appMeasures(row map[string]any, app string) bool {
+	return mapString(appRowEntry(row, app), "readiness") != ""
+}
+
+// appMeasuredReadyAt is when the machine last measured the app working, zero when
+// it has not said. A refusal older than this is over: buying a reset or signing in
+// writes no session row, and this is what ends the block without anybody pressing
+// anything. Regression test: TestAppRefusalDBClearsOnANewerMeasurement.
+func appMeasuredReadyAt(row map[string]any, app string) time.Time {
+	entry := appRowEntry(row, app)
+	if mapString(entry, "readiness") != "ready" {
+		return time.Time{}
+	}
+	at, _ := time.Parse(time.RFC3339, mapString(entry, "readinessCheckedAt"))
+	return at
+}
+
+func appRowEntry(row map[string]any, app string) map[string]any {
+	entries, _ := row["apps"].([]any)
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if mapString(entry, "id") == app {
+			return entry
+		}
+	}
 	return nil
 }
 
@@ -138,8 +266,11 @@ func (e *MemQLEngine) FilterAppDoors(ctx context.Context, doors []AppDoor) ([]Ap
 			if err != nil {
 				return nil, err
 			}
+			if appMeasuredNotReady(row, door.AppId) {
+				continue
+			}
 			settings, _ := row["appRouting"].(map[string]any)
-			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent)
+			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
 			if err != nil {
 				return nil, err
 			}
@@ -199,16 +330,10 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 			if req.AppId != "*" && req.AppId != door.AppId {
 				continue
 			}
-			skip := false
-			for _, app := range excluded {
-				if app == door.AppId {
-					skip = true
-				}
-			}
-			if skip {
-				continue
-			}
 			for _, machine := range door.Machines {
+				if AppSelectionExcluded(excluded, door.AppId, machine.RegistrationId) {
+					continue
+				}
 				if !machine.Online || (!machine.LocalStream && (localOnly || !machine.Forwardable)) || (req.Schema != nil && !machine.StructuredResult) {
 					continue
 				}
@@ -217,11 +342,11 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 					return AppSelection{}, err
 				}
 				features, _ := row["ownerFeatures"].(map[string]any)
-				if mapString(row, "revokedAt") != "" || features["apps"] == false {
+				if mapString(row, "revokedAt") != "" || features["apps"] == false || appMeasuredNotReady(row, door.AppId) {
 					continue
 				}
 				settings, _ := row["appRouting"].(map[string]any)
-				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent)
+				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
 				if err != nil {
 					return AppSelection{}, err
 				}

@@ -648,7 +648,8 @@ query appSession appRoutingEvidence {
 }
 
 /// Latest availability-changing receipt on this owner's machine, independent of
-/// the rolling usage window. Unrelated failures do not erase an exhausted quota.
+/// the rolling usage window. Unrelated failures do not erase an exhausted quota
+/// or an expired login.
 @actor
 @cache(0)
 query appSession appAvailabilityEvidence {
@@ -656,7 +657,7 @@ query appSession appAvailabilityEvidence {
     workerId string!
     app string!
   }
-  filter row => row.ownerUserId == actor.userId && row.workerId == args.workerId && row.app == args.app && (row.quotaRefused == true || row.status == "ended")
+  filter row => row.ownerUserId == actor.userId && row.workerId == args.workerId && row.app == args.app && (row.quotaRefused == true || row.authRefused == true || row.status == "ended")
   sort "endedAt", "desc"
   paginate 1
   shape workerAppRoutingEvidence

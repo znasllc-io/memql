@@ -4,9 +4,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/core/airoute"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // apps.go owns the local-app inventory a cockpit reports and the
@@ -48,6 +50,23 @@ const (
 	SubscriptionNone    = "none"
 	SubscriptionPresent = "present"
 
+	// AppReadinessReady and its siblings are the closed set of what a machine
+	// measured about an app (AppInfo.Readiness). See AppInfo.Runnable for which of
+	// them routing admits. Empty is a Cockpit that measures nothing, and unknown is
+	// one that measures and has no answer yet. A Cockpit that measures always sends
+	// a word, so the two cannot be confused.
+	AppReadinessReady      = "ready"
+	AppReadinessSignedOut  = "signed_out"
+	AppReadinessOutOfUsage = "out_of_usage"
+	AppReadinessUnknown    = "unknown"
+
+	// appReadinessRowRefresh is how far a check's time may run ahead of the row
+	// before the row moves for it alone. A free check runs every five minutes on
+	// every machine, and a row version each is a write nothing reads; a person
+	// reading "checked 20 minutes ago" loses nothing. A changed ANSWER ignores this
+	// and lands on the next beat, because that is a routing change.
+	appReadinessRowRefresh = 30 * time.Minute
+
 	// maxReportedApps bounds the inventory a single registration can
 	// carry, so a malformed cockpit cannot grow the row without limit.
 	maxReportedApps = 32
@@ -62,12 +81,98 @@ type AppInfo struct {
 	SignedIn     bool   `json:"signedIn"`
 	Subscription string `json:"subscription"`
 	Allowed      bool   `json:"allowed"`
+	// Readiness is what the machine last measured about this app. Strings, these
+	// three, because the struct is compared with != and travels through a row:
+	// ReadinessCheckedAt and UsageResetsAt are RFC 3339 in UTC, empty when absent.
+	Readiness          string `json:"readiness,omitempty"`
+	ReadinessCheckedAt string `json:"readinessCheckedAt,omitempty"`
+	UsageResetsAt      string `json:"usageResetsAt,omitempty"`
+	// ReadinessDetail is the machine's sentence for an answer that is not ready,
+	// bounded by maxAppFieldLen, so a person can see why an app is not being used.
+	ReadinessDetail string `json:"readinessDetail,omitempty"`
 }
 
 // Runnable reports whether the engine can drive this app: the id is
 // one the engine knows AND the machine will actually run it.
+//
+// READINESS IS A HARD FILTER. The owner: "I shouldn't be able to reach an app that is
+// not online, that meaning like does not, is not ready, is not connected." So only
+// "ready" is admitted, with one exception for a machine that cannot say.
+//
+// THE EXCEPTION IS A COCKPIT THAT PREDATES THE CHECKS, which sends no word at all.
+// Refusing it would take every current machine out of routing until it upgraded, so
+// it keeps the file-based answer it always had, reads as "Not checked" in Fleet, and
+// a call it refuses moves on. A Cockpit that measures always sends a word, "unknown"
+// included, so this exception can never admit an app a machine could not vouch for.
+// Delete it once no machine in a fleet reports silence.
+//
+// IT TAKES NO CLOCK. The machine re-checks at a reset and reports the change, so a
+// limit that has passed clears on the next beat, and a machine that went quiet is
+// offline and selected by nobody. An answer with no clock is the same on every
+// replica that reads the row, and labels derived from it cannot go stale by
+// themselves.
 func (a AppInfo) Runnable() bool {
-	return IsKnownAppId(a.Id) && a.Allowed && a.SignedIn
+	return IsKnownAppId(a.Id) && a.Allowed && a.SignedIn &&
+		(a.Readiness == "" || a.Readiness == AppReadinessReady)
+}
+
+// NotRunnableReason says why Runnable is false, in words for a refusal.
+func (a AppInfo) NotRunnableReason() string {
+	switch {
+	case a.Readiness == AppReadinessOutOfUsage && a.UsageResetsAt != "":
+		return a.Id + " is out of usage until " + a.UsageResetsAt
+	case a.Readiness == AppReadinessOutOfUsage:
+		return a.Id + " is out of usage"
+	case a.Readiness == AppReadinessSignedOut:
+		return a.Id + " is signed out"
+	case a.Readiness == AppReadinessUnknown && a.ReadinessDetail != "":
+		return a.Id + " could not be checked: " + a.ReadinessDetail
+	case a.Readiness == AppReadinessUnknown:
+		return a.Id + " could not be checked yet"
+	}
+	return a.Id + " is not allowed and signed in"
+}
+
+// NormalizeAppReadiness clamps a reported word to the closed set. Empty stays
+// empty, because silence is a different statement from "could not tell", and a word
+// from a newer cockpit reads as unknown: routing admits only what this engine can
+// read as ready.
+func NormalizeAppReadiness(s string) string {
+	switch s = strings.TrimSpace(s); s {
+	case "", AppReadinessReady, AppReadinessSignedOut, AppReadinessOutOfUsage, AppReadinessUnknown:
+		return s
+	}
+	return AppReadinessUnknown
+}
+
+// AppInfoFromMap decodes one app as a registration row stores it (appsAsMaps), and
+// reports false for an entry with no id. ONE DECODER FOR EVERY ROW READER, for
+// AppDescriptorFromMap's reason.
+func AppInfoFromMap(m map[string]any) (AppInfo, bool) {
+	id, _ := m["id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return AppInfo{}, false
+	}
+	version, _ := m["version"].(string)
+	subscription, _ := m["subscription"].(string)
+	signedIn, _ := m["signedIn"].(bool)
+	allowed, _ := m["allowed"].(bool)
+	readiness, _ := m["readiness"].(string)
+	checkedAt, _ := m["readinessCheckedAt"].(string)
+	resetsAt, _ := m["usageResetsAt"].(string)
+	detail, _ := m["readinessDetail"].(string)
+	return AppInfo{
+		Id:                 id,
+		Version:            version,
+		SignedIn:           signedIn,
+		Subscription:       NormalizeSubscription(subscription),
+		Allowed:            allowed,
+		Readiness:          NormalizeAppReadiness(readiness),
+		ReadinessCheckedAt: checkedAt,
+		UsageResetsAt:      resetsAt,
+		ReadinessDetail:    detail,
+	}, true
 }
 
 // IsKnownAppId reports whether id is in the engine's closed runnable
@@ -114,11 +219,15 @@ func AppsFromProto(in []*memqlv1.AppInfo) []AppInfo {
 		}
 		seen[id] = struct{}{}
 		out = append(out, AppInfo{
-			Id:           id,
-			Version:      truncate(strings.TrimSpace(a.GetVersion()), maxAppFieldLen),
-			SignedIn:     a.GetSignedIn(),
-			Subscription: NormalizeSubscription(a.GetSubscription()),
-			Allowed:      a.GetAllowed(),
+			Id:                 id,
+			Version:            truncate(strings.TrimSpace(a.GetVersion()), maxAppFieldLen),
+			SignedIn:           a.GetSignedIn(),
+			Subscription:       NormalizeSubscription(a.GetSubscription()),
+			Allowed:            a.GetAllowed(),
+			Readiness:          NormalizeAppReadiness(a.GetReadiness()),
+			ReadinessCheckedAt: appTimestamp(a.GetReadinessCheckedAt()),
+			UsageResetsAt:      appTimestamp(a.GetUsageResetsAt()),
+			ReadinessDetail:    truncate(strings.TrimSpace(a.GetReadinessDetail()), maxAppFieldLen),
 		})
 		if len(out) >= maxReportedApps {
 			break
@@ -126,6 +235,15 @@ func AppsFromProto(in []*memqlv1.AppInfo) []AppInfo {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Id < out[j].Id })
 	return out
+}
+
+// appTimestamp renders a reported time for the row, empty when absent. Second
+// precision, so one instant reported twice compares equal.
+func appTimestamp(ts *timestamppb.Timestamp) string {
+	if ts == nil || !ts.IsValid() {
+		return ""
+	}
+	return ts.AsTime().UTC().Truncate(time.Second).Format(time.RFC3339)
 }
 
 // AppLabels derives the routing labels for an inventory. Only
@@ -214,19 +332,41 @@ func mergeAppLabels(base map[string]string, apps []AppInfo) map[string]string {
 	return out
 }
 
-// appsEqual reports whether two inventories are identical. Used to
+// appsEqual reports whether two inventories say the same thing. Used to
 // skip a registration rewrite when a heartbeat re-reports what the
-// row already says.
+// row already says. A check that only moved its time inside
+// appReadinessRowRefresh says the same thing.
 func appsEqual(a, b []AppInfo) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		stored, reported := a[i], b[i]
+		if readinessCheckIsRecent(stored.ReadinessCheckedAt, reported.ReadinessCheckedAt) {
+			reported.ReadinessCheckedAt = stored.ReadinessCheckedAt
+			// A detail can carry a temporary path, so it travels with an answer
+			// or a refresh and never moves the row by itself.
+			reported.ReadinessDetail = stored.ReadinessDetail
+		}
+		if stored != reported {
 			return false
 		}
 	}
 	return true
+}
+
+// readinessCheckIsRecent reports whether a newer check time is close enough to the
+// stored one that the row need not move for it.
+func readinessCheckIsRecent(stored, reported string) bool {
+	storedAt, err := time.Parse(time.RFC3339, stored)
+	if err != nil {
+		return false
+	}
+	reportedAt, err := time.Parse(time.RFC3339, reported)
+	if err != nil {
+		return false
+	}
+	return reportedAt.Sub(storedAt) < appReadinessRowRefresh
 }
 
 func truncate(s string, n int) string {
