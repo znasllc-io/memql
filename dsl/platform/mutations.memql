@@ -2462,7 +2462,9 @@ mutation package recordPackageDeployables {
 /// analysis nobody deploys. A deploy writes it from its own report once the DSL it carries is staged
 /// and rolled -- or found unchanged, or there is none -- and before any site is published, so the
 /// window between the DSL going live and the list arriving fails closed rather than open. A rollback
-/// rewrites it from the deployment it returns to, after that deployment's DSL is back.
+/// rewrites it from the deployment it returns to, after that deployment's DSL is back or found
+/// already live -- and not at all when it puts no DSL back, so the list never describes DSL that is
+/// not running.
 /// recordPackageDeployables is the analysis's write and is kept apart from this one for that reason:
 /// it records what the manifest DECLARES, which is true of a tree whether or not anyone deploys it.
 ///

@@ -370,6 +370,97 @@ func TestARollbackRestoresTheDomainsOfTheDeploymentItReturnsTo(t *testing.T) {
 		}
 	})
 
+	// THE LIST DESCRIBES LIVE DSL, so it is written only when the earlier
+	// deployment's DSL is live again: restored now, or found already active. A
+	// cluster that cannot stage DSL cannot restore it, and says so the way a
+	// deploy does (stageAndRoll's refusal) -- before anything has moved, so the
+	// sites and the DSL are not left apart.
+	t.Run("a cluster with no staging surface refuses before anything moves", func(t *testing.T) {
+		h := newHarness(t, validPackage(), ownerPackage())
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{priorWith(recorded)}
+		h.deps.Stager = nil
+		err := rollback(h, mayDeployDsl())
+		if RefusalCode(err) != CodeSourceUnreadable || !strings.Contains(err.Error(), "no DSL staging surface") {
+			t.Fatalf("want a %s refusal naming the missing staging surface, got %v", CodeSourceUnreadable, err)
+		}
+		if len(h.publisher.repointed) != 0 || h.roller.rolls != 0 {
+			t.Fatalf("the refusal came after something moved: repointed %v, rolls %d", h.publisher.repointed, h.roller.rolls)
+		}
+		if writes := domainWrites(h); len(writes) != 0 {
+			t.Fatalf("a rollback that restored no DSL wrote the list %v", writes)
+		}
+	})
+
+	t.Run("a DSL found already live is as good as one restored", func(t *testing.T) {
+		h := newHarness(t, validPackage(), ownerPackage())
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{priorWith(recorded)}
+		h.stager.active = map[string]string{"acme": "packages/acme/0123456789abcdef/"}
+		if err := rollback(h, mayDeployDsl()); err != nil {
+			t.Fatalf("rollback: %v", err)
+		}
+		if h.roller.rolls != 0 || h.stager.written != 0 {
+			t.Fatalf("setup: the DSL was already the earlier deployment's, so nothing should have moved (rolls %d, pointer writes %d)", h.roller.rolls, h.stager.written)
+		}
+		if writes := domainWrites(h); len(writes) != 1 || writes[0] != `["acme","realns"]` {
+			t.Fatalf("the rollback wrote %v, want [\"acme\",\"realns\"]: the DSL is live, so its list is too", writes)
+		}
+	})
+
+	// A deployment that carried no DSL records no version to put back, so a
+	// rollback to it leaves the DSL exactly as it is, and the list is the DSL's:
+	// writing that deployment's own list over DSL a later deployment added would
+	// describe DSL that is not what is live.
+	t.Run("a deployment that carried no DSL leaves the DSL and the list as they are", func(t *testing.T) {
+		h := newHarness(t, spaOnlyPackage(), ownerPackage())
+		row := priorWith(map[string]any{"dslDomains": []any{}})
+		delete(row, "dslVersion")
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{row}
+		h.stager.active = map[string]string{"acme": "packages/acme/ffffffffffffffff/"}
+		if err := rollback(h, plainUser()); err != nil {
+			t.Fatalf("rollback: %v", err)
+		}
+		if len(h.publisher.repointed) != 1 {
+			t.Fatalf("setup: the site was not repointed: %v", h.publisher.repointed)
+		}
+		if h.roller.rolls != 0 || h.stager.written != 0 {
+			t.Fatalf("a rollback with no DSL to restore moved the DSL (rolls %d, pointer writes %d)", h.roller.rolls, h.stager.written)
+		}
+		if writes := domainWrites(h); len(writes) != 0 {
+			t.Fatalf("a rollback that restored no DSL wrote the list %v", writes)
+		}
+	})
+
+	// ...and the refusal above is about DSL, not about the cluster: a package
+	// that ships none rolls back on a cluster with no staging surface.
+	t.Run("a deployment that carried no DSL rolls back where nothing can stage DSL", func(t *testing.T) {
+		h := newHarness(t, spaOnlyPackage(), ownerPackage())
+		row := priorWith(map[string]any{"dslDomains": []any{}})
+		delete(row, "dslVersion")
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{row}
+		h.deps.Stager = nil
+		if err := rollback(h, plainUser()); err != nil {
+			t.Fatalf("a package with no DSL was refused a rollback for want of a staging surface: %v", err)
+		}
+		if len(h.publisher.repointed) != 1 {
+			t.Fatalf("the site was not repointed: %v", h.publisher.repointed)
+		}
+	})
+
+	// A recorded version that names no domain restored nothing, and nothing
+	// restored is not DSL found live.
+	t.Run("a DSL version that names no domain is not DSL that is live", func(t *testing.T) {
+		h := newHarness(t, validPackage(), ownerPackage())
+		row := priorWith(recorded)
+		row["dslVersion"] = "not-a-staged-prefix"
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{row}
+		if err := rollback(h, mayDeployDsl()); err != nil {
+			t.Fatalf("rollback: %v", err)
+		}
+		if writes := domainWrites(h); len(writes) != 0 {
+			t.Fatalf("a DSL version naming no domain was taken for live DSL: wrote %v", writes)
+		}
+	})
+
 	t.Run("a deployment that never went live restores nothing", func(t *testing.T) {
 		h := newHarness(t, validPackage(), ownerPackage())
 		row := priorWith(recorded)
