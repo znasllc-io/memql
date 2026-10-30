@@ -85,8 +85,9 @@ func newAccessStore(engine server.MemQLExecutor, logger *slog.Logger) *accessSto
 var _ server.AccessStore = (*accessStore)(nil)
 
 // AccessSite resolves a site UNDER the named owner's own actor, as shopperSiteReader
-// does. A miss is (nil, nil), and so is a site with no package deployable: it has no
-// gates to open, and a stamp naming one gets what any other unusable stamp gets.
+// does. A miss is (nil, nil). A site with no package deployable is not one: it was read,
+// it has no gates to open, and it comes back with a blank name for the handler to refuse,
+// because a miss is what the handler tells an operator is a site its owner cannot read.
 //
 // FRESH, both reads, because nothing in the access decision is cached (D11). siteById
 // and packageById are ordinary cached reads, and the handler compares what comes back:
@@ -106,16 +107,15 @@ func (s *accessStore) AccessSite(ctx context.Context, siteID, owner string) (*se
 	}
 	row := rows[0]
 	deployable, _ := row["packageDeployableName"].(string)
-	if deployable = strings.TrimSpace(deployable); deployable == "" {
-		return nil, nil
-	}
 	site := &server.AccessSite{
 		ID:             accessBareField(row, "id"),
 		OwnerUserID:    accessBareField(row, "ownerUserId"),
 		AccountID:      accessBareField(row, "accountId"),
-		DeployableName: deployable,
+		DeployableName: strings.TrimSpace(deployable),
 	}
-	site.PackageDomains = s.packageDomains(asOwner, site.ID, accessBareField(row, "packageId"))
+	if site.DeployableName != "" {
+		site.PackageDomains = s.packageDomains(asOwner, site.ID, accessBareField(row, "packageId"))
+	}
 	return site, nil
 }
 

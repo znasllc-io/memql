@@ -119,6 +119,17 @@ query accessBrief accessBriefsUnshaped {
   paginate 20
 }
 
+@accessGate(deployable="` + accessE2EDeployable + `", gate="dashboard")
+@actor
+query accessBrief accessBriefsCached {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+  shape accessBriefRow
+}
+
 @accessGate(deployable="some-other-deployable", gate="dashboard")
 @actor
 @cache(0)
@@ -206,6 +217,12 @@ func bootAccessSurface(t *testing.T) *accessSurfaceRig {
 	})
 
 	eng, db := workTemplateDBEngineAndDB(t)
+
+	// THE LOGS OF BOTH, at their most talkative, because "never logged" is a claim about
+	// every line and not only the handler's own. The engine's goes on before the
+	// integration is built from it, so what the operator's acts log is in it as well.
+	rig := &accessSurfaceRig{eng: eng, db: db, logs: &bytes.Buffer{}, engineLogs: &bytes.Buffer{}}
+	eng.Logger = slog.New(slog.NewTextHandler(rig.engineLogs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	for _, plugin := range memql.RegisteredPlugins() {
 		if plugin.Name == "siteAccess" {
 			provider, err := plugin.Factory(memql.PluginContext{Engine: eng, Logger: eng.Logger})
@@ -213,11 +230,6 @@ func bootAccessSurface(t *testing.T) *accessSurfaceRig {
 			require.NoError(t, eng.RegisterIntegration(provider))
 		}
 	}
-
-	// THE LOGS OF BOTH, at their most talkative, because "never logged" is a claim about
-	// every line and not only the handler's own.
-	rig := &accessSurfaceRig{eng: eng, db: db, logs: &bytes.Buffer{}, engineLogs: &bytes.Buffer{}}
-	eng.Logger = slog.New(slog.NewTextHandler(rig.engineLogs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	a := &App{
 		mux: http.NewServeMux(), engine: eng,
 		Logger:           slog.New(slog.NewTextHandler(rig.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
@@ -426,6 +438,19 @@ func (w *accessWorld) moveExpiry(codeID string, to time.Time) {
 	})
 }
 
+// storedCode reads a code's newest row off the table: what was stored is the question,
+// and no shape would answer it.
+func (w *accessWorld) storedCode(codeID string) map[string]any {
+	w.t.Helper()
+	var stored []byte
+	require.NoError(w.t, w.rig.db.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("payload").
+		Where("id = ?", "v1:platform:siteAccessCode:"+codeID).
+		OrderExpr(`"createdAt" DESC`).Limit(1).Scan(context.Background(), &stored))
+	var row map[string]any
+	require.NoError(w.t, json.Unmarshal(stored, &row))
+	return row
+}
+
 // send is one request from a browser, through the edge's stamp.
 func (w *accessWorld) send(method, path, body, token, site, owner string) *httptest.ResponseRecorder {
 	w.t.Helper()
@@ -488,6 +513,25 @@ func (w *accessWorld) call(token, construct string, args map[string]any) *httpte
 	body, err := json.Marshal(map[string]any{"call": construct, "args": args})
 	require.NoError(w.t, err)
 	return w.send(http.MethodPost, "/access/call", string(body), token, w.site, "v1:identity:user:"+w.owner)
+}
+
+// accessActingEngine is the real engine with something landing as the call finishes: it
+// does the work first, so the rows are in hand, and only then runs the act, once.
+type accessActingEngine struct {
+	inner  server.MemQLExecutor
+	after  func()
+	landed int
+}
+
+func (e *accessActingEngine) Execute(ctx context.Context, query string) (any, error) {
+	result, err := e.inner.Execute(ctx, query)
+	if e.after != nil {
+		after := e.after
+		e.after = nil
+		e.landed++
+		after()
+	}
+	return result, err
 }
 
 func requireAccessReply(t *testing.T, rec *httptest.ResponseRecorder, status int, body string) {
@@ -645,6 +689,9 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 	t.Run("regenerating ends the session at the next call", func(t *testing.T) {
 		w := newAccessWorld(t, rig)
 		codeID, code := w.mint(w.site, "dashboard", "")
+		// THE HANDLER SHUTS OUT A GENERATION BELOW 1, so a real one has to start there:
+		// what a mint and a regenerate write, read off the row.
+		require.EqualValues(t, 1, w.storedCode(codeID)["generation"], "a mint does not write generation 1")
 		token := w.open(code)
 		require.Equal(t, http.StatusOK, w.call(token, "accessBriefs", nil).Code)
 
@@ -653,6 +700,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		fresh, _ := reply["code"].(string)
 		require.NotEmpty(t, fresh)
 		require.NotEqual(t, code, fresh)
+		require.EqualValues(t, 2, w.storedCode(codeID)["generation"], "a regenerate does not move the generation on")
 
 		rec := w.call(token, "accessBriefs", nil)
 		requireAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
@@ -807,8 +855,17 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, memql.MaterializeRows(result), "the premise failed: the tier admits an owner outside the organization")
 
+		rig.logs.Reset()
 		rec := w.send(http.MethodGet, "/access/session", "", "", outsiders, "v1:identity:user:"+w.stranger)
 		requireAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
+
+		// AND AN OPERATOR CAN SEE WHY, since nothing else anywhere says so.
+		logged := rig.logs.String()
+		require.Contains(t, logged, "level=WARN")
+		require.Contains(t, logged, "the stamped owner cannot read this site")
+		require.Contains(t, logged, "subject.id="+outsiders)
+		require.Contains(t, logged, "subject.concept=v1:platform:site")
+		require.NotContains(t, logged, w.stranger, "the line names the owner the stamp named")
 	})
 
 	t.Run("a code whose copy of the account is out of date", func(t *testing.T) {
@@ -868,6 +925,58 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		unknown := w.unlockOn(otherSite, "00000-00000-00000-00000-00000")
 		requireAccessReply(t, unknown, http.StatusUnauthorized, `{"state":"invalid"}`)
 		requireAccessReply(t, w.unlockOn(otherSite, code), http.StatusUnauthorized, unknown.Body.String())
+	})
+
+	// THE ACTS THE REVIEW MEASURED, on the real store: each of them used to answer 200 with
+	// rows, because nothing re-read the session once the construct had run. The engine here
+	// is the real one, doing what it was asked and only then letting the act land, so the
+	// rows are really in hand when the handler comes to deliver them.
+	t.Run("an operator's act during a call delivers nothing", func(t *testing.T) {
+		for name, act := range map[string]func(w *accessWorld, codeID string){
+			"a regenerate": func(w *accessWorld, codeID string) {
+				w.builtin("siteAccessCodeRegenerate", map[string]any{"codeId": codeID})
+			},
+			"a removal": func(w *accessWorld, codeID string) {
+				w.builtin("siteAccessCodeRemove", map[string]any{"codeId": codeID})
+			},
+			"an expiry moved into the past": func(w *accessWorld, codeID string) {
+				w.moveExpiry(codeID, time.Now().Add(-time.Minute))
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				w := newAccessWorld(t, rig)
+				codeID, code := w.mint(w.site, "dashboard", "")
+				token := w.open(code)
+				const note = "a-note-this-visitor-may-no-longer-read"
+				noteID := "as-acting-" + w.suffix
+				requireAccessReply(t, w.call(token, "accessBriefRecord", map[string]any{"noteId": noteID, "note": note}),
+					http.StatusOK, `{"data":[{"id":"`+noteID+`"}]}`)
+
+				acting := &accessActingEngine{inner: &AccessEngineAdapter{Engine: rig.eng}}
+				logger := slog.New(slog.DiscardHandler)
+				handler := server.NewAccessHandler(acting, newAccessStore(&AccessEngineAdapter{Engine: rig.eng}, logger), logger, time.Now)
+				serve := func() *httptest.ResponseRecorder {
+					req := httptest.NewRequest(http.MethodPost, "/access/call", strings.NewReader(`{"call":"accessBriefs"}`))
+					req.Header.Set(server.AccessStampSiteHeader, w.site)
+					req.Header.Set(server.AccessStampOwnerHeader, "v1:identity:user:"+w.owner)
+					req.AddCookie(&http.Cookie{Name: server.AccessCookieName, Value: token})
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+					return rec
+				}
+
+				// The control: with nothing landing, this handler delivers the row.
+				rec := serve()
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Contains(t, rec.Body.String(), note, "the row is not there to be withheld, so this proves nothing")
+
+				acting.after = func() { act(w, codeID) }
+				rec = serve()
+				require.Equal(t, 1, acting.landed, "the act did not land during the call")
+				requireAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+				requireAccessCookieCleared(t, rec)
+			})
+		}
 	})
 
 	t.Run("what a session cannot reach is one 404", func(t *testing.T) {
@@ -1014,6 +1123,11 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		// Every path a refusal can take, the engine's own included: `note` wants a string,
 		// so this one is refused by the engine and with the statement in its hands.
 		w.call(token, "accessBriefRecord", map[string]any{"noteId": "as-refused-" + w.suffix, "note": map[string]any{"secret": secretValue}})
+		// A READ THE RESULT CACHE KEEPS, AND THEN A WRITE THAT EVICTS IT. The engine is nearly
+		// silent on this path, and this is the line it does write on it, at Debug: without
+		// this pair the capture below was empty, and its half of this test was true of an
+		// empty buffer whatever the engine did.
+		w.call(token, "accessBriefsCached", nil)
 		w.call(token, "accessBriefRecord", map[string]any{"noteId": "as-logged-" + w.suffix, "note": secretValue})
 		w.call(token, "accessBriefs", nil)
 		w.call(token, "accessBriefs", map[string]any{"bogus": secretValue})
@@ -1025,6 +1139,10 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		w.session(token)
 
 		handler, engine := rig.logs.String(), rig.engineLogs.String()
+		// THE ABSENCES BELOW MEAN NOTHING OF A LOG NOTHING WROTE TO. The engine's half has to
+		// have captured something from this flow, or "the engine's log holds no secret" is
+		// true of an empty buffer whatever the engine does.
+		require.NotEmpty(t, engine, "the engine logged nothing in this flow, so its half of this test proves nothing")
 		for name, secret := range map[string]string{
 			"the code":            code,
 			"the normalized code": memql.NormalizeAccessCode(code),

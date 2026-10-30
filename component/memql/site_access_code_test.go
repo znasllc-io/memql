@@ -425,3 +425,24 @@ func TestAccessSessionEnd(t *testing.T) {
 		})
 	}
 }
+
+// THE WIRE BETWEEN THE EDGE AND THE BFF, spelled once in this package and read by both.
+// A change here moves both ends together, so the only thing left that could go wrong is
+// the change itself: a rolling deploy has an old edge forwarding to a new bff, or the
+// reverse, for as long as it takes. So these are pinned as text, and renaming one is
+// something a person has to mean.
+func TestAccessSurfaceWireNamesArePinned(t *testing.T) {
+	for name, tc := range map[string]struct{ got, want string }{
+		"the base":        {AccessSurfacePathPrefix, "/access/"},
+		"unlock":          {AccessUnlockPath, "/access/unlock"},
+		"session":         {AccessSessionPath, "/access/session"},
+		"leave":           {AccessLeavePath, "/access/leave"},
+		"call":            {AccessCallPath, "/access/call"},
+		"the site stamp":  {AccessStampSiteHeader, "X-Memql-Access-Site"},
+		"the owner stamp": {AccessStampOwnerHeader, "X-Memql-Access-Owner"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", name, tc.got, tc.want)
+		}
+	}
+}

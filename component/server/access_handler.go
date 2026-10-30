@@ -15,6 +15,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/metrics"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // access_handler.go -- THE BFF HALF OF THE ACCESS SURFACE (design record
@@ -60,7 +61,9 @@ import (
 // with no grace and no leeway (D11, section 8). AccessSessionEnd is worked out from
 // the code's CURRENT expiry, so an operator moving it moves every open session
 // without a write to any of them, and nothing here writes when a session lapses: an
-// expiry is a comparison. The one write outside an unlock is a visitor leaving.
+// expiry is a comparison. The one write outside an unlock is a visitor leaving. A call
+// decides twice, ahead of the construct and again before its rows leave, because an end
+// can land while it runs.
 //
 // # One answer each, identical to the byte
 //
@@ -137,10 +140,22 @@ var (
 	accessBodyRefused     = []byte(`{"error":"refused"}`)
 )
 
+// accessSiteConcept is what a line about a site says it is about, so the Logs app can
+// narrow on it and an app's own Logs section can select it (logger.Subject).
+const accessSiteConcept = "v1:platform:site"
+
+// Why a stamp did not check out, as an operator reads it. Fixed text, because this is a
+// reason and not a report: nothing a request carried belongs in it.
+const (
+	accessReasonUnreadable = "the stamped owner cannot read this site, which is what an owner removed from the site's organization looks like"
+	accessReasonNotOwner   = "the stamped owner is not this site's owner"
+)
+
 // accessRoute is one of the four method and path pairs. One table, because the
 // routes this handler answers and the routes the verifier steps aside for
 // (AccessSelfAuthenticatedPaths) have to be the same four, and two lists that agree
-// by coincidence are the pair that drifts.
+// by coincidence are the pair that drifts. The paths are memql's, for the same reason
+// about the edge.
 type accessRoute struct {
 	method  string
 	path    string
@@ -149,10 +164,10 @@ type accessRoute struct {
 }
 
 var accessRoutes = []accessRoute{
-	{http.MethodPost, "/access/unlock", accessOpUnlock, accessSmallBodyBytes},
-	{http.MethodGet, "/access/session", accessOpSession, accessSmallBodyBytes},
-	{http.MethodPost, "/access/leave", accessOpLeave, accessSmallBodyBytes},
-	{http.MethodPost, "/access/call", accessOpCall, accessCallBodyBytes},
+	{http.MethodPost, memql.AccessUnlockPath, accessOpUnlock, accessSmallBodyBytes},
+	{http.MethodGet, memql.AccessSessionPath, accessOpSession, accessSmallBodyBytes},
+	{http.MethodPost, memql.AccessLeavePath, accessOpLeave, accessSmallBodyBytes},
+	{http.MethodPost, memql.AccessCallPath, accessOpCall, accessCallBodyBytes},
 }
 
 func accessRouteFor(method, path string) (accessRoute, bool) {
@@ -203,15 +218,18 @@ type AccessSession struct {
 //
 // A MISS IS (nil, nil), and that covers every way of not being allowed to see a row.
 // A read that FAILED is an error and never looks like a miss: it opens nothing, ends
-// nothing and clears nothing, so a database blip is not a visitor taken out.
+// nothing and clears nothing, so a database blip is not a visitor taken out. The one
+// exception is the second read of a call, with rows in hand: serveCall says why.
 //
 // AN ERROR MUST BE SAFE TO LOG, and that is part of this contract rather than
 // something the handler can check: the handler logs it, and the digests these
 // methods are handed must not be in it. integrations/siteaccess scrubs its errors for
 // exactly this.
 type AccessStore interface {
-	// AccessSite resolves the site UNDER owner's own actor, or a miss when they
-	// cannot read it or it has no package deployable.
+	// AccessSite resolves the site UNDER owner's own actor, or a miss when they cannot
+	// read it. A site with no package deployable is not a miss: it comes back with a
+	// blank DeployableName, and the handler refuses it, because it was read and has
+	// simply never had a code to open.
 	AccessSite(ctx context.Context, siteID, owner string) (*AccessSite, error)
 	// CodeByHash finds a code by the digest of what a visitor typed. A removed or
 	// expired code still answers; which of those means which reply is decided here.
@@ -319,8 +337,14 @@ func readAccessStamp(r *http.Request) (siteID, owner string, stamped bool) {
 // comparisons the checks on the stamp, rather than a second opinion about it.
 func (h *AccessHandler) resolveSite(ctx context.Context, siteID, owner string) (*AccessSite, error) {
 	site, err := h.store.AccessSite(ctx, siteID, owner)
-	if err != nil || site == nil {
+	if err != nil {
 		return nil, err
+	}
+	// The row has to be the site the stamp named, and not whatever the read turned up:
+	// site.ID is what every code and session below is compared with.
+	if site == nil || !sameBareID(site.ID, siteID) {
+		h.warnSiteClosed(siteID, accessReasonUnreadable)
+		return nil, nil
 	}
 	// THE CHECK ON THE OWNER, and there is no other. The tier's account arm admits a
 	// member of the organization, so a forged owner who is one has just read this row,
@@ -329,16 +353,28 @@ func (h *AccessHandler) resolveSite(ctx context.Context, siteID, owner string) (
 	// no stamp, since a stamp is never blank by here: a site with no owner cannot have
 	// codes (D6).
 	if !sameBareID(site.OwnerUserID, owner) {
-		h.logger.Warn("access surface: refusing a stamp that does not name this site's owner",
-			"component", "server", "site", siteID)
+		h.warnSiteClosed(site.ID, accessReasonNotOwner)
 		return nil, nil
 	}
-	// The row has to be the site the stamp named, and not whatever the read turned up:
-	// site.ID is what every code and session below is compared with.
-	if !sameBareID(site.ID, siteID) || strings.TrimSpace(site.DeployableName) == "" {
+	if strings.TrimSpace(site.DeployableName) == "" {
 		return nil, nil
 	}
 	return site, nil
+}
+
+// warnSiteClosed says why a site's codes are answering 404, which the reply never will.
+// A tied site whose owner was removed from its organization reads as zero rows under
+// that owner: every code it has stops working, correctly, and without this line nothing
+// anywhere tells the operator looking at them why.
+//
+// NOTHING A VISITOR SENT GOES IN THIS LINE, and neither does the owner the stamp named:
+// the reason is a constant, and the site is the edge's stamp or the row's own id. It is
+// said once per request, because there is no state here to say it once with, and only
+// what the edge's budgets let through can reach it.
+func (h *AccessHandler) warnSiteClosed(siteID, reason string) {
+	h.logger.Warn("access surface: this site's codes answer 404",
+		"component", "server", "reason", reason,
+		logger.Subject(accessSiteConcept, memql.BareShortId(siteID)))
 }
 
 // sameBareID compares two ids whatever their spelling. A view hands relationship
@@ -359,8 +395,14 @@ func sameBareID(a, b string) bool {
 // is locked for that: a code whose copy differs is treated as gone, here and for every
 // session opened with it, so the race leaves a code that opens nothing. Two blanks are
 // not a difference: a site with no organization has codes with no copy.
+//
+// A GENERATION STARTS AT 1, so anything below it is a generation that could not be read,
+// and it fails here as a zero expiry fails below. openSession only tests equality, and 0
+// on a code and 0 on its session compare equal: with both read as absent, a regenerate
+// would stop ending sessions and nothing would look wrong.
 func codeOpensSite(code *AccessCode, site *AccessSite) bool {
-	return !code.Revoked && sameBareID(code.SiteID, site.ID) && sameBareID(code.AccountID, site.AccountID)
+	return !code.Revoked && code.Generation >= 1 &&
+		sameBareID(code.SiteID, site.ID) && sameBareID(code.AccountID, site.AccountID)
 }
 
 // ---------------------------------------------------------------------------
@@ -603,10 +645,20 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, site *
 		return accessResultRefused
 	}
 
-	// AFTER THE INSTANT OF EXPIRY NO GATED DATA LEAVES (section 8), and the check ahead
-	// of the call has no opinion about how long the call took. A write that landed
-	// stays landed; what it says to the visitor is that they are out.
-	if !h.now().Before(open.end) {
+	// NOTHING LEAVES UNTIL THE SESSION HAS BEEN READ AGAIN (section 8). The read ahead of
+	// the call says nothing about what happened while it ran, and a regenerate, a removal,
+	// an expiry moved into the past or the instant of expiry itself can each land in that
+	// window. Measured before this was here: each of the three acts answered 200 with
+	// rows. So the whole decision is made again, which costs two point reads on every call
+	// and is what makes "taken out now" true of a query already running. A write that
+	// landed stays landed; what it says to the visitor is that they are out.
+	//
+	// ANYTHING BUT AN OPEN SESSION IS ONE ANSWER HERE, and that includes a read that
+	// failed, the one place a database blip takes somebody out. The rows are in hand and
+	// nothing can say they may leave, so they do not. Somebody taken out by a blip types
+	// their code again; somebody handed rows after their code was regenerated cannot be
+	// made not to have read them.
+	if _, state := h.openSession(r, site); state != "" {
 		clearAccessCookie(w)
 		writeAccessJSON(w, http.StatusUnauthorized, accessBodyEnded)
 		return accessResultEnded

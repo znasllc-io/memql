@@ -478,8 +478,8 @@ func TestUnlockForgivesTyping(t *testing.T) {
 		"I for one":               "K7Q4M-2XPDN-8RT3V-WJ6HC-9F0IA",
 		"L for one":               "K7Q4M-2XPDN-8RT3V-WJ6HC-9F0LA",
 		"lower case o, i and l":   "k7q4m-2xpdn-8rt3v-wj6hc-9foia",
-		"en dashes from an email": "K7Q4M–2XPDN–8RT3V–WJ6HC–9F01A",
-		"a zero-width space":      "K7Q4M-​2XPDN-8RT3V-WJ6HC-9F01A",
+		"en dashes from an email": "K7Q4M\u20132XPDN\u20138RT3V\u2013WJ6HC\u20139F01A",
+		"a zero-width space":      "K7Q4M-\u200b2XPDN-8RT3V-WJ6HC-9F01A",
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newAccessRig(t)
@@ -1292,19 +1292,135 @@ func TestCallAfterExpiryNeverReachesTheEngine(t *testing.T) {
 	}
 }
 
-// AFTER THE INSTANT OF EXPIRY NO GATED DATA LEAVES (section 8), and that includes a
-// query that was already running when the instant passed: the check before the call
-// has no opinion about how long the call took.
-func TestACallThatOutlivesTheSessionAnswersEnded(t *testing.T) {
-	rig := newAccessRig(t)
-	token := rig.open()
-	rig.engine.result = memql.NewResultWithOutput([]any{map[string]any{"id": "brief1", "title": "secret"}})
-	rig.engine.during = func() { rig.clock.at = accessT0.Add(time.Hour) }
+// NOTHING LEAVES UNTIL THE SESSION HAS BEEN READ AGAIN (section 8). The check ahead of
+// a call has no opinion about what happened while the call ran, so each of these lands
+// from inside Execute, with the rows already in the engine's hands: an operator's act,
+// the clock, and a second read that cannot say. Every one of them delivers nothing and
+// answers as a call after the end does.
+func TestAnEndLandingDuringACallDeliversNothing(t *testing.T) {
+	const secretRow = "a-row-this-visitor-may-no-longer-read"
+	for name, act := range map[string]func(r *accessRig, token string){
+		"a regenerate": func(r *accessRig, _ string) {
+			r.store.regenerate(accessTestCodeID, "ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ")
+		},
+		"a removal": func(r *accessRig, _ string) { r.store.codes[accessTestCodeID].Revoked = true },
+		"an expiry moved into the past": func(r *accessRig, _ string) {
+			r.store.codes[accessTestCodeID].ExpiresAt = accessT0.Add(-time.Minute)
+		},
+		"the clock reaching the expiry": func(r *accessRig, _ string) { r.clock.at = accessT0.Add(time.Hour) },
+		"the clock reaching the day's cap": func(r *accessRig, _ string) {
+			r.store.codes[accessTestCodeID].ExpiresAt = accessT0.Add(30 * 24 * time.Hour)
+			r.clock.at = accessT0.Add(24 * time.Hour)
+		},
+		"the visitor leaving in another tab": func(r *accessRig, token string) {
+			r.store.sessions[memql.AccessSessionTokenDigest(token)].Ended = true
+		},
+		"the session's row going": func(r *accessRig, token string) {
+			delete(r.store.sessions, memql.AccessSessionTokenDigest(token))
+		},
+		"the code's row going": func(r *accessRig, _ string) { delete(r.store.codes, accessTestCodeID) },
+		"the code's copy of the account going stale": func(r *accessRig, _ string) {
+			r.store.codes[accessTestCodeID].AccountID = "acct-the-site-left"
+		},
+		// THE ONE FAILED READ THAT TAKES SOMEBODY OUT. The rows are in hand and nothing can
+		// say they may leave. The first read of a call still answers 502, which is
+		// TestAStoreFailureOpensNothingAndEndsNothing.
+		"the second read of the session failing": func(r *accessRig, _ string) {
+			r.store.fail["SessionByTokenHash"] = errors.New("the store failed")
+		},
+		"the second read of the code failing": func(r *accessRig, _ string) {
+			r.store.fail["CodeByID"] = errors.New("the store failed")
+		},
+	} {
+		for _, construct := range []string{"deskBriefs", "deskNote"} {
+			t.Run(name+", on "+construct, func(t *testing.T) {
+				rig := newAccessRig(t)
+				token := rig.open()
+				rig.engine.result = memql.NewResultWithOutput([]any{map[string]any{"id": "brief1", "title": secretRow}})
+				rig.engine.during = func() { act(rig, token) }
+				args := map[string]any{}
+				if construct == "deskNote" {
+					args = map[string]any{"noteId": "note1", "title": "mine"}
+				}
 
-	rec := rig.call(token, "deskBriefs", nil)
+				rec := rig.call(token, construct, args)
 
-	assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
-	assertAccessCookieCleared(t, rec)
+				if len(rig.engine.calls) != 1 {
+					t.Fatalf("the construct did not run, so nothing was in hand: %v", rig.engine.calls)
+				}
+				assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+				assertAccessCookieCleared(t, rec)
+			})
+		}
+	}
+
+	// The control, and the price: with nothing landing the rows leave, and a call has read
+	// the session and its code twice each.
+	t.Run("with nothing landing, the rows leave after a second read", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.open()
+		rig.engine.result = memql.NewResultWithOutput([]any{map[string]any{"id": "brief1", "title": secretRow}})
+		sessions, codes := rig.store.called("SessionByTokenHash"), rig.store.called("CodeByID")
+
+		rec := rig.call(token, "deskBriefs", nil)
+
+		assertAccessReply(t, rec, http.StatusOK, `{"data":[{"id":"brief1","title":"`+secretRow+`"}]}`)
+		assertNoAccessCookie(t, rec)
+		if got := rig.store.called("SessionByTokenHash") - sessions; got != 2 {
+			t.Fatalf("the session was read %d times, want 2", got)
+		}
+		if got := rig.store.called("CodeByID") - codes; got != 2 {
+			t.Fatalf("the code was read %d times, want 2", got)
+		}
+	})
+}
+
+// A GENERATION STARTS AT 1, and an unreadable one comes back as 0. Equality is not enough:
+// 0 on a code and 0 on its session compare equal, so with both read as absent a regenerate
+// would stop ending sessions. It fails as a zero expiry does.
+func TestACodeOfNoGenerationOpensNothing(t *testing.T) {
+	for name, generation := range map[string]int{"zero": 0, "below zero": -1} {
+		t.Run(name, func(t *testing.T) {
+			t.Run("on unlock", func(t *testing.T) {
+				rig := newAccessRig(t)
+				rig.store.codes[accessTestCodeID].Generation = generation
+				rec := rig.unlock(accessTestCode)
+				assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"invalid"}`)
+				assertNoAccessCookie(t, rec)
+				if len(rig.store.created) != 0 {
+					t.Fatalf("a code of no generation wrote a session: %+v", rig.store.created)
+				}
+			})
+
+			t.Run("with its session of the same", func(t *testing.T) {
+				rig := newAccessRig(t)
+				token := rig.open()
+				rig.store.codes[accessTestCodeID].Generation = generation
+				rig.store.sessions[memql.AccessSessionTokenDigest(token)].Generation = generation
+
+				rec := rig.session(token)
+				assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+				assertAccessCookieCleared(t, rec)
+				rec = rig.call(token, "deskBriefs", nil)
+				assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+				if len(rig.engine.calls) != 0 {
+					t.Fatalf("reached the engine: %v", rig.engine.calls)
+				}
+			})
+		})
+	}
+
+	// The first generation is the first that counts: what a mint writes has to open.
+	t.Run("generation 1 opens", func(t *testing.T) {
+		rig := newAccessRig(t)
+		if rig.store.codes[accessTestCodeID].Generation != 1 {
+			t.Fatal("the fixture's code is not of generation 1, so this proves nothing")
+		}
+		token := rig.open()
+		if rec := rig.session(token); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestARefusedCallIsRefusedAndTheSessionStands(t *testing.T) {
@@ -1630,6 +1746,87 @@ func TestForgedOwnerReadsNothing(t *testing.T) {
 	})
 }
 
+// A SITE WHOSE OWNER WAS REMOVED FROM ITS ORGANIZATION reads as zero rows under that
+// owner, so all its codes answer 404. That fails closed and stays that way, and the 404
+// has to stay the one a stranger gets, but an operator has to be able to see why a site's
+// codes stopped working, and without this line nothing anywhere says so.
+func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
+	for name, tc := range map[string]struct {
+		arrange func(*accessRig)
+		reason  string
+	}{
+		"the stamped owner cannot read the site, as one removed from its organization cannot": {
+			arrange: func(r *accessRig) { r.store.admits = map[string]bool{} },
+			reason:  "the stamped owner cannot read this site",
+		},
+		"the site is read but the stamp does not name its owner": {
+			arrange: func(r *accessRig) { r.stamp[AccessStampOwnerHeader] = accessTestMember },
+			reason:  "the stamped owner is not this site's owner",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			token := rig.open()
+			rig.logs.Reset()
+			tc.arrange(rig)
+
+			const visitorWrote = "something-only-the-visitor-sent"
+			for op, rec := range map[string]*httptest.ResponseRecorder{
+				"unlock":  rig.unlock(visitorWrote),
+				"session": rig.session(token),
+				"leave":   rig.leave(token),
+				"call":    rig.call(token, visitorWrote, map[string]any{"window": visitorWrote}),
+			} {
+				t.Run(op, func(t *testing.T) {
+					assertAccessReply(t, rec, http.StatusNotFound, `{"error":"not_found"}`)
+					assertNoAccessCookie(t, rec)
+				})
+			}
+
+			logged := rig.logs.String()
+			if got := strings.Count(logged, "level=WARN"); got != 4 {
+				t.Fatalf("logged %d WARN lines for 4 requests:\n%s", got, logged)
+			}
+			for _, want := range []string{tc.reason, "subject.id=" + accessTestSite, "subject.concept=v1:platform:site"} {
+				if !strings.Contains(logged, want) {
+					t.Fatalf("the line does not carry %q:\n%s", want, logged)
+				}
+			}
+			for what, secret := range map[string]string{
+				"what the visitor sent": visitorWrote,
+				"the token":             token,
+				"the stamped owner":     accessTestMember,
+				"the token's digest":    memql.AccessSessionTokenDigest(token),
+			} {
+				if strings.Contains(logged, secret) {
+					t.Fatalf("the line holds %s:\n%s", what, logged)
+				}
+			}
+		})
+	}
+
+	// NOT EVERY 404 IS THIS ONE. A site with no package deployable has no codes to stop
+	// working, a request with no stamp is not about a site at all, and an operator told
+	// about those would learn to read past the one that matters.
+	t.Run("a site with no package deployable says nothing", func(t *testing.T) {
+		rig := newAccessRig(t)
+		rig.store.site.DeployableName = ""
+		assertAccessReply(t, rig.session(""), http.StatusNotFound, `{"error":"not_found"}`)
+		if logged := rig.logs.String(); logged != "" {
+			t.Fatalf("logged:\n%s", logged)
+		}
+	})
+
+	t.Run("a request with no stamp says nothing", func(t *testing.T) {
+		rig := newAccessRig(t)
+		rig.stamp = nil
+		assertAccessReply(t, rig.session(""), http.StatusNotFound, `{"error":"not_found"}`)
+		if logged := rig.logs.String(); logged != "" {
+			t.Fatalf("logged:\n%s", logged)
+		}
+	})
+}
+
 func TestOnlyTheFourRoutesAnswer(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/access/unlock"},
@@ -1669,7 +1866,9 @@ func TestOnlyTheFourRoutesAnswer(t *testing.T) {
 
 // A FAILED READ IS NOT AN ANSWER. It opens nothing, ends nothing and clears nothing:
 // a database blip must not read as "your code is wrong", and a cookie cleared on a
-// blip would take out a visitor whose session the row still honours.
+// blip would take out a visitor whose session the row still honours. The second read of
+// a call, with rows in hand, is the one exception, and it has its own cases in
+// TestAnEndLandingDuringACallDeliversNothing.
 func TestAStoreFailureOpensNothingAndEndsNothing(t *testing.T) {
 	failure := errors.New("the store failed")
 	for _, tc := range []struct {

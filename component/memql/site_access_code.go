@@ -288,6 +288,33 @@ const (
 	AccessStampOwnerHeader = "X-Memql-Access-Owner"
 )
 
+// The routes of the access surface on the bff: the base its handler mounts under and
+// the four paths the edge forwards to.
+//
+// HERE WITH THE STAMP'S NAMES, for the same reason. The edge forwards to these and the
+// bff answers them, neither can import the other, and each used to have its own table
+// held equal by eye. A path that drifted would not be an error anywhere: an exact route the
+// verifier no longer steps aside for is a 401 for every visitor, and a route the handler
+// no longer knows is a 404 for every visitor, and neither names the cause.
+const (
+	// AccessSurfacePathPrefix is the base the bff mounts the surface under. It is not
+	// the visitor's path: on a deployable's own origin the surface is /_memql/access,
+	// and the edge maps one to the other.
+	AccessSurfacePathPrefix = "/access/"
+
+	// AccessUnlockPath trades a code for a session.
+	AccessUnlockPath = AccessSurfacePathPrefix + "unlock"
+
+	// AccessSessionPath says whether the cookie presented is still good.
+	AccessSessionPath = AccessSurfacePathPrefix + "session"
+
+	// AccessLeavePath ends the session the cookie names.
+	AccessLeavePath = AccessSurfacePathPrefix + "leave"
+
+	// AccessCallPath runs a construct the session's gate reaches.
+	AccessCallPath = AccessSurfacePathPrefix + "call"
+)
+
 // hexSHA256 is how every digest in this file is spelled: lowercase hex, because
 // a stored digest and a presented one are compared as strings.
 func hexSHA256(s string) string {

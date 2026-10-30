@@ -253,6 +253,16 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 			continue
 		}
 		if _, reserved := reservedAccessArgSet[name]; !reserved {
+			// THE MISTAKE THAT LOOKS LIKE THE RIGHT ANSWER. The handler matches the reserved
+			// names exactly, so accessCodeID is an ordinary argument to it: it renders what
+			// the caller sent and stamps nothing. A filter on args.accessCodeID then reads
+			// as scoped to the code, and opens to any id a visitor cares to name.
+			if spelling := reservedAccessArgFolded(name); spelling != "" {
+				return AccessGateEntry{}, fmt.Errorf("%q declares the argument %s, which differs only in case from "+
+					"the reserved argument %s. The access handler stamps %s and treats %s as an ordinary argument, so "+
+					"the construct would get whatever a caller sent in place of the stamp. Declare it as %s",
+					fn.Name, name, spelling, spelling, name, spelling)
+			}
 			entry.Args = append(entry.Args, name)
 			continue
 		}

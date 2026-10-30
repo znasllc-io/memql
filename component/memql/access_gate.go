@@ -2,6 +2,7 @@ package memql
 
 import (
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -117,6 +118,18 @@ var reservedAccessArgSet = func() map[string]struct{} {
 	}
 	return set
 }()
+
+// reservedAccessArgFolded answers the reserved name that name is in another case, or ""
+// for a name that is not one. An exact match is not this function's business, since that
+// name IS the reserved argument: the caller has already tested for it.
+func reservedAccessArgFolded(name string) string {
+	for reserved := range reservedAccessArgSet {
+		if strings.EqualFold(name, reserved) {
+			return reserved
+		}
+	}
+	return ""
+}
 
 // AccessGateEntry is one gated construct, as the access handler needs it.
 type AccessGateEntry struct {

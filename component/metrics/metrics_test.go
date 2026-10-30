@@ -109,6 +109,35 @@ func TestSiteAccessRequestsAreExported(t *testing.T) {
 	}
 }
 
+// THE HELP IS WHAT AN ALERT IS WRITTEN FROM (signing_key_help_test.go). A visitor can move
+// call/refused at will, with a wrong argument type or a code with no subject on a gate
+// whose constructs use one, so a Help that called every refused the graph failing would
+// have an operator paged by a visitor.
+func TestSiteAccessHelpDoesNotCallEveryRefusalAFault(t *testing.T) {
+	SiteAccessRequest("call", "refused")
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := ""
+	for _, family := range families {
+		if family.GetName() == "memql_site_access_requests_total" {
+			help = family.GetHelp()
+		}
+	}
+	if help == "" {
+		t.Fatal("memql_site_access_requests_total is not exported, or has no Help")
+	}
+	for _, want := range []string{"call/refused", "DO NOT ALERT", "wrong argument type", "no subject", "unlock, session or leave"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the Help does not say %q: %s", want, help)
+		}
+	}
+	if strings.Contains(help, "any refused") {
+		t.Errorf("the Help still reads every refused as a fault: %s", help)
+	}
+}
+
 // readGauge reads a single-series gauge value out of the registry by name.
 func readGauge(t *testing.T, name string) float64 {
 	t.Helper()

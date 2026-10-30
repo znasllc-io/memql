@@ -183,7 +183,7 @@ var (
 			Namespace: namespace,
 			Subsystem: "site_access",
 			Name:      "requests_total",
-			Help:      "BFF NODES ONLY -- select app=\"bff\"; every other node type exports nothing here, because only the bff serves the access surface. Requests to a deployable's access-code routes, labelled by op (unlock, session, leave, call) and result (ok, invalid, expired, none, ended, not_found, invalid_args, refused), with no per-attempt rows behind it. A climb in unlock/invalid is somebody guessing or a code passed along wrongly, and 125 bits is what stops the guessing; a climb in any refused is the graph failing under the surface, which every visitor sees as an answer that is neither in nor out.",
+			Help:      "BFF NODES ONLY -- select app=\"bff\"; every other node type exports nothing here, because only the bff serves the access surface. Requests to a deployable's access-code routes, labelled by op (unlock, session, leave, call) and result (ok, invalid, expired, none, ended, not_found, invalid_args, refused), with no per-attempt rows behind it. A climb in unlock/invalid is somebody guessing or a code passed along wrongly, and 125 bits is what stops the guessing. DO NOT ALERT ON call/refused: a visitor can move it at will, because a construct refusing a wrong argument type, and a code with no subject on a gate whose constructs use one, count there beside a read that failed. refused on unlock, session or leave is the store failing under the surface, which a visitor sees as an answer that is neither in nor out, and that is the one to alert on.",
 		},
 		[]string{"op", "result"},
 	)

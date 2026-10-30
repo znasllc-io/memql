@@ -113,6 +113,10 @@ func TestAccessSiteMisses(t *testing.T) {
 		}
 	})
 
+	// A SITE WITH NO PACKAGE DEPLOYABLE IS READ, AND IT IS NOT A MISS. It has no codes to
+	// open, and the handler answers it with the one 404, but a miss is what the handler
+	// logs as a site its owner cannot read, and this is not that. Its package has nothing
+	// to say, so that read is not made.
 	for name, value := range map[string]any{"no package deployable": nil, "a blank one": "   "} {
 		t.Run(name, func(t *testing.T) {
 			row := accessFakeSiteRow()
@@ -121,10 +125,13 @@ func TestAccessSiteMisses(t *testing.T) {
 			} else {
 				row["packageDeployableName"] = value
 			}
-			graph := &accessFakeGraph{site: row}
+			graph := &accessFakeGraph{site: row, pkg: map[string]any{"dslDomains": []any{"desk"}}}
 			site, err := newAccessStore(graph, nil).AccessSite(context.Background(), "site1", "owner1")
-			if err != nil || site != nil {
+			if err != nil || site == nil {
 				t.Fatalf("site = %+v, err = %v", site, err)
+			}
+			if site.DeployableName != "" || len(site.PackageDomains) != 0 || site.OwnerUserID != "owner1" {
+				t.Fatalf("site = %+v", site)
 			}
 			if len(graph.reads) != 1 {
 				t.Fatalf("reads = %+v", graph.reads)

@@ -134,10 +134,10 @@ type accessRoute struct {
 }
 
 var accessRoutes = [...]accessRoute{
-	{http.MethodPost, accessPath, "/access/unlock", accessOpUnlock, accessSmallBodyBytes},
-	{http.MethodGet, accessPath, "/access/session", accessOpSession, accessSmallBodyBytes},
-	{http.MethodPost, accessLeavePath, "/access/leave", accessOpLeave, accessSmallBodyBytes},
-	{http.MethodPost, accessCallPath, "/access/call", accessOpCall, accessCallBodyBytes},
+	{http.MethodPost, accessPath, memql.AccessUnlockPath, accessOpUnlock, accessSmallBodyBytes},
+	{http.MethodGet, accessPath, memql.AccessSessionPath, accessOpSession, accessSmallBodyBytes},
+	{http.MethodPost, accessLeavePath, memql.AccessLeavePath, accessOpLeave, accessSmallBodyBytes},
+	{http.MethodPost, accessCallPath, memql.AccessCallPath, accessOpCall, accessCallBodyBytes},
 }
 
 // accessRouteFor reports which of the four pairs a request is, if it is one.

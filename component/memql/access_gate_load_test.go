@@ -262,6 +262,33 @@ tool deskTool {
 				"deskBriefs", "    accessCodeId int!\n", `row.count == args.accessCodeId`)},
 			refused: []string{"deskBriefs", "accessCodeId", "int", "Declare it as string"},
 		},
+		// A NAME THAT IS A RESERVED ONE IN ANOTHER CASE IS AN ORDINARY ARGUMENT TO THE
+		// HANDLER, which matches exactly: it would render what the caller sent and stamp
+		// nothing, under a name that reads as stamped. One row per reserved name.
+		{
+			name: "an argument spelled accessCodeID",
+			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
+				"    accessCodeID string!\n", `row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeID`)},
+			refused: []string{"deskBriefs", "accessCodeID", "reserved argument accessCodeId", "Declare it as accessCodeId"},
+		},
+		{
+			name: "an argument spelled siteID",
+			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
+				"    siteID string!\n", `row.ownerUserId == actor.userId && row.siteId == args.siteID`)},
+			refused: []string{"deskBriefs", "siteID", "reserved argument siteId", "Declare it as siteId"},
+		},
+		{
+			name: "an argument spelled accessgate",
+			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
+				"    accessgate string!\n", `row.ownerUserId == actor.userId && row.title == args.accessgate`)},
+			refused: []string{"deskBriefs", "accessgate", "reserved argument accessGate", "Declare it as accessGate"},
+		},
+		{
+			name: "an argument spelled AccessSubject, on a mutation",
+			domains: map[string]string{"desk": gateMutation(gateDashboard, "deskNote",
+				"    AccessSubject string!\n    title string!\n", "      accessSubject: args.AccessSubject\n")},
+			refused: []string{"deskNote", "AccessSubject", "reserved argument accessSubject", "Declare it as accessSubject"},
+		},
 		{
 			// Two file namespaces, one domain: the second construct binds to the
 			// desk concept through an import, so both belong to desk.

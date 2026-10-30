@@ -1119,7 +1119,7 @@ func ShopperSurfacePaths() []string {
 // only intended caller, and a front-door rule would publish an unauthenticated route
 // at api.<domain> with none of the edge's caps and rate limits in front of it.
 func AccessSurfacePaths() []string {
-	return pathsWithBase("/access/")
+	return pathsWithBase(memql.AccessSurfacePathPrefix)
 }
 
 // ArtifactPaths returns the paths the Library's two byte-bearing routes mount
