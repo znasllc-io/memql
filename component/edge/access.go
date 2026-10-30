@@ -521,11 +521,24 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // routes live at its own root under names of their own (/access/unlock, not
 // /access), and unlock and session share one inbound path, so no rule over the
 // inbound path alone could produce them.
+//
+// NO QUERY STRING TRAVELS. The protocol carries a code in the body of a POST and
+// has no query parameters at all, so whatever a caller put after the question mark
+// is dropped, and a code pasted into a URL goes no further than it has to: not
+// into the bff's request line, and so not into anything that records the URL of
+// what it served. The route is chosen by the path alone (accessRouteFor), so
+// nothing here depends on the query. ForceQuery is cleared as well as RawQuery,
+// since a bare "?" is carried by that flag and the request line would otherwise
+// end in one; the bff then sees the canonical path and nothing after it. (A query
+// configured on MEMQL_EDGE_API_TARGET goes too, which these four routes do not
+// need. The generic proxy is untouched and keeps the queries its routes use.)
 func accessStamp(route accessRoute, siteID, owner string) func(*httputil.ProxyRequest) {
 	return func(pr *httputil.ProxyRequest) {
 		pr.Out.Header.Set(AccessStampSiteHeader, siteID)
 		pr.Out.Header.Set(AccessStampOwnerHeader, owner)
 		pr.Out.URL.Path = route.upstream
 		pr.Out.URL.RawPath = ""
+		pr.Out.URL.RawQuery = ""
+		pr.Out.URL.ForceQuery = false
 	}
 }

@@ -31,8 +31,12 @@ import (
 
 // accessHit is one request the fake bff received.
 type accessHit struct {
-	method           string
-	path             string
+	method string
+	path   string
+	// requestURI is the request target exactly as the bff received it, query and
+	// all, and rawQuery is the part after the question mark.
+	requestURI       string
+	rawQuery         string
 	header           http.Header
 	body             string
 	contentLength    int64
@@ -56,7 +60,8 @@ func newAccessUpstream(t *testing.T) *accessUpstream {
 		body, _ := io.ReadAll(r.Body)
 		up.mu.Lock()
 		up.hits = append(up.hits, accessHit{
-			method: r.Method, path: r.URL.Path, header: r.Header.Clone(), body: string(body),
+			method: r.Method, path: r.URL.Path, requestURI: r.RequestURI, rawQuery: r.URL.RawQuery,
+			header: r.Header.Clone(), body: string(body),
 			contentLength: r.ContentLength, transferEncoding: r.TransferEncoding,
 		})
 		reply := up.reply
@@ -1720,7 +1725,9 @@ func TestAccessAnEncodedSlashIsTheSlashItDecodesTo(t *testing.T) {
 
 // A QUERY STRING DOES NOT CHOOSE THE ROUTE. The pair is the method and the PATH;
 // whatever follows the question mark is data, so a query that spells another
-// route's path does not become that route, and every check still applies.
+// route's path does not become that route, and every check still applies. What
+// becomes of the query afterwards is
+// TestAccessACodeInTheQueryStringTravelsNoFurther's.
 func TestAccessAQueryStringDoesNotChooseTheRoute(t *testing.T) {
 	cases := []struct{ name, method, target, forwarded string }{
 		{"on unlock", http.MethodPost, "/_memql/access?code=abc", "/access/unlock"},
@@ -1758,6 +1765,60 @@ func TestAccessAQueryStringDoesNotChooseTheRoute(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A CODE PASTED INTO A URL TRAVELS NO FURTHER THAN IT HAS TO. The protocol puts a
+// code in the body of a POST and has no query parameters at all, so whatever
+// follows the question mark is not the bff's business: it is dropped here, on all
+// four pairs, and the route still works. What reaches the bff is the canonical
+// request target and nothing after it, so a code in a query string is not in the
+// bff's request line, and so not in anything that records the URL of what it
+// served. An empty query goes too: no query at all, not even a bare question mark.
+func TestAccessACodeInTheQueryStringTravelsNoFurther(t *testing.T) {
+	queries := []struct{ name, query string }{
+		{"a code", "?code=SECRET"},
+		{"a code among others", "?x=1&code=SECRET&y=2"},
+		{"a code with no name", "?SECRET"},
+		{"an empty query", "?"},
+	}
+	for _, pair := range accessPairs {
+		for _, q := range queries {
+			t.Run(pair.name+"/"+q.name, func(t *testing.T) {
+				up := newAccessUpstream(t)
+				h := accessHandler(t, accessSite(nil), up.server.URL)
+
+				rec := serveAccess(h, accessRequest(pair.method, pair.path+q.query, ""))
+
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s %s%s = %d, want 200: the route must still work", pair.method, pair.path, q.query, rec.Code)
+				}
+				hit := up.only(t)
+				if hit.path != pair.forwarded {
+					t.Fatalf("the bff received path %q, want %q", hit.path, pair.forwarded)
+				}
+				if hit.rawQuery != "" || hit.requestURI != pair.forwarded {
+					t.Fatalf("the bff received request target %q with query %q, want exactly %q and no query",
+						hit.requestURI, hit.rawQuery, pair.forwarded)
+				}
+				if hit.header.Get(AccessStampSiteHeader) != "site1" || hit.header.Get(AccessStampOwnerHeader) != "user-owner" {
+					t.Fatalf("the request was not stamped with the resolved site and owner")
+				}
+			})
+		}
+	}
+
+	// The strip belongs to the access surface. Other routes carry queries that
+	// mean something to the bff, and the shared builder must not lose them.
+	t.Run("the generic proxy keeps its own queries", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(func(s *Site) { s.APIProxy = true }), up.server.URL)
+
+		serveAccess(h, accessRequest(http.MethodGet, "/_memql/ws?x=1", ""))
+
+		if hit := up.only(t); hit.requestURI != "/memql/ws?x=1" {
+			t.Fatalf("the bff received %q, want the generic proxy's /memql/ws?x=1", hit.requestURI)
+		}
+	})
 }
 
 // CASE IS NOT FOLDED. The route is an exact match, so a path in another case, or
