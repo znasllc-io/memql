@@ -2,12 +2,17 @@ package release
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
@@ -81,10 +86,32 @@ type carriedRunSpec struct {
 	noWorkRun             bool
 }
 
+var (
+	carriedEngineOnce sync.Once
+	carriedEngine     *memql.MemQLEngine
+)
+
+// sharedCarriedEngine is one engine for every fixture of this kind in the process.
+// A boot takes most of a second and these tables hold dozens of cases, so a boot per
+// case took this package past its 180s budget on the bounded CI runner (see
+// scripts/ci/db-test-budgets.yaml). The cases write their own rows under their own
+// pipeline, and their reads are fresh, so nothing carries between them. Its database
+// stays open for the process.
+func sharedCarriedEngine(t *testing.T) *memql.MemQLEngine {
+	t.Helper()
+	candidateTestDB(t) // Reachable, or the suite's usual skip or failure.
+	carriedEngineOnce.Do(func() {
+		carriedEngine = assemblyEngine(t, sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))))
+	})
+	if carriedEngine == nil {
+		t.Fatal("the shared fixture engine did not start")
+	}
+	return carriedEngine
+}
+
 func newCarriedDB(t *testing.T) *carriedDB {
 	t.Helper()
-	db := candidateTestDB(t)
-	engine := assemblyEngine(t, db)
+	engine := sharedCarriedEngine(t)
 	owner, err := candidateOwner(ownerCtx())
 	if err != nil {
 		t.Fatal(err)
