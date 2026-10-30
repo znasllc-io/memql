@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -62,23 +63,28 @@ import (
 // reads the session from the database on every request, so a verdict formed
 // here would be a second decision that could disagree with the first and could
 // not be better informed -- and a cookie the edge had an opinion about is one
-// it might cache. The cookie goes through untouched, and so does Set-Cookie
-// coming back, which is the only thing that can open or end a session.
+// it might cache. The cookie's value goes through as the browser sent it, and so
+// does Set-Cookie coming back, which is the only thing that can open or end a
+// session.
+//
+// IT DOES READ THE COOKIE'S NAME, on every way out of here, and that is the other
+// half of what this file owns. The cookie is a __Host- cookie, so it has Path=/ and a
+// browser sends it with every request to this host (memql.AccessCookieName says why it
+// has to be). So on these four routes the bff gets that cookie and nothing else a
+// browser holds, and on every other route it is taken out of what is forwarded
+// (accessStripCookie). Nothing the edge serves itself ever reads it.
 //
 // The stamp is a POINTER, not an assertion. The bff re-reads the site under the
 // owner it names and requires the row's own owner to equal it, so the most a
 // forged value can do is name a site that really has codes. Stripping first is
 // what lets it treat the header as the edge's alone.
 
-// The three inbound paths, on a deployable's own origin. They sit under the SAME
-// /_memql/ marker as every other reserved path, so the origin keeps one reserved
-// namespace; a bundle may not claim it and never could. The session cookie's Path
-// is /_memql/access, and a browser matches a cookie path by whole segments, so
-// the cookie travels with these requests and not with /_memql/accessories.
+// The three inbound paths, on a deployable's own origin, under the one the bff
+// and this file share. Exact, and the routes below take no query string.
 const (
-	accessPath      = "/_memql/access"
-	accessLeavePath = "/_memql/access/leave"
-	accessCallPath  = "/_memql/access/call"
+	accessPath      = memql.AccessInboundPath
+	accessLeavePath = memql.AccessInboundPath + "/leave"
+	accessCallPath  = memql.AccessInboundPath + "/call"
 )
 
 // The four operations. A fixed set, because the budget a request draws on is
@@ -91,20 +97,16 @@ const (
 )
 
 const (
-	// accessSmallBodyBytes caps unlock, leave and session. A code is 29
-	// characters and a leave says nothing, so a kilobyte is generous for all of
-	// them.
-	accessSmallBodyBytes int64 = 1 << 10
-
-	// accessCallBodyBytes caps a call, which carries a construct's arguments.
-	accessCallBodyBytes int64 = 64 << 10
-
 	// The budgets, per replica (see accessLimits): the design record's numbers,
 	// section 6. There is no environment override as the shopper's has, because
 	// nothing asks for one yet and a knob is cheap to add the day something does.
 	accessUnlockPerMinutePerAddress = 10
 	accessUnlockPerMinutePerSite    = 60
 	accessOtherPerMinutePerAddress  = 600
+
+	// accessIPv6KeyBits is how much of an IPv6 address names one budget (see
+	// accessClientAddress).
+	accessIPv6KeyBits = 64
 )
 
 // The headers the edge stamps and the bff reads are declared ONCE, in
@@ -135,10 +137,10 @@ type accessRoute struct {
 }
 
 var accessRoutes = [...]accessRoute{
-	{http.MethodPost, accessPath, memql.AccessUnlockPath, accessOpUnlock, accessSmallBodyBytes},
-	{http.MethodGet, accessPath, memql.AccessSessionPath, accessOpSession, accessSmallBodyBytes},
-	{http.MethodPost, accessLeavePath, memql.AccessLeavePath, accessOpLeave, accessSmallBodyBytes},
-	{http.MethodPost, accessCallPath, memql.AccessCallPath, accessOpCall, accessCallBodyBytes},
+	{http.MethodPost, accessPath, memql.AccessUnlockPath, accessOpUnlock, memql.AccessSmallBodyBytes},
+	{http.MethodGet, accessPath, memql.AccessSessionPath, accessOpSession, memql.AccessSmallBodyBytes},
+	{http.MethodPost, accessLeavePath, memql.AccessLeavePath, accessOpLeave, memql.AccessSmallBodyBytes},
+	{http.MethodPost, accessCallPath, memql.AccessCallPath, accessOpCall, memql.AccessCallBodyBytes},
 }
 
 // accessRouteFor reports which of the four pairs a request is, if it is one.
@@ -241,6 +243,12 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 // spelling (lower case, compressed, an IPv4-mapped address as plain IPv4), so one
 // machine is one key and it is the same key the peer fallback gives it.
 //
+// AN IPv6 ADDRESS KEYS ON ITS /64, and an IPv4 address on every bit. One connection is
+// routinely handed a whole /64 and may pick any address in it, so a key on the address
+// would be a fresh budget for the asking, which is the rotation the right-most entry
+// exists to stop. THE COST: a shared /64 shares a bucket, so everybody behind one
+// office's or one carrier's prefix shares ten unlocks a minute.
+//
 // EVERY HEADER LINE, last first, because a header may arrive as several lines
 // and an ingress may add its own rather than extend the caller's; reading only
 // the first would key on what the caller wrote. EMPTY ENTRIES ARE SKIPPED, so a
@@ -257,14 +265,28 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 func accessClientAddress(r *http.Request) string {
 	if entry := accessRightMostForwarded(r); entry != "" {
 		if addr, err := netip.ParseAddr(entry); err == nil && addr.Zone() == "" {
-			return addr.Unmap().String()
+			return accessAddressKey(addr)
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return strings.TrimSpace(r.RemoteAddr)
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	// The peer's own zone is nobody's to choose, and it says nothing about who this is.
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return accessAddressKey(addr.WithZone(""))
 	}
 	return host
+}
+
+// accessAddressKey is what one address's budget is kept under: an IPv4 address, an
+// IPv4-mapped one as the address it maps, and an IPv6 address as its /64.
+func accessAddressKey(addr netip.Addr) string {
+	addr = addr.Unmap()
+	if addr.Is6() {
+		return netip.PrefixFrom(addr, accessIPv6KeyBits).Masked().String()
+	}
+	return addr.String()
 }
 
 // accessRightMostForwarded is the right-most non-empty entry of X-Forwarded-For
@@ -532,13 +554,82 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // end in one; the bff then sees the canonical path and nothing after it. (A query
 // configured on MEMQL_EDGE_API_TARGET goes too, which these four routes do not
 // need. The generic proxy is untouched and keeps the queries its routes use.)
+//
+// THE ACCESS COOKIE, AND NO OTHER CREDENTIAL. The bff reads this one cookie and nothing
+// else a browser sends, so nothing else travels: not memql_auth, not a bearer, not a
+// cookie the deployable's own page set. Left on, they were a read a visitor could drive
+// (the session-revocation middleware looks up any bearer it finds) and a lockout nobody
+// could explain (a revoked sign-in answered a plain-text 401 on all four routes). The
+// shared rewrite has already taken the access cookie out of what it copied, so this reads
+// the request as it arrived, and the value goes through as it was sent.
 func accessStamp(route accessRoute, siteID, owner string) func(*httputil.ProxyRequest) {
 	return func(pr *httputil.ProxyRequest) {
 		pr.Out.Header.Set(AccessStampSiteHeader, siteID)
 		pr.Out.Header.Set(AccessStampOwnerHeader, owner)
+		pr.Out.Header.Del("Authorization")
+		accessSetCookies(pr.Out.Header, accessCookiePairs(pr.In.Header.Values("Cookie"), func(name string) bool {
+			return name == memql.AccessCookieName
+		}))
 		pr.Out.URL.Path = route.upstream
 		pr.Out.URL.RawPath = ""
 		pr.Out.URL.RawQuery = ""
 		pr.Out.URL.ForceQuery = false
 	}
+}
+
+// accessStripCookie takes the access cookie out of a request leaving the edge for
+// anywhere but the four routes, and leaves the rest of the header as it was.
+//
+// EVERY WAY OUT CALLS THIS. The cookie has Path=/, so a browser sends it with everything
+// (see the file note), and a session token has no business in a request to the identity
+// service, in a shopper's form or on the API bridge, where anything that records a header
+// would be recording a working session. There are two ways out of this package, the two
+// reverse proxies, and TestTheAccessCookieGoesNowhereElse walks every route through both.
+func accessStripCookie(out http.Header) {
+	lines := out.Values("Cookie")
+	if len(lines) == 0 {
+		return
+	}
+	accessSetCookies(out, accessCookiePairs(lines, func(name string) bool {
+		return name != memql.AccessCookieName
+	}))
+}
+
+// accessCookiePairs is the header lines with only the pairs keep accepts by name.
+//
+// THE SPELLING OF WHAT STAYS IS LEFT ALONE. A line with nothing to take out comes back as
+// it arrived, and from one with something to take out only that pair goes, so what is
+// somebody else's credential reaches its service in the bytes it was sent in. A line left
+// holding nothing is dropped. Names are matched as net/http reads them, trimmed and exact:
+// a differently cased or longer name is another cookie, to a browser as well. The value is
+// never looked at, and it can say what it likes.
+func accessCookiePairs(lines []string, keep func(name string) bool) []string {
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		pairs := strings.Split(line, ";")
+		retained := make([]string, 0, len(pairs))
+		for _, pair := range pairs {
+			name, _, _ := strings.Cut(pair, "=")
+			if keep(textproto.TrimString(name)) {
+				retained = append(retained, pair)
+			}
+		}
+		if len(retained) == len(pairs) {
+			kept = append(kept, line)
+			continue
+		}
+		if rest := textproto.TrimString(strings.Join(retained, ";")); rest != "" {
+			kept = append(kept, rest)
+		}
+	}
+	return kept
+}
+
+// accessSetCookies replaces a request's Cookie lines.
+func accessSetCookies(out http.Header, lines []string) {
+	if len(lines) == 0 {
+		out.Del("Cookie")
+		return
+	}
+	out["Cookie"] = lines
 }

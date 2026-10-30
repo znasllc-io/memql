@@ -1138,7 +1138,10 @@ func TestAccessClientAddress(t *testing.T) {
 	}{
 		{"no header is the peer", peer + ":40000", nil, peer},
 		{"a peer with no port is itself", peer, nil, peer},
-		{"an IPv6 peer", "[2001:db8::7]:40000", nil, "2001:db8::7"},
+		{"an IPv6 peer is its /64", "[2001:db8:1:2:3:4:5:7]:40000", nil, "2001:db8:1:2::/64"},
+		{"an IPv4-mapped peer is the IPv4 address", "[::ffff:198.51.100.7]:40000", nil, peer},
+		{"a zoned peer is its /64", "[fe80::1%en0]:40000", nil, "fe80::/64"},
+		{"a peer that is no address is itself", "not-an-address", nil, "not-an-address"},
 		{"one entry", peer + ":40000", []string{"203.0.113.9"}, "203.0.113.9"},
 		{"the right-most of several", peer + ":40000", []string{"10.66.0.1, 10.66.0.2, 203.0.113.9"}, "203.0.113.9"},
 		{"spaces around the entries", peer + ":40000", []string{"  10.66.0.1 ,   203.0.113.9  "}, "203.0.113.9"},
@@ -1172,10 +1175,18 @@ func TestAccessClientAddress(t *testing.T) {
 			[]string{"203.0.113.9, 198.18.0.1:8080"}, peer},
 
 		// The key is the canonical spelling, so one machine is one key.
-		{"IPv6 is lower case and compressed", peer + ":40000", []string{"2001:DB8:0:0:0:0:0:1"}, "2001:db8::1"},
+		{"IPv6 is lower case and compressed", peer + ":40000", []string{"2001:DB8:0:0:0:0:0:1"}, "2001:db8::/64"},
 		{"IPv6 spelled in full is the compressed one", peer + ":40000",
-			[]string{"2001:0db8:0000:0000:0000:0000:0000:0001"}, "2001:db8::1"},
+			[]string{"2001:0db8:0000:0000:0000:0000:0000:0001"}, "2001:db8::/64"},
 		{"an IPv4-mapped IPv6 address is the IPv4 address", peer + ":40000", []string{"::ffff:203.0.113.9"}, "203.0.113.9"},
+
+		// AN IPv6 ADDRESS IS ITS /64. One connection is routinely handed a whole /64 and
+		// can pick any of 2^64 addresses from it, so a key on the address is a fresh
+		// budget for the asking.
+		{"IPv6 keys on its /64", peer + ":40000", []string{"2001:db8:1:2:3:4:5:6"}, "2001:db8:1:2::/64"},
+		{"another address in that /64 is the same key", peer + ":40000", []string{"2001:db8:1:2:ffff:ffff:ffff:ffff"}, "2001:db8:1:2::/64"},
+		{"the next /64 is another key", peer + ":40000", []string{"2001:db8:1:3::1"}, "2001:db8:1:3::/64"},
+		{"an IPv4 address keeps every bit", peer + ":40000", []string{"203.0.113.9"}, "203.0.113.9"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1368,7 +1379,7 @@ func TestAccessSiteOfflineAnswersBeforeForwarding(t *testing.T) {
 				h := accessHandler(t, accessSite(func(s *Site) { s.Status = tc.status }), up.server.URL)
 
 				req := accessRequest(pair.method, pair.path, "")
-				req.Header.Set("Cookie", "memql_access=mql_acs_a-visitor-already-inside")
+				req.Header.Set("Cookie", memql.AccessCookieName+"=mql_acs_a-visitor-already-inside")
 				rec := serveAccess(h, req)
 
 				if rec.Code != tc.want {
@@ -1382,16 +1393,16 @@ func TestAccessSiteOfflineAnswersBeforeForwarding(t *testing.T) {
 	}
 }
 
-// THE EDGE NEVER READS THE COOKIE'S VALUE AND NEVER DECIDES ACCESS. It forwards
-// whatever the browser sent, including a value no session could have, and the
-// bff alone says what it means; and the bff's Set-Cookie, the one thing that
-// can open or end a session, reaches the browser exactly as written.
+// THE EDGE NEVER READS THE COOKIE'S VALUE AND NEVER DECIDES ACCESS. On the four routes
+// it forwards that one cookie as the browser sent it, including a value no session could
+// have, and the bff alone says what it means; and the bff's Set-Cookie, the one thing
+// that can open or end a session, reaches the browser exactly as written.
 func TestAccessCookiePassesThrough(t *testing.T) {
 	t.Run("the visitor's cookie reaches the bff", func(t *testing.T) {
 		up := newAccessUpstream(t)
 		h := accessHandler(t, accessSite(nil), up.server.URL)
 
-		const cookie = "memql_access=mql_acs_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; theme=dark"
+		const cookie = memql.AccessCookieName + "=mql_acs_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 		req := accessRequest(http.MethodGet, "/_memql/access", "")
 		req.Header.Set("Cookie", cookie)
 		serveAccess(h, req)
@@ -1406,13 +1417,13 @@ func TestAccessCookiePassesThrough(t *testing.T) {
 		h := accessHandler(t, accessSite(nil), up.server.URL)
 
 		req := accessRequest(http.MethodPost, "/_memql/access/call", `{"call":"x","args":{}}`)
-		req.Header.Set("Cookie", "memql_access=not-even-a-token")
+		req.Header.Set("Cookie", memql.AccessCookieName+"=not-even-a-token")
 		rec := serveAccess(h, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want the bff's answer", rec.Code)
 		}
-		if got := up.only(t).header.Get("Cookie"); got != "memql_access=not-even-a-token" {
+		if got := up.only(t).header.Get("Cookie"); got != memql.AccessCookieName+"=not-even-a-token" {
 			t.Fatalf("the bff received Cookie %q: the edge judged the value", got)
 		}
 	})
@@ -1430,11 +1441,11 @@ func TestAccessCookiePassesThrough(t *testing.T) {
 
 	t.Run("Set-Cookie reaches the visitor as written", func(t *testing.T) {
 		opening := &http.Cookie{
-			Name: "memql_access", Value: "mql_acs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-			Path: "/_memql/access", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+			Name: memql.AccessCookieName, Value: "mql_acs_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+			Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 		}
 		clearing := &http.Cookie{
-			Name: "memql_access", Value: "", Path: "/_memql/access", MaxAge: -1,
+			Name: memql.AccessCookieName, Value: "", Path: "/", MaxAge: -1,
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 		}
 		for name, cookie := range map[string]*http.Cookie{"opening": opening, "clearing": clearing} {
@@ -1453,6 +1464,241 @@ func TestAccessCookiePassesThrough(t *testing.T) {
 					t.Fatalf("Set-Cookie = %q, want exactly [%s]", got, cookie.String())
 				}
 			})
+		}
+	})
+}
+
+// accessCookieCases are the Cookie headers a request can arrive with, on the two sides of
+// the one rule: what the access surface forwards, and what everything else forwards.
+var accessCookieCases = []struct {
+	name           string
+	lines          []string
+	onlyAccess     []string // what the access surface hands the bff
+	everythingElse []string // what any other route hands its upstream
+}{
+	{
+		name:           "alone",
+		lines:          []string{"__Host-memql_access=TOKEN"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: nil,
+	},
+	{
+		name:           "first",
+		lines:          []string{"__Host-memql_access=TOKEN; memql_auth=A"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: []string{"memql_auth=A"},
+	},
+	{
+		name:           "last",
+		lines:          []string{"memql_auth=A; __Host-memql_access=TOKEN"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: []string{"memql_auth=A"},
+	},
+	{
+		name:           "between",
+		lines:          []string{"memql_auth=A; __Host-memql_access=TOKEN; theme=dark"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: []string{"memql_auth=A; theme=dark"},
+	},
+	{
+		name:           "on a line of its own",
+		lines:          []string{"memql_auth=A", "__Host-memql_access=TOKEN", "theme=dark"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: []string{"memql_auth=A", "theme=dark"},
+	},
+	{
+		name:           "sharing the second line",
+		lines:          []string{"memql_auth=A", "__Host-memql_access=TOKEN; theme=dark"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: []string{"memql_auth=A", "theme=dark"},
+	},
+	{
+		name:           "with nothing after its separator",
+		lines:          []string{"__Host-memql_access=TOKEN;"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: nil,
+	},
+	{
+		name:           "twice, which only a client that is not a browser sends",
+		lines:          []string{"__Host-memql_access=FIRST; theme=dark; __Host-memql_access=SECOND"},
+		onlyAccess:     []string{"__Host-memql_access=FIRST; __Host-memql_access=SECOND"},
+		everythingElse: []string{"theme=dark"},
+	},
+	{
+		// THE REST OF THE HEADER IS LEFT AS IT WAS, spelling included: this is somebody
+		// else's credential on its way to somebody else's service.
+		name:           "the rest of the header keeps its spelling",
+		lines:          []string{"a=1;b=\"2 3\";  __Host-memql_access=TOKEN;\tc=4"},
+		onlyAccess:     []string{"__Host-memql_access=TOKEN"},
+		everythingElse: []string{"a=1;b=\"2 3\";\tc=4"},
+	},
+	{
+		name:           "a header without it is untouched, whatever its spelling",
+		lines:          []string{"a=1;b=2;   c=3 ; d"},
+		onlyAccess:     nil,
+		everythingElse: []string{"a=1;b=2;   c=3 ; d"},
+	},
+	{
+		// EXACT NAMES. Each of these is another cookie, and a browser treats it as one,
+		// so none of them is what this rule is about in either direction. The value of the
+		// third merely says the name.
+		name:           "its neighbours are other cookies",
+		lines:          []string{"__host-memql_access=x; __Host-memql_access2=y; other=__Host-memql_access=z; memql_access=old"},
+		onlyAccess:     nil,
+		everythingElse: []string{"__host-memql_access=x; __Host-memql_access2=y; other=__Host-memql_access=z; memql_access=old"},
+	},
+	{
+		name:           "no cookie at all",
+		lines:          nil,
+		onlyAccess:     nil,
+		everythingElse: nil,
+	},
+}
+
+func accessCookieRequest(req *http.Request, lines []string) *http.Request {
+	for _, line := range lines {
+		req.Header.Add("Cookie", line)
+	}
+	return req
+}
+
+func requireCookieLines(t *testing.T, got http.Header, want []string) {
+	t.Helper()
+	lines := got.Values("Cookie")
+	if len(lines) != len(want) {
+		t.Fatalf("Cookie = %q, want %q", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("Cookie = %q, want %q", lines, want)
+		}
+	}
+}
+
+// THE COOKIE REACHES THE BFF ON THE FOUR PAIRS, ALONE. The bff reads this one cookie and
+// nothing else a browser sends: not a sign-in cookie and not a bearer. Forwarding them
+// made a visitor's own browser state a read on the access path (the session-revocation
+// middleware looks up any bearer it finds) and locked out a visitor holding a revoked
+// sign-in, with a plain-text 401 on every route.
+func TestAccessForwardsOnlyTheAccessCookie(t *testing.T) {
+	for _, pair := range accessPairs {
+		for _, tc := range accessCookieCases {
+			t.Run(pair.name+"/"+tc.name, func(t *testing.T) {
+				up := newAccessUpstream(t)
+				h := accessHandler(t, accessSite(nil), up.server.URL)
+
+				req := accessCookieRequest(accessRequest(pair.method, pair.path, ""), tc.lines)
+				req.Header.Set("Authorization", "Bearer a-token-the-bff-has-no-use-for")
+				serveAccess(h, req)
+
+				hit := up.only(t)
+				requireCookieLines(t, hit.header, tc.onlyAccess)
+				if got := hit.header.Values("Authorization"); len(got) != 0 {
+					t.Fatalf("Authorization reached the bff: %q", got)
+				}
+			})
+		}
+	}
+}
+
+// accessOutbound is every way a request leaves this edge for an upstream that is not one
+// of the four pairs, and the proof it took that way. If a route is added, it goes here.
+var accessOutbound = []struct {
+	name         string
+	method, path string
+	site         func(*Site)
+	arrange      func(*http.Request)
+	wantPath     string
+}{
+	// The generic proxy, newBFFProxy with no stamp.
+	{name: "the bridge", method: http.MethodGet, path: "/_memql/ws", site: func(s *Site) { s.APIProxy = true }, wantPath: "/memql/ws"},
+	{name: "the bridge, upgrading", method: http.MethodGet, path: "/_memql/ws", site: func(s *Site) { s.APIProxy = true },
+		arrange: func(r *http.Request) {
+			r.Header.Set("Connection", "Upgrade")
+			r.Header.Set("Upgrade", "websocket")
+		}, wantPath: "/memql/ws"},
+	{name: "a Library upload", method: http.MethodPost, path: "/_memql/artifacts", site: func(s *Site) { s.APIProxy = true }, wantPath: "/artifacts"},
+	{name: "a Library download", method: http.MethodGet, path: "/_memql/artifacts/a1/content", site: func(s *Site) { s.APIProxy = true }, wantPath: "/artifacts/a1/content"},
+	{name: "the bff's own spelling of unlock", method: http.MethodPost, path: "/_memql/access/unlock", site: func(s *Site) { s.APIProxy = true }, wantPath: "/memql/access/unlock"},
+	{name: "the bff's own spelling of session", method: http.MethodGet, path: "/_memql/access/session", site: func(s *Site) { s.APIProxy = true }, wantPath: "/memql/access/session"},
+	{name: "the wrong method on the surface's path", method: http.MethodDelete, path: "/_memql/access", site: func(s *Site) { s.APIProxy = true }, wantPath: "/memql/access"},
+	{name: "a segment under the surface's path", method: http.MethodPost, path: "/_memql/access/x", site: func(s *Site) { s.APIProxy = true }, wantPath: "/memql/access/x"},
+	{name: "a longer first segment", method: http.MethodPost, path: "/_memql/accessories", site: func(s *Site) { s.APIProxy = true }, wantPath: "/memql/accessories"},
+
+	// The shopper surface, newBFFProxy with its own stamp.
+	{name: "a shopper's form", method: http.MethodPost, path: "/_memql/forms/reviews/review",
+		site: func(s *Site) { s.ShopperForms = true }, wantPath: "/forms/reviews/review",
+		arrange: func(r *http.Request) { r.Header.Set("Content-Type", "application/x-www-form-urlencoded") }},
+	{name: "a shopper's read", method: http.MethodGet, path: "/_memql/reads/reviews/recent",
+		site: func(s *Site) { s.ShopperForms = true }, wantPath: "/reads/reviews/recent"},
+
+	// The identity proxy, which has its own ReverseProxy.
+	{name: "the token endpoint", method: http.MethodPost, path: "/oauth/token", wantPath: "/oauth/token"},
+	{name: "a refresh", method: http.MethodPost, path: "/auth/refresh", wantPath: "/auth/refresh"},
+	{name: "a sign-out", method: http.MethodPost, path: "/auth/logout", wantPath: "/auth/logout"},
+	{name: "the keys", method: http.MethodGet, path: "/.well-known/jwks.json", wantPath: "/.well-known/jwks.json"},
+	{name: "GitHub's completion", method: http.MethodGet, path: "/auth/github/complete", wantPath: "/auth/github/complete"},
+	{name: "Shopify's completion", method: http.MethodGet, path: "/auth/shopify/complete", wantPath: "/auth/shopify/complete"},
+	{name: "a native identity page's JSON", method: http.MethodGet, path: "/login", wantPath: "/login",
+		arrange: func(r *http.Request) { r.Header.Set("Accept", "application/vnd.memql.identity+json") }},
+	{name: "a passkey step", method: http.MethodPost, path: "/auth/webauthn/login/begin", wantPath: "/auth/webauthn/login/begin"},
+}
+
+// BECAUSE THE COOKIE NOW REACHES EVERY PATH ON THE ORIGIN, nothing else may carry it on.
+// A __Host- cookie has to have Path=/, so a browser sends it with every request to this
+// host, and the only thing keeping the session token from the identity service, from a
+// shopper's form and from whatever else the proxy reaches is this. Everything else in the
+// header is somebody else's credential, on its way to the service that wants it.
+func TestTheAccessCookieGoesNowhereElse(t *testing.T) {
+	for _, route := range accessOutbound {
+		for _, tc := range accessCookieCases {
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				up := newAccessUpstream(t)
+				site := accessSite(route.site)
+				h := NewHandler(Options{
+					Resolver:       staticResolver{site: site},
+					Opener:         mapOpener(map[string]string{"index.html": "ROOT"}),
+					Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+					APITarget:      up.server.URL,
+					IdentityTarget: up.server.URL,
+				})
+
+				req := accessCookieRequest(accessRequest(route.method, route.path, ""), tc.lines)
+				if route.arrange != nil {
+					route.arrange(req)
+				}
+				serveAccess(h, req)
+
+				hit := up.only(t)
+				if hit.path != route.wantPath {
+					t.Fatalf("reached the upstream as %q, want %q: this is not the path under test", hit.path, route.wantPath)
+				}
+				requireCookieLines(t, hit.header, tc.everythingElse)
+			})
+		}
+	}
+
+	// A BEARER IS NOT THE ACCESS SURFACE'S TO TAKE EVERYWHERE. Only the four routes drop
+	// it: the identity proxy and the API bridge are what it is for.
+	t.Run("everything else keeps its bearer", func(t *testing.T) {
+		for _, route := range accessOutbound {
+			up := newAccessUpstream(t)
+			h := NewHandler(Options{
+				Resolver:       staticResolver{site: accessSite(route.site)},
+				Opener:         mapOpener(map[string]string{"index.html": "ROOT"}),
+				Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+				APITarget:      up.server.URL,
+				IdentityTarget: up.server.URL,
+			})
+			req := accessRequest(route.method, route.path, "")
+			if route.arrange != nil {
+				route.arrange(req)
+			}
+			req.Header.Set("Authorization", "Bearer somebody-elses")
+			serveAccess(h, req)
+			if got := up.only(t).header.Get("Authorization"); got != "Bearer somebody-elses" {
+				t.Fatalf("%s: Authorization = %q", route.name, got)
+			}
 		}
 	})
 }

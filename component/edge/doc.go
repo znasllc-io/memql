@@ -81,6 +81,9 @@
 // open a stream with, and only an HTTP response can set an HttpOnly cookie, so
 // this is an owner-approved HTTP exception (2026-10-29). The edge routes, caps,
 // rate-limits and stamps the site and owner it resolved; it never reads the
-// session cookie and never decides access, which the bff does on every request
-// (design record docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md).
+// session cookie's value and never decides access, which the bff does on every
+// request (design record docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md).
+// It does read the cookie's name: a __Host- cookie reaches every path on the origin,
+// so these four routes forward it and no other credential, and every other way out
+// of this package removes it.
 package edge
