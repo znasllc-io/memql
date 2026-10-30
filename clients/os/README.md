@@ -956,11 +956,20 @@ the engine's clock on every request, so these words only say what a row says.
   click of a double-click on Create must not press what the first one brought and
   throw away a code shown once. It is the one loud thing on the surface.
 - **THE DIALOG WAITS WHILE IT HOLDS THE ONLY COPY.** The panel tells the dialog
-  (`DetailDialog`'s `busy`) when a write is out or a new code is on screen, and
-  Close and Escape do nothing until it is not. Closed with a write out, the reply
-  lands in nothing: the old code is dead and the new one was never seen. Closed
-  over a new code, that code is gone for good and a regenerate is the only
-  recovery. Done is the way out, which costs one deliberate click.
+  (`DetailDialog`'s `busy`, through `onBusyChange`) when a write is out or a new
+  code is on screen, and Close is disabled and Escape waits until it is not.
+  Closed with a write out, the reply lands in nothing: the old code is dead and
+  the new one was never seen. Closed over a new code, that code is gone for good
+  and a regenerate is the only recovery. Done is the way out, which costs one
+  deliberate click.
+- **A LOST REPLY IS NOT A REFUSAL.** A write whose reply never came
+  (`isTransportInterruption`), or came without the code, ends `unknown`
+  (`WriteOutcome`) rather than `refused`. The panel says in words of its own
+  (`UNANSWERED`) that it may have been saved, because the socket's mean nothing to
+  a person, then closes the form or the question and puts the list back in view.
+  A refused write leaves its draft waiting for another try. An unknown one must
+  not: trying again from a draft could mint a second credential beside one nobody
+  holds, so the list is what gets looked at next.
 - **NOTHING HERE IS A LIVE FEED.** Neither concept publishes graph events (D14),
   so a collection over one would draw a list that never moves. Both lists are
   builtins (the shared organization gate judges builtins and mutations, never a

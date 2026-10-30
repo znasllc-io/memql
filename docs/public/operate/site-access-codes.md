@@ -114,7 +114,10 @@ copy control and a notice that this is the only time it is shown. It is held in
 the page's memory alone, and dropped when the next act starts. While it is on
 screen, or a write is still out, the dialog's Close and Escape wait and **Done is
 the way out**, because what the panel holds is the only copy. Lose it and the
-answer is Regenerate, never recovery: the cluster does not have it.
+answer is Regenerate, never recovery: the cluster does not have it. If the
+connection drops before the cluster answers, the panel cannot know whether the
+write landed. It says so, closes the form and shows the list, where a code that
+did land can be regenerated to get a value to copy.
 
 | Act | What it does | What stops working |
 |---|---|---|
@@ -306,11 +309,12 @@ things are the author's to get right:
 - **Do not let the visitor choose the row's id.** An `insert` at an id that
   already names a row writes a new version of *that* row, and every row a gated
   mutation writes belongs to the same owner, so one code can overwrite another's.
-  Leave the id out and the engine mints one for every call (the example below),
-  or build it from the stamped `accessCodeId` so two codes can never reach one
-  row. If a visitor must name the row, as a retry
-  key, make every field the mutation writes `@createOnly`, so a repeat cannot
-  change a row that exists.
+  Leave the id out: the engine then derives it from the concept and everything
+  the row holds, the stamped `accessCodeId` included (the example below), so one
+  code's call cannot land on another's row, and a repeat of the same call is the
+  same row rather than a second. Or build the id from the stamped `accessCodeId`.
+  If a visitor must name the row, as a retry key, make every field the mutation
+  writes `@createOnly`, so a repeat cannot change a row that exists.
 - **A nested name is not checked.** The handler refuses a reserved name at the
   top level of `args` and looks no deeper. If a construct declares an object
   argument and spreads it into the row (a bare `args.payload`), a visitor can
@@ -330,7 +334,8 @@ concept deskNote {
 }
 
 /// Leave a note under the code that opened the gate. There is no id argument, so
-/// the engine mints one for every call and a visitor cannot name another code's row.
+/// the engine derives the id from what the row holds, accessCodeId included, and a
+/// visitor cannot name another code's row.
 @accessGate(deployable="client-desk", gate="dashboard")
 @actor
 mutation deskNote leaveNote {
