@@ -1,7 +1,7 @@
 ---
 title: Should a local cluster run production's pipeline queue?
 audience: internal
-status: draft
+status: accepted
 area: operate
 sinceVersion: 0.31.9
 owner: znas
