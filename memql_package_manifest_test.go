@@ -720,12 +720,16 @@ func TestEngineManifestGateStepRunsRepositoryGatePackages(t *testing.T) {
 // its packages need room: on the build pool component/architecture measured 154s
 // to over 300s and the step's packages 680s to 900s of test time (2026-10-26/27).
 // The 300s package bound and the 20m default step deadline failed memql#6325
-// twice on code that passes in 80-95s locally under the same flags. The
+// twice on code that passes in 80-95s locally under the same flags. Memory is the
+// same story: the namespace's default 4Gi killed the step on memql#6394. The
 // measurements live on the step in memql-package.yaml; this holds the floor.
 func TestEngineManifestGateStepHasHeadroom(t *testing.T) {
 	step, ok := engineDeclaredStep(engineManifest(t).Pipeline, manifestStepGateInputs)
 	if !ok {
 		t.Fatalf("the pipeline has no %s step", manifestStepGateInputs)
+	}
+	if step.MemoryMiB < 6144 {
+		t.Errorf("the %s step declares %d MiB; it needs at least 6144, because the default 4Gi killed it (exit 137)", manifestStepGateInputs, step.MemoryMiB)
 	}
 	deadline := pipelines.DefaultStepTimeout
 	if step.Timeout != "" {
