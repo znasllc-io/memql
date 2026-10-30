@@ -86,38 +86,3 @@ func TestVerificationReusesOnlyFreshExactDefinitionReceipts(t *testing.T) {
 		})
 	}
 }
-
-// A release run executes every verification step itself, whatever the
-// installed policy admits. Candidate preparation accepts a carried
-// pipeline_passed_earlier receipt only with a proof from an earlier attempt of
-// the same release, which a receipt reused from main has not got, so a release
-// that reused main's receipts could never be released: 0.31.4 was lost that
-// way to the push run at its commit.
-func TestReleaseRunsExecuteEveryVerificationStep(t *testing.T) {
-	for _, producer := range []Opening{
-		pushOpening(),
-		{Event: pipelines.EventMergeGroup, SHA: shaA, Branch: "gh-readonly-queue/main/test", Trigger: TriggerWebhook},
-	} {
-		t.Run(string(producer.Event), func(t *testing.T) {
-			dh := newReuseHarness(t)
-			source := dh.openRun(t, producer)
-			deliver(t, dh.integ, source)
-			if first, _ := dh.store.run(source.ID); first.Conclusion != ConclusionSuccess {
-				t.Fatalf("producer failed: %+v", first)
-			}
-			release := dh.openRun(t, Opening{Event: pipelines.EventRelease, Mode: pipelines.ModeFull, SHA: shaA, ReleaseTag: "v1.4.0", Trigger: TriggerManual})
-			deliver(t, dh.integ, release)
-			got, _ := dh.store.run(release.ID)
-			if got.Conclusion != ConclusionSuccess {
-				t.Fatalf("release failed: %+v", got)
-			}
-			if n := len(dh.exec.sentKeys()); n != 2 {
-				t.Fatalf("the release executed %d of 2 commands: it reused the %s run's receipt", n, producer.Event)
-			}
-			rows, err := dh.store.WorkSteps(context.Background(), got.WorkRunID)
-			if err != nil || len(rows) != 1 || rows[0].Status != WorkStepDone || rows[0].Skip != nil {
-				t.Fatalf("the release's step is not its own executed receipt: %+v %v", rows, err)
-			}
-		})
-	}
-}

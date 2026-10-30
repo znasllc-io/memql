@@ -19,6 +19,11 @@ type ReleaseWorkReceipt struct {
 	DefinitionDigest, ReceiptDigest            string
 	ArtifactIntentIDs                          []string
 	StepKind, Status, SkipCode                 string
+	// TreeHash is the git tree the run tested, from its work input. Empty on a
+	// run opened before tree hashes existed, or whose read failed. Never encoded:
+	// the native overlay hashes these receipts, and an overlay's saved evidence must
+	// read the same on any engine.
+	TreeHash string `json:"-"`
 }
 
 // InspectReleaseWorkReceipt is a pure integrity check over an authorized,
@@ -229,11 +234,18 @@ func inspectPipelineStepReceipt(owner, runID, stepKey string, run, step map[stri
 	digest := sha256.Sum256(append([]byte(prefix), body...))
 	ids := slices.Clone(s.Result.Metadata.ArtifactIntentIDs)
 	slices.Sort(ids)
+	// The input's tree hash stays out of the digest above, read beside the decode
+	// rather than through it. An engine that predates tree hashes computes the same
+	// digest for the same rows, so a rollback refuses no candidate that did not
+	// reuse a step (TestAReceiptsDigestIgnoresItsInputTree). The digest still commits
+	// to the tree where it matters: the step's treeFingerprint is part of its call.
+	input, _ := run["input"].(map[string]any)
+	treeHash, _ := input["treeHash"].(string)
 	out = ReleaseWorkReceipt{
 		OwnerUserID: owner, WorkRunID: runID, StepKey: stepKey, ReceiptID: s.ID,
 		Repository: r.Input.Repository, Commit: r.Input.SHA, Mode: r.Input.Mode, Event: r.Input.Event,
 		Attempt: s.Attempt, DefinitionDigest: definition, ReceiptDigest: "sha256:" + hex.EncodeToString(digest[:]), ArtifactIntentIDs: ids,
-		StepKind: s.Call.PipelineKind, Status: s.Status,
+		StepKind: s.Call.PipelineKind, Status: s.Status, TreeHash: treeHash,
 	}
 	if s.Call.Skip != nil {
 		out.SkipCode = s.Call.Skip.Code

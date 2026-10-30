@@ -192,7 +192,7 @@ export function stageWord(status: StageStatus): string {
   return STAGE_WORDS[status];
 }
 
-/** A step's state in one word. A step a failed-only re-run carried over passed in an earlier attempt. */
+/** A step's state in one word. A step carried from an earlier attempt, or reused from another run of the same source, passed earlier. */
 export function stepWord(step: StepRow): string {
   switch (step.status) {
     case "done":

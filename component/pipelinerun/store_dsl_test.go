@@ -124,6 +124,8 @@ func everyStoreCall(s Store, value string) []struct {
 		{"WorkSteps", func() error { _, err := s.WorkSteps(ctx, value); return err }},
 		{"RunsForKey", func() error { _, err := s.RunsForKey(ctx, value); return err }},
 		{"RunsForPipelineSHA", func() error { _, err := s.RunsForPipelineSHA(ctx, value, value); return err }},
+		{"RunsForPipelineTree", func() error { _, err := s.RunsForPipelineTree(ctx, value, value); return err }},
+		{"WorkRunRow", func() error { _, err := s.WorkRunRow(ctx, value); return err }},
 		{"RunByCheckRun", func() error { _, err := s.RunByCheckRun(ctx, value, 30431907812); return err }},
 		{"RunsUnfinished", func() error { _, err := s.RunsUnfinished(ctx); return err }},
 		{"RunsUnfinishedForPullRequest", func() error { _, err := s.RunsUnfinishedForPullRequest(ctx, value, 42); return err }},

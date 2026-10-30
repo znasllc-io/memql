@@ -8,12 +8,14 @@ import (
 func TestVerificationEnvironmentDoesNotExposeEventOrRunIdentity(t *testing.T) {
 	r := StepRequest{RunID: "run", WorkRunID: "work", SHA: "commit", BaseSHA: "base", Mode: ModeFull, Event: EventRelease, Version: "v2", Step: Step{Verification: true, Packages: []string{"module/pkg"}}}
 	env := r.Environment()
-	for _, key := range []string{"MEMQL_RUN_ID", "MEMQL_WORK_RUN_ID", "MEMQL_BASE_SHA", "MEMQL_MODE", "MEMQL_EVENT", "MEMQL_VERSION"} {
+	// The commit goes too: a release reuses this receipt across commits with one
+	// tree, so what the step can read must not tell them apart.
+	for _, key := range []string{"MEMQL_RUN_ID", "MEMQL_WORK_RUN_ID", "MEMQL_SHA", "MEMQL_BASE_SHA", "MEMQL_MODE", "MEMQL_EVENT", "MEMQL_VERSION"} {
 		if _, ok := env[key]; ok {
 			t.Fatalf("event-specific input leaked: %s", key)
 		}
 	}
-	if env["MEMQL_SHA"] != "commit" || env["MEMQL_PACKAGES"] != "module/pkg" || env["MEMQL_VERIFICATION"] != "true" {
+	if env["MEMQL_PACKAGES"] != "module/pkg" || env["MEMQL_VERIFICATION"] != "true" {
 		t.Fatalf("missing declared inputs: %v", env)
 	}
 }

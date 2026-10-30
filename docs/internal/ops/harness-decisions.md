@@ -1474,9 +1474,10 @@ Rejected: a candidate whose evidence spans attempts (attempt 1's complete
 evidence includes its failed step, its artifacts would be pinned from a failed
 run, and the candidate format would change), and adopting only full re-runs
 (saves the version bump and pull request check but not the long run; the design
-adopts full re-runs too, which carry nothing). Cross-event reuse stays off for
-releases (#6344): a receipt from a push, pull request or merge-group run has no
-chain inside the release.
+adopts full re-runs too, which carry nothing). Reuse across events stayed off for
+releases here (#6344), because a receipt from a push, pull request or merge-group
+run has no chain inside the release. It came later with a proof of its own: see
+[A release reuses the run that tested its tree](#a-release-reuses-the-run-that-tested-its-tree-2026-10-29).
 
 Compatibility: `RerunOf` and `Chain` are omitted when empty, so a run without
 re-run facts encodes exactly as before. Journals written earlier keep their
@@ -1508,6 +1509,143 @@ Tests: `TestCarriedReleaseReceipt*` and
 last ones db-gated). Not verified here: a live release re-run on a cluster.
 This change helps only after it ships in an engine release; the release that
 carries it is still prepared under the previous rules.
+
+## A release reuses the run that tested its tree (2026-10-29)
+
+The 0.31.9 release run took 2h14m on production and its stages' own time added up
+to under an hour; the rest was queueing on the single build node, repeating what
+its pull request had just run. The owner decided on 2026-10-29 to let release runs
+reuse the pull request's results on the same tree, keeping the release-only build
+steps. #6344 had forbidden exactly this, because a release that reused a receipt
+candidate preparation then refused could never be prepared, which lost 0.31.4 and
+0.31.5. Design record:
+`docs/superpowers/specs/2026-10-29-release-same-tree-reuse-design.md`; the connected
+workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#what-a-release-reuses).
+
+- **Trigger.** A release's first attempt opening its work (`reuseSameTree`,
+  `component/pipelinerun/evidence.go`). A re-run never asks: a whole re-run is
+  someone asking for the checks to run, and a failed-only one carries inside its
+  chain.
+- **Identity** (`readTreeHash`, `component/pipelinerun/tree.go`). The driver reads
+  the commit's tree from GitHub before the plan, for every run, and writes it to the
+  run row, which is how a release finds sources (`pipelineRunsForPipelineTree`), and
+  to the work input, where the proof reads it. A read that fails costs the run its
+  reuse and nothing else: it neither offers nor takes it, and a release executes every
+  step. Failing a pull request's checks over an optional read would be the worse
+  failure. The input's tree stays out of a receipt's digest, so a rollback refuses no
+  candidate that reused nothing. The digest still commits to the tree through the
+  step's `treeFingerprint`.
+- **Same check** (`treeFingerprintOf`, `definition.go`). The verification
+  fingerprint with the tree in the commit's place and without `dependsOn`, which
+  differs between a pull request plan and a release plan on one tree and never
+  reaches the command. A verification step no longer receives `MEMQL_SHA`, so the
+  commit is not an input. `checkoutHistory` disqualifies a step: it has inputs
+  beyond the tree. Only `verification: true` steps get one.
+- **Scope.** Twenty-seven of the release plan's steps today
+  (`TestEngineVerificationStepsCompileTheSameForAPullRequestAndARelease`). Everything
+  that declares artifacts or an image runs, whatever it reports too
+  (`releaseProducer`). Rejected: reusing any artifact-free step by normalizing its
+  environment, because a step that receives `MEMQL_EVENT` may branch on it, as the
+  vulnerability scans do. So `go-checks` (reads `MEMQL_BASE_SHA`), `fuzz`,
+  `mcp-conformance` and the two Cockpit lanes keep running. Extending reuse to
+  evidence a machine produced is the owner's open decision from the fleet-first work.
+- **Vulnerability scans run in every release.** They declare artifacts, they branch
+  on the event (#6381), and they are not a function of the tree. A freshness bound
+  was defensible, and rejected because the release would ship a report older than
+  itself.
+- **The policy decides after the native rules.** `pipelineEvidenceReuse` is asked
+  about each source with its existing arguments, and the engine default stays
+  `false`. Mode is the policy's to weigh rather than a native gate: a pull request
+  runs `affected`, and the fingerprint binds what the step executed.
+- **Slices** (`reuseGroup`, `adoptReleaseSlices`). A shard's slice follows the timing
+  table, which every successful full run moves, so exact slices would almost never
+  match. A step is judged with all its shards: when the source's rows hold exactly
+  the packages the plan selected, the release takes the source's split, and either
+  every shard is covered or none is. A failed-only re-run takes its attempt's split
+  the same way, or a moved table would run every shard again.
+- **The runner may not plan what the proof refuses.** This is the invariant. Both
+  halves call `pipelines.SameTreeProblem` and
+  `pipelines.InspectReusedReleaseReceipt` over the same rows. The runner judges age
+  at the later of now and the run's start and the proof at the start, so the first
+  implies the second (`TestSameTreeWindowOfTheRunnerImpliesTheProofs`).
+  `TestAReleaseReusesItsTreeOverRealRows` runs the whole proof over rows the real
+  driver wrote.
+- **Proof and record** (`pipelines.ProveReusedStep`). It lives in `component/pipelines`
+  because `integrations/release` is another module and cannot run the driver: both
+  halves can call it there. Coverage re-derives the source on every read, and the
+  candidate's `reusedFrom` must equal it, so client JSON cannot assert it. Absent, the
+  field leaves the candidate's bytes and identity alone. The proof does not ask GitHub
+  again: each driver read its tree from the commit object, and the journal is already
+  the trust root for whether a test passed. One pass of coverage reads each row once
+  (`forOnePass`), because a publication repeats it for every artifact.
+- **Retention** (`retentionHeldBackSQL`, `integrations/work/operational_retention.go`).
+  A live candidate holds the runs it reused from, the way an artifact holds its
+  producer. A release's own rows stay while its artifacts are pinned, and a pull
+  request has none, so without the hold a release would become unprovable a month
+  after it was cut and its next overlay would be refused. Rejected: accepting the
+  sealed record once the rows are gone, which would stop proving exactly when nothing
+  else could notice. The hold is an uncorrelated `NOT IN`, read once per statement. An
+  `EXISTS` per row detoasted every live manifest once per version, and an index does
+  not help because the heap is a few pages; measured at 13 s against an 8 s statement
+  timeout, which would stall retention for good
+  (`TestRetentionHoldReadsTheCandidatesOncePerStatement`). A retired candidate holds
+  nothing, and neither does an archived one, whose own rows leave on their usual
+  window.
+- **What survives a retry, pause or replica change.** The tree, the fingerprint and
+  the evidence run are all on rows. `resume` and `reopenFromRows` restore them from
+  the row before a step's call is declared again, because the run's definition
+  fingerprint covers every call and a call that changed would refuse the candidate
+  (`TestATakeoverKeepsWhatReuseDeclared`). A failed-only re-run carries a reused step
+  like any pass. The walk stops at the attempt that reused it, whether or not that
+  row settled as reused, since a failed stage may have blocked it first.
+
+Stop conditions: anything unproven runs the step. A read that does not answer stops
+the drive and recovery tries again, as `carryFromOriginal` does. If a candidate is
+refused anyway, the release is stuck, because a successful recorded attempt is never
+replaced (`adoptableBuildRun`): the installed policy can stop reuse for releases, and
+the next version then executes everything.
+
+Invariants: every artifact in a candidate comes from the run it names; a reused step
+names none; a tree is compared only when both sides read it; only a directly executed
+receipt counts; a source older than 24 hours at the attempt's start counts for
+nothing; every other event still compares commits.
+
+Tests: `TestSameTree*`, `TestReusedReleaseReceipt*`, `TestProveReusedStep*`,
+`TestReceiptDigest*`, `TestAReceiptsDigest*`, `TestReleaseCandidate*Reused*`
+(`component/pipelines`); `TestReleaseReuses*`,
+`TestReleaseExecutesEveryStepWithoutAProvenSource`, `TestReleaseDoesNot*`,
+`TestAFailedOnlyRelease*`, `TestATakeoverKeepsWhatReuseDeclared`, `TestTreeFingerprint*`
+and the db-gated `TestAReleaseReusesItsTreeOverRealRows` (`component/pipelinerun`);
+`TestReusedReceipt*`, `TestCandidateRecordOfAReuseIsWhatTheJournalProves`,
+`TestACarriedReuseProvesAgainstItsSource` and `TestCandidateAssemblyRecordsAReusedReceipt`
+(`integrations/release`, db-gated); `TestRetentionKeepsARunALiveCandidateReusedFrom`
+and `TestRetentionHoldReadsTheCandidatesOncePerStatement` (`integrations/work`,
+db-gated).
+
+Not verified: a live release on a cluster, or the time it saves. No test runs
+`coverage` itself over rows the real driver wrote: `integrations/release` cannot run
+the driver, so its tests use hand-written journal rows. The driver test runs
+`ProveReusedStep` and what `completeRun` checks over real rows, which leaves the wiring
+in `coverage` and assembly tested only over the hand-written ones. Known limits:
+
+- a pull request whose steps passed across a failed-only re-run offers only what its
+  last attempt executed;
+- an engine upgrade between a source and its release runs everything;
+- a candidate prepared from a failed-only re-run reads the release's earlier attempts
+  on every read and nothing holds them, so past the retention window a new overlay
+  from it is refused (true of every carried step since #6369);
+- a retention window shorter than the time between a source and its candidate retires
+  the source first, and preparation refuses it;
+- rolling back to an engine from before tree hashes refuses a candidate with
+  `reusedFrom`, and leaves a run row holding a `treeHash` unwritable, so a run in
+  flight stops being driven;
+- a reused step's log stays on its source, under that run's shorter retention.
+
+The memql-znas `evidenceReuse` policy admits `push` and `merge_group` sources for a
+release today and not `pull_request`, so reuse from a push turns on with the engine
+upgrade, and a pull request's results are reused only once that policy admits them.
+This change helps only after it ships in an engine release.
 
 ## A GitHub check per pipeline step (2026-10-28)
 
@@ -1793,10 +1931,11 @@ releases should flag findings, not fail on them.
 - **Rejected for now.** Skipping the stage on releases: today's candidate
   workflow refuses a release whose steps were skipped for any reason but
   `pipeline_not_affected` or a proven `pipeline_passed_earlier`, so a skip would
-  block the candidate rather than save time. Reusing the pull request's
-  evidence in the release run is the larger saving (its tests repeat the PR's on
-  the same tree), but release runs reuse nothing by design (#6344), and changing
-  that is an engine decision of its own.
+  block the candidate rather than save time. A release now reuses its pull
+  request's checks on the same tree (see
+  [A release reuses the run that tested its tree](#a-release-reuses-the-run-that-tested-its-tree-2026-10-29)),
+  and these scans stay out of that: they declare their reports as artifacts, and
+  advisories change daily.
 - **Tests.** `TestEngineSecurityScansDoNotTurnFindingsIntoSuccess` pins the
   release-only relaxation and that every other event still fails;
   `TestNPMAuditRejectsFindingsAndIncompleteReports` covers `--report-only`
