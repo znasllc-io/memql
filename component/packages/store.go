@@ -494,21 +494,33 @@ func (s *store) recordPackageName(ctx context.Context, packageId, name string) e
 		langparser.QuoteString(packageId), langparser.QuoteString(name)))
 }
 
-// recordPackageDeployables writes what the manifest declares onto the package.
+// recordPackageDeployables writes what the source says it contains onto the
+// package: the deployables its manifest declares, and the DSL domains its tree
+// ships (design record 2026-10-29, D5).
+//
+// ONE WRITE FOR BOTH, because both are read off the same tree by the same
+// analysis and both are rewritten whole: two writes would leave a window in
+// which one list described a newer tree than the other, and dslDomains is the
+// one the bff's gate check reads.
 //
 // ALWAYS AN ARRAY, never null -- the same trap closeDeployment documents above:
 // jsonLiteral sees an interface holding a typed nil slice as non-nil, marshals
-// it and writes the word `null`, which the concept's []object refuses. A source
-// whose manifest declares nothing is an empty list, which is a true statement;
-// a refused write would leave the package claiming whatever the LAST analysis
-// found, which is worse than saying nothing.
-func (s *store) recordPackageDeployables(ctx context.Context, packageId string, declares []DeclaredDeployable) error {
+// it and writes the word `null`, which the concept's []object and []string
+// refuse. A source whose manifest declares nothing, or whose tree ships no DSL,
+// is an empty list, which is a true statement; a refused write would leave the
+// package claiming whatever the LAST analysis found, which is worse than saying
+// nothing -- and for dslDomains it would be a list that still opens the gates of
+// a domain the source has dropped.
+func (s *store) recordPackageDeployables(ctx context.Context, packageId string, declares []DeclaredDeployable, dslDomains []string) error {
 	if declares == nil {
 		declares = []DeclaredDeployable{}
 	}
+	if dslDomains == nil {
+		dslDomains = []string{}
+	}
 	return s.writeInternal(ctx, fmt.Sprintf(
-		"mutation recordPackageDeployables(packageId: %s, declares: %s)",
-		langparser.QuoteString(packageId), jsonLiteral(declares)))
+		"mutation recordPackageDeployables(packageId: %s, declares: %s, dslDomains: %s)",
+		langparser.QuoteString(packageId), jsonLiteral(declares), jsonLiteral(dslDomains)))
 }
 
 func (s *store) recordUpstreamVersion(ctx context.Context, packageId, version string, updateAvailable bool) error {

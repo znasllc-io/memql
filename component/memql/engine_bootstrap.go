@@ -279,7 +279,14 @@ func (e *MemQLEngine) initFromTree(concepts concept.Registry, tree fs.FS, publis
 	// refuses it and a package deploy's analysis reports it before anything is
 	// rolled. The refused construct is not in the registry: the break-glass
 	// that boots past a skip must never be what opens a gate.
-	for _, gateErr := range loadAccessGates(functionRegistry, publish) {
+	//
+	// The view is kept on the report too. A candidate validation (publish
+	// false) publishes nothing, so the report is the one place the gates it
+	// loaded survive, and package analysis binds them to the package that
+	// ships them.
+	gates, gateErrs := loadAccessGates(functionRegistry, publish)
+	report.SetAccessGates(gates)
+	for _, gateErr := range gateErrs {
 		report.AddSkip(accessGateSkip(gateErr))
 		if e.Component != nil && e.Logger != nil {
 			e.Logger.Error("access gate does not register",

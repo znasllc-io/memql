@@ -105,6 +105,14 @@ func restoreAccessGatesAfter(t *testing.T) {
 // registry restored when the test ends.
 func loadGateBundle(t *testing.T, files map[string]string, publish bool) []string {
 	t.Helper()
+	_, problems := loadGateBundleEntries(t, files, publish)
+	return problems
+}
+
+// loadGateBundleEntries is loadGateBundle that also hands back the entries the
+// pass built, which is how a candidate load (publish=false) is read.
+func loadGateBundleEntries(t *testing.T, files map[string]string, publish bool) ([]AccessGateEntry, []string) {
+	t.Helper()
 	if publish {
 		restoreAccessGatesAfter(t)
 	}
@@ -128,14 +136,15 @@ func loadGateBundle(t *testing.T, files map[string]string, publish bool) []strin
 
 	// The same fold the engine does (engine_bootstrap.go), so a refusal here
 	// is shaped exactly as it is on a node.
-	for _, fault := range loadAccessGates(functions, publish) {
+	entries, faults := loadAccessGates(functions, publish)
+	for _, fault := range faults {
 		report.AddSkip(accessGateSkip(fault))
 	}
 	var problems []string
 	for _, skip := range report.Skipped {
 		problems = append(problems, skipDiagnostic(skip))
 	}
-	return problems
+	return entries, problems
 }
 
 func gateBundleDomains(domains map[string]string) map[string]string {
@@ -436,7 +445,7 @@ func TestAccessGateFaultsAreShapedForTheLoadReport(t *testing.T) {
 	if err := functions.Upsert(fn); err != nil {
 		t.Fatal(err)
 	}
-	faults := loadAccessGates(functions, false)
+	_, faults := loadAccessGates(functions, false)
 	if len(faults) != 1 {
 		t.Fatalf("want one fault, got %v", faults)
 	}
@@ -681,6 +690,8 @@ func TestAccessGateRegistryAnswers(t *testing.T) {
 			Namespace: "desk",
 			Args:      []string{"topic"},
 			Stamped:   []string{"accessCodeId", "accessSubject"},
+			// The construct's own file, which package analysis points an author at.
+			File: "desk/constructs.memql",
 		}
 		if !reflect.DeepEqual(*got, want) {
 			t.Fatalf("entry = %+v\nwant   %+v", *got, want)

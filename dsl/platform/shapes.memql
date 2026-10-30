@@ -280,6 +280,7 @@ shape package packageFull {
   autoDeploy
   autoDeployChangedAt
   declares
+  dslDomains
   disabledDeployables
   status
   row.createdAt

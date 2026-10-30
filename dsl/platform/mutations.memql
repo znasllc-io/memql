@@ -2424,11 +2424,15 @@ mutation package recordPackageName {
   }
 }
 
-/// Record what a source's manifest declares, from the analysis that read it.
+/// Record what a source's tree says it contains, from the analysis that read it: the deployables
+/// its manifest declares, and the DSL domains it ships.
 ///
 /// @serverOnly because it is the PIPELINE's reading of the tree, not a claim a client may make:
-/// this list is what the OS offers as "apps you can still deploy", so a caller able to write it
-/// could invent deployables that no manifest contains and have the console offer to deploy them.
+/// the first list is what the OS offers as "apps you can still deploy", so a caller able to write
+/// it could invent deployables that no manifest contains and have the console offer to deploy
+/// them. The second is what the bff compares an access gate's domain with (design record
+/// 2026-10-29, D5), so a caller able to write it could make a package own a domain it does not
+/// ship and have another product's gates open for its sites.
 ///
 /// actor.userId scoping is not the fix, for both of the reasons the other pipeline writers give.
 /// It runs during a deploy, where stages hand off across nodes and actor.userId is EMPTY on the
@@ -2439,16 +2443,21 @@ mutation package recordPackageName {
 ///
 /// Rewritten whole on every analysis rather than merged, because the manifest is the authority on
 /// what the source contains -- an app removed upstream must LEAVE this list, and a merge would
-/// keep it forever.
+/// keep it forever. Both lists are written together: they are read off the same tree by the same
+/// analysis, and two writes would leave a window in which one described a newer tree than the
+/// other.
 @serverOnly
 mutation package recordPackageDeployables {
   args {
-    packageId  string!
-    declares   []object!
+    packageId   string!
+    declares    []object!
+    dslDomains  []string!
   }
   update {
-    id:       args.packageId
-    declares: args.declares
+    accept { declares, dslDomains }
+    stamp {
+      id: args.packageId
+    }
   }
 }
 

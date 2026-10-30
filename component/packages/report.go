@@ -2,6 +2,7 @@ package packages
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -108,6 +109,51 @@ func declaredFrom(rep *Report) []DeclaredDeployable {
 	return out
 }
 
+// dslDomainsFrom projects the analysis report onto the list a package records of
+// the DSL domains it ships (`v1:platform:package.dslDomains`).
+//
+// SPELLED AS A CONCEPT ID SPELLS A DOMAIN, not as the repository names a
+// directory: an access gate records the domain of the concept its construct is
+// bound to (memql.AccessGateEntry.Domain), the bff compares that with this list
+// on every call, and the two only meet if they are the same string. A
+// namespace.pin is the case that tells them apart, and it fails in the
+// direction nobody sees -- the gate is simply never opened.
+//
+// A domain the engine owns is left out. Analysis refuses one
+// (dsl_domain_reserved), so a recorded list never holds it; this filter is the
+// second line, because a name the engine owns is not the package's to open
+// anything in.
+//
+// Sorted and unique, and ALWAYS AN ARRAY, never nil, for the reason declaredFrom
+// states: a typed nil slice marshals to the word null, which the concept's
+// []string refuses, and a refused write leaves the package claiming whatever the
+// LAST analysis found.
+func dslDomainsFrom(rep *Report) []string {
+	out := []string{}
+	if rep == nil {
+		return out
+	}
+	seen := map[string]struct{}{}
+	for _, d := range rep.DslDomains {
+		if d.Reserved {
+			continue
+		}
+		for _, name := range d.Namespaces {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 type DeployableReport struct {
 	DisplayName string              `json:"displayName,omitempty"`
 	Deployment  *ManifestDeployment `json:"deployment,omitempty"`
@@ -158,6 +204,14 @@ type DslDomainReport struct {
 	// Its constructs are NOT counted -- nothing read them -- and its problem
 	// is dsl_domain_reserved.
 	Reserved bool `json:"reserved,omitempty"`
+	// Namespaces are the domain names an access gate bound to one of this
+	// domain's concepts records (design record 2026-10-29, D5), sorted: the
+	// namespace its concepts' ids carry, which is the directory's
+	// namespace.pin when it has one and the directory's own name when it has
+	// not, plus whatever a nested directory under it pins. Read by the engine
+	// from the candidate tree, never guessed from the directory name, because a
+	// pin moves the two apart. Empty for a reserved domain, which ships nothing.
+	Namespaces []string `json:"namespaces,omitempty"`
 }
 
 // GoPackReport is a detected, deferred Go pack (D3).

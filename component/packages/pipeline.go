@@ -716,8 +716,18 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// a client could see it: absent from the list, and absent from its own
 	// source's "apps it produces". A warning rather than a failure -- the
 	// deploy is not less correct because a catalogue write did not land.
-	if nerr := d.Store.recordPackageDeployables(ctx, req.PackageId, declaredFrom(rep)); nerr != nil {
-		d.log().Warn("packages: could not record what the manifest declares",
+	//
+	// THE DSL DOMAINS THE TREE SHIPS ride the same write, for the same reason
+	// and with the same rule (design record 2026-10-29, D5). The bff reads them
+	// with the site on every call and opens an access code only for a gate
+	// whose domain is in the list, so a domain dropped upstream has to leave it:
+	// a merge would keep the package owning, for good, a domain it no longer
+	// ships. A write that did not land leaves the previous list standing, which
+	// can close a gate but opens none the live tree lacks; and a source not
+	// analyzed since the field existed has none, which opens nothing until it is
+	// analyzed again.
+	if nerr := d.Store.recordPackageDeployables(ctx, req.PackageId, declaredFrom(rep), dslDomainsFrom(rep)); nerr != nil {
+		d.log().Warn("packages: could not record what the source declares and ships",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 			"deployment", out.DeploymentId, "err", nerr)
 	}

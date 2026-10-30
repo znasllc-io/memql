@@ -150,6 +150,11 @@ type AccessGateEntry struct {
 	// Stamped are the reserved names the construct declares, in declaration
 	// order: the names the handler stamps, last.
 	Stamped []string
+	// File is the construct's file in the DSL tree, relative to the DSL root
+	// (desk/queries.memql), spelled as a LoadReport skip spells it. The
+	// handler never reads it: package analysis does, to point an author at the
+	// file a refusal about this gate is about.
+	File string
 }
 
 // Call is the exact text the handler renders before the arguments: the call
@@ -307,17 +312,27 @@ func AccessGatesFor(deployable string, domains []string) []AccessGateSummary {
 }
 
 // AccessGateEntries lists every gated construct the node serves, whatever its
-// domain, sorted by deployable, gate, construct and domain, as copies. Package
-// analysis reads it; a request never does, because a request is always scoped
-// to a site's package.
+// domain, sorted by deployable, gate, construct and domain, as copies. A request
+// never reads it, because a request is always scoped to a site's package.
+//
+// Package analysis does not read it either: it validates a CANDIDATE, which is
+// never published, so the node's own registry cannot hold the candidate's gates.
+// It takes them from the load that built them (AnalyzePackageDSL's AccessGates).
 func AccessGateEntries() []AccessGateEntry {
 	accessGateMu.RLock()
-	out := make([]AccessGateEntry, 0, len(accessGates))
-	for _, entry := range accessGates {
+	defer accessGateMu.RUnlock()
+	return accessGateList(accessGates)
+}
+
+// accessGateList is a view's entries as copies, in the order AccessGateEntries
+// documents. One definition of that order, because the registry a node serves
+// and the view a load returns (loadAccessGates) are the same list from two
+// places, and two orders would make "the same gates" depend on which was asked.
+func accessGateList(view map[accessGateSlot]AccessGateEntry) []AccessGateEntry {
+	out := make([]AccessGateEntry, 0, len(view))
+	for _, entry := range view {
 		out = append(out, entry.clone())
 	}
-	accessGateMu.RUnlock()
-
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if a.Deployable != b.Deployable {

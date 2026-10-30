@@ -54,6 +54,31 @@ type PackageDSLResult struct {
 	// <domain>/memql.toml -- so boot refuses nothing for it, and a deploy must
 	// neither be refused for it nor be told it "would refuse boot".
 	UnreadRootManifest *LintDiagnostic
+
+	// AccessGates are the gated constructs the candidate declares, as the
+	// registration pass built them (design record 2026-10-29, section 7): the
+	// gates this tree would open, in the registry's order. A construct that was
+	// refused, or is disabled, is not here, and neither is one that another
+	// product installed on this node declares: only a construct written in one
+	// of the candidate's own domains (Mounted) is the candidate's.
+	//
+	// They come out of the load itself because this pass publishes nothing, so
+	// AccessGateEntries -- the live node's registry -- never holds them. The
+	// caller binds each to the package that ships it.
+	AccessGates []AccessGateEntry
+	// Namespaces maps each mounted domain directory to the domain names an
+	// @accessGate bound to one of its concepts records (AccessGateEntry.Domain),
+	// sorted. A directory that pins nothing goes by its own name; a
+	// namespace.pin moves it off the directory, and so does a nested directory
+	// that pins its own, which is why a domain can answer with more than one.
+	//
+	// Read from the CANDIDATE's tree, with the loader's own pin reader, and not
+	// guessed from directory names: a gate in a pinned domain would otherwise
+	// record a spelling the package's list never holds, and be closed without a
+	// word. Every mounted domain has an entry, whatever it holds. A domain the
+	// engine owns (SkippedCore) is not mounted and has none, and a pin that
+	// names one is left out of the entry it would have been in.
+	Namespaces map[string][]string
 }
 
 // AnalyzePackageDSL validates the product-DSL half of a candidate package.
@@ -72,7 +97,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 		return PackageDSLResult{}, err
 	}
 
-	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore}
+	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore, Namespaces: candidateNamespaces(tree, mounted)}
 	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
 		// A warning of its own: boot refuses nothing for it (lint_parity.go).
 		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg, Severity: LintSeverityWarning}
@@ -103,6 +128,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	initErr := eng.initFromTree(memoryNodes.NewRegistry(concepts), tree, false)
 
 	if eng.loadReport != nil {
+		result.AccessGates = candidateGates(eng.loadReport.AccessGates, mounted)
 		for _, s := range eng.loadReport.Skipped {
 			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: s.File, Message: skipDiagnostic(s), Severity: LintSeverityError})
 		}
@@ -128,6 +154,95 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	// engine will not read (memql#5357); the package author reads it once.
 	result.Diagnostics = dedupeDiagnostics(result.Diagnostics)
 	return result, nil
+}
+
+// candidateGates keeps the gates the candidate itself declares.
+//
+// The view the registration pass built covers the whole tree the validation ran
+// over: the engine's, every other product installed on this node, and the
+// candidate's. A package is bound to the gates written in ITS OWN domains --
+// the ones it ships -- and judging an installed product's against this
+// package's manifest would refuse a deploy for a gate it does not contain.
+//
+// A construct is the candidate's by the file it is written in, which is the
+// domain that ships it. The domain of the concept it is bound to is a different
+// fact, and is what the package is then judged on.
+func candidateGates(view []AccessGateEntry, mounted []string) []AccessGateEntry {
+	own := make(map[string]struct{}, len(mounted))
+	for _, domain := range mounted {
+		own[domain] = struct{}{}
+	}
+	out := make([]AccessGateEntry, 0, len(view))
+	for _, entry := range view {
+		if _, shipped := own[RootDomainFromFilePath(entry.File)]; shipped {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// candidateNamespaces answers, for each mounted domain, the domain names an
+// access gate records for a construct bound to one of its concepts.
+//
+// AccessGateEntry.Domain is the first segment of the namespace in a concept's
+// id -- v1:<namespace>:name -- and the namespace is not the directory's name:
+// it is the directory's namespace.pin when it has one. So the list a package
+// ships is read the way the loader assembles an id, through the loader's own pin
+// reader (declaredNamespaceForDomainFromTree), from the candidate's own tree and
+// never from the live domain's old pin, and the two spellings agree by
+// construction.
+//
+// A DOMAIN IS MORE THAN ITS TOP DIRECTORY. A namespace is a path
+// (NamespaceFromFilePath), so a nested directory is a namespace of its own, and
+// since a path is no legal namespace it can hold a concept only by pinning one
+// -- which need not be the domain's. Every directory under the domain that
+// holds a file is read, and one that pins nothing, whose namespace is a path,
+// names nothing.
+//
+// The domain itself counts first, whatever it holds: a package that ships a
+// domain with no construct still ships it.
+func candidateNamespaces(tree fs.FS, mounted []string) map[string][]string {
+	out := make(map[string][]string, len(mounted))
+	for _, domain := range mounted {
+		names := map[string]struct{}{}
+		read := map[string]struct{}{}
+		add := func(directory string) {
+			// A pin is read once per directory, however many files it holds.
+			if _, done := read[directory]; done {
+				return
+			}
+			read[directory] = struct{}{}
+			namespace := declaredNamespaceForDomainFromTree(tree, directory)
+			if namespace == "" || strings.Contains(namespace, "/") {
+				return
+			}
+			root, _, _ := strings.Cut(namespace, ":")
+			// A name the engine owns is not a package's to ship however it
+			// arrives. A directory carrying one is refused outright
+			// (dsl_domain_reserved); a pin naming one is the same name by another
+			// road, and the engine does not police it, so the list leaves it out
+			// rather than hand the package a core domain's gates.
+			if memqldsl.IsCoreDomain(root) {
+				return
+			}
+			names[root] = struct{}{}
+		}
+		add(domain)
+		if sub, err := fs.Sub(tree, domain); err == nil {
+			if files, err := dslfs.WalkMemqlFiles(sub); err == nil {
+				for _, file := range files {
+					add(NamespaceFromFilePath(domain + "/" + file))
+				}
+			}
+		}
+		list := make([]string, 0, len(names))
+		for name := range names {
+			list = append(list, name)
+		}
+		sort.Strings(list)
+		out[domain] = list
+	}
+	return out
 }
 
 // sortDiagnostics orders diagnostics by file, then position, then message. An

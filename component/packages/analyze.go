@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"path"
@@ -236,6 +237,10 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 		_, isReserved := reserved[d]
 		dr := DslDomainReport{Domain: d, Reserved: isReserved}
 		if !isReserved {
+			// What an access gate bound to this domain's concepts records as
+			// its domain (D5), read by the engine from the candidate's own
+			// tree: a namespace.pin moves it off the directory's name.
+			dr.Namespaces = result.Namespaces[d]
 			if c, ok := counts[d]; ok {
 				dr.Constructs = c.byKind
 				dr.Files = c.files
@@ -270,6 +275,71 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 		}
 		rep.add(problemFrom(refuse(CodeDslRefusesBoot, "%s", b.String()), true))
 	}
+
+	// LAST, so the engine's own refusals lead: they say the DSL does not load,
+	// and a gate judged over a tree that does not load is judged over part of
+	// it.
+	analyzeAccessGates(rep, result.AccessGates)
+}
+
+// analyzeAccessGates binds the candidate's access gates to the package that
+// ships them (design record 2026-10-29, D5), before anything is staged.
+//
+// A gate opens at run time only when the construct's deployable is the site's
+// own (packageDeployableName) and its domain is one the site's package ships.
+// A gate that fails either could only ever answer 404, which looks exactly like
+// a gate nobody wrote -- so it is refused here, where the author is reading, and
+// not discovered by a visitor. The same two facts are what stop one product's
+// construct from being reached through another product's code when two happen to
+// share a gate or a deployable name.
+//
+// Each rule is judged on its own, so a construct wrong twice is reported
+// twice: fixing one should not take a deploy to learn of the other.
+func analyzeAccessGates(rep *Report, gates []memql.AccessGateEntry) {
+	declared := make(map[string]struct{}, len(rep.Deployables))
+	declaredNames := make([]string, 0, len(rep.Deployables))
+	for _, d := range rep.Deployables {
+		declared[d.Name] = struct{}{}
+		declaredNames = append(declaredNames, d.Name)
+	}
+	shippedNames := dslDomainsFrom(rep)
+	shipped := make(map[string]struct{}, len(shippedNames))
+	for _, name := range shippedNames {
+		shipped[name] = struct{}{}
+	}
+
+	for _, g := range gates {
+		// The construct's file as the author's checkout spells it, which is
+		// where the repair is.
+		scope := path.Join(DslRoot, g.File)
+		if _, ok := declared[g.Deployable]; !ok {
+			rep.add(problemFrom(refuseScoped(CodeDslAccessGateForeignDeployable, scope,
+				"the %s %q in %s is gated with @accessGate(deployable=%q, gate=%q), but this package's manifest declares no deployable of that name (%s). A site opens a gate only for the deployable name its own package gave it, so this %s could never be reached, and a name that happens to match another product's deployable must not cut a gate into somebody else's app. Name one of this package's own deployables in deployable=.",
+				g.Kind, g.Construct, scope, g.Deployable, g.Gate, namesPhrase("it declares", "it declares no deployable at all", declaredNames), g.Kind), true))
+		}
+		if _, ok := shipped[g.Domain]; !ok {
+			rep.add(problemFrom(refuseScoped(CodeDslAccessGateForeignDomain, scope,
+				"the %s %q in %s is gated with @accessGate(deployable=%q, gate=%q), but it is bound to a concept of the DSL domain %q, which this package does not ship (%s). A site opens a gate only when its package ships the domain of the concept the construct is bound to, so a code for this gate could only ever answer 404. Bind the construct to a concept of one of this package's own domains.",
+				g.Kind, g.Construct, scope, g.Deployable, g.Gate, g.Domain, namesPhrase("it ships", "it ships no domain at all", shippedNames)), true))
+		}
+	}
+}
+
+// namesPhrase renders `it declares "a" and "b"` -- or the sentence for none --
+// for a refusal that has to show what the author could have written instead.
+func namesPhrase(verb, none string, names []string) string {
+	if len(names) == 0 {
+		return none
+	}
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+	list := quoted[0]
+	if last := len(quoted) - 1; last > 0 {
+		list = strings.Join(quoted[:last], ", ") + " and " + quoted[last]
+	}
+	return verb + " " + list
 }
 
 // ---------------------------------------------------------------------------

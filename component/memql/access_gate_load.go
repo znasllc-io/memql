@@ -239,6 +239,7 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 		Kind:       kind,
 		Domain:     domain,
 		Namespace:  namespace,
+		File:       accessGateFile(fn.Origin),
 	}
 	if fn.ArgsSchema == nil {
 		return entry, nil
@@ -300,19 +301,26 @@ type accessGateCandidate struct {
 // validation (a package deploy's analysis) runs the same checks without
 // touching what the node is serving.
 //
+// The view comes back as well, in the registry's own order, whether or not it
+// was published. A candidate validation publishes nothing, so reading the
+// registry afterwards (AccessGateEntries) would answer with the node's gates and
+// not the candidate's; package analysis binds the candidate's gates to the
+// package that ships them, and it can only do that with the entries this pass
+// built.
+//
 // Every refusal is RETURNED rather than logged-and-skipped, so strict boot
 // decides. A gate that silently failed to register is a code whose every call
 // is a 404, which looks exactly like a gate nobody wrote. And a refused
 // construct is left OUT of the view: the break-glass that lets a node boot
 // past a skipped construct must never be the thing that opens a gate somebody
 // was told was refused.
-func loadAccessGates(functions *FunctionRegistry, publish bool) []error {
+func loadAccessGates(functions *FunctionRegistry, publish bool) ([]AccessGateEntry, []error) {
 	view := map[accessGateSlot]AccessGateEntry{}
 	if publish {
 		defer func() { publishAccessGates(view) }()
 	}
 	if functions == nil {
-		return nil
+		return nil, nil
 	}
 
 	// Range walks in sorted-key order without cloning the whole registry, so a
@@ -367,7 +375,7 @@ func loadAccessGates(functions *FunctionRegistry, publish bool) []error {
 		}
 		view[slot] = group[0].entry
 	}
-	return problems
+	return accessGateList(view), problems
 }
 
 func newAccessGateFault(fn *Function, err error) error {

@@ -4824,6 +4824,7 @@
         "declares",
         "deployedVersion",
         "disabledDeployables",
+        "dslDomains",
         "latestKnownVersion",
         "name",
         "ownerUserId",
