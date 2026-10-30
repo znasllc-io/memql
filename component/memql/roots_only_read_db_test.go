@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -59,23 +61,29 @@ func TestARootsOnlyReadSkipsTheRelationships(t *testing.T) {
 		UserId: "rootsonly-seeder", Role: auth.RoleOwner, Unranked: true, Synthetic: true,
 	}), &auth.TokenInfo{Subject: "rootsonly-seeder"}))
 	owner := "v1:identity:user:rootsonly-owner-" + suffix
-	insert := func(concept, rowID, payload string) {
+	insert := func(concept, rowID string, payload map[string]any) {
 		t.Helper()
-		_, err := eng.Execute(seed, fmt.Sprintf(`insert(%q, id=%q, payload=%s)`, concept, rowID, payload))
+		encoded, err := json.Marshal(payload)
+		require.NoError(t, err)
+		_, err = eng.Execute(seed, fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+			langparser.QuoteString(concept), langparser.QuoteString(rowID), encoded))
 		require.NoError(t, err)
 	}
-	insert("v1:accounts:account", account, `{"name":"Acme","status":"active","domainStatus":"unverified"}`)
-	insert("v1:platform:package", pkg, fmt.Sprintf(`{"name":"desk","sourceKind":"repo","status":"active","ownerUserId":%q,"accountId":%q}`, owner, account))
-	insert("v1:platform:site", site, fmt.Sprintf(
-		`{"hostname":%q,"kind":"spa","status":"draft","bundleRef":"blob://x/v1","ownerUserId":%q,"packageId":%q,"accountId":%q,"packageDeployableName":"desk"}`,
-		site+".example.test", owner, "v1:platform:package:"+pkg, account))
+	insert("v1:accounts:account", account, map[string]any{"name": "Acme", "status": "active", "domainStatus": "unverified"})
+	insert("v1:platform:package", pkg, map[string]any{
+		"name": "desk", "sourceKind": "repo", "status": "active", "ownerUserId": owner, "accountId": account,
+	})
+	insert("v1:platform:site", site, map[string]any{
+		"hostname": site + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://x/v1",
+		"ownerUserId": owner, "packageId": "v1:platform:package:" + pkg, "accountId": account, "packageDeployableName": "desk",
+	})
 	t.Cleanup(func() {
 		for _, row := range []string{"v1:accounts:account:" + account, "v1:platform:package:" + pkg, "v1:platform:site:" + site} {
 			_, _ = db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ?", row).Exec(context.Background())
 		}
 	})
 
-	query := fmt.Sprintf(`query siteById(siteId: %q)`, site)
+	query := `query siteById(siteId: ` + langparser.QuoteString(site) + `)`
 	reader := auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "rootsonly"))
 	full := ContextWithFreshRead(reader)
 	roots := ContextWithRootsOnlyRead(full)
