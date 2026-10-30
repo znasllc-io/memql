@@ -17,6 +17,11 @@ classes: |
   db      work      integrations/work  300s     serial    1
   # Revision workflows exercise two engines and must not compete with other DB suites.
   db      library   integrations/library 180s   serial    1
+  # The release suite passes in 154s on a laptop. With the same-tree reuse cases
+  # it exhausted the 180s alarm on the bounded AKS runner while a new test was
+  # only 3s old. Give the whole package headroom; keep every test and its
+  # operation deadlines.
+  db      release   integrations/release 300s   serial    1
   # Campaigns now covers 498 cases, including independent two-engine hops.
   # Keep each lock/write deadline assertion; give the full suite its own budget.
   db      campaigns component/campaigns 600s     serial,uncached 1
