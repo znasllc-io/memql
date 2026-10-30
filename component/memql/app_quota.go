@@ -2,14 +2,11 @@ package memql
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/znasllc-io/memql/component/auth"
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -118,7 +115,7 @@ var appBlockedUntilMeasured = time.Date(9999, time.January, 1, 0, 0, 0, 0, time.
 //
 // A Cockpit that predates the checks has only the clock (appRefusalUntil), so on it a
 // real call still finds out, and a refusal then moves on to the next app.
-func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, settings map[string]any, recent []map[string]any, measures bool, measuredReadyAt time.Time) (time.Time, error) {
+func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app string, recent []map[string]any, measures bool, measuredReadyAt time.Time) (time.Time, error) {
 	call, _ := parser.RenderCall("appAvailabilityEvidence", map[string]any{"workerId": registration, "app": app})
 	res, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
@@ -142,11 +139,6 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 			latest, latestAt = row, at
 		}
 	}
-	retries, _ := settings["availabilityRetriedAt"].(map[string]any)
-	retry, _ := time.Parse(time.RFC3339Nano, mapString(retries, app))
-	if !retry.IsZero() && !retry.Before(latestAt) {
-		return time.Time{}, nil
-	}
 	if !measuredReadyAt.IsZero() && !measuredReadyAt.Before(latestAt) {
 		return time.Time{}, nil
 	}
@@ -155,43 +147,4 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 		return appBlockedUntilMeasured, nil
 	}
 	return until, nil
-}
-
-func (e *MemQLEngine) evaluateFleetRetryAppAvailability(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
-	registration, app := stringArg(args, "registrationId"), stringArg(args, "app")
-	if app != "claude-code" && app != "codex" {
-		return nil, fmt.Errorf("choose a supported app")
-	}
-	if _, err := e.modelSetupRow(ctx, registration); err != nil {
-		return nil, err
-	}
-	ctx, err := e.fenceWriteTarget(ctx, WorkerRegistrationConcept, registration)
-	if err != nil {
-		return nil, err
-	}
-	row, err := e.modelSetupRow(ContextWithFreshRead(ctx), registration)
-	if err != nil {
-		return nil, err
-	}
-	if mapString(row, "revokedAt") != "" {
-		return nil, fmt.Errorf("pair this machine again before retrying its apps")
-	}
-	settings, _ := row["appRouting"].(map[string]any)
-	next := map[string]any{}
-	for key, value := range settings {
-		next[key] = value
-	}
-	retries := map[string]any{}
-	previous, _ := settings["availabilityRetriedAt"].(map[string]any)
-	for key, value := range previous {
-		retries[key] = value
-	}
-	at := time.Now().UTC().Format(time.RFC3339Nano)
-	retries[app] = at
-	next["availabilityRetriedAt"] = retries
-	call, _ := parser.RenderCall("setWorkerAppRouting", map[string]any{"registrationId": registration, "settings": next})
-	if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
-		return nil, err
-	}
-	return singleVirtualRow("v1:worker:appRoutingResult", registration, map[string]any{"app": app, "retriedAt": at})
 }

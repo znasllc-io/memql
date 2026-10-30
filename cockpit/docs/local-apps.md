@@ -187,6 +187,34 @@ it found. It answers to no cadence or ceiling, because you asked, so it spends a
 
 ---
 
+## Signing in from Fleet
+
+A machine's Apps page offers **Sign in** when an app reads as signed out. It works when
+you are not sitting at the machine: no browser opens there, and the page opens in your
+own browser on any computer. The app writes its own login on the machine, and no token
+crosses to the cluster.
+
+| | Claude Code | Codex |
+|---|---|---|
+| What runs | `claude auth login --claudeai` with `BROWSER=true`, so nothing opens on the machine | `codex app-server`: `account/login/start` with `chatgptDeviceCode` |
+| What you do | open the page, sign in, and paste the code it shows back into Fleet | open the page and enter the code Fleet shows |
+| What crosses the stream | the page's address, then your pasted code | the page's address and the device code |
+
+A pasted code goes to the waiting process's stdin and nowhere else. It is useless without
+the verifier that process holds, and it is written to no row and no log line. The page's
+address and the device code sit on a row only you can read, and are cleared when the
+sign-in ends.
+
+A sign-in needs the app allowed for that cluster in this machine's `policy.yaml`, which
+the worker checks again when the request arrives. It stops after 15 minutes, when you
+cancel it, when you start another for that app, or when the stream to the cluster goes.
+When it finishes, the worker checks the app at once, and Fleet moves to **Ready** on the
+next heartbeat after that.
+
+Machines report whether they can do this in `AppDescriptor.sign_in`, on `Register`. A
+Cockpit that predates it says nothing, and Fleet offers its older **Connect** instead, a
+setup goal in Ask.
+
 ## Where a session runs
 
 The engine may name a workspace (from the owner's delegation policy). When it
@@ -832,6 +860,9 @@ resources rather than Library copies of a repository.
 | `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false, or its last check did not say ready; the badge says which |
 | `Read-only file system` or `read-only file system`, from a session or a check on Linux | the machine still has the old service unit. Run the installer again ([the service unit](#on-linux-the-service-unit)) |
 | `memql worker apps --check` says `could not tell: ... could bill API credit; not pinged` | an API-key or proxy setting in the worker's environment. Correct refusal: a check never spends API credit, and the app stays selectable |
+| `This machine's Cockpit service cannot write to ~/.claude` (or `~/.codex`), from Sign in | the old Linux service unit. Run the installer again |
+| `This Codex cannot sign in by device code` | a Codex too old for it, or with no app-server. Update Codex, or run `codex login --device-auth` on the machine |
+| `Login failed: Request failed with status code 400` after pasting a code | the code was wrong or expired. Sign in again and paste the newest one |
 | The machine never appears at all | `claude` / `codex` is in none of the directories the worker searches. A service does not get your shell's `PATH`: the worker searches its own, with `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin` appended at start, and logs the result once (`worker PATH extended`). An app installed anywhere else needs that directory in the service's own `PATH` |
 | `is not allowed for this cluster by this machine's policy.yaml (apps.homes)` | the engine routed here anyway. `memql worker apps --allow <app> --home <this cluster>`, or ask why the label was derived |
 | `apps.allow is no longer read` (worker log, `memql worker apps`) | a `policy.yaml` from before consent was per cluster. Allow the app for the cluster you meant with `--home`; that removes the old list |

@@ -157,6 +157,15 @@ it('shows models and apps for display only, without a selection, a reading or fe
  expect(screen.queryByRole('button',{name:'Personal inference'})).toBeNull();
  expect(screen.queryByText('Tools')).toBeNull();
 });
+it('says what the machine measured about each app instead of calling an unmeasured one ready',async()=>{
+ const {MachineEquipment}=await import('../../src/apps/fleet/FleetWorkspace');
+ const {machineFromRow}=await import('../../src/apps/fleet/rows');
+ const machine=machineFromRow(machineRow({id:'a',apps:[{id:'claude-code',allowed:true,signedIn:true},{id:'codex',allowed:true,signedIn:true,readiness:'out_of_usage'}]}));
+ render(<MachineEquipment machine={machine} now={new Date()} onInspect={vi.fn()}/>);
+ const apps=screen.getByRole('region',{name:'App equipment'});
+ expect(within(apps).getByText('Claude Code').closest('.fleet-equipment-slot')?.textContent).toContain('Not checked');
+ expect(within(apps).getByText('Codex').closest('.fleet-equipment-slot')?.textContent).toContain('Out of usage');
+});
 it('identifies image generation separately from chat among the equipment models',async()=>{
  const {MachineEquipment}=await import('../../src/apps/fleet/FleetWorkspace');
  const {machineFromRow}=await import('../../src/apps/fleet/rows');

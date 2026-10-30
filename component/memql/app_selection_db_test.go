@@ -125,7 +125,7 @@ func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {
 	machine := AppMachine{RegistrationId: registration, Online: true, LocalStream: true, StructuredResult: true}
 	doors := []AppDoor{{AppId: "claude-code", Machines: []AppMachine{machine}}, {AppId: "codex", Machines: []AppMachine{machine}}}
 	req := AppCallRequest{ActingUserId: owner, AppId: "*"}
-	untilWithoutRecent, err := peer.appBlockedUntil(ctx, registration, "claude-code", nil, nil, false, time.Time{})
+	untilWithoutRecent, err := peer.appBlockedUntil(ctx, registration, "claude-code", nil, false, time.Time{})
 	require.NoError(t, err)
 	require.Equal(t, reset, untilWithoutRecent, "quota was lost without rolling usage history")
 	// Receipt is older than the rolling two-hour window, with non-zero work.
@@ -138,23 +138,11 @@ func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, filtered[0].Machines)
 	}
-	// Another user's receipts and another machine's receipts never block this one.
-	_, err = peer.evaluateFleetRetryAppAvailability(auth.ContextWithUserActor(context.Background(), "stranger"), map[string]any{"registrationId": registration, "app": "claude-code"})
-	require.Error(t, err)
-	until, err := peer.appBlockedUntil(ctx, registration+"-other", "claude-code", nil, nil, false, time.Time{})
+	// Another machine's receipts never block this one.
+	until, err := peer.appBlockedUntil(ctx, registration+"-other", "claude-code", nil, false, time.Time{})
 	require.NoError(t, err)
 	require.True(t, until.IsZero())
-	// A deliberate credit refresh is durable across replicas and scoped to one app.
-	_, err = eng.evaluateFleetRetryAppAvailability(ctx, map[string]any{"registrationId": registration, "app": "claude-code"})
-	require.NoError(t, err)
-	selected, err := peer.SelectAppForCall(ctx, req, false, []string{"codex"}, doors)
-	require.NoError(t, err)
-	require.Equal(t, "claude-code", selected.AppId)
-	_, err = eng.evaluateFleetSetAppRouting(ctx, map[string]any{"registrationId": registration, "revision": "", "mode": "auto", "usageWeight": 50, "speedWeight": 50, "reliabilityWeight": 50})
-	require.NoError(t, err)
-	_, err = peer.SelectAppForCall(ctx, req, false, []string{"codex"}, doors)
-	require.NoError(t, err, "saving strategy erased credit recovery")
-	// A new refusal after refresh blocks again; an unrelated failure cannot erase it.
+	// A new refusal blocks again; an unrelated failure cannot erase it.
 	quota["endedAt"] = time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)
 	insert("v1:worker:appSession", key+"-new-quota", quota)
 	insert("v1:worker:appSession", key+"-unrelated", map[string]any{"ownerUserId": owner, "workerId": registration, "app": "claude-code", "status": "failed", "errorMessage": "connection lost", "endedAt": time.Now().UTC().Add(2 * time.Second).Format(time.RFC3339Nano)})
@@ -204,7 +192,7 @@ func TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas(t *testing.T) {
 	}}}
 	req := AppCallRequest{ActingUserId: owner, AppId: "*"}
 	for _, e := range []*MemQLEngine{eng, peer} {
-		until, err := e.appBlockedUntil(ctx, black, "claude-code", nil, nil, false, time.Time{})
+		until, err := e.appBlockedUntil(ctx, black, "claude-code", nil, false, time.Time{})
 		require.NoError(t, err)
 		require.Equal(t, refused.Add(15*time.Minute).Truncate(time.Millisecond), until.Truncate(time.Millisecond))
 		selected, err := e.SelectAppForCall(ctx, req, false, nil, doors)
@@ -220,7 +208,7 @@ func TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas(t *testing.T) {
 	require.ErrorIs(t, err, ErrAppUnavailable)
 	// A later success on that machine is the proof the login works again.
 	insert("v1:worker:appSession", "v1:worker:appSession:"+key+"-recovered", map[string]any{"ownerUserId": owner, "workerId": black, "app": "claude-code", "status": "ended", "endedAt": time.Now().UTC().Format(time.RFC3339Nano)})
-	until, err := peer.appBlockedUntil(ctx, black, "claude-code", nil, nil, false, time.Time{})
+	until, err := peer.appBlockedUntil(ctx, black, "claude-code", nil, false, time.Time{})
 	require.NoError(t, err)
 	require.True(t, until.IsZero(), "success did not clear the refusal")
 }

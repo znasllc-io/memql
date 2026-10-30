@@ -212,6 +212,7 @@ func (d *Detector) Detect(ctx context.Context, allow []string) []Info {
 			StructuredResult: resolved.StructuredResult,
 			FollowUps:        resolved.FollowUps,
 			InferenceOnly:    resolved.InferenceOnly,
+			SignIn:           spec.ID == IDClaudeCode || resolved.Harness == HarnessCodexAppServer,
 		}
 		if d.Readiness != nil {
 			if report, ok := d.Readiness.Report(spec.ID); ok {

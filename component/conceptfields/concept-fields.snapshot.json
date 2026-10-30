@@ -9131,6 +9131,46 @@
       }
     },
     {
+      "concept": "v1:worker:appSignIn",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "app",
+        "endedAt",
+        "errorMessage",
+        "expiresAt",
+        "needsCode",
+        "ownerUserId",
+        "requestedAt",
+        "status",
+        "targetNodeId",
+        "updatedAt",
+        "url",
+        "userCode",
+        "workerId"
+      ],
+      "required": [
+        "app",
+        "expiresAt",
+        "ownerUserId",
+        "requestedAt",
+        "status",
+        "workerId"
+      ],
+      "enums": {
+        "app": [
+          "claude-code",
+          "codex"
+        ],
+        "status": [
+          "cancelled",
+          "failed",
+          "requested",
+          "succeeded",
+          "waiting"
+        ]
+      }
+    },
+    {
       "concept": "v1:worker:delegationPolicy",
       "file": "worker/concepts.memql",
       "fields": [

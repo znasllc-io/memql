@@ -3,3 +3,8 @@
 
 .fleet-app-routing-actions { flex-wrap: wrap; gap: 12px; }
 .fleet-machine-apps.fleet-machine-details { container-name: machine-details details; }
+
+.fleet-app-sign-in { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; margin-top: 12px; }
+.fleet-app-sign-in .os-copy-field { max-width: 100%; }
+.fleet-app-sign-in-code { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; width: 100%; min-width: 0; }
+.fleet-app-sign-in-code > .os-field { flex: 1 1 16rem; min-width: 0; }

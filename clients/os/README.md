@@ -360,8 +360,8 @@ every app epic after it:
   and nothing logged. `live/useLiveCollection.ts` is the one place that
   contract is honoured — use it rather than constructing a collection.
 - **Check the routing rules before deciding a concept is dark.**
-  `v1:worker:registration`, `v1:worker:routingPolicy` and
-  `v1:workbench:workspace` carry explicit broadcast rules
+  `v1:worker:registration`, `v1:worker:routingPolicy`, `v1:worker:appSignIn`
+  and `v1:workbench:workspace` carry explicit broadcast rules
   (`component/node/routing.go`); `v1:cluster:node` carries one through the
   `v1:cluster:*` wildcards in the same file. Machine activity and invocation
   receipts now broadcast created/updated events, and `v1:router:call`

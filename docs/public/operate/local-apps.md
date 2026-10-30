@@ -160,6 +160,28 @@ Codex names its reset in the machine's time zone without saying which, so the
 engine reads the earliest time it could mean. An app can come back up to a day
 before its real reset; the next call then costs one more refusal and no tokens.
 
+### Signing in from Fleet
+
+A machine's Apps page in Fleet offers **Sign in** when an app reads as signed out. It
+works when you are not at the machine, because the page opens in your own browser and
+none opens there. Only the machine's owner can start one, and the app must already be
+allowed for this cluster in the machine's own `policy.yaml`.
+
+**The login stays on the machine.** The app writes it there, and no token crosses to the
+cluster. What crosses is the sign-in page's address, a device code to enter on it (Codex),
+or a code the page shows that you paste back (Claude Code). A pasted code goes to the app
+waiting on the machine and is written to no row and no log line. It is useless without the
+verifier that process holds.
+
+The address and the device code are on a `v1:worker:appSignIn` row only the machine's owner
+can read, with no cluster-owner access, and are cleared when the sign-in ends. It runs on
+the agent holding the machine's stream, whichever replica took your call
+(`fleetAppSignIn` forwards it). A machine whose Cockpit predates this gets the older
+**Connect** instead, a setup goal in Ask.
+
+There is no button to retry an app, because the machine checks on its own. A `ready`
+measured after a refusal ends the block that refusal started.
+
 ### Which machine, and on which replica
 
 Selection is the **Fleet router**
@@ -624,7 +646,7 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 | `cockpit-app: the backend is registered but not wired on this node` | the Task reached a node with no WorkerService. Only an agent node serves one |
 | `cockpit-app: no credential minter configured` | `MEMQL_IDENTITY_VERIFIER_BASE_URL` or `MEMQL_NODE_BOOTSTRAP_TOKEN` is unset on the agent. The run is REFUSED rather than started with a blank bearer — an app with no credential reaches nothing over MCP and reports that as "MemQL's tools are broken" |
 | `no machine online with claude-code allowed and signed in` | check Fleet -> Machines page; the badge says which half is missing |
-| `Failed to authenticate: OAuth session expired`, `Not logged in`, `401 Unauthorized` | the app's login on that machine is missing or expired, even though Fleet may show it signed in. Run `claude auth login` or `codex login` on that machine, then Retry availability in Fleet. The call has already moved on where another app could take it |
+| `Failed to authenticate: OAuth session expired`, `Not logged in`, `401 Unauthorized` | the app's login on that machine is missing or expired, even though Fleet may show it signed in. Press **Sign in** on that machine's Apps page in Fleet, or run `claude auth login` or `codex login` on the machine. The call has already moved on where another app could take it |
 | `You've hit your usage limit` | that app's plan is out of usage. It is skipped until the reset it names, and the call moved on where another app could take it |
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
 | `app_holder_unreachable` / "the agent holding its stream (...) is not reachable from this node" | the registration names an agent replica this node cannot reach (restarted, or the row is stale). Nothing started; the route moved on. The machine re-registers on a live replica within a heartbeat |

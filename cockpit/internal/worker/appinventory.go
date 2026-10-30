@@ -209,6 +209,7 @@ func appDescriptorsToProto(inventory []apps.Info) []*memqlv1.AppDescriptor {
 			StructuredResult: a.StructuredResult,
 			FollowUps:        a.FollowUps,
 			InferenceOnly:    a.InferenceOnly,
+			SignIn:           a.SignIn,
 		})
 	}
 	return out

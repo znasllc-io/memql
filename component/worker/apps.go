@@ -416,6 +416,10 @@ type AppDescriptor struct {
 	// with no tools for an inference-only turn (worker.proto). Absent reads
 	// false, which is what a Cockpit that predates it means.
 	InferenceOnly bool `json:"inferenceOnly"`
+	// SignIn is the machine's claim that it can run a sign-in to this app. Absent
+	// reads false, because an older Cockpit would ignore AppSignInStart and leave a
+	// person waiting.
+	SignIn bool `json:"signIn"`
 }
 
 // IsKnownHarness reports whether h is a protocol this engine understands.
@@ -453,12 +457,14 @@ func AppDescriptorFromMap(m map[string]any) (AppDescriptor, bool) {
 	structured, _ := m["structuredResult"].(bool)
 	followUps, _ := m["followUps"].(bool)
 	inferenceOnly, _ := m["inferenceOnly"].(bool)
+	signIn, _ := m["signIn"].(bool)
 	d := AppDescriptor{
 		Id:               strings.TrimSpace(id),
 		Harness:          strings.TrimSpace(harness),
 		StructuredResult: structured,
 		FollowUps:        followUps,
 		InferenceOnly:    inferenceOnly,
+		SignIn:           signIn,
 	}
 	return d, d.Valid()
 }
@@ -482,6 +488,7 @@ func AppDescriptorsFromProto(in []*memqlv1.AppDescriptor) []AppDescriptor {
 			StructuredResult: d.GetStructuredResult(),
 			FollowUps:        d.GetFollowUps(),
 			InferenceOnly:    d.GetInferenceOnly(),
+			SignIn:           d.GetSignIn(),
 		}
 		if !desc.Valid() {
 			continue

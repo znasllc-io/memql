@@ -343,18 +343,20 @@ Route and Where controls; it does not carry an app-strategy override.
 The usage score uses up to 200 recent owner-scoped app sessions from the last
 two hours. Unknown usage stays unknown; token counts are not remaining-credit
 estimates. Availability is tracked separately for each app on each owned
-machine. A quota refusal stays effective until an unambiguous, explicitly zoned
-reset reported by the app; when no such time is reported, it is eligible for a
-recheck after fifteen minutes. This evidence survives restarts and replica
-changes and does not disappear as other sessions enter the usage window.
+machine, and only an app its machine has found ready is used. A quota refusal
+stays effective until a check on that machine finds the app working again; a reset
+passing does not send a real call to find out. This evidence survives restarts and
+replica changes and does not disappear as other sessions enter the usage window.
 Auto and Round robin can use another enabled app; an Only strategy cannot.
 
-After purchasing credits or restoring access, choose **Retry availability**
-beside that app in the machine's Apps page. This clears the earlier refusal for
-the next call, without starting a task, changing strategy or claiming a balance.
-A later quota refusal blocks new calls again, and a successful call clears it.
-Quota evidence from older builds is honored while present in recent history;
-newly recorded refusals have a durable marker independent of that history.
+After purchasing credits or signing in, there is nothing to press. The machine keeps
+checking, within five minutes for Codex and fifteen for Claude Code, and the app comes
+back when a check finds it working. A Cockpit that predates those checks reports none,
+so its refusal lasts until the reset the app named, or fifteen minutes when it named
+none, and the next call is what finds out. A later quota refusal blocks new calls
+again, and a successful call clears it. Quota evidence from older builds is honored
+while present in recent history; newly recorded refusals have a durable marker
+independent of that history.
 
 Each active session stays with its app. New calls receive their full supplied
 conversation and contract, and delegated steps receive their inputs and

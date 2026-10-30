@@ -160,6 +160,8 @@ type SessionReadiness interface {
 	SessionStarted(app string)
 	SessionEnded(app string)
 	Observe(app string, signal harness.ReadinessSignal)
+	// Recheck asks for a check at once, because a sign-in just finished.
+	Recheck(app string)
 }
 
 // Options configures a Manager.
@@ -186,6 +188,9 @@ type Options struct {
 	// Readiness hears about each session and what its turns said about the app,
 	// which stands in for a check (apps/readiness.go). Nil tells nobody.
 	Readiness SessionReadiness
+	// SignInLauncher overrides the supervisor a sign-in's processes come from.
+	// Tests set it; nil is CheckLauncher.
+	SignInLauncher harness.LaunchFunc
 	// Levels returns the machine owner's policy.yaml apps.levels entries
 	// for one app, and the levels those entries refuse, each with the
 	// sentence saying why (tools.Policy.AppLevels). The session lays the
@@ -257,6 +262,8 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	// signIns are the sign-ins this manager is running, by id (signin.go).
+	signIns map[string]*liveSignIn
 }
 
 // NewManager builds a Manager and sweeps whatever a previous process

@@ -100,6 +100,17 @@ func (l *appLink) Send(nodeId string, msg *nodev1.NodeClientMessage) bool {
 	}
 	crossed := wire(l.t, msg, &nodev1.NodeClientMessage{})
 	switch payload := crossed.GetPayload().(type) {
+	case *nodev1.NodeClientMessage_AppSignInForwardRequest:
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			l.handler.HandleForwardedAppSignIn(l.streamCtx, payload.AppSignInForwardRequest, func(m *nodev1.NodeServerMessage) error {
+				back := wire(l.t, m, &nodev1.NodeServerMessage{})
+				l.router.DispatchAppSignIn(back.GetAppSignInForwardResponse())
+				return nil
+			})
+		}()
+		return true
 	case *nodev1.NodeClientMessage_AppCallForwardRequest:
 		l.mu.Lock()
 		l.requests = append(l.requests, payload.AppCallForwardRequest)

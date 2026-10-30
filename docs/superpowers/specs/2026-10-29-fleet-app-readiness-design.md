@@ -102,16 +102,17 @@ machine does not take a working app away.
 
 ## Piece 3: Sign in from Fleet
 
-Only the machine's owner may start one, and the app must already be allowed for
-this cluster. The act writes a `v1:worker:appSignIn` row, as a model pull does, and
-the replica holding the stream runs it. The row carries the URL and device code
-and never a token: credentials stay on the machine, and the pasted code crosses
-the mesh in a transient message, never on a row or in a log. Claude Code's code is
-useless without the verifier held by the process on the machine (PKCE).
+Only the machine's owner may start one, and the app must already be allowed for this
+cluster. The act writes a `v1:worker:appSignIn` row, whose tier has no cluster-owner bypass,
+and forwards the start to the replica holding the stream. A start is forwarded rather than
+claimed from an event as a model pull is, because a pasted code must reach that same replica
+without being written anywhere. The row carries the URL and device code and never a token.
+Claude Code's code is useless without the verifier held by the process on the machine (PKCE),
+and it is written to no row and no log.
 
-Fleet shows each app's state, with the reset time when out of usage, and replaces
-"Retry availability" with Sign in. No browser opens on the machine, so it works
-from anywhere.
+Fleet shows each app's state, with the reset time when out of usage, and replaces "Retry
+availability" with Sign in. A `ready` measured after a refusal ends that refusal's block, which
+is what makes the retry unnecessary. No browser opens on the machine, so it works from anywhere.
 
 ## Linux service hardening
 

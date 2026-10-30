@@ -1,43 +1,38 @@
 import { useRef, useState } from "react";
 import { Button, Fact, Facts, Notice } from "../../../kit";
+import { formatFreshness, formatMoment } from "../../../kit/format";
 import { PageHelp } from "../../../kit/pageHelp";
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useOpenAskWork } from "../../../ask/AskProvider";
-import { appLabel, machineName, RUNNABLE_APPS, type MachineApp, type MachineRow } from "../rows";
+import { appLabel, machineName, RUNNABLE_APPS, type MachineRow } from "../rows";
 import { isWorkerOnline } from "../online";
 import { workerClusterUrl } from "../addMachine/install";
 import { MachineDetailsSection } from "./MachineDetailsInfo";
 import { MachineAppRouting } from "./MachineAppRouting";
-import { RetryAppAvailability } from "./RetryAppAvailability";
 import { AppPermissionHelp } from "./AppPermissionHelp";
-
-export function appStatus(machine: MachineRow, app: MachineApp | undefined, now: Date): string {
-  if (machine.revokedAt) return "Machine removed";
-  if (machine.ownerFeatures?.apps === false) return "Disabled in Settings";
-  if (!isWorkerOnline(machine, now)) return "Machine offline";
-  if (!machine.appsReported) return "Not reported";
-  if (!app) return "Not installed";
-  if (!app.signedIn) return "Sign-in needed";
-  if (!app.allowed) return "Permission needed";
-  return "Ready";
-}
+import { appStatus } from "./features";
+import { AppSignInAction } from "./AppSignInAction";
+import { useAppSignIns, type AppSignInsHandle } from "./useAppSignIns";
 
 export function subscriptionLabel(value?: string): string {
   return value === "present" ? "Active" : value === "none" ? "No subscription" : "Not reported";
 }
 
 export function MachineAppsHelp() {
-  return <PageHelp title="Apps"><p>Apps supported by MemQL. Ready means installed, signed in and allowed on this machine. Offline machines show their last reported information.</p><p>Subscription comes from the app. Not reported means the app has not supplied a plan; it does not prevent a ready app from running.</p><p>Setup starts work in Ask on this machine. MemQL checks what is needed and asks you for any permissions or sign-in steps. Readiness changes only after Cockpit reports it.</p></PageHelp>;
+  return <PageHelp title="Apps"><p>Apps supported by MemQL. Each machine checks on a schedule that its apps can answer. Ready means signed in with usage left. Out of usage says when it resets. MemQL sends work only to an app that is ready.</p><p>Could not check means the machine asked and got no answer, so the app gets no work until it does. Not checked means this machine's Cockpit predates the checks. The app is still used until Cockpit is updated, and a call it refuses moves to the next app.</p><p>Sign in opens the app’s own page in this browser, wherever you are, and the login stays on the machine. Subscription comes from the app; Not reported does not prevent a ready app from running.</p></PageHelp>;
 }
 
 export function MachineApps({ machine, now }: { machine: MachineRow; now: Date }) {
+  const { access } = useSession();
+  // Only a machine's owner may sign it in, so nobody else has a feed to read.
+  const signIns = useAppSignIns(machine.ownerUserId === access?.userId ? machine.id : "");
   return <div className="fleet-machine-details fleet-machine-apps"><MachineAppRouting key={machine.id} machine={machine} />{RUNNABLE_APPS.map(id =>
-    <MachineAppSection key={`${machine.id}:${id}`} id={id} machine={machine} now={now} />
+    <MachineAppSection key={`${machine.id}:${id}`} id={id} machine={machine} now={now} signIns={signIns} />
   )}</div>;
 }
 
-function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[number]; machine: MachineRow; now: Date }) {
+function MachineAppSection({ id, machine, now, signIns }: { id: typeof RUNNABLE_APPS[number]; machine: MachineRow; now: Date; signIns: AppSignInsHandle }) {
   const app = machine.apps.find(item => item.id === id);
   const status = appStatus(machine, app, now);
   const connection = useOsConnection();
@@ -48,7 +43,9 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
   const [runId, setRunId] = useState("");
   const starting = useRef(false);
   const label = appLabel(id);
-  const available = machine.ownerFeatures?.apps === false ? "Disabled in Settings" : machine.appsReported ? app ? app.allowed && app.signedIn ? "Allowed and signed in" : [app.allowed ? "Allowed" : "Not allowed", app.signedIn ? "Signed in" : "Signed out"].join(" · ") : "Install to connect" : "Waiting for Cockpit";
+  // What the Ask-driven setup can still do: install, ask for the permission, or sign in
+  // a machine whose Cockpit cannot run a sign-in itself.
+  const setupLabel = !app ? "Set up" : !app.allowed ? "Allow app" : !app.signedIn && !app.canSignIn ? "Connect" : "";
   const canSetup = machine.ownerFeatures?.apps !== false && !machine.revokedAt && isWorkerOnline(machine, now) && machine.ownerUserId === access?.userId;
   async function setup() {
     if (starting.current || !connection || !canSetup || !openWork) return;
@@ -71,15 +68,16 @@ function MachineAppSection({ id, machine, now }: { id: typeof RUNNABLE_APPS[numb
   return <MachineDetailsSection title={label}>
     <Facts>
       <Fact label="Status" value={<span className="fleet-app-status" data-ready={status === "Ready" || undefined}>{status}</span>} />
-      <Fact label="Installed" value={machine.appsReported ? app ? "Yes" : "No" : "Not reported"} />
-      <Fact label="Availability" value={available} />
+      {status === "Out of usage" && app?.resetsAt ? <Fact label="Resets" value={formatMoment(app.resetsAt)} title={app.resetsAt} /> : null}
+      {status === "Could not check" && app?.readinessDetail ? <Fact label="Why" value={app.readinessDetail} /> : null}
+      {app?.checkedAt ? <Fact label="Last checked" value={formatFreshness(app.checkedAt, now)} title={app.checkedAt} /> : null}
       <Fact label="Subscription" value={subscriptionLabel(app?.subscription)} />
       {app?.version ? <Fact label="Version" value={app.version} /> : null}
     </Facts>
     {app ? <AppPermissionHelp app={app} machine={machine} /> : null}
-    {app ? <div className="fleet-section-actions"><RetryAppAvailability registrationId={machine.id} app={id} disabled={!canSetup || !app.allowed || !app.signedIn} /></div> : null}
+    {app && canSetup ? <AppSignInAction app={id} label={label} signIns={signIns} now={now} available={app.allowed && !app.signedIn && app.canSignIn} /> : null}
     {runId ? <div className="fleet-section-actions"><Button onClick={() => openWork?.(runId)}>View setup</Button></div>
-      : status !== "Ready" && canSetup ? <div className="fleet-section-actions"><Button tone="primary" disabled={!connection || !openWork} busy={busy} busyLabel="Starting…" onClick={() => void setup()}>{!app ? "Set up" : !app.signedIn ? "Connect" : "Allow app"}</Button></div> : null}
+      : setupLabel && canSetup ? <div className="fleet-section-actions"><Button tone="primary" disabled={!connection || !openWork} busy={busy} busyLabel="Starting…" onClick={() => void setup()}>{setupLabel}</Button></div> : null}
     {error ? <Notice tone="error" sentence="Setup could not start." detail={error} /> : null}
   </MachineDetailsSection>;
 }

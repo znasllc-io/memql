@@ -269,8 +269,7 @@ func (e *MemQLEngine) FilterAppDoors(ctx context.Context, doors []AppDoor) ([]Ap
 			if appMeasuredNotReady(row, door.AppId) {
 				continue
 			}
-			settings, _ := row["appRouting"].(map[string]any)
-			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, settings, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
+			until, err := e.appBlockedUntil(ctx, machine.RegistrationId, door.AppId, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
 			if err != nil {
 				return nil, err
 			}
@@ -346,7 +345,7 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 					continue
 				}
 				settings, _ := row["appRouting"].(map[string]any)
-				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, settings, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
+				until, err := e.appBlockedUntil(read, machine.RegistrationId, door.AppId, recent, appMeasures(row, door.AppId), appMeasuredReadyAt(row, door.AppId))
 				if err != nil {
 					return AppSelection{}, err
 				}
@@ -446,10 +445,6 @@ func (e *MemQLEngine) evaluateFleetSetAppRouting(ctx context.Context, args map[s
 	}
 	revision := id.NewShortId()
 	settings := map[string]any{"mode": p.Mode, "usageWeight": p.UsageWeight, "speedWeight": p.SpeedWeight, "reliabilityWeight": p.ReliabilityWeight, "revision": revision}
-	previous, _ := row["appRouting"].(map[string]any)
-	if retries, ok := previous["availabilityRetriedAt"]; ok {
-		settings["availabilityRetriedAt"] = retries
-	}
 	call, _ := parser.RenderCall("setWorkerAppRouting", map[string]any{"registrationId": registration, "settings": settings})
 	if _, err = e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
 		return nil, err

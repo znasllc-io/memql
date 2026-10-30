@@ -1005,6 +1005,7 @@ func descriptorsAsMaps(descriptors []AppDescriptor) []map[string]any {
 			"structuredResult": d.StructuredResult,
 			"followUps":        d.FollowUps,
 			"inferenceOnly":    d.InferenceOnly,
+			"signIn":           d.SignIn,
 		})
 	}
 	return out

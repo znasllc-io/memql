@@ -996,6 +996,50 @@ func AppSessionsForUserBuild(args AppSessionsForUserArgs) string {
 	return "query appSessionsForUser()"
 }
 
+// AppSignInById -- One of the caller's sign-ins, read fresh by the act that answers it.
+//
+// Bound concept: v1:worker:appSignIn (machine-readable: BoundConcepts["appSignInById"] in generated_concepts.go).
+type AppSignInByIdArgs struct {
+	SignInId string
+}
+
+// AppSignInById calls the engine query appSignInById.
+func (qc *QueryClient) AppSignInById(ctx context.Context, args AppSignInByIdArgs) (*Result, error) {
+	call := AppSignInByIdBuild(args)
+	return qc.executeNamed(ctx, "appSignInById", call)
+}
+
+func AppSignInByIdBuild(args AppSignInByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query appSignInById(")
+	b.WriteString("signInId: ")
+	b.WriteString(quoteMemQL(args.SignInId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AppSignInsForWorker -- The CALLER'S sign-ins for one machine, newest first. Backs the Sign in action on the machine's Apps page.
+//
+// Bound concept: v1:worker:appSignIn (machine-readable: BoundConcepts["appSignInsForWorker"] in generated_concepts.go).
+type AppSignInsForWorkerArgs struct {
+	WorkerId string
+}
+
+// AppSignInsForWorker calls the engine query appSignInsForWorker.
+func (qc *QueryClient) AppSignInsForWorker(ctx context.Context, args AppSignInsForWorkerArgs) (*Result, error) {
+	call := AppSignInsForWorkerBuild(args)
+	return qc.executeNamed(ctx, "appSignInsForWorker", call)
+}
+
+func AppSignInsForWorkerBuild(args AppSignInsForWorkerArgs) string {
+	var b strings.Builder
+	b.WriteString("query appSignInsForWorker(")
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ApprovalChainById -- One approval chain.
 //
 // Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["approvalChainById"] in generated_concepts.go).

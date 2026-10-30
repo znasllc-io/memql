@@ -41,6 +41,7 @@ message WorkerClientMessage {
     ModelProbeProgress model_probe_progress = 22;
     ModelProbeEnd model_probe_end = 23;
     Pong pong = 24;
+    AppSignInUpdate app_sign_in_update = 25;
   }
 }
 
@@ -65,6 +66,9 @@ message WorkerServerMessage {
     ModelProbeStart model_probe_start = 22;
     ModelProbeCancel model_probe_cancel = 23;
     Ping ping = 24;
+    AppSignInStart app_sign_in_start = 25;
+    AppSignInInput app_sign_in_input = 26;
+    AppSignInCancel app_sign_in_cancel = 27;
   }
 }
 
@@ -244,6 +248,11 @@ message AppDescriptor {
   // (spec 2026-10-29, D4). False -- including a Cockpit that predates the
   // field -- keeps the destination refusal.
   bool inference_only = 5;
+  // sign_in reports that this machine can run a sign-in to this app when the
+  // engine sends AppSignInStart. False -- including a Cockpit that predates the
+  // field, which would ignore the message and leave a person waiting -- means
+  // Fleet offers no Sign in button for it.
+  bool sign_in = 6;
 }
 
 // AppInfo is one local app the cockpit detected. `allowed` is the
@@ -712,6 +721,52 @@ message AppSessionChunk {
   // seq is monotonic per session; the engine drops out-of-order and
   // duplicate chunks rather than corrupting the transcript.
   uint64 seq = 4;
+}
+
+// -----------------------------------------------------------------------------
+// App sign-in (the Fleet app's Sign in action)
+// -----------------------------------------------------------------------------
+//
+// CREDENTIALS STAY ON THE MACHINE. These messages carry where a person goes to
+// sign in and, for an app that needs one pasted back, the code that page shows.
+// The login's tokens are written by the app on the machine and never cross this
+// stream. A pasted code is useless without the verifier held by the process on the
+// machine (PKCE), and it is still never logged or written to a row.
+
+// AppSignInStart asks the machine to begin a sign-in. Server -> worker.
+message AppSignInStart {
+  string sign_in_id = 1;
+  // app is "claude-code" or "codex".
+  string app = 2;
+}
+
+// AppSignInInput carries what the person pasted back. Server -> worker.
+message AppSignInInput {
+  string sign_in_id = 1;
+  string code = 2;
+}
+
+// AppSignInCancel stops a sign-in. Server -> worker.
+message AppSignInCancel {
+  string sign_in_id = 1;
+  string reason = 2;
+}
+
+// AppSignInUpdate reports where a sign-in stands. Worker -> server.
+message AppSignInUpdate {
+  string sign_in_id = 1;
+  // state is "waiting" (url is ready for the person), "succeeded" or "failed".
+  string state = 2;
+  // url is the page to open. It carries no secret.
+  string url = 3;
+  // user_code is what the person enters on that page (Codex's device code).
+  string user_code = 4;
+  // needs_code means the page shows a code to paste back (Claude Code).
+  bool needs_code = 5;
+  // expires_at is when the app stops waiting.
+  google.protobuf.Timestamp expires_at = 6;
+  // error is the app's own sentence when state is "failed".
+  string error = 7;
 }
 
 // AppSessionEnd closes a session. Worker -> server.

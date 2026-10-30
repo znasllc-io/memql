@@ -135,6 +135,9 @@ type Info struct {
 	// InferenceOnly reports whether that harness runs the app with no
 	// tools when a turn asks for inference only (see Spec.InferenceOnly).
 	InferenceOnly bool
+	// SignIn reports whether this machine can run a sign-in to this app from Fleet.
+	// Codex's goes through its app-server, so a Codex without one cannot.
+	SignIn bool
 	// Readiness is what this machine last MEASURED about whether the app can take
 	// a call (readiness.go), one of harness's Readiness words. A worker always sends
 	// a word, because the engine reads none as a Cockpit that predates the checks.

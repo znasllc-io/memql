@@ -2219,10 +2219,11 @@ func preflightFixtureClient(s *httptest.Server) *http.Client {
 
 // recordingReadiness is the machine's tracker, as a session sees it.
 type recordingReadiness struct {
-	mu       sync.Mutex
-	started  []string
-	ended    []string
-	observed []harness.ReadinessSignal
+	mu        sync.Mutex
+	started   []string
+	ended     []string
+	observed  []harness.ReadinessSignal
+	rechecked []string
 }
 
 func (r *recordingReadiness) SessionStarted(app string) {
@@ -2241,6 +2242,12 @@ func (r *recordingReadiness) Observe(_ string, signal harness.ReadinessSignal) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.observed = append(r.observed, signal)
+}
+
+func (r *recordingReadiness) Recheck(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rechecked = append(r.rechecked, app)
 }
 
 func (r *recordingReadiness) snapshot() (started, ended []string, observed []harness.ReadinessSignal) {

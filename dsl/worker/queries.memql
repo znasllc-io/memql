@@ -443,6 +443,32 @@ query modelPull modelPullsForWorker {
   shape   workerModelPullFull
 }
 
+/// The CALLER'S sign-ins for one machine, newest first. Backs the Sign in action on the machine's
+/// Apps page.
+@actor
+@cache(0)
+query appSignIn appSignInsForWorker {
+  args {
+    workerId  string!
+  }
+  filter  row => row.workerId == args.workerId && row.ownerUserId == actor.userId
+  sort    "requestedAt", "desc"
+  paginate 10
+  shape   workerAppSignInFull
+}
+
+/// One of the caller's sign-ins, read fresh by the act that answers it.
+@actor
+@cache(0)
+query appSignIn appSignInById {
+  args {
+    signInId  string!
+  }
+  filter  row => row.id == args.signInId && row.ownerUserId == actor.userId
+  paginate 1
+  shape   workerAppSignInFull
+}
+
 /// Every model pull nobody is driving, for the sweep that closes them.
 ///
 /// ===========================================================================

@@ -151,8 +151,14 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorFleetSetSharing: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetSetSharingExpression(ctx, args)
 		},
-		"fleetRetryAppAvailability": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-			return e.evaluateFleetRetryAppAvailability(ctx, args)
+		"fleetAppSignIn": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetAppSignIn(ctx, args)
+		},
+		"fleetAppSignInCode": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetAppSignInCode(ctx, args)
+		},
+		"fleetAppSignInCancel": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetAppSignInCancel(ctx, args)
 		},
 		"fleetSetAppRouting": func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetSetAppRouting(ctx, args)

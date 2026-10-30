@@ -1109,6 +1109,65 @@ units in a Linux VM (systemd 255). They have not run on the fleet, and neither a
 successful Claude Code turn on Linux nor the tracker's schedule on a real machine has been
 observed.
 
+## Signing in to an app from Fleet (2026-10-29)
+
+Owner's brief: an unauthenticated app gets "a sign-in button", and "right now there's a
+button that says retry availability. That's not what we want." Fleet now shows each app's
+state with its reset time and offers Sign in. Retry is gone, because the machine's own
+checks do its job.
+
+**What crosses and what does not.** Credentials stay on the machine: the app writes its own
+login. A page's address and a device code cross the worker stream and sit on a
+`v1:worker:appSignIn` row. A pasted code crosses to the waiting process and is written
+nowhere; it is an authorization code bound to the verifier that process holds (PKCE). The
+address and the code are cleared when the sign-in ends, though an earlier row version keeps
+them, by then useless. Tests: `TestFleetAppSignInDB` reads every row version for the pasted
+code, `TestAppSignInRefusalDoesNotEchoACode`.
+
+**Who.** Only the machine's owner, at three points: the act reads through `modelSetupRow`,
+which answers only for the caller's own machines, so a cluster owner gets the stranger's
+refusal; the holder checks the verified authority and not the envelope
+(`HandleForwardedAppSignIn`); and the row's tier is plain owner with no cluster-owner
+bypass, unlike the model pull's, because a device code signs an account into a machine.
+Tests: `TestFleetAppSignInDB`, `TestAppSignInRefusesAnyoneButTheMachinesOwner`.
+
+**How it crosses replicas.** The act runs on the bff that took the call, the machine's stream
+ends on one agent, and the row is what the person watches. A start is forwarded rather than
+claimed from an event as a model pull is, because a pasted code must reach the same replica
+without being written anywhere, so the forward has to exist anyway, and it makes "that
+machine has gone" a refusal rather than a spinner. Test: `TestAppSignInCrossesTheHop`.
+
+**Fallbacks and stops.** A machine whose Cockpit predates `AppDescriptor.sign_in` gets the
+older Ask-driven Connect, because it would ignore the message. A code goes only to a sign-in
+its stream started, because after a reconnect the process holding the verifier is gone. When
+the stream ends the row closes as failed and the process stops. A sign-in stops itself after
+15 minutes, and nothing sweeps the rows: Fleet reads a live status past `expiresAt` as over,
+which is what covers a replica dying. A newer sign-in to the same app replaces an older one.
+A cancel takes the sign-in off the stream at once, because the row then holds the person's
+answer, and neither a last word from the machine nor the stream ending may rewrite it. A code
+that could not be sent stays open, so the stream ending closes it.
+On Linux, a home the service cannot write fails at the start with what to do, rather than
+after the person has done everything. Tests: `TestAppSignInClosesWhenTheStreamEnds`,
+`TestAppSignInCancelStaysCancelled`, `TestAppSignInCodeThatDidNotGoIsClosedByTheStreamEnding`,
+`TestAppSignInCodeGoesOnlyToASignInThisStreamStarted`, `TestSignInStopsWithTheStream`,
+`TestANewerSignInReplacesAnOlderOne`, `TestCheckLoginWritableSaysToUpdateTheService`.
+
+**Retry's removal.** A measurement newer than a refusal now ends its block (the section
+above), so nothing needs pressing. A machine still on a Cockpit that measures nothing has
+no such measurement: a named reset blocks until then, even if credits were bought, and
+success cannot clear it because the app is not selected. It clears when that machine's
+Cockpit upgrades. `availabilityRetriedAt` stays on stored `appRouting` rows, unread, because
+that field is a free object.
+
+**Limits.** No real login has completed through this path. The flows were run against the
+real CLIs in scratch config directories up to the page and a fabricated code, and the Fleet
+states were checked against fixtures (`clients/os/qa/app-routing.tsx`), at desktop and phone
+width, light and dark. Whether Codex's device code login is enabled for an account is that
+account's setting; a refusal then reads as the app's own sentence. The row takes no lock: the
+holder and the bff can both write it, so a `waiting` write already in flight when a cancel
+lands could land after it. The row would then read as waiting until the person cancels again
+or it expires. That is reasoned from the code and has not been observed.
+
 ## Pipeline AI runs local first (2026-10-29)
 
 Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a
