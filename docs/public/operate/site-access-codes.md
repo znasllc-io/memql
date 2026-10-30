@@ -451,8 +451,10 @@ generic `/_memql/*` proxy, **whatever the site's `apiProxy` says**.
 | `POST /_memql/access/call`, body `{"call":"name","args":{...}}` | `POST /access/call` |
 
 Any other method or path under `/_memql/access` is not this surface's and
-reaches the generic proxy as it always did. The bff routes are never reachable
-from outside: the edge is the only way in.
+reaches the generic proxy as it always did. The four take no query string: the
+edge forwards the path alone, so a code pasted into a URL never reaches the bff or
+anything that records what it served. The bff routes are never reachable from
+outside: the edge is the only way in.
 
 Every reply carries `Cache-Control: no-store` and `X-Content-Type-Options:
 nosniff`. Every POST must declare `Content-Type: application/json`, **`leave`
