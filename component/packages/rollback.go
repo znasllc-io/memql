@@ -68,6 +68,18 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			"this deployment carried MemQL DSL, so rolling back to it changes what the whole cluster can do -- which is owner or developer only.")
 	}
 
+	// THE POINTER IS READ BEFORE ANYTHING MOVES. That read can fail for real, and
+	// the sites go back first, so asked after them it would leave the sites on the
+	// old build and the DSL on the new one, the apart-state the ordering below
+	// exists to keep brief. The map it returns is the one the pointer moves from.
+	var current map[string]string
+	if dslVersion != "" && d.Stager != nil {
+		var rerr error
+		if current, rerr = d.Stager.ReadActiveSet(ctx); rerr != nil {
+			return nil, rerr
+		}
+	}
+
 	restored := &RestoredState{DeploymentId: req.DeploymentId, DslVersion: dslVersion}
 
 	// ---- publish back FIRST ----
@@ -83,10 +95,6 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 
 	// ---- then the pointer back, and roll ----
 	if dslVersion != "" && d.Stager != nil {
-		current, rerr := d.Stager.ReadActiveSet(ctx)
-		if rerr != nil {
-			return restored, rerr
-		}
 		next := map[string]string{}
 		for k, v := range current {
 			next[k] = v

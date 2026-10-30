@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -294,11 +295,19 @@ func (b *blobStager) ReadActiveSet(ctx context.Context) (map[string]string, erro
 		return nil, err
 	}
 	raw, err := b.uploader.Download(ctx, b.container, ActiveSetPath)
-	if err != nil {
+	if bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ContainerNotFound) {
 		// A cluster that has never staged a package has no pointer, and that
 		// is the ordinary first-deploy state rather than a fault. Returning
 		// empty is what makes the first deploy identical to every later one.
 		return map[string]string{}, nil
+	}
+	if err != nil {
+		// ONLY ABSENCE READS AS EMPTY. A caller copies this map, adds its own
+		// domains and writes the whole document back, so an empty answer to a
+		// read that merely failed would replace the cluster's pointer with one
+		// package's domains, and the next roll would drop every other package's
+		// DSL.
+		return nil, fmt.Errorf("packages: the active-set pointer at %s is not readable: %w", ActiveSetPath, err)
 	}
 	set := map[string]string{}
 	if len(raw) > 0 {
