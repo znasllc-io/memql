@@ -1171,13 +1171,14 @@ mutation sitePreviewObservation recordSitePreviewObservation {
 // of two that race, the loser is refused with 'row version changed before the write committed' and
 // has written nothing, so a caller re-reads and decides again rather than undoing the other.
 //
-// ALL SIX RUN AS THE SITE'S OWNER, with internal origin stamped inline -- by integrations/siteaccess,
-// which the bff reaches through an interface because component/server may not stamp internal origin
-// itself (the sitePreview precedent). The owner is the actor, so `ownerUserId` is stamped as the
-// SITE'S and never the operator's, and the composite tier's owner arm admits every update after
-// it. The person behind an operator's act is therefore NOT the actor, which is why `lastChangedBy`
-// is an argument on the four operator writes -- and why those four are server-only all the more: an
-// argument naming who made a change is a claim a client could otherwise make about anybody.
+// ALL SIX CARRY INTERNAL ORIGIN, stamped inline by integrations/siteaccess, which the bff reaches
+// through an interface because component/server may not stamp it itself (the sitePreview precedent).
+// THE TWO CREATES RUN AS THE SITE'S OWNER, so `ownerUserId` is stamped as the SITE'S at birth and never
+// the operator's. THE FOUR UPDATES RUN AS THE CLUSTER ACTING, so a row's current owner has no say in
+// them: that stamp stays where it landed (an ownership transfer skips both concepts), while the site
+// can go on to have another owner. The person behind an operator's act is therefore NOT the actor, which
+// is why `lastChangedBy` is an argument on the four operator writes -- and why those four are server-only
+// all the more: an argument naming who made a change is a claim a client could otherwise make about anybody.
 
 /// Mint an access code (design record 2026-10-29-deployable-access-codes). @serverOnly: `codeHash` is
 /// the digest of a bearer credential and `expiresAt` is the only bound on it, so neither may be a
@@ -1187,8 +1188,8 @@ mutation sitePreviewObservation recordSitePreviewObservation {
 /// reason exactly. The concept declares the composite owner tier over this field, and a tier over a
 /// caller-supplied value records a guarantee nothing provides (TestDeclaredOwnerFieldsAreServerStamped
 /// is what refuses it). The builtin runs this write as the SITE'S owner, so the stamp is the site's
-/// owner whoever asked -- which is also what lets the bff find the row again under the owner the
-/// edge stamps on a request.
+/// owner whoever asked. Nothing that decides whether a code opens reads it afterwards: the bff's store
+/// finds the row as the cluster acting.
 ///
 /// SCOPING TO actor.userId IS NOT THE FIX, AND IT IS ALREADY DONE. The stamp above is exactly that
 /// scoping, and the composite owner tier decides the row. What it cannot establish is what the row
@@ -1239,10 +1240,10 @@ mutation siteAccessCode createSiteAccessCode {
 /// which the secret has changed and the generation has not -- sessions of the old secret would
 /// still match.
 ///
-/// actor.userId SCOPING COULD NOT BE THE FIX, and it holds already: the write runs as the site's
-/// owner, so the owner arm admits it. What scoping cannot say is the thing this write claims -- that
-/// the digest is a freshly minted one, and that the expiry was computed rather than chosen -- and
-/// that is the integration's to establish, which is what @serverOnly names.
+/// actor.userId SCOPING COULD NOT BE THE FIX: the write runs as the cluster acting, whose update never
+/// moves the row's owner. What scoping cannot say is the thing this write claims -- that the digest is
+/// a freshly minted one, and that the expiry was computed rather than chosen -- and that is the
+/// integration's to establish, which is what @serverOnly names.
 ///
 /// `revokedAt` IS NOT CLEARED, AND NEVER NEEDS TO BE: removal is final, and siteAccessCodeRegenerate
 /// refuses a removed code, so a rotation only ever lands on a live or an expired one. Nor is anything
@@ -1274,9 +1275,10 @@ mutation siteAccessCode rotateSiteAccessCode {
 ///
 /// @serverOnly because `expiresAt` is the only bound a bearer credential has, and the bounds it must
 /// sit inside (more than a minute away, at most 366 days) are the integration's to enforce.
-/// actor.userId scoping is not the fix: the write runs as the site's owner and the tier already
-/// decides the row, but a caller who is allowed to write the row is not thereby allowed to choose
-/// its lifetime outside those bounds, or to extend a code the organization gate would refuse them.
+/// actor.userId scoping is not the fix: the write runs as the cluster acting, after the builtin has
+/// authorized the person under their own actor, and a caller who is allowed to read the row is not
+/// thereby allowed to choose its lifetime outside those bounds, or to extend a code the organization
+/// gate would refuse them.
 ///
 /// `generation` AND `codeHash` ARE NOT TOUCHED. Changing when a code stops is not changing what it
 /// is, and an advanced generation would end sessions a mere re-timing has no reason to end.
@@ -1306,7 +1308,7 @@ mutation siteAccessCode setSiteAccessCodeExpiry {
 /// carries no credential, and it writes one timestamp. It is @serverOnly anyway because an operator
 /// act that ends access must reach the audit log, and only siteAccessCodeRemove writes the event.
 /// Reachable, this would end a code with no trace of who. actor.userId scoping does not touch that:
-/// the write runs as the site's owner, which is exactly why the person behind it is an argument.
+/// the write runs as the cluster acting, which is exactly why the person behind it is an argument.
 @serverOnly
 mutation siteAccessCode removeSiteAccessCode {
   args {
@@ -1361,8 +1363,8 @@ mutation siteAccessSession createSiteAccessSession {
 /// Expiry, regeneration and removal do not wait for this write: they are comparisons the bff makes
 /// against the code and the clock on every request, which is why none of them needs a sweep.
 ///
-/// @serverOnly, and actor.userId scoping is not the fix: the write runs as the site's owner and the
-/// owner arm admits it, but that arm admits ANY session of the owner's. The property is that the
+/// @serverOnly, and actor.userId scoping is not the fix: the write runs as the cluster acting, which
+/// reaches ANY session, and an owner's scope would admit any of that owner's. The property is that the
 /// visitor ending it is the holder of the cookie, which only the handler that hashed the cookie
 /// knows -- a client-callable end by id would let anybody who learned a session id end another
 /// visitor's.
@@ -2467,8 +2469,8 @@ mutation package recordPackageDeployables {
 /// a serving version published, or nothing published and DSL carried -- so a run that publishes only
 /// candidates leaves it alone. A rollback rewrites it from the report of the deployment it returns
 /// to -- a row only the pipeline can write, since the deployment concept is @serverWritten -- after
-/// that deployment's DSL is back or found already live, and not at all when it puts no DSL back, so
-/// the list never describes DSL that is not running.
+/// the cluster's pointer names that deployment's DSL again, whether it was put back or already did,
+/// and not at all when it puts no DSL back, so the list never describes DSL the pointer does not name.
 /// recordPackageDeployables is the analysis's write and is kept apart from this one for that reason:
 /// it records what the manifest DECLARES, which is true of a tree whether or not anyone deploys it.
 ///

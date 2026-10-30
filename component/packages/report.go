@@ -111,8 +111,9 @@ func declaredFrom(rep *Report) []DeclaredDeployable {
 
 // dslDomainsFrom projects a run's report onto the list a package records of the
 // DSL domains it ships (`v1:platform:package.dslDomains`). A deploy writes it
-// from its own report once its DSL is live, and a rollback from the report of
-// the deployment it returns to; an analysis states it and records nothing.
+// from its own report once its DSL is staged and its roll requested, which does
+// not wait for a node to run it, and a rollback from the report of the
+// deployment it returns to; an analysis states it and records nothing.
 //
 // SPELLED AS A CONCEPT ID SPELLS A DOMAIN, not as the repository names a
 // directory: an access gate records the domain of the concept its construct is
