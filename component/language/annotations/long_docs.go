@@ -209,3 +209,40 @@ const docSecretField = "The field holds a secret. It is emitted as `x-secret`, a
 	"\n" +
 	"So `@secret` stops a credential leaking through a validation diagnostic. It is not a general secrecy guarantee, and not a " +
 	"reason to treat a credential in the graph as protected."
+
+// docAccessGateAuthoring is what @accessGate's Docs entry adds after its opening paragraph,
+// for the author of a gated construct (hover reads it as well as the page, like docRowAuthz).
+// The code that makes each claim true: the refusal of a case-variant reserved name is
+// reservedAccessArgFolded (component/memql/access_gate.go), called by
+// accessGateEntryFromFunction (access_gate_load.go); what a call may name, the shape rule,
+// the warning for an unshaped query and the bare-id answer are accessCallArgs,
+// accessResultIsShaped, accessReply and serveCall in component/server/access_handler.go; a
+// write at an id that names a row is the read-merge in executeWrite
+// (component/memql/executor_mutation.go, memql#1709); an id left out is derived by
+// Concept.DeriveContentId (component/database/memory-nodes/concept.go) from the concept and
+// the whole payload; a block field applied after a spread is PayloadOverlayTemplate
+// (component/memql/mutation_templates.go, memql#401); and a bundle is public because
+// component/edge serves it to every host that resolves to a live site (handler.go). The page
+// that carries the rest, the wire and the limits, is docs/public/operate/site-access-codes.md.
+const docAccessGateAuthoring = "A declared argument that differs from a reserved name only in case, such as `accessCodeID`, is refused at " +
+	"load. The handler matches the four names exactly, so it would be an ordinary caller-supplied argument, and a filter on it " +
+	"would read as scoped to the code while opening to any id a visitor names.\n" +
+	"\n" +
+	"A code opens gated constructs and nothing else. It protects nothing in a public bundle, which the edge serves to everyone " +
+	"who resolves the hostname, so private content belongs in the graph, read through a gated construct. A gated query answers " +
+	"with the rows of its `shape` clause, every id bare. One with no `shape` answers only the bare ids of the rows it selected, " +
+	"and the server logs a warning naming the site and the construct, so give it one.\n" +
+	"\n" +
+	"A gated mutation writes with the site owner's authority, and keeping one code's rows from another's is the author's to do:\n" +
+	"\n" +
+	"- A visitor-chosen id can overwrite another code's row. An insert at an id that already names a row writes a new version " +
+	"of it, and every row a gated mutation writes has the same owner. Leave the id out, so the engine derives it from the " +
+	"concept and everything the row holds, `accessCodeId` included, or build it from the stamped `accessCodeId`. Where a " +
+	"visitor must name the row, mark every field the mutation writes `@createOnly`.\n" +
+	"- The handler refuses a reserved name at the top level of the call's `args` and looks no deeper. A nested one under a " +
+	"declared object argument reaches the construct, and a bare `args.<object>` spread into the row writes it unless the block " +
+	"also names that field, which the engine applies after the spread. Accept named fields (`accept { body }`) instead of " +
+	"spreading an object.\n" +
+	"- A mutation has no shape clause, so it answers with only the bare id of the row it wrote.\n" +
+	"\n" +
+	"See docs/public/operate/site-access-codes.md for the wire, what the page must do and the limits."
