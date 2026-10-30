@@ -3,9 +3,12 @@ package packages
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,4 +274,287 @@ func TestASiteOwnerReadsTheDomainsOfThePackageTheyOwn(t *testing.T) {
 			t.Fatalf("a writer outside the package's organization reads it by owning it (%v): the organization boundary has moved", row)
 		}
 	})
+}
+
+// NO CLIENT WRITE CAN NAME THE LIST (the second automated security review of
+// Task 9).
+//
+// recordPackageDslDomains is @serverOnly, and @serverOnly bars the NAMED call
+// only. A raw insert at an existing package id read-merges its delta onto the
+// stored row, so
+//
+//	insert("v1:platform:package", id=<pkg>, payload={"dslDomains":["forged"]})
+//
+// rewrote the list for a cluster owner, a developer and a plain writer in the
+// package's organization, on their own package and on a colleague's -- and the
+// bff opens an access code only for a gate whose domain is in that list.
+// @serverWritten would shut it, but a package has client-reachable writes (the
+// compose flow, the OS's own settings), so the guard is on the field.
+//
+// What this pins is the guard's whole shape, not only the refusal: the refused
+// write leaves the row as it was; a client's other writes to the same row are
+// not touched by it; a client that re-sends the whole row without naming the
+// field cannot change it, because the read-merge keeps what the delta omits;
+// and the deploy's own write still lands.
+func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
+	eng, db := dbEngine(t)
+	suffix := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+
+	var ids []string
+	t.Cleanup(func() {
+		for _, id := range ids {
+			_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+		}
+	})
+	account := "dd-guard-acct-" + suffix
+	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "dd guard")`, langparser.QuoteString(account))); err != nil {
+		t.Fatal(err)
+	}
+	group := "dd-guard-group-" + suffix
+	seedTieGroup(t, eng, group, account)
+	ids = append(ids, group)
+
+	// person writes a user of the given role. A writer reaches a tied package
+	// only through the organization, so a writer is a member of it; staff are
+	// standing members of every organization by rule.
+	person := func(t *testing.T, tag string, role auth.Role) string {
+		t.Helper()
+		user := fmt.Sprintf("v1:identity:user:dd-guard-%s-%s", tag, suffix)
+		ids = append(ids, user)
+		seedTiePrincipal(t, eng, user, role)
+		if role == auth.RoleWriter {
+			seedTieMembership(t, eng, group, user)
+		}
+		return user
+	}
+	// seed writes a package tied to the organization with a list a deploy would
+	// have left, under the engine's own origin: the question is whether a CLIENT
+	// can change it.
+	seed := func(t *testing.T, tag, owner string) string {
+		t.Helper()
+		pkg := fmt.Sprintf("v1:platform:package:dd-guard-%s-%s", tag, suffix)
+		ids = append(ids, pkg)
+		payload := fmt.Sprintf(`{"name":%q,"ownerUserId":%q,"sourceKind":"repo","repoUrl":"https://github.com/acme/%s","status":"active","updateAvailable":false,"accountId":%q,"dslDomains":["real"]}`,
+			pkg, owner, memql.BareShortId(pkg), account)
+		if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`insert("v1:platform:package", id=%s, payload=%s)`, langparser.QuoteString(pkg), payload)); err != nil {
+			t.Fatalf("seed package: %v", err)
+		}
+		return pkg
+	}
+	// stored is the list on the latest stored version of the row, read straight
+	// off the table: the answer to "what is the list", with no read tier between.
+	// A row that was never written has none, which is not a failure to read.
+	stored := func(t *testing.T, pkg string) []string {
+		t.Helper()
+		var node concept.MemoryNode
+		err := db.NewSelect().Model(&node).Where("concept = ?", "v1:platform:package").Where("id = ?", pkg).
+			OrderExpr(`"createdAt" DESC`).Limit(1).Scan(context.Background())
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("read back %s: %v", pkg, err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(node.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return rowStrings(payload, "dslDomains")
+	}
+	raw := func(ctx context.Context, pkg, payload string) error {
+		_, err := eng.Execute(ctx, fmt.Sprintf(`insert("v1:platform:package", id=%s, payload=%s)`, langparser.QuoteString(pkg), payload))
+		return err
+	}
+
+	colleague := person(t, "colleague", auth.RoleDeveloper)
+	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleDeveloper, auth.RoleWriter} {
+		actor := person(t, string(role), role)
+		ctx := tieActorCtx(actor, role)
+		for whose, owner := range map[string]string{"their own package": actor, "a colleague's package": colleague} {
+			t.Run(string(role)+" on "+whose, func(t *testing.T) {
+				pkg := seed(t, string(role)+"-"+strings.ReplaceAll(whose, " ", "-"), owner)
+
+				// THE FORGERY, by the door @serverOnly does not guard.
+				for _, forged := range []string{`["forged-raw"]`, `[]`, `null`} {
+					err := raw(ctx, pkg, `{"dslDomains":`+forged+`}`)
+					if err == nil {
+						t.Fatalf("a %s's raw insert of dslDomains=%s on %s landed", role, forged, whose)
+					}
+					// The GUARD's refusal, not a schema's that happens to name the
+					// field: it is the sentence that tells a person what to remove.
+					if !strings.Contains(err.Error(), "`dslDomains` refused") || !strings.Contains(err.Error(), "written only by a package deploy or rollback") {
+						t.Fatalf("the write was refused, but not by the package guard: %v", err)
+					}
+					if got := stored(t, pkg); !reflect.DeepEqual(got, []string{"real"}) {
+						t.Fatalf("after the refused write of %s the list is %v, want [real]", forged, got)
+					}
+				}
+				// ...and by the door it does: the named mutation.
+				if _, err := eng.Execute(ctx, fmt.Sprintf(`mutation recordPackageDslDomains(packageId: %s, dslDomains: ["forged-named"])`, langparser.QuoteString(pkg))); err == nil {
+					t.Fatalf("a %s called the @serverOnly mutation", role)
+				}
+
+				// A CLIENT'S OTHER WRITES TO THE ROW ARE NOT THE GUARD'S. Naming the
+				// field is what is refused, not touching the row. (latestKnownVersion
+				// because no organization capability is held against it: a plain
+				// writer's write to the row is refused by those, which is not this.)
+				if err := raw(ctx, pkg, `{"latestKnownVersion":"sha-unrelated"}`); err != nil {
+					t.Fatalf("an unrelated write to the row was refused: %v", err)
+				}
+				// A CLIENT THAT RE-SENDS THE ROW WITHOUT THE FIELD cannot change it:
+				// the read-merge keeps what the delta omits.
+				resend := fmt.Sprintf(`{"name":%q,"ownerUserId":%q,"sourceKind":"repo","repoUrl":"https://github.com/acme/%s","status":"active","updateAvailable":false,"accountId":%q}`,
+					pkg, owner, memql.BareShortId(pkg), account)
+				if err := raw(ctx, pkg, resend); err != nil {
+					t.Fatalf("a whole-row write that omits the field was refused: %v", err)
+				}
+				if got := stored(t, pkg); !reflect.DeepEqual(got, []string{"real"}) {
+					t.Fatalf("a client that re-sent the row without the field left the list %v, want [real]", got)
+				}
+			})
+		}
+	}
+
+	// A new row is no door either: a client creating a package cannot give it a
+	// list before any deploy has.
+	t.Run("a client cannot create a package that already has a list", func(t *testing.T) {
+		actor := person(t, "creator", auth.RoleDeveloper)
+		pkg := fmt.Sprintf("v1:platform:package:dd-guard-created-%s", suffix)
+		ids = append(ids, pkg)
+		payload := fmt.Sprintf(`{"name":%q,"ownerUserId":%q,"sourceKind":"repo","repoUrl":"https://github.com/acme/created-%s","status":"active","updateAvailable":false,"accountId":%q,"dslDomains":["forged-new"]}`,
+			pkg, actor, suffix, account)
+		if err := raw(tieActorCtx(actor, auth.RoleDeveloper), pkg, payload); err == nil || !strings.Contains(err.Error(), "`dslDomains` refused") {
+			t.Fatalf("a client creating a package carrying a list was not refused by the package guard: %v", err)
+		}
+		if got := stored(t, pkg); len(got) != 0 {
+			t.Fatalf("the refused create left a row with the list %v", got)
+		}
+	})
+}
+
+// The deploy's own write is the other half of the guard: a field no client can
+// name is still one the pipeline writes, under the engine's origin.
+func TestTheDeploysOwnWriteOfTheDomainsStillLandsOnceClientsAreRefused(t *testing.T) {
+	eng, db := dbEngine(t)
+	suffix := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	owner := "v1:identity:user:dd-own-" + suffix
+	pkg := "v1:platform:package:dd-own-" + suffix
+	t.Cleanup(func() {
+		for _, id := range []string{pkg, owner} {
+			_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+		}
+	})
+	seedTiePrincipal(t, eng, owner, auth.RoleOwner)
+	ownerCtx := tieActorCtx(owner, auth.RoleOwner)
+	createTiedPackage(t, eng, ownerCtx, pkg, "dd-own-"+suffix, "dd-own-acct-"+suffix)
+	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
+
+	// The same person, as a client: refused.
+	if _, err := eng.Execute(ownerCtx, fmt.Sprintf(`insert("v1:platform:package", id=%s, payload={"dslDomains":["forged"]})`, langparser.QuoteString(pkg))); err == nil {
+		t.Fatal("setup: the owner's raw insert of the list landed")
+	}
+	// ...and as the deploy that records what it made live: lands.
+	if err := s.recordPackageDslDomains(ownerCtx, pkg, []string{"acme", "beta"}); err != nil {
+		t.Fatalf("the deploy's own write was refused: %v", err)
+	}
+	row, err := s.packageById(ownerCtx, pkg)
+	if err != nil || row == nil {
+		t.Fatalf("read the package: %v (%v)", err, row)
+	}
+	if list, _ := dslDomainsOf(row); !reflect.DeepEqual(list, []string{"acme", "beta"}) {
+		t.Fatalf("dslDomains = %v, want the deploy's [acme beta]", list)
+	}
+}
+
+// A ROLLBACK RESTORES THE LIST FROM A REPORT THAT REALLY WENT THROUGH THE
+// STORE. The offline rollback cases hand it a report written as a Go map, which
+// proves the arithmetic and nothing about the row: whether `namespaces` -- a
+// field of a field of an object field -- comes back out of the engine's shape,
+// and whether a developer who does not own the package can read the deployment
+// they are rolling back to. Either failing is silent: the list restored is the
+// empty one, and every access code on the package's sites answers 404.
+//
+// So this is the whole chain on real rows: a real analysis of a tree with a
+// pinned namespace, its report recorded by the real store, the run closed as
+// succeeded, then a rollback by a developer, and the package read back.
+func TestARollbackRestoresTheDomainsFromTheReportItsDeploymentRecordedOnRealRows(t *testing.T) {
+	eng, db := dbEngine(t)
+	suffix := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	owner := "v1:identity:user:dd-rb-owner-" + suffix
+	developer := "v1:identity:user:dd-rb-dev-" + suffix
+	pkg := "v1:platform:package:dd-rb-" + suffix
+	deployment := "dd-rb-run-" + suffix
+	account := "dd-rb-acct-" + suffix
+	t.Cleanup(func() {
+		for _, id := range []string{pkg, owner, developer, deployment, "v1:platform:packageDeployment:" + deployment} {
+			_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+		}
+	})
+	seedTiePrincipal(t, eng, owner, auth.RoleDeveloper)
+	seedTiePrincipal(t, eng, developer, auth.RoleDeveloper)
+	ownerCtx := tieActorCtx(owner, auth.RoleDeveloper)
+	developerCtx := tieActorCtx(developer, auth.RoleDeveloper)
+	createTiedPackage(t, eng, ownerCtx, pkg, "dd-rb-"+suffix, account)
+	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
+
+	// A pinned directory, because the spelling is the point: the pin is what
+	// the concept ids say, so it is what the list must say.
+	tree := validPackage()
+	tree["dsl/pinneddir/concepts.memql"] = file(validConcepts)
+	tree["dsl/pinneddir/memql.toml"] = file(languageLine)
+	tree["dsl/pinneddir/namespace.pin"] = file("realns\n")
+	rep, err := Analyze(tree, Options{SourceVersion: "sha-1"})
+	if err != nil {
+		t.Fatalf("analysis: %v", err)
+	}
+	if want := []string{"acme", "realns"}; !reflect.DeepEqual(dslDomainsFrom(rep), want) {
+		t.Fatalf("setup: the analysis ships %v, want %v", dslDomainsFrom(rep), want)
+	}
+
+	if err := s.openDeployment(context.Background(), deploymentSeed{
+		DeploymentId: deployment, PackageId: pkg, OwnerUserId: owner, AccountId: account, RequestedBy: owner, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("open the run: %v", err)
+	}
+	if err := s.recordReport(ownerCtx, deployment, rep, ""); err != nil {
+		t.Fatalf("record the report: %v", err)
+	}
+	if err := s.closeDeployment(ownerCtx, deploymentClose{
+		DeploymentId: deployment, Status: StatusSucceeded,
+		DslVersion: "packages/acme/0123456789abcdef/ packages/pinneddir/0123456789abcdef/",
+		FinishedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("close the run: %v", err)
+	}
+
+	// The deployment as the person rolling back to it reads it.
+	row, err := s.deploymentById(developerCtx, deployment)
+	if err != nil || row == nil {
+		t.Fatalf("a developer cannot read the deployment they are rolling back to: %v (%v)", err, row)
+	}
+	if got := dslDomainsFrom(reportFromRow(row)); !reflect.DeepEqual(got, []string{"acme", "realns"}) {
+		t.Fatalf("the list read back out of the recorded report is %v, want [acme realns]: "+
+			"the report's namespaces did not survive the row's shape", got)
+	}
+
+	// The cluster is on a newer tree, so the rollback has DSL to put back.
+	stager := &fakeStager{active: map[string]string{"acme": "packages/acme/ffffffffffffffff/"}}
+	roller := &fakeRoller{}
+	deps := &Deps{Store: s, Stager: stager, Roller: roller, Publisher: &fakePublisher{}, Logger: discardLogger()}
+	if _, err := Rollback(developerCtx, deps, RollbackRequest{
+		PackageId: pkg, DeploymentId: deployment, Actor: Actor{UserId: developer, MayDeployDsl: true},
+	}); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if roller.rolls != 1 {
+		t.Fatalf("setup: the rollback rolled %d times, want 1", roller.rolls)
+	}
+
+	after, err := s.packageById(ownerCtx, pkg)
+	if err != nil || after == nil {
+		t.Fatalf("read the package: %v (%v)", err, after)
+	}
+	if list, _ := dslDomainsOf(after); !reflect.DeepEqual(list, []string{"acme", "realns"}) {
+		t.Fatalf("after the rollback the package ships %v, want [acme realns] restored from the deployment's own report", list)
+	}
 }

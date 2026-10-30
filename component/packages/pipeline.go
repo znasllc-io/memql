@@ -827,17 +827,34 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		}
 	}
 
-	// ---- which DSL domains this package ships, now that its DSL is live ----
+	// ---- which DSL domains this package ships ----
 	//
 	// WRITTEN HERE AND NOWHERE EARLIER (design record 2026-10-29, D5). The bff
 	// reads the list with the site on every call and opens an access code only
 	// for a gate whose domain is in it, so a write that precedes a commitment is
 	// a widening: at analysis, a run that was refused, parked at the confirm
 	// gate or cancelled would already have changed which domains a package owns.
-	// This is after the last cancel checkpoint, after the DSL is staged and
-	// rolled (or found unchanged, or absent), and before any site is published --
-	// so the window between the DSL going live and the list arriving closes gates
-	// rather than opening them.
+	// This is after the last cancel checkpoint, after the roll was requested (or
+	// found unnecessary, or there is no DSL), and before any site is published.
+	//
+	// "AFTER THE ROLL" IS AFTER IT WAS ASKED FOR, NOT AFTER IT FINISHED. Roll
+	// returns once the rollout is requested, so a node can still be restarting
+	// onto the new DSL when this write lands. That cannot open a gate early, and
+	// the reason is not this ordering: a gate resolves only on a node whose
+	// registry holds it (component/memql/access_gate.go), a registry is built
+	// when the node boots, and the list is the other half of the same test. A
+	// node still on the old DSL has no entry for a gate the new DSL adds, however
+	// soon the list names its domain; and a domain the new tree dropped leaves
+	// the list while an old node still has its entry, which closes a gate early
+	// rather than opening one.
+	//
+	// ONLY A RUN THAT CHANGES WHAT A VISITOR IS SERVED (writesDslDomains): one
+	// that publishes a serving version, or that publishes nothing and carries DSL.
+	// A run that publishes only candidates deploys nothing -- the check after the
+	// publish says as much -- and leaves every visitor on the serving build, so it
+	// leaves alone the list that build's gates were opened by. Written from a
+	// candidate's tree it would close every access code when that tree ships no
+	// DSL, and the gates of a domain the cluster still runs when it dropped one.
 	//
 	// FROM THIS RUN'S OWN REPORT, the tree this run staged. A package whose DSL
 	// did not move, or that ships none, writes the list its report states: that
@@ -849,10 +866,16 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// organization refuses every such write) must not stop its sites deploying.
 	// What it leaves is the previous list, which can close a gate and opens none
 	// the live tree lacks.
-	if derr := d.Store.recordPackageDslDomains(ctx, req.PackageId, dslDomainsFrom(rep)); derr != nil {
-		d.log().Warn("packages: could not record which DSL domains this package ships; its access gates stay as the previous list left them",
+	if writesDslDomains(rep, req.Placements, bundles) {
+		if derr := d.Store.recordPackageDslDomains(ctx, req.PackageId, dslDomainsFrom(rep)); derr != nil {
+			d.log().Warn("packages: could not record which DSL domains this package ships; its access gates stay as the previous list left them",
+				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+				"deployment", out.DeploymentId, "err", derr)
+		}
+	} else {
+		d.log().Info("packages: this run publishes no serving version, so the DSL domains this package ships are left as they were",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
-			"deployment", out.DeploymentId, "err", derr)
+			"deployment", out.DeploymentId)
 	}
 
 	// ---- publish ----

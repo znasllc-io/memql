@@ -282,6 +282,13 @@ decision about the run, not about the software.
   whether that applies: `report.dslChanges` is `true`, `false`, or absent
   when unknown ([packages.md](packages.md#the-order-and-why-it-never-changes)),
   and the confirm checks again.
+- **A candidate run leaves the package's access gates as they were.** The list of
+  DSL domains a package ships (`dslDomains` on the package) is what a
+  deployable's access gates are checked against, and it is recorded by a run
+  that serves visitors: one that publishes a serving version, or one with every
+  app skipped that carries DSL. A run that published only candidates records
+  nothing, so a candidate of a tree that dropped a domain, or that ships no DSL
+  at all, cannot close the gates of the build the public is being served.
 - **The target survives the confirm gate.** A run records its candidates when
   it opens (`candidates` on the run row). At the gate, a target the
   confirming call names wins -- choosing there, with the plan on screen, is

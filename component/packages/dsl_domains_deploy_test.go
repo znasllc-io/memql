@@ -3,9 +3,13 @@ package packages
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/znasllc-io/memql/component/edge"
 )
 
 // dsl_domains_deploy_test.go -- WHEN package.dslDomains is written (design
@@ -15,9 +19,12 @@ import (
 // write that precedes a commitment is a widening. Written at analysis it was
 // one: a run that was refused, or parked at the confirm gate, or cancelled,
 // would already have changed which domains a package owns. It is written by a
-// deploy, once the DSL that deploy carries is staged and rolled and before any
-// site is published, from the run's own report; and by a rollback, from the
-// deployment it returns to. `declares` stays at analysis.
+// deploy, once the DSL that deploy carries is staged and its roll requested and
+// before any site is published, from the run's own report -- and only by a run
+// that changes what a visitor is served: one that publishes a serving version,
+// or publishes nothing and carries DSL. A run that publishes only candidates
+// leaves it. A rollback writes it from the deployment it returns to.
+// `declares` stays at analysis.
 
 // domainWrites is the dslDomains literal of every recordPackageDslDomains
 // statement a harness saw, in order.
@@ -265,12 +272,273 @@ func TestADomainDroppedUpstreamLeavesTheListOnTheNextDeploy(t *testing.T) {
 	}
 }
 
+// A RUN THAT PUBLISHES NO SERVING VERSION LEAVES THE LIST ALONE.
+//
+// The list is what every visitor's access gate is compared with, and a
+// candidate run leaves every visitor on the serving build
+// (docs/public/operate/deployables.md). Writing the list from a tree no visitor
+// is being served lets that tree answer for the gates of the build visitors ARE
+// being served. Measured through the real Deploy before this was decided: a candidate
+// of a tree with no DSL wrote [] and closed every access code on the site; a
+// candidate of a tree that dropped a domain wrote the shorter list with no roll,
+// no pointer write and the domain still active; and a run with every app
+// skipped on a tree with no DSL wrote [] having published nothing.
+//
+// EVERY CASE IS PAIRED WITH THE SAME TREE PUBLISHED TO VISITORS, so what differs
+// between "writes" and "leaves alone" is only whether a visitor is about to be
+// served this run. The one run that publishes nothing and still writes is the
+// one refuseCandidateDslChange sends a person to -- every app skipped, on a tree
+// that really carries DSL -- because staging and rolling that DSL is the deploy.
+func TestARunThatPublishesNoServingVersionLeavesTheListAlone(t *testing.T) {
+	skipBoth := map[string]Placement{"storefront": {Skip: true}, "docs": {Skip: true}}
+	servingDocs := map[string]Placement{"storefront": {Skip: true}, "docs": {Hostname: "docs.example.com"}}
+	servingAndCandidate := map[string]Placement{
+		"storefront": {Hostname: "shop.example.com"},
+		"docs":       {Hostname: "docs.example.com", Target: edge.TargetCandidate},
+	}
+
+	// What the cluster is running when each run starts.
+	nothingLive := func(*testing.T, *harness, fstest.MapFS) map[string]string { return map[string]string{} }
+	acmeLive := func(t *testing.T, h *harness, tree fstest.MapFS) map[string]string {
+		return activeSetMatching(t, h, tree, "acme")
+	}
+	acmeAndBetaLive := func(t *testing.T, h *harness, tree fstest.MapFS) map[string]string {
+		active := activeSetMatching(t, h, tree, "acme")
+		active["beta"] = "packages/beta/ffffffffffffffff/"
+		return active
+	}
+	staleAcme := func(*testing.T, *harness, fstest.MapFS) map[string]string {
+		return map[string]string{"acme": "packages/acme/ffffffffffffffff/"}
+	}
+
+	for _, tc := range []struct {
+		name       string
+		tree       fstest.MapFS
+		active     func(*testing.T, *harness, fstest.MapFS) map[string]string
+		placements map[string]Placement
+		// want is every list write, in order; nil is none.
+		want    []string
+		rolls   int
+		targets []edge.Target
+	}{
+		{
+			name: "a candidate of a tree with no DSL", tree: spaOnlyPackage(), active: staleAcme,
+			placements: candidatePlacements(), want: nil, targets: []edge.Target{edge.TargetCandidate},
+		},
+		{
+			name: "a serving publish of a tree with no DSL", tree: spaOnlyPackage(), active: staleAcme,
+			placements: servingDocs, want: []string{`[]`}, targets: []edge.Target{edge.TargetServing},
+		},
+		{
+			name: "a candidate of a tree that dropped a domain", tree: validPackage(), active: acmeAndBetaLive,
+			placements: candidatePlacements(), want: nil, targets: []edge.Target{edge.TargetCandidate},
+		},
+		{
+			name: "a serving publish of a tree that dropped a domain", tree: validPackage(), active: acmeAndBetaLive,
+			placements: servingDocs, want: []string{`["acme"]`}, targets: []edge.Target{edge.TargetServing},
+		},
+		{
+			name: "a candidate of a tree whose DSL is what the cluster runs", tree: validPackage(), active: acmeLive,
+			placements: candidatePlacements(), want: nil, targets: []edge.Target{edge.TargetCandidate},
+		},
+		{
+			name: "a serving publish of a tree whose DSL is what the cluster runs", tree: validPackage(), active: acmeLive,
+			placements: servingDocs, want: []string{`["acme"]`}, targets: []edge.Target{edge.TargetServing},
+		},
+		{
+			name: "every app skipped on a tree with no DSL", tree: spaOnlyPackage(), active: nothingLive,
+			placements: skipBoth, want: nil,
+		},
+		// THE EXCEPTION, and the control that makes the silence above mean
+		// something: nothing is published and the list is still written, because
+		// the DSL this run stages and rolls is the whole of its deploy.
+		{
+			name: "every app skipped on a tree that carries DSL", tree: validPackage(), active: nothingLive,
+			placements: skipBoth, want: []string{`["acme"]`}, rolls: 1,
+		},
+		// A candidate beside a serving version is a run that serves.
+		{
+			name: "a candidate beside a serving version", tree: validPackage(), active: acmeLive,
+			placements: servingAndCandidate, want: []string{`["acme"]`},
+			targets: []edge.Target{edge.TargetServing, edge.TargetCandidate},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, tc.tree, ownerPackage())
+			h.stager.active = tc.active(t, h, tc.tree)
+			before := map[string]string{}
+			for k, v := range h.stager.active {
+				before[k] = v
+			}
+			if _, err := Deploy(context.Background(), h.deps, DeployRequest{
+				PackageId: "v1:platform:package:abc", Actor: mayDeployDsl(), Confirmed: true, Placements: tc.placements,
+			}); err != nil {
+				t.Fatalf("deploy: %v", err)
+			}
+
+			// The setup is the one the case names, not a different run.
+			if !reflect.DeepEqual(h.publisher.targets, tc.targets) {
+				t.Fatalf("the run published %v, want %v", h.publisher.targets, tc.targets)
+			}
+			if h.roller.rolls != tc.rolls {
+				t.Fatalf("the run rolled %d times, want %d", h.roller.rolls, tc.rolls)
+			}
+			if tc.rolls == 0 && (h.stager.written != 0 || !reflect.DeepEqual(h.stager.active, before)) {
+				t.Fatalf("a run that rolled nothing moved the pointer: %v -> %v", before, h.stager.active)
+			}
+
+			if got := domainWrites(h); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("the run wrote the list %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// writesDslDomains answers from the plan what the publish stage will do, so it
+// has to agree with publish on the cases a whole Deploy cannot reach: the build
+// stage never hands a skipped app a bundle, and a deployable with a non-fatal
+// problem has none either.
+func TestWritesDslDomainsAgreesWithWhatThePublishStagePublishes(t *testing.T) {
+	deployables := func(names ...string) []DeployableReport {
+		out := make([]DeployableReport, 0, len(names))
+		for _, n := range names {
+			out = append(out, DeployableReport{Name: n})
+		}
+		return out
+	}
+	withDsl := []DslDomainReport{{Domain: "acme"}}
+	built := func(names ...string) map[string]edge.Bundle {
+		out := map[string]edge.Bundle{}
+		for _, n := range names {
+			out[n] = edge.Bundle{"index.html": []byte("<!doctype html>")}
+		}
+		return out
+	}
+	candidate := Placement{Target: edge.TargetCandidate}
+
+	for _, tc := range []struct {
+		name       string
+		rep        *Report
+		placements map[string]Placement
+		bundles    map[string]edge.Bundle
+		want       bool
+	}{
+		{"no report", nil, nil, nil, false},
+		{"a package of DSL alone", &Report{DslDomains: withDsl}, nil, nil, true},
+		{"a serving app", &Report{Deployables: deployables("web")}, nil, built("web"), true},
+		{"an explicit serving target", &Report{Deployables: deployables("web")},
+			map[string]Placement{"web": {Target: edge.TargetServing}}, built("web"), true},
+		{"a lone candidate", &Report{Deployables: deployables("web")},
+			map[string]Placement{"web": candidate}, built("web"), false},
+		{"a lone candidate of a package that carries DSL", &Report{Deployables: deployables("web"), DslDomains: withDsl},
+			map[string]Placement{"web": candidate}, built("web"), false},
+		{"a candidate beside a serving app", &Report{Deployables: deployables("web", "docs")},
+			map[string]Placement{"web": candidate}, built("web", "docs"), true},
+		// A skipped app publishes nothing even if a bundle for it exists, so it is
+		// neither a serving version nor a candidate.
+		{"a skipped app that has a bundle", &Report{Deployables: deployables("web")},
+			map[string]Placement{"web": {Skip: true}}, built("web"), false},
+		{"a skipped app on a package that carries DSL", &Report{Deployables: deployables("web"), DslDomains: withDsl},
+			map[string]Placement{"web": {Skip: true}}, built("web"), true},
+		// A skipped CANDIDATE is not a candidate: it publishes nothing, so the
+		// DSL this run carries is still the whole of its deploy.
+		{"a skipped candidate on a package that carries DSL", &Report{Deployables: deployables("web"), DslDomains: withDsl},
+			map[string]Placement{"web": {Skip: true, Target: edge.TargetCandidate}}, built("web"), true},
+		{"an app with no bundle", &Report{Deployables: deployables("web")}, nil, built(), false},
+		{"an app with no bundle on a package that carries DSL", &Report{Deployables: deployables("web"), DslDomains: withDsl}, nil, built(), true},
+		// An app with no bundle does not turn a candidate beside it into a run
+		// that publishes nothing.
+		{"a candidate beside an app with no bundle", &Report{Deployables: deployables("web", "docs"), DslDomains: withDsl},
+			map[string]Placement{"web": candidate}, built("web"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := writesDslDomains(tc.rep, tc.placements, tc.bundles); got != tc.want {
+				t.Fatalf("writesDslDomains = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A PARKED RUN IS NOT A COMMITMENT AND ITS CONFIRMATION IS (memql#4954). The
+// gate is the first call and the confirm the second, so the write that follows a
+// commitment belongs to the second and happens once.
+func TestAParkedRunWritesTheListWhenItIsConfirmedAndNotBefore(t *testing.T) {
+	t.Run("a run that serves", func(t *testing.T) {
+		h := newHarness(t, withBetaDomain(validPackage()), ownerPackage())
+		parked, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: "v1:platform:package:abc", Actor: mayDeployDsl()})
+		if err != nil || !parked.AwaitingConfirm {
+			t.Fatalf("setup: want a run parked at the gate, got %+v %v", parked, err)
+		}
+		if writes := domainWrites(h); len(writes) != 0 || h.roller.rolls != 0 {
+			t.Fatalf("the park wrote %v and rolled %d times before anyone confirmed", writes, h.roller.rolls)
+		}
+
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{parkedRun(parked.DeploymentId, "v1:platform:package:abc", nil)}
+		confirmed, err := Deploy(context.Background(), h.deps, DeployRequest{
+			PackageId: "v1:platform:package:abc", Actor: mayDeployDsl(), Confirmed: true,
+			DeploymentId: parked.DeploymentId, Placements: firstDeployPlacements(),
+		})
+		if err != nil || confirmed.Status != StatusSucceeded || confirmed.DeploymentId != parked.DeploymentId {
+			t.Fatalf("the confirmation did not complete the run it confirmed: %+v %v", confirmed, err)
+		}
+		// Once, from the report of the confirming call's own analysis.
+		if writes := domainWrites(h); len(writes) != 1 || writes[0] != `["acme","beta"]` {
+			t.Fatalf("the confirmed run wrote %v, want one write of [\"acme\",\"beta\"]", writes)
+		}
+	})
+
+	// THE TARGET A RUN WAS OPENED WITH SURVIVES THE GATE, and so does what it
+	// means for the list: a run opened as a candidate and confirmed by a call
+	// that left the target out is still a candidate, and still leaves the list.
+	t.Run("a candidate confirmed without naming its target", func(t *testing.T) {
+		h := confirmParked(t, []any{"docs"}, map[string]Placement{
+			"storefront": {Skip: true},
+			"docs":       {Hostname: "docs.example.com"},
+		})
+		if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetCandidate {
+			t.Fatalf("setup: the confirm published %v, want the recorded candidate", got)
+		}
+		if writes := domainWrites(h); len(writes) != 0 {
+			t.Fatalf("a confirmed candidate wrote the list %v", writes)
+		}
+	})
+
+	t.Run("a candidate the person chose to serve at the gate", func(t *testing.T) {
+		h := confirmParked(t, []any{"docs"}, map[string]Placement{
+			"storefront": {Skip: true},
+			"docs":       {Hostname: "docs.example.com", Target: edge.TargetServing},
+		})
+		if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetServing {
+			t.Fatalf("setup: the confirm published %v, want the serving version", got)
+		}
+		if writes := domainWrites(h); len(writes) != 1 || writes[0] != `[]` {
+			t.Fatalf("a run served at the gate wrote %v, want its one empty list", writes)
+		}
+	})
+}
+
+// logLine is the first line of a captured log containing sub, or "".
+func logLine(log fmt.Stringer, sub string) string {
+	for _, line := range strings.Split(log.String(), "\n") {
+		if strings.Contains(line, sub) {
+			return line
+		}
+	}
+	return ""
+}
+
 // A write that cannot land does not stop a deploy: it is bookkeeping on the
 // package row, as declares and the deployed version are, and a historic
 // package with no organization refuses every such write. What it leaves is the
 // previous list, which can close a gate and opens none the live tree lacks.
+//
+// AND IT SAYS SO WHERE THE PERSON LOOKING AT THE RUN WILL LOOK: the line is
+// stamped with the deployment it is about (logger.Subject), which is what puts
+// it in that run's Logs section rather than only in a node's output.
 func TestAListThatCannotBeWrittenDoesNotStopTheDeploy(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
+	log, buf := capturedLog()
+	h.deps.Logger = log
 	h.engine.fail = map[string]error{"mutation recordPackageDslDomains(": errors.New("organization_required: attribute this existing record before changing it")}
 	out, err := deployConfirmed(h, mayDeployDsl())
 	if err != nil || out.Status != StatusSucceeded {
@@ -278,6 +546,35 @@ func TestAListThatCannotBeWrittenDoesNotStopTheDeploy(t *testing.T) {
 	}
 	if len(h.publisher.published) == 0 {
 		t.Fatal("the sites were not published")
+	}
+	line := logLine(buf, "could not record which DSL domains")
+	if line == "" {
+		t.Fatalf("the failed write was not logged:\n%s", buf)
+	}
+	if !strings.Contains(line, "subject.id="+out.DeploymentId) || !strings.Contains(line, "subject.concept="+packageDeploymentConcept) {
+		t.Fatalf("the line is not about the run, so its Logs will not show it: %s", line)
+	}
+}
+
+// A run that leaves the list alone says so, against the run, so a person who
+// reads the Logs of a candidate run and finds no list write knows it was
+// decided rather than lost.
+func TestARunThatLeavesTheListAloneSaysSoInItsLogs(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	log, buf := capturedLog()
+	h.deps.Logger = log
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId: "v1:platform:package:abc", Actor: plainUser(), Confirmed: true, Placements: candidatePlacements(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := logLine(buf, "publishes no serving version")
+	if line == "" {
+		t.Fatalf("a candidate run did not say it left the list alone:\n%s", buf)
+	}
+	if !strings.Contains(line, "subject.id="+out.DeploymentId) || !strings.Contains(line, "subject.concept="+packageDeploymentConcept) {
+		t.Fatalf("the line is not about the run: %s", line)
 	}
 }
 
@@ -388,6 +685,83 @@ func TestARollbackRestoresTheDomainsOfTheDeploymentItReturnsTo(t *testing.T) {
 		}
 		if writes := domainWrites(h); len(writes) != 0 {
 			t.Fatalf("a rollback that restored no DSL wrote the list %v", writes)
+		}
+	})
+
+	// THE OTHER WAY OF HAVING NO SURFACE, and the one production has. The
+	// integration always wires the blob stager, so the nil check above never
+	// fires on a real node: a cluster with no object storage refuses inside the
+	// stager's first read. That read used to come after the sites were
+	// repointed, so the refusal arrived with the sites already back and the DSL
+	// not -- the apart-state the refusal exists to prevent, under a sentence that
+	// promised nothing had changed.
+	t.Run("a stager that cannot be read refuses before anything moves", func(t *testing.T) {
+		h := newHarness(t, validPackage(), ownerPackage())
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{priorWith(recorded)}
+		h.stager.readErr = refuse(CodeSourceUnreadable, "the active-set pointer is not readable")
+		err := rollback(h, mayDeployDsl())
+		if RefusalCode(err) != CodeSourceUnreadable {
+			t.Fatalf("want a %s refusal, got %v", CodeSourceUnreadable, err)
+		}
+		if len(h.publisher.repointed) != 0 || h.roller.rolls != 0 || h.stager.written != 0 {
+			t.Fatalf("the refusal came after something moved: repointed %v, rolls %d, pointer writes %d",
+				h.publisher.repointed, h.roller.rolls, h.stager.written)
+		}
+		if writes := domainWrites(h); len(writes) != 0 {
+			t.Fatalf("a rollback that restored nothing wrote the list %v", writes)
+		}
+	})
+
+	// The same thing with the stager production builds, on a cluster with no
+	// object storage: the case the review measured, not a stand-in for it.
+	t.Run("the production stager with no object storage refuses before anything moves", func(t *testing.T) {
+		t.Setenv("MEMQL_AZURE_BLOB_CONTAINER", "")
+		h := newHarness(t, validPackage(), ownerPackage())
+		h.engine.rows["query packageDeploymentById"] = []map[string]any{priorWith(recorded)}
+		h.deps.Stager = newBlobStager()
+		err := rollback(h, mayDeployDsl())
+		if RefusalCode(err) != CodeSourceUnreadable || !strings.Contains(err.Error(), "no object storage configured") {
+			t.Fatalf("want a %s refusal naming the missing storage, got %v", CodeSourceUnreadable, err)
+		}
+		if len(h.publisher.repointed) != 0 || h.roller.rolls != 0 {
+			t.Fatalf("the refusal came after something moved: repointed %v, rolls %d", h.publisher.repointed, h.roller.rolls)
+		}
+		if writes := domainWrites(h); len(writes) != 0 {
+			t.Fatalf("a rollback that restored nothing wrote the list %v", writes)
+		}
+	})
+
+	// The rollback's lines are about the deployment it returns to, and carry it
+	// as their subject for the reason the deploy's do: the run's Logs section
+	// selects by it.
+	t.Run("its log lines are about the deployment it returned to", func(t *testing.T) {
+		const returnedTo = "subject.id=v1:platform:packageDeployment:old"
+		failed := newHarness(t, validPackage(), ownerPackage())
+		failedLog, failedBuf := capturedLog()
+		failed.deps.Logger = failedLog
+		failed.engine.rows["query packageDeploymentById"] = []map[string]any{priorWith(recorded)}
+		failed.stager.active = map[string]string{"acme": "packages/acme/ffffffffffffffff/"}
+		failed.engine.fail = map[string]error{"mutation recordPackageDslDomains(": errors.New("organization_required: attribute this existing record before changing it")}
+		if err := rollback(failed, mayDeployDsl()); err != nil {
+			t.Fatalf("a list that could not be written stopped the rollback: %v", err)
+		}
+		warn := logLine(failedBuf, "could not record which DSL domains")
+		if warn == "" || !strings.Contains(warn, returnedTo) || !strings.Contains(warn, "subject.concept="+packageDeploymentConcept) {
+			t.Fatalf("the failed write is not logged against the deployment: %q\n%s", warn, failedBuf)
+		}
+
+		skipped := newHarness(t, spaOnlyPackage(), ownerPackage())
+		skippedLog, skippedBuf := capturedLog()
+		skipped.deps.Logger = skippedLog
+		row := priorWith(map[string]any{"dslDomains": []any{}})
+		delete(row, "dslVersion")
+		skipped.engine.rows["query packageDeploymentById"] = []map[string]any{row}
+		if err := rollback(skipped, plainUser()); err != nil {
+			t.Fatal(err)
+		}
+		info := logLine(skippedBuf, "left as it was")
+		if info == "" || !strings.Contains(info, returnedTo) {
+			t.Fatalf("the skipped write is not logged against the deployment: %q\n%s", info, skippedBuf)
 		}
 	})
 

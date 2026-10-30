@@ -845,6 +845,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("invalid payload JSON for mutation: %w", err)
 	}
 
+	// A PACKAGE'S LIST OF DSL DOMAINS HAS ONE WRITER, a deploy or a rollback under
+	// internal origin (platform_package_dsl_domains_guard.go). @serverOnly bars
+	// only the named mutation, and a raw insert() at an existing package id
+	// read-merges its delta, so the field is judged here, on the delta as the
+	// caller supplied it: before the claim lock below is taken, so a refused
+	// write holds nothing, and before the read-merge, after which a stored list
+	// and a forged one are one map entry.
+	if conceptMeta.Name == conceptPlatformPackage {
+		if err := validatePackageDslDomainsServerOnly(ctx, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	// Hold source claims through persistence so two replicas cannot both pass
 	// the uniqueness read before either registration becomes visible.
 	if conceptMeta.Name == conceptPlatformPackage && packageSourceClaims(payload) {
