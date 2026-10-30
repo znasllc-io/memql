@@ -248,6 +248,7 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"appSessionRef":       row.AppSessionRef,
 		"errorMessage":        row.ErrorMessage,
 		"quotaRefused":        row.Status == AppSessionStatusFailed && memqlengine.IsAppQuotaRefusal(row.ErrorMessage),
+		"authRefused":         row.Status == AppSessionStatusFailed && memqlengine.IsAppAuthRefusal(row.ErrorMessage),
 		"cancelReason":        row.CancelReason,
 		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
 	}

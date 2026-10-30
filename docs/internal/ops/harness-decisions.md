@@ -948,6 +948,64 @@ independent instructions and cancellation. The existing driver regression
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
 
+## A refused app call moves on only when nothing ran (2026-10-29)
+
+Production, engine 0.31.9: Ask with routing set to apps failed twice on one
+machine. Codex was out of credits and the call stopped there, then Claude Code
+failed with `OAuth session expired`, as it had since 2026-10-24. The
+[spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md) records
+what each app really reports.
+
+**The proof** (`appPreWorkRefusal`, `integrations/agent/worker/app_inference.go`).
+A failed session may move to another app or machine only when nothing ran: no
+served model, no structured result, no recorded or dropped action, no tokens, and
+no prose except the refusal's own sentence. Anything else may have caused effects
+and is returned as it is, because running it again would repeat them.
+`usage.known` is not part of the proof. A Codex turn refused by its limit reports
+no usage at all, which is why failover never fired for it. Stated tokens still
+disprove it. The alternative, trusting the sentence alone, would replay a turn
+that had already started tools. Tests:
+`TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions`,
+`TestAppFallbackCrossesReplicaForARefusalReportingNoUsage`.
+
+**Two refusals, because they are about different things**
+(`appRefusalExclusion`, `component/memql/app_selection.go`). A usage limit is the
+account's, so it rules the app out on every machine for the rest of the call:
+trying each would open a session on each to hear the same answer. A login is one
+machine's, so it rules out that machine's app and the same app elsewhere can still
+answer. A pin stays its app either way, because the selector is asked for the
+pinned app every time. When nothing is left, the caller gets the last refusal
+rather than "no enabled app matches", which would send somebody to a setting when
+their login has expired. The walk stops at 16 exclusions. Tests:
+`TestAppRefusalExclusionMatchesWhatTheRefusalIsAbout`,
+`TestPinnedAppNeverMovesToAnotherApp`,
+`TestAppFallbackThatRunsOutKeepsTheLastRefusal`.
+
+**The block is availability evidence, not permission to replay.**
+`v1:worker:appSession.quotaRefused` and `authRefused` are stamped from the error's
+words whatever the session did, and `appAvailabilityEvidence` reads the newest of
+them and of a success, on any replica. A refusal blocks until the reset its
+sentence names, and otherwise for a 15-minute recheck (`appRefusalUntil`). A login
+has no reset, and a sign-in in a terminal writes no row, so the next call after
+the window is what finds it. Test: `TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas`.
+
+**Codex's reset names no zone.** "try again at Nov 3rd, 2026 11:52 PM" is in the
+machine's zone, which a cluster node does not know. Reading it as unknown blocked
+an app out of credits for days for only 15 minutes, so every call met the refusal
+again. It is now read as the earliest instant it can mean (UTC+14), so the block
+never outlasts the real reset and can end up to a day early. A reset read as
+already past takes the recheck, not no block. Test:
+`TestAppRefusalUntilRechecksAResetThatHasAlreadyPassed`.
+
+**Limits.** The classification reads each app's sentence, so a sentence neither
+list knows is an ordinary failure: no failover and no block. The phrases were
+measured on Claude Code 2.1.304 and codex-cli 0.162.1 against fabricated expired
+logins, and on one real out-of-usage Codex. A real expired refresh token and
+Claude Code's own usage-limit sentence were not reproduced here. Failing over a
+signed-out Codex costs about 20 seconds of its own retries before the next app
+starts; checking before routing is the follow-up that removes that wait. Neither
+the failover nor the block has run against the production fleet.
+
 ## Pipeline AI runs local first (2026-10-29)
 
 Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a

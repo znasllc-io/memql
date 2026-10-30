@@ -64,16 +64,10 @@ func selectAppWithStore(ctx context.Context, store any, req memqlengine.AppCallR
 		if req.AppId != "*" && req.AppId != door.AppId {
 			continue
 		}
-		skip := false
-		for _, app := range excluded {
-			if app == door.AppId {
-				skip = true
-			}
-		}
-		if skip {
-			continue
-		}
 		for _, m := range door.Machines {
+			if memqlengine.AppSelectionExcluded(excluded, door.AppId, m.RegistrationId) {
+				continue
+			}
 			if m.Online && (m.LocalStream || (!localOnly && m.Forwardable)) && (req.Schema == nil || m.StructuredResult) {
 				return memqlengine.AppSelection{AppId: door.AppId, RegistrationId: m.RegistrationId}, nil
 			}
