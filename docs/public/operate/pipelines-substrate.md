@@ -463,7 +463,9 @@ kubectl logs -n memql-pipelines job/<job name> -c step --follow
 A Job lasts only until the agent holds its outcome. A Secret no Job came to own
 -- its runner went before the Job it made owned it -- is deleted by any
 replica's orphan sweep (at startup and every 10 minutes, even with no builds)
-once its Job is gone and the stamped run deadline plus the Job TTL has passed.
+once its Job is gone and the stamped run deadline plus the Job TTL has passed,
+and, for an attempt that was stopped with its Job creation unanswered, once it
+has been stopped for five minutes ([Cancel](#cancel)).
 A different workbench ceiling cannot shorten that retention. Legacy Secrets
 without a valid deadline use their creation time plus the sweeping workbench's
 run ceiling and Job TTL as a bounded fallback.
@@ -1016,6 +1018,19 @@ A cancelled step reports `pipeline_step_cancelled`, and what it had printed is
 still archived to the Library (a cluster step's archive ends with a line saying
 it was cancelled). A cancel that arrives after a step's outcome is recorded on
 its Job changes nothing: the outcome stands.
+
+A cancel can also land while a step's Job is being created. That request cannot
+be recalled, and with its answer lost, a missing Job does not yet prove it will
+not arrive. So the attempt gets a stop marker first, which refuses every later
+creation and which a runner reads last before each create, and its cleanup is
+refused for five minutes from the marker, longer than a request that read no
+marker can stay in flight. While that lasts, the driver's cancel stays unconfirmed
+and the run stays unfinished, showing `cancelRequested`; recovery asks again, so
+the run usually concludes within about ten minutes. A Job that arrives in that
+time is deleted like any other. After it, with no Job to find, the step's Secret
+is deleted and the cancel is confirmed. The marker stays for its own retention, so
+the attempt is never created again. The same wait applies to the receipt of a
+step that failed `pipeline_execution_uncertain` because its create went unanswered.
 
 ### Cancel-on-push
 
