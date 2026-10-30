@@ -408,7 +408,7 @@ func (h *AccessHandler) answerSite(w http.ResponseWriter, r *http.Request, stamp
 // said once per request, because there is no state here to say it once with. Only a
 // credential that found a row can reach it, so a stranger cannot drive it at all.
 func (h *AccessHandler) warnSiteClosed(siteID, reason string) {
-	h.logger.Warn("access surface: this site's calls answer 404",
+	h.logger.Warn("access surface: a credential holder was answered 404, see reason",
 		"component", "server", "reason", reason,
 		logger.Subject(accessSiteConcept, memql.BareShortId(siteID)))
 }

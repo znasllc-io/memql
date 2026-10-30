@@ -42,7 +42,8 @@ import (
 // way a lookup as the site's owner missed a code that should open. Nor can an operator
 // who only belongs to the site's organization read a session, whose tier has no account
 // arm. So nothing here compares an owner: the bff's handler compares the edge's stamp
-// with the site's own ownerUserId before it calls in, and THAT IS WHAT CHECKS THE OWNER.
+// with the site's own ownerUserId once a digest has found a row and before anything is
+// delivered, and THAT IS WHAT CHECKS THE OWNER.
 // These reads answer for anybody who reaches them, which is why they are @serverOnly and
 // why a caller outside this package holds only the seven functions below. A test persona
 // is judged under the caller, at the reads above, and only asked after that whether its
@@ -239,7 +240,7 @@ func (s *GraphStore) PackageDomainsForAccess(ctx context.Context, packageID stri
 //
 // IT CHECKS NO OWNER, and neither does anything else on this path: it reads as the
 // cluster acting (see the file note), and it is the handler's comparison of the edge's
-// stamp with the site's ownerUserId, made before this is called, that checks the owner.
+// stamp with the site's ownerUserId, made once this finds a row, that checks the owner.
 func (s *GraphStore) CodeByHash(ctx context.Context, siteID, codeHash string) (*Code, error) {
 	call, err := langparser.RenderCall("siteAccessCodeByHash", map[string]any{"siteId": siteID, "codeHash": codeHash})
 	rows, err := s.readAsCluster(ctx, "a code by its digest", call, err)

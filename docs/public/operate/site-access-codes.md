@@ -183,7 +183,8 @@ checked against that copy. So a deployable's organization **cannot change while
 it has a code that has not been removed** -- an expired one included, since a
 new expiry revives it. The refusal says to remove the codes first. A code whose
 copy differs from its deployable's (one a move racing a mint can leave) opens
-nothing, and the panel offers only Remove for it.
+nothing. The panel offers only Remove for it, to somebody the organization gate
+admits; anybody else is told that a cluster operator must remove it.
 
 ### Where the rows live
 

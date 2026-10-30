@@ -495,7 +495,7 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 // internal origin stamped AS THE CLUSTER ACTING (a synthetic actor), through the cluster-owner arm,
 // because a row's current owner must not decide whether a code opens: a code keeps the owner it was
 // stamped with at birth, and the site can go on to have another. What checks the owner on that path is
-// the bff, which compares the edge's stamp with the site's own owner before it calls in.
+// the bff, which compares the edge's stamp with the site's own owner once a digest has found a row.
 
 /// The rows under the siteAccessCodesForSite builtin: every access code minted against one
 /// deployable, in the siteAccessCodeView shape, which never carries the digest. Read by that
@@ -573,8 +573,8 @@ query siteAccessCode siteAccessCodeById {
 /// visitor has no actor, and the store runs it as the cluster acting, so no row's owner decides it.
 /// A code keeps the owner it was stamped with at birth while its site can go on to have another, and
 /// a lookup scoped to the site's current owner would then miss a code that should open. WHAT CHECKS
-/// THE OWNER IS THE BFF, which compares the edge's stamp with the site's own owner before it asks
-/// this, and the siteId below is what keeps the answer to that one site. What the annotation withholds
+/// THE OWNER IS THE BFF, which compares the edge's stamp with the site's own owner once this finds
+/// a row, and the siteId below is what keeps the answer to that one site. What the annotation withholds
 /// is the wire: a client-callable lookup by digest is an oracle for whether a guessed digest is a live
 /// code, for a caller who never held the code.
 @serverOnly
@@ -608,8 +608,8 @@ query siteAccessCode siteAccessCodeByHash {
 ///
 /// @serverOnly, and actor.userId scoping is not the fix: the store runs it as the cluster acting,
 /// through the conjunct's second arm, because a session keeps the owner it was stamped with while its
-/// site can go on to have another. The bff compares the edge's stamp with the site's own owner before
-/// it asks this, and compares the session's site with the request's after. What the annotation
+/// site can go on to have another. Once this finds a row the bff compares the session's site with the
+/// request's, and the edge's stamp with the site's own owner. What the annotation
 /// withholds is the wire: a client-callable lookup by digest is an oracle for whether a guessed token
 /// is a live session.
 @serverOnly

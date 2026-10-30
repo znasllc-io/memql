@@ -74,8 +74,8 @@ import (
 // browser holds, and on every other route it is taken out of what is forwarded
 // (accessStripCookie). Nothing the edge serves itself ever reads it.
 //
-// The stamp is a POINTER, not an assertion. The bff re-reads the site under the
-// owner it names and requires the row's own owner to equal it, so the most a
+// The stamp is a POINTER, not an assertion. The bff reads the site it names and
+// requires the row's own owner to equal the stamped one, so the most a
 // forged value can do is name a site that really has codes. Stripping first is
 // what lets it treat the header as the edge's alone.
 
@@ -556,8 +556,10 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // need. The generic proxy is untouched and keeps the queries its routes use.)
 //
 // THE ACCESS COOKIE, AND NO OTHER CREDENTIAL. The bff reads this one cookie and nothing
-// else a browser sends, so nothing else travels: not memql_auth, not a bearer, not a
-// cookie the deployable's own page set. Left on, they were a read a visitor could drive
+// else a browser sends, so nothing else travels: not memql_auth, not a bearer in either
+// header the bff's middleware accepts one from (Sec-WebSocket-Protocol is the other, and
+// the shared rewrite copies it for the bridge), not a cookie the deployable's own page
+// set. Left on, they were a read a visitor could drive, from any page with a WebSocket
 // (the session-revocation middleware looks up any bearer it finds) and a lockout nobody
 // could explain (a revoked sign-in answered a plain-text 401 on all four routes). The
 // shared rewrite has already taken the access cookie out of what it copied, so this reads
@@ -567,6 +569,7 @@ func accessStamp(route accessRoute, siteID, owner string) func(*httputil.ProxyRe
 		pr.Out.Header.Set(AccessStampSiteHeader, siteID)
 		pr.Out.Header.Set(AccessStampOwnerHeader, owner)
 		pr.Out.Header.Del("Authorization")
+		pr.Out.Header.Del("Sec-WebSocket-Protocol")
 		accessSetCookies(pr.Out.Header, accessCookiePairs(pr.In.Header.Values("Cookie"), func(name string) bool {
 			return name == memql.AccessCookieName
 		}))

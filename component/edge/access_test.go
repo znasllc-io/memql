@@ -1589,12 +1589,16 @@ func TestAccessForwardsOnlyTheAccessCookie(t *testing.T) {
 
 				req := accessCookieRequest(accessRequest(pair.method, pair.path, ""), tc.lines)
 				req.Header.Set("Authorization", "Bearer a-token-the-bff-has-no-use-for")
+				req.Header.Set("Sec-WebSocket-Protocol", "bearer, a-token-the-bff-has-no-use-for")
 				serveAccess(h, req)
 
 				hit := up.only(t)
 				requireCookieLines(t, hit.header, tc.onlyAccess)
 				if got := hit.header.Values("Authorization"); len(got) != 0 {
 					t.Fatalf("Authorization reached the bff: %q", got)
+				}
+				if got := hit.header.Values("Sec-WebSocket-Protocol"); len(got) != 0 {
+					t.Fatalf("Sec-WebSocket-Protocol, which carries a bearer too, reached the bff: %q", got)
 				}
 			})
 		}
