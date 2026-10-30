@@ -1,7 +1,7 @@
 ---
 title: Should a local cluster run production's pipeline queue?
 audience: internal
-status: draft
+status: accepted
 area: operate
 sinceVersion: 0.31.9
 owner: znas
@@ -12,7 +12,7 @@ owner: znas
 The owner wants every installation to get the deadline promoter (memql#6382), the
 local k3d cluster included. The promoter relabels waiting Jobs in a Kueue queue, and a
 local cluster has no Kueue: its steps wait for a slot under `count/jobs.batch: 2` before
-a Job exists. This record is for the owner to decide on. Nothing here has been built.
+a Job exists. This record is what the owner decided on; the decision is at the end.
 
 ## Recommendation
 
@@ -229,7 +229,7 @@ On an Apple silicon Mac the engine's own package cannot run on the cluster: it d
 `linux/amd64` and the build node is arm64. Such a step holds a slot until its timeout,
 today and under the queue alike.
 
-## Decision needed
+## Decision
 
-Yes or no, from the owner. On yes, step 1 goes first as its own change. On no, still do
-step 1 and fix the stub.
+The owner said yes on 2026-10-30. Step 1 goes first, as its own change, and steps 2 to 4
+follow in order. Nothing past step 1 has been built.
