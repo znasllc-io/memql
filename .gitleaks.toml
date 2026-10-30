@@ -275,6 +275,7 @@ description = "Deployable access codes' test fixtures and alphabet (design recor
 regexTarget = "secret"
 regexes = [
   '''^K7Q4M-?2XPDN-?8RT3V-?WJ6HC-?9FBZA$''',
+  '''^K7Q4M-2XPDN-8RT3V-WJ6HC-9F01A$''',
   '''^0123456789ABCDEFGHJKMNPQR$''',
   '''^0123456789ABCDEFGHJKMNPQRSTVWXYZ$''',
   '''^5d019d0e2df8e90faa86ef5b169bfc4980778282fa6ad3b7128d1752118cf948$''',
