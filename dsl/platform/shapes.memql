@@ -435,6 +435,11 @@ shape sitePreviewObservation sitePreviewObservationFull {
 /// `ownerUserId`, `accountId` and `lastChangedBy` are absent too. The first two decide who may see
 /// the row, and the tier has already decided that by the time it is projected; the third is the
 /// audit log's answer to 'who did that', and the log is where it is read.
+///
+/// THERE IS NO 'LAST USED' HERE BECAUSE THE ROW HAS NONE: nothing a visitor does writes a code. When a
+/// code was last opened is the newest session of its current generation, which the list handler adds
+/// to each row as `lastOpenedAt` (siteAccessSessionLatestForCode) -- a fact about the sessions, not a
+/// field of this projection.
 @row
 shape siteAccessCode siteAccessCodeView {
   row.id
@@ -447,7 +452,6 @@ shape siteAccessCode siteAccessCodeView {
   issuedAt
   expiresAt
   revokedAt
-  lastUsedAt
   row.createdAt
 }
 

@@ -766,16 +766,21 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// claim a client could otherwise make about anybody.
 		//
 		// THE VISITOR'S WRITES AND LOOKUPS -- createSiteAccessSession,
-		// endSiteAccessSession, touchSiteAccessCode, siteAccessCodeByHash,
-		// siteAccessSessionByToken. A visitor has no actor. The bff writes and
-		// reads as the owner the edge stamped on the request, re-checked against
-		// the site, so the owner tier DOES scope them, to that owner; what that
-		// scope cannot establish is what the call CLAIMS: that a valid code was
-		// just presented (a session), that the cookie's holder is the one
-		// leaving (an end), that the deployment observed a use (touch, which
-		// touchSitePreviewGrant's reasoning covers exactly). The two lookups
-		// are the credential check itself, and a client-callable one is an
-		// oracle for whether a guessed digest is a live code or a live session.
+		// endSiteAccessSession, siteAccessCodeByHash, siteAccessSessionByToken.
+		// A visitor has no actor. The bff writes and reads as the owner the edge
+		// stamped on the request, re-checked against the site, so the owner tier
+		// DOES scope them, to that owner; what that scope cannot establish is
+		// what the call CLAIMS: that a valid code was just presented (a
+		// session), that the cookie's holder is the one leaving (an end). The
+		// two lookups are the credential check itself, and a client-callable one
+		// is an oracle for whether a guessed digest is a live code or a live
+		// session. There is no write of a code for a visitor's use, by design
+		// (D13): it raced the operator acts on the same row.
+		//
+		// siteAccessSessionLatestForCode is the list handler's read of when a
+		// code was last opened, the newest session of its current generation. A
+		// client-callable one is a read of session activity that skips the part
+		// and the organization check.
 		//
 		// siteAccessCodeById and siteAccessCodeRowsForSite are the operator
 		// handlers' reads of the rows they change and list. Their filters are the
@@ -784,20 +789,20 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// scoping is the wrong tool. The annotation is what keeps them from being
 		// a way AROUND the organization check: the shared gate judges builtins and
 		// mutations and never a query, so a client-callable read over these rows
-		// is a read nobody judged. Every named read and write a client can call
-		// over access codes is a builtin (siteAccessCodesForSite among them), and
-		// these are the rows beneath them.
-		{Path: "platform/mutations.memql", Name: "createSiteAccessCode"}:    true,
-		{Path: "platform/mutations.memql", Name: "rotateSiteAccessCode"}:    true,
-		{Path: "platform/mutations.memql", Name: "setSiteAccessCodeExpiry"}: true,
-		{Path: "platform/mutations.memql", Name: "removeSiteAccessCode"}:    true,
-		{Path: "platform/mutations.memql", Name: "touchSiteAccessCode"}:     true,
-		{Path: "platform/mutations.memql", Name: "createSiteAccessSession"}: true,
-		{Path: "platform/mutations.memql", Name: "endSiteAccessSession"}:    true,
-		{Path: "platform/queries.memql", Name: "siteAccessCodeById"}:        true,
-		{Path: "platform/queries.memql", Name: "siteAccessCodeRowsForSite"}: true,
-		{Path: "platform/queries.memql", Name: "siteAccessCodeByHash"}:      true,
-		{Path: "platform/queries.memql", Name: "siteAccessSessionByToken"}:  true,
+		// is a read nobody judged. Every client-callable read and write on access
+		// codes is a builtin (siteAccessCodesForSite among them), and these are
+		// the rows beneath them.
+		{Path: "platform/mutations.memql", Name: "createSiteAccessCode"}:         true,
+		{Path: "platform/mutations.memql", Name: "rotateSiteAccessCode"}:         true,
+		{Path: "platform/mutations.memql", Name: "setSiteAccessCodeExpiry"}:      true,
+		{Path: "platform/mutations.memql", Name: "removeSiteAccessCode"}:         true,
+		{Path: "platform/mutations.memql", Name: "createSiteAccessSession"}:      true,
+		{Path: "platform/mutations.memql", Name: "endSiteAccessSession"}:         true,
+		{Path: "platform/queries.memql", Name: "siteAccessCodeById"}:             true,
+		{Path: "platform/queries.memql", Name: "siteAccessCodeRowsForSite"}:      true,
+		{Path: "platform/queries.memql", Name: "siteAccessCodeByHash"}:           true,
+		{Path: "platform/queries.memql", Name: "siteAccessSessionByToken"}:       true,
+		{Path: "platform/queries.memql", Name: "siteAccessSessionLatestForCode"}: true,
 
 		// The per-account front door (epic memql#5168). Every write on a door's
 		// walk is the reconciler's: what a client-reachable one would buy is the

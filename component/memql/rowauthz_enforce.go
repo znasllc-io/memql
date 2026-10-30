@@ -423,6 +423,18 @@ func rowAuthzAdmitsMode(ctx context.Context, conceptName string, id string, payl
 		return rowAuthzDeny
 	}
 
+	// NO CLIENT READS THESE ROWS, WHATEVER THE TIER SAYS (design D14). Answered
+	// before the tier because it is not a tier: the concepts on this list are
+	// reached by clients only through builtins that pass the part and the
+	// organization gate, and a read that does not go through one passes
+	// neither. Reads only -- the write side is @serverWritten. Every read shape
+	// arrives here, since this function is the per-row admission of queries,
+	// graph expansion, asOf and subscriptions; internal origin and an unranked
+	// actor, which no request can be, are how the server's own readers pass.
+	// See clientUnreadableConcepts for the reasons.
+	if !write && clientReadRefused(ctx, conceptName) {
+		return rowAuthzDeny
+	}
 	if organizationOperator(ctx) && HasOrganizationBoundary(conceptName) && !organizationAppAllowsRow(ctx, "", "") {
 		return rowAuthzDeny
 	}

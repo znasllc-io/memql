@@ -927,7 +927,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// must never replace fields merged before another replica changed them.
 	// Identity's narrow admin edits must also serialize with existing profile
 	// writers, so a concurrent legacy update cannot silently lose either edit.
-	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || conceptMeta.Name == "v1:identity:user" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
+	// An access code is a bearer credential whose every operator act is a
+	// read-merge of the whole row, so two acts racing would let the later
+	// commit store the earlier's stale read: a removed code live again, or the
+	// digest an operator just replaced back in force (measured in review at
+	// 65 to 123 of 200 rounds). The fence makes the loser fail loudly instead.
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || conceptMeta.Name == "v1:identity:user" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept || conceptMeta.Name == siteAccessCodeConcept) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {

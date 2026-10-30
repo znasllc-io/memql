@@ -323,18 +323,29 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 		return nil
 	}
 	ac, _ := auth.AccessFromContext(ctx)
-	if ac != nil && ac.Synthetic {
-		return nil
-	}
+	synthetic := ac != nil && ac.Synthetic
 	old, _ := prior["accountId"].(string)
 	// A move requires write authority in the source as well as the target.
 	// Otherwise membership in both accounts plus a target-only grant could
 	// take a row out of an organization the caller may only read.
-	if !e.OrganizationCapable(ctx, old, auth.VerbUpdate, auth.ResourceData) {
+	if !synthetic && !e.OrganizationCapable(ctx, old, auth.VerbUpdate, auth.ResourceData) {
 		return ErrOrganizationRowForbidden
 	}
 	next, present := delta["accountId"].(string)
 	if !present || BareShortId(next) == BareShortId(old) {
+		return nil
+	}
+	// A deployable's access codes copy its accountId when they are minted, and
+	// the tier and the organization gate judge an act on a code from the copy.
+	// So a site with live codes cannot change organization, and that holds for
+	// the cluster acting on its own as for a person: the copy goes stale
+	// whoever moves the site (design D15, site_access_guards.go).
+	if concept == conceptPlatformSite {
+		if err := e.refuseSiteMoveWithLiveAccessCodes(ctx, id); err != nil {
+			return err
+		}
+	}
+	if synthetic {
 		return nil
 	}
 	if e.database() == nil {

@@ -133,7 +133,7 @@ var pluginKinds = map[string]moduleKind{
 	// Deployable access codes (design record 2026-10-29): mint, regenerate,
 	// re-time and remove a code, and list the gates a deployable declares.
 	//
-	// A COMPONENT for sitePreview's reasons, which apply unchanged. Its five
+	// A COMPONENT for sitePreview's reasons, which apply unchanged. Its six
 	// builtins are declared in dsl/platform/builtins.memql, which EVERY binary
 	// loads, so a node without the executor fails boot resolution -- turning it
 	// off breaks the engine rather than removing a feature. And it calls

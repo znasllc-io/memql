@@ -452,18 +452,21 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 
 // ---- Access codes (design record 2026-10-29-deployable-access-codes) ----
 //
-// EVERY QUERY HERE IS @serverOnly, AND THAT IS THE POINT OF THE GROUP. Every NAMED read and write a
-// client can call over access codes is a BUILTIN passing one gate (dsl/platform/builtins.memql), and
-// every query and mutation beneath those builtins is @serverOnly. The reason is a property of the
-// shared organization gate, not of these rows: it judges builtins and mutations and NEVER a query.
-// The list used to be a client-callable query, and it let a person who held the part in one
-// organization read the labels, hints and expiries of a site in another whose row tier admitted
-// them. So the list is now the siteAccessCodesForSite builtin, and the rows under it are
+// EVERY QUERY HERE IS @serverOnly, AND THAT IS THE POINT OF THE GROUP. Every client-callable read and
+// write on access codes is a BUILTIN passing one gate (dsl/platform/builtins.memql), and every query
+// and mutation beneath those builtins is @serverOnly. The reason is a property of the shared
+// organization gate, not of these rows: it judges builtins and mutations and NEVER a query, so a
+// client-callable query over a site's codes would let a person who holds the part in one organization
+// read the labels, hints and expiries of a site in another whose row tier admits them. So the list a
+// person calls is the siteAccessCodesForSite builtin, and the rows under it are
 // siteAccessCodeRowsForSite below -- read by its handler with internal origin under the CALLER's
 // actor, so the tier still decides every row and the organization gate has already decided the call.
-// (A raw read of the concept never reaches a named construct and is decided by the row tier alone,
-// as for every concept outside the organization boundary; it shows a code's metadata and a digest,
-// never a code.)
+//
+// A READ THAT NAMES NO CONSTRUCT IS CLOSED THE SAME WAY, by the engine and not by this file: a raw
+// read of either concept, parentOf, sort(paginate(...)), asOf and a subscription never reach a builtin,
+// so they pass neither the part nor the organization gate, and the engine refuses them to every caller
+// but internal origin and an unranked actor (clientUnreadableConcepts, component/memql; design D14).
+// Internal origin is how every query in this group is reached, and nothing a request carries can be it.
 //
 // TWO CONCEPTS, TWO TIERS, AND THE READS FOLLOW THEIR CONCEPT.
 //
@@ -499,8 +502,8 @@ query sitePreviewObservation sitePreviewObservationsForSite {
 /// the question a list answers after something unexpected happens is 'who could get in, and when',
 /// and a filtered list answers it for the live codes only. The OS hides a removed code and draws an
 /// expired one as expired; this read decides neither. NO ORDER IS PROMISED: `row.createdAt` is the
-/// time of a row's latest version, so it moves whenever a code is used or re-timed, and the
-/// Access codes panel sorts what it is given by label.
+/// time of a row's latest version, so it moves whenever an operator regenerates, re-times or removes
+/// the code, and the Access codes panel sorts what it is given by label.
 ///
 /// UNBOUNDED, BECAUSE A PAGE CAP WOULD HIDE A LIVE CODE from the person who has to remove it. The
 /// population is the codes one operator minted for one deployable, which is small; the failure to
@@ -564,9 +567,11 @@ query siteAccessCode siteAccessCodeById {
 ///
 /// @serverOnly, and actor.userId scoping is not the fix: this is the visitor's credential check, a
 /// visitor has no actor, and the handler runs it as the site's owner borrowed from the edge's
-/// stamp -- so the tier DOES scope it, to that owner, which is why a forged owner header reads
-/// zero rows. What the annotation withholds is the wire: a client-callable lookup by digest is an
-/// oracle for whether a guessed digest is a live code, for a caller who never held the code.
+/// stamp -- so the tier DOES scope it, to that owner. It is not what authenticates the stamp: the
+/// tier's account arm admits any member of the code's account, so a forged owner header naming one
+/// of them still reads the row, and the bff compares the stamp with the site's own owner before it
+/// relies on the tier. What the annotation withholds is the wire: a client-callable lookup by digest
+/// is an oracle for whether a guessed digest is a live code, for a caller who never held the code.
 @serverOnly
 @unbounded("access code by site and digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
 @actor
@@ -611,6 +616,44 @@ query siteAccessSession siteAccessSessionByToken {
   filter  row => row.tokenHash == args.tokenHash
               && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   siteAccessSessionFull
+}
+
+/// The newest session of one generation of one code, for the Access codes panel's 'last opened'
+/// (design record 2026-10-29-deployable-access-codes, D13). IT IS THE ONLY SOURCE OF THE FACT. A code
+/// carries no 'last used' field, because a write on a visitor's schedule races every operator act on
+/// the same row (dsl/platform/concepts.memql says how badly), so when a code was last opened is when
+/// its newest session was, and the list handler reads it from here for each code.
+///
+/// OF ONE GENERATION, WHICH IS WHAT LETS A REGENERATION RESET IT WITH NO WRITE. The caller passes the
+/// code's CURRENT generation; the new secret has no sessions yet, so the answer is nothing and the panel
+/// says 'not opened', although sessions of the replaced secret still exist and are not what was asked.
+///
+/// AN ENDED SESSION STILL COUNTS, because it was opened. The newest is chosen by `issuedAt`, which a
+/// session never moves, and not by `row.createdAt`, which ending the session would advance. The order
+/// is the TEXT order of `issuedAt`, so the bff writes it in one form -- UTC RFC 3339 at whole seconds,
+/// the form the concept names -- and two sessions opened in the same second are interchangeable. One
+/// row at most, in siteAccessSessionFull, which never carries the digest.
+///
+/// The owner tier is stated as a top-level conjunct, as siteAccessSessionByToken states it, because
+/// this concept's tier has no account arm. The handler therefore reads it as the SITE'S owner, the actor
+/// the sessions are written as, and not as an operator who is only a member of the account.
+///
+/// @serverOnly, and actor.userId scoping is already here -- the filter IS owner-scoped. What the
+/// annotation withholds is the wire: nothing a person does needs a code's session activity except
+/// through the list, which has passed the part and the organization gate.
+@serverOnly
+@actor
+@cache(0)
+query siteAccessSession siteAccessSessionLatestForCode {
+  args {
+    codeId      string!
+    generation  int!
+  }
+  filter  row => row.codeId == args.codeId && row.generation == args.generation
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   siteAccessSessionFull
+  sort    "issuedAt", "desc"
+  paginate 1
 }
 
 // ---- Custom domains (epic memql#4805) ----

@@ -604,17 +604,17 @@ builtin sitePreviewNoteOrder {
 
 // ---- Access codes (design record 2026-10-29-deployable-access-codes) ----
 //
-// Six capabilities over v1:platform:siteAccessCode, and EVERY NAMED READ AND WRITE A CLIENT CAN CALL
-// OVER ACCESS CODES IS ONE OF THEM, passing the same gate. The split between them and the constructs
+// Six capabilities over v1:platform:siteAccessCode, and EVERY CLIENT-CALLABLE READ AND WRITE ON
+// ACCESS CODES IS ONE OF THEM, passing the same gate. The split between them and the constructs
 // beneath is the preview group's taken to its end: every WRITE is a @serverOnly mutation
 // (dsl/platform/mutations.memql), every READ beneath a builtin is a @serverOnly query
-// (dsl/platform/queries.memql), and the concepts are @serverWritten so a raw insert cannot go
-// around either. An act an operator takes is a BUILTIN because a builtin is where the code is
-// minted, the gate is checked, the organization is judged and the audit event is written -- and the
-// LIST is one too, for the reason that settled it: the shared organization gate judges builtins and
-// mutations and NEVER a query, so a list that was a query was a read of another organization's codes
-// that nobody checked. Nothing here can be skipped by calling what is underneath, since a client
-// cannot.
+// (dsl/platform/queries.memql), and the concepts are @serverWritten and unreadable by a client
+// (clientUnreadableConcepts, component/memql), so neither a raw write nor a raw read can go around
+// either. An act an operator takes is a BUILTIN because a builtin is where the code is minted, the
+// gate is checked, the organization is judged and the audit event is written -- and the LIST is one
+// too, since the shared organization gate judges builtins and mutations and NEVER a query, so a list
+// that was a query would be a read of another organization's codes that nobody checked. Nothing here
+// can be skipped by calling what is underneath, since a client cannot.
 //
 // AUTHORIZATION IS TWO LAYERS, as sitePreviewOpen's is, and a third for the organization.
 // @requiresCapability names the SURFACE (`execute app:deployables/access`, owner and developer).
@@ -623,7 +623,7 @@ builtin sitePreviewNoteOrder {
 // And organization_action_capabilities.go names each builtin's TARGET -- the site for minting,
 // listing the codes and listing the gates, the code for every act on an existing one -- so the
 // shared gate judges the organization the call selected rather than the caller's global capability
-// alone. TestSiteAccessListIsJudgedByTheOrganizationGate is the proof it does.
+// alone. TestSiteAccessListIsJudgedByTheOrganizationGate is the proof it does, for each of the six.
 
 /// Mint an access code for one gate of a deployable (design record 2026-10-29-deployable-access-codes).
 ///
@@ -738,27 +738,28 @@ builtin siteAccessGates {
 /// The access codes of a deployable, for the Access codes panel (design record
 /// 2026-10-29-deployable-access-codes).
 ///
-/// IT IS A BUILTIN RATHER THAN A QUERY, and the name is the one the query had, so the call a client
-/// makes did not change. The reason is the finding that moved it: the shared organization gate judges
-/// builtins and mutations and never a query, so a client-callable list let a person who held the part
-/// in one organization read the labels, hints and expiries of a site in another whose row tier admitted
-/// them. As a builtin it is judged against the site's organization exactly as minting is, and the
-/// handler reads the rows through siteAccessCodeRowsForSite -- a @serverOnly query -- with internal
-/// origin stamped and the caller's actor left untouched, so the tier still decides every row.
+/// IT IS A BUILTIN, NOT A QUERY, because the shared organization gate judges builtins and mutations and
+/// never a query: a client-callable list would let a person who held the part in one organization read
+/// the labels, hints and expiries of a site in another whose row tier admitted them. As a builtin it is
+/// judged against the site's organization exactly as minting is, and the handler reads the rows through
+/// siteAccessCodeRowsForSite -- a @serverOnly query -- with internal origin stamped and the caller's
+/// actor left untouched, so the tier still decides every row.
 ///
-/// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the
-/// label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was
-/// removed and when it was last used. NEVER THE CODE and never its digest. No order is promised; the
-/// panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this
-/// decides neither.
+/// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the label,
+/// what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed
+/// and when it was last opened. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the
+/// code: the handler fills it from the newest session of the code's CURRENT generation
+/// (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was
+/// regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and
+/// draws an expired one as expired, so this decides neither.
 ///
 /// Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt,
-/// expiresAt, revokedAt, lastUsedAt, createdAt}.
+/// expiresAt, revokedAt, lastOpenedAt, createdAt}.
 @sdk
 @executor("integration.siteAccess.list")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/access")
-@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt and lastUsedAt. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastUsedAt, createdAt}.")
+@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt and lastOpenedAt -- when a visitor last opened the code's current secret, absent for one nobody has opened. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. Returns one row per code: {id, siteId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.")
 builtin siteAccessCodesForSite {
   siteId  string!  @description("The deployable to list the codes of.")
 }

@@ -351,7 +351,7 @@ var tierDecidesTheRead = map[string]string{
 	// TestEveryClientCallableAccessCodeActIsAGatedBuiltin holds the line.
 	"siteAccessCodeRowsForSite": "Deployable access codes, as siteById over v1:platform:siteAccessCode: the site's composite tier decides every row, and the account arm is what admits the people who manage the deployable but did not create it. The rows under the siteAccessCodesForSite builtin, read by its handler with internal origin under the CALLER's actor, so the tier still decides; the organization gate judges the builtin, which it could never do to this query. TestSiteAccessCodesAreReadableByTheAccountsPeopleAndNotByAStranger.",
 	"siteAccessCodeById":        "Deployable access codes, as siteAccessCodeRowsForSite -- the by-id read the regenerate, re-time and remove acts resolve their target through under the CALLER's actor, so the gate an act runs behind admits the same people the list does.",
-	"siteAccessCodeByHash":      "Deployable access codes, as siteAccessCodeRowsForSite. @serverOnly, read by the bff under the owner the edge stamped, which the owner arm admits; a forged owner reads zero rows because the tier, not the filter, decides.",
+	"siteAccessCodeByHash":      "Deployable access codes, as siteAccessCodeRowsForSite. @serverOnly, read by the bff under the owner the edge stamped, which the owner arm admits. The tier, not the filter, decides the row, and its account arm admits a member of the code's account, so a forged owner header naming one still reads it: the bff compares the stamp with the site's own owner before it relies on the tier.",
 
 	// Organization-owned reads deliberately admit authorized peer members.
 	// PR #5598; TestOrganizationPersistedAttributionAndCrossReplicaMembership

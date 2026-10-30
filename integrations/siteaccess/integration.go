@@ -18,10 +18,12 @@ import (
 //	integration.siteAccess.gates       the gates a site opens  (dsl builtin siteAccessGates)
 //	integration.siteAccess.list        the codes of a site     (dsl builtin siteAccessCodesForSite)
 //
-// Every named read and write a client can call over access codes is one of these, passing the shared
+// Every client-callable read and write on access codes is one of these, passing the shared
 // organization gate; the queries and mutations beneath them are @serverOnly. The list is a builtin,
 // and reads its rows through the @serverOnly siteAccessCodeRowsForSite with internal origin and the
-// caller's actor untouched, because that gate judges builtins and mutations and never a query.
+// caller's actor untouched, because that gate judges builtins and mutations and never a query. The
+// rows are readable by no client any other way (clientUnreadableConcepts, component/memql), so these
+// handlers and the bff are the readers.
 //
 // # Why every handler refuses for now
 //
@@ -102,7 +104,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{
 			Name: "list",
 			Description: "The access codes minted against a deployable, removed and expired ones included, one row per " +
-				"code and never the code or its digest. No order is promised.",
+				"code and never the code or its digest, each with lastOpenedAt taken from the newest session of its " +
+				"current generation when there is one. No order is promised.",
 			Handler: notImplemented("siteAccessCodesForSite"),
 			ArgsSchema: map[string]string{
 				"siteId": "string (required) -- the deployable to list the codes of.",

@@ -13,11 +13,11 @@ import (
 // THE ACCESS CODES PART REACHES THE SHARED ORGANIZATION GATE (deployable access
 // codes design record, 2026-10-29, section 5 "Authority").
 //
-// EVERY NAMED CLIENT-CALLABLE READ AND WRITE ON ACCESS CODES IS A BUILTIN PASSING
+// EVERY CLIENT-CALLABLE READ AND WRITE ON ACCESS CODES IS A BUILTIN PASSING
 // THE SAME GATE, and every query and mutation underneath is @serverOnly. That is one
 // sentence with a reason and a test. The reason: the shared gate judges builtins
 // and mutations and NEVER a query, so a client-callable query over these rows
-// (the list used to be one) is a read that skips the organization check -- a
+// would be a read that skips the organization check -- a
 // person holding the part in one organization could read the labels, hints and
 // expiries of a site in another whose row tier admits them. The tests below are
 // the proof, in two halves: the declarations (this file) and the gate actually
@@ -88,11 +88,11 @@ func TestSiteAccessBuiltinsNameTheirOrganizationTarget(t *testing.T) {
 
 }
 
-// THE LIST IS A BUILTIN, AND THE QUERY UNDER IT IS NOT REACHABLE. This is the
-// regression the security review found, pinned from both sides. siteAccessCodesForSite
-// used to be a client-callable query, which the organization gate never judges; it is
-// now the builtin above, and the rows come from siteAccessCodeRowsForSite, a
-// @serverOnly query that carries no part because nothing a person calls reaches it.
+// THE LIST IS A BUILTIN, AND THE QUERY UNDER IT IS NOT REACHABLE. Pinned from both
+// sides: a client-callable query is one the organization gate never judges, so
+// siteAccessCodesForSite is the builtin above, and the rows come from
+// siteAccessCodeRowsForSite, a @serverOnly query that carries no part because nothing
+// a person calls reaches it.
 func TestSiteAccessCodesForSiteIsABuiltinOverAServerOnlyQuery(t *testing.T) {
 	fns := loadedSiteAccessTree(t)
 

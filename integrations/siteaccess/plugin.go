@@ -7,7 +7,7 @@ import (
 // plugin.go -- self-registration.
 //
 // REGISTERED ON EVERY NODE TYPE, for integrations/sitepreview's reason exactly:
-// the five builtins are declared in dsl/platform/builtins.memql, which EVERY
+// the six builtins are declared in dsl/platform/builtins.memql, which EVERY
 // binary loads, and a capability present in the DSL and absent from the
 // registry is a boot-time resolution failure. Gating the registration by build
 // tag would make whether an operator can mint a code depend on which replica

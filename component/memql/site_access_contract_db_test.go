@@ -128,7 +128,7 @@ func TestSiteAccessConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) 
 		"tokenHash": siteAccessDigest(0xb2), "issuedAt": issuedAt,
 	}
 
-	// The constructs in the order a code lives: minted, used, rotated, moved,
+	// The constructs in the order a code lives: minted, rotated, re-timed,
 	// removed; and a session opened and ended. Each is called with VALID
 	// arguments, so a refusal can only be the gate, never the arguments.
 	calls := []struct {
@@ -149,9 +149,6 @@ func TestSiteAccessConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) 
 		{"removeSiteAccessCode", siteAccessCall(t, "mutation", "removeSiteAccessCode", map[string]any{
 			"codeId": ids.code, "revokedAt": issuedAt, "lastChangedBy": "operator-" + ids.owner,
 		}), "ending a code without the audit event the builtin writes beside it"},
-		{"touchSiteAccessCode", siteAccessCall(t, "mutation", "touchSiteAccessCode", map[string]any{
-			"codeId": ids.code, "lastUsedAt": issuedAt,
-		}), "writing a 'last used' that says what its writer wanted it to say"},
 		{"createSiteAccessSession", siteAccessCall(t, "mutation", "createSiteAccessSession", sessionArgs),
 			"opening a session without a code, which is the whole of what a code is for"},
 		{"endSiteAccessSession", siteAccessCall(t, "mutation", "endSiteAccessSession", map[string]any{
@@ -167,6 +164,9 @@ func TestSiteAccessConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) 
 		{"siteAccessSessionByToken", siteAccessCall(t, "query", "siteAccessSessionByToken", map[string]any{
 			"tokenHash": siteAccessDigest(0xb2),
 		}), "an oracle for whether a guessed digest is a live session"},
+		{"siteAccessSessionLatestForCode", siteAccessCall(t, "query", "siteAccessSessionLatestForCode", map[string]any{
+			"codeId": ids.code, "generation": 1,
+		}), "when a code was last opened, past the gate that judges the list it is shown in"},
 	}
 
 	// Every client-origin call first, before anything exists: the refusal must
@@ -185,7 +185,7 @@ func TestSiteAccessConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) 
 	// The same calls pass the gate under internal origin, in lifecycle order.
 	// The first one has to create the row the rest act on.
 	for _, tc := range calls {
-		if strings.HasPrefix(tc.construct, "siteAccessCodeBy") || tc.construct == "siteAccessSessionByToken" || tc.construct == "siteAccessCodeRowsForSite" {
+		if strings.HasPrefix(tc.call, "query ") {
 			continue
 		}
 		t.Run("an internal-origin "+tc.construct+" passes the gate", func(t *testing.T) {
@@ -270,8 +270,9 @@ func TestSiteAccessCodeViewNeverCarriesTheDigest(t *testing.T) {
 			}
 
 			// THE TIER DECIDES THE ROW. Another person asking for the same code
-			// resolves zero rows, which is also what a forged owner stamp
-			// reads at the bff (the owner is a pointer the bff re-checks).
+			// resolves zero rows. (A forged owner stamp is a different case: the
+			// account arm admits a member, so the bff compares the stamp with the
+			// site's own owner before it relies on the tier.)
 			res, err = eng.Execute(stranger, query)
 			require.NoError(t, err)
 			require.NotContains(t, resultBlob(t, res), ids.code, "a stranger read the owner's code %s", name)
@@ -370,12 +371,13 @@ func TestSiteAccessCodeLifecycleChangesOnlyWhatItNames(t *testing.T) {
 	require.Equal(t, "operator-b", BareShortId(fmt.Sprint(row["lastChangedBy"])))
 	require.Equal(t, stamp(48*time.Hour), fmt.Sprint(row["expiresAt"]))
 
-	// Use is recorded without touching anything else, including who last
-	// changed the code: a visitor is not an operator.
-	row = run("touchSiteAccessCode", map[string]any{"codeId": ids.code, "lastUsedAt": stamp(time.Minute)})
-	require.Equal(t, stamp(time.Minute), fmt.Sprint(row["lastUsedAt"]))
-	require.Equal(t, "operator-b", BareShortId(fmt.Sprint(row["lastChangedBy"])), "a visitor's use was recorded as an operator's act")
-	require.Equal(t, stamp(48*time.Hour), fmt.Sprint(row["expiresAt"]))
+	// A visitor's use is NOT recorded on the code (D13): nothing a visitor does
+	// writes this row, so the only versions it has are operators' acts. "Last
+	// opened" is read from the code's sessions (siteAccessSessionLatestForCode).
+	for _, heartbeat := range []string{"lastUsedAt", "lastSeenAt", "lastOpenedAt"} {
+		_, present := row[heartbeat]
+		require.False(t, present, "the code carries %q, a field only a visitor's use could write", heartbeat)
+	}
 
 	// Regenerate: new digest, new hint, next generation, new issue time. The
 	// previous digest resolves nothing from that instant.
@@ -494,6 +496,86 @@ func TestSiteAccessSessionIsBoundToItsOwnerAndGeneration(t *testing.T) {
 	got, err = eng.Execute(owner, byToken)
 	require.NoError(t, err)
 	require.Contains(t, resultBlob(t, got), "endedAt", "an ended session must still resolve, so the handler can say 'ended'")
+}
+
+// "LAST OPENED" IS THE NEWEST SESSION OF THE CODE'S CURRENT GENERATION (D13), and
+// the code carries no heartbeat to say so. The list handler fills `lastOpenedAt`
+// from this one read, so the properties below are the panel's:
+//
+//   - the NEWEST by issuedAt, whatever order the rows were written in;
+//   - of ONE generation, so a regenerated code reads as not opened though older
+//     sessions of the replaced secret exist -- the new secret has not been used;
+//   - an ENDED session still counts, because it was opened;
+//   - one row at most, and never the digest of a live cookie.
+func TestSiteAccessSessionLatestForCodeIsTheNewestOfThatGeneration(t *testing.T) {
+	eng, _, ctx := sharedReadMergeEngine(t)
+	ids := newSiteAccessIDs("latest")
+	issued := time.Now().UTC().Truncate(time.Second)
+	at := func(d time.Duration) string { return issued.Add(d).Format(time.RFC3339) }
+	owner := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, siteAccessAs(ids.owner, auth.RoleWriter)))
+	stranger := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, siteAccessAs("stranger-"+ids.owner, auth.RoleWriter)))
+
+	open := func(label, code string, generation int, opened string, seed byte) string {
+		t.Helper()
+		id := ids.session + "-" + label
+		_, err := eng.Execute(owner, siteAccessCall(t, "mutation", "createSiteAccessSession", map[string]any{
+			"sessionId": id, "siteId": ids.site, "codeId": code, "generation": generation,
+			"tokenHash": siteAccessDigest(seed), "issuedAt": opened,
+		}))
+		require.NoError(t, err)
+		return id
+	}
+	// Generation 1 is written out of order: the newest is NOT the last row written.
+	open("g1-early", ids.code, 1, at(time.Minute), 0x01)
+	newest := open("g1-newest", ids.code, 1, at(5*time.Minute), 0x02)
+	open("g1-middle", ids.code, 1, at(2*time.Minute), 0x03)
+	// Generation 2 is older than generation 1's newest, and still the answer for 2.
+	second := open("g2", ids.code, 2, at(3*time.Minute), 0x04)
+	// Another code's session must never answer for this one.
+	other := open("other", ids.code+"-other", 1, at(9*time.Minute), 0x05)
+
+	latest := func(ctx context.Context, code string, generation int) (string, []map[string]any) {
+		t.Helper()
+		res, err := eng.Execute(ctx, siteAccessCall(t, "query", "siteAccessSessionLatestForCode", map[string]any{"codeId": code, "generation": generation}))
+		require.NoError(t, err)
+		return resultBlob(t, res), MaterializeRows(res)
+	}
+
+	blob, rows := latest(owner, ids.code, 1)
+	require.Len(t, rows, 1, "the read must return one row: %s", blob)
+	require.Contains(t, blob, newest, "the newest session of the generation is not the answer")
+	require.Contains(t, blob, at(5*time.Minute), "the reply must carry issuedAt: it is what the panel shows as 'last opened'")
+	require.NotContains(t, blob, "tokenHash", "the reply carries the digest of a live cookie")
+	require.NotContains(t, blob, siteAccessDigest(0x02))
+
+	blob, rows = latest(owner, ids.code, 2)
+	require.Len(t, rows, 1)
+	require.Contains(t, blob, second, "generation 2 was answered by a session of another generation")
+
+	_, rows = latest(owner, ids.code, 3)
+	require.Empty(t, rows, "a generation nobody opened reads as opened: a regenerated code would show the replaced secret's last use")
+
+	blob, rows = latest(owner, ids.code+"-other", 1)
+	require.Len(t, rows, 1)
+	require.Contains(t, blob, other)
+
+	_, rows = latest(owner, ids.code+"-nowhere", 1)
+	require.Empty(t, rows, "a code nobody opened answered with a row")
+
+	// An ended session was still opened.
+	_, err := eng.Execute(owner, siteAccessCall(t, "mutation", "endSiteAccessSession", map[string]any{
+		"sessionId": newest, "endedAt": at(6 * time.Minute),
+	}))
+	require.NoError(t, err)
+	blob, rows = latest(owner, ids.code, 1)
+	require.Len(t, rows, 1)
+	require.Contains(t, blob, newest, "ending the newest session changed which one is the newest")
+	require.Contains(t, blob, at(5*time.Minute), "the answer is when it was opened, not when it ended")
+
+	// The tier decides the row: sessions are the site owner's, so a stranger
+	// reads none of them.
+	_, rows = latest(stranger, ids.code, 1)
+	require.Empty(t, rows, "a stranger read the owner's session through the latest-session read")
 }
 
 // THE TIER IS THE SITE'S, ACCOUNT ARM INCLUDED, and that is what lets the three
@@ -623,23 +705,26 @@ func installAccessExecutorRecorders(t *testing.T, eng *MemQLEngine, executors ..
 	return reached
 }
 
-// THE ORGANIZATION GATE JUDGES THE LIST, AS IT JUDGES MINTING (the automated
-// security review's finding on the first version of this contract).
+// THE ORGANIZATION GATE JUDGES EVERY ACCESS-CODE BUILTIN, THE LIST AND THE THREE ACTS ON A
+// CODE AS IT JUDGES MINTING.
 //
-// siteAccessCodesForSite was a client-callable QUERY, and the shared gate judges
-// builtins and mutations and never a query -- so a person who held the part in one
-// organization could read the labels, hints and expiries of a site in another whose
-// ROW TIER admitted them. This is that person, built literally: they OWN a site tied
-// to Beta (so the owner arm of the tier admits every code on it) while their only
-// standing, and the only place their group grant gives them the part, is Acme.
+// The shared gate judges builtins and mutations and never a query, so a client-callable
+// list would let a person who held the part in one organization read the labels, hints
+// and expiries of a site in another whose ROW TIER admitted them. This is that person,
+// built literally: they OWN a site tied to Beta (so the owner arm of the tier admits every
+// code on it) while their only standing, and the only place their group grant gives them
+// the part, is Acme.
 //
 // The premise is asserted first, because the claim is meaningless without it: the
 // rows under the list ARE visible to this person through the tier alone. Then the
-// gate: the list, minting and the gate listing are all refused for Beta's site with
-// capability_not_held and reach no executor, and all three pass for Acme's, where
-// the same grant holds. A member of Beta who was never granted the part is refused
-// on Beta's own site, so the pass on Acme's is the GRANT's doing and not an accident
-// of the fixture.
+// gate. The builtins fall in two groups, judged against two different rows: minting,
+// the list and the gate listing ask about the SITE, and regenerate, set-expiry and
+// remove ask about the CODE, whose accountId was copied off its site when it was
+// minted. All six are refused for Beta's with capability_not_held and reach no
+// executor, and all six pass for Acme's, where the same grant holds. A member of Beta
+// who was never granted the part is refused on Beta's own site and code, so the pass on
+// Acme's is the GRANT's doing and not an accident of the fixture. A code or a site that
+// does not exist is refused, never answered empty or passed through to the handler.
 func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
@@ -670,35 +755,53 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	}
 
 	// THE PREMISE: a code on Beta's site, and the tier alone shows it to this person.
+	// A second code on Acme's site is where the same grant DOES hold.
 	issued := time.Now().UTC().Truncate(time.Second)
 	internal := auth.ContextWithInternalOrigin(partGateActor(person, auth.RoleWriter))
-	_, err := eng.Execute(internal, siteAccessCall(t, "mutation", "createSiteAccessCode", map[string]any{
-		"codeId": ids.code, "siteId": siteBeta, "accountId": beta, "label": "Beta reviewers", "gate": "dashboard",
-		"codeHash": siteAccessDigest(0x61), "codeHint": "FBZA",
-		"issuedAt": issued.Format(time.RFC3339), "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
-		"lastChangedBy": person,
-	}))
-	require.NoError(t, err)
+	codeBeta, codeAcme := ids.code, ids.code+"-acme"
+	for code, mint := range map[string]struct{ site, account string }{codeBeta: {siteBeta, beta}, codeAcme: {siteAcme, acme}} {
+		_, err := eng.Execute(internal, siteAccessCall(t, "mutation", "createSiteAccessCode", map[string]any{
+			"codeId": code, "siteId": mint.site, "accountId": mint.account, "label": "Reviewers", "gate": "dashboard",
+			"codeHash": siteAccessDigest(byte(len(code))), "codeHint": "FBZA",
+			"issuedAt": issued.Format(time.RFC3339), "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+			"lastChangedBy": person,
+		}))
+		require.NoError(t, err)
+	}
 	rows, err := eng.Execute(internal, siteAccessCall(t, "query", "siteAccessCodeRowsForSite", map[string]any{"siteId": siteBeta}))
 	require.NoError(t, err)
-	require.Contains(t, resultBlob(t, rows), ids.code,
+	require.Contains(t, resultBlob(t, rows), codeBeta,
 		"the premise failed: the row tier does not admit this person to Beta's code, so the gate below is not the only thing in the way")
 
+	// scope is what a call is about: a site for the three builtins that ask about
+	// the site, a code for the three that ask about the code.
+	type scope struct{ site, code string }
+	inBeta, inAcme := scope{siteBeta, codeBeta}, scope{siteAcme, codeAcme}
+	expiry := issued.Add(2 * time.Hour).Format(time.RFC3339)
 	acts := []struct {
 		builtin  string
 		executor string
-		call     func(site string) string
+		call     func(scope) string
 	}{
-		{"siteAccessCodesForSite", "integration.siteAccess.list", func(site string) string {
-			return siteAccessCall(t, "builtin", "siteAccessCodesForSite", map[string]any{"siteId": site})
+		{"siteAccessCodesForSite", "integration.siteAccess.list", func(s scope) string {
+			return siteAccessCall(t, "builtin", "siteAccessCodesForSite", map[string]any{"siteId": s.site})
 		}},
-		{"siteAccessCodeCreate", "integration.siteAccess.create", func(site string) string {
+		{"siteAccessCodeCreate", "integration.siteAccess.create", func(s scope) string {
 			return siteAccessCall(t, "builtin", "siteAccessCodeCreate", map[string]any{
-				"siteId": site, "label": "Probe", "gate": "dashboard", "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+				"siteId": s.site, "label": "Probe", "gate": "dashboard", "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
 			})
 		}},
-		{"siteAccessGates", "integration.siteAccess.gates", func(site string) string {
-			return siteAccessCall(t, "builtin", "siteAccessGates", map[string]any{"siteId": site})
+		{"siteAccessGates", "integration.siteAccess.gates", func(s scope) string {
+			return siteAccessCall(t, "builtin", "siteAccessGates", map[string]any{"siteId": s.site})
+		}},
+		{"siteAccessCodeRegenerate", "integration.siteAccess.regenerate", func(s scope) string {
+			return siteAccessCall(t, "builtin", "siteAccessCodeRegenerate", map[string]any{"codeId": s.code})
+		}},
+		{"siteAccessCodeSetExpiry", "integration.siteAccess.setExpiry", func(s scope) string {
+			return siteAccessCall(t, "builtin", "siteAccessCodeSetExpiry", map[string]any{"codeId": s.code, "expiresAt": expiry})
+		}},
+		{"siteAccessCodeRemove", "integration.siteAccess.remove", func(s scope) string {
+			return siteAccessCall(t, "builtin", "siteAccessCodeRemove", map[string]any{"codeId": s.code})
 		}},
 	}
 	executors := make([]string, 0, len(acts))
@@ -717,32 +820,57 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	// A CLIENT-ORIGIN CALL: internal origin skips the gate by design, and the gate is the point.
 	personCtx := partGateActor(person, auth.RoleWriter)
 	for _, act := range acts {
-		t.Run(act.builtin+" on a site in another organization is refused", func(t *testing.T) {
+		t.Run(act.builtin+" on a site or code in another organization is refused", func(t *testing.T) {
 			before := *reached[act.executor]
-			_, err := eng.Execute(personCtx, act.call(siteBeta))
+			_, err := eng.Execute(personCtx, act.call(inBeta))
 			refused(t, err, act.builtin)
 			require.Equal(t, before, *reached[act.executor], "the executor ran for a call the gate refused")
 		})
-		t.Run(act.builtin+" on a site in the organization that granted the part passes the gate", func(t *testing.T) {
+		t.Run(act.builtin+" on a site or code in the organization that granted the part passes the gate", func(t *testing.T) {
 			before := *reached[act.executor]
-			_, err := eng.Execute(personCtx, act.call(siteAcme))
+			_, err := eng.Execute(personCtx, act.call(inAcme))
 			require.NoError(t, err, "%s was refused on the organization the grant belongs to", act.builtin)
 			require.Equal(t, before+1, *reached[act.executor], "the gate admitted the call but the executor was not reached")
 		})
 	}
 
-	t.Run("a member of the organization who was never granted the part is refused on its own site", func(t *testing.T) {
+	t.Run("a member of the organization who was never granted the part is refused on its own site and code", func(t *testing.T) {
 		for _, act := range acts {
 			before := *reached[act.executor]
-			_, err := eng.Execute(partGateActor(betaMember, auth.RoleWriter), act.call(siteBeta))
+			_, err := eng.Execute(partGateActor(betaMember, auth.RoleWriter), act.call(inBeta))
 			refused(t, err, act.builtin)
 			require.Equal(t, before, *reached[act.executor], "the executor ran for a call the gate refused")
 		}
 	})
 
-	t.Run("a site that does not exist is refused, not answered empty", func(t *testing.T) {
-		_, err := eng.Execute(personCtx, siteAccessCall(t, "builtin", "siteAccessCodesForSite", map[string]any{"siteId": ids.site + "-nowhere"}))
-		refused(t, err, "siteAccessCodesForSite")
+	t.Run("a site or code that does not exist is refused, not answered empty or handed to the handler", func(t *testing.T) {
+		nowhere := scope{ids.site + "-nowhere", ids.code + "-nowhere"}
+		for _, act := range acts {
+			before := *reached[act.executor]
+			_, err := eng.Execute(personCtx, act.call(nowhere))
+			refused(t, err, act.builtin)
+			require.Equal(t, before, *reached[act.executor], "the executor ran for a target that does not exist")
+		}
+	})
+
+	t.Run("a code named by its canonical id is judged by the same row", func(t *testing.T) {
+		// The gate must not be steerable by spelling: the canonical form of Beta's
+		// code is refused as the bare form is, and Acme's passes as it does.
+		for _, act := range acts[3:] {
+			before := *reached[act.executor]
+			_, err := eng.Execute(personCtx, act.call(scope{siteBeta, "v1:platform:siteAccessCode:" + codeBeta}))
+			refused(t, err, act.builtin)
+			require.Equal(t, before, *reached[act.executor], "the executor ran for a canonical id the gate refused")
+		}
+	})
+
+	t.Run("a blank code is refused", func(t *testing.T) {
+		for _, act := range acts[3:] {
+			before := *reached[act.executor]
+			_, err := eng.Execute(personCtx, act.call(scope{siteAcme, " "}))
+			require.Error(t, err, "%s was admitted for a blank code", act.builtin)
+			require.Equal(t, before, *reached[act.executor], "the executor ran for a blank code")
+		}
 	})
 }
 
@@ -830,8 +958,8 @@ func TestSiteAccessRowsCannotBeWrittenAroundTheBuiltins(t *testing.T) {
 			"the refused raw write changed the stored session")
 	})
 	t.Run("the builtins' own writes still pass", func(t *testing.T) {
-		_, err := eng.Execute(internal, siteAccessCall(t, "mutation", "touchSiteAccessCode", map[string]any{
-			"codeId": ids.code, "lastUsedAt": stamp(time.Minute),
+		_, err := eng.Execute(internal, siteAccessCall(t, "mutation", "setSiteAccessCodeExpiry", map[string]any{
+			"codeId": ids.code, "expiresAt": stamp(2 * time.Hour), "lastChangedBy": ids.owner,
 		}))
 		require.NoError(t, err, "internal origin is refused by @serverWritten, which would leave every integration write dead")
 	})

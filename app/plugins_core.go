@@ -49,7 +49,7 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"
 	_ "github.com/znasllc-io/memql/integrations/sitepreview"
 	// Deployable access codes (design record 2026-10-29). On every node type
-	// for sitepreview's reason exactly: the five builtins are declared in
+	// for sitepreview's reason exactly: the six builtins are declared in
 	// dsl/platform/builtins.memql, which every binary loads, so a capability
 	// present in the DSL and absent from the registry is a boot-time
 	// resolution failure -- and gating it by build tag would make whether an

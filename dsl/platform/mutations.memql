@@ -1146,9 +1146,9 @@ mutation sitePreviewObservation recordSitePreviewObservation {
 // such write. The four things an operator does are BUILTINS (siteAccessCodeCreate, Regenerate,
 // SetExpiry and Remove), because a builtin is where the code is minted, the gate is checked, the
 // organization is judged and the audit event is written -- and a reachable mutation would have
-// skipped all four. So every named read and write a client can call over access codes is a builtin
-// passing the same gate (dsl/platform/builtins.memql), and every query and mutation beneath those
-// builtins is @serverOnly.
+// skipped all four. So every client-callable read and write on access codes is a builtin passing the
+// same gate (dsl/platform/builtins.memql), and every query and mutation beneath those builtins is
+// @serverOnly.
 //
 // @serverOnly BARS ONLY THE NAMED CALL, which is why both concepts are also @serverWritten
 // (dsl/platform/concepts.memql): an insert() that names the concept never consults it, and a second
@@ -1159,11 +1159,19 @@ mutation sitePreviewObservation recordSitePreviewObservation {
 //   rotateSiteAccessCode       @serverOnly -- replaces it, and moves the generation sessions are held to
 //   setSiteAccessCodeExpiry    @serverOnly -- writes the only bound a bearer credential has
 //   removeSiteAccessCode       @serverOnly -- ends a code, and must reach the audit log
-//   touchSiteAccessCode        @serverOnly -- the bff's own record of use
 //   createSiteAccessSession    @serverOnly -- opens a session, which is what a code is for
 //   endSiteAccessSession       @serverOnly -- the bff's say-so that a visitor left
 //
-// ALL SEVEN RUN AS THE SITE'S OWNER, with internal origin stamped inline -- by integrations/siteaccess,
+// THERE IS NO WRITE OF A CODE FOR A VISITOR'S USE, AND THAT IS DELIBERATE (design D13). Every write to a
+// code is a read-merge of the whole row, so a write on a visitor's schedule races every operator act
+// on the same row; review measured a prototype of such a 'last used' stamp undoing a removal in
+// 123 of 200 rounds and putting a replaced digest back in 65. When a code was last opened is read from its sessions
+// (siteAccessSessionLatestForCode). The four operator acts on the code share the row with each
+// other and nothing else, and the row carries the engine's row-version fence (executor_mutation.go):
+// of two that race, the loser is refused with 'row version changed before the write committed' and
+// has written nothing, so a caller re-reads and decides again rather than undoing the other.
+//
+// ALL SIX RUN AS THE SITE'S OWNER, with internal origin stamped inline -- by integrations/siteaccess,
 // which the bff reaches through an interface because component/server may not stamp internal origin
 // itself (the sitePreview precedent). The owner is the actor, so `ownerUserId` is stamped as the
 // SITE'S and never the operator's, and the composite tier's owner arm admits every update after
@@ -1236,12 +1244,11 @@ mutation siteAccessCode createSiteAccessCode {
 /// the digest is a freshly minted one, and that the expiry was computed rather than chosen -- and
 /// that is the integration's to establish, which is what @serverOnly names.
 ///
-/// TWO FIELDS ARE LEFT ALONE ON PURPOSE, so a reader does not assume a rotation resets them.
-/// `lastUsedAt` is not cleared: the row is the same code, and the Access codes panel reads a
-/// `lastUsedAt` EARLIER than `issuedAt` as 'Not used yet', so the new secret starts unused without a
-/// write that would erase when the code was last in use. `revokedAt` is not cleared either, because
-/// it never needs to be: removal is final, and siteAccessCodeRegenerate refuses a removed code, so a
-/// rotation only ever lands on a live or an expired one.
+/// `revokedAt` IS NOT CLEARED, AND NEVER NEEDS TO BE: removal is final, and siteAccessCodeRegenerate
+/// refuses a removed code, so a rotation only ever lands on a live or an expired one. Nor is anything
+/// reset to say the new secret is unused: 'last opened' is the newest session of the CURRENT
+/// generation, so moving `generation` is what makes the new secret read as not opened, with no write
+/// of its own.
 @serverOnly
 mutation siteAccessCode rotateSiteAccessCode {
   args {
@@ -1315,36 +1322,11 @@ mutation siteAccessCode removeSiteAccessCode {
   }
 }
 
-/// Record that a visitor used a code (design record 2026-10-29-deployable-access-codes). @serverOnly:
-/// it is the deployment's own observation of its own serving path, and a client-writable 'last used'
-/// is a field that says what its writer wanted it to say -- touchSitePreviewGrant's reasoning.
-///
-/// THE BFF THROTTLES THIS RATHER THAN WRITING PER REQUEST. A visitor's page may make a call every
-/// few seconds, and a write per call would put the graph in the serving path of every one;
-/// integrations/siteaccess holds the value for a minute before writing again. The field is evidence
-/// that a code was used, not a request counter.
-///
-/// actor.userId SCOPING COULD NOT BE THE FIX HERE, because the writer is not a person acting. The
-/// bff writes it for a visitor who has no identity, as the owner the edge stamped, and scoping it
-/// to that owner would not help: the property is that the value was OBSERVED by the deployment
-/// rather than asserted by anybody. `lastChangedBy` is deliberately not written. A visitor's use
-/// is not an operator's act.
-@serverOnly
-mutation siteAccessCode touchSiteAccessCode {
-  args {
-    codeId      string!
-    lastUsedAt  datetime!
-  }
-  update {
-    id:          args.codeId
-    lastUsedAt:  args.lastUsedAt
-  }
-}
-
 /// Open an access session (design record 2026-10-29-deployable-access-codes). @serverOnly: opening a
 /// session is the thing a code is FOR, and a caller who could write one would have the access with
 /// no code. `tokenHash` is the digest of a cookie value the bff has just minted, and `generation` is
-/// the code's at that instant.
+/// the code's at that instant. `issuedAt` is UTC RFC 3339 at whole seconds and always that form:
+/// siteAccessSessionLatestForCode orders sessions by its text.
 ///
 /// `ownerUserId` IS STAMPED FROM THE ACTOR AND IS NOT AN ARGUMENT, for createSiteAccessCode's reason.
 /// The bff writes as the owner the edge stamped on the request, re-checked against the site, so the

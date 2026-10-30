@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,4 +128,114 @@ func TestSiteAccessCodeIsAnAuditTargetType(t *testing.T) {
 		t.Fatalf("createAuditEvent.targetType does not accept siteAccessCode: %v", field.Enum)
 	}
 	t.Fatal("createAuditEvent declares no targetType")
+}
+
+// accessConceptFields reads the field names a loaded concept declares.
+func accessConceptFields(t *testing.T, name string) []string {
+	t.Helper()
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	c, err := memorynodes.Get(name)
+	if err != nil || c == nil {
+		t.Fatalf("%s is not in the loaded tree: %v", name, err)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(c.Schemas["definition"], &schema); err != nil || len(schema.Properties) == 0 {
+		t.Fatalf("%s declares no fields in the loaded tree: %v", name, err)
+	}
+	fields := make([]string, 0, len(schema.Properties))
+	for field := range schema.Properties {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+// NO HEARTBEAT ON A CREDENTIAL (design D13). Every write to a code is a read-merge
+// of the whole row, so a write that happens on a visitor's schedule instead of an
+// operator's races every operator act -- and in review the loser was the
+// operator's: a removed code live again, the replaced digest resolving again,
+// measured at 65 to 123 of 200 rounds. The writer is gone, and with it the field.
+//
+// This pins the SET of fields rather than the absence of one name, so that the
+// next field to be added to a credential's row is added on purpose: each field
+// below is written by an operator act, by the mint, or stamped, and "last opened"
+// is not on the list because it is a fact about the SESSIONS
+// (siteAccessSessionLatestForCode).
+func TestAnAccessCodeCarriesNoHeartbeat(t *testing.T) {
+	fns := loadedSiteAccessTree(t)
+
+	for name, want := range map[string][]string{
+		"v1:platform:siteAccessCode": {
+			"accountId", "codeHash", "codeHint", "expiresAt", "gate", "generation", "issuedAt",
+			"label", "lastChangedBy", "ownerUserId", "revokedAt", "siteId", "subject",
+		},
+		"v1:platform:siteAccessSession": {
+			"codeId", "endedAt", "generation", "issuedAt", "ownerUserId", "siteId", "tokenHash",
+		},
+	} {
+		if got := accessConceptFields(t, name); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s declares %v, want %v: a field a visitor's use could write races the operator acts that share its row (D13)", name, got, want)
+		}
+	}
+
+	// The only mutations over a code are the four operator acts.
+	operatorActs := map[string]bool{
+		"createSiteAccessCode": true, "rotateSiteAccessCode": true,
+		"setSiteAccessCodeExpiry": true, "removeSiteAccessCode": true,
+	}
+	for _, fn := range fns.List() {
+		if fn != nil && fn.BoundConcept == "v1:platform:siteAccessCode" && fn.FunctionKind == "mutation" && !operatorActs[fn.Name] {
+			t.Errorf("mutation %s writes an access code and is not an operator act: a code is written by operators and by nothing else (D13)", fn.Name)
+		}
+	}
+	if fn, err := fns.Get("touchSiteAccessCode"); err == nil && fn != nil {
+		t.Error("touchSiteAccessCode is back: it is the heartbeat the review proved could undo a revocation")
+	}
+
+	// "Last opened" has a home: the newest session of the generation, a server-only read.
+	latest, err := fns.Get("siteAccessSessionLatestForCode")
+	if err != nil || latest == nil {
+		t.Fatalf("siteAccessSessionLatestForCode is not in the loaded tree: %v", err)
+	}
+	if latest.FunctionKind != "query" || !latest.ServerOnly || latest.BoundConcept != "v1:platform:siteAccessSession" {
+		t.Errorf("siteAccessSessionLatestForCode is a %s over %s with ServerOnly=%v, want a @serverOnly query over the session concept",
+			latest.FunctionKind, latest.BoundConcept, latest.ServerOnly)
+	}
+}
+
+// NO CLIENT READS EITHER CONCEPT (design D14). The behaviour is proved against a
+// database in site_access_raw_read_db_test.go; this is the list it stands on. An
+// entry that names no registered concept, or one with no tier, protects nothing and
+// reads as if it did.
+func TestTheClientUnreadableListNamesTheAccessConceptsAndTheirReasons(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	for _, name := range []string{"v1:platform:siteAccessCode", "v1:platform:siteAccessSession"} {
+		reason, listed := clientUnreadableConcepts[name]
+		if !listed {
+			t.Errorf("%s is not on clientUnreadableConcepts: a raw read, parentOf, asOf or a subscription would reach its rows without the part or the organization gate", name)
+			continue
+		}
+		if strings.TrimSpace(reason) == "" {
+			t.Errorf("%s is listed without its reason", name)
+		}
+	}
+	for name, reason := range clientUnreadableConcepts {
+		c, err := memorynodes.Get(name)
+		if err != nil || c == nil {
+			t.Errorf("clientUnreadableConcepts names %s, which is not a registered concept", name)
+			continue
+		}
+		if c.RowAuthz == nil {
+			t.Errorf("%s is client-unreadable but declares no tier: the clause grants nothing, so a server reader would see every row", name)
+		}
+		if strings.TrimSpace(reason) == "" {
+			t.Errorf("%s is listed without its reason", name)
+		}
+	}
 }

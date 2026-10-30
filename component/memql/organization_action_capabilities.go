@@ -55,11 +55,11 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// resolves without reading the site a second time.
 		//
 		// THE LIST IS HERE BECAUSE IT IS A BUILTIN, and it is a builtin because this
-		// gate judges builtins and mutations and NEVER a query: as the query it used
-		// to be, it let a person who held the part in one organization read the codes
-		// of a site in another whose row tier admitted them. So every named read and
-		// write a client can call over access codes is a builtin in this table, and
-		// every query and mutation beneath them is @serverOnly
+		// gate judges builtins and mutations and NEVER a query: a client-callable list
+		// would let a person who held the part in one organization read the codes of a
+		// site in another whose row tier admitted them. So every client-callable read
+		// and write on access codes is a builtin in this table, and every query and
+		// mutation beneath them is @serverOnly
 		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
 		case "siteAccessCodeCreate", "siteAccessGates", "siteAccessCodesForSite":
 			return "v1:platform:site", "siteId"
