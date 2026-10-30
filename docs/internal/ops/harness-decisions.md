@@ -1255,6 +1255,107 @@ Not verified here:
 - Retry on a question the old recipe raised. It reruns the failed step under
   the installed recipe and keeps the old run's prefix.
 
+## A stopped attempt stops waiting for a Job POST that can no longer land (2026-10-30)
+
+On 2026-10-29 memql-znas run `131819ff` was cancelled. All 12 of its steps were
+terminal by 16:21:13Z, and more than 12 hours later it still read `in_progress`
+with `driverHeartbeatAt` advancing. Every recovery pass claimed it, answered the
+cancel, and stopped at `cancelRunner`: each workbench replica answered
+`cancel_failed`, because `cleanupReceipt` refused the attempt of
+`checks.package-config`. That attempt's Secret had `memql.io/job-creation:
+creating`, stamped 16:21:13.300Z, over no Job, and the run's stop marker was
+created in that same second. The cancel ended the creator's context with its POST
+unanswered. The protocol leaves `creating` in place on purpose, because the POST
+may have landed, and the refusal promised to wait until the claim was reconciled.
+
+Nothing reconciles a claim. Only the creator holding it can release it, and that
+creator has no answer to go on, or is gone. So the wait had no end, and every
+driver rightly kept the run unfinished on an unconfirmed cancel. The orphan sweep
+deferred to the same missing step: any stop marker kept a `creating` Secret, with
+its clone token, for good. On 2026-10-30 production held 13 such Secrets, the
+oldest created 2026-10-17, and two more runs were in the same loop: `735780c9`
+(claim 2026-10-24) and `defdc70b` (2026-10-25). `735780c9`'s attempt was retired
+2 seconds after its claim and its run stopped 54 minutes later, which fits a step
+failing `pipeline_execution_uncertain` whose receipt could never be cleaned up:
+the same refusal reached with no cancel. Its row was not read, so that is an
+inference.
+
+`latePostWindow` (five minutes, `integrations/pipelinesteps/retirement.go`) ends
+the wait. Once an attempt's stop marker has stood that long with no Job,
+`cleanupReceipt` deletes the Secret and confirms, and `reapSecret` may collect it.
+The window runs from the marker's `creationTimestamp`, which the API server
+stamps, because the marker is the fence: `checkRetirement` reads it last before
+every POST, so a POST leaves within one API call of a read that found none. The
+slowest POST the fence lets through lands 180 s after the stamp: 60 s for the
+marker's write to commit (the API server's default `--request-timeout`), 30 s for
+the read's answer (`k8sRequestTimeout`), then 30 s on the client and 60 s on the API
+server for the POST. The other two minutes are margin. Nothing that can take time
+may be added between that read and the POST, and the attempt's marker must stay
+the last one read. An independent review caught the fence reading it first: a
+creator could pass that read, sit in the run marker's retries (10 x 30 s + 9 x 2 s =
+318 s) while the stop and the whole wait came and went, and POST after cleanup had
+confirmed (`TestAStopThatLandsDuringTheFenceStopsThePost`).
+
+What a replica change, a retry or a pause leaves:
+
+- **The stop marker stays**, for its own retention. It refuses a later creation
+  and a delayed envelope, so a spent claim is never replayed. The claim is never
+  returned to `queued`; it goes with its Secret.
+- **The decision reads the API server and this replica's clock**, so any replica
+  can make it. The creator's memory is not consulted, and a replica's death changes
+  nothing.
+- **A refusal inside the window stores nothing new.** The driver's durable cancel
+  request or receipt stands, and recovery asks again under `abortBackoff`. The
+  backoff gives about eight minutes in all, which is derived and not measured.
+- **A Job that lands inside the window** is deleted as any Job is. One that lands
+  as cleanup deletes the Secret is caught by the absence check, which reads again.
+
+Rejected alternatives:
+
+- **Timing from the claim's stamp.** A creator can spend over ten minutes after
+  stamping it, retrying the fence's reads against a hung API server (two reads,
+  ten attempts, 30 s each), and still send. It bounds nothing.
+- **Concluding at once and leaving the Secret to maintenance.** The run would claim
+  to have stopped while a Job could still appear, which `cancel.go` promises never
+  to do.
+- **Waiting for the run's deadline**, as the sweep does for an attempt nobody
+  stopped. A cancel would read as running for up to the 12-hour ceiling.
+- **A namesake placeholder Job**, so that a late POST answers 409. It needs its own
+  retention and a timer to delete it, so it adds an object without removing the
+  time bound.
+- **A new `pipelineCancel` version.** The answer comes from API state, so a mixed
+  rollout is harmless: an old replica refuses, and the agent asks again.
+
+`TestACancelThatInterruptsAJobPostConfirmsOnceThePostCanNoLongerLand` reproduces
+the production state with a second replica answering, and
+`TestCancelHopConfirmsOnceAnInterruptedPostCanNoLongerLand` takes it through the
+real executor and forward handlers with the creating replica dead. The driver's
+half is `TestCancellationFailureRemainsUnfinishedUntilAnotherDriverConfirms`
+(`component/pipelinerun`). `TestAnOldClaimStillWaitsOutItsStopMarker`,
+`TestAPostTheLastReadMissedIsCaughtByTheAbsenceCheck`,
+`TestASecretWithNoCreationStateWaitsOutTheWindowToo`,
+`TestAnUncertainStepsReceiptCleansUpOnceItsPostCanNoLongerLand`,
+`TestAStopMarkerWithNoCreationTimeDoesNotEndTheWait` and the
+`TestMaintenance...` tests in `retirement_test.go` hold the rest.
+`TestRetirementAgainstLocalKubernetes` ran the spent claim against a real k3d API
+server, with the marker's own timestamp and the guarded delete.
+
+Not verified: the path on production, the 60 s on AKS (it is the documented
+default), and what the POST at 16:21:13Z did, because that second's logs went with
+the pods and the rows were not read.
+
+Known limits. A process frozen between its read and its POST for longer than the
+margin can still create a Job, and so can a replica whose clock runs ahead of the
+API server's by more than the margin (`fresh` already assumes clocks far closer
+than that). The Job finds no Secret, so it has no clone token and none of the step's
+secrets. A step that declares a secret cannot start, and any other, on a repository
+that clones anonymously, runs with no credentials. Its attempt's receipt is already
+written, so its result changes nothing, and the deadline and TTL it was created with
+collect it, a queued one once it is admitted. Separately, and from before this
+change: `create` has no fence between its first read and `CreateSecret`, so a Secret
+can reappear after a confirmed cleanup. The next fence finds the marker and removes
+it, and a Run that dies in between leaves it for the sweep at its run's deadline.
+
 ## A step that ran out of memory says so (2026-10-29)
 
 On 2026-10-29 the second attempt of the `cockpit/v0.21.0` release run failed
