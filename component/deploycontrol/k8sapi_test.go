@@ -550,6 +550,27 @@ func TestIsConflictAndIsForbiddenQuota(t *testing.T) {
 	})
 }
 
+// TestABlankTokenSendsNoAuthorization: a client named with no credential is talking
+// to an operator's `kubectl proxy`, which supplies their own. client-go's credential
+// round trippers stop at a request that already has the header, blank or not, so a
+// blank bearer would reach the API server as the credential and be refused wherever
+// the operator's own credential is a bearer token (an AKS kubeconfig, for one).
+func TestABlankTokenSendsNoAuthorization(t *testing.T) {
+	var authorization []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = append(authorization, r.Header.Values("Authorization")...)
+		_, _ = io.WriteString(w, "{}")
+	}))
+	defer srv.Close()
+	api := NewClusterAPIWith(srv.URL, "", srv.Client())
+	if _, err := api.Do(context.Background(), http.MethodGet, "apis/batch/v1/namespaces/memql-pipelines/jobs", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(authorization) != 0 {
+		t.Fatalf("sent Authorization %q with no token", authorization)
+	}
+}
+
 // TestNewClusterAPIWithSendsTheBearer: the seam sends the token it was given, and builds
 // its requests exactly as the in-cluster constructor does, on Do and on Stream alike.
 func TestNewClusterAPIWithSendsTheBearer(t *testing.T) {
