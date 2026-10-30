@@ -339,22 +339,33 @@ func TestAccessIgnoresAPIProxy(t *testing.T) {
 	}
 }
 
-// A CLIENT-SUPPLIED STAMP DOES NOT SURVIVE. The bff treats the headers as a
-// pointer it then verifies, but only because the edge is the sole author of
-// them; a forged copy that rode through would make the pointer an assertion.
-// Both headers are checked with a SECOND forged value as well, since Del drops
-// every value and Set replaces them, and a refactor to Add would keep the first.
+// A CLIENT-SUPPLIED STAMP DOES NOT SURVIVE, ON ANY PATH. The bff treats the
+// headers as a pointer it then verifies, but only because the edge is the sole
+// author of them; a forged copy that rode through would make the pointer an
+// assertion. Both headers carry a SECOND forged value as well, since a refactor
+// from Set to Add would keep the first.
+//
+// There are two halves, and they are one rule seen from either side. On the four
+// pairs the edge's own values are what arrive. On everything ELSE the edge
+// forwards -- an apiProxy site's ordinary /_memql/* calls and the shopper
+// surface -- nothing arrives, because the bff would otherwise read a stamp the
+// edge never wrote: with the bff behind a base path it also answers the access
+// routes at /memql/access/..., which an ordinary call reaches by the marker swap.
 func TestAccessStripsThenStamps(t *testing.T) {
+	forge := func(req *http.Request) {
+		req.Header.Set(AccessStampSiteHeader, "site-someone-elses")
+		req.Header.Add(AccessStampSiteHeader, "site-another")
+		req.Header.Set(AccessStampOwnerHeader, "user-someone-else")
+		req.Header.Add(AccessStampOwnerHeader, "user-another")
+	}
+
 	for _, pair := range accessPairs {
-		t.Run(pair.name, func(t *testing.T) {
+		t.Run("stamped/"+pair.name, func(t *testing.T) {
 			up := newAccessUpstream(t)
 			h := accessHandler(t, accessSite(nil), up.server.URL)
 
 			req := accessRequest(pair.method, pair.path, "")
-			req.Header.Set(AccessStampSiteHeader, "site-someone-elses")
-			req.Header.Add(AccessStampSiteHeader, "site-another")
-			req.Header.Set(AccessStampOwnerHeader, "user-someone-else")
-			req.Header.Add(AccessStampOwnerHeader, "user-another")
+			forge(req)
 			serveAccess(h, req)
 
 			hit := up.only(t)
@@ -366,6 +377,61 @@ func TestAccessStripsThenStamps(t *testing.T) {
 			}
 		})
 	}
+
+	// want is the path the generic proxy forwards each as, which is also what
+	// proves the request took the generic path and not the access surface.
+	generic := []struct{ name, method, path, want string }{
+		{"the bff's own spelling of unlock", http.MethodPost, "/_memql/access/unlock", "/memql/access/unlock"},
+		{"the bff's own spelling of session", http.MethodGet, "/_memql/access/session", "/memql/access/session"},
+		{"DELETE on the unlock path", http.MethodDelete, "/_memql/access", "/memql/access"},
+		{"a segment of its own", http.MethodPost, "/_memql/access/x", "/memql/access/x"},
+		{"a longer first segment", http.MethodPost, "/_memql/accessories", "/memql/accessories"},
+		{"the bridge", http.MethodGet, "/_memql/ws", "/memql/ws"},
+		{"a route at the bff's own root", http.MethodPost, "/_memql/artifacts", "/artifacts"},
+	}
+	for _, tc := range generic {
+		t.Run("stripped/"+tc.name, func(t *testing.T) {
+			up := newAccessUpstream(t)
+			h := accessHandler(t, accessSite(func(s *Site) { s.APIProxy = true }), up.server.URL)
+
+			req := accessRequest(tc.method, tc.path, "")
+			forge(req)
+			serveAccess(h, req)
+
+			hit := up.only(t)
+			if hit.path != tc.want {
+				t.Fatalf("%s %s reached the bff as %q, want %q from the generic proxy",
+					tc.method, tc.path, hit.path, tc.want)
+			}
+			if got := hit.header.Values(AccessStampSiteHeader); len(got) != 0 {
+				t.Fatalf("a client-written site stamp reached the bff: %q", got)
+			}
+			if got := hit.header.Values(AccessStampOwnerHeader); len(got) != 0 {
+				t.Fatalf("a client-written owner stamp reached the bff: %q", got)
+			}
+		})
+	}
+
+	t.Run("stripped/the shopper surface", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(func(s *Site) { s.ShopperForms = true }), up.server.URL)
+
+		req := accessRequest(http.MethodPost, "/_memql/forms/reviews/review", "body=nice")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		forge(req)
+		serveAccess(h, req)
+
+		hit := up.only(t)
+		if hit.header.Get(ShopperSiteHeader) != "site1" {
+			t.Fatalf("the request did not take the shopper surface: stamp site = %q", hit.header.Get(ShopperSiteHeader))
+		}
+		if got := hit.header.Values(AccessStampSiteHeader); len(got) != 0 {
+			t.Fatalf("a client-written site stamp reached the bff: %q", got)
+		}
+		if got := hit.header.Values(AccessStampOwnerHeader); len(got) != 0 {
+			t.Fatalf("a client-written owner stamp reached the bff: %q", got)
+		}
+	})
 }
 
 // THE TWO NAMES ARE A CONTRACT WITH A PACKAGE THIS ONE CANNOT IMPORT.

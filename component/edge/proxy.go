@@ -93,15 +93,15 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 // newBFFProxy builds the reverse proxy to the bff, optionally applying a
 // caller's `stamp` to the outbound request AFTER the shared rewrite.
 //
-// ONE BUILDER FOR BOTH CALLERS (serveAPI and the shopper surface), because
-// the rewrite is a contract with the bff -- the marker swap, X-Forwarded,
-// the site's own Host, the WebSocket subprotocols -- and a second copy of a
-// contract is wrong before it drifts. `stamp` runs LAST so it can delete a
-// header the shared rewrite copied through, which is exactly what the
-// shopper stamp does.
+// ONE BUILDER FOR ALL THREE CALLERS (serveAPI, the shopper surface and the
+// access surface), because the rewrite is a contract with the bff -- the
+// marker swap, X-Forwarded, the site's own Host, the WebSocket subprotocols,
+// the access stamp's removal -- and a second copy of a contract is wrong
+// before it drifts. `stamp` runs LAST so it can delete a header the shared
+// rewrite copied through, which is exactly what the shopper stamp does.
 //
 // Returns nil when MEMQL_EDGE_API_TARGET is not a URL; the caller decides
-// what a person sees, because the two callers owe them different answers.
+// what a person sees, because the callers owe them different answers.
 func (h *Handler) newBFFProxy(site *Site, stamp func(*httputil.ProxyRequest)) *httputil.ReverseProxy {
 	target, err := url.Parse(h.apiTarget)
 	if err != nil {
@@ -124,6 +124,20 @@ func (h *Handler) newBFFProxy(site *Site, stamp func(*httputil.ProxyRequest)) *h
 			pr.SetXForwarded()
 			pr.Out.Host = pr.In.Host
 			copyWebsocketSubprotocols(pr)
+			// THE ACCESS STAMP IS THE EDGE'S ALONE, ON EVERY PATH THIS BUILDER
+			// SERVES (deployable access codes). The bff reads the two headers as the
+			// edge's pointer to the site a request arrived on, so a copy a client
+			// wrote must not survive the hop on a route the access surface does not
+			// own either: with the bff behind a base path it also answers the access
+			// routes at /memql/access/..., and the marker swap above sends an
+			// ordinary /_memql/access/unlock from an apiProxy site straight there.
+			//
+			// DELETED HERE, AHEAD OF `stamp`, which is the order that matters: the
+			// access surface writes its own values in `stamp`, after this, and a
+			// delete placed below it would take those with it.
+			for _, name := range accessStampHeaders {
+				pr.Out.Header.Del(name)
+			}
 			if stamp != nil {
 				stamp(pr)
 			}

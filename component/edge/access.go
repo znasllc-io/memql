@@ -117,8 +117,9 @@ const (
 	AccessStampOwnerHeader = memql.AccessStampOwnerHeader
 )
 
-// accessStampHeaders is every header this file controls. Used to STRIP before
-// setting, so a client cannot supply its own.
+// accessStampHeaders is every header this surface controls. newBFFProxy deletes
+// them from everything it forwards, not only from the four pairs, so a client
+// cannot supply its own on any path.
 var accessStampHeaders = []string{AccessStampSiteHeader, AccessStampOwnerHeader}
 
 // accessRoute is one of the four method and path pairs and everything the edge
@@ -473,13 +474,10 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 
 // accessStamp is the rewrite that makes the forwarded request the bff's.
 //
-// STRIP, THEN SET, and it runs after the shared rewrite, which has already
-// copied the inbound headers across: deleting from pr.Out is what matters. Both
-// headers are always written, so unlike the shopper's optional store header Set
-// alone would already replace a client's value here. The delete stays because
-// the contract is that the edge is the only author of these two, and a later
-// change from Set to Add would otherwise let a client's value ride through
-// ahead of ours.
+// IT SETS AND DOES NOT STRIP. newBFFProxy has already deleted both headers from
+// everything it forwards, on every path, so there is no client-written copy left
+// here to replace. The order is the other half of that: this runs after the
+// delete, which is the only reason the values written here reach the bff.
 //
 // THE PATH IS SET HERE, not by upstreamPath. The shared rewrite swaps the marker
 // for the bff's /memql root, which would ask for /memql/access. The bff's four
@@ -488,9 +486,6 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // inbound path alone could produce them.
 func accessStamp(route accessRoute, siteID, owner string) func(*httputil.ProxyRequest) {
 	return func(pr *httputil.ProxyRequest) {
-		for _, name := range accessStampHeaders {
-			pr.Out.Header.Del(name)
-		}
 		pr.Out.Header.Set(AccessStampSiteHeader, siteID)
 		pr.Out.Header.Set(AccessStampOwnerHeader, owner)
 		pr.Out.URL.Path = route.upstream
