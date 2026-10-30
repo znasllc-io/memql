@@ -167,6 +167,8 @@ export function DeployablePage({
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
   const [detail, setDetail] = useState<WorkspaceDetail | null>(initialDetail ?? null);
+  // WHETHER THE ACCESS CODES HOLD THE DIALOG OPEN: what they hold is the only copy.
+  const [accessHeld, setAccessHeld] = useState(false);
   // WHICH PART OF "Addresses and client" IS OPEN. The domains list, one
   // binding's setup, or the add form -- each its OWN view with its own Head, so
   // the trail names the real depth and a list never shares a scroll column
@@ -508,12 +510,12 @@ export function DeployablePage({
           {lifecycle.refusal ? (
             <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" />
           ) : null}
-      {detail ? <DetailDialog title={detailTitle(detail)} onClose={() => setDetail(null)}>
+      {detail ? <DetailDialog title={detailTitle(detail)} busy={detail === "access" && accessHeld} onClose={() => setDetail(null)}>
         {detail === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
           detail === "traffic" ? <TrafficPanel site={site} /> :
           // KEYED, so a code held for one deployable is never drawn over another:
           // the effect that closes this dialog runs after the render that moves on.
-          detail === "access" ? <AccessCodesPanel key={site.id} site={site} /> :
+          detail === "access" ? <AccessCodesPanel key={site.id} site={site} onBusyChange={setAccessHeld} /> :
           (() => { const stage = railFor(rail).stages.find(s => s.id === detail); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
         {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
       </DetailDialog> : null}

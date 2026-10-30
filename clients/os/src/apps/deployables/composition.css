@@ -67,6 +67,7 @@
    nothing, so the two tracks kept for those would only narrow the sentence that
    says a gate is gone. The trash stands under the plus, on one right edge. */
 .access-codes { display: grid; gap: 12px; min-width: 0; }
+.access-codes:focus { outline: none; }
 /* ITS TOP EDGE STANDS STILL. A modal is centred, so a question opening under a row,
    or the form taking the list's place, moved everything in it, and the second click
    of a double-click on Add landed on Close. Pinned, what is above a change stays put. */
@@ -81,7 +82,11 @@
 .access-codes .os-row.os-record-row[data-no-icon] { grid-template-columns: minmax(0, 1fr) auto; }
 .access-codes .os-record-actions { padding-right: 0; }
 .access-code-opened { color: var(--os-muted); white-space: nowrap; }
-.access-code-warn { color: var(--os-warn); }
+/* A SENTENCE THAT A CODE OPENS NOTHING, in ink with the state's dot beside it, which is
+   the record status's own language. The warn token alone is about 3.75:1 on the light
+   dialog surface, too little for a sentence at this size. */
+.access-code-warn { display: inline-flex; align-items: baseline; gap: 6px; color: var(--os-ink); }
+.access-code-warn::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--os-warn); transform: translateY(-2px); }
 .access-code-ask { padding-bottom: 12px; }
 .access-code-ask [role="group"] { display: grid; gap: 8px; }
 .access-code-ask .os-notice, .access-code-once .os-notice { gap: 8px; }

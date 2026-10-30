@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { refusalSentence, rowString, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { isTransportInterruption, refusalSentence, rowString, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useReading, type Reading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
@@ -84,13 +84,34 @@ export interface MintedCode {
   label: string;
 }
 
-/** A write's refusal, and the code it was about: "" for one that was being created. */
+/** What a write said back, and the code it was about: "" for one that was being created. */
 export interface AccessRefusal {
   codeId: string;
   sentence: string;
+  /** It may have landed all the same, so the panel says so over the list rather than in a draft. */
+  unknown: boolean;
 }
 
 export type AccessAct = "create" | "regenerate" | "setExpiry" | "remove";
+
+/**
+ * How a write ended. REFUSED means the engine answered no, and the draft waits for
+ * another try. UNKNOWN means nobody can say from here: the reply never came, or it
+ * came without the code. Trying again from a draft could mint a second credential
+ * beside one nobody holds, so the list is what gets looked at next.
+ */
+export type WriteOutcome = "done" | "refused" | "unknown";
+
+/** What to do about a write the connection dropped under, for each act. */
+const UNANSWERED: Readonly<Record<AccessAct, string>> = {
+  create: "The connection dropped before the cluster answered, so this code may have been saved, and it cannot be shown now. If it is on the list, regenerate it to get one you can copy.",
+  regenerate: "The connection dropped before the cluster answered, so a new code may have been saved, and the old one may have stopped working. Regenerate it again to get one you can copy.",
+  setExpiry: "The connection dropped before the cluster answered, so this change may have been saved. Check the list before trying again.",
+  remove: "The connection dropped before the cluster answered, so this change may have been saved. Check the list before trying again.",
+};
+
+/** A write the cluster accepted without the reply it owed: it landed, and nothing shows it. */
+class NoCodeInReply extends Error {}
 
 export interface NewAccessCode {
   label: string;
@@ -113,19 +134,32 @@ export interface AccessCodes {
   clearRefusal: () => void;
   minted: MintedCode | null;
   dropMinted: () => void;
-  create: (code: NewAccessCode) => Promise<boolean>;
+  create: (code: NewAccessCode) => Promise<WriteOutcome>;
   /** Keeps the expiry unless given one, which a code already past its expiry needs. */
-  regenerate: (code: AccessCodeRow, expiresAt?: string) => Promise<boolean>;
-  setExpiry: (code: AccessCodeRow, expiresAt: string) => Promise<boolean>;
-  remove: (code: AccessCodeRow) => Promise<boolean>;
+  regenerate: (code: AccessCodeRow, expiresAt?: string) => Promise<WriteOutcome>;
+  setExpiry: (code: AccessCodeRow, expiresAt: string) => Promise<WriteOutcome>;
+  remove: (code: AccessCodeRow) => Promise<WriteOutcome>;
 }
 
 function mintedFrom(result: { rows(): Row[] }, label: string): MintedCode {
   const code = rowString(result.rows()[0] ?? null, "code");
   // Accepted with nothing to show: the secret has moved and nobody holds it, which
   // a form that simply closed would not have said.
-  if (code === "") throw new Error("The cluster accepted that but did not return the code. Regenerate it to get one you can copy.");
+  if (code === "") throw new NoCodeInReply("The cluster accepted that but did not return the code. Regenerate it to get one you can copy.");
   return { code, label };
+}
+
+/**
+ * Runs a read, and puts a dropped socket's failure in words of its own: `stream
+ * closed` is the transport talking, and it would reach the panel as the sentence.
+ */
+async function readOrSayDropped<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err: unknown) {
+    if (isTransportInterruption(err)) throw new Error("The connection to the cluster dropped, so the access codes could not be read.");
+    throw err;
+  }
 }
 
 /**
@@ -150,7 +184,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   const readCodes = useMemo(() => {
     if (connection === null || id === "") return null;
     return async (signal: AbortSignal): Promise<AccessCodeRow[]> => {
-      const result = await connection.query.siteAccessCodesForSite({ siteId: id }, { signal });
+      const result = await readOrSayDropped(() => connection.query.siteAccessCodesForSite({ siteId: id }, { signal }));
       return accessCodesFromRows(result.rows());
     };
   }, [connection, id]);
@@ -159,7 +193,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   const readGates = useMemo(() => {
     if (connection === null || id === "") return null;
     return async (signal: AbortSignal): Promise<AccessGateRow[]> => {
-      const result = await connection.query.siteAccessGates({ siteId: id }, { signal });
+      const result = await readOrSayDropped(() => connection.query.siteAccessGates({ siteId: id }, { signal }));
       return result.rows().map(accessGateFromRow).sort((a, b) => a.gate.localeCompare(b.gate));
     };
   }, [connection, id]);
@@ -168,26 +202,34 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   const gates = useReading<AccessGateRow[]>(connection === null || id === "" ? "no-site" : `access-gates:${id}`, readGates, written);
 
   const run = useCallback(
-    async (act: AccessAct, construct: string, codeId: string, work: (query: QueryClient) => Promise<void>): Promise<boolean> => {
-      if (inFlight.current) return false;
+    async (act: AccessAct, construct: string, codeId: string, work: (query: QueryClient) => Promise<void>): Promise<WriteOutcome> => {
+      // One is out already: this press did nothing, and what asked stays as it is.
+      if (inFlight.current) return "refused";
       // THE HELD CODE GOES FIRST, whatever becomes of this write (`usePreview`'s
       // reasoning): two credentials on one screen is two a person has to tell apart.
       setMinted(null);
       setRefusal(null);
       if (connection === null) {
-        setRefusal({ codeId, sentence: "Not connected to the cluster, so nothing was written." });
-        return false;
+        setRefusal({ codeId, sentence: "Not connected to the cluster, so nothing was written.", unknown: false });
+        return "refused";
       }
       inFlight.current = true;
       setBusy(act);
       try {
         await work(connection.query);
-        return true;
+        return "done";
       } catch (err: unknown) {
+        // A LOST REPLY IS NOT A REFUSAL. The dispatcher's own account is that a write's
+        // outcome must be reconciled before any retry, and the words are ours, because
+        // the socket's mean nothing to a person.
+        if (err instanceof NoCodeInReply || isTransportInterruption(err)) {
+          setRefusal({ codeId, sentence: err instanceof NoCodeInReply ? err.message : UNANSWERED[act], unknown: true });
+          return "unknown";
+        }
         // An engine frame with nothing in it answers "", and a refusal has to say
         // something: the draft is still on screen, waiting for a reason.
-        setRefusal({ codeId, sentence: refusalSentence(err, construct).trim() || "That did not complete. Try again." });
-        return false;
+        setRefusal({ codeId, sentence: refusalSentence(err, construct).trim() || "That did not complete. Try again.", unknown: false });
+        return "refused";
       } finally {
         inFlight.current = false;
         setBusy(null);
@@ -198,7 +240,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   );
 
   const create = useCallback(
-    (code: NewAccessCode): Promise<boolean> =>
+    (code: NewAccessCode): Promise<WriteOutcome> =>
       run("create", "siteAccessCodeCreate", "", async (query) => {
         const subject = code.subject.trim();
         const result = await query.siteAccessCodeCreate({
@@ -214,7 +256,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   );
 
   const regenerate = useCallback(
-    (code: AccessCodeRow, expiresAt?: string): Promise<boolean> =>
+    (code: AccessCodeRow, expiresAt?: string): Promise<WriteOutcome> =>
       run("regenerate", "siteAccessCodeRegenerate", code.id, async (query) => {
         const result = await query.siteAccessCodeRegenerate({ codeId: code.id, ...(expiresAt === undefined ? {} : { expiresAt }) });
         setMinted(mintedFrom(result, code.label));
@@ -223,7 +265,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   );
 
   const setExpiry = useCallback(
-    (code: AccessCodeRow, expiresAt: string): Promise<boolean> =>
+    (code: AccessCodeRow, expiresAt: string): Promise<WriteOutcome> =>
       run("setExpiry", "siteAccessCodeSetExpiry", code.id, async (query) => {
         await query.siteAccessCodeSetExpiry({ codeId: code.id, expiresAt });
       }),
@@ -231,7 +273,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   );
 
   const remove = useCallback(
-    (code: AccessCodeRow): Promise<boolean> =>
+    (code: AccessCodeRow): Promise<WriteOutcome> =>
       run("remove", "siteAccessCodeRemove", code.id, async (query) => {
         await query.siteAccessCodeRemove({ codeId: code.id });
       }),

@@ -11,7 +11,7 @@ import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { browserZone, instantToLocal } from "../../email/when";
 import type { SiteRow } from "../rows";
 import { CUSTOM_EXPIRY, DEFAULT_EXPIRY, EXPIRY_PRESETS, expiryFromDraft, expiryWord, hasExpired, lastOpenedWord, type ExpiryDraft } from "./expiry";
-import { useAccessCodes, type AccessCodeRow, type AccessCodes, type AccessGateRow } from "./useAccessCodes";
+import { useAccessCodes, type AccessCodeRow, type AccessCodes, type AccessGateRow, type WriteOutcome } from "./useAccessCodes";
 
 // The Access codes panel (design record 2026-10-29-deployable-access-codes,
 // section 5; clients/os/DESIGN.md rules 7, 8 and 12).
@@ -38,6 +38,13 @@ import { useAccessCodes, type AccessCodeRow, type AccessCodes, type AccessGateRo
 // The code goes when the next write starts (`useAccessCodes`), not when a question
 // opens: a person who asks and answers Keep it has changed nothing, and an uncopied
 // code gone from under them would cost a regenerate to learn that.
+//
+// ===========================================================================
+// THE DIALOG WAITS WHILE IT HOLDS THE ONLY COPY
+// ===========================================================================
+// Closed with a write out, the reply lands in nothing: the old code is dead and the
+// new one was never seen. Closed over a new code, that code is gone for good. So
+// `onBusyChange` keeps Close and Escape from acting for both, and Done is the way out.
 
 /** One clock for the panel (`useNow`), so a code turns to Expired with the panel left open. */
 const CLOCK_MS = 5_000;
@@ -45,9 +52,17 @@ const CLOCK_MS = 5_000;
 type RowAct = "regenerate" | "setExpiry" | "remove";
 
 /** The panel: the codes, the way to add one, and whichever single question is open. */
-export function AccessCodesPanel({ site }: { site: SiteRow }) {
+export function AccessCodesPanel({ site, onBusyChange }: {
+  site: SiteRow;
+  /** Told whether the panel holds the only copy of something: a reply on its way, or a new code. */
+  onBusyChange?: (busy: boolean) => void;
+}) {
   const access = useAccessCodes(site);
   const now = useNow(CLOCK_MS).getTime();
+  const holding = access.busy !== null || access.minted !== null;
+  useEffect(() => {
+    onBusyChange?.(holding);
+  }, [holding, onBusyChange]);
   const [adding, setAdding] = useState(false);
   // The gates the form opened with. A re-read that fails answers null, and a draft
   // somebody is part-way through must not go with it.
@@ -58,12 +73,13 @@ export function AccessCodesPanel({ site }: { site: SiteRow }) {
   // and then leave, and focus left on nothing in a modal sends the next Tab to the
   // dialog's header. The control that asked is usually still there; Add is not (it
   // is absent while the form is open), and neither is the row of a removed code.
+  // The panel itself is the last resort: a list with every gate gone has no Add.
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [refocus, setRefocus] = useState(0);
   useEffect(() => {
     if (refocus === 0) return;
-    const back = opener.current?.isConnected ? opener.current : root.current?.querySelector<HTMLElement>(".os-add-button");
+    const back = opener.current?.isConnected ? opener.current : root.current?.querySelector<HTMLElement>(".os-add-button") ?? root.current;
     back?.focus();
   }, [refocus]);
   const returnFocus = (): void => setRefocus((n) => n + 1);
@@ -85,6 +101,10 @@ export function AccessCodesPanel({ site }: { site: SiteRow }) {
   // and a refusal nobody can read is a refusal nobody can act on.
   const refusal = access.refusal;
   const refusedRowGone = refusal !== null && refusal.codeId !== "" && !(codes ?? []).some((code) => code.id === refusal.codeId);
+  // The question went with its row, with focus inside it.
+  useEffect(() => {
+    if (refusedRowGone) setRefocus((n) => n + 1);
+  }, [refusedRowGone]);
 
   let body: ReactNode;
   if (!access.connected) {
@@ -112,10 +132,13 @@ export function AccessCodesPanel({ site }: { site: SiteRow }) {
                 setAsked(null);
                 returnFocus();
               }}
-              onAnswered={(act) => {
+              onAnswered={(act, outcome) => {
                 setAsked(null);
-                // A regenerate's code takes focus for itself, and gives it back on Done.
-                if (act !== "regenerate") returnFocus();
+                // THE ROW OF A REMOVED CODE IS ABOUT TO GO. It stays until the re-read
+                // lands, so it would take focus back now and drop it on nothing then.
+                if (act === "remove") opener.current = null;
+                // A new code takes focus for itself, and gives it back on Done.
+                if (act !== "regenerate" || outcome === "unknown") returnFocus();
               }}
             />
           ))}
@@ -140,7 +163,7 @@ export function AccessCodesPanel({ site }: { site: SiteRow }) {
   }
 
   return (
-    <div className="access-codes" ref={root}>
+    <div className="access-codes" ref={root} tabIndex={-1}>
       {/* No heading over nothing: with no gates and no codes, the explanation is the panel. */}
       {noGates && codes !== null && codes.length === 0 ? null : (
         <Subhead
@@ -167,7 +190,7 @@ export function AccessCodesPanel({ site }: { site: SiteRow }) {
           <Button onClick={access.reread}>Try again</Button>
         </Notice>
       ))}
-      {refusedRowGone ? <Notice tone="error" sentence={refusal.sentence} /> : null}
+      {refusal?.unknown ? <Notice tone="warn" sentence={refusal.sentence} /> : refusedRowGone ? <Notice tone="error" sentence={refusal.sentence} /> : null}
       {access.minted !== null ? (
         <MintedCodeNotice
           code={access.minted.code}
@@ -192,7 +215,11 @@ export function AccessCodesPanel({ site }: { site: SiteRow }) {
             setAdding(false);
             returnFocus();
           }}
-          onCreated={() => setAdding(false)}
+          onCreated={(outcome) => {
+            setAdding(false);
+            // A new code takes focus for itself. Without one, nothing else will.
+            if (outcome === "unknown") returnFocus();
+          }}
         />
       ) : (
         body
@@ -237,7 +264,7 @@ function CodeEntry({
   asked: RowAct | null;
   onAsk: (event: MouseEvent<HTMLElement>, act: RowAct) => void;
   onKeep: () => void;
-  onAnswered: (act: RowAct) => void;
+  onAnswered: (act: RowAct, outcome: WriteOutcome) => void;
 }) {
   // `sameEntityId` answers false for two empties, and a site with no organization
   // and a code that copied none are the same organization.
@@ -287,13 +314,13 @@ function CodeEntry({
           </>
         }
       />
-      {asked !== null ? <CodeAsk key={asked} code={code} act={asked} now={now} access={access} onKeep={onKeep} onAnswered={() => onAnswered(asked)} /> : null}
+      {asked !== null ? <CodeAsk key={asked} code={code} act={asked} opensNothing={opensNothing} now={now} access={access} onKeep={onKeep} onAnswered={(outcome) => onAnswered(asked, outcome)} /> : null}
     </>
   );
 }
 
 /** What a question says: what is being asked, then what it costs, above the buttons (rule 8). */
-function askWords(act: RowAct, label: string, expired: boolean): { question: string; consequence: string; answer: string; answering: string } {
+function askWords(act: RowAct, label: string, expired: boolean, opensNothing: boolean): { question: string; consequence: string; answer: string; answering: string } {
   const nobody = "It has already expired, so nobody is using it.";
   switch (act) {
     case "regenerate":
@@ -306,7 +333,7 @@ function askWords(act: RowAct, label: string, expired: boolean): { question: str
     case "remove":
       return {
         question: `Remove ${label}?`,
-        consequence: `${expired ? nobody : "The code stops working and anyone using it is taken out now."} Removal is final: to give someone access again, add a new code.`,
+        consequence: `${opensNothing ? "It already opens nothing." : expired ? nobody : "The code stops working and anyone using it is taken out now."} Removal is final: to give someone access again, add a new code.`,
         answer: "Remove",
         answering: "Removing",
       };
@@ -334,6 +361,7 @@ function askWords(act: RowAct, label: string, expired: boolean): { question: str
 function CodeAsk({
   code,
   act,
+  opensNothing,
   now,
   access,
   onKeep,
@@ -341,16 +369,17 @@ function CodeAsk({
 }: {
   code: AccessCodeRow;
   act: RowAct;
+  opensNothing: boolean;
   now: number;
   access: AccessCodes;
   onKeep: () => void;
-  onAnswered: () => void;
+  onAnswered: (outcome: WriteOutcome) => void;
 }) {
   const [draft, setDraft] = useState<ExpiryDraft>(DEFAULT_EXPIRY);
   const root = useRef<HTMLDivElement>(null);
   const expired = hasExpired(code.expiresAt, now);
   const asksExpiry = act === "setExpiry" || (act === "regenerate" && expired);
-  const { question, consequence, answer: answerWord, answering } = askWords(act, code.label, expired);
+  const { question, consequence, answer: answerWord, answering } = askWords(act, code.label, expired, opensNothing);
   const refusal = access.refusal?.codeId === code.id ? access.refusal.sentence : "";
 
   // Into the question, so a keyboard is on the way out rather than on the act, and
@@ -360,16 +389,16 @@ function CodeAsk({
   }, []);
 
   async function answer(): Promise<void> {
-    let done: boolean;
-    if (act === "remove") done = await access.remove(code);
-    else if (!asksExpiry) done = await access.regenerate(code);
+    let outcome: WriteOutcome;
+    if (act === "remove") outcome = await access.remove(code);
+    else if (!asksExpiry) outcome = await access.regenerate(code);
     else {
       // From the press, and not from when the question opened.
       const expiresAt = expiryFromDraft(draft, Date.now());
       if (expiresAt === null) return;
-      done = await (act === "setExpiry" ? access.setExpiry(code, expiresAt) : access.regenerate(code, expiresAt));
+      outcome = await (act === "setExpiry" ? access.setExpiry(code, expiresAt) : access.regenerate(code, expiresAt));
     }
-    if (done) onAnswered();
+    if (outcome !== "refused") onAnswered(outcome);
   }
 
   return (
@@ -444,13 +473,18 @@ function AddCodeForm({
   now: number;
   access: AccessCodes;
   onCancel: () => void;
-  onCreated: () => void;
+  onCreated: (outcome: WriteOutcome) => void;
 }) {
   const [name, setName] = useState("");
   const [chosenGate, setChosenGate] = useState("");
   const [subject, setSubject] = useState("");
   const [draft, setDraft] = useState<ExpiryDraft>(DEFAULT_EXPIRY);
   const root = useRef<HTMLElement>(null);
+  // THE FORM IS OVER ONCE THE WRITE HAS ANSWERED. The hook's guard lets go in `finally`,
+  // and the form is still drawn until React next renders. A disabled Create stops a
+  // click in that frame, and nothing stops Enter in a field, which would mint a second
+  // code that nobody holds.
+  const answered = useRef(false);
 
   useEffect(() => {
     root.current?.querySelector("input")?.focus();
@@ -462,10 +496,14 @@ function AddCodeForm({
   const refusal = access.refusal?.codeId === "" ? access.refusal.sentence : "";
 
   async function create(): Promise<void> {
+    if (answered.current) return;
     // From the press: a form left open must not shorten the code it makes.
     const expiresAt = expiryFromDraft(draft, Date.now());
     if (!complete || expiresAt === null) return;
-    if (await access.create({ label: name, gate, subject: usesSubject ? subject : "", expiresAt })) onCreated();
+    const outcome = await access.create({ label: name, gate, subject: usesSubject ? subject : "", expiresAt });
+    if (outcome === "refused") return;
+    answered.current = true;
+    onCreated(outcome);
   }
 
   return (
@@ -484,8 +522,8 @@ function AddCodeForm({
         </Select>
       </Field>
       {usesSubject ? (
-        <Field label="Subject">
-          <Input id={`access-subject-${siteId}`} label="Subject" value={subject} onChange={setSubject} placeholder="Whose part of the app it opens" onEnter={() => void create()} />
+        <Field label="Subject (optional)">
+          <Input id={`access-subject-${siteId}`} label="Subject (optional)" value={subject} onChange={setSubject} placeholder="Whose part of the app it opens" onEnter={() => void create()} />
         </Field>
       ) : null}
       <ExpiryField id={`access-expiry-${siteId}`} draft={draft} now={now} onChange={setDraft} />

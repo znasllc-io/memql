@@ -29,7 +29,9 @@ import {
   accessCodeRow,
   accessGateRow,
   click,
+  droppedSocket,
   fakeConnection,
+  loseTheReply,
   refusedByEngine,
   siteRow,
   type as typeInto,
@@ -68,6 +70,7 @@ const DESK = siteRow({
 const DASHBOARD = accessGateRow({ gate: "dashboard" });
 const ENGAGEMENT = accessGateRow({ gate: "engagement", usesSubject: true });
 const [FIRST_CODE, SECOND_CODE] = FIXTURE_ACCESS_CODES;
+const SUBJECT = "Subject (optional)";
 
 function reviewers(over: Partial<Row> = {}): Row {
   return accessCodeRow({ id: "code-desk", label: "Client reviewers", ...over });
@@ -140,24 +143,23 @@ beforeEach(() => {
 // The way in
 // ---------------------------------------------------------------------------
 
+function memStore() {
+  const data = new Map<string, string>();
+  return new LocalDeployablesSettingsStore({
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+  });
+}
+
+async function openPage(seed: FakeSeed, hostname: string, session: Parameters<typeof withSession>[1] = {}, connection: FakeConnection = fakeConnection(seed)): Promise<HTMLElement> {
+  h.connection = connection;
+  render(withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />, { userId: "u-me", ...session }));
+  await waitFor(() => expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"));
+  await click((await screen.findByText(hostname)).closest("button"));
+  return screen.findByRole("region", { name: `Deployable ${hostname}` });
+}
+
 describe("the lock sits after Traffic and is absent without the part, on a system-owned site, and with no package deployable", () => {
-  function memStore() {
-    const data = new Map<string, string>();
-    return new LocalDeployablesSettingsStore({
-      getItem: (k) => data.get(k) ?? null,
-      setItem: (k, v) => void data.set(k, v),
-    });
-  }
-
-  async function openPage(seed: FakeSeed, hostname: string, session: Parameters<typeof withSession>[1] = {}): Promise<HTMLElement> {
-    const connection = fakeConnection(seed);
-    h.connection = connection;
-    render(withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />, { userId: "u-me", ...session }));
-    await waitFor(() => expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"));
-    await click((await screen.findByText(hostname)).closest("button"));
-    return screen.findByRole("region", { name: `Deployable ${hostname}` });
-  }
-
   it("sits immediately after Traffic and opens the codes in a dialog", async () => {
     const page = await openPage({ sites: [DESK], accessGates: [DASHBOARD], accessCodes: [reviewers()] }, "desk.memql.example.com");
     const traffic = within(page).getByRole("button", { name: "Traffic" });
@@ -166,18 +168,6 @@ describe("the lock sits after Traffic and is absent without the part, on a syste
     await click(lock);
     const dialog = await screen.findByRole("dialog", { name: "Access codes" });
     expect(await within(dialog).findByText("Client reviewers")).toBeTruthy();
-  });
-
-  it("drops a minted code when the dialog closes", async () => {
-    const page = await openPage({ sites: [DESK], accessGates: [DASHBOARD], accessCodes: [reviewers()] }, "desk.memql.example.com");
-    await click(within(page).getByRole("button", { name: "Access codes" }));
-    await answerYes("Client reviewers", "Regenerate");
-    expect(await screen.findByText(FIRST_CODE)).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Close Access codes" }));
-    expect(screen.queryByText(FIRST_CODE)).toBeNull();
-    await click(within(page).getByRole("button", { name: "Access codes" }));
-    await screen.findByText("Client reviewers");
-    expect(document.body.textContent).not.toContain(FIRST_CODE);
   });
 
   it("is absent without the part", async () => {
@@ -198,6 +188,72 @@ describe("the lock sits after Traffic and is absent without the part, on a syste
     const page = await openPage({ sites: [plain] }, "plain.memql.example.com");
     expect(within(page).getByRole("button", { name: "Traffic" })).toBeTruthy();
     expect(within(page).queryByRole("button", { name: "Access codes" })).toBeNull();
+  });
+});
+
+describe("the dialog holds while a write is out and while a new code stands", () => {
+  const closeControl = () => screen.getByRole("button", { name: "Close Access codes" }) as HTMLButtonElement;
+  const pressEscape = () => fireEvent.keyDown(screen.getByRole("dialog", { name: "Access codes" }), { key: "Escape" });
+  const codesSeed = (): FakeSeed => ({ sites: [DESK], accessGates: [DASHBOARD], accessCodes: [reviewers()] });
+
+  async function openCodes(seed: FakeSeed, connection: FakeConnection): Promise<HTMLElement> {
+    const page = await openPage(seed, "desk.memql.example.com", {}, connection);
+    await click(within(page).getByRole("button", { name: "Access codes" }));
+    await screen.findByText("Client reviewers");
+    return page;
+  }
+
+  it("will not close on Close or Escape while a regenerate is out, because its reply is the only copy of the code", async () => {
+    const seed = codesSeed();
+    const connection = fakeConnection(seed);
+    const release = holdAnswers(connection, "siteAccessCodeRegenerate");
+    await openCodes(seed, connection);
+    await answerYes("Client reviewers", "Regenerate");
+
+    expect(closeControl().disabled).toBe(true);
+    await click(closeControl());
+    pressEscape();
+    expect(screen.getByRole("dialog", { name: "Access codes" })).toBeTruthy();
+
+    release();
+    expect(await screen.findByText(FIRST_CODE)).toBeTruthy();
+  });
+
+  it("lets go once a refused write has answered, with nothing left to lose", async () => {
+    const seed = { ...codesSeed(), accessRemoveError: refusedByEngine("siteAccessCodeRemove", "Not this time.") };
+    await openCodes(seed, fakeConnection(seed));
+    await answerYes("Client reviewers", "Remove");
+    await screen.findByText("Not this time.");
+    expect(closeControl().disabled).toBe(false);
+  });
+
+  it("will not close over a new code, and Done is the way out", async () => {
+    const seed = codesSeed();
+    const page = await openCodes(seed, fakeConnection(seed));
+    await answerYes("Client reviewers", "Regenerate");
+    await screen.findByText(FIRST_CODE);
+
+    expect(closeControl().disabled).toBe(true);
+    pressEscape();
+    expect(screen.getByText(FIRST_CODE)).toBeTruthy();
+
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Done" }));
+    expect(closeControl().disabled).toBe(false);
+    await click(closeControl());
+    expect(screen.queryByRole("dialog", { name: "Access codes" })).toBeNull();
+
+    await click(within(page).getByRole("button", { name: "Access codes" }));
+    await screen.findByText("Client reviewers");
+    expect(document.body.innerHTML).not.toContain(FIRST_CODE);
+  });
+
+  it("closes as ever with nothing out and no code standing", async () => {
+    const seed = codesSeed();
+    await openCodes(seed, fakeConnection(seed));
+    expect(closeControl().disabled).toBe(false);
+    pressEscape();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Access codes" })).toBeNull());
   });
 });
 
@@ -298,6 +354,44 @@ describe("a failed read does not look empty; loading is a skeleton; no gates exp
     expect(screen.queryByText("No access codes yet")).toBeNull();
   });
 
+  it("says so when the read after a write fails, keeps the new code, and reads again on Try again", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [reviewers()] };
+    mountPanel(seed);
+    await rowOf("Client reviewers");
+
+    seed.accessCodesError = refusedByEngine("siteAccessCodesForSite", "The cluster did not answer.");
+    await answerYes("Client reviewers", "Regenerate");
+
+    expect(await screen.findByText("The cluster did not answer.")).toBeTruthy();
+    expect(screen.getByText(FIRST_CODE)).toBeTruthy();
+    expect(screen.queryByText("Client reviewers")).toBeNull();
+    expect(screen.queryByText("No access codes yet")).toBeNull();
+    expect(document.querySelector(".os-record-skeleton")).toBeNull();
+
+    seed.accessCodesError = undefined;
+    await click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Client reviewers")).toBeTruthy();
+    expect(screen.getByText(FIRST_CODE)).toBeTruthy();
+    expect(screen.queryByText("The cluster did not answer.")).toBeNull();
+  });
+
+  it("does not print the socket's words when the connection drops under a read", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [reviewers()] };
+    const connection = fakeConnection(seed);
+    const real = connection.query.executeNamed.bind(connection.query);
+    connection.query.executeNamed = (async () => {
+      throw droppedSocket();
+    }) as unknown as typeof connection.query.executeNamed;
+    mountPanel(seed, { connection });
+    const said = await screen.findByText(/connection to the cluster dropped/);
+    expect(said.closest(".os-notice")?.getAttribute("data-tone")).toBe("error");
+    expect(document.body.textContent).not.toContain("stream closed");
+
+    connection.query.executeNamed = real as typeof connection.query.executeNamed;
+    await click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Client reviewers")).toBeTruthy();
+  });
+
   it("says one refusal once when both reads were refused for it", async () => {
     mountPanel({
       accessCodesError: refusedByEngine("siteAccessCodesForSite", REFUSAL),
@@ -376,7 +470,7 @@ describe("Add preselects a single gate, asks for a subject only when the gate us
     const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
     await fillAdd("  Client reviewers ");
     expect(selectedLabel(screen.getByLabelText("Unlocks"))).toBe("dashboard");
-    expect(screen.queryByLabelText("Subject")).toBeNull();
+    expect(screen.queryByLabelText(SUBJECT)).toBeNull();
     chooseOption(screen.getByLabelText("Expires"), "10 minutes");
     await click(screen.getByRole("button", { name: "Create" }));
     expect(connection.callsNamed("siteAccessCodeCreate")).toEqual([
@@ -419,24 +513,32 @@ describe("Add preselects a single gate, asks for a subject only when the gate us
     await fillAdd("Acme");
     const create = screen.getByRole("button", { name: "Create" }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
-    expect(screen.queryByLabelText("Subject")).toBeNull();
+    expect(screen.queryByLabelText(SUBJECT)).toBeNull();
 
     const list = openSelect(screen.getByLabelText("Unlocks"));
     expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose a gate", "dashboard", "engagement"]);
     fireEvent.click(within(list).getByRole("option", { name: "engagement" }));
-    await typeInto(screen.getByLabelText("Subject") as HTMLInputElement, "acme");
+    await typeInto(screen.getByLabelText(SUBJECT) as HTMLInputElement, "acme");
     expect(create.disabled).toBe(false);
     await click(create);
     expect(connection.callsNamed("siteAccessCodeCreate")[0]).toContain('gate: "engagement", subject: "acme", expiresAt:');
+  });
+
+  it("does not ask for a subject the engine does not require: left empty, none is sent", async () => {
+    const { connection } = mountPanel({ accessGates: [ENGAGEMENT], accessCodes: [] });
+    await fillAdd("Whoever holds it");
+    expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(false);
+    await click(screen.getByRole("button", { name: "Create" }));
+    expect(connection.callsNamed("siteAccessCodeCreate")[0]).not.toContain("subject");
   });
 
   it("sends no subject typed for a gate that was then changed", async () => {
     const { connection } = mountPanel({ accessGates: [DASHBOARD, ENGAGEMENT], accessCodes: [] });
     await fillAdd("Changed my mind");
     chooseOption(screen.getByLabelText("Unlocks"), "engagement");
-    await typeInto(screen.getByLabelText("Subject") as HTMLInputElement, "acme");
+    await typeInto(screen.getByLabelText(SUBJECT) as HTMLInputElement, "acme");
     chooseOption(screen.getByLabelText("Unlocks"), "dashboard");
-    expect(screen.queryByLabelText("Subject")).toBeNull();
+    expect(screen.queryByLabelText(SUBJECT)).toBeNull();
     await click(screen.getByRole("button", { name: "Create" }));
     expect(connection.callsNamed("siteAccessCodeCreate")[0]).not.toContain("subject");
   });
@@ -447,7 +549,7 @@ describe("Add preselects a single gate, asks for a subject only when the gate us
   ])("reads usesSubject %s as text, which is how a scalar flag has reached this client on a builtin's row", async (flag, asks) => {
     mountPanel({ accessGates: [accessGateRow({ gate: "engagement", usesSubject: flag })], accessCodes: [] });
     await click(await addControl());
-    expect(screen.queryByLabelText("Subject") !== null).toBe(asks);
+    expect(screen.queryByLabelText(SUBJECT) !== null).toBe(asks);
   });
 
   it("holds Create back until the name has something in it", async () => {
@@ -528,7 +630,7 @@ describe("custom expiry names the time zone and a server refusal renders in plac
     const { connection } = mountPanel(seed);
     await fillAdd("Far away");
     chooseOption(screen.getByLabelText("Unlocks"), "engagement");
-    await typeInto(screen.getByLabelText("Subject") as HTMLInputElement, "acme");
+    await typeInto(screen.getByLabelText(SUBJECT) as HTMLInputElement, "acme");
     chooseOption(screen.getByLabelText("Expires"), "Custom");
     await typeInto(fieldForTheDate(), "2029-01-01T09:30");
     await click(screen.getByRole("button", { name: "Create" }));
@@ -537,7 +639,7 @@ describe("custom expiry names the time zone and a server refusal renders in plac
     expect(said.textContent).toBe("That expiry is more than 366 days away; choose an earlier time, and extend the expiry later if the code is still needed.");
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Far away");
     expect(selectedLabel(screen.getByLabelText("Unlocks"))).toBe("engagement");
-    expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("acme");
+    expect((screen.getByLabelText(SUBJECT) as HTMLInputElement).value).toBe("acme");
     expect(fieldForTheDate().value).toBe("2029-01-01T09:30");
 
     seed.accessCreateError = undefined;
@@ -553,7 +655,7 @@ describe("custom expiry names the time zone and a server refusal renders in plac
     const { connection } = mountPanel(seed);
     await fillAdd("Acme");
     chooseOption(screen.getByLabelText("Unlocks"), "engagement");
-    await typeInto(screen.getByLabelText("Subject") as HTMLInputElement, "acme");
+    await typeInto(screen.getByLabelText(SUBJECT) as HTMLInputElement, "acme");
     seed.accessCreateError = refusedByEngine("siteAccessCodeCreate", "That did not complete. Reload the list to see where it stands, and try again.");
     seed.accessGatesError = refusedByEngine("siteAccessGates", "The cluster did not answer.");
     await click(screen.getByRole("button", { name: "Create" }));
@@ -561,7 +663,7 @@ describe("custom expiry names the time zone and a server refusal renders in plac
 
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Acme");
     expect(selectedLabel(screen.getByLabelText("Unlocks"))).toBe("engagement");
-    expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("acme");
+    expect((screen.getByLabelText(SUBJECT) as HTMLInputElement).value).toBe("acme");
     expect(screen.getByText("That did not complete. Reload the list to see where it stands, and try again.")).toBeTruthy();
 
     seed.accessCreateError = undefined;
@@ -636,6 +738,101 @@ describe("the new code appears once with a warning and copy, and Done discards i
     await answerYes("Client reviewers", "Regenerate");
     expect(await screen.findByText(/did not return the code/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keep it" })).toBeNull();
+  });
+});
+
+describe("a write whose answer never came", () => {
+  it("says a create may have been saved, puts the list back in view, and offers nothing that would mint again", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [] };
+    const connection = fakeConnection(seed);
+    loseTheReply(connection, "siteAccessCodeCreate");
+    mountPanel(seed, { connection });
+    await fillAdd("Client reviewers");
+    await click(screen.getByRole("button", { name: "Create" }));
+
+    const said = await screen.findByText(/may have been saved/);
+    expect(said.closest(".os-notice")?.getAttribute("data-tone")).toBe("warn");
+    expect(document.body.textContent).not.toContain("stream closed");
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
+    // It did land, and the list is where a person finds that out.
+    expect(await rowOf("Client reviewers")).toBeTruthy();
+    expect(document.activeElement).toBe(await addControl());
+    expect(connection.callsNamed("siteAccessCodeCreate")).toHaveLength(1);
+  });
+
+  it("does the same for a create accepted with no code in its reply", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [] };
+    const connection = fakeConnection(seed);
+    const real = connection.query.executeNamed.bind(connection.query);
+    connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+      const answer = await real(name, call, opts);
+      return name === "siteAccessCodeCreate" ? { rows: () => [{ codeId: "code-minted-1" }] } : answer;
+    }) as unknown as typeof connection.query.executeNamed;
+    mountPanel(seed, { connection });
+    await fillAdd("Client reviewers");
+    await click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByText(/did not return the code/)).toBeTruthy();
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(await rowOf("Client reviewers")).toBeTruthy();
+    expect(document.activeElement).toBe(await addControl());
+  });
+
+  it.each([
+    ["Regenerate", "siteAccessCodeRegenerate", /regenerate it again/i],
+    ["Remove", "siteAccessCodeRemove", /Check the list before trying again/],
+  ] as const)("says a %s may have been saved, closes the question, and returns focus", async (act, construct, next) => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [reviewers(), pilot()] };
+    const connection = fakeConnection(seed);
+    loseTheReply(connection, construct);
+    mountPanel(seed, { connection });
+    await answerYes("Pilot client", act);
+
+    const said = await screen.findByText(/may have been saved/);
+    expect(said.textContent).toMatch(next);
+    expect(document.body.textContent).not.toContain("stream closed");
+    expect(screen.queryByRole("button", { name: "Keep it" })).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("says it in words when the socket stays down, and the list comes back on Try again", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [reviewers()] };
+    const connection = fakeConnection(seed);
+    const real = connection.query.executeNamed.bind(connection.query);
+    mountPanel(seed, { connection });
+    await rowOf("Client reviewers");
+    // The write reaches the cluster, and from then on nothing else does.
+    connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+      if (name === "siteAccessCodeRemove") await real(name, call, opts);
+      throw droppedSocket();
+    }) as typeof connection.query.executeNamed;
+    await answerYes("Client reviewers", "Remove");
+
+    expect(await screen.findByText(/may have been saved/)).toBeTruthy();
+    expect(await screen.findByText(/connection to the cluster dropped/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("stream closed");
+    expect(screen.queryByText("No access codes yet")).toBeNull();
+
+    connection.query.executeNamed = real as typeof connection.query.executeNamed;
+    await click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No access codes yet")).toBeTruthy();
+    expect(screen.queryByText(/connection to the cluster dropped/)).toBeNull();
+  });
+
+  it("keeps a refusal the engine did answer with apart from one it never answered", async () => {
+    const seed: FakeSeed = {
+      accessGates: [DASHBOARD],
+      accessCodes: [],
+      accessCreateError: refusedByEngine("siteAccessCodeCreate", "Shorten the name to 80 characters or fewer."),
+    };
+    mountPanel(seed);
+    await fillAdd("Client reviewers");
+    await click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByText("Shorten the name to 80 characters or fewer.")).toBeTruthy();
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+    expect(screen.queryByText(/may have been saved/)).toBeNull();
   });
 });
 
@@ -745,6 +942,46 @@ describe("a double click on Create sends one call", () => {
     await screen.findByText(FIRST_CODE);
   });
 
+  it("sends one when Enter lands after the reply and before the form has gone", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [] };
+    const connection = fakeConnection(seed);
+    const release = holdAnswers(connection, "siteAccessCodeCreate");
+    const held = connection.query.executeNamed.bind(connection.query);
+    let replied = false;
+    connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+      const answer = await held(name, call, opts);
+      if (name === "siteAccessCodeCreate") replied = true;
+      return answer;
+    }) as typeof connection.query.executeNamed;
+    mountPanel(seed, { connection });
+    await fillAdd("Client reviewers");
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    const enter = () => name.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    // REACT'S OWN SCHEDULER, NOT act(). Under act() a state update is drawn before
+    // the next line runs, so the frame this is about does not exist. On the real
+    // scheduler the reply's every hop is a microtask and the render is a later task,
+    // so a press can land between them, as a press in a browser can.
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      enter();
+      release();
+      for (let hop = 0; hop < 50; hop++) await Promise.resolve();
+      // The frame in question: the reply is in, and the form has not gone.
+      expect(replied).toBe(true);
+      expect(name.isConnected).toBe(true);
+      enter();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+
+    expect(connection.callsNamed("siteAccessCodeCreate")).toHaveLength(1);
+    expect(await screen.findByText(FIRST_CODE)).toBeTruthy();
+    expect(screen.queryByText(SECOND_CODE)).toBeNull();
+  });
+
   it("does not let the second click of it discard the code it brought", async () => {
     mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
     await fillAdd("Client reviewers");
@@ -814,6 +1051,30 @@ describe("Regenerate and Remove ask first, say what stops working, and Keep it w
     expect(screen.getByText("Pilot client")).toBeTruthy();
   });
 
+  it("puts focus on Add once a remove has landed, before the re-read takes the row away", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [reviewers(), pilot()] };
+    const connection = fakeConnection(seed);
+    mountPanel(seed, { connection });
+    await rowOf("Pilot client");
+    const release = holdAnswers(connection, "siteAccessCodesForSite");
+    await answerYes("Pilot client", "Remove");
+
+    expect(screen.getByText("Pilot client")).toBeTruthy();
+    expect(document.activeElement).toBe(await addControl());
+
+    release();
+    await waitFor(() => expect(screen.queryByText("Pilot client")).toBeNull());
+    expect(document.activeElement).toBe(await addControl());
+  });
+
+  it("puts focus on the panel when there is no Add to go back to", async () => {
+    const seed: FakeSeed = { accessGates: [], accessCodes: [reviewers(), pilot()] };
+    mountPanel(seed);
+    await answerYes("Pilot client", "Remove");
+    await waitFor(() => expect(screen.queryByText("Pilot client")).toBeNull());
+    expect(document.activeElement).toBe(document.querySelector(".access-codes"));
+  });
+
   it("gives an expired code's Regenerate a new expiry to send, and says nobody is using it", async () => {
     const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [reviewers({ expiresAt: inMinutes(-5) })] });
     const row = await ask("Client reviewers", "Regenerate");
@@ -865,6 +1126,8 @@ describe("Regenerate and Remove ask first, say what stops working, and Keep it w
     expect(await screen.findByText(sentence)).toBeTruthy();
     await waitFor(() => expect(screen.queryByText("Client reviewers")).toBeNull());
     expect(screen.getByText(sentence)).toBeTruthy();
+    // The question went with the row, with focus inside it.
+    expect(document.activeElement).toBe(await addControl());
   });
 
   it("reads the list again after every write, accepted or refused", async () => {
@@ -1009,6 +1272,15 @@ describe("a code minted under another organization", () => {
     expect(within(row).queryByRole("button", { name: "Change expiry of Client reviewers" })).toBeNull();
     expect(within(row).getByRole("button", { name: "Remove Client reviewers" })).toBeTruthy();
     expect(row.textContent).not.toContain("Expires in");
+  });
+
+  it("does not say removing it takes anyone out, because it already opens nothing", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [reviewers({ accountId: "borden", expiresAt: inDays(5) })] }, { site: ACME_SITE });
+    const row = await ask("Client reviewers", "Remove");
+    const group = within(row).getByRole("group", { name: "Remove Client reviewers?" });
+    expect(group.textContent).toContain("It already opens nothing.");
+    expect(group.textContent).not.toContain("taken out");
+    expect(group.textContent).not.toContain("stops working");
   });
 
   it("is the same organization however each side spells it", async () => {

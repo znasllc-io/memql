@@ -1532,6 +1532,21 @@ export function accessGateRow(over: Partial<Row> & { gate: string }): Row {
   return { usesSubject: false, constructs: ["deskBrief"], ...over } as unknown as Row;
 }
 
+/** What the dispatcher rejects a pending call with when the socket goes. */
+export function droppedSocket(): Error {
+  return Object.assign(new Error("stream closed"), { reason: "transport" });
+}
+
+/** The write lands and its reply is lost on the way back: the worst of the cases, and the commonest. */
+export function loseTheReply(connection: FakeConnection, construct: string): void {
+  const real = connection.query.executeNamed.bind(connection.query);
+  connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+    const answer = await real(name, call, opts);
+    if (name === construct) throw droppedSocket();
+    return answer;
+  }) as typeof connection.query.executeNamed;
+}
+
 /** A refusal as `executeNamed` throws it: the call's name and the engine's frame around the sentence. */
 export function refusedByEngine(construct: string, sentence: string): string {
   return `${construct}: MemQL engine failed to execute query. Details: ${sentence}`;

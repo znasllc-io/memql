@@ -46,6 +46,7 @@ import {
   accessGateRow,
   fakeConnection,
   githubGrantRow,
+  loseTheReply,
   sourceConnectionRow,
   probeReply,
   repositoriesReply,
@@ -742,7 +743,17 @@ const ACCESS_REFUSED: FakeSeed = {
 };
 
 /** `?click=` for the view that can only be reached by pressing: the code exists once. */
-const ACCESS_CLICKS: Record<string, string> = { "access-minted": "Regenerate Client reviewers|Regenerate" };
+const ACCESS_CLICKS: Record<string, string> = {
+  "access-minted": "Regenerate Client reviewers|Regenerate",
+  "access-unanswered": "Regenerate Client reviewers|Regenerate",
+};
+
+/** A regenerate that lands with its reply lost on the way back. */
+function accessUnanswered() {
+  const connection = fakeConnection(ACCESS_SEED);
+  loseTheReply(connection, "siteAccessCodeRegenerate");
+  return connection;
+}
 
 function AccessPage() {
   return (
@@ -1250,6 +1261,7 @@ const VIEWS: Record<
   "access-minted": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
   "access-no-gates": { seed: { accessGates: [], accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-refused": { seed: ACCESS_REFUSED, framed: true, render: () => <AccessPage /> },
+  "access-unanswered": { connect: accessUnanswered, framed: true, render: () => <AccessPage /> },
   store: { seed: BOUND, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   picker: { seed: UNBOUND, render: () => <StorePane site={siteFromRow(UNBOUND_SITE)} canBind /> },
