@@ -29,7 +29,8 @@ package identity
 //  2. PER-ROW OR PER-USER -- BOTH, because they are different jobs and the
 //     issue says so: offboarding is per-user, a single stuck row is not.
 //     `rowId` narrows to one row, `concept` to one concept, neither to
-//     everything the departing principal owns. There is no "transfer
+//     everything the departing principal owns but what stampedAtBirth lists,
+//     which stays where it was stamped. There is no "transfer
 //     everything in the cluster" form: the argument naming the FROM principal
 //     is always required, so a transfer always has a subject.
 //

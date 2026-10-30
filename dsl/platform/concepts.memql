@@ -372,6 +372,9 @@ concept sitePreviewObservation {
 ///
 /// THE TIER IS THE SITE'S, account arm included, so whoever manages a deployable sees every code
 /// minted against it: its owner, a cluster owner, and the people of the account it is tied to. THE
+/// ONE EXCEPTION IS THE HEIR OF A SITE TIED TO NO ACCOUNT, a move only a cluster owner can make: its
+/// codes stay stamped with the owner they were minted under and no account arm admits the heir, so
+/// the heir does not see them, and a cluster owner is who can end them. THE
 /// OWNER IS THE SITE'S, never the operator who asked -- the integration creates the row as the site's
 /// owner, and the person behind each act is recorded separately in `lastChangedBy`. IT IS THE OWNER THE
 /// SITE HAD WHEN THE CODE WAS MINTED, and it stays that: an ownership transfer skips this concept, so a
