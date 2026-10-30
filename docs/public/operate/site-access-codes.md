@@ -64,8 +64,8 @@ version**. A file that must stay private does not belong in the bundle yet.
    a row in the graph, and an `HttpOnly` cookie holding a random token whose
    digest is in that row.
 4. The page calls the constructs its gate declares through
-   `/_memql/access/call`. Every request reads the session and its code from the
-   database again. Nothing in the decision is cached.
+   `/_memql/access/call`. Every request that presents a session reads it and its
+   code from the database again. Nothing in the decision is cached.
 5. The visit ends at the earliest of the code's expiry, 24 hours after the
    session opened, a regenerate, a removal, or the visitor leaving.
 
@@ -285,7 +285,7 @@ so a forged argument cannot tell anybody what a construct declares.
 |---|---|---|
 | `accessCodeId` | the bare id of the code in use. It survives a regenerate | keep each code's rows apart |
 | `accessSubject` | the subject the operator gave the code. **Not stamped at all** for a code with none -- never an empty string | scope by client |
-| `accessGate` | the gate the code opens | let one construct serve two gates and tell them apart |
+| `accessGate` | the gate the code opens. A construct has exactly one, so this is always that gate | record on a row which gate wrote it |
 | `siteId` | the bare id of the deployable's site | scope by deployable |
 
 That is the isolation mechanism, and it is the author's to use: **rows carry the
@@ -459,19 +459,36 @@ outside: the edge is the only way in.
 Every reply carries `Cache-Control: no-store` and `X-Content-Type-Options:
 nosniff`. Every POST must declare `Content-Type: application/json`, **`leave`
 included**, whose body is empty or `{}`. There is no CORS: the page that calls
-this is the deployable's own.
+this is the deployable's own. **The bff sees the access cookie and no other
+credential**: the edge drops `Authorization` and every other cookie on these four
+routes, a MemQL sign-in cookie included, because nothing here reads them.
 
 ### The cookie
 
 ```
-memql_access=mql_acs_<43 characters>; Path=/_memql/access; HttpOnly; Secure; SameSite=Strict
+__Host-memql_access=mql_acs_<43 characters>; Path=/; HttpOnly; Secure; SameSite=Strict
 ```
 
-Host-only, with no `Max-Age` or `Expires`: the server is the authority on
-expiry, and an extension must not be cut short by a browser-side clock. The
-`Path` means it travels with these four requests and nothing else, so arriving
-from a link in an email is fine, and it is not sent to `/_memql/accessories`.
-Page script cannot read it.
+No `Domain`, and no `Max-Age` or `Expires`: the server is the authority on
+expiry, and an extension must not be cut short by a browser-side clock. Page
+script cannot read it, and arriving from a link in an email is fine. A clear is
+the same attributes with `Max-Age=0`.
+
+**The `__Host-` prefix is what stops another site planting one.** Every deployable
+on `*.memql.<domain>` is a sibling of every other, whoever owns it, and a page on
+any of them can set a cookie for the shared parent. A browser refuses a `__Host-`
+cookie from a sibling, or with any `Path` but `/`, a `Domain` or no `Secure`, so
+none of them can put a cookie of this name in a visitor's browser. Without the
+prefix a planted cookie with a longer `Path` would be sent first and read first,
+which would end the real session, and a planted live session would catch the
+visitor's gated writes.
+
+**`Path=/` is the price, and the edge pays it.** A browser sends this cookie with
+every request to the site, so the edge takes it out of everything it forwards
+anywhere but the four routes: the generic `/_memql/*` proxy, shopper forms and
+reads, and the identity endpoints. The rest of the `Cookie` header goes through
+as it was. The bundle's own files are served by the edge, which reads nothing from
+it.
 
 ### What a code looks like
 
@@ -498,7 +515,7 @@ is JSON:
 | `400` | `{"error":"bad_request"}` | a body that could not be read |
 | `429` | `{"error":"rate_limited"}` | a budget is spent. `Retry-After` is in whole seconds |
 
-Three replies are **not JSON**, and a client must not assume they are:
+Two replies are **not JSON**, and a client must not assume they are:
 
 - a **`502`** from the proxy, when the edge cannot reach the bff, is `text/plain`
   (`upstream unavailable`). It is the proxy's reply, shared by every route it
@@ -507,15 +524,22 @@ Three replies are **not JSON**, and a client must not assume they are:
   and a draft or archived one `404`, both plain text. The exception is somebody
   holding a [preview grant](deployables.md#publishing-the-candidate-version-instead),
   who is already served a draft or a live deployable's candidate and reaches these
-  routes on it too, where a code still has to be valid;
-- a `401` for a [revoked sign-in](#a-browser-with-a-revoked-sign-in), below.
+  routes on it too, where a code still has to be valid.
 
 The edge then strips `X-Memql-Access-Site` and `X-Memql-Access-Owner` from
 everything it forwards, on every path, and sets them itself. The stamp is a
-pointer, not an assertion: the bff re-reads the site under the named owner and
-requires the row's own owner to equal it.
+pointer, not an assertion: the bff reads the site's row and requires its own owner
+to equal the stamp, and its account to equal the code's copy.
 
 ### What the bff answers
+
+**A stranger costs nothing.** Anybody on the internet can send these four, so the
+order is deliberate. A request with no cookie, a cookie that could not be a token
+(`mql_acs_` and 43 base64url characters) and a body that could not hold a code (25
+symbols once normalized) are answered without a read. Anything else is looked up
+by its digest first, and a digest that finds nothing is answered with no other read
+and no write. The site is read only for a request whose digest found a row, and its
+package and the owner's own view of both only for a gated call.
 
 **`POST /_memql/access`** trades a code for a session.
 
@@ -538,17 +562,19 @@ machine does not move the moment.
 | Status | Body | Meaning |
 |---|---|---|
 | `200` | as above, no new cookie | still in; the remainder is as of this answer |
-| `401` | `{"state":"none"}` | no cookie |
-| `401` | `{"state":"ended"}` | a cookie whose session is over for any reason: expired, the 24 hours, regenerated, removed, left, or a token with no row at all |
+| `401` | `{"state":"none"}` | no cookie. **Sets nothing** |
+| `401` | `{"state":"ended"}` | a cookie whose session is over for any reason: expired, the 24 hours, regenerated, removed, left, or a token with no row at all. Clears the cookie |
 | `502` | `{"error":"refused"}` | a failed read. **Clears nothing**: a database blip is not a visitor taken out |
 
-Both `401`s clear the cookie.
+**`none` clears nothing because a browser may well hold the cookie.** Under
+`SameSite=Strict` a link from another site to this path arrives without it, and a
+clear in that reply would delete the real session of whoever followed the link.
 
 **`POST /_memql/access/leave`** ends the session the cookie names, and no other
 -- two browsers on one code are two sessions. It answers `204` and clears the
-cookie, and it is idempotent. If the end cannot be written it answers `502
-{"error":"refused"}` and the cookie stays, because clearing it would say the
-visit is over while the row still honors the token.
+cookie, and it is idempotent, with no cookie as well. If the end cannot be written
+it answers `502 {"error":"refused"}` and the cookie stays, because clearing it
+would say the visit is over while the row still honors the token.
 
 **`POST /_memql/access/call`** runs a construct.
 
@@ -562,11 +588,18 @@ visit is over while the row still honors the token.
 
 **One `404`, identical to the byte,** for an unknown construct, an undeclared
 one, one on another gate, one on another deployable, one in a domain the package
-does not ship, a name two of the package's domains both declare, a site no
-stamped owner can read, and a request with no stamp. A holder of one gate's code
-learns nothing about another's. The registry is consulted before the arguments
-are looked at, so a refused argument is only ever reported for a construct the
-session's gate reaches.
+does not ship, a name two of the package's domains both declare, a site whose
+owner cannot read it or its package, a stamp the site's row does not agree with,
+and a request with no stamp. A holder of one gate's code learns nothing about
+another's. The registry is consulted before the arguments are looked at, so a
+refused argument is only ever reported for a construct the session's gate reaches.
+
+**A call reads the site and its package under the owner's own authority, last,
+just before the construct runs**, because the construct is about to run as that
+person. A site whose owner was removed from its organization reads as nothing to
+them, so its calls answer that `404`, and the bff logs why. Nothing else lends that
+authority, so such a site still unlocks and a status check still says who is in;
+what is gated stays gated.
 
 A query answers with its **shape's rows**, with every id bare. A query with no
 `shape` clause answers with only the ids of the rows it selected, and the bff
@@ -598,21 +631,14 @@ itself recorded, which a caller cannot choose. The leftmost entry is the
 caller's to write, and rotating it would spend the site's sixty unlocks and lock
 real visitors out. It is a key only when it is an IP address, in its canonical
 spelling; a name, an `ip:port` or anything else is not, and the connection's peer
-is used instead, which behind the ingress is the ingress itself. Unlock draws on
-the address's bucket first, so one machine can take at most ten of the sixty.
+is used instead, which behind the ingress is the ingress itself. **An IPv6 address
+keys on its /64**, because one connection is routinely handed a whole /64 and may
+pick any address in it, so everybody behind one /64 shares a bucket. Unlock draws
+on the address's bucket first, so one machine can take at most ten of the sixty.
 `Retry-After` is how long the refusing bucket takes to give one token back: 6
 seconds for an address that spent its ten unlocks, 1 otherwise.
 
 **These bound load, not guessing.** What stops guessing is 125 bits.
-
-### A browser with a revoked sign-in
-
-A browser that also holds a `memql_auth` cookie whose session has been revoked
-gets a plain-text **`401 session revoked`** on all four routes, unlock
-included. The bff's session-revocation middleware answers any request that
-carries a revoked token, on any route, before the access handler sees it, so the
-body is not JSON. A client must treat **a `401` that is not JSON as locked**,
-and a visitor in that state cannot unlock until the stale cookie is cleared.
 
 ---
 
@@ -627,7 +653,7 @@ client is not in the SDK in this version.
 |---|---|---|
 | **1. Leave on time** | Schedule the end from `remainingMs` the moment a reply arrives, and drop gated state the instant it fires. Never compare `expiresAt` with the page's own clock | Refuses after the exact instant of expiry, with no grace |
 | **2. Learn of an act** | Ask `GET /_memql/access` every 5 seconds while the page is visible, and at once on `visibilitychange`, `focus` and `online`. A changed `remainingMs` reschedules the end | A regenerate, a removal or a shortened expiry is refused on the next request |
-| **3. Treat a 401 as the end** | Any `401` on a call, and any `401` that is not JSON, means locked: drop gated state and show the code box | A `401` clears the cookie |
+| **3. Treat a 401 as the end** | Any `401` on a status check or a call means locked: drop gated state and show the code box | `ended` clears the cookie |
 
 Keep gated rows in memory. Anything held in `localStorage`, `sessionStorage`,
 IndexedDB or a cache is a place a drop can miss. A `5xx`, a `429`, a network
@@ -636,7 +662,6 @@ again at the next tick. Do not read them as locked, and do not read them as in.
 
 ```js
 const ACCESS = "/_memql/access";
-const isJson = (response) => (response.headers.get("content-type") ?? "").includes("json");
 
 const post = (path, body) =>
   fetch(ACCESS + path, {
@@ -677,7 +702,7 @@ export function accessSession({ onOpen, onLocked }) {
     } catch {
       return;
     }
-    if (response.status === 401) lock(); // none, ended, or a plain-text "session revoked"
+    if (response.status === 401) lock(); // none or ended
     else if (response.ok) open(await response.json());
   }
   const recheck = () => live && document.visibilityState === "visible" && check();
@@ -696,7 +721,7 @@ export function accessSession({ onOpen, onLocked }) {
       }
       if (response.status === 429) return "wait"; // Retry-After says how long
       if (response.status === 403) return "expired"; // the exact code, past its expiry
-      if (response.status === 401) return isJson(response) ? "invalid" : "blocked";
+      if (response.status === 401) return "invalid";
       return "unavailable";
     },
 
@@ -740,7 +765,8 @@ export function accessSession({ onOpen, onLocked }) {
   on the right-most `X-Forwarded-For` entry. A proxy added in front of the
   ingress groups every visitor behind it into one bucket: ten unlocks a minute
   between them, and a share of the site's sixty. So does an ingress that writes
-  `ip:port`, which is not an address and falls back to the peer.
+  `ip:port`, which is not an address and falls back to the peer, and so does one
+  IPv6 /64.
 - **Borrowed authority does not re-check that the site's owner is still
   active.** A construct runs as the owner, as a shopper's form does, and nothing
   per request asks whether that person is still around. **Removing the codes is
@@ -756,6 +782,9 @@ export function accessSession({ onOpen, onLocked }) {
 | Guessing a code | 125 bits. Failures write nothing and are one reply. Rate limits bound load |
 | A leaked row, backup or log | Only digests are stored. A code, a token, a digest and a call's arguments are never logged or put in an audit event |
 | Cross-site request forgery | `SameSite=Strict`, JSON-only POSTs and the `Origin` check |
+| Another deployable on the same parent domain planting a cookie | A browser refuses a `__Host-` cookie from a sibling, so it cannot hide the real one, end it or catch the visitor's writes with a session of its own |
+| A link from another site to the status check | Arrives with no cookie under `SameSite=Strict`, is answered `none`, and clears nothing |
+| A stranger running up the database | No cookie, a malformed token and a body that holds no code cost no read. A guess costs one lookup by digest, through an index |
 | Script on the deployable | Cannot read the cookie. Can call declared constructs while the page is open, which is the reach the code already grants. The edge's hash-based CSP applies |
 | Forged reserved arguments | Refused from the caller, stamped last |
 | Forged edge headers | Stripped on every path, and the bff compares the stamped owner with the site's own |
@@ -773,11 +802,20 @@ export function accessSession({ onOpen, onLocked }) {
 | The panel says the app has no gates yet, and Add is absent | No construct declares `@accessGate` for this deployable's name, or the source has not been deployed since access codes existed, so its `dslDomains` are empty | Declare the gate and deploy; or, for an older source, deploy it again |
 | Every call answers `404` on a source that worked before | The same: an empty `dslDomains` opens nothing | Deploy the source again |
 | One call answers `404` and others work | The name is not declared, is on another gate, is `@disabled`, is in a nested directory, or two of the package's domains both declare it | Check the gate, the name and `dsl_access_gate_*` in the analysis |
-| All four routes answer `404` for one site, and the bff logs "this site's codes answer 404" | The site's owner cannot read it. A site whose owner was removed from its organization reads as zero rows under that owner. The log line carries the reason | Restore the owner's membership, or give the site an owner who can read it |
+| Unlock and the status check work, every call answers `404`, and the bff logs "this site's calls answer 404" | The site's owner cannot read it or its package. A site whose owner was removed from its organization reads as zero rows under that owner. The log line carries the reason | Restore the owner's membership, or give the site an owner who can read it |
+| A code unlocks and every call answers `404`, and the bff logs nothing | Which node the edge reaches. On an instance where the neutral `bff` mounts no product bundle, a code minted through `bff-<product>` unlocks, because the rows are the same everywhere, and every call misses the gate registry of a node that never loaded the gate | Check which node the edge's `bff-http` selects, and mount the product's DSL there ([which node](#which-node-answers)) |
 | All four routes answer `404` for a platform-managed site | It has no owner to borrow | Codes are for your own deployables |
-| All four routes answer `404` for a deployable that was not deployed from a package | It has no deployable name, so no gate can be its own | Deploy it from a package that declares a gate |
-| A plain-text `401 session revoked` | The browser carries a revoked `memql_auth` cookie | Clear the site's cookies |
+| Add is absent, and a visitor is only ever told `invalid` or `none` | The deployable was not deployed from a package, so it has no deployable name, no gate can be its own, and it has no codes | Deploy it from a package that declares a gate |
 | A `503` or a plain `404` before any JSON | The deployable is offline, or not live | Take it live. An offline spell does not end a session: it works again if its code has not expired |
+
+### Which node answers
+
+The edge forwards the surface to whatever `MEMQL_EDGE_API_TARGET` names, normally
+`bff-http`, and a gate's registry lives on the node that loaded its DSL. The code
+and session rows are in the graph and read the same from anywhere, so a node that
+has not loaded the gate still unlocks and answers every call `404`. An instance
+that runs a separate `bff-<product>` for its DSL has to have `bff-http` select a node
+that mounts it too.
 
 ## Operating it
 
@@ -791,9 +829,59 @@ export function accessSession({ onOpen, onLocked }) {
 - **"Has anybody opened this?"** is answered by the newest session of the code's
   current generation, with no write to the credential itself.
 - **Logs name the deployable and the construct, never an argument.** A code, a
-  token and a digest are never logged. The warning about a site whose codes
+  token and a digest are never logged. The warning about a site whose calls
   answer 404 carries the deployable, so the Logs button on its page shows it.
 - **Failed attempts are not recorded.** Operator acts are in the audit log.
+- **A stamp that does not check out is logged at `WARN`,** and it takes a credential
+  that found a row to get that far, so a stranger cannot drive that line.
+
+### The indexes
+
+Three payload lookup indexes on `MemoryNodes` keep the lookups cheap
+(`memory_nodes_access_tokenhash_lookup_idx`,
+`memory_nodes_access_codeid_lookup_idx`,
+`memory_nodes_access_codehash_lookup_idx`). Migration
+`20261030000000_site_access_lookup_indexes` builds them like every other lookup
+index, one chunk per transaction, and **that is not free on a large table**:
+
+- **Each is a full scan of every chunk's heap, whatever it holds.** Being partial
+  decides what goes in, not what is read. Three indexes are three passes.
+- **Writes wait, in two places; reads do not.** Each build starts with a `ShareLock` on
+  the table itself, and a write already open holds it back while every later write to
+  any chunk queues behind it, so an open write of a few seconds is a pause of all writes
+  for that long, three times. Each then holds a `ShareLock` on one chunk at a time, so
+  writes to the newest chunk wait while it is scanned. A write that waits longer than
+  the serving statement limit fails.
+- **All three share one migration deadline**
+  (`MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS`, 30 s by default). A build that
+  outlives it carries on server-side and the runner **retains its lock**, by design,
+  which is a failed rollout until somebody recovers it
+  ([how](env-vars.md#database-tuning)).
+
+On a table where three passes will not fit the deadline, build them first, in a
+session of your own with no client deadline, one statement to a query, and let the
+migration verify them:
+
+```sql
+CREATE INDEX memory_nodes_access_tokenhash_lookup_idx ON "MemoryNodes"
+  ((payload->>'tokenHash'), concept, id, "createdAt" DESC)
+  WITH (timescaledb.transaction_per_chunk)
+  WHERE concept = ANY (ARRAY['v1:platform:siteAccessSession'::text]);
+CREATE INDEX memory_nodes_access_codeid_lookup_idx ON "MemoryNodes"
+  ((payload->>'codeId'), concept, id, "createdAt" DESC)
+  WITH (timescaledb.transaction_per_chunk)
+  WHERE concept = ANY (ARRAY['v1:platform:siteAccessSession'::text]);
+CREATE INDEX memory_nodes_access_codehash_lookup_idx ON "MemoryNodes"
+  ((payload->>'codeHash'), concept, id, "createdAt" DESC)
+  WITH (timescaledb.transaction_per_chunk)
+  WHERE concept = ANY (ARRAY['v1:platform:siteAccessCode'::text]);
+```
+
+**No upgrade barrier.** An older engine ignores the indexes, and an engine that
+reaches the lookups before they exist still answers correctly, slower: neither
+concept has a row until the first code is minted. After a rollout, the migration
+is in the ledger, the three root indexes and every chunk's copy are valid, ready and
+live, and no lock is left in `bun_migration_locks`.
 
 ---
 

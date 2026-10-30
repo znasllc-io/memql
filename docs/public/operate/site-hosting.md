@@ -788,7 +788,13 @@ The edge adds four method and path pairs on the site's own origin for this
 - **The edge decides nothing about who is in.** It checks the shape of a POST
   (JSON, the same `Origin`), caps the body, rate-limits per replica, and writes
   the site and owner stamp over any copy the client sent. The bff reads the
-  database on every request, and nothing in the decision is cached.
+  database for every request that presents a credential, and nothing in the
+  decision is cached.
+- **The session cookie stops here.** It is a `__Host-` cookie, so a browser sends
+  it with every request to the site. These four routes forward it and no other
+  credential, and everything else the edge forwards, the proxy above and the
+  identity endpoints included, has it taken out and the rest of the header left
+  alone.
 - **A site that is not live does not serve them.** An offline deployable answers
   `503` and a draft or archived one `404` before anything is forwarded, as for
   any other path; somebody holding a preview grant, who is already served the
