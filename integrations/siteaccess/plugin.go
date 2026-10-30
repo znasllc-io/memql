@@ -1,6 +1,8 @@
 package siteaccess
 
 import (
+	"context"
+
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -20,6 +22,15 @@ import (
 
 func init() {
 	memql.RegisterPlugin("siteAccess", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		return NewIntegration(pctx.Logger), nil
+		return NewIntegration(engineAdapter{pctx.Engine}, pctx.Logger), nil
 	})
+}
+
+// engineAdapter narrows IntegrationEngineAccess to the one method this package
+// uses. Narrow deliberately: nothing here should be able to reach the AI
+// provider registry or the tool surface.
+type engineAdapter struct{ engine memql.IntegrationEngineAccess }
+
+func (a engineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	return a.engine.Execute(ctx, query)
 }

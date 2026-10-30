@@ -206,6 +206,42 @@ func TestASiteWithLiveAccessCodesCannotChangeOrganization(t *testing.T) {
 		require.Empty(t, accountOf(cleared))
 	})
 
+	t.Run("a stale code's refusal says who can remove it", func(t *testing.T) {
+		// A move racing a mint can leave a code whose copy names the organization the
+		// site left. It opens nothing, and it still blocks the next move, and the
+		// plain next step would be wrong: the shared gate judges the copy, so the people
+		// of the site's own organization are refused the removal it asks of them.
+		staleSite := addSite("stale", beta)
+		code := ids.code + "-stale"
+		mint(code, staleSite, acme, issued.Add(time.Hour))
+
+		err := move(operatorCtx, staleSite, acme)
+		refusedStale := func(err error, what string) {
+			t.Helper()
+			require.Error(t, err, "%s was allowed", what)
+			require.Contains(t, err.Error(), "organization_transfer_refused", what)
+			require.Contains(t, err.Error(), "access code", what)
+			require.Contains(t, err.Error(), "cluster operator", "the refusal sends the person to an act the gate refuses them: %v", err)
+		}
+		refusedStale(err, "moving a site that has a stale code, even to the organization the copy names")
+		require.Equal(t, BareShortId(beta), accountOf(staleSite))
+
+		// A stale code among live ones is still the sentence the person needs.
+		mint(ids.code+"-stale-live", staleSite, beta, issued.Add(time.Hour))
+		refusedStale(move(operatorCtx, staleSite, acme), "moving a site with a stale code and a live one")
+
+		// Once it is gone the live one is what is in the way, and that is the plain
+		// sentence again: its organization's people can remove it themselves.
+		remove(code)
+		err = move(operatorCtx, staleSite, acme)
+		refused(t, err, "moving a site whose stale code is gone and whose live one is not")
+		require.NotContains(t, err.Error(), "cluster operator", "a live code does not need a cluster operator")
+
+		remove(ids.code + "-stale-live")
+		require.NoError(t, move(operatorCtx, staleSite, acme), "nothing is left in the way")
+		require.Equal(t, BareShortId(acme), accountOf(staleSite))
+	})
+
 	t.Run("a null or a value that is not a string in the place of the organization is a change too", func(t *testing.T) {
 		// The read-merge stores a delta key as given, so a null clears the organization as
 		// surely as an empty string does. Reading a key that is not a string as 'no change'

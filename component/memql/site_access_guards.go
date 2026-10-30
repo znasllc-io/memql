@@ -113,6 +113,14 @@ func actorIsTheClusterActing(ctx context.Context) bool {
 // are in the way.
 var errSiteHasLiveAccessCodes = errors.New("organization_transfer_refused: this deployable still has access codes; remove its access codes before changing its organization")
 
+// errSiteHasStaleAccessCode is the same refusal when what is in the way is a code
+// whose copied organization already differs from its site's: the one a move racing a
+// mint can leave (D15). The next step differs, so the sentence does. It opens nothing,
+// but "remove it" is not something the person moving the site can do: the shared gate
+// judges the copy, so it refuses the people of the site's own organization, and only a
+// cluster operator gets through it.
+var errSiteHasStaleAccessCode = errors.New("organization_transfer_refused: this deployable still has an access code minted under an earlier organization, which opens nothing and only a cluster operator can remove; ask a cluster operator to remove it before changing its organization")
+
 // refuseSiteMoveWithLiveAccessCodes refuses ANY change of a site's accountId
 // while a code minted against the site has not been removed (D15).
 //
@@ -136,9 +144,14 @@ var errSiteHasLiveAccessCodes = errors.New("organization_transfer_refused: this 
 // an untied site carry an empty accountId, and a tie would leave the copy empty
 // where the site now has an organization.
 //
+// THE WHOLE LIST IS READ BEFORE ANSWERING, because one stale code among live ones
+// still needs a cluster operator, and the plainer sentence would send the person off
+// to remove something the gate will not let them touch. `currentAccount` is the
+// site's organization now, which is what a copy is stale against.
+//
 // staged-data: MUST-NOT-GATE -- an unpublished code of the site is still a code
 // naming the old organization; hiding it would let the move through.
-func (e *MemQLEngine) refuseSiteMoveWithLiveAccessCodes(ctx context.Context, siteID string) error {
+func (e *MemQLEngine) refuseSiteMoveWithLiveAccessCodes(ctx context.Context, siteID, currentAccount string) error {
 	if e.database() == nil {
 		return fmt.Errorf("organization_unavailable: dependent records cannot be checked")
 	}
@@ -146,6 +159,7 @@ func (e *MemQLEngine) refuseSiteMoveWithLiveAccessCodes(ctx context.Context, sit
 	if err := e.database().NewSelect().Model(&rows).DistinctOn("id").Where("concept = ?", siteAccessCodeConcept).OrderExpr(`id ASC, "createdAt" DESC`).Scan(ctx); err != nil {
 		return fmt.Errorf("organization_unavailable: %w", err)
 	}
+	blocked := false
 	for _, row := range rows {
 		payload := accountRowPayload(row)
 		if BareShortId(stringFromAny(payload["siteId"])) != BareShortId(siteID) {
@@ -154,6 +168,12 @@ func (e *MemQLEngine) refuseSiteMoveWithLiveAccessCodes(ctx context.Context, sit
 		if strings.TrimSpace(stringFromAny(payload["revokedAt"])) != "" {
 			continue
 		}
+		if BareShortId(stringFromAny(payload["accountId"])) != BareShortId(currentAccount) {
+			return errSiteHasStaleAccessCode
+		}
+		blocked = true
+	}
+	if blocked {
 		return errSiteHasLiveAccessCodes
 	}
 	return nil

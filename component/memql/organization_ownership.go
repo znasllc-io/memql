@@ -347,7 +347,7 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 	// the cluster acting on its own as for a person: the copy goes stale
 	// whoever moves the site (design D15, site_access_guards.go).
 	if concept == conceptPlatformSite {
-		if err := e.refuseSiteMoveWithLiveAccessCodes(ctx, id); err != nil {
+		if err := e.refuseSiteMoveWithLiveAccessCodes(ctx, id, old); err != nil {
 			return err
 		}
 	}

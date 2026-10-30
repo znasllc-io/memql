@@ -41,6 +41,7 @@ db	component/server/uploadsession	11.86
 db	component/server/fileversion	10.57
 db	component/sitetraffic	10.50
 db	examples/referencepack	10.49
+db	integrations/siteaccess	8.71
 db	component/database/dbtest	5.74
 db	integrations/library/versionstore	4.59
 db	component/memql/sense	4.50
