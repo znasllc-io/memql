@@ -12,7 +12,7 @@ verification is tracked separately from a passing typecheck.
 | Users | Shared directory/membership live lists, with a detail skeleton while a deep-linked group is first read. |
 | Bin | Shared `LiveList` handles initial reads and preserves archived rows during refresh. |
 | Files | Shared live lists and explicit file-version skeletons; the folder hierarchy and version chronology retain their navigation model. |
-| Deployables | Shared list reads, map, source metadata, repository/account choices, compose prerequisites, versions, domain guidance, traffic, inline workspace values and store connections. Ordered deployment/setup rails remain workflows. |
+| Deployables | Shared list reads, map, source metadata, repository/account choices, compose prerequisites, versions, domain guidance, traffic, access codes, inline workspace values and store connections. Ordered deployment/setup rails remain workflows. |
 | Email | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
 | Concepts | Registry, concept details, initial rows and additional pages. Schema and row inspectors retain their split view. |
 | Logs | Search/tail data and settings reads; loaded virtual rows remain usable on refresh. |

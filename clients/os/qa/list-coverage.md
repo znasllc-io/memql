@@ -22,7 +22,7 @@ answer does display zero.
 | Accounts | Client registry; billing accounts; credentials; client group links and bounded ledger evidence |
 | Bin | Archived files and folders, retaining selection and adjacent inspector |
 | Files | Browsing/search results (including Desktop, Bin and materialized places); backups; version-history title count |
-| Deployables | Deployables and Sources already canonical; source-produced apps, source credentials, Library zip choices, package report records, paired development stores; GitHub repository choices and group counts |
+| Deployables | Deployables and Sources already canonical; source-produced apps, source credentials, Library zip choices, package report records, paired development stores, access codes; GitHub repository choices and group counts |
 | Fleet | Machines; machine apps/models; recommended models; previous downloads; recent work; app sessions and produced artifacts; available models and host machines; catalog and uncatalogued models; workspaces/replicas; routing call history and policy references |
 | Users | People, groups and roles; memberships, invitations, standing managers, role holders and sessions |
 | Email | Email, audiences, senders, templates and rules; audience recipients and delivery ledger |

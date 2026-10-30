@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { Activity } from "lucide-react";
+import { Activity, Lock } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
+import { AccessCodesPanel } from "../access/AccessCodesPanel";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
 import { everyOtherAppSkipped, type DeployTarget, type Placement } from "../packages/calls";
@@ -429,6 +430,10 @@ export function DeployablePage({
             <VisitSiteButton site={site} name={name} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
             <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
+            {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
+                the whole axis, and a code opens a gate that only a package's own
+                deployable can declare. */}
+            {can.access && !site.systemOwned && site.packageDeployableName ? <IconButton label="Access codes" onClick={() => setDetail("access")}><Lock size={16} aria-hidden /></IconButton> : null}
           </Head>
 
           <Chips label="Deployable facts">
@@ -506,6 +511,9 @@ export function DeployablePage({
       {detail ? <DetailDialog title={detailTitle(detail)} onClose={() => setDetail(null)}>
         {detail === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
           detail === "traffic" ? <TrafficPanel site={site} /> :
+          // KEYED, so a code held for one deployable is never drawn over another:
+          // the effect that closes this dialog runs after the render that moves on.
+          detail === "access" ? <AccessCodesPanel key={site.id} site={site} /> :
           (() => { const stage = railFor(rail).stages.find(s => s.id === detail); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
         {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
       </DetailDialog> : null}
@@ -656,5 +664,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 // both take the pane and draw their own Head, and an entry here would be a
 // second title for a surface that already has one.
 function detailTitle(detail: WorkspaceDetail): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", store: "Store" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store" }[detail];
 }

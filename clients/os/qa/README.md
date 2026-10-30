@@ -102,6 +102,14 @@ archived). A development cluster has two built-in deployables and no source,
 so until these views existed neither list had been seen with the rows it was
 designed for. `connected` is the same app with a GitHub account connected.
 
+The `access*` views are a deployable's Access codes (design record
+2026-10-29-deployable-access-codes), opened over the real page: `access` holds a
+code in every reading a row has, long values included, `access-empty` has gates
+and no codes, `access-no-gates` has neither, `access-refused` is both reads
+refused, and `access-minted` presses its way to the one screen a code is ever on.
+Every code is the fake's. `&click=Regenerate Acme`, `&click=Change expiry of
+Acme` and `&click=Add an access code` open the question or the form.
+
 The `github-*` and `settings-*` views are the cluster's GitHub App in each
 reading a surface has of it: a cluster with none seen by somebody who may
 register one (`github-owner`, `settings-no-app`) and by somebody who may not

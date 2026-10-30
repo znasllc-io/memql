@@ -42,6 +42,8 @@ import {
   PLATFORM_SITE,
   SHOP,
   STORE,
+  accessCodeRow,
+  accessGateRow,
   fakeConnection,
   githubGrantRow,
   sourceConnectionRow,
@@ -699,6 +701,68 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// ACCESS CODES (design record 2026-10-29-deployable-access-codes)
+// ---------------------------------------------------------------------------
+// One code in every reading a row has: live and opened, live and never opened,
+// past its expiry, its gate no longer declared, old enough that "not opened yet"
+// would be a claim nothing can back, minted under another organization, and with a
+// name and a subject at their limits. The dialog opens through the page's own
+// `initialDetail`, over the real page, because a dialog judged alone is judged
+// without the window it dims.
+const ACCESS_SITE = siteRow({
+  id: "site-desk",
+  hostname: "desk.memql.example.com",
+  title: "Client Desk",
+  bundleRef: "blob://sites/site-desk/v3/",
+  packageId: "pkg-desk",
+  packageDeployableName: "client-desk",
+});
+
+const accessAt = (minutes: number): string => new Date(Date.now() + minutes * 60_000).toISOString();
+const ACCESS_DAY = 24 * 60;
+
+const ACCESS_GATES = [accessGateRow({ gate: "dashboard" }), accessGateRow({ gate: "engagement", usesSubject: true })];
+
+const ACCESS_SEED: FakeSeed = {
+  accessGates: ACCESS_GATES,
+  accessCodes: [
+    accessCodeRow({ id: "code-reviewers", label: "Client reviewers", codeHint: "9FBZ", issuedAt: accessAt(-3 * ACCESS_DAY), expiresAt: accessAt(8), lastOpenedAt: accessAt(-2) }),
+    accessCodeRow({ id: "code-acme", label: "Acme", gate: "engagement", subject: "acme", codeHint: "4GSX", issuedAt: accessAt(-ACCESS_DAY), expiresAt: accessAt(6 * ACCESS_DAY) }),
+    accessCodeRow({ id: "code-pilot", label: "Autumn pilot", codeHint: "T4DK", issuedAt: accessAt(-20 * ACCESS_DAY), expiresAt: accessAt(-90), lastOpenedAt: accessAt(-9 * ACCESS_DAY) }),
+    accessCodeRow({ id: "code-partner", label: "Former partner", gate: "reports", codeHint: "3XPA", issuedAt: accessAt(-40 * ACCESS_DAY), expiresAt: accessAt(20 * ACCESS_DAY) }),
+    accessCodeRow({ id: "code-moved", label: "Moved with the site", accountId: "borden", codeHint: "R7MY", issuedAt: accessAt(-5 * ACCESS_DAY), expiresAt: accessAt(5 * ACCESS_DAY) }),
+    accessCodeRow({ id: "code-long", label: "Northern Europe regional reviewers for the autumn operations audit, second pass", gate: "engagement", subject: "acme-holdings-emea-procurement-and-regional-compliance-review-2026-engagement-letter-counterparties-annex-c", codeHint: "J8N2", issuedAt: accessAt(-ACCESS_DAY), expiresAt: accessAt(29 * ACCESS_DAY), lastOpenedAt: accessAt(-4 * 60) }),
+  ],
+};
+
+const ACCESS_REFUSED: FakeSeed = {
+  accessCodesError: "siteAccessCodesForSite: MemQL engine failed to execute query. Details: No deployable you can read has that id. Reload the list of deployables and choose one you can see.",
+  accessGatesError: "siteAccessGates: MemQL engine failed to execute query. Details: No deployable you can read has that id. Reload the list of deployables and choose one you can see.",
+};
+
+/** `?click=` for the view that can only be reached by pressing: the code exists once. */
+const ACCESS_CLICKS: Record<string, string> = { "access-minted": "Regenerate Client reviewers|Regenerate" };
+
+function AccessPage() {
+  return (
+    <WindowBody fallback="Deployables">
+      <DeployablePage
+        site={siteFromRow(ACCESS_SITE)}
+        pkg={null}
+        credentials={[]}
+        viewerUserId="u-me"
+        nameOf={() => ""}
+        can={ALL_PARTS}
+        clusterDomain="memql.example.com"
+        onBack={() => {}}
+        onOpenSource={() => {}}
+        initialDetail="access"
+      />
+    </WindowBody>
+  );
+}
+
 // A view may bring its own CONNECTION and its own session wrapper. The Store
 // and Deployables views share `test/deployables/harness`; the Data origins
 // views need `test/cluster/harness`, whose fake answers `dataOrigins` and
@@ -1181,6 +1245,11 @@ const VIEWS: Record<
   "preview-failing": { seed: PREVIEW_FAILING, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
   "preview-refused": { seed: PREVIEW_REFUSED, render: () => <PreviewPage site={siteFromRow(siteRow({ ...SHOP, id: "site-shop", candidateRef: "blob://sites/site-shop/v2/", previewBinding: { storeId: "store-example" } } as never))} /> },
   "preview-none": { seed: PREVIEW_NONE, render: () => <PreviewPage site={siteFromRow(SHOP)} /> },
+  access: { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
+  "access-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
+  "access-minted": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
+  "access-no-gates": { seed: { accessGates: [], accessCodes: [] }, framed: true, render: () => <AccessPage /> },
+  "access-refused": { seed: ACCESS_REFUSED, framed: true, render: () => <AccessPage /> },
   store: { seed: BOUND, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   picker: { seed: UNBOUND, render: () => <StorePane site={siteFromRow(UNBOUND_SITE)} canBind /> },
@@ -2149,7 +2218,7 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
     // A choice card and a record row answer to their names: a card's note ("1,204
