@@ -182,7 +182,7 @@ func TestDigestLookupReadsOnlyTheMatchingRows(t *testing.T) {
 
 // THE REVOCATION CHECK COSTS ITS SESSION, NOT EVERY SESSION.
 //
-// authSessionByTokenHash runs for every verified HTTP request and stream open.
+// authSessionByTokenHash runs for verified HTTP requests and user stream opens.
 // With no lookup index it collapsed every session to its latest version before
 // comparing the digest: 474,699 buffers and 1.1 s at 120,000 sessions, hit or
 // miss, measured through a real bff. This fixture is 20,000 sessions of two

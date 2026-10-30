@@ -709,8 +709,8 @@ query authSession authSessionByRefreshTokenHash {
 // runs this query to decide whether the row has been revoked. Returns
 // the latest version of the row (append-only semantics) including
 // revokedAt; the caller branches on the timestamp. Read through
-// memory_nodes_auth_session_hash_lookup_idx, so it costs one session
-// however many the cluster holds (component/memql payloadLookups).
+// memory_nodes_auth_session_hash_lookup_idx, so its cost does not grow
+// with the number of sessions (component/memql payloadLookups).
 //
 // Intentionally does NOT filter on isActiveRecord -- a revoked row
 // is still the row we need to find so the middleware can refuse the

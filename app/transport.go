@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"google.golang.org/grpc"
+
 	"github.com/znasllc-io/memql/component/auth"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
@@ -158,49 +160,7 @@ func (a *App) transportBase() {
 	// users authenticate through the HTTP magic-link / OAuth /
 	// admin paths wired by transportIdentity.
 	if a.identityVerifier != nil {
-		// Delegation resolver (memql#112). When the verified JWT
-		// subject has an active delegation row, the resolver builds a
-		// DelegationContext (role-ceiling-clamped, scope-narrowed,
-		// lifetime-checked) and the interceptor stamps it on the
-		// request ctx. Audit emit goes through a SlogAuditLogger
-		// rooted in a.Logger -- on the identity binary the boot
-		// path also wires a DB sink on top (see app/integrations_identity.go),
-		// but the resolver itself only needs the slog stream.
-		delegationAuditor := &identity.SlogAuditLogger{Logger: a.Logger}
-		delegationResolver := identity.NewEngineDelegationResolver(a.engine, delegationAuditor, a.Logger)
-		base := verifier.StreamInterceptor(a.identityVerifier, a.Logger, delegationResolver)
-		sessionChecked := memqlgrpc.NewSessionRevocationStreamInterceptor(base, a.engine, a.Logger)
-		operatorChecked := memqlgrpc.NewOperatorAwareStreamInterceptor(sessionChecked, a.Logger)
-		// Service-account: class="service_account" identity-issued JWT pinned
-		// to the read/query surface (#691, deployment-v2 Phase 3). Verified via
-		// the same JWKS verifier (no DB lookup), so it works on the BFF/mesh
-		// where a PAT does not. This is what lets the in-cluster deploy gate
-		// run its authenticated query. See component/grpc/
-		// service_account_stream_interceptor.go.
-		serviceAccountChecked := memqlgrpc.NewServiceAccountStreamInterceptor(operatorChecked, a.identityVerifier, a.Logger)
-		// Anonymous: a stream carrying NO credential at all, on a cluster
-		// whose operator opted into having an anonymous surface (epic
-		// memql#4541, D4). Default OFF, and off it is a pass-through --
-		// a credential-less dial is refused by the same code as before.
-		//
-		// OUTERMOST of the auth chain, and that is the point: it has to
-		// decide before the verifier refuses. Everything inside it still
-		// sees exactly what it saw, because a stream carrying any
-		// credential is handed straight down.
-		publicReads := auth.PublicReadsEnabled()
-		if publicReads {
-			a.Logger.Warn("PUBLIC READS ENABLED: this cluster accepts unauthenticated sessions, pinned to public-tier reads and graph subscriptions",
-				"env", auth.PublicReadsEnabledEnv,
-				"note", "no concept in the engine tree declares @rowAuthz(public), so this publishes nothing until a bundle declares the tier")
-		}
-		anonymousChecked := memqlgrpc.NewAnonymousStreamInterceptor(serviceAccountChecked, publicReads, a.Logger)
-		// Panic recovery wraps the entire chain. A panic anywhere
-		// downstream is caught here, logged with stack + error id,
-		// and surfaced to the client as codes.Internal with the
-		// safe message "internal server error [ERR-...]" -- never
-		// the raw panic value.
-		recovered := memqlgrpc.NewPanicRecoveryStreamInterceptor(anonymousChecked, a.Logger)
-		a.grpcServer.SetStreamInterceptor(recovered)
+		a.grpcServer.SetStreamInterceptor(a.verifiedStreamChain())
 		// Hand the verifier to the gRPC server so the in-stream
 		// rotation handler (RotateAuthMsg) can re-verify a refreshed
 		// bearer against the same JWKS + audience + issuer the
@@ -265,6 +225,56 @@ func (a *App) transportBase() {
 	for _, path := range server.MemqlWebsocketPaths() {
 		a.handleRouteFunc("GET "+path, wsBridge.ServeHTTP)
 	}
+}
+
+// verifiedStreamChain is the MemqlService stream chain of a node with a verifier,
+// as transportBase describes it. It is a method so a test can open a stream
+// through what the node really installs, because that chain is the only thing
+// that refuses a revoked bearer the gateway forwards from a path the verifier
+// skipped (TestARevokedSessionIsRefusedThroughTheGatewayOnAPublicPrefix).
+func (a *App) verifiedStreamChain() grpc.StreamServerInterceptor {
+	// Delegation resolver (memql#112). When the verified JWT
+	// subject has an active delegation row, the resolver builds a
+	// DelegationContext (role-ceiling-clamped, scope-narrowed,
+	// lifetime-checked) and the interceptor stamps it on the
+	// request ctx. Audit emit goes through a SlogAuditLogger
+	// rooted in a.Logger -- on the identity binary the boot
+	// path also wires a DB sink on top (see app/integrations_identity.go),
+	// but the resolver itself only needs the slog stream.
+	delegationAuditor := &identity.SlogAuditLogger{Logger: a.Logger}
+	delegationResolver := identity.NewEngineDelegationResolver(a.engine, delegationAuditor, a.Logger)
+	base := verifier.StreamInterceptor(a.identityVerifier, a.Logger, delegationResolver)
+	sessionChecked := memqlgrpc.NewSessionRevocationStreamInterceptor(base, a.engine, a.Logger)
+	operatorChecked := memqlgrpc.NewOperatorAwareStreamInterceptor(sessionChecked, a.Logger)
+	// Service-account: class="service_account" identity-issued JWT pinned
+	// to the read/query surface (#691, deployment-v2 Phase 3). Verified via
+	// the same JWKS verifier (no DB lookup), so it works on the BFF/mesh
+	// where a PAT does not. This is what lets the in-cluster deploy gate
+	// run its authenticated query. See component/grpc/
+	// service_account_stream_interceptor.go.
+	serviceAccountChecked := memqlgrpc.NewServiceAccountStreamInterceptor(operatorChecked, a.identityVerifier, a.Logger)
+	// Anonymous: a stream carrying NO credential at all, on a cluster
+	// whose operator opted into having an anonymous surface (epic
+	// memql#4541, D4). Default OFF, and off it is a pass-through --
+	// a credential-less dial is refused by the same code as before.
+	//
+	// OUTERMOST of the auth chain, and that is the point: it has to
+	// decide before the verifier refuses. Everything inside it still
+	// sees exactly what it saw, because a stream carrying any
+	// credential is handed straight down.
+	publicReads := auth.PublicReadsEnabled()
+	if publicReads {
+		a.Logger.Warn("PUBLIC READS ENABLED: this cluster accepts unauthenticated sessions, pinned to public-tier reads and graph subscriptions",
+			"env", auth.PublicReadsEnabledEnv,
+			"note", "no concept in the engine tree declares @rowAuthz(public), so this publishes nothing until a bundle declares the tier")
+	}
+	anonymousChecked := memqlgrpc.NewAnonymousStreamInterceptor(serviceAccountChecked, publicReads, a.Logger)
+	// Panic recovery wraps the entire chain. A panic anywhere
+	// downstream is caught here, logged with stack + error id,
+	// and surfaced to the client as codes.Internal with the
+	// safe message "internal server error [ERR-...]" -- never
+	// the raw panic value.
+	return memqlgrpc.NewPanicRecoveryStreamInterceptor(anonymousChecked, a.Logger)
 }
 
 // createHTTPServer finalizes middleware and creates the HTTP server.

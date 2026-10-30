@@ -548,7 +548,7 @@ func parseAndScan(t *testing.T, name, src string) ([]string, int) {
 // it appeared in no declaration and failed no check. The fix records it via
 // a.middlewareRoutes -- which closes that instance. It does not, on its own,
 // stop the NEXT middleware being equally invisible: `a.middlewares = append(...)`
-// appears at five sites and exactly one of them declares any path.
+// appears at four sites and exactly one of them declares any path.
 //
 // So this gate makes the channel explicit. Every middleware registration is
 // either known to serve no request path of its own, or must declare what it

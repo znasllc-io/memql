@@ -14,7 +14,7 @@ const (
 )
 
 // The revocation check must not cost every session. It runs
-// authSessionByTokenHash for every verified HTTP request and stream open, and
+// authSessionByTokenHash for verified HTTP requests and user stream opens, and
 // the identity service's own bearer lookups run the same query. Without an index
 // that read collapsed every session to its latest version before comparing the
 // digest: 474,699 buffers and 1.1 s at 120,000 sessions in 11 chunks, 4.8 s in 54,

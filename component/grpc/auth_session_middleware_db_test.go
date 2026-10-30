@@ -146,11 +146,14 @@ var bearerCarriers = []struct {
 	{"authorization header", func(r *http.Request, token string) { r.Header.Set("Authorization", "Bearer "+token) }},
 	{"websocket subprotocol", func(r *http.Request, token string) { r.Header.Set("Sec-WebSocket-Protocol", "bearer, "+token) }},
 	{"auth cookie", func(r *http.Request, token string) { r.AddCookie(&http.Cookie{Name: authCookieName, Value: token}) }},
-	{"query parameter", func(r *http.Request, token string) {
-		query := r.URL.Query()
-		query.Set("token", token)
-		r.URL.RawQuery = query.Encode()
-	}},
+	{"token query parameter", func(r *http.Request, token string) { setQuery(r, "token", token) }},
+	{"bearer_token query parameter", func(r *http.Request, token string) { setQuery(r, "bearer_token", token) }},
+}
+
+func setQuery(r *http.Request, name, value string) {
+	query := r.URL.Query()
+	query.Set(name, value)
+	r.URL.RawQuery = query.Encode()
 }
 
 // serve runs one request through chain and reports its status, its body, and
@@ -196,7 +199,9 @@ func TestSessionRevocationReadsNothingForABearerNobodyVerified(t *testing.T) {
 // it, the handler gets no claims from it, and a public path answers everyone. So
 // a revoked one is served there too, and that is deliberate. It used to be
 // refused, so a browser still holding a revoked cookie got a 401 from a public
-// path; nothing on those paths acts on the credential.
+// path. A handler behind one of those paths does not read the credential. The
+// gateway does forward it, and the stream chain refuses it on that hop:
+// TestARevokedSessionIsRefusedThroughTheGatewayOnAPublicPrefix (app).
 func TestSessionRevocationLeavesAPathTheVerifierSkipped(t *testing.T) {
 	f := newRevocationFixture(t)
 	for _, carrier := range bearerCarriers {
@@ -238,41 +243,22 @@ func TestSessionRevocationRefusesARevokedSessionOnEveryCarrier(t *testing.T) {
 	})
 }
 
-// narrowDelegation answers every subject with an active delegation of the least
-// authority one can carry, which the stream verifier stamps on the context it
-// hands on. The node installs a real resolver in the same place.
-type narrowDelegation struct{}
-
-func (narrowDelegation) ResolveActiveDelegation(_ context.Context, subject string) (*auth.DelegationContext, error) {
-	return &auth.DelegationContext{
-		DelegationId: "v1:identity:delegation:narrow",
-		IdentityId:   subject,
-		IdentityType: "human",
-		AgentId:      "v1:agents:agent:narrow",
-		RoleCeiling:  auth.RoleReader,
-		Scopes:       []string{"nothing.that.reads.a.session"},
-	}, nil
-}
-
 func TestSessionRevocationStreamVerifiesBeforeItReads(t *testing.T) {
 	f := newRevocationFixture(t)
-	opener := func(base grpc.StreamServerInterceptor) func(*testing.T, string) (error, bool, map[string]any) {
-		interceptor := NewSessionRevocationStreamInterceptor(base, f.engine, f.logger)
-		return func(t *testing.T, token string) (error, bool, map[string]any) {
-			t.Helper()
-			stream := newCaptureStream(t)
-			stream.ctx = metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
-			var reached bool
-			var claims map[string]any
-			err := interceptor(nil, stream, &grpc.StreamServerInfo{FullMethod: "/revocation.test/Stream"}, func(_ any, verified grpc.ServerStream) error {
-				reached = true
-				claims, _ = auth.ClaimsFromContext(verified.Context())
-				return nil
-			})
-			return err, reached, claims
-		}
+	interceptor := NewSessionRevocationStreamInterceptor(verifier.StreamInterceptor(f.verifier, f.logger), f.engine, f.logger)
+	open := func(t *testing.T, token string) (error, bool, map[string]any) {
+		t.Helper()
+		stream := newCaptureStream(t)
+		stream.ctx = metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
+		var reached bool
+		var claims map[string]any
+		err := interceptor(nil, stream, &grpc.StreamServerInfo{FullMethod: "/revocation.test/Stream"}, func(_ any, verified grpc.ServerStream) error {
+			reached = true
+			claims, _ = auth.ClaimsFromContext(verified.Context())
+			return nil
+		})
+		return err, reached, claims
 	}
-	open := opener(verifier.StreamInterceptor(f.verifier, f.logger))
 
 	t.Run("a bearer the verifier refuses costs no read", func(t *testing.T) {
 		err, reached, _ := open(t, "not-a-token")
@@ -300,14 +286,5 @@ func TestSessionRevocationStreamVerifiesBeforeItReads(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, reached)
 		require.Equal(t, 1, f.reads.take())
-	})
-	// A lookup that failed under a delegation's narrowed authority would fail
-	// open, and a revoked session would get its stream.
-	t.Run("a revoked session is refused under an active delegation", func(t *testing.T) {
-		delegated := opener(verifier.StreamInterceptor(f.verifier, f.logger, narrowDelegation{}))
-		err, reached, _ := delegated(t, f.revokedSession(t))
-		require.Equal(t, codes.Unauthenticated, status.Code(err))
-		require.Contains(t, fmt.Sprint(err), "session revoked")
-		require.False(t, reached)
 	})
 }

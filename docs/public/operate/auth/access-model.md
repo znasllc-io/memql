@@ -610,11 +610,16 @@ keep their socket open until the JWT expires or the client
 disconnects.
 
 The lookup waits for the verifier, so a bearer the verifier refused
-costs no session read, and a path the verifier skips (a public or
-self-authenticated one) is not checked at all, a revoked bearer
-included: that path answers a caller with no credential the same way.
-The read goes through `memory_nodes_auth_session_hash_lookup_idx`, so it
-costs one session however many the cluster holds.
+costs no session read. A path the verifier skips (a public or
+self-authenticated one) is not checked by this middleware, a revoked
+bearer included, because its handler does not read the bearer. The
+gateway is the exception: it claims any `POST` ending in `/memql/query`,
+so `POST /healthz/memql/query` skips the verifier and still forwards the
+bearer to the stream, and the check at stream open refuses it there.
+
+The read goes through `memory_nodes_auth_session_hash_lookup_idx`, so its
+cost does not grow with the number of sessions. It does still visit each
+chunk's index.
 
 **Building that index on a large table.** Migration
 `20261030140000_auth_session_hash_lookup_index` builds it one chunk per

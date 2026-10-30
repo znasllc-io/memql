@@ -1,14 +1,14 @@
 // Package memql session-revocation middleware.
 //
-// Two enforcement layers wrap the identity-verifier auth path so a
-// revoked v1:identity:authSession row blocks the bearer token
-// everywhere it might appear:
+// Two enforcement layers wrap the node's main identity-verifier auth
+// path so a revoked v1:identity:authSession row blocks the bearer
+// token wherever that path accepts it:
 //
 //   - NewSessionRevocationHTTPMiddleware: runs inside the verifier's
 //     HTTPMiddleware (app.identityHTTPMiddleware builds the two as
 //     one). For a request whose JWT has been signature-verified and
 //     whose claims are attached, we hash the bearer token (Authorization
-//     header, WebSocket subprotocol, memql_auth cookie, or `?token=`
+//     header, WebSocket subprotocol, memql_auth cookie, or a deprecated
 //     query param) and reject the request if the matching session row
 //     is revoked.
 //
@@ -27,12 +27,14 @@
 // 120,000 sessions. The index makes it cheap; waiting makes it
 // unreachable by a stranger.
 //
-// A path the verifier skips is therefore not checked at all, a revoked
-// bearer included. That gives nothing away: no verifier read that
-// bearer, the handler behind it gets no claims from it, and the path
-// answers a caller with no credential the same way. A later hop that
-// does act on a credential verifies it for itself, and the stream
-// interceptor below is on that hop.
+// A path the verifier skips is therefore not checked here, a revoked
+// bearer included. No verifier read that bearer, and the handler
+// behind it gets no claims from it. One thing on such a path does act
+// on a bearer: the verifier matches public paths by prefix and the
+// gateway claims any POST ending in /memql/query, so POST
+// /healthz/memql/query forwards the bearer to MemqlService.Stream. The
+// stream interceptor below is what refuses it there, and nothing else
+// does (TestARevokedSessionIsRefusedThroughTheGatewayOnAPublicPrefix).
 //
 // The HTTP middleware also runs on the WebSocket upgrade -- the
 // revocation check happens at connect time. Already-established
@@ -138,9 +140,8 @@ func NewSessionRevocationStreamInterceptor(base grpc.StreamServerInterceptor, en
 		// Base runs first; it sets claims and rejects bad tokens, and
 		// only a stream it accepted reaches this handler. The read
 		// stays on the original ss.Context(), where the bearer token's
-		// metadata lives: the context base hands on can carry a
-		// delegation's narrowed authority, and a read refused under it
-		// would fail open below.
+		// metadata lives: waiting for base changes when it runs, not
+		// as whom.
 		return base(srv, ss, info, func(srv interface{}, verified grpc.ServerStream) error {
 			token := bearerTokenFromIncomingContext(ss.Context())
 			if token == "" {
