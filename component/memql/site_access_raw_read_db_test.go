@@ -130,7 +130,11 @@ func TestNoClientReadsAnAccessCodeOrSessionByAnyPath(t *testing.T) {
 		{"a raw read by id", fmt.Sprintf(`concept==v1:platform:siteAccessCode && id==%q`, f.codeStored), true},
 		{"a raw read by digest", fmt.Sprintf(`concept==v1:platform:siteAccessCode && codeHash==%q`, f.digest), true},
 		{"a raw read of the whole concept", `concept==v1:platform:siteAccessCode`, true},
-		{"sort(paginate(...))", `sort(paginate(concept==v1:platform:siteAccessCode, 10), "createdAt", "desc")`, true},
+		// Scoped to the fixture's site: the window is the newest ten rows of whatever the
+		// filter selects, so over the whole concept it would be the newest ten of every
+		// test's codes -- including another run's, against a shared database -- and the
+		// control read below would find none of this fixture's.
+		{"sort(paginate(...))", fmt.Sprintf(`sort(paginate(concept==v1:platform:siteAccessCode && siteId==%q, 10), "createdAt", "desc")`, f.site), true},
 		{"asOf", fmt.Sprintf(`asOf(concept==v1:platform:siteAccessCode && siteId==%q, %q)`, f.site, now), true},
 		{"a raw session read by site", fmt.Sprintf(`concept==v1:platform:siteAccessSession && siteId==%q`, f.site), true},
 		{"a raw session read by token digest", fmt.Sprintf(`concept==v1:platform:siteAccessSession && tokenHash==%q`, f.tokenDigest), true},

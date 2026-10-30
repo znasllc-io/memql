@@ -118,11 +118,11 @@ func TestASiteWithLiveAccessCodesCannotChangeOrganization(t *testing.T) {
 		require.NoError(t, move(operatorCtx, tied, acme), "a write that changes nothing was refused")
 		require.Equal(t, BareShortId(acme), accountOf(tied))
 
-		// Untying is a change too. A person is refused it by the ownership rule
-		// before it reaches this one (an attributed record is not unattributed),
-		// so only that it fails and changes nothing is asserted; the cluster
-		// acting, which skips that rule, is held to this one below.
-		require.Error(t, move(operatorCtx, tied, ""), "clearing the organization of a site with a live code was allowed")
+		// Untying is a change too, and a person meets this check FIRST: it runs
+		// before the ownership rule that would stop them clearing an attributed
+		// record anyway, so the codes sentence is what they read while a code is
+		// live. (Once none is, that rule is what refuses them.)
+		refused(t, move(operatorCtx, tied, ""), "clearing the organization of a site with a live code")
 		require.Equal(t, BareShortId(acme), accountOf(tied))
 
 		// A code that has been removed stops blocking, so a site that once had a
@@ -189,9 +189,10 @@ func TestASiteWithLiveAccessCodesCannotChangeOrganization(t *testing.T) {
 
 	t.Run("clearing the organization is refused while a code is live and works once none is", func(t *testing.T) {
 		// Clearing is the change most likely to be skipped, because the new organization is
-		// empty. A person is stopped by the ownership rule after this check, so the sentence
-		// is asserted for the person only where this check comes first, and for the cluster,
-		// which is the one actor that can clear, in every case.
+		// empty. A person meets this check before the ownership rule that would stop them
+		// clearing any attributed record, so they read the codes sentence while a code is
+		// live. The cluster is the one actor that can clear at all, and it is held to the
+		// same sentence, and can clear once no code is live.
 		cleared := addSite("clear", acme)
 		code := ids.code + "-clear"
 		mint(code, cleared, acme, issued.Add(time.Hour))

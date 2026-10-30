@@ -392,6 +392,15 @@ concept sitePreviewObservation {
 /// visitor's gated call runs under it. The tier below still decides every row they read; the clause
 /// grants nothing.
 ///
+/// NO GRAPH EVENT IS PUBLISHED FOR A WRITE TO IT. The event a write would publish carries the whole
+/// row -- the digest and the label -- to every subscriber, the bus has no authorization hook, and an
+/// authored automation or an email rule can trigger on any concept and have its run journal copy the
+/// event into a run row that a cluster owner reads. So withholdGraphWriteEvent (component/memql)
+/// withholds both graph.node.created and graph.node.updated for the concepts on the same list the read
+/// clause uses: nothing triggers on a code and nothing can subscribe to one. Cache invalidation is a
+/// separate channel that carries only the concept's name, and it is still published. The Access codes
+/// panel re-lists after each act.
+///
 /// NOTHING A VISITOR DOES WRITES THIS ROW. A write to a code is a read-merge of the whole row, so a
 /// write on a visitor's schedule (a 'last used' stamp on every unlock) races every operator act on
 /// the same row, and a prototype of one undid them when review measured it: a removed code live
@@ -476,7 +485,9 @@ concept siteAccessCode {
 /// code's reason, and the stakes are higher here: a session row is what the bff honours IN PLACE OF the
 /// code, so a raw insert of one with a digest the writer chose would be a way in that needs neither the
 /// code nor the part. Its reads are closed to clients as the code's are (clientUnreadableConcepts):
-/// the digest of a live cookie is not something the owner of a site gets to read back.
+/// the digest of a live cookie is not something the owner of a site gets to read back. For the same
+/// reason a write to it publishes no graph event (withholdGraphWriteEvent): the event would carry the
+/// digest to every subscriber, an authored automation's run journal included.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @retention(ttl="30d", keepLatest=false, archive="none")

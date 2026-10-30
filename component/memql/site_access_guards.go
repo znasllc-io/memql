@@ -41,6 +41,18 @@ const (
 // No working code was exposed (only a digest is stored), and the owner asked for
 // the one clause that closes it rather than the argument that it is harmless.
 //
+// THE EVENT BUS IS A DOOR TOO, and the same list closes it. A write publishes
+// graph.node.created (and graph.node.updated) with the whole stored row flattened into
+// the envelope and retained again under "payload", and events.Bus.Publish fans a clone
+// out to every subscriber with no AccessContext and no authorization hook of any kind.
+// An authored automation can trigger on any concept (an email rule generates one), and an
+// automation's run journal writes the event it ran for into a run row that its author, and
+// a cluster owner, can read: in review that put a code's digest and label, and a session's
+// token digest, in a row nobody had gated. So a concept on this list publishes NO graph
+// event (withholdGraphWriteEvent, staged_write.go) -- the staged-data tier's ruling, for
+// its reason. Cache invalidation is a separate channel that carries the concept's name and
+// nothing of its rows, and it is still published.
+//
 // WHO STILL READS. The server does, and says so twice over: internal origin, which
 // every handler under the builtins and the bff's store stamp on their own reads (and
 // which the organization gate has already judged by then), and the cluster acting on
@@ -66,12 +78,19 @@ var clientUnreadableConcepts = map[string]string{
 	siteAccessSessionConcept: "its row is what the bff honours in place of a code, with the digest of a live cookie, and nothing a person calls needs it except through the code's builtins; a raw read would hand the owner of a site the very rows the visitor protocol trusts",
 }
 
+// conceptIsClientUnreadable reports whether a concept is on clientUnreadableConcepts.
+// The read clause and the event bus's withholding both ask it, so the two cannot drift.
+func conceptIsClientUnreadable(conceptName string) bool {
+	_, listed := clientUnreadableConcepts[strings.TrimSpace(conceptName)]
+	return listed
+}
+
 // clientReadRefused reports whether this caller is a CLIENT asking for a row of a
 // concept no client reads. Internal origin and the cluster acting are not clients;
 // see clientUnreadableConcepts for what each is, why neither can be forged, and why
 // borrowed authority is neither.
 func clientReadRefused(ctx context.Context, conceptName string) bool {
-	if _, listed := clientUnreadableConcepts[strings.TrimSpace(conceptName)]; !listed {
+	if !conceptIsClientUnreadable(conceptName) {
 		return false
 	}
 	return !auth.OriginFromContext(ctx).IsInternal() && !actorIsTheClusterActing(ctx)
