@@ -747,6 +747,13 @@ This is separate from the action journal, which retains file revisions as the
 app records them. Clean checkouts and dependency caches remain reusable local
 resources rather than Library copies of a repository.
 
+A file can be stored before its artifact is visible: the Library's upload route
+waits a bounded time for the index row, then answers with the file ID alone. The
+file is stored and the artifact follows, so this is not a transfer failure and
+does not fail the session. The manifest names that file by its file ID. It is
+left out of the session's produced artifact IDs, so that one artifact gets no
+produced-by provenance.
+
 ---
 
 ## When it does not work
