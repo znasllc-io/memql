@@ -932,6 +932,63 @@ repetitions of what the app already had.
   source moves, then what", which is a property of the source rather than of
   any one run.
 
+### Access codes: who a deployable is for (design record 2026-10-29)
+
+A lock after Traffic in a deployable's head opens its **Access codes**
+(`apps/deployables/access/`): the codes in label order, a short Add form, and
+Regenerate, Change expiry and Remove on each row. The engine side, the wire a
+visitor's page speaks and the limits are in
+[site-access-codes.md](../../docs/public/operate/site-access-codes.md); what the
+panel decides is below, and it decides almost nothing: validity is compared with
+the engine's clock on every request, so these words only say what a row says.
+
+- **ABSENT, NOT DISABLED** (DESIGN.md rule 12). The control is drawn when
+  `can.access` holds (the `access` part, `parts.ts`), the deployable is not
+  `systemOwned`, and it has a `packageDeployableName`, because a code opens a
+  gate that only a package's own deployable can declare. An illegal act on a row
+  is absent too: a code minted under another organization offers only Remove.
+- **THE PLAIN CODE IS IN NO ROW.** The reply to a mint or a regenerate is the only
+  place it ever exists, so `useAccessCodes` holds it in React state, no row type
+  has a field for it, and it goes when the NEXT WRITE STARTS, not when a question
+  opens: somebody who asks and answers Keep it has changed nothing, and an
+  uncopied code gone from under them would cost a regenerate to learn that.
+  Done is held by `InPlaceAsk` for the other side of the same race -- the second
+  click of a double-click on Create must not press what the first one brought and
+  throw away a code shown once. It is the one loud thing on the surface.
+- **THE DIALOG WAITS WHILE IT HOLDS THE ONLY COPY.** The panel tells the dialog
+  (`DetailDialog`'s `busy`) when a write is out or a new code is on screen, and
+  Close and Escape do nothing until it is not. Closed with a write out, the reply
+  lands in nothing: the old code is dead and the new one was never seen. Closed
+  over a new code, that code is gone for good and a regenerate is the only
+  recovery. Done is the way out, which costs one deliberate click.
+- **NOTHING HERE IS A LIVE FEED.** Neither concept publishes graph events (D14),
+  so a collection over one would draw a list that never moves. Both lists are
+  builtins (the shared organization gate judges builtins and mutations, never a
+  query), read through `useReading` and read again after each write, as
+  `usePreview.ts` does. The re-read is a REVISION and not `reread()`, which is
+  ignored while a read is out: a read that started before a write landed answers
+  with the world before it, and would otherwise stand.
+- **THE WORDS SAY WHAT THEY CAN BACK** (`access/expiry.ts`). "Expires in 8
+  minutes" has the exact time behind it, the last minute has its own word,
+  because rounded it reads as zero minutes and zero reads as expired, and an
+  unreadable expiry counts as past, as the engine's regenerate does. "Not opened
+  yet" is a claim about the secret's whole life, and sessions are retired at 30
+  days, so past that it says "Not opened in the last 30 days"; an opening older
+  than the secret belongs to the one it replaced.
+- **A QUESTION STANDS WHERE THE ACT WAS ASKED.** Regenerate and Remove ask under
+  their own row and say what stops working. An expired code's Regenerate asks for
+  a new expiry, because the engine refuses one without it. A refusal is read
+  through `refusalSentence` and stays on screen after its row has gone, which is
+  what a regenerate of a code somebody else removed needs: the re-read takes the
+  row, and the question under it, away.
+- **THE DIALOG'S TOP EDGE STANDS STILL** (`composition.css`). A centred modal
+  moved everything in it when a question opened or the form took the list's
+  place, and the second click of a double-click on Add landed on Close.
+
+The QA harness has fixtures for it (`access`, `access-empty`, `access-minted`,
+`access-no-gates` and `access-refused`), and `test/deployables/accessCodes.test.tsx`
+holds the presence rules, the shown-once rule and each confirmation.
+
 ### Pipelines: delivery management
 
 The dedicated Pipelines app owns Overview, Repositories, Changes, Runs,

@@ -430,6 +430,53 @@ Full reasoning:
 
 ---
 
+## A construct an access code can open: `@accessGate`
+
+A shopper is the public. A deployable can also keep part of itself for people who
+hold an **access code** an operator gave them -- one client's engagement pages,
+say -- and a product declares that part in DSL alone: no Go, no `bff/` module.
+A `query` or a `mutation` carries `@accessGate`, and a visitor who has traded a
+code for that gate's session may call it from the deployable's own origin:
+
+```memql fragment
+@accessGate(deployable="client-desk", gate="dashboard")
+@actor
+query deskBrief dashboardBriefs {
+  args { accessCodeId string! }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+  shape deskBriefCard
+}
+```
+
+**It opens no endpoint.** The route family (`/_memql/access*` on a deployable's
+own origin) is engine-owned, so the privilege of putting a public endpoint on
+someone's origin stays Go compiled into the engine. The annotation only says
+which constructs a gate reaches, and a deployable with no codes answers every
+call as it answers a stranger.
+
+- **Reach is declared per construct, and runs under the SITE OWNER'S borrowed
+  authority**, never internal origin, like the shopper write above. So the
+  annotation is refused beside `@serverOnly`, `@requiresRank` and
+  `@requiresCapability`, and on anything but a query or a mutation.
+- **Four arguments are reserved and stamped last**: `siteId`, `accessCodeId`,
+  `accessGate` and `accessSubject`. They are how rows stay apart between codes,
+  and a gated read that filters on neither `accessCodeId` nor `accessSubject`
+  opens its rows to everyone holding any code for that gate. A reserved name that
+  differs only in case is a load fault.
+- **A gate belongs to the package that ships it**: its `deployable` is the
+  manifest's name, and the DSL domain of the concept it is bound to must be one
+  the site's package ships (`dslDomains`, recorded by the deploy). Package
+  analysis reports a foreign one before anything is staged.
+- **Every other argument is untrusted input.** A mutation must not let a visitor
+  choose the row's id or spread an object argument into the row, or one code can
+  write over another's.
+
+The worked example, the rules, the wire and what the page has to do are in
+[Access codes](../operate/site-access-codes.md#declaring-what-a-code-opens).
+
+---
+
 ## The storefront-pack convention
 
 `reviewspack` and the wholesale pack ship **concepts, mutations, queries, tools

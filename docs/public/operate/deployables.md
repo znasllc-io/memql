@@ -288,7 +288,8 @@ decision about the run, not about the software.
   that serves visitors: one that publishes a serving version, or one with every
   app skipped that carries DSL. A run that published only candidates records
   nothing, so a candidate of a tree that dropped a domain, or that ships no DSL
-  at all, cannot close the gates of the build the public is being served.
+  at all, cannot close the gates of the build the public is being served
+  ([Access codes](site-access-codes.md#which-package-opens-a-gate)).
 - **The target survives the confirm gate.** A run records its candidates when
   it opens (`candidates` on the run row). At the gate, a target the
   confirming call names wins -- choosing there, with the plan on screen, is
@@ -934,6 +935,63 @@ rather than by omission.
 
 ---
 
+## Access codes
+
+A deployable is public: anybody who resolves its hostname is served its bundle.
+**Access codes** let part of it open only for people an operator gives a code to,
+with no sign-in. The full account -- the wire, what the page must do, how a gate
+is declared and the limits -- is [Access codes](site-access-codes.md). This
+section is what belongs to the deployable.
+
+**Where.** The lock after Traffic in a deployable's page head opens its Access
+codes: a list, a short Add form, and Regenerate, Change expiry and Remove on each
+row. The control is *absent*, not disabled, for a person who does not hold the
+part, on a system-owned deployable, and on one that was not deployed from a
+package.
+
+**The part.** `execute` on `app:deployables/access`, seeded on owner and
+developer, and judged against the deployable's own organization as
+`sitePreviewOpen` is. A code is minted for one gate of the deployable's own app,
+optionally for one subject (one client), and **always expires**: more than a
+minute away and at most 366 days, with presets of 10 minutes, 1 hour, 1 day,
+7 days and 30 days.
+
+**What a code opens is declared in the package.** A construct carries
+`@accessGate(deployable="...", gate="...")` for the deployable's manifest name.
+A deployable with none declared offers no gate to choose, and says how to add
+one. Which DSL domains a package ships is recorded by the deploy that serves
+visitors (`dslDomains`; see the candidate paragraph under
+[Publishing the candidate version instead](#publishing-the-candidate-version-instead)),
+so **a source deployed before access codes existed has no gates until it is
+deployed again.**
+
+**Refused**, with a sentence that says what to change:
+
+- a deployable with **no owner**, and a **system-owned** one -- a call runs under
+  its owner's authority, so a deployable without one has none to lend;
+- a deployable with **no package deployable**, or a gate it does not declare;
+- a name outside 1 to 80 characters, a subject over 120, and an expiry outside
+  the bounds above.
+
+**A person mints a code, never a run.** Add and Regenerate refuse inside a run,
+because a run's journal is durable and readable by the cluster and the code must
+exist in the reply and nowhere else. Every act needs a person behind it: a
+synthetic actor and the operator credential are refused. A deployable that loses
+its owner can only have its codes removed.
+
+**Moving a deployable to another organization is refused while it has codes.** A
+code copies its deployable's organization when it is minted, so the organization
+cannot change while a code has not been removed -- expired ones included, since a
+new expiry revives them. The refusal says to remove the codes first; add new ones
+after the move.
+
+**Regenerate is revocation.** It replaces the secret and keeps the id, name, gate
+and subject, so rows a product stamped with the code's id stay attached, and
+anyone using the old code is taken out now. **Remove is final.** Each act is
+written to the audit log, never with the code.
+
+---
+
 ## Where the surface is
 
 **MemQL OS, the Deployables app**, in three sections: **Map** (what serves
@@ -944,7 +1002,8 @@ and not a modal: New deployable opens the same page in compose mode, in place,
 with a quiet Back to the list.
 
 A package with two apps is **two rows sharing a source**, grouped under it --
-one row per thing that serves or will.
+one row per thing that serves or will. On a deployable's page, a lock after
+Traffic in the head opens its Access codes, for a person who holds the part.
 
 The Deployables app is the one surface, and `/sites` and
 everything under it redirect to it, tail included, so an old bookmark or a
@@ -959,6 +1018,8 @@ link in a runbook still lands.
 - [The Library](library.md) -- where the zip artifact you deploy comes from.
 - [Site hosting](site-hosting.md) -- the request path, the CI publish route and
   the per-site CSP.
+- [Access codes](site-access-codes.md) -- keeping part of a deployable for people
+  who hold a code: the codes, the gates, the wire and the limits.
 - [Front door](front-door.md) -- hosts, certificates, custom domains and the
   two TLS regimes.
 - [GitHub Connect](github-connect.md) -- connect GitHub once and pick a

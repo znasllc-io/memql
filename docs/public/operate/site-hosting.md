@@ -21,6 +21,7 @@ on. This page does not restate it.
 
 Related: [The cluster front door](front-door.md) ·
 [Connected -- a site that stays where it is](connected-integration.md) ·
+[Access codes](site-access-codes.md) ·
 [MemQL OS](memql-os.md) ·
 [Service-account JWTs](auth/service-account-jwt.md)
 
@@ -598,6 +599,10 @@ site whose bundle calls back into MemQL -- which, per
 [the contract](#the-contract-a-build-is-a-directory-of-static-files) above,
 is essentially every site hosting more than pure marketing copy.
 
+(Four exact method and path pairs under `/_memql/access` are *not* this proxy's
+and answer with it off: see [Part of a site, for visitors holding a
+code](#part-of-a-site-for-visitors-holding-a-code).)
+
 What it removes is worth stating alongside what it adds: the bff's own
 auth cookie is `SameSite=Lax`, which browsers do not send cross-site at
 all, so a site calling `api.<domain>` directly would need CORS AND a token
@@ -751,6 +756,54 @@ means no filter can branch on which stranger is asking.
 best-cached data in the system: one computation, served to everyone. That
 is a reason to prefer the public tier over a per-visitor credential for
 genuinely public content, not merely a side effect.
+
+---
+
+## Part of a site, for visitors holding a code
+
+Everything above serves the same thing to everyone. A deployable can also keep
+part of itself back for people an operator gives an **access code** to, with no
+sign-in and no MemQL account: the visitor types the code on the site, and the
+page then calls the queries and mutations the deployable's own DSL has marked
+for that code's gate (`@accessGate`). The operator adds, replaces, re-times and
+removes codes from the deployable's page in MemQL OS.
+
+The edge adds four method and path pairs on the site's own origin for this
+(`component/edge/access.go`), answered ahead of both the bundle and the generic
+`/_memql/*` proxy:
+
+| On the site's origin | Does |
+|---|---|
+| `POST /_memql/access` | trades a code for a session |
+| `GET /_memql/access` | says whether the session still stands |
+| `POST /_memql/access/leave` | ends the session |
+| `POST /_memql/access/call` | runs a construct the session's gate reaches |
+
+- **They work whatever the site's `apiProxy` says.** The visitor holds a code and
+  no MemQL cookie, so this is not the proxy above and does not need it on. It
+  does need `MEMQL_EDGE_API_TARGET`: unset, every one of the four answers a `404`,
+  as the proxy refuses, and the edge's one warning at boot is the only line about
+  it. Any other method or path under `/_memql/access` is the generic proxy's,
+  exactly as it was.
+- **The edge decides nothing about who is in.** It checks the shape of a POST
+  (JSON, the same `Origin`), caps the body, rate-limits per replica, and writes
+  the site and owner stamp over any copy the client sent. The bff reads the
+  database on every request, and nothing in the decision is cached.
+- **A site that is not live does not serve them.** An offline deployable answers
+  `503` and a draft or archived one `404` before anything is forwarded, as for
+  any other path; somebody holding a preview grant, who is already served the
+  draft, reaches them too, and a code still has to be valid. A system-owned site
+  has no owner to lend its authority and answers `404`.
+
+**What a code protects is what the bff returns, not the bundle.** The bytes this
+page is about are public by construction: the edge serves them to everyone who
+resolves the hostname, a code does not change that, and gating a path of static
+files is not in this version. Put nothing in a bundle that a visitor without a
+code should not read; private content lives in the graph and reaches the page as
+the answer to a gated call.
+
+The wire, what the page has to do so the browser leaves on time, the limits and
+how to declare a gate are in [Access codes](site-access-codes.md).
 
 ---
 
@@ -1164,7 +1217,8 @@ rather than trusting this paragraph's age.
   `dsl/platform/mutations.memql`, `dsl/platform/queries.memql`,
   `dsl/platform/seeds.memql`.
 - Serving path: `component/edge/handler.go`, `resolve.go`, `csp.go`,
-  `runtimeconfig.go`, `proxy.go`, `bundle.go`, `blob.go`.
+  `runtimeconfig.go`, `proxy.go`, `bundle.go`, `blob.go`; the access-code
+  routes are `access.go` ([Access codes](site-access-codes.md)).
 - Publish path: `component/edge/publish.go`,
   `component/server/site_bundle_handler.go`, `app/transport_sites.go`.
 - Node wiring: `app/transport_edge.go`, `app/build_edge.go`.

@@ -90,15 +90,18 @@ The panel lists the codes in label order. Each row shows the name the operator
 gave it, what it unlocks (`Unlocks engagement for acme`), the last four
 symbols of the code so two can be told apart, when it expires ("Expires in 8
 minutes", with the exact time behind it, and "Expired" once past) and when it
-was last opened ("Last opened 2 minutes ago", or "Not opened yet"). A removed
-code is hidden; its row stays in the graph as the record.
+was last opened ("Last opened 2 minutes ago", or "Not opened yet"). **Last
+opened is the last unlock with the current secret, not the last request**: the
+code's row is written by an operator's act and by nothing else, so a visitor's
+activity never touches the credential. A removed code is hidden; its row stays
+in the graph as the record.
 
 **Add** takes four things:
 
 - **Name** -- the operator's label, 1 to 80 characters. A visitor never sees it.
 - **Unlocks** -- one of the gates the deployable declares. With none declared
   the panel says so and explains `@accessGate`, and Add is absent.
-- **Subject** -- offered only when the chosen gate's constructs read
+- **Subject**, optional -- offered only when the chosen gate's constructs read
   `accessSubject`. It says whose part of the app the code opens (`acme`), up to
   120 characters.
 - **Expires** -- 10 minutes, 1 hour, 1 day, 7 days, 30 days, or a date. It must
@@ -108,7 +111,9 @@ code is hidden; its row stays in the graph as the record.
 
 **The code appears once.** After Add or Regenerate the panel shows it with a
 copy control and a notice that this is the only time it is shown. It is held in
-the page's memory alone, and dropped when the next act starts. Lose it and the
+the page's memory alone, and dropped when the next act starts. While it is on
+screen, or a write is still out, the dialog's Close and Escape wait and **Done is
+the way out**, because what the panel holds is the only copy. Lose it and the
 answer is Regenerate, never recovery: the cluster does not have it.
 
 | Act | What it does | What stops working |
@@ -118,7 +123,8 @@ answer is Regenerate, never recovery: the cluster does not have it.
 | **Remove** | Ends the code. The row stays, so it still answers who could get in, and when. | Every session opened with it, at its next request. **Removal is final**: a removed code cannot be regenerated or re-timed, and a new code is added instead. |
 
 Regenerate and Remove ask in place, under their own row, and say what stops
-working.
+working. If two operators regenerate one code at the same moment, the second is
+told so rather than replacing the code the first has just been handed.
 
 ### What Add refuses
 
@@ -149,7 +155,9 @@ the operator key can read the list. It cannot end a code; a person signs in and
 does that.
 
 The acts are DSL builtins, and the panel is a client of them. Called by a person
-from anywhere else, they pass the same part and the same organization gate:
+from anywhere else, they pass the same part and the same organization gate, and
+the reply holds the code: an MCP client or a script acting for that person
+receives it, and it reaches whatever that client records.
 
 | Builtin | Reply |
 |---|---|
@@ -296,10 +304,11 @@ The call runs under the owner's authority, and a mutation writes with it. Three
 things are the author's to get right:
 
 - **Do not let the visitor choose the row's id.** An `insert` at an id that
-  already names a row writes a new version of *that* row, whoever owns it: one
-  code can overwrite another's. Leave the id out and the engine mints one for
-  every call (the example below), or build it from the stamped `accessCodeId` so
-  two codes can never reach one row. If a visitor must name the row, as a retry
+  already names a row writes a new version of *that* row, and every row a gated
+  mutation writes belongs to the same owner, so one code can overwrite another's.
+  Leave the id out and the engine mints one for every call (the example below),
+  or build it from the stamped `accessCodeId` so two codes can never reach one
+  row. If a visitor must name the row, as a retry
   key, make every field the mutation writes `@createOnly`, so a repeat cannot
   change a row that exists.
 - **A nested name is not checked.** The handler refuses a reserved name at the
@@ -457,7 +466,7 @@ expiry, and an extension must not be cut short by a browser-side clock. The
 from a link in an email is fine, and it is not sent to `/_memql/accessories`.
 Page script cannot read it.
 
-### The codes
+### What a code looks like
 
 Twenty-five symbols of Crockford base32 in five groups,
 `K7Q4M-2XPDN-8RT3V-WJ6HC-9FBZA`. The bff normalizes whatever was typed before it
@@ -488,7 +497,10 @@ Three replies are **not JSON**, and a client must not assume they are:
   (`upstream unavailable`). It is the proxy's reply, shared by every route it
   serves;
 - a deployable that is not live never reaches the surface: offline answers `503`
-  and a draft or archived one `404`, both plain text;
+  and a draft or archived one `404`, both plain text. The exception is somebody
+  holding a [preview grant](deployables.md#publishing-the-candidate-version-instead),
+  who is already served a draft or a live deployable's candidate and reaches these
+  routes on it too, where a code still has to be valid;
 - a `401` for a [revoked sign-in](#a-browser-with-a-revoked-sign-in), below.
 
 The edge then strips `X-Memql-Access-Site` and `X-Memql-Access-Owner` from
@@ -577,10 +589,12 @@ replicas:
 The address is the **right-most** `X-Forwarded-For` entry: the hop the ingress
 itself recorded, which a caller cannot choose. The leftmost entry is the
 caller's to write, and rotating it would spend the site's sixty unlocks and lock
-real visitors out. Unlock draws on the address's bucket first, so one machine
-can take at most ten of the sixty. `Retry-After` is how long the refusing bucket
-takes to give one token back: 6 seconds for an address that spent its ten
-unlocks, 1 otherwise.
+real visitors out. It is a key only when it is an IP address, in its canonical
+spelling; a name, an `ip:port` or anything else is not, and the connection's peer
+is used instead, which behind the ingress is the ingress itself. Unlock draws on
+the address's bucket first, so one machine can take at most ten of the sixty.
+`Retry-After` is how long the refusing bucket takes to give one token back: 6
+seconds for an address that spent its ten unlocks, 1 otherwise.
 
 **These bound load, not guessing.** What stops guessing is 125 bits.
 
@@ -718,7 +732,8 @@ export function accessSession({ onOpen, onLocked }) {
 - **The rate limits are per replica and bound load, not guessing,** and they key
   on the right-most `X-Forwarded-For` entry. A proxy added in front of the
   ingress groups every visitor behind it into one bucket: ten unlocks a minute
-  between them, and a share of the site's sixty.
+  between them, and a share of the site's sixty. So does an ingress that writes
+  `ip:port`, which is not an address and falls back to the peer.
 - **Borrowed authority does not re-check that the site's owner is still
   active.** A construct runs as the owner, as a shopper's form does, and nothing
   per request asks whether that person is still around. **Removing the codes is
@@ -753,6 +768,7 @@ export function accessSession({ onOpen, onLocked }) {
 | One call answers `404` and others work | The name is not declared, is on another gate, is `@disabled`, is in a nested directory, or two of the package's domains both declare it | Check the gate, the name and `dsl_access_gate_*` in the analysis |
 | All four routes answer `404` for one site, and the bff logs "this site's codes answer 404" | The site's owner cannot read it. A site whose owner was removed from its organization reads as zero rows under that owner. The log line carries the reason | Restore the owner's membership, or give the site an owner who can read it |
 | All four routes answer `404` for a platform-managed site | It has no owner to borrow | Codes are for your own deployables |
+| All four routes answer `404` for a deployable that was not deployed from a package | It has no deployable name, so no gate can be its own | Deploy it from a package that declares a gate |
 | A plain-text `401 session revoked` | The browser carries a revoked `memql_auth` cookie | Clear the site's cookies |
 | A `503` or a plain `404` before any JSON | The deployable is offline, or not live | Take it live. An offline spell does not end a session: it works again if its code has not expired |
 
