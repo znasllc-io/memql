@@ -782,8 +782,14 @@ func forwardAppCall(
 				fmt.Errorf("%w: %s on %s: %w", memqlengine.ErrAppUnavailable, req.AppId, c.Label(), ctxErr)
 		}
 		reason := appForwardReason(out, err, holder)
-		if out.ErrorCode == "app_quota_refused" {
+		// A PROVEN PRE-WORK REFUSAL comes back as the type a local call returns,
+		// and stops this walk: the caller's selection moves on, and it knows
+		// whether the machine or the app is what was refused (appRefusalExclusion).
+		switch out.ErrorCode {
+		case memqlengine.AppQuotaRefusalCode:
 			return out.Result, &memqlengine.AppQuotaRefused{Reason: out.ErrorMessage}
+		case memqlengine.AppAuthRefusalCode:
+			return out.Result, &memqlengine.AppAuthRefused{Reason: out.ErrorMessage}
 		}
 		if isAppGateCode(out.ErrorCode) {
 			return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable,

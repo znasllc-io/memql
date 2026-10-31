@@ -478,8 +478,8 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		}
 	})
 	surface := AppSurfacePrefix + req.AppId + "@" + result.WorkerId
-	if quota := appQuotaRefusal(result); quota != nil {
-		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, quota
+	if refusal := appPreWorkRefusal(result); refusal != nil {
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, refusal
 	}
 	if err != nil {
 		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true,
@@ -510,12 +510,38 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 	}, true, nil
 }
 
-func appQuotaRefusal(result workerservice.RunResult) *memqlengine.AppQuotaRefused {
-	if result.Status == workerservice.AppSessionStatusFailed && result.Usage.Known &&
-		result.Usage.InputTokens == 0 && result.Usage.OutputTokens == 0 &&
-		result.Model == "" && len(result.Result) == 0 && result.DroppedActions == 0 && result.RecordedActions == 0 &&
-		memqlengine.IsAppQuotaRefusal(result.ErrorMessage) {
+// appPreWorkRefusal is the typed refusal for a session the app turned away
+// before doing anything, or nil. It is the ONE proof that lets a call move to
+// another app: everything else may have caused effects, and running it again
+// would repeat them.
+//
+// WHAT PROVES IT is that nothing ran: no served model, no structured result, no
+// recorded or dropped action, no tokens and no prose of the model's own.
+//
+// usage.known IS NOT PART OF THE PROOF, deliberately. It says whether the app
+// reported its spend, and a refused turn may have nothing to report: Codex's
+// usage-limit refusal states no usage at all (measured on codex-cli 0.162.1,
+// 2026-10-29), which is why failover never fired for it while this required
+// Known. Tokens, when stated, still disprove it.
+//
+// A refusal's own sentence is not model prose. Claude Code repeats it as a
+// synthetic assistant message ("model":"<synthetic>", measured on 2.1.304), so it
+// reaches the transcript's answer as well as the error. Anything else there is
+// text a model wrote, and proves the turn got that far. Regression tests:
+// TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions and the
+// TestAppFallbackCrossesReplica tests.
+func appPreWorkRefusal(result workerservice.RunResult) error {
+	if result.Status != workerservice.AppSessionStatusFailed ||
+		result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 ||
+		result.Model != "" || len(result.Result) != 0 || result.DroppedActions != 0 || result.RecordedActions != 0 ||
+		!strings.Contains(result.ErrorMessage, strings.TrimSpace(result.Answer)) {
+		return nil
+	}
+	switch {
+	case memqlengine.IsAppQuotaRefusal(result.ErrorMessage):
 		return &memqlengine.AppQuotaRefused{Reason: result.ErrorMessage}
+	case memqlengine.IsAppAuthRefusal(result.ErrorMessage):
+		return &memqlengine.AppAuthRefused{Reason: result.ErrorMessage}
 	}
 	return nil
 }

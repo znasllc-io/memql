@@ -90,6 +90,26 @@ change. Persisting it there is also what lets a **planner** node answer "is a
 machine with this app online" — that node holds no worker streams at all, so
 the row and its derived labels are the only thing it can read.
 
+### When an app refuses a call
+
+A signed-in app can still turn a call away: its login has expired, or its plan is
+out of usage. The call moves to the next app **only when nothing ran**: no model
+served it, it has no result, no action was recorded or dropped, no tokens were
+reported, and the only text is the refusal itself. Any other failure may have
+caused effects, so it is returned rather than run again.
+
+| What the app said | What the rest of the call skips | How long that machine's app is skipped |
+|---|---|---|
+| Out of usage | that app on every machine, because a limit belongs to the account | until the reset the app names, or 15 minutes if it names none |
+| Signed out or expired | that app on that machine, because a login belongs to one machine | 15 minutes, then the next call tries again; a successful session clears it sooner |
+
+A call pinned to one app stays on that app and may only move to another machine.
+When nothing is left, the call fails with the app's own sentence.
+
+Codex names its reset in the machine's time zone without saying which, so the
+engine reads the earliest time it could mean. An app can come back up to a day
+before its real reset; the next call then costs one more refusal and no tokens.
+
 ### Which machine, and on which replica
 
 Selection is the **Fleet router**
@@ -554,6 +574,8 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 | `cockpit-app: the backend is registered but not wired on this node` | the Task reached a node with no WorkerService. Only an agent node serves one |
 | `cockpit-app: no credential minter configured` | `MEMQL_IDENTITY_VERIFIER_BASE_URL` or `MEMQL_NODE_BOOTSTRAP_TOKEN` is unset on the agent. The run is REFUSED rather than started with a blank bearer — an app with no credential reaches nothing over MCP and reports that as "MemQL's tools are broken" |
 | `no machine online with claude-code allowed and signed in` | check Fleet -> Machines page; the badge says which half is missing |
+| `Failed to authenticate: OAuth session expired`, `Not logged in`, `401 Unauthorized` | the app's login on that machine is missing or expired, even though Fleet may show it signed in. Run `claude auth login` or `codex login` on that machine, then Retry availability in Fleet. The call has already moved on where another app could take it |
+| `You've hit your usage limit` | that app's plan is out of usage. It is skipped until the reset it names, and the call moved on where another app could take it |
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
 | `app_holder_unreachable` / "the agent holding its stream (...) is not reachable from this node" | the registration names an agent replica this node cannot reach (restarted, or the row is stale). Nothing started; the route moved on. The machine re-registers on a live replica within a heartbeat |
 | `app_holder_gone` | the agent holding the machine went away while the session ran. The session may have run on the machine; the call is not re-run elsewhere and the route moved on |

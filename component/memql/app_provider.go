@@ -656,11 +656,20 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	var res AppCallResult
 	var err error
 	var excluded []string
+	// THE LAST REFUSAL OUTLIVES THE SELECTION THAT FINDS NOTHING LEFT: "no enabled
+	// app matches" after a refusal would hide why the call failed, and send
+	// somebody to look at a setting when their login has expired.
+	var lastRefusal error
 	for {
 		req.AppId = p.appId
+		selected := AppSelection{AppId: p.appId}
 		if selector, ok := a.(AppSelector); ok {
-			selected, selectErr := selector.SelectApp(ctx, req, false, excluded)
+			var selectErr error
+			selected, selectErr = selector.SelectApp(ctx, req, false, excluded)
 			if selectErr != nil {
+				if lastRefusal != nil {
+					return res, lastRefusal
+				}
 				return AppCallResult{}, selectErr
 			}
 			req.AppId, req.RegistrationId = selected.AppId, selected.RegistrationId
@@ -677,14 +686,19 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		if err == nil {
 			break
 		}
-		var quota *AppQuotaRefused
-		if !p.wildcard || !errors.As(err, &quota) || ctx.Err() != nil {
+		// A PIN STAYS ITS APP without a rule of its own: req.AppId is reset to
+		// p.appId above, so the selector offers a pinned call that app on another
+		// machine and never a different app. Anything but a proven pre-work
+		// refusal may have caused effects and is returned as it is.
+		exclude, moves := appRefusalExclusion(err, selected)
+		if !moves || ctx.Err() != nil {
 			return res, err
 		}
 		if _, ok := a.(AppSelector); !ok {
 			return res, err
 		}
-		excluded = append(excluded, req.AppId)
+		lastRefusal = err
+		excluded = append(excluded, exclude)
 		if len(excluded) >= 16 {
 			return res, err
 		}
