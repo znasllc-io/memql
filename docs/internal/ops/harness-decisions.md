@@ -2343,7 +2343,9 @@ connected workflow is in
   artifact-free successful command (`pl.InspectCarriedReleaseReceipt`) with the
   same definition digest and packages. The recipe accepts
   `pipeline_passed_earlier` only together with that proof; anything unproven
-  refuses the candidate, naming the step.
+  refuses the candidate, naming the step. Coverage repeats this on every read, so a live
+  candidate holds these rows past retention
+  ([why, and how](#a-release-reuses-the-run-that-tested-its-tree-2026-10-29)).
 
 Rejected: a candidate whose evidence spans attempts (attempt 1's complete
 evidence includes its failed step, its artifacts would be pinned from a failed
@@ -2467,6 +2469,35 @@ workflow is in
   (`TestRetentionHoldReadsTheCandidatesOncePerStatement`). A retired candidate holds
   nothing, and neither does an archived one, whose own rows leave on their usual
   window.
+- **A candidate also holds its release's attempts** (the same function). A candidate
+  from a failed-only re-run names one attempt, and coverage reads every earlier one on
+  every read: `carriedChain` walks to attempt 1, and `passedEarlier` to the attempt that
+  ran the step. Only the named attempt has a pinned artifact, so the others left on their
+  window and the candidate's next overlay was refused. That dates from #6369, and
+  `TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention` reproduced it before the
+  fix. The hold keeps every `release` run at the repository and commit of a component
+  the candidate names, which is what every link must share (`sameRelease`) and what
+  `pipelines.RunKey` is built from. The proof's rules did not change: with the rows gone
+  it refuses as before. Rejected:
+  - Listing the attempts in the manifest. It changes a new candidate's identity, cannot
+    help a saved one, makes an older engine refuse it, and is one more claim coverage
+    would have to prove.
+  - Holding by the attempts' shared `workGoalId`. It must read the journal to learn the
+    goal, so it ends with the named attempt's row. It misses an attempt refused before it
+    opened work, which names no goal while the chain still reads its row. And it splits if
+    a pipeline is renamed between attempts, because the goal id derives from the name.
+
+  Cost, on a seeded hypertable of 30,000 versions in 8 chunks with 150 live candidates of
+  43 KB and every row a release's, the worst case: the manifests are read once per
+  statement, in about 4 ms. A page read goes from p50 30-34 ms to 34-38 ms and a guarded
+  delete from 19-21 ms to 24-26 ms. The goal hold took 45 ms and 33 ms, since it reads the
+  journal too. It over-reaches only to another pipeline's release of the same commit.
+
+  Saved candidates need nothing, because every manifest already names both fields: they
+  are held from the next pass. Rows that already left stay gone, and that candidate is
+  refused as before. Failed-only release re-runs first shipped in 0.31.9 (#6369, merged
+  2026-10-29), so at the 30-day default no candidate can lose its rows before 2026-11-28.
+  A rollback refuses nothing: an older engine just stops holding.
 - **What survives a retry, pause or replica change.** The tree, the fingerprint and
   the evidence run are all on rows. `resume` and `reopenFromRows` restore them from
   the row before a step's call is declared again, because the run's definition
@@ -2484,7 +2515,8 @@ the next version then executes everything.
 Invariants: every artifact in a candidate comes from the run it names; a reused step
 names none; a tree is compared only when both sides read it; only a directly executed
 receipt counts; a source older than 24 hours at the attempt's start counts for
-nothing; every other event still compares commits.
+nothing; every other event still compares commits; every row a carried or reused proof
+reads stays while the candidate is neither retired nor archived.
 
 Tests: `TestSameTree*`, `TestReusedReleaseReceipt*`, `TestProveReusedStep*`,
 `TestReceiptDigest*`, `TestAReceiptsDigest*`, `TestReleaseCandidate*Reused*`
@@ -2494,22 +2526,30 @@ Tests: `TestSameTree*`, `TestReusedReleaseReceipt*`, `TestProveReusedStep*`,
 and the db-gated `TestAReleaseReusesItsTreeOverRealRows` (`component/pipelinerun`);
 `TestReusedReceipt*`, `TestCandidateRecordOfAReuseIsWhatTheJournalProves`,
 `TestACarriedReuseProvesAgainstItsSource` and `TestCandidateAssemblyRecordsAReusedReceipt`
-(`integrations/release`, db-gated); `TestRetentionKeepsARunALiveCandidateReusedFrom`
-and `TestRetentionHoldReadsTheCandidatesOncePerStatement` (`integrations/work`,
-db-gated).
+(`integrations/release`, db-gated); `TestRetentionKeepsARunALiveCandidateReusedFrom`,
+`TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease` and
+`TestRetentionHoldReadsTheCandidatesOncePerStatement` (`integrations/work`, db-gated).
+`TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention` and
+`TestACarriedReuseStaysProvablePastRetention` (`integrations/release`, db-gated) run the
+real nightly pass and then the real proof, on a scratch database with the real schema.
+`TestAReleaseReusesItsTreeOverRealRows` also holds that the real driver writes the fields
+the attempts' hold reads.
 
 Not verified: a live release on a cluster, or the time it saves. No test runs
 `coverage` itself over rows the real driver wrote: `integrations/release` cannot run
 the driver, so its tests use hand-written journal rows. The driver test runs
 `ProveReusedStep` and what `completeRun` checks over real rows, which leaves the wiring
-in `coverage` and assembly tested only over the hand-written ones. Known limits:
+in `coverage` and assembly tested only over the hand-written ones. The attempts' hold has
+not run on a production journal; its cost above is from a seeded one. Known limits:
 
 - a pull request whose steps passed across a failed-only re-run offers only what its
   last attempt executed;
 - an engine upgrade between a source and its release runs everything;
-- a candidate prepared from a failed-only re-run reads the release's earlier attempts
-  on every read and nothing holds them, so past the retention window a new overlay
-  from it is refused (true of every carried step since #6369);
+- a candidate whose earlier attempts left before its installation ran the hold stays
+  refused, since no hold brings rows back;
+- a run a candidate names that is not a release and has no pinned artifact, such as a
+  check suite on a push, has nothing to keep it. The assembly format allows one, and past
+  the window coverage refuses it with "release run is unavailable";
 - a retention window shorter than the time between a source and its candidate retires
   the source first, and preparation refuses it;
 - rolling back to an engine from before tree hashes refuses a candidate with

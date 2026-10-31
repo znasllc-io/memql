@@ -854,6 +854,158 @@ func TestRetentionKeepsARunALiveCandidateReusedFrom(t *testing.T) {
 	assertRetired(t, db, work, run)
 }
 
+// seedReleaseAttempt writes one attempt's two rows at a (repository, commit, event), as
+// the driver writes them: the run row carries the three itself, and the work run in its
+// input.
+func seedReleaseAttempt(t *testing.T, db *bun.DB, name, repository, sha, event string, at time.Time) (work, run string) {
+	t.Helper()
+	work = seedPipelineWorkRun(t, db, name, pipelineOwner, runStatusSucceeded, at)
+	run = seedPipelinesRun(t, db, name, pipelineOwner, "completed", at)
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('input',jsonb_build_object('repository',?::text,'sha',?::text,'event',?::text)) WHERE id=?`, repository, sha, event, work); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('repository',?::text,'sha',?::text,'event',?::text,'workRunId',?::text) WHERE id=?`, repository, sha, event, work, run); err != nil {
+		t.Fatal(err)
+	}
+	return work, run
+}
+
+// A failed-only re-run's candidate names one attempt, and coverage walks back through
+// every earlier one on every read (carriedChain, integrations/release). Only the named
+// attempt has an artifact to keep it, so a live candidate holds every release attempt at
+// the repository and commit of a component it names: the identity a release run key is
+// built from, and the identity every link of that chain must share. It takes no new
+// manifest field, so a candidate saved before this hold is covered as well.
+//
+// An attempt refused before it opened any work is held too. It names no work run and no
+// goal, and the walk still reads its row to reach attempt 1.
+func TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease(t *testing.T) {
+	db, i := sweepDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.AddDate(0, 0, -40)
+	cutoff := now.AddDate(0, 0, -30)
+	engineCommit, cockpitCommit := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	const release = "release"
+
+	type row struct{ concept, id string }
+	var held []row
+	attempt := func(name, repository, sha string) {
+		work, run := seedReleaseAttempt(t, db, name, repository, sha, release, old)
+		held = append(held, row{runConcept, work}, row{pipelinesRunConcept, run})
+	}
+	attempt("first-attempt", "acme/engine", engineCommit)
+	attempt("second-attempt", "acme/engine", engineCommit)
+	attempt("other-component", "acme/cockpit", cockpitCommit)
+	refused := seedPipelinesRun(t, db, "refused-attempt", pipelineOwner, "completed", old)
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('repository','acme/engine','sha',?::text,'event','release') WHERE id=?`, engineCommit, refused); err != nil {
+		t.Fatal(err)
+	}
+	held = append(held, row{pipelinesRunConcept, refused})
+
+	var free []row
+	unheld := func(name, repository, sha, event string) {
+		work, run := seedReleaseAttempt(t, db, name, repository, sha, event, old)
+		free = append(free, row{runConcept, work}, row{pipelinesRunConcept, run})
+	}
+	unheld("another-commit", "acme/engine", strings.Repeat("c", 40), release)
+	unheld("another-repository", "acme/other", engineCommit, release)
+	// The pair a component names, not one repository crossed with another's commit.
+	unheld("crossed-components", "acme/engine", cockpitCommit, release)
+	// The chain is a release's alone, so a push of the same commit goes on its window.
+	unheld("a-push-of-the-commit", "acme/engine", engineCommit, "push")
+	free = append(free, row{runConcept, seedSystemRun(t, db, "a-system-run", runStatusSucceeded, old)})
+	// A release row naming no repository or commit matches no pair, and must not be kept
+	// for that: NULL NOT IN a list that is not empty is not true.
+	unnamed := seedPipelineWorkRun(t, db, "names-no-source", pipelineOwner, runStatusSucceeded, old)
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('input',jsonb_build_object('event','release')) WHERE id=?`, unnamed); err != nil {
+		t.Fatal(err)
+	}
+	free = append(free, row{runConcept, unnamed})
+
+	before := map[string]bool{}
+	for _, r := range held {
+		maps.Copy(before, storedKeys(t, db, r.id))
+	}
+	// The manifest's own type, so a renamed field fails here rather than holding nothing.
+	manifest, err := json.Marshal(pipelines.ReleaseCandidate{Components: []pipelines.ReleaseComponent{
+		{Name: "engine", Repository: "acme/engine", Commit: engineCommit},
+		{Name: "cockpit", Repository: "acme/cockpit", Commit: cockpitCommit},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := "sha256:" + strings.Repeat("a", 64)
+	if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state) VALUES (?,'pipeline-owner',?,'ready')`, candidate, string(manifest)); err != nil {
+		t.Fatal(err)
+	}
+	// Live candidates that name no pair. Neither may hold anything, and neither may stop
+	// the statement: a NULL in a NOT IN list would keep every release row for good, and
+	// jsonb_array_elements refuses a scalar.
+	for n, malformed := range []string{`{"components":[{"repository":"acme/engine"}]}`, `{"components":[{"commit":"` + engineCommit + `"}]}`, `{"components":null}`, `{}`} {
+		if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state) VALUES (?,'pipeline-owner',?,'ready')`,
+			"sha256:"+strings.Repeat(strconv.Itoa(n), 64), malformed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&verifyingArchive{})
+	admitted := func(concept string) []string {
+		t.Helper()
+		q, args := retentionCandidateRead(operationalPolicy{concept: concept, predicate: "TRUE"}, cutoff, old.Add(-24*time.Hour), cutoff, nil)
+		var candidates []map[string]any
+		if err := db.NewRaw(q, args...).Scan(t.Context(), &candidates); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(candidates))
+		for _, row := range candidates {
+			ids = append(ids, fmt.Sprint(row["id"]))
+		}
+		return ids
+	}
+	retire := func(r row) (int, error) {
+		t.Helper()
+		_, deleted, _, err := i.retireVerified(retentionOwner(), r.concept, []map[string]any{{"id": r.id, "createdAt": rfc(old)}}, r.concept == runConcept, cutoff, false)
+		return deleted, err
+	}
+	for _, state := range []string{"preparing", "ready", "approved"} {
+		if _, err := db.Exec(`UPDATE release_candidates SET state=? WHERE candidate_id=?`, state, candidate); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range held {
+			if slices.Contains(admitted(r.concept), r.id) {
+				t.Fatalf("%s: %s was admitted to history retention while a live candidate needs it", state, r.id)
+			}
+			// The final transactional guard too: a read made before the candidate was
+			// prepared cannot delete an attempt it now stands on.
+			if deleted, err := retire(r); err != nil || deleted != 0 {
+				t.Fatalf("%s: deleted %s under a live candidate: %d %v", state, r.id, deleted, err)
+			}
+		}
+		for _, r := range free {
+			if !slices.Contains(admitted(r.concept), r.id) {
+				t.Errorf("%s: the candidate held %s as well", state, r.id)
+			}
+		}
+		assertStillStored(t, db, before)
+	}
+	for _, state := range []string{"retired", "archived"} {
+		if _, err := db.Exec(`UPDATE release_candidates SET state=? WHERE candidate_id=?`, state, candidate); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range held {
+			if !slices.Contains(admitted(r.concept), r.id) {
+				t.Errorf("a %s candidate still holds %s", state, r.id)
+			}
+		}
+	}
+	for _, r := range held {
+		if deleted, err := retire(r); err != nil || deleted == 0 {
+			t.Errorf("an archived candidate held %s: %d %v", r.id, deleted, err)
+		}
+		assertRetired(t, db, r.id)
+	}
+}
+
 // The hold reads the candidates once per statement, however many versions the
 // statement looks at. Read per row it detoasted every live manifest once per version,
 // which at a hundred or so candidates took a delete past its 8 s statement timeout,
@@ -865,7 +1017,8 @@ func TestRetentionHoldReadsTheCandidatesOncePerStatement(t *testing.T) {
 	cutoff := now.AddDate(0, 0, -30)
 	if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state)
 SELECT 'sha256:'||encode(sha256(g::text::bytea),'hex'),'pipeline-owner',
- jsonb_build_object('evidence',(SELECT jsonb_agg(jsonb_build_object('name','step-'||e,'reusedFrom',jsonb_build_object('workRunId','source-'||g))) FROM generate_series(1,30) e)),'approved'
+ jsonb_build_object('evidence',(SELECT jsonb_agg(jsonb_build_object('name','step-'||e,'reusedFrom',jsonb_build_object('workRunId','source-'||g))) FROM generate_series(1,30) e),
+  'components',jsonb_build_array(jsonb_build_object('repository','acme/engine','commit','commit-'||g))),'approved'
 FROM generate_series(1,200) g`); err != nil {
 		t.Fatal(err)
 	}
@@ -875,8 +1028,9 @@ FROM generate_series(1,200) g`); err != nil {
 	keys := make([]string, 0, 50)
 	raw := make([]retirementKey, 0, 50)
 	for n := range 50 {
-		name := fmt.Sprintf("many-%d", n)
-		keys = append(keys, seedPipelineWorkRun(t, db, name, pipelineOwner, runStatusSucceeded, old))
+		// A release attempt nothing names, so every row reaches both holds.
+		work, _ := seedReleaseAttempt(t, db, fmt.Sprintf("many-%d", n), "acme/engine", "not-named", "release", old)
+		keys = append(keys, work)
 		raw = append(raw, retirementKey{keys[n], runConcept, old})
 	}
 	body, err := json.Marshal(raw)

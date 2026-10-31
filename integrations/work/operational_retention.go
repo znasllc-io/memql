@@ -82,7 +82,7 @@ func retentionShare(left time.Duration, policies int) time.Duration {
 // appear orphaned and permits retirement while that parent is still running.
 const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" parent WHERE parent.concept='v1:work:run' AND parent.id=n.payload->>'runId' AND COALESCE(parent.payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned') AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerParent WHERE newerParent.concept=parent.concept AND newerParent.id=parent.id AND newerParent."createdAt">parent."createdAt"))`
 
-// Two things keep a finished pipeline run past its window, and both are read
+// Three things keep a finished pipeline run past its window, and all are read
 // without presentation gates: hiding a staged row must not let what it authorizes
 // disappear.
 //
@@ -101,23 +101,58 @@ const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" pare
 // and holding its sources past them would keep nothing provable. Neither holds
 // anything. The candidate names the work run bare, in pipelines.ReleaseReusedFrom.
 //
-// THE HOLD IS AN UNCORRELATED NOT IN, ON PURPOSE. Postgres reads the candidates once
-// per statement and probes a hash for each row. An EXISTS per row would detoast
+// A LIVE CANDIDATE HOLDS ITS RELEASE'S ATTEMPTS. A candidate from a failed-only re-run
+// names one attempt, and coverage walks back through every earlier one on every read
+// (carriedChain and passedEarlier, integrations/release): each attempt's run row and,
+// where it opened work, its work run and steps. Only the named attempt has a pinned
+// artifact, so without this hold the others leave on their window and the candidate's
+// next overlay is refused. It keeps every release run at the repository and commit of a
+// component the candidate names, because that is the identity every link of the chain
+// must share (sameRelease) and what pipelines.RunKey is built from. Coverage's verify
+// compares a manifest's pair with the named attempt's journal exactly, so the spellings
+// agree. A row's event narrows it to a release's: nothing else can be in a chain.
+//
+// It reads only what every saved manifest already has, so a candidate saved before this
+// hold is held from the next pass, and rolling back refuses nothing: an older engine just
+// stops holding. Rows already gone stay gone, and the proof goes on refusing that
+// candidate. It over-reaches only to another pipeline's release of the same commit, which
+// keeps a few more rows. Rejected:
+//   - Listing the attempts in the manifest. That changes a new candidate's identity,
+//     cannot help a saved one, makes an older engine refuse it, and is one more claim
+//     coverage would have to prove.
+//   - Holding by the attempts' shared goal. Only a work run's row names the goal, so the
+//     hold would end with the named attempt's row; it would miss an attempt refused before
+//     it opened work, whose row the chain still reads; and it would split if the pipeline
+//     were renamed between attempts, since the goal's id is derived from the name.
+//
+// TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease holds which rows it keeps, and
+// TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention runs a real pass and then
+// the real proof over what it left.
+//
+// BOTH CANDIDATE HOLDS ARE UNCORRELATED NOT INS, ON PURPOSE. Postgres reads the candidates
+// once per statement and probes a hash for each row. An EXISTS per row would detoast
 // every live manifest once per version, and an index does not help: the heap is a
 // few pages, so the planner keeps its sequential scan. Measured over 5,000 versions
 // and 150 candidates of 33 KB, that EXISTS took 13 s against this statement's 8 s
 // timeout, and a cancelled delete repeats on the same page every night, which is
 // the stall retentionRunBudget's note describes. This form took under 10 ms.
-// TestRetentionHoldReadsTheCandidatesOncePerStatement holds it. COALESCE because a
-// run refused before it opened any work names none, and NULL NOT IN a list that is
-// not empty keeps that run forever.
+// TestRetentionHoldReadsTheCandidatesOncePerStatement holds it. Measured for the attempts'
+// hold on a hypertable of 30,000 versions in 8 chunks, 150 candidates of 43 KB and every
+// row a release's, the worst case: it reads the manifests once, in about 4 ms, taking a
+// page read from p50 30-34 ms to 34-38 ms and a guarded delete from 19-21 ms to 24-26 ms.
+// Holding by goal, measured beside it, took 45 ms and 33 ms, since it reads the journal too.
+//
+// COALESCE because a run refused before it opened any work names none, and NULL NOT IN a
+// list that is not empty keeps that run forever. The attempts' hold coalesces and filters
+// for the same reason, and sits behind the event test, so a statement over no release row
+// never reads the manifests for it.
 func retentionHeldBackSQL(concept string) string {
-	var work string
+	var work, source string
 	switch concept {
 	case runConcept:
-		work = `n.id`
+		work, source = `n.id`, `n.payload->'input'`
 	case pipelinesRunConcept:
-		work = `n.payload->>'workRunId'`
+		work, source = `n.payload->>'workRunId'`, `n.payload`
 	default:
 		return "TRUE"
 	}
@@ -126,7 +161,9 @@ func retentionHeldBackSQL(concept string) string {
  AND a.identity->>'WorkRunID'=regexp_replace(` + work + `,'^v1:work:run:','')
  AND (a.state<>'retired' OR a.library_purged_at IS NULL))
  AND COALESCE(regexp_replace(` + work + `,'^v1:work:run:',''),'') NOT IN (SELECT e->'reusedFrom'->>'workRunId' FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'evidence') e
- WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'evidence')='array' AND e->'reusedFrom'->>'workRunId' IS NOT NULL)`
+ WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'evidence')='array' AND e->'reusedFrom'->>'workRunId' IS NOT NULL)
+ AND (COALESCE(` + source + `->>'event','')<>'` + string(pipelines.EventRelease) + `' OR (COALESCE(` + source + `->>'repository',''),COALESCE(` + source + `->>'sha','')) NOT IN (SELECT k->>'repository',k->>'commit' FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'components') k
+ WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'components')='array' AND k->>'repository' IS NOT NULL AND k->>'commit' IS NOT NULL))`
 }
 
 // This is a closed list of operational records, never a default lifetime for

@@ -227,9 +227,10 @@ candidates, and a cancelled delete repeats on the same page every night.
   a `treeHash` unwritable, so a run in flight at the rollback stops being driven. A
   candidate that reused nothing still verifies.
 - A candidate prepared from a failed-only re-run reads the release's earlier attempts
-  on every read and nothing holds them, so past the retention window a new overlay from
-  it is refused. This is true of every carried step since #6369, and it is not fixed
-  here.
+  on every read and nothing held them, so past the retention window a new overlay from
+  it was refused. That was true of every carried step since #6369, and this design did
+  not fix it. A later change holds those attempts: see `retentionHeldBackSQL` and the
+  decision map's section on this feature.
 - A reused step's log stays on its source, under that run's shorter retention.
 - `checkoutHistory` aside, "the tree determines the check" stays the author's
   assertion. A command could still ask git for its commit.

@@ -217,6 +217,17 @@ func TestAReleaseReusesItsTreeOverRealRows(t *testing.T) {
 		t.Errorf("the rows no longer match the declared execution: %s, want %v (%v)", fingerprint, workRow["templateFingerprint"], err)
 	}
 
+	// Retention holds a live candidate's release attempts by these fields, read straight
+	// out of the stored rows (retentionHeldBackSQL, integrations/work). A hold that names
+	// a field the driver no longer writes holds nothing, and says so only a month later,
+	// when a candidate's next overlay is refused.
+	runFields := read(fmt.Sprintf(`query pipelineRunForOwner(runId: %s)`, langparser.QuoteString(release.ID)))
+	for name, fields := range map[string]map[string]any{"the run row": runFields, "the work run's input": argObject(workRow, "input")} {
+		if fields["repository"] != repo || fields["sha"] != release.SHA || fields["event"] != string(pipelines.EventRelease) {
+			t.Errorf("%s no longer names the release retention holds it by: %v", name, fields)
+		}
+	}
+
 	// A run whose tree could not be read is found under no tree. In the query itself a
 	// blank value equals an absent field, so a blank tree must read nothing at all.
 	gh.mu.Lock()
