@@ -559,7 +559,9 @@ combined list". Keep two lists in the same row language (`RecordRow`), with dist
   archives a package, removes a source or uninstalls a hosted app.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
-  with Review beside it -- not repeated on every deployable the source made.
+  with Review beside it -- not repeated on every deployable the source made. A
+  gate over apps that already have their addresses has no address to ask for:
+  the Address step reads as answered, and Deploy is on Review.
 - The trail keeps the way in: `Deployables > storefront`, or
   `Pipelines > Repositories > acme/storefront` for source management. Opening
   a deployed app crosses into Deployables; a contextual repository link returns
