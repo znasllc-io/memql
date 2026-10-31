@@ -40,6 +40,10 @@ operator configuration; repository manifests cannot choose a priority class.
 Create the referenced classes before enabling it. Malformed mappings refuse
 execution, and a missing class leaves the Job suspended until repaired.
 
+A restart of the Kueue controller costs a step time and nothing else. A new step still
+creates its Job, which stays suspended until the controller returns, and a running step
+finishes.
+
 This uses [Kueue workload priority](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/),
 which is separate from Pod scheduling priority. Resource ceilings, dedicated
 pool placement and the ClusterQueue's preemption policy still apply. With

@@ -1,4 +1,14 @@
 # Only the batch namespace and queue resources may depend on this webhook.
+#
+# THE TWO HOOKS ON JOBS FAIL OPEN. Under Fail, a controller restart answers every Job
+# write in memql-pipelines with a 500 for about 13 s: a new step fails
+# pipeline_execution_uncertain and stays failed, the isolation probe is refused, and so
+# is a takeover claim. A step's Job needs neither hook to be safe: the runner creates a
+# queued Job suspended, only the workbench's Role can create one here, and a Job a hook
+# missed waits until the controller returns. Every other hook stays Fail, because no
+# step writes those kinds and a queue written during an outage would go unvalidated.
+# TestAControllerOutageCannotRefuseAStepsJob and
+# TestNewStepsWaitThroughAControllerOutage hold this; the decision map says why.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
@@ -31,7 +41,7 @@ webhooks:
       name: kueue-webhook-service
       namespace: kueue-system
       path: /mutate-batch-v1-job
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: mjob.kb.io
   namespaceSelector:
     matchLabels:
@@ -141,7 +151,7 @@ webhooks:
       name: kueue-webhook-service
       namespace: kueue-system
       path: /validate-batch-v1-job
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: vjob.kb.io
   namespaceSelector:
     matchLabels:

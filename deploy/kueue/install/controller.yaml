@@ -24,3 +24,19 @@ data:
     manageJobsWithoutQueueName: false
     # Omitted deliberately: any non-null value enables eviction/requeue in
     # v0.20. This runner must never replay an admitted command.
+---
+# A cluster restart makes a new pod, and upstream's Always then needs the registry: with
+# no network the controller stays in ImagePullBackOff and nothing admits a step until
+# the network returns. The kustomization pins the image by digest, so the copy a node
+# already holds is the one this would pull.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kueue-controller-manager
+  namespace: kueue-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          imagePullPolicy: IfNotPresent
