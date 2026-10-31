@@ -292,6 +292,10 @@ time, Cancel and Leave. Leave returns to the analyzing row; reopening resumes
 its state. The review/failure fixtures advance after opening, and Cancel emits
 a terminal cancelled row. No fixture contacts GitHub or starts a real deployment.
 
+`package-placed-review` is an update parked over an app that already serves:
+`&click=storefront` opens Review with Deploy on the bar and the Address step
+answered with the app's address.
+
 ## Static desktop wallpaper
 
 `/wallpaper.html?theme=graphite&mode=dark` mounts the real Fold wallpaper and desk
