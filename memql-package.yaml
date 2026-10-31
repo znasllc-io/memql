@@ -264,6 +264,14 @@ pipeline:
             bash scripts/identity/build-css.sh
             go build -tags workbench github.com/znasllc-io/memql/...
             go vet -tags workbench github.com/znasllc-io/memql/...
+        # Compiles and vets test/clustere2e under both tag sets, then runs what
+        # of TestPipelinesSubstrate reads no cluster. It names no context, so
+        # the test runs those subtests and skips at the connection, and it names
+        # no MEMQL_DATABASE_DSN, so the package's TestMain touches no database.
+        # They read only the tree and a loopback server, which keeps this step
+        # verification: true. A seam change that breaks one fails its own pull
+        # request here; the rest of the test runs only on the weekly
+        # installer-lifecycle.pipelines leg.
         - name: build-clustere2e
           verification: true
           placement: cluster
@@ -277,6 +285,7 @@ pipeline:
             go test -tags clustere2e -c -o /dev/null ./test/clustere2e/
             go vet -tags clustere2e,agent ./test/clustere2e/
             go test -tags clustere2e,agent -c -o /dev/null ./test/clustere2e/
+            go test -tags clustere2e,agent -count=1 -run '^TestPipelinesSubstrate$' ./test/clustere2e/
         - name: module-boundaries
           verification: true
           placement: cluster
