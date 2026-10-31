@@ -797,8 +797,10 @@ Afterwards:
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:pipelines/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
-  queued run no agent has claimed is concluded cancelled at once. A new push
-  to a pull request cancels the pull request's earlier runs the same way
+  queued run no agent has claimed is concluded cancelled at once. A cancel that
+  lands while a step's Job is being created concludes some minutes later
+  ([Cancel](pipelines-substrate.md#cancel)). A new push to a pull request cancels
+  the pull request's earlier runs the same way
   ([Cancel-on-push](pipelines-substrate.md#cancel-on-push)).
 
 Each acts on your own pipeline or run only. A caller who does not own it is
