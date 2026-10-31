@@ -1056,8 +1056,9 @@ query package packagesByRepoUrl {
 }
 
 /// The active packages whose live DSL includes one domain, for a @usesDeployerFleet
-/// workflow finding its deployer. @serverOnly and read as the cluster: a workflow has
-/// no person to read as, and exactly one row is the only answer that serves a call.
+/// workflow finding its deployer. Not scoped to actor.userId, because a workflow has no
+/// person to read as: that person is the answer this read is for. Read as the cluster, and
+/// exactly one row is the only answer that serves a call.
 @serverOnly
 @cache(0)
 @unbounded("the packages of one cluster -- a domain listed by more than one is a refusal, so the caller must see them all")

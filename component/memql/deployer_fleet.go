@@ -92,8 +92,7 @@ func domainOfNamespace(namespace string) string {
 }
 
 // ContextForDeployerFleet is the context one `builtin ai` call runs on: the
-// caller's own, unless the automation declared @usesDeployerFleet and nobody is
-// already acting.
+// caller's own, unless the automation declared @usesDeployerFleet.
 func (e *MemQLEngine) ContextForDeployerFleet(ctx context.Context) (context.Context, error) {
 	return contextForDeployerFleet(ctx, func(readCtx context.Context, statement string) ([]map[string]any, error) {
 		res, err := e.Execute(readCtx, statement)
@@ -101,24 +100,45 @@ func (e *MemQLEngine) ContextForDeployerFleet(ctx context.Context) (context.Cont
 			return nil, err
 		}
 		return MaterializeRows(res), nil
-	})
+	}, e.localRouteJobs)
+}
+
+// localRouteJobs is the Local route as this cluster has it, its override applied.
+func (e *MemQLEngine) localRouteJobs() RouteJobs {
+	var override *RouteJobs
+	if policies := e.Policies(); policies != nil {
+		if jobs, ok := policies.RouteOverride(RouteIdLocal); ok {
+			override = &jobs
+		}
+	}
+	spec, _ := BuiltinRouteSpec(RouteIdLocal, override)
+	return spec.Jobs
 }
 
 // deployerFleetRead runs one of the seam's reads as the cluster.
 type deployerFleetRead func(ctx context.Context, statement string) ([]map[string]any, error)
 
-func contextForDeployerFleet(ctx context.Context, read deployerFleetRead) (context.Context, error) {
+func contextForDeployerFleet(ctx context.Context, read deployerFleetRead, localRoute func() RouteJobs) (context.Context, error) {
 	domain, declared := DeployerFleetDeclaration(ctx)
 	if !declared {
 		return ctx, nil
 	}
-	// A PERSON ALREADY ACTING WINS (D10). An authored automation runs as its author,
-	// and a call in a person's context, or on a person's run, is already theirs.
-	if !auth.ActsForNoPerson(ctx, actingUserFromContext(ctx)) {
-		return ctx, nil
-	}
+	// A RUN WITH AN OWNER IS THAT PERSON'S WORK, on whatever route they chose for it.
 	if run, inRun := common.RunFromContext(ctx); inRun && strings.TrimSpace(run.OwnerUserId) != "" {
 		return ctx, nil
+	}
+	// THE PROMISE IS THE FLEET, NOT THE ROUTE'S NAME (D8). An owner or a developer can
+	// edit Local for the whole cluster, and a source other than a fleet's would take a
+	// visitor's click to an app session or a vendor, so that refuses.
+	if source := firstNonFleetSource(localRoute()); source != "" {
+		return nil, &DeployerFleetRefusal{Domain: domain, Reason: fmt.Sprintf(
+			"this cluster's Local route also lists %s, so this call could leave the fleet", source)}
+	}
+	// A PERSON ALREADY ACTING KEEPS THEIR OWN FLEET (D10): an authored automation's
+	// author, or someone resuming the run. It stays on Local, since the run they are
+	// resuming may be one a visitor started.
+	if acting := actingUserFromContext(ctx); !auth.ActsForNoPerson(ctx, acting) {
+		return onLocalRoute(ctx, acting), nil
 	}
 	person, err := deployerOfDomain(ctx, domain, read)
 	if err != nil {
@@ -131,6 +151,17 @@ func contextForDeployerFleet(ctx context.Context, read deployerFleetRead) (conte
 	return bound, nil
 }
 
+func firstNonFleetSource(jobs RouteJobs) string {
+	for _, sources := range [][]string{jobs.Fast, jobs.Strong, jobs.Reasoning} {
+		for _, source := range sources {
+			if !strings.HasPrefix(strings.TrimSpace(source), FleetReferencePrefix) {
+				return source
+			}
+		}
+	}
+	return ""
+}
+
 // DeployerCallContext is ctx for one model call made as person, on the Local route.
 //
 // THE LOCAL ROUTE (D8). Their machines first, then the ones lent to them, and it never
@@ -141,12 +172,16 @@ func DeployerCallContext(ctx context.Context, person string) (context.Context, e
 	if err != nil {
 		return nil, err
 	}
+	return onLocalRoute(bound, person), nil
+}
+
+func onLocalRoute(ctx context.Context, person string) context.Context {
 	choice := common.RouteChoice{Source: RouteSourcePrefix + RouteIdLocal, By: person}
 	if run, inRun := common.RunFromContext(ctx); inRun {
 		run.Routing = choice
-		return common.ContextWithRun(bound, run), nil
+		return common.ContextWithRun(ctx, run)
 	}
-	return ContextWithGoalRouteChoice(bound, choice), nil
+	return ContextWithGoalRouteChoice(ctx, choice)
 }
 
 // deployerOfDomain finds the person whose fleet serves a domain's declared

@@ -56,6 +56,9 @@ cells/automation/trigger/an-invalid-cron.memql
 cells/automation/trigger/an-unregistered-concept.memql
 cells/automation/trigger/keyword-arguments.memql
 cells/automation/trigger/with-a-positional-value.memql
+cells/automation/usesDeployerFleet/on-a-before-write-hook.memql
+cells/automation/usesDeployerFleet/with-true.memql
+cells/automation/usesDeployerFleet/written-bare.memql
 cells/builtin/alias/a-string.memql
 cells/builtin/alias/with-an-unquoted-value.memql
 cells/builtin/args/keyword-arguments.memql

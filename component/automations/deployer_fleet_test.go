@@ -95,3 +95,36 @@ func TestAnAutomationDecidesItsOwnDeclaration(t *testing.T) {
 		t.Fatalf("an unflagged automation inherited a person from its caller: %q", probe.domains["b"])
 	}
 }
+
+// D11: a resumed run declares what its first attempt declared, and it is a resume that
+// must not fall back to the ordinary rules: a failed brief resumed by anyone carries what
+// the first attempt carried.
+func TestAResumedRunKeepsItsDeclaration(t *testing.T) {
+	probe := &fleetDeclarationProbe{}
+	e := NewExecutor(ExecutorOptions{StepRegistry: probe})
+	defer e.Close()
+	resume := func(ctx context.Context, a *Automation, step string) {
+		t.Helper()
+		journal := &RunJournal{
+			RunId:          "run-" + step,
+			AutomationName: a.Name,
+			FailedStep:     step,
+			StepStates:     states(step, StepState{Status: "failed", Attempt: 1}),
+			TriggerEvent:   map[string]any{"topic": "probe.fired", "kind": "message", "payload": map[string]any{}},
+		}
+		if _, err := e.ResumeFrom(ctx, journal, a, &ResumeOptions{AllowSideEffects: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resume(context.Background(), &Automation{Name: "flagged", UsesDeployerFleet: true, Domain: "shop", Steps: scheduledSteps("a")}, "a")
+	if probe.domains["a"] != "shop" {
+		t.Fatalf("a resumed step reads %q", probe.domains["a"])
+	}
+
+	inherited := memql.ContextWithDeployerFleet(context.Background(), true, "shop")
+	resume(inherited, &Automation{Name: "plain", Domain: "shop", Steps: scheduledSteps("b")}, "b")
+	if probe.domains["b"] != "(none)" {
+		t.Fatalf("a child resumed under a flagged parent inherited a person: %q", probe.domains["b"])
+	}
+}

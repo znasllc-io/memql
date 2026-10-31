@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"strings"
 	"testing"
@@ -45,9 +46,70 @@ func TestADeployThatStagesDslRecordsItsActor(t *testing.T) {
 	if writes := deployerWrites(h); len(writes) != 1 || writes[0] != `"alice"` {
 		t.Fatalf("the run recorded %v, want its actor", writes)
 	}
-	stmts := h.engine.statements()
-	if statementIndex(stmts, "mutation recordPackageDslDeployer(") < statementIndex(stmts, "mutation recordPackageDslDomains(") {
-		t.Fatal("the person was recorded before the commit point the domain list keeps")
+}
+
+// D4: after the pointer moves any restart runs the new DSL, so the person is recorded first.
+func TestThePersonIsRecordedBeforeThePointerMoves(t *testing.T) {
+	h := newHarness(t, validPackage(), packageDeployedBy("bob"))
+	atPointer := -1
+	h.stager.onWrite = func() { atPointer = len(deployerWrites(h)) }
+	if _, err := deployConfirmed(h, actorNamed("alice")); err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if atPointer != 1 {
+		t.Fatalf("%d writes of the person had landed when the pointer moved, want 1", atPointer)
+	}
+}
+
+// A roll that fails returns before anything later runs, and its retry finds the pointer
+// already moved and stages nothing, so the person must already be there.
+func TestARollThatFailsLeavesThePersonWhoMovedThePointer(t *testing.T) {
+	h := newHarness(t, validPackage(), packageDeployedBy("bob"))
+	h.roller.err = errors.New("the cluster said no")
+	if _, err := deployConfirmed(h, actorNamed("alice")); err == nil {
+		t.Fatal("setup: the roll was meant to fail")
+	}
+	if writes := deployerWrites(h); len(writes) != 1 || writes[0] != `"alice"` {
+		t.Fatalf("after a failed roll the record is %v, want the person who moved the pointer", writes)
+	}
+}
+
+const fleetAutomation = "@usesDeployerFleet\n@trigger(schedule=\"0 0 * * * *\")\nautomation acmeBrief { return true }\n"
+
+func TestAFailedRecordStopsAPackageWithFleetWorkflowsBeforeThePointerMoves(t *testing.T) {
+	tree := validPackage()
+	tree["dsl/acme/automations.memql"] = file(fleetAutomation)
+	h := newHarness(t, tree, packageDeployedBy("bob"))
+	h.engine.fail = map[string]error{"mutation recordPackageDslDeployer(": errors.New("the row refused")}
+	if _, err := deployConfirmed(h, actorNamed("alice")); err == nil || !strings.Contains(err.Error(), "nothing was staged") {
+		t.Fatalf("err = %v, want the deploy stopped, saying so", err)
+	}
+	if h.stager.written != 0 || h.roller.rolls != 0 {
+		t.Fatalf("the pointer moved %d time(s) and rolled %d", h.stager.written, h.roller.rolls)
+	}
+}
+
+// A historic row refuses bookkeeping, and that must not stop its sites deploying.
+func TestAFailedRecordDoesNotStopAPackageWithNoFleetWorkflows(t *testing.T) {
+	h := newHarness(t, validPackage(), packageDeployedBy("bob"))
+	h.engine.fail = map[string]error{"mutation recordPackageDslDeployer(": errors.New("organization_required")}
+	out, err := deployConfirmed(h, actorNamed("alice"))
+	if err != nil || out.Status != StatusSucceeded {
+		t.Fatalf("a failed record stopped the deploy: %+v %v", out, err)
+	}
+}
+
+// D13: a push adding a workflow that spends the owner's machines waits for a person.
+func TestAPlanGainingAFleetWorkflowIsADifferentPlan(t *testing.T) {
+	rep := &Report{DslDomains: []DslDomainReport{{Domain: "acme"}}}
+	before := PlanFingerprint(rep)
+	rep.DslDomains[0].FleetWorkflows = []string{"acmeBrief"}
+	if PlanFingerprint(rep) == before {
+		t.Fatal("an automatic deploy would confirm a new fleet workflow unread")
+	}
+	// A plan that never used it reads as it always did, so no armed source parks on upgrade.
+	if !strings.Contains(before, "dsl=acme|ok") || strings.Contains(before, "fleet=") {
+		t.Fatalf("a plan with no fleet workflows changed: %s", before)
 	}
 }
 

@@ -44,6 +44,11 @@ func statementIs(statement, name string) bool {
 	return len(statement) >= len("query ")+len(name) && statement[len("query "):len("query ")+len(name)] == name
 }
 
+func defaultLocalRoute() RouteJobs {
+	spec, _ := BuiltinRouteSpec(RouteIdLocal, nil)
+	return spec.Jobs
+}
+
 func flaggedContext(domain string) context.Context {
 	ctx := auth.ContextWithSystemActor(context.Background(), "automation-under-test")
 	return ContextWithDeployerFleet(ctx, true, domain)
@@ -56,27 +61,56 @@ func onePackage(deployer string) []map[string]any {
 func TestAWorkflowThatDeclaredNothingIsUntouched(t *testing.T) {
 	facts := &fleetFacts{}
 	ctx := auth.ContextWithSystemActor(context.Background(), "plain")
-	got, err := contextForDeployerFleet(ctx, facts.read)
+	got, err := contextForDeployerFleet(ctx, facts.read, defaultLocalRoute)
 	require.NoError(t, err)
 	require.Equal(t, ctx, got)
 	require.Empty(t, facts.asked, "a workflow that declared nothing read a package")
 }
 
-// D10: a person already acting wins.
-func TestAPersonAlreadyActingIsUntouched(t *testing.T) {
+// D10: a person already acting keeps their own fleet, and stays on Local: they may be
+// resuming a run a visitor started.
+func TestAPersonAlreadyActingKeepsTheirFleetOnLocal(t *testing.T) {
 	facts := &fleetFacts{}
-	ctx := ContextWithDeployerFleet(auth.ContextWithUserActor(context.Background(), "v1:identity:user:bob"), true, "shop")
-	got, err := contextForDeployerFleet(ctx, facts.read)
+	const bob = "v1:identity:user:bob"
+	ctx := ContextWithDeployerFleet(auth.ContextWithUserActor(context.Background(), bob), true, "shop")
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "r"})
+	got, err := contextForDeployerFleet(ctx, facts.read, defaultLocalRoute)
 	require.NoError(t, err)
-	require.Equal(t, ctx, got)
-	require.Empty(t, facts.asked)
+	require.Equal(t, bob, actingUserFromContext(got))
+	require.Empty(t, facts.asked, "a person acting needs no deployer looked up")
+	run, _ := common.RunFromContext(got)
+	require.Equal(t, RouteSourcePrefix+RouteIdLocal, run.Routing.Source)
+	require.Equal(t, bob, run.Routing.By)
+}
+
+// D8: the promise is the fleet, whatever the cluster has done to the route.
+func TestALocalRouteThatLeavesTheFleetRefuses(t *testing.T) {
+	for name, jobs := range map[string]RouteJobs{
+		"an app":   {Fast: []string{"fleet:fastest"}, Strong: []string{"fleet:strongest", "app:*"}, Reasoning: []string{"fleet:strongest"}},
+		"a vendor": {Fast: []string{"federation:cheapest"}, Strong: []string{"fleet:strongest"}, Reasoning: []string{"fleet:strongest"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			facts := &fleetFacts{packages: onePackage(fleetTestPerson), role: auth.RoleOwner}
+			got, err := contextForDeployerFleet(flaggedContext("shop"), facts.read, func() RouteJobs { return jobs })
+			require.Nil(t, got)
+			var refusal *DeployerFleetRefusal
+			require.ErrorAs(t, err, &refusal)
+			require.Contains(t, refusal.Reason, "Local route")
+		})
+	}
+	// An edited route that stays on the fleet is fine.
+	facts := &fleetFacts{packages: onePackage(fleetTestPerson), role: auth.RoleOwner}
+	_, err := contextForDeployerFleet(flaggedContext("shop"), facts.read, func() RouteJobs {
+		return RouteJobs{Fast: []string{"fleet:qwen3.5:4b"}, Strong: []string{"fleet:strongest"}, Reasoning: []string{"fleet:strongest"}}
+	})
+	require.NoError(t, err)
 }
 
 // A goal's run belongs to its owner; a blank-owner run is the deployment's.
 func TestARunWithAnOwnerIsUntouched(t *testing.T) {
 	facts := &fleetFacts{}
 	ctx := common.ContextWithRun(flaggedContext("shop"), common.RunContext{RunId: "r", OwnerUserId: "v1:identity:user:bob"})
-	got, err := contextForDeployerFleet(ctx, facts.read)
+	got, err := contextForDeployerFleet(ctx, facts.read, defaultLocalRoute)
 	require.NoError(t, err)
 	require.Equal(t, ctx, got)
 	require.Empty(t, facts.asked)
@@ -86,7 +120,7 @@ func TestAFlaggedCallBorrowsTheDeployerForThatCall(t *testing.T) {
 	facts := &fleetFacts{packages: onePackage(fleetTestPerson), role: auth.RoleDeveloper}
 	ctx := common.ContextWithRun(flaggedContext("shop"), common.RunContext{RunId: "run-1", StepKey: "s"})
 
-	got, err := contextForDeployerFleet(ctx, facts.read)
+	got, err := contextForDeployerFleet(ctx, facts.read, defaultLocalRoute)
 	require.NoError(t, err)
 
 	// The call acts for the person...
@@ -120,14 +154,14 @@ func TestAFlaggedCallBorrowsTheDeployerForThatCall(t *testing.T) {
 func TestABorrowedCallResolvesToTheLocalRoute(t *testing.T) {
 	facts := &fleetFacts{packages: onePackage(fleetTestPerson), role: auth.RoleOwner}
 	ctx := common.ContextWithRun(flaggedContext("shop"), common.RunContext{RunId: "run-1"})
-	got, err := contextForDeployerFleet(ctx, facts.read)
+	got, err := contextForDeployerFleet(ctx, facts.read, defaultLocalRoute)
 	require.NoError(t, err)
 	require.Equal(t, RouteIdLocal, routedPersonRoute(t, got))
 }
 
 func TestACallOutsideARunStillGetsTheLocalRoute(t *testing.T) {
 	facts := &fleetFacts{packages: onePackage(fleetTestPerson), role: auth.RoleOwner}
-	got, err := contextForDeployerFleet(flaggedContext("shop"), facts.read)
+	got, err := contextForDeployerFleet(flaggedContext("shop"), facts.read, defaultLocalRoute)
 	require.NoError(t, err)
 	require.Equal(t, RouteIdLocal, routedPersonRoute(t, got))
 }
@@ -161,7 +195,7 @@ func TestTheDeployerFleetRefusals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			facts := tc.facts
-			got, err := contextForDeployerFleet(flaggedContext(tc.domain), facts.read)
+			got, err := contextForDeployerFleet(flaggedContext(tc.domain), facts.read, defaultLocalRoute)
 			require.Nil(t, got)
 			var refusal *DeployerFleetRefusal
 			require.ErrorAs(t, err, &refusal)

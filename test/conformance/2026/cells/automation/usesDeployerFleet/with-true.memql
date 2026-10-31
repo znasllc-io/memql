@@ -1,0 +1,3 @@
+@template
+@usesDeployerFleet(true)
+automation invalidDeclaration { return true }

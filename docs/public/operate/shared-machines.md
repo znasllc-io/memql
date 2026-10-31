@@ -169,13 +169,16 @@ writes stays what the cluster may.
 - **Whose fleet.** The person who pressed Deploy or Rollback for the DSL that is
   live, or the package's owner for an automatic deploy. A deploy that does not move
   the DSL does not move the person. The deploy review names the workflows that will
-  use your machines before you confirm.
+  use your machines before you confirm, and an automatic deploy whose list of them
+  changed stops for that review. Someone resuming a run acts for themselves, on their
+  own fleet, still on `Local`.
 - **Fleet only.** The call runs on the `Local` route: that person's machines first,
   then the ones lent to them. It never reaches a signed-in app session or a vendor,
   because a visitor's click must not spend a person's subscription.
 - **It fails closed.** No package listing the workflow's domain, more than one, no
-  person recorded, or a person who may no longer author constructs is a refusal, and
-  so is every machine being asleep. Each is an ordinary `ai` error, which `on error
+  person recorded, a person who may no longer author constructs, or a `Local` route
+  edited to list anything but fleet sources is a refusal, and so is every machine
+  being asleep. Each is an ordinary `ai` error, which `on error
   continue` and the workflow's own failure path handle. Nothing falls back to the
   cluster acting.
 - **Visitor text is data.** The seam adds no input of its own, and the `ai` builtin

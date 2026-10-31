@@ -2503,9 +2503,11 @@ mutation package recordPackageDslDomains {
   }
 }
 
-/// Who staged this package's DSL, written with dslDomains at the same commit point
-/// (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D4). @serverOnly for
-/// dslDomains' reason, and the same guard reserves the field against a raw write.
+/// Who is staging this package's DSL, written just before the pointer moves
+/// (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D4). Not scoped to actor.userId
+/// for dslDomains' reason, since a deploy's stages hand off across nodes with no actor, and what
+/// is worth refusing is a caller naming whose machines serve the package's workflows. The same
+/// guard reserves the field against a raw write.
 @serverOnly
 mutation package recordPackageDslDeployer {
   args {

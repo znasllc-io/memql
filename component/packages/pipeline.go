@@ -816,7 +816,7 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 
 	dslStaged := false
 	if len(rep.DslDomains) > 0 {
-		dslVersion, staged, serr := d.stageAndRoll(ctx, snapshot, rep, out)
+		dslVersion, staged, serr := d.stageAndRoll(ctx, snapshot, rep, out, req.PackageId, req.Actor.UserId)
 		if serr != nil {
 			return serr
 		}
@@ -874,9 +874,9 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 				"deployment", out.DeploymentId, "err", derr)
 		}
-		// Who staged it, at the same commit point and for the same reason.
-		if len(rep.DslDomains) > 0 {
-			d.recordDslDeployer(ctx, req.PackageId, req.Actor.UserId, rowString(pkg, "dslDeployedBy"), dslStaged)
+		// A run that staged recorded its person before moving the pointer.
+		if len(rep.DslDomains) > 0 && !dslStaged {
+			d.fillDslDeployer(ctx, req.PackageId, req.Actor.UserId, rowString(pkg, "dslDeployedBy"))
 		}
 	} else {
 		d.log().Info("packages: this run publishes no serving version, so the DSL domains this package ships are left as they were",

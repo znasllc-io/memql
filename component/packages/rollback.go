@@ -139,6 +139,11 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			}
 		}
 		if changed {
+			// Whoever puts DSL back answers for it, recorded before the pointer moves for
+			// the reason a deploy's is.
+			if err := d.recordDslDeployerBeforeStaging(ctx, req.PackageId, req.Actor.UserId, declaresFleetWorkflows(reportFromRow(prior))); err != nil {
+				return restored, err
+			}
 			if err := d.Stager.WriteActiveSet(ctx, next); err != nil {
 				return restored, err
 			}
@@ -185,12 +190,6 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			"component", "packages.rollback", logger.Subject(packageDeploymentConcept, req.DeploymentId),
 			"package", req.PackageId, "deployment", req.DeploymentId, "err", derr)
 	}
-	// A rollback that put DSL back staged it, so its actor is who answers for it. One
-	// that found the DSL already active moved nothing, and leaves the record.
-	if restored.Rolled {
-		d.recordDslDeployer(ctx, req.PackageId, req.Actor.UserId, "", true)
-	}
-
 	return restored, nil
 }
 
