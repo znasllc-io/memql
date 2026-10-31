@@ -65,6 +65,12 @@ const (
 	// AnnotRunDeadline keeps queued-step secrets until the agent's run deadline,
 	// independently of the sweeping workbench's configured ceiling.
 	AnnotRunDeadline = "memql.io/run-deadline"
+	// AnnotRunCeiling is the ceiling that deadline was measured against, in whole
+	// minutes, on a queued Job only: `memql pipeline-deadline-priority` scales its
+	// windows by it (deadline_priority.go). A Job carries it rather than the
+	// promoter being told, because a ceiling changed while a step waits does not
+	// reach that step's deadline, so only the Job knows which one it is under.
+	AnnotRunCeiling = "memql.io/run-ceiling-minutes"
 	// AnnotRunner is "<nodeId> <RFC3339 heartbeat>": which replica holds the
 	// Job, and when it last said so.
 	AnnotRunner = "memql.io/runner"

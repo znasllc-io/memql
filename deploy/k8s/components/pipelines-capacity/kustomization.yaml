@@ -1,5 +1,6 @@
 # Upstream Kueue v0.20.2, SHA256 1ab14ecd590575ac57f50fa4cbcf529766bc2c32ba974bda1614381281ec52b4.
-# The runner must ship queue support before an overlay enables this component.
+# The runner must ship queue support before an overlay enables this component, and
+# the workbench image it pins must carry `memql pipeline-deadline-priority`.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 openapi:
@@ -8,6 +9,8 @@ resources:
   - queue.yaml
   - rbac.yaml
   - ceiling-policy.yaml
+  - priorities.yaml
+  - deadline-priority.yaml
 patches:
   - target: {kind: ConfigMap, name: memql-pipelines}
     patch: |-
