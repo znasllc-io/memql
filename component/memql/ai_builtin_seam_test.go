@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"text/template"
@@ -247,6 +248,64 @@ func TestTheAiBuiltinEnvelopeKeysAreStable(t *testing.T) {
 	for _, key := range []string{"prompt", "reply"} {
 		if _, ok := back[key]; !ok {
 			t.Errorf("the ai() envelope must carry %q", key)
+		}
+	}
+}
+
+// THE LANE IS DECLARED ON THE BUILTIN, AND THE ENGINE'S CALL CONTRACT ADMITS IT.
+//
+// integrations/agents reads args["lane"] and accepts "interactive" or
+// "background" (its TestAnUnknownLaneIsRefused refuses the rest by name). This
+// is the other half of the same promise, read off the embedded tree the way a
+// node loads it: the builtin declares an optional `lane` with those two
+// members, so an author may write it; and the contract every builtin call
+// passes before its executor runs refuses a misspelled ARGUMENT NAME and a lane
+// that is not a string, so neither can reach the executor and run a reflection
+// on the interactive bucket in silence. Membership is not left to the
+// contract: the executor refuses an unknown lane itself.
+func TestTheAiBuiltinDeclaresTheLaneTheExecutorReads(t *testing.T) {
+	fn, err := newParserTestEngine(t).functions.Get("agents.ai")
+	if err != nil || fn == nil || fn.BuiltinArgs == nil {
+		t.Fatalf("the ai builtin is not loaded from the embedded tree: %v", err)
+	}
+	var lane *FunctionArgsField
+	for _, field := range fn.BuiltinArgs.Fields {
+		if field.Name == "lane" {
+			lane = field
+		}
+	}
+	if lane == nil {
+		t.Fatal("builtin ai declares no `lane`: a DSL author cannot put a call on the background lane")
+	}
+	if lane.Type != "string" || !lane.Optional {
+		t.Fatalf("lane is declared type %q optional=%v, want an optional string (no lane is the interactive lane)", lane.Type, lane.Optional)
+	}
+	if want := []any{"interactive", "background"}; !reflect.DeepEqual(lane.Enum, want) {
+		t.Fatalf("lane declares the members %v, want %v: they are the two the executor accepts", lane.Enum, want)
+	}
+
+	call := func(extra map[string]any) error {
+		args := map[string]any{"templateId": "reflect", "data": map[string]any{}}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return validateBuiltinCallArgs("ai", args, fn.BuiltinArgs)
+	}
+	for name, extra := range map[string]map[string]any{
+		"no lane":     nil,
+		"interactive": {"lane": "interactive"},
+		"background":  {"lane": "background"},
+	} {
+		if err := call(extra); err != nil {
+			t.Errorf("%s: the call contract refused a call it must admit: %v", name, err)
+		}
+	}
+	for name, extra := range map[string]map[string]any{
+		"a misspelled argument name": {"laen": "background"},
+		"a lane that is a bool":      {"lane": true},
+	} {
+		if err := call(extra); err == nil {
+			t.Errorf("%s: the call contract admitted it, so it would reach the executor", name)
 		}
 	}
 }

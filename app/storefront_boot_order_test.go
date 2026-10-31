@@ -81,14 +81,14 @@ concept applicationDetail {
 	if _, err := app.registry.Get("v1:wholesale:application"); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"reviews", "wholesale"} {
+	for _, name := range []string{"reviews", "wholesale", "games"} {
 		if enabled, declared := memqldsl.PackDefaults()[name]; !declared || enabled {
 			t.Fatalf("pack %s must remain declared disabled, got %v/%v", name, enabled, declared)
 		}
 	}
 	// The analyzer may anchor again in this same process; no double registration
 	// or implicit enablement may result from moving the first registration early.
-	app.anchorStorefrontPacks()
+	app.anchorPacks()
 	if memqldsl.PackDefaultEnabled("reviews") || memqldsl.PackDefaultEnabled("wholesale") {
 		t.Fatal("repeat anchor enabled a storefront pack")
 	}

@@ -41,7 +41,7 @@ func (a *App) databaseAndConcepts() {
 	// phase: otherwise a valid product import resolves during Analyze but is
 	// still bare when the database registry is built at boot. Registration
 	// declares disabled defaults; behavior remains gated by loadPackEnablement.
-	a.anchorStorefrontPacks()
+	a.anchorPacks()
 
 	// Mount any product DSL delivered at runtime via MEMQL_DSL_PATH (a bundle
 	// image's init-container populates that volume) BEFORE the first Tree()

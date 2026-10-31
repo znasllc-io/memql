@@ -118,6 +118,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/examples/deploypack":    4, // all:dsl (+memql.toml, the pack's language line -- memql#5357)
 	"github.com/znasllc-io/memql/examples/referencepack": 6, // all:dsl (+memql.toml, memql#5357)
 	"github.com/znasllc-io/memql/packs/reviewspack":      8, // all:dsl (memql#4139; +memql.toml, memql#5357; +queries.memql and +shapes.memql -- the reads the pack lacked, epic memql#5532). MEASURED, never derived
+	"github.com/znasllc-io/memql/packs/gamespack":        7, // all:dsl (design record 2026-10-18-games-pack-design.md): concepts, shapes, queries, mutations, builtins, memql.toml, namespace.pin. MEASURED, never derived
 	"github.com/znasllc-io/memql/packs/wholesalepack":    8, // all:dsl (epic memql#5533): concepts, shapes, queries, mutations, builtins, tools, memql.toml, namespace.pin. The BUILTIN decides and the MUTATION writes -- a builtin's returned nodes are the expression's value and are never persisted. MEASURED, never derived
 	"github.com/znasllc-io/memql/examples/shopifypack":   8, // all:dsl -- memql#4138 attach/secrets/sync (+memql.toml, memql#5357; +namespace.pin -- epic memql#5375 retired @namespace, so a pack whose namespace diverges from its directory states it in a one-line pin instead). MEASURED from the gate, never derived
 	"github.com/znasllc-io/memql/integrations":           1, // *.json

@@ -226,7 +226,7 @@ func run(args []string) int {
 		// Linking is not enabling: a storefront pack ships disabled and its
 		// reach is governed by v1:platform:packState. This makes the
 		// concepts importable, which is all a lint needs.
-		anchor.Storefront()
+		anchor.Packs()
 
 		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
 		// What the parity pass found that LOADS -- a use of a deprecated form

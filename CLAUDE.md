@@ -141,9 +141,10 @@ MemQL/
 │                      copied (brand_shared_source_test.go, memql#4266)
 ├── clients/os/        MemQL OS -- desktop shell + graphical ops console,
 │                      served by component/edge as a site row
-├── packs/             Storefront packs in the DEFAULT BUILD (epic memql#5532),
-│                      mounted on every node by app/anchor_storefront_packs.go
-│                      and shipped DISABLED. examples/ keeps the tag-gated packs
+├── packs/             Packs in the DEFAULT BUILD (the storefront packs, epic
+│                      memql#5532, and the games pack), mounted on every node
+│                      by app/anchor_packs.go and shipped DISABLED. examples/
+│                      keeps the tag-gated packs
 ├── component/         Core Go components (memql, grpc, events, database,
 │                      server, auth, edge, language, procedure, bus, node,
 │                      architecture, observe, envregistry, ...)

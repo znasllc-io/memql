@@ -1,0 +1,238 @@
+// games pack -- writes. Every mutation stamps ownerUserId from the actor, so a
+// row is always the caller's own.
+//
+// THE CALLER NAMES EVERY ROW ID, and that is what makes these upserts. An
+// insert on an id that exists writes a new version of it (a shallow
+// read-merge), so a runtime that derives a stable id -- a preference from its
+// player and subject, a place from its world and name -- rewrites one row
+// instead of accumulating near-duplicates.
+//
+// THREE WRITERS ARE @serverOnly, for the work journal's reason: a
+// client-reachable write would be a forgery. A plan trace whose signature
+// nobody checked teaches the learner a skill nobody demonstrated, and a skill
+// row a client could write is a promotion nobody earned. @serverOnly closes
+// only the mutation it sits on, and a raw insert() or update() never consults
+// it, so the two concepts the writers fill, skill and planTrace, are also
+// @serverWritten: every write to them needs internal origin.
+//
+// INTERNAL ORIGIN ESCAPES THE OWNED TIER. The pack's Go half calls the three
+// writers under internal origin with the caller's actor kept, and the owned
+// tier's write guard admits internal origin without comparing the stored
+// owner (rowAuthzWriteEscape, component/memql/rowauthz_write_guard.go). So the
+// tier does not decide whose row a server writer touches: that rests on the
+// Go half reading under the actor first, before it writes.
+
+/// Register or update a player. playerId is the runtime's stable id for the player.
+@actor
+mutation player upsertGamesPlayer {
+  args {
+    playerId     string!  @maxLength(64)
+    gamertag     string!  @maxLength(32)
+    displayName  string!  @maxLength(64)
+    consented    bool!
+  }
+  insert {
+    accept { gamertag, displayName, consented }
+    stamp {
+      id: args.playerId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record one episode. gamesRecordEpisodes is the usual path, because it also embeds the
+/// summary; an episode written here directly is embedded by the next gamesEmbedPending.
+@actor
+mutation episode createGamesEpisode {
+  args {
+    episodeId    string!  @maxLength(64)
+    characterId  string!  @maxLength(64)
+    playerId     string
+    worldId      string!  @maxLength(64)
+    at           datetime!
+    kind         enum("chat", "event", "activity", "session")!
+    summary      string!  @maxLength(400)
+    importance   int!  @minimum(1)  @maximum(10)
+  }
+  insert {
+    accept { characterId, playerId, worldId, at, kind, summary, importance }
+    stamp {
+      id: args.episodeId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Write a player's preference about one subject. preferenceId is stable per (player, subject).
+@actor
+mutation preference upsertGamesPreference {
+  args {
+    preferenceId  string!  @maxLength(64)
+    playerId      string!
+    subject       string!  @maxLength(120)
+    valence       float!  @minimum(-1)  @maximum(1)
+    confidence    float!  @minimum(0)  @maximum(1)
+    evidence      []string
+  }
+  insert {
+    accept { playerId, subject, valence, confidence, evidence }
+    stamp {
+      id: args.preferenceId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Write a promise a character made to a player.
+@actor
+mutation promise upsertGamesPromise {
+  args {
+    promiseId    string!  @maxLength(64)
+    characterId  string!  @maxLength(64)
+    playerId     string!
+    text         string!  @maxLength(200)
+    status       enum("open", "kept", "dropped")!
+    madeAt       datetime!
+  }
+  insert {
+    accept { characterId, playerId, text, status, madeAt }
+    stamp {
+      id: args.promiseId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Mark a promise kept or dropped (or open again).
+@actor
+mutation promise setGamesPromiseStatus {
+  args {
+    promiseId  string!
+    status     enum("open", "kept", "dropped")!
+  }
+  update {
+    accept { status }
+    stamp {
+      id: args.promiseId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Write a place in a world. placeId is stable per (world, name).
+@actor
+mutation place upsertGamesPlace {
+  args {
+    placeId       string!  @maxLength(64)
+    worldId       string!  @maxLength(64)
+    name          string!  @maxLength(80)
+    kind          string!  @maxLength(32)
+    position      object!
+    discoveredBy  string  @maxLength(64)
+    at            datetime!
+  }
+  insert {
+    accept { worldId, name, kind, position, discoveredBy, at }
+    stamp {
+      id: args.placeId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record a plan trace. @serverOnly: gamesRecordTrace recomputes the goal signature and
+/// derives the action list first, and a trace written around it would teach the learner
+/// whatever its caller claimed.
+@serverOnly
+@actor
+mutation planTrace createGamesPlanTrace {
+  args {
+    traceId        string!  @maxLength(64)
+    characterId    string!  @maxLength(64)
+    goalText       string!  @maxLength(200)
+    goalSignature  string!
+    trigger        string!  @maxLength(64)
+    inputs         object
+    steps          []object!
+    actions        []string!
+    outcome        enum("success", "failure", "abandoned")!
+    reaction       enum("positive", "neutral", "negative")!
+    at             datetime!
+    say            string  @maxLength(200)
+    skillId        string
+  }
+  insert {
+    accept { characterId, goalText, goalSignature, trigger, inputs, steps, actions, outcome, reaction, at, say, skillId }
+    stamp {
+      id: args.traceId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Create a skill at the bottom of the ladder. @serverOnly: only the learner creates a skill,
+/// from at least two successful traces it read itself.
+@serverOnly
+@actor
+mutation skill createGamesSkill {
+  args {
+    skillId         string!
+    goalText        string!  @maxLength(200)
+    goalSignature   string!
+    actions         []string!
+    template        object!
+    templateDigest  string!
+    triggers        []string
+    confirmation    string  @maxLength(200)
+    learnedFrom     []string
+  }
+  insert {
+    accept { goalText, goalSignature, actions, template, templateDigest, triggers, confirmation, learnedFrom }
+    stamp {
+      id: args.skillId
+      ownerUserId: actor.userId
+      learnedAt: now
+      rung: "shadow"
+      state: "shadow"
+      shadowMatches: 0
+      canaryMatches: 0
+      distinctBindings: {}
+      failures: 0
+      promotionApprovalId: ""
+      lastReason: "learned from two or more successful plans; it is compared with the model's plans in shadow"
+      rungChangedAt: now
+    }
+  }
+}
+
+/// Write one ladder move: the WHOLE state component/work.Advance returned. @serverOnly: the
+/// ladder writes the ladder. versionAt is stamped strictly after the version the move read, so
+/// a move made on a replica with a lagging clock is still the newest version (memql#5431).
+@serverOnly
+@actor
+mutation skill recordGamesSkillLadder {
+  args {
+    skillId              string!
+    versionAt            datetime!
+    rung                 enum("shadow", "canary", "trusted", "retired")!
+    state                enum("shadow", "awaiting_approval", "canary", "trusted", "retired")!
+    shadowMatches        int!
+    canaryMatches        int!
+    distinctBindings     object!
+    failures             int!
+    promotionApprovalId  string
+    promotionProposedAt  datetime
+    lastReplayAt         datetime
+    lastBinding          object
+    lastReason           string!
+    rungChangedAt        datetime
+  }
+  update {
+    accept { rung, state, shadowMatches, canaryMatches, distinctBindings, failures, promotionApprovalId, promotionProposedAt, lastReplayAt, lastBinding, lastReason, rungChangedAt }
+    stamp {
+      id: args.skillId
+      createdAt: args.versionAt
+      ownerUserId: actor.userId
+    }
+  }
+}

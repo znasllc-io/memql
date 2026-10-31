@@ -548,6 +548,22 @@ ceiling as no-spend: the ordinary numeric ceiling uses zero to mean unset.
 | `MEMQL_LLM_RATE_WINDOW_SECONDS` | 10 |
 | `MEMQL_LLM_BG_MAX_CALLS_PER_WINDOW` | 40 |
 
+The second bucket is the background lane's. A call is on it when Go marks its
+context with `memql.ContextWithBackgroundLane` (the agent's non-streaming
+loop does) or when DSL calls `builtin ai(..., lane: "background")`. A burst of
+reflections on that lane never spends the interactive budget a person's
+request needs, and that bucket is the effect that always applies.
+
+The lane also tags the request `background`. Under the shipped rules that tag
+selects the same chain as the `default` rule, and a fast-level prompt keeps
+`fastLane`. Locked rules are evaluated before any rule an owner adds, so a
+tagged call is matched by `backgroundLane` first and an owner's rule for the
+same prompt is not consulted. A prompt that pins a provider keeps its pin.
+
+`lane` is visible to a model that calls `ai`, and that is bounded: it changes
+only which rate ceiling the call counts against, and the kill switch, the loop
+breaker and cost accounting apply to every call on either lane.
+
 ### Layer 2 — automation budget
 | env | default |
 |---|---|

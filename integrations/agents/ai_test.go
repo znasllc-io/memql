@@ -20,10 +20,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // promptRecordingEngine is the AI runtime as this executor sees it: one method that
@@ -33,13 +35,15 @@ type promptRecordingEngine struct {
 
 	gotTemplate string
 	gotData     map[string]any
+	gotCtx      context.Context
 	calls       int
 	reply       any
 	err         error
 }
 
-func (r *promptRecordingEngine) InvokeAI(_ context.Context, templateId string, data map[string]any) (any, error) {
+func (r *promptRecordingEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
 	r.calls++
+	r.gotCtx = ctx
 	r.gotTemplate = templateId
 	r.gotData = data
 	return r.reply, r.err
@@ -190,7 +194,7 @@ func TestTheAiBuiltinRefusesByNameRatherThanAnsweringEmpty(t *testing.T) {
 // and a call site naming one is a routing decision no rule can see.
 func TestTheAiCapabilityDeclaresPromptContractsAndNoProviderOverride(t *testing.T) {
 	cap := aiHandler(t, &promptRecordingEngine{})
-	for _, key := range []string{"templateId", "data", "responseSchema", "progress"} {
+	for _, key := range []string{"templateId", "data", "responseSchema", "progress", "lane"} {
 		if _, ok := cap.ArgsSchema[key]; !ok {
 			t.Errorf("the ai capability must declare %q", key)
 		}
@@ -203,8 +207,8 @@ func TestTheAiCapabilityDeclaresPromptContractsAndNoProviderOverride(t *testing.
 				"provider this repo ships. The surviving pin is @defaultProvider on the PROMPT.", banned)
 		}
 	}
-	if len(cap.ArgsSchema) != 4 {
-		t.Errorf("the ai capability declares %d arguments, want exactly 4: %#v", len(cap.ArgsSchema), cap.ArgsSchema)
+	if len(cap.ArgsSchema) != 5 {
+		t.Errorf("the ai capability declares %d arguments, want exactly 5: %#v", len(cap.ArgsSchema), cap.ArgsSchema)
 	}
 }
 
@@ -226,8 +230,9 @@ type structuredPromptEngine struct {
 	answer   string
 }
 
-func (e *structuredPromptEngine) InvokeAIStructured(_ context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+func (e *structuredPromptEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
 	e.calls++
+	e.gotCtx = ctx
 	e.gotTemplate, e.gotData, e.schema, e.strict = name, data, schema, strict
 	if schemaName != "prompt_output" {
 		return "", fmt.Errorf("unexpected schema name")
@@ -276,5 +281,217 @@ func TestStructuredPromptRejectsUndecodableObject(t *testing.T) {
 		if err == nil || engine.calls != 1 {
 			t.Fatalf("invalid structured result accepted or retried: %q, calls=%d, err=%v", answer, engine.calls, err)
 		}
+	}
+}
+
+// THE LANE (games pack design record, seam 1). A background call counts
+// against the background rate bucket and carries the background routing tag;
+// no lane is the interactive lane; anything else is refused before the
+// runtime is asked.
+func TestTheBackgroundLaneReachesTheRuntime(t *testing.T) {
+	engine := &promptRecordingEngine{reply: "ok"}
+	if _, err := callAi(t, engine, map[string]any{"templateId": "reflect", "data": map[string]any{}, "lane": "background"}); err != nil {
+		t.Fatal(err)
+	}
+	if !memql.BackgroundLaneFromContext(engine.gotCtx) {
+		t.Fatal("a background ai() call reached the runtime on the interactive lane: its model calls would spend the interactive rate budget")
+	}
+	stamped, _ := memql.AICallAttributionFromContext(engine.gotCtx)
+	if !slices.Contains(stamped.Tags, airoute.TagBackground) {
+		t.Fatalf("a background ai() call must carry the %q tag the backgroundLane rule routes on, got %v", airoute.TagBackground, stamped.Tags)
+	}
+}
+
+func TestTheInteractiveLaneIsTheDefault(t *testing.T) {
+	for _, lane := range []any{nil, "interactive"} {
+		engine := &promptRecordingEngine{reply: "ok"}
+		args := map[string]any{"templateId": "decide", "data": map[string]any{}}
+		if lane != nil {
+			args["lane"] = lane
+		}
+		if _, err := callAi(t, engine, args); err != nil {
+			t.Fatal(err)
+		}
+		if memql.BackgroundLaneFromContext(engine.gotCtx) {
+			t.Fatalf("lane %v put the call on the background lane", lane)
+		}
+	}
+}
+
+func TestAnUnknownLaneIsRefused(t *testing.T) {
+	engine := &promptRecordingEngine{reply: "ok"}
+	_, err := callAi(t, engine, map[string]any{"templateId": "reflect", "data": map[string]any{}, "lane": "bg"})
+	if err == nil || !strings.Contains(err.Error(), "lane must be interactive or background") {
+		t.Fatalf("an unknown lane must be refused by name, got %v", err)
+	}
+	if engine.calls != 0 {
+		t.Fatal("the runtime was asked although the lane was refused")
+	}
+}
+
+// laneProbeKey marks a context as the caller's own, so a test can tell the
+// context the runtime was handed from one the executor built.
+type laneProbeKey struct{}
+
+// NO LANE, OR THE INTERACTIVE ONE, CHANGES NOTHING: a call that never heard of
+// the lane reaches the runtime exactly as it did before the argument existed.
+// The runtime is handed the very context the executor received -- no lane mark,
+// no tag, no attribution stamped -- for an absent lane, a null one, an empty
+// one and the spelled-out default alike.
+func TestAnAbsentLaneLeavesTheCallersContextUntouched(t *testing.T) {
+	absent := map[string]any{"templateId": "decide", "data": map[string]any{}}
+	withLane := func(lane any) map[string]any {
+		return map[string]any{"templateId": "decide", "data": map[string]any{}, "lane": lane}
+	}
+	for name, args := range map[string]map[string]any{
+		"no lane argument": absent,
+		"a null lane":      withLane(nil),
+		"an empty lane":    withLane(""),
+		"interactive":      withLane("interactive"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := &promptRecordingEngine{reply: "ok"}
+			caller := context.WithValue(context.Background(), laneProbeKey{}, "callers-own")
+			if _, err := aiHandler(t, engine).Handler(caller, args, 0); err != nil {
+				t.Fatal(err)
+			}
+			if engine.gotCtx != caller {
+				t.Fatal("the runtime was handed a context the executor built; an absent lane must pass the caller's own through")
+			}
+			if memql.BackgroundLaneFromContext(engine.gotCtx) {
+				t.Fatal("the call is on the background lane")
+			}
+			if stamped, ok := memql.AICallAttributionFromContext(engine.gotCtx); ok {
+				t.Fatalf("an attribution was stamped on a call that asked for no lane: %+v", stamped)
+			}
+		})
+	}
+}
+
+// A LANE THAT IS NOT ONE OF THE TWO IS REFUSED, WHATEVER IT IS, AND THE
+// REFUSAL NAMES THE ARGUMENT. A value that is not a string cannot be read as
+// "no lane": `lane: true` silently running a reflection on the interactive
+// bucket is the same failure as a misspelling, and an easier one to make.
+func TestALaneThatIsNotAKnownLaneIsRefusedByName(t *testing.T) {
+	for name, lane := range map[string]any{
+		"a misspelling":     "bg",
+		"the wrong case":    "Background",
+		"an extra word":     "background-ish",
+		"a bool":            true,
+		"a number":          float64(5),
+		"a list":            []any{"background"},
+		"an object":         map[string]any{"lane": "background"},
+		"the other default": "batch",
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := &promptRecordingEngine{reply: "ok"}
+			_, err := callAi(t, engine, map[string]any{"templateId": "reflect", "data": map[string]any{}, "lane": lane})
+			requireRefusal(t, err, "lane must be interactive or background")
+			requireRefusal(t, err, `ai("reflect")`)
+			if engine.calls != 0 {
+				t.Fatal("the runtime was asked although the lane was refused")
+			}
+		})
+	}
+}
+
+// progressPromptEngine is the runtime with the plain progress entry point, the
+// one InvokeAI-shaped method the other recording engines do not carry.
+type progressPromptEngine struct{ promptRecordingEngine }
+
+func (e *progressPromptEngine) InvokeAIProgress(ctx context.Context, name string, data map[string]any) (any, error) {
+	return e.InvokeAI(ctx, name, data)
+}
+
+// THE LANE REACHES THE RUNTIME ON EVERY PATH THE BUILTIN HAS: the plain call,
+// the progress call, the structured call and the structured progress call are
+// four different engine methods, and a lane applied on one of them only would
+// leave the others spending the interactive budget in silence.
+func TestTheLaneReachesEveryRuntimeEntryPoint(t *testing.T) {
+	schema := map[string]any{"type": "object"}
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		mk   func() (memql.IntegrationEngineAccess, func() context.Context)
+	}{
+		{"plain", map[string]any{},
+			func() (memql.IntegrationEngineAccess, func() context.Context) {
+				e := &promptRecordingEngine{reply: "ok"}
+				return e, func() context.Context { return e.gotCtx }
+			}},
+		{"progress", map[string]any{"progress": true},
+			func() (memql.IntegrationEngineAccess, func() context.Context) {
+				e := &progressPromptEngine{promptRecordingEngine{reply: "ok"}}
+				return e, func() context.Context { return e.gotCtx }
+			}},
+		{"structured", map[string]any{"responseSchema": schema},
+			func() (memql.IntegrationEngineAccess, func() context.Context) {
+				e := &structuredPromptEngine{}
+				return e, func() context.Context { return e.gotCtx }
+			}},
+		{"structured progress", map[string]any{"responseSchema": schema, "progress": true},
+			func() (memql.IntegrationEngineAccess, func() context.Context) {
+				e := &structuredPromptEngine{}
+				return e, func() context.Context { return e.gotCtx }
+			}},
+	} {
+		for _, lane := range []string{"background", "interactive"} {
+			t.Run(tc.name+" "+lane, func(t *testing.T) {
+				engine, reached := tc.mk()
+				args := map[string]any{"templateId": "reflect", "data": map[string]any{}, "lane": lane}
+				for k, v := range tc.args {
+					args[k] = v
+				}
+				if _, err := callAi(t, engine, args); err != nil {
+					t.Fatal(err)
+				}
+				if reached() == nil {
+					t.Fatal("the runtime was not asked")
+				}
+				background := lane == "background"
+				if got := memql.BackgroundLaneFromContext(reached()); got != background {
+					t.Fatalf("on the %s lane the call's background mark is %v, want %v", lane, got, background)
+				}
+				stamped, _ := memql.AICallAttributionFromContext(reached())
+				if got := slices.Contains(stamped.Tags, airoute.TagBackground); got != background {
+					t.Fatalf("on the %s lane the background tag is present=%v, want %v", lane, got, background)
+				}
+			})
+		}
+	}
+}
+
+// THE LANE ADDS TO WHAT AN OUTER FRAME STAMPED; IT NEVER REPLACES IT. An
+// attribution naming the upstream request, the agent and the footprint is what
+// the decision record joins on, and a lane that rebuilt the stamp from nothing
+// would blank all of it for exactly the calls (a reflection after the fact)
+// whose spend is hardest to trace back. The outer frame's own slice is not
+// written into either.
+func TestTheBackgroundLaneKeepsWhatAnOuterFrameStamped(t *testing.T) {
+	engine := &promptRecordingEngine{reply: "ok"}
+	outerTags := make([]string, 1, 4)
+	outerTags[0] = "custom"
+	outer := memql.ContextWithAICallAttribution(context.Background(), memql.AICallAttribution{
+		RequestId: "req-1", AgentId: "agent-1", Touches: []string{"v1:library:file"}, Tags: outerTags,
+	})
+	args := map[string]any{"templateId": "reflect", "data": map[string]any{}, "lane": "background"}
+	if _, err := aiHandler(t, engine).Handler(outer, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := memql.AICallAttributionFromContext(engine.gotCtx)
+	if !ok {
+		t.Fatal("the runtime was handed no attribution")
+	}
+	if got.RequestId != "req-1" || got.AgentId != "agent-1" || !slices.Equal(got.Touches, []string{"v1:library:file"}) {
+		t.Fatalf("the lane blanked what the outer frame stamped: %+v", got)
+	}
+	if want := []string{"custom", airoute.TagBackground}; !slices.Equal(got.Tags, want) {
+		t.Fatalf("tags=%q, want the outer frame's tag then the lane's: %q", got.Tags, want)
+	}
+	if spare := outerTags[:cap(outerTags)]; spare[1] != "" {
+		t.Fatalf("the outer frame's backing array was written into: %q", spare)
+	}
+	if before, _ := memql.AICallAttributionFromContext(outer); len(before.Tags) != 1 {
+		t.Fatalf("the caller's own context was changed: tags=%q", before.Tags)
 	}
 }

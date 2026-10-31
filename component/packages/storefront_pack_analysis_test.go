@@ -11,7 +11,7 @@ import (
 // pack's concepts, and the analyzer has to know that.
 //
 // THE ANALYZER MODELS AN ENGINE. Every published image links the storefront
-// packs with no build tag (app/anchor_storefront_packs.go), so a product
+// packs with no build tag (app/anchor_packs.go), so a product
 // domain that imports one loads perfectly well on a real node. The offline
 // analysis linked none of them, so the same tree came back
 // "dsl_refuses_boot" with a message telling the author to add an import

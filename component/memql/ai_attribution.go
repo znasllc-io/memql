@@ -33,9 +33,10 @@ package memql
 //     call an automation makes. It also carries the run's OwnerUserId, which
 //     is a person's id on a context that may carry no access context at all.
 //   - AICallAttribution -- the one thing neither of the above can know: the
-//     upstream request id a transport assigned, the agent acting, and the
-//     footprint the call is about. A caller that HAS those stamps them once;
-//     one that does not is no worse off than it was.
+//     upstream request id a transport assigned, the agent acting, the
+//     footprint the call is about and the tags a rule may branch on. A caller
+//     that HAS those stamps them once; one that does not is no worse off than
+//     it was.
 //
 // # What is deliberately not derived
 //
@@ -70,9 +71,12 @@ type AICallAttribution struct {
 	// Touches is the call's footprint: the concept ids or knowledge-domain
 	// ids the call is about. A rule matches it with startsWith semantics.
 	Touches []string
-	// Tags are call tags a rule may branch on, for a caller whose call site
-	// builds no request of its own -- the pipeline runner's independent review
-	// renders a captured prompt, so it says "pipeline" here.
+	// Tags are call tags a rule may branch on (core/airoute's TagBackground,
+	// TagPipeline). The `ai` builtin's background lane stamps TagBackground
+	// here, so a background prompt call is routed by the shipped
+	// backgroundLane rule exactly as a background agent turn is -- unless a
+	// pin wins, as a pin always does. The pipeline runner's independent review
+	// renders a captured prompt and says "pipeline" here.
 	Tags []string
 }
 
@@ -106,10 +110,15 @@ func AICallAttributionFromContext(ctx context.Context) (AICallAttribution, bool)
 // applyCallAttribution fills the attribution half of a router request from the
 // context, leaving anything the caller already set alone.
 //
-// EVERY FIELD IS FILLED ONLY IF EMPTY, because a call site that named a value
-// knows something this derivation does not -- the agent replier stamps the
-// gRPC request id straight onto its own request, and rediscovering a different
-// one here would rename the very thing the field exists to join on.
+// EVERY FIELD BUT TAGS IS FILLED ONLY IF EMPTY, because a call site that named
+// a value knows something this derivation does not -- the agent replier stamps
+// the gRPC request id straight onto its own request, and rediscovering a
+// different one here would rename the very thing the field exists to join on.
+//
+// TAGS ARE THE ONE EXCEPTION. They are a set a rule reads membership in, not a
+// single value, so a stamped tag is ADDED beside the ones the call site set
+// (once, and never replacing them) instead of being skipped because the call
+// site set some.
 func applyCallAttribution(ctx context.Context, req airoute.ResolveRequest) airoute.ResolveRequest {
 	if ctx == nil {
 		ctx = context.Background()

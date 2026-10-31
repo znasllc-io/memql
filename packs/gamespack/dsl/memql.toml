@@ -1,0 +1,4 @@
+# The language this directory's .memql files are written in.
+# See docs/public/language/memql.md, "The language line".
+memql = "1.0"
+edition = "2026"

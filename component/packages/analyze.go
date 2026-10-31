@@ -212,7 +212,7 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 	// "dsl_refuses_boot" against a tree that loads perfectly well on a real
 	// node. Idempotent, because a node runs this analysis in-process while
 	// already carrying the packs.
-	anchor.Storefront()
+	anchor.Packs()
 
 	result, gateErr := memql.AnalyzePackageDSL(logger, dslTree)
 	if gateErr != nil {

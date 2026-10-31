@@ -227,7 +227,7 @@ release.
 
 ```go
 // packs/mypack/pack.go -- no build tag, no init(); Register is called from
-// app/anchor_storefront_packs.go, which every node type runs.
+// app/anchor_packs.go, which every node type runs.
 func Register(domain string) {
     memqldsl.RegisterTree(domain, Tree())
     memqldsl.RegisterPackDefault(domain, DefaultEnabled) // false, for a storefront pack

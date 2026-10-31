@@ -113,7 +113,7 @@ func (g *llmGuard) admitLocalCall(ctx context.Context, fingerprint string) error
 	// 2. The per-lane rate ceiling. The lane is read off the context exactly
 	// as the transport reads it off the request context, so a background
 	// executor's local calls count against the background bucket.
-	if open, calls := g.admitRate(backgroundLaneFromContext(ctx)); open {
+	if open, calls := g.admitRate(BackgroundLaneFromContext(ctx)); open {
 		return &LLMGuardBlock{
 			Layer: GuardLayerRateCeiling,
 			Reason: fmt.Sprintf(

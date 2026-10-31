@@ -942,6 +942,41 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// TestTheStampNeverEscapesItsCall counts the site with comments
 		// stripped.
 		"integrations/compose": "the Materializer's writers -- the stamp opens its @serverOnly mutations (the composition writers, and createLibraryFile once its key is held to the caller's own library/{owner}/ prefix) and changes no actor, so the composite owner tier still decides every row and a caller can only ever write their own (epic memql#4977)",
+		// The games pack's @serverOnly writers (design record
+		// docs/superpowers/specs/2026-10-18-games-pack-design.md):
+		// createGamesPlanTrace, createGamesSkill and recordGamesSkillLadder.
+		// REQUEST-DERIVED: a game runtime and a browser call the pack's
+		// builtins as the owner, and a builtin stamps internal origin on
+		// exactly one rendered call of exactly one writer --
+		// createGamesPlanTrace after it recomputed the goal signature and
+		// checked that no other owner holds the trace id, createGamesSkill
+		// after it read the evidence under the caller's actor inside the learn
+		// gate, recordGamesSkillLadder after it read the skill fresh, under the
+		// caller's actor, inside the skill's gate and found it the caller's
+		// own. The actor is never touched, so ownerUserId is stamped from the
+		// caller and the owned tier decides every read; the marked context is a
+		// local of the one call (packs/gamespack/store_internal.go) and is
+		// never returned. Asserted by packs/gamespack's
+		// TestLiveInternalOriginWritesStayTheCallers (the rows stay the
+		// caller's), TestLiveALadderMoveNeverReachesAnotherOwnersSkill (a
+		// cluster owner, whom the tier lets READ every owner's skills, moves none
+		// of them) and internal_origin_test.go, which counts the stamp sites with
+		// comments stripped, holds each to the shape s.exec(auth.ContextWithInternalOrigin(ctx),
+		// "mutation "+call), matches them to the pack's @serverOnly mutations and shows
+		// that the scan finds the ways a stamp could escape.
+		//
+		// INTERNAL ORIGIN ESCAPES THE OWNED TIER'S WRITE GUARD
+		// (rowAuthzWriteEscape), so the tier does not decide a write onto an
+		// existing row and this entry does not claim it does. What does: a
+		// skill's id carries its owner (SkillID) and its evidence is read
+		// under the caller's actor; a plan trace is written under the id the
+		// runtime chose, which names a row for the whole cluster (design
+		// record D20), so storeTrace takes the gate on the id and refuses one
+		// another owner holds before it writes; a ladder move compares the
+		// owner of the skill it read with the caller's, in the canonical
+		// spelling, before it writes, because the mutation stamps the actor as
+		// the owner.
+		"packs/gamespack": "the games pack's trace, skill and ladder writers -- REQUEST-DERIVED, one stamp per rendered @serverOnly call, after the builtin read its evidence under the caller's own actor; the actor is unchanged, so the owned tier decides every read, and the writes rest on the builtin's own checks (a trace id another owner holds is refused, a skill id carries its owner, a ladder move moves only the caller's own skill) because internal origin escapes the tier's write guard",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler

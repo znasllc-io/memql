@@ -1,0 +1,170 @@
+// games pack -- reads. Every row is the owner's, and the owned tier scopes a read to its
+// owner. But the tier's read arm for the cluster's owner returns every owner's rows, and a
+// page of them is cut at its limit, so the 13 queries here that page ALSO name the owner in
+// their filter (row.ownerUserId == actor.userId, which needs @actor), and a test holds the
+// list. The other 2 answer one row by id (gamesPlayerById, gamesSkillById): they do not page
+// and do not name the owner, and their callers compare it themselves (moveLadder,
+// gamesForgetPlayer).
+
+@description("Every player the caller registered, by display name.")
+@actor
+query player gamesPlayers {
+  filter    row => row.ownerUserId == actor.userId
+  sort      "displayName", "asc"
+  paginate  100
+  shape     gamesPlayerFull
+}
+
+@description("One player by id.")
+@unbounded("one player by id -- bounded to a single row")
+query player gamesPlayerById {
+  args {
+    playerId  string!
+  }
+  filter  row => row.id == args.playerId
+  shape   gamesPlayerFull
+}
+
+@description("One player's preferences, most confident first.")
+@actor
+query preference gamesPreferencesForPlayer {
+  args {
+    playerId  string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.playerId == args.playerId
+  sort      "confidence", "desc"
+  paginate  50
+  shape     gamesPreferenceFull
+}
+
+@description("The promises one character made to one player that are still open, newest first.")
+@actor
+query promise gamesOpenPromises {
+  args {
+    characterId  string!
+    playerId     string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.characterId == args.characterId && row.playerId == args.playerId && row.status == "open"
+  sort      "madeAt", "desc"
+  paginate  20
+  shape     gamesPromiseFull
+}
+
+@description("Every promise made to one player, newest first.")
+@actor
+query promise gamesPromisesForPlayer {
+  args {
+    playerId  string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.playerId == args.playerId
+  sort      "madeAt", "desc"
+  paginate  50
+  shape     gamesPromiseFull
+}
+
+@description("The places known in one world, most recently confirmed first.")
+@actor
+query place gamesPlacesInWorld {
+  args {
+    worldId  string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.worldId == args.worldId
+  sort      "at", "desc"
+  paginate  50
+  shape     gamesPlaceFull
+}
+
+@description("One character's episodes at or after a moment, newest first, at most 40: what a session reflection reads. A `since` bound must be written in the stored form \"2006-01-02T15:04:05.000Z\" (UTC, milliseconds always present), because `at` is compared as text.")
+@actor
+query episode gamesSessionEpisodes {
+  args {
+    characterId  string!
+    since        datetime!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.characterId == args.characterId && row.at >= args.since
+  sort      "at", "desc"
+  paginate  40
+  shape     gamesEpisodeFull
+}
+
+@description("Episodes about one player, newest first.")
+@actor
+query episode gamesEpisodesForPlayer {
+  args {
+    playerId  string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.playerId == args.playerId
+  sort      "at", "desc"
+  paginate  50
+  shape     gamesEpisodeFull
+}
+
+@description("Every skill, most recently moved first.")
+@actor
+query skill gamesSkills {
+  filter    row => row.ownerUserId == actor.userId
+  sort      "rungChangedAt", "desc"
+  paginate  100
+  shape     gamesSkillFull
+}
+
+@description("Skills waiting for the owner's promotion decision, newest proposal first.")
+@actor
+query skill gamesSkillsAwaitingApproval {
+  filter    row => row.ownerUserId == actor.userId && row.state == "awaiting_approval"
+  sort      "promotionProposedAt", "desc"
+  paginate  50
+  shape     gamesSkillFull
+}
+
+@description("One skill by id.")
+@unbounded("one skill by id -- bounded to a single row")
+query skill gamesSkillById {
+  args {
+    skillId  string!
+  }
+  filter  row => row.id == args.skillId
+  shape   gamesSkillFull
+}
+
+@description("The skills learned for one goal signature.")
+@actor
+query skill gamesSkillsForSignature {
+  args {
+    goalSignature  string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.goalSignature == args.goalSignature
+  sort      "learnedAt", "desc"
+  paginate  20
+  shape     gamesSkillFull
+}
+
+@description("Every trusted skill, most recently used first: the pool a trigger lookup chooses from.")
+@actor
+query skill gamesTrustedSkills {
+  filter    row => row.ownerUserId == actor.userId && row.rung == "trusted"
+  sort      "lastReplayAt", "desc"
+  paginate  100
+  shape     gamesSkillFull
+}
+
+@description("The successful traces of one goal signature, newest first: the evidence learning reads. The Go half drops skill runs and traces another action sequence produced.")
+@actor
+query planTrace gamesLearningTraces {
+  args {
+    goalSignature  string!
+  }
+  filter    row => row.ownerUserId == actor.userId && row.goalSignature == args.goalSignature && row.outcome == "success" && row.reaction != "negative"
+  sort      "at", "desc"
+  paginate  20
+  shape     gamesPlanTraceFull
+}
+
+@description("Every skill of the caller's not yet retired, the one written to longest ago first, 200 to a page: what gamesSweepSkills re-examines. It is read page after page with the engine's keyset cursor, which can only continue an order that is the row's own write time (a payload field carries no position). A use of a skill writes a version, and so do a decision, a demotion and learning, so the oldest version is only roughly the least recently used; every page is read, so the order decides nothing but which skills a sweep that is cut short has done first. The retirement clock itself is lastReplayAt, or learnedAt for a skill never used, and the sweep reads it off each row.")
+@actor
+query skill gamesSkillsToSweep {
+  filter    row => row.ownerUserId == actor.userId && row.rung != "retired"
+  sort      "row.createdAt", "asc"
+  paginate  200
+  shape     gamesSkillFull
+}

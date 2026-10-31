@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -169,6 +170,115 @@ func TestEmptyAttributionDoesNotShadow(t *testing.T) {
 	req := applyCallAttribution(ctx, airoute.ResolveRequest{})
 	if req.RequestId != "outer" {
 		t.Fatalf("requestId=%q; an empty stamp overwrote a richer one", req.RequestId)
+	}
+}
+
+// A STAMPED TAG IS ADDED, NEVER A REPLACEMENT (games pack design record, seam
+// 1): the `ai` builtin's background lane stamps airoute.TagBackground, and a
+// tag the call site set itself survives beside it, once.
+func TestStampedTagsAreAddedToTheRequest(t *testing.T) {
+	ctx := ContextWithAICallAttribution(context.Background(), AICallAttribution{Tags: []string{airoute.TagBackground}})
+	req := applyCallAttribution(ctx, airoute.ResolveRequest{Tags: []string{"own"}})
+	if !req.HasTag("own") || !req.HasTag(airoute.TagBackground) {
+		t.Fatalf("tags=%v, want the call site's and the stamped one", req.Tags)
+	}
+	again := applyCallAttribution(ctx, airoute.ResolveRequest{Tags: []string{airoute.TagBackground}})
+	if len(again.Tags) != 1 {
+		t.Fatalf("tags=%v, a tag already present must not be added twice", again.Tags)
+	}
+}
+
+// THE CALL SITE'S SLICE IS NOT WRITTEN INTO. The stamped tag lands on a copy:
+// appending in place would write into spare capacity the call site (or a slice
+// shared between calls) still owns, and two concurrent prompt calls would race
+// on one backing array. A blank stamped tag is no tag at all.
+func TestStampedTagsNeverWriteIntoTheCallSitesSlice(t *testing.T) {
+	ctx := ContextWithAICallAttribution(context.Background(), AICallAttribution{Tags: []string{airoute.TagBackground, "  ", ""}})
+	own := make([]string, 1, 4)
+	own[0] = "own"
+	req := applyCallAttribution(ctx, airoute.ResolveRequest{Tags: own})
+	if want := []string{"own", airoute.TagBackground}; !reflect.DeepEqual(req.Tags, want) {
+		t.Fatalf("tags=%q, want %q (a blank stamped tag is skipped)", req.Tags, want)
+	}
+	if spare := own[:cap(own)]; spare[1] != "" {
+		t.Fatalf("the call site's backing array was written into: %q", spare)
+	}
+}
+
+// laneProbe is a model that records, for every call it answers, whether the
+// context it was handed rides the background lane -- which is where
+// guardedTransport reads it off the vendor request.
+type laneProbe struct{ background []bool }
+
+func (p *laneProbe) Call(ctx context.Context, _ string) (any, error) {
+	p.background = append(p.background, BackgroundLaneFromContext(ctx))
+	return "the draft", nil
+}
+
+func (p *laneProbe) CallChatStructured(ctx context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+	p.background = append(p.background, BackgroundLaneFromContext(ctx))
+	return `{"draft":"the draft"}`, nil
+}
+
+// A BACKGROUND STAMP SURVIVES THE REAL PROMPT PATH, not only the pure function.
+// What the `ai` builtin promises is two facts about a call it hands InvokeAI: the
+// router is asked with the background tag (once -- the stamp is applied at both
+// requestForPrompt and resolveAI, and must not double), and the model is
+// called on a context still marked as the background lane, which is the only
+// place the rate guard can read it. Both prompt paths, and both with and
+// without a work run on the context: a DSL ai() inside an automation always
+// has one, and the run seam derives the context the model is called with.
+func TestABackgroundStampReachesTheRouterAndTheModelOnEveryPromptPath(t *testing.T) {
+	draft := map[string]any{"week": "38"}
+	paths := map[string]func(e *MemQLEngine, ctx context.Context) error{
+		"plain": func(e *MemQLEngine, ctx context.Context) error {
+			_, err := e.InvokeAI(ctx, "draftReport", draft)
+			return err
+		},
+		"structured": func(e *MemQLEngine, ctx context.Context) error {
+			_, err := e.InvokeAIStructured(ctx, "draftReport", draft, "draft", draftSchema, true)
+			return err
+		},
+	}
+	bases := map[string]context.Context{"outside a run": userCtx("alice"), "inside a run": stepCtx(nil)}
+	for pathName, call := range paths {
+		for baseName, base := range bases {
+			for _, background := range []bool{true, false} {
+				name := pathName + " " + baseName + " interactive"
+				ctx := base
+				if background {
+					name = pathName + " " + baseName + " background"
+					ctx = ContextWithBackgroundLane(ContextWithAICallAttribution(base, AICallAttribution{Tags: []string{airoute.TagBackground}}))
+				}
+				t.Run(name, func(t *testing.T) {
+					e, _, seen := overrideSeamEngine(t, aiCacheConfig{})
+					probe := &laneProbe{}
+					e.providers.RegisterForTest("chat54Mini", "openai", "gpt-5.4-mini", probe)
+					if err := call(e, ctx); err != nil {
+						t.Fatal(err)
+					}
+					if len(*seen) != 1 {
+						t.Fatalf("the router was asked %d times, want once", len(*seen))
+					}
+					want := 0
+					if background {
+						want = 1
+					}
+					got := 0
+					for _, tag := range (*seen)[0].Tags {
+						if tag == airoute.TagBackground {
+							got++
+						}
+					}
+					if got != want {
+						t.Fatalf("the router saw the background tag %d times (tags %q), want %d", got, (*seen)[0].Tags, want)
+					}
+					if !slices.Equal(probe.background, []bool{background}) {
+						t.Fatalf("the model was called with background-lane marks %v, want [%v]", probe.background, background)
+					}
+				})
+			}
+		}
 	}
 }
 

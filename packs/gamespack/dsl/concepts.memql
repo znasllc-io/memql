@@ -1,0 +1,175 @@
+// games pack -- memory and skill learning for an EXTERNAL game runtime
+// (design record docs/superpowers/specs/2026-10-18-games-pack-design.md).
+//
+// GAME-AGNOSTIC. Nothing here names a game, a product or a character. A
+// runtime outside the cluster plays the game in real time; this pack is what
+// it remembers with and what it learns with. The runtime executes every
+// action itself: the engine stores, scores, learns and governs the ladder.
+//
+// EVERY ROW IS THE OWNER'S. The runtime and the owner's browser both act as
+// the owner (a person's JWT), so every concept is the owned tier with the
+// cluster-owner read arm, and every mutation stamps ownerUserId from the
+// actor. A character (the AI companion the runtime animates) is a plain
+// characterId string chosen by the runtime, not a concept.
+//
+// TWO CONCEPTS ARE SERVER-WRITTEN. skill and planTrace carry @serverWritten,
+// so every write to them needs internal origin, whichever construct carries
+// it. @serverOnly on a mutation closes only that mutation: a raw insert() or
+// update() is a public expression, and the owned tier admits it for the row's
+// owner, so without the mark an owner could file a plan trace nobody checked
+// or a skill nobody earned. The other five concepts are written by the runtime
+// and the owner's browser as the owner, by design.
+//
+// RETENTION IS DECLARED, NOT CODED. Episodes and plan traces are raw
+// evidence and expire whole after 30 days (keepLatest=false). Everything
+// else keeps its newest version forever and sheds older versions after 30
+// days (keepLatest=true). archive="none" everywhere: these rows describe
+// the people who play, and an archive copy would outlive the deletion it
+// exists to perform.
+
+use identity.concepts.{ user }
+
+/// A person who plays alongside the owner's characters. The owner registers each player; the
+/// runtime remembers only players whose `consented` is true.
+@displayCard(primary="displayName", secondary="gamertag", status="consented")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=true, archive="none")
+concept player {
+  ownerUserId  string!  @description("v1:identity:user.id of the owner who registered this player. Stamped from actor.userId.")
+  gamertag     string!  @pii  @maxLength(32)  @description("The name the game reports for this player.")
+  displayName  string!  @pii  @maxLength(64)  @description("What the characters call this player.")
+  consented    bool!    @description("Whether the owner allows the characters to remember this player. A runtime writes memories only about a consented player.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// One remembered moment: something a character saw, said or did, in at most a sentence. The
+/// summary is embedded when the episode is recorded through gamesRecordEpisodes, so gamesRecall can
+/// rank episodes by relevance, recency and importance.
+@displayCard(primary="summary", secondary="kind", tertiary="characterId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=false, archive="none")
+concept episode {
+  ownerUserId  string!    @description("v1:identity:user.id of the owner. Stamped from actor.userId.")
+  characterId  string!    @maxLength(64)  @description("The character that remembers this, as the runtime names it.")
+  playerId     string     @description("v1:games:player.id this episode is about, when it is about one.")
+  worldId      string!    @maxLength(64)  @description("The game world it happened in, as the runtime names it.")
+  at           datetime!  @description("When it happened in the game, which recall's recency measures from.")
+  kind         enum("chat", "event", "activity", "session")!  @description("chat: an exchange with a player. event: something that happened. activity: the outcome of a plan. session: a summary of a whole play session.")
+  summary      string!    @pii  @maxLength(400)  @description("The memory itself, at most about 25 words. The embedding source.")
+  importance   int!       @minimum(1)  @maximum(10)  @description("How much this matters, 1 to 10. Recall weighs it at a tenth of its value.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="about", field="playerId", target=player, direction="outgoing")
+}
+
+/// What a player likes or dislikes, as reflection inferred it. One row per (player, subject),
+/// rewritten as evidence accumulates.
+@displayCard(primary="subject", secondary="valence", tertiary="playerId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=true, archive="none")
+concept preference {
+  ownerUserId  string!   @description("v1:identity:user.id of the owner. Stamped from actor.userId.")
+  playerId     string!   @description("v1:games:player.id this preference belongs to.")
+  subject      string!   @pii  @maxLength(120)  @description("What the preference is about, in a few words.")
+  valence      float!    @minimum(-1)  @maximum(1)  @description("-1 dislikes strongly, 0 neutral, 1 likes strongly.")
+  confidence   float!    @minimum(0)  @maximum(1)  @description("How sure reflection is, 0 to 1.")
+  evidence     []string  @description("Bare ids of the episodes this was inferred from. Episodes expire after 30 days; the ids may then resolve to nothing. It holds ids and must not hold a player's name: gamesForgetPlayer does not read it.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="about", field="playerId", target=player, direction="outgoing")
+}
+
+/// Something a character said it would do for a player, and whether it did.
+@displayCard(primary="text", secondary="status", tertiary="characterId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=true, archive="none")
+concept promise {
+  ownerUserId  string!    @description("v1:identity:user.id of the owner. Stamped from actor.userId.")
+  characterId  string!    @maxLength(64)  @description("The character that made the promise.")
+  playerId     string!    @description("v1:games:player.id the promise was made to.")
+  text         string!    @pii  @maxLength(200)  @description("The promise, in a sentence.")
+  status       enum("open", "kept", "dropped")!  @description("open until the character keeps it or lets it go.")
+  madeAt       datetime!  @description("When the promise was made, in the game.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="madeTo", field="playerId", target=player, direction="outgoing")
+}
+
+/// A named spot in a game world, shared by every character in that world.
+@displayCard(primary="name", secondary="kind", tertiary="worldId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=true, archive="none")
+concept place {
+  ownerUserId   string!    @description("v1:identity:user.id of the owner. Stamped from actor.userId.")
+  worldId       string!    @maxLength(64)  @description("The game world, as the runtime names it.")
+  name          string!    @maxLength(80)  @description("What the characters call this place.")
+  kind          string!    @maxLength(32)  @description("The runtime's own word for what the place is (for example base, farm, landmark, danger). Free text, so a new kind is not an engine change.")
+  position      object!    @description("Where it is, in the runtime's coordinates (for example {x, y, z}).")
+  discoveredBy  string     @maxLength(64)  @description("The character that found it. It holds a character's id and must not hold a player's name: gamesForgetPlayer does not read it.")
+  at            datetime!  @description("When it was found or last confirmed, in the game.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A procedure learned from a runtime's own successful plans: a sequence of the runtime's
+/// actions with holes for what varies. It climbs the same ladder as a learned procedure
+/// (component/work.Advance under v1:authoring:ladderPolicy:primary): shadow, then one owner
+/// approval, then canary, then trusted. Only the pack's Go half writes it, and @serverWritten
+/// makes that true of every construct, a raw insert() or update() included.
+@serverWritten
+@displayCard(primary="goalText", secondary="state", tertiary="goalSignature")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=true, archive="none")
+concept skill {
+  ownerUserId          string!    @description("v1:identity:user.id of the owner. Stamped from actor.userId.")
+  goalText             string!    @maxLength(200)  @description("The goal, as the most recent trace it was learned from stated it. The embedding source for a near-match lookup.")
+  goalSignature        string!    @pattern("^[0-9a-f]{64}$")  @description("sha256 of the normalized goal text, a vertical bar and the sorted input keys. See GoalSignature in packs/gamespack.")
+  actions              []string!  @description("The action names, in order. Two skills of one signature differ here.")
+  template             object!    @description("{steps: [{action, args: {key: {const: value} | {hole: id}}}], holes: [id]}. A hole id is <stepIndex>.<argKey>.")
+  templateDigest       string!    @description("sha256 over the template's canonical JSON. A promotion approves exactly this digest.")
+  triggers             []string   @description("The triggers the traces were recorded under. A trusted skill may be chosen for one without a model.")
+  confirmation         string     @maxLength(200)  @description("A line the runtime may say when it runs the skill, taken from the newest trace's say.")
+  learnedFrom          []string   @description("Bare ids of the plan traces it was generalized from.")
+  learnedAt            datetime!  @description("When it was learned.")
+  rung                 enum("shadow", "canary", "trusted", "retired")!  @description("The ladder rung, as component/work names it.")
+  state                enum("shadow", "awaiting_approval", "canary", "trusted", "retired")!  @description("The rung as a person reads it: shadow with an open promotion is awaiting_approval. Written by the engine; clients never derive it.")
+  shadowMatches        int!       @description("Consecutive shadow comparisons that matched.")
+  canaryMatches        int!       @description("Consecutive clean canary runs.")
+  distinctBindings     object     @description("Per hole id, the sha256 digests of the distinct values it took in the current streak.")
+  failures             int!       @description("Consecutive failed runs on canary or trusted.")
+  promotionApprovalId  string     @description("Non-empty while a promotion is open. It names the template digest the promotion is for.")
+  promotionProposedAt  datetime   @description("When the latest promotion was proposed.")
+  lastReplayAt         datetime   @description("The last shadow comparison or run. The retirement clock.")
+  lastBinding          object     @description("The hole values of the newest matching comparison or clean run, for a runtime that runs the skill without a model.")
+  lastReason           string     @description("Why the ladder last moved, or did not, in a sentence.")
+  rungChangedAt        datetime   @description("When the rung last changed.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// One plan the runtime executed, recorded after it finished: the evidence skills are learned
+/// from. Written only through gamesRecordTrace, which checks the goal signature; @serverWritten
+/// refuses every other route to the concept, a raw insert() or update() included.
+@serverWritten
+@displayCard(primary="goalText", secondary="outcome", tertiary="characterId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=false, archive="none")
+concept planTrace {
+  ownerUserId    string!    @description("v1:identity:user.id of the owner. Stamped from actor.userId.")
+  characterId    string!    @maxLength(64)  @description("The character that executed the plan.")
+  goalText       string!    @maxLength(200)  @description("The goal the plan was for.")
+  goalSignature  string!    @pattern("^[0-9a-f]{64}$")  @description("GoalSignature(goalText, keys of inputs), recomputed by the engine.")
+  trigger        string!    @maxLength(64)  @description("What prompted the plan (an event kind, addressed chat, initiative).")
+  inputs         object     @description("The goal's inputs. Only the KEYS enter the signature.")
+  steps          []object!  @description("[{action, args, ok, durationMs, error}], in execution order.")
+  actions        []string!  @description("The step action names, in order, derived by the engine.")
+  outcome        enum("success", "failure", "abandoned")!  @description("How the plan ended.")
+  reaction       enum("positive", "neutral", "negative")!  @description("How the player reacted. A negative trace is never learned from.")
+  at             datetime!  @description("When the plan finished, in the game.")
+  say            string     @maxLength(200)  @description("What the character said when it took the plan on.")
+  skillId        string     @description("v1:games:skill.id when the plan was a skill run. A skill run is never learned from.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="ranSkill", field="skillId", target=skill, direction="outgoing")
+}

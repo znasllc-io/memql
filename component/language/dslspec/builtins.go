@@ -248,13 +248,14 @@ func handAuthoredBuiltins() []Builtin {
 			// catalogued `ai` would thereby be Admitted to do.
 			Name:      "ai",
 			Category:  CategoryBuiltinRegistry,
-			Signature: `ai(templateId string, data object)`,
+			Signature: `ai(templateId string, data object, lane? string)`,
 			Doc: "Call a named prompt with a data object and return {prompt, reply}. Written as a builtin call, " +
 				"`builtin ai(templateId: ..., data: ...)`, in a logic or automation body. The prompt's @level and the " +
 				"routing rules choose the model, so the call never names one.",
 			Params: []BuiltinParam{
 				{Name: "templateId", Doc: "Name of the prompt to call."},
 				{Name: "data", Doc: "Object whose fields the prompt's body declares; `{}` when it declares none."},
+				{Name: "lane", Doc: "Optional: \"interactive\" (the default), or \"background\" for a call nobody is waiting on, whose model calls then count against the background rate bucket. It says what the call is and never names a model."},
 			},
 		},
 		{

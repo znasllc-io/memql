@@ -24,13 +24,13 @@ import (
 // This test holds the first; TestOnlyAnchoredPacksDeclareThemselvesStorefrontPacks
 // holds the second.
 func TestTheDeclaredStorefrontPacksAreTheAnchoredOnes(t *testing.T) {
-	Storefront()
+	Packs()
 
-	want := append([]string(nil), Domains()...)
+	want := append([]string(nil), StorefrontDomains()...)
 	sort.Strings(want)
 	if got := memqldsl.StorefrontPacks(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("declared storefront packs = %v, anchored = %v. Call "+
-			"dsl.RegisterStorefrontPack from the pack's Register, or take it off anchor.Domains()",
+			"dsl.RegisterStorefrontPack from the pack's Register, or take it off anchor.StorefrontDomains()",
 			got, want)
 	}
 }

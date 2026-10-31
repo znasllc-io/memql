@@ -1,0 +1,151 @@
+// games pack -- the Go half (packs/gamespack). Every capability runs under the
+// CALLER'S actor: a runtime and a browser both call these as the owner, and the
+// rows they read, and the rows they record through this pack's own mutations,
+// are the owner's.
+//
+// ONE PATH DOES NOT CHECK OWNERSHIP. The embedding write path -- gamesEmbedStore,
+// which is integration.embedding.store under this pack's name -- attaches a
+// vector to whatever nodeId it is handed, as it does for every caller of that
+// integration. That is a property of the platform, not of this pack. This pack
+// only ever hands it the id of a row it has just written, or just read, as the
+// owner.
+//
+// THE RUNTIME EXECUTES; THE ENGINE REMEMBERS, LEARNS AND GOVERNS. Nothing here
+// runs a game action. The skill builtins store traces, generalize them, move
+// the ladder with component/work.Advance and answer lookups; the runtime
+// decides what to do with the answer.
+//
+// REFUSALS LEAD WITH A STABLE CODE (games_<what>), the way the router's lead
+// with every_door_shut: a client matches the code, never the sentence.
+
+/// Record a batch of episodes and embed each summary on the background lane.
+@sdk
+@executor("integration.games.recordEpisodes")
+@args(profile="object")
+@description("Record up to 50 episodes, then embed each summary into the cluster's embedder space on the background lane, so a burst of memories never takes the interactive budget a decision needs. Every episode is checked before the first is written, so a batch with a bad entry writes nothing and is refused with games_invalid_argument, naming the entry and the field. An episode's at is stored in UTC to the millisecond, as 2006-01-02T15:04:05.000Z, however it is written, so a since bound in that form compares as the times do. An embedding that fails leaves its episode recorded and pending; gamesEmbedPending retries it. Answers {written, embedded, pending, ids}.")
+builtin gamesRecordEpisodes {
+  episodes  []object!  @description("[{episodeId, characterId, playerId?, worldId, at, kind, summary, importance}]. episodeId is the caller's stable bare id, with no colons.")
+}
+
+/// Embed the caller's episodes that have no vector in the current embedder space.
+@sdk
+@executor("integration.games.embedPending")
+@args(profile="object")
+@description("Embed up to `limit` (default 25, at most 200) of the caller's episodes and skills that have no vector in the cluster's current embedder space, newest first, on the background lane. Call it when the model comes back online. Answers {embedded, failed, more}, more being true when a full page was found and at least one of it embedded, so a caller that loops while more stops when the model is away.")
+builtin gamesEmbedPending {
+  limit  int  @description("How many to embed in this call.")
+}
+
+/// The shared embedding write path, under this pack's name.
+@executor("integration.embedding.store")
+@args(profile="object")
+@description("Store an embedding for one games row: a second DSL name for integration.embedding.store, so the pack writes vectors through the one embedding write path rather than opening a second. vectorField stays 'content', which every recall join filters on.")
+builtin gamesEmbedStore {
+  nodeId       string!  @description("Canonical id of the row the vector attaches to.")
+  text         string!  @description("The text to embed.")
+  concept      string   @description("The row's concept.")
+  vectorField  string   @description("Always 'content'.")
+  provider     string   @description("Omit: the cluster's embedder binding decides.")
+}
+
+/// Recall what one character remembers that matters now.
+@sdk
+@executor("integration.games.recall")
+@args(profile="object")
+@description("Rank the caller's episodes for one character by 0.5 x relevance (cosine to the embedded query text, negative counted as 0) + 0.3 x recency (half-life 72 hours from the episode's `at`) + 0.2 x importance/10, over episodes that are the character's own or about the player, and return the top k; then the player's most confident preferences, the character's open promises to the player and the world's places. With no embedder, no model, or a model that does not answer within 2 seconds, the relevance term is 0 for every episode; so it is for an episode with no vector yet in the cluster's current embedder space. An episode row says relevanceAvailable true only when the query was embedded and that episode has a vector it can be compared with, and false otherwise. Answers rows {rank, kind: episode|preference|promise|place, id, text, score, relevance, recency, importance, relevanceAvailable, row}; order them by rank, 1 first.")
+builtin gamesRecall {
+  characterId    string!  @description("The character recalling.")
+  playerId       string   @description("The player being addressed. Omit when nobody is.")
+  worldId        string!  @description("The world whose places to include.")
+  text           string!  @description("What to recall about: the situation or what the player said.")
+  k              int      @description("Episodes to return. Default 8, at most 50.")
+  asOf           datetime @description("The game's present moment, which recency measures from, as an RFC 3339 datetime in the years 0001 to 9999; anything else is refused with games_invalid_argument, except that a blank asOf counts as omitted. Default: the server's clock. (Not `now`: that name is reserved.)")
+  halfLifeHours  number   @description("Recency half-life in hours. Default 72. Zero or less turns the recency term off; otherwise a number from 0.000001 to 87600 (ten years), or the call is refused with games_invalid_argument.")
+  wRelevance     number   @description("Relevance weight, a number from 0 to 1000, or the call is refused with games_invalid_argument. Default 0.5.")
+  wRecency       number   @description("Recency weight, a number from 0 to 1000, or the call is refused with games_invalid_argument. Default 0.3.")
+  wImportance    number   @description("Importance weight, a number from 0 to 1000, or the call is refused with games_invalid_argument. Default 0.2.")
+  preferences    int      @description("Most confident preferences to append. Default 3.")
+  promises       int      @description("Open promises to append. Default 5.")
+  places         int      @description("Places to append. Default 10.")
+}
+
+/// Delete every row this owner holds about one player.
+@sdk
+@executor("integration.games.forgetPlayer")
+@args(profile="object")
+@description("Delete, outright and in every version, the player row; every episode, preference and promise about the player; everything else of the caller's that names the player's gamertag as a whole name, in any case (the gamertag Tag is not found in Tagger or stage), under the gamertag the player has now or has had -- plan traces, skills, and the episodes (whoever they are about), preferences, promises and places; and the vectors of all of it in every embedder space. A name is looked for in the words a person or a character wrote: an episode's summary; a preference's subject; a promise's text; a place's name; a plan trace's arguments and words; and a skill's goal, the line it says, the constants of its template and the values of its last binding. Identifiers and enums are not read (ids, characterId, worldId, playerId, kind, a place's finder, discoveredBy, which is the character that found it, and a preference's evidence, which is the ids of the episodes it was inferred from), and neither are the names of keys, actions and holes. A gamertag that equals or begins one of them (a player tagged like a pal, or like the prefix of the ids the runtime makes) would otherwise delete every row of that pal or every row with such an id; so a player's name must not be written there. A skill that names nobody is kept, and a skill that names the player in any one of its versions is deleted in all of them, with its ladder. Every other row of the caller's is kept. Only the caller's own rows, in one transaction: a player who is not the caller's is refused with games_player_not_found and nothing is deleted. The skills that name the player when it lists them are held against their ladder moves until it commits, so a move in flight cannot leave one behind; if their gates cannot all be held within six seconds the whole forget is refused, nothing is deleted, and it may be sent again. The runtime stops writing about the player before it asks: a write about the player that commits at the same moment as the forget can survive it (an episode being recorded, a skill being learned from traces read before it or coming to name the player through a comparison or a run report in flight, a promise whose status is being set). Answers {playerId, deleted: {episodes, preferences, promises, places, planTraces, skills, players, vectors}}, each the number of rows (not versions) deleted, vectors the number of vectors; episodes, preferences and promises count the rows about the player and the rows that name the gamertag together, each row once, and places the places that name it.")
+builtin gamesForgetPlayer {
+  playerId  string!  @description("The player to forget.")
+}
+
+/// Record one executed plan and learn from it.
+@sdk
+@executor("integration.games.recordTrace")
+@args(profile="object")
+@description("Record one executed plan and learn from it. The engine recomputes goalSignature from goalText and the input keys and refuses a supplied one that differs (games_signature_mismatch). When at least two successful, non-negative, non-skill traces of the signature share this trace's action sequence and no skill exists for them, it generalizes them -- an argument equal in every trace stays a constant, one that differs becomes a hole -- and creates a skill in shadow. A traceId names one trace for the whole cluster: an id another owner holds is refused with games_invalid_argument and nothing is written, and sending your own again records a new version of it. Every argument is checked before anything is written, and a bad one is refused with games_invalid_argument naming it: the text arguments are strings, characterId and trigger at most 64 characters, goalText and say at most 200 (counted in characters, after trimming), at a datetime, inputs an object. Answers {traceId, goalSignature, learnedSkillId}.")
+builtin gamesRecordTrace {
+  traceId        string!    @description("The caller's stable bare id for this trace: random, at most 64 characters, no colons. It names one trace for the whole cluster, so an id another owner holds is refused.")
+  characterId    string!    @description("The character that executed the plan. At most 64 characters.")
+  goalText       string!    @description("The goal the plan was for. At most 200 characters.")
+  goalSignature  string     @description("The caller's own signature, checked against the engine's. Omit to let the engine compute it.")
+  trigger        string!    @description("What prompted the plan. At most 64 characters.")
+  inputs         object     @description("The goal's inputs. Only the keys enter the signature.")
+  steps          []object!  @description("[{action, args, ok, durationMs, error}], in execution order.")
+  outcome        string!    @description("success, failure or abandoned.")
+  reaction       string     @description("positive, neutral (default) or negative.")
+  at             datetime!  @description("When the plan finished, as an RFC 3339 datetime. It is stored in UTC to the millisecond, as an episode's is, however it was written, so traces are read in the order they happened.")
+  say            string     @description("What the character said when it took the plan on. At most 200 characters.")
+  skillId        string     @description("The skill this plan ran, when it was a skill run.")
+}
+
+/// Compare a model's plan with the skills in shadow for its goal.
+@sdk
+@executor("integration.games.shadowCompare")
+@args(profile="object")
+@description("Compare the model's plan for a goal with every shadow skill of the signature that has the same action sequence. A plan whose arguments bind the skill's holes is a match and counts toward promotion: five consecutive matches across at least two distinct values of every hole propose it for the owner's approval. A plan with the same actions and a differing constant resets the streak. Only the caller's own skills are compared. goalSignature is GoalSignature's 64 lower-case hexadecimal digits and the plan has at least one step, or the call is refused with games_invalid_argument. Answers {compared, matched, proposed: [skillId]}.")
+builtin gamesShadowCompare {
+  goalSignature  string!    @description("The goal signature of the model's plan.")
+  plan           []object!  @description("[{action, args}], the model's plan.")
+}
+
+/// Report how a canary or trusted skill run went.
+@sdk
+@executor("integration.games.reportSkillOutcome")
+@args(profile="object")
+@description("Report one run of a canary or trusted skill. Five consecutive clean canary runs make it trusted; two consecutive failures on canary or trusted send it back to shadow without asking. A skill in shadow or retired is refused with games_skill_not_serving, and one that is not the caller's, or not there, with games_skill_not_found. A binding is read only on a clean run (ok true), and then it must fill every hole of the skill's template, none with a null, and name no other, or the call is refused with games_invalid_argument and the run is not counted; with ok false the binding is ignored and the run counts as a failure. A binding that is not an object is refused either way. Answers {skillId, rung, state, reason}.")
+builtin gamesReportSkillOutcome {
+  skillId  string!  @description("The skill that ran: a bare id of at most 64 characters with no colons (or v1:games:skill:<id>), or the call is refused with games_invalid_argument.")
+  ok       bool!    @description("Whether every step succeeded.")
+  binding  object   @description("The hole values it ran with, kept as the skill's lastBinding on a clean run.")
+}
+
+/// The owner's one decision on a skill's promotion.
+@sdk
+@executor("integration.games.decidePromotion")
+@args(profile="object")
+@description("Approve or decline the promotion a skill in shadow earned. templateDigest must be the skill's current digest: a decision about one version never promotes another (games_skill_version_changed). Approving moves it to canary; declining keeps it in shadow and it must earn a new proposal. A skill with no promotion waiting is refused with games_no_promotion_open, and one that is not the caller's, or not there, with games_skill_not_found. Answers {skillId, rung, state, reason}.")
+builtin gamesDecideSkillPromotion {
+  skillId         string!  @description("The skill: a bare id of at most 64 characters with no colons (or v1:games:skill:<id>), or the call is refused with games_invalid_argument.")
+  templateDigest  string!  @description("The digest of the version being decided.")
+  approved        bool!    @description("The decision.")
+}
+
+/// Re-apply the ladder's demotion and retirement rules to every skill.
+@sdk
+@executor("integration.games.sweepSkills")
+@args(profile="object")
+@description("Re-apply the ladder's demotion rules under the current v1:authoring:ladderPolicy values and retire every skill unused for longer than its retirement window (30 days by default), measured from the skill's last shadow comparison or run, or from when it was learned if it never had one. It examines every skill of the caller that is not retired, 200 at a time with no limit on how many, the least recently written first, and writes only the skills it demotes or retires. Call it at runtime start and daily. Answers {examined, demoted, retired}.")
+builtin gamesSweepSkills {
+}
+
+/// Find a skill to run instead of asking a model.
+@sdk
+@executor("integration.games.findSkill")
+@args(profile="object")
+@description("Find the skill to run instead of asking a model. Exactly one of goalSignature, trigger and text, or the call is refused with games_invalid_argument. By goalSignature (64 lower-case hexadecimal digits): the trusted skill of the signature, else the canary one, the most recently used within a rung; the runtime asked a model for its plan first and runs the skill instead of it, and a canary skill answers standby true, the model standing by to take over. By trigger: the most recently used trusted skill learned under it, the trigger matched whole and as it was recorded; only a trusted skill runs with no model asked. By text: the trusted skill whose goal text is nearest the embedded text, when the cosine is at least minSimilarity (a number above 0 and at most 1, default 0.82; anything else is refused with games_invalid_argument; the other two lookups do not read it). Only the caller's own skills are found, even for a cluster owner, whose lists are its own. A lookup by signature reads the caller's 20 newest skills of the goal and one by trigger the caller's 100 most recently used trusted skills, the engine's pages; the skill to answer is then read again past the result cache, so a demotion made on another replica is not answered from a stale list, and the next best is tried if it no longer qualifies. A text lookup waits at most 2 seconds for the text to be embedded and fails, saying so, when it cannot be: treat that as no match. Answers one row {the skill's fields, serve: skill|model, standby, serveReason (only when the verdict has one), similarity (a text lookup only)} or none.")
+builtin gamesFindSkill {
+  goalSignature  string  @description("Look up by goal signature: 64 lower-case hexadecimal digits, as GoalSignature computes them.")
+  trigger        string  @description("Look up by trigger, as gamesRecordTrace recorded it.")
+  text           string  @description("Look up by meaning: an addressed message or a goal text.")
+  minSimilarity  number  @description("The near-match floor for a text lookup, which alone reads it: a number above 0 and at most 1. Default 0.82.")
+}

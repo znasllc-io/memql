@@ -47,12 +47,19 @@ package agents
 //     it names a policy. That is a reviewable place for an override. An
 //     argument is not.
 //
-// So the signature is `ai(templateId string, data object)`, both required.
-// `data` is required rather than defaulted to `{}` because the prompt's body
-// is a closed schema validated before the template renders: an omitted
-// argument would be refused anyway, one layer down, as a missing FIELD -- and
-// "your data object left out `run`" is a worse sentence than the call having
-// to say what it is sending.
+// So the signature is `ai(templateId string, data object)`, both required,
+// plus three optional arguments that came later (below). `data` is required
+// rather than defaulted to `{}` because the prompt's body is a closed schema
+// validated before the template renders: an omitted argument would be refused
+// anyway, one layer down, as a missing FIELD -- and "your data object left out
+// `run`" is a worse sentence than the call having to say what it is sending.
+//
+// The three optional arguments name no model and no provider: each says
+// something about the call or its reply, and the routing rules still choose
+// what serves it. `responseSchema` is a strict JSON Schema for the reply,
+// `progress` asks for public output snapshots on an owned run, and `lane` is
+// interactive (the default) or background, for a call nobody is waiting on
+// (see promptLane).
 //
 // ===========================================================================
 // WHY THE EXECUTOR LIVES HERE
@@ -149,6 +156,8 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // invokePromptCapName is the capability the `ai` builtin's @executor names.
@@ -162,6 +171,7 @@ const invokePromptCapName = "invokePrompt"
 //
 //	args["templateId"]  string  required -- the prompt to call, by name
 //	args["data"]        object  required -- the prompt's declared input fields
+//	args["lane"]        string  optional -- "interactive" (the default) or "background"; see promptLane
 //
 // SYNCHRONOUS, for runAgentTurn's reason: a body statement is already running
 // inside whatever detached the work, and a second layer of asynchrony here
@@ -183,6 +193,9 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 		// saying it cannot reach the AI runtime at all, which is a deployment
 		// fact; the layers below name their own causes.
 		return nil, fmt.Errorf("ai(%q): no engine handle on this node, so the AI runtime is unreachable and the prompt cannot be called", templateId)
+	}
+	if ctx, err = promptLane(ctx, templateId, args["lane"]); err != nil {
+		return nil, err
 	}
 
 	// THE LIVE SEAM. Everything a prompt call is -- resolve the prompt,
@@ -263,6 +276,50 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 		CreatedBy: systemActorId,
 		Payload:   payload,
 	}}, nil
+}
+
+// promptLane applies the call's LANE (design record
+// docs/superpowers/specs/2026-10-18-games-pack-design.md, seam 1).
+//
+// "interactive", or no lane, is every call as it was. "background" is a call
+// nobody is waiting on -- a reflection, a summary written after the fact -- and
+// it is the same two things the background agent lane is
+// (integrations/agent/nonstreaming.go): its model calls count against the
+// BACKGROUND rate bucket (memql.ContextWithBackgroundLane, ai_guard.go), so a
+// burst of them can never spend the interactive budget a person's request
+// needs, and the request carries airoute.TagBackground, which the shipped
+// backgroundLane rule matches. The bucket is the effect that always applies.
+// The tag selects the same chain as the `default` rule, a fast-level prompt
+// keeps fastLane, a pin still wins, and because locked rules evaluate before
+// any rule an owner adds, an owner's rule for the prompt is not consulted for
+// a background call. An unknown lane is REFUSED: a typo that silently ran a
+// reflection in the interactive bucket is the failure the lane exists to
+// prevent.
+//
+// A VALUE THAT IS NOT A STRING IS AN UNKNOWN LANE TOO. asString answers "" for
+// anything that is not one, and "" is the absent lane, so reading the value
+// through it would run `lane: true` on the interactive bucket without a word:
+// the same silent failure as a misspelling, and an easier one to write. Only a
+// missing or null lane is "no lane".
+func promptLane(ctx context.Context, templateId string, raw any) (context.Context, error) {
+	var lane string
+	switch v := raw.(type) {
+	case nil:
+	case string:
+		lane = strings.TrimSpace(v)
+	default:
+		return ctx, fmt.Errorf("ai(%q): lane must be interactive or background, not %T", templateId, raw)
+	}
+	switch lane {
+	case "", "interactive":
+		return ctx, nil
+	case "background":
+		stamped, _ := memql.AICallAttributionFromContext(ctx)
+		stamped.Tags = append(append([]string(nil), stamped.Tags...), airoute.TagBackground)
+		return memql.ContextWithAICallAttribution(memql.ContextWithBackgroundLane(ctx), stamped), nil
+	default:
+		return ctx, fmt.Errorf("ai(%q): lane must be interactive or background, not %q", templateId, lane)
+	}
 }
 
 // promptData coerces the `data` argument to the map InvokeAI takes.

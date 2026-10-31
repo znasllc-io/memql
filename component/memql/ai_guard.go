@@ -69,11 +69,13 @@ import (
 )
 
 // laneCtxKey tags a context as belonging to the background (batch)
-// execution lane (memql#897). The background AI executor stamps it via
-// ContextWithBackgroundLane before issuing model calls; because the
-// vendor SDKs thread the call context all the way to the HTTP request,
-// guardedTransport.RoundTrip can read it off req.Context() and count the
-// call against the background rate bucket instead of the interactive one.
+// execution lane (memql#897). A caller whose model calls nobody is waiting on
+// stamps it via ContextWithBackgroundLane before issuing them: the background
+// agent turn, the `ai` builtin when a body writes `lane: "background"`, and a
+// pack's background embedding writes. Because the vendor SDKs thread the call
+// context all the way to the HTTP request, guardedTransport.RoundTrip can read
+// it off req.Context() and count the call against the background rate bucket
+// instead of the interactive one.
 type laneCtxKey struct{}
 
 // ContextWithBackgroundLane marks ctx as the background execution lane so
@@ -86,11 +88,16 @@ func ContextWithBackgroundLane(ctx context.Context) context.Context {
 	return context.WithValue(ctx, laneCtxKey{}, true)
 }
 
-// backgroundLaneFromContext reports whether ctx was tagged as the
+// BackgroundLaneFromContext reports whether ctx was tagged as the
 // background execution lane. Defaults to false (interactive) for any
 // context that wasn't stamped -- so chat, voice, suggest, and every legacy
 // path keep counting against the interactive ceiling unchanged.
-func backgroundLaneFromContext(ctx context.Context) bool {
+//
+// It is exported for the in-process callers' tests, the FreshReadFromContext
+// precedent: a caller that promises the background lane is tested against a
+// fake engine, and a fake that cannot see the mark cannot tell the promise
+// from its absence.
+func BackgroundLaneFromContext(ctx context.Context) bool {
 	if ctx == nil {
 		return false
 	}
@@ -241,12 +248,14 @@ type llmGuard struct {
 	lastRateAlert time.Time
 
 	// Background-lane rate ceiling (memql#897). A SEPARATE bucket from the
-	// interactive one above, selected per-call by a context flag the
-	// background executor stamps (see ContextWithBackgroundLane). Keeping
-	// the two buckets independent is the isolation that matters: a burst of
-	// planner-dispatched task executions fills bgRateHits and can trip the
-	// background ceiling without ever touching rateHits, so live chat +
-	// voice never get a synthetic 429 because batch work was busy.
+	// interactive one above, selected per-call by a context flag any caller
+	// of background work stamps (see ContextWithBackgroundLane: the
+	// background agent turn, the `ai` builtin's background lane, a pack's
+	// background embedding writes). Keeping the two buckets independent is
+	// the isolation that matters: a burst of planner-dispatched task
+	// executions fills bgRateHits and can trip the background ceiling
+	// without ever touching rateHits, so live chat + voice never get a
+	// synthetic 429 because batch work was busy.
 	bgRateEnabled   bool
 	bgRateMax       int
 	bgRateWindow    time.Duration
@@ -898,7 +907,7 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		// off the request context (memql#897): background-executor calls
 		// count against the background bucket, everything else against the
 		// interactive bucket. admitRate self-gates on the lane's enable flag.
-		background := backgroundLaneFromContext(req.Context())
+		background := BackgroundLaneFromContext(req.Context())
 		if open, calls := g.admitRate(background); open {
 			return rateCeilingResponse(req, calls), nil
 		}

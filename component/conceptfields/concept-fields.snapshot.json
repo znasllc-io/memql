@@ -2269,6 +2269,220 @@
       }
     },
     {
+      "concept": "v1:games:episode",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "at",
+        "characterId",
+        "importance",
+        "kind",
+        "ownerUserId",
+        "playerId",
+        "summary",
+        "worldId"
+      ],
+      "required": [
+        "at",
+        "characterId",
+        "importance",
+        "kind",
+        "ownerUserId",
+        "summary",
+        "worldId"
+      ],
+      "enums": {
+        "kind": [
+          "activity",
+          "chat",
+          "event",
+          "session"
+        ]
+      }
+    },
+    {
+      "concept": "v1:games:place",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "at",
+        "discoveredBy",
+        "kind",
+        "name",
+        "ownerUserId",
+        "position",
+        "worldId"
+      ],
+      "required": [
+        "at",
+        "kind",
+        "name",
+        "ownerUserId",
+        "position",
+        "worldId"
+      ]
+    },
+    {
+      "concept": "v1:games:planTrace",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "actions",
+        "at",
+        "characterId",
+        "goalSignature",
+        "goalText",
+        "inputs",
+        "outcome",
+        "ownerUserId",
+        "reaction",
+        "say",
+        "skillId",
+        "steps",
+        "trigger"
+      ],
+      "required": [
+        "actions",
+        "at",
+        "characterId",
+        "goalSignature",
+        "goalText",
+        "outcome",
+        "ownerUserId",
+        "reaction",
+        "steps",
+        "trigger"
+      ],
+      "enums": {
+        "outcome": [
+          "abandoned",
+          "failure",
+          "success"
+        ],
+        "reaction": [
+          "negative",
+          "neutral",
+          "positive"
+        ]
+      }
+    },
+    {
+      "concept": "v1:games:player",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "consented",
+        "displayName",
+        "gamertag",
+        "ownerUserId"
+      ],
+      "required": [
+        "consented",
+        "displayName",
+        "gamertag",
+        "ownerUserId"
+      ]
+    },
+    {
+      "concept": "v1:games:preference",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "confidence",
+        "evidence",
+        "ownerUserId",
+        "playerId",
+        "subject",
+        "valence"
+      ],
+      "required": [
+        "confidence",
+        "ownerUserId",
+        "playerId",
+        "subject",
+        "valence"
+      ]
+    },
+    {
+      "concept": "v1:games:promise",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "characterId",
+        "madeAt",
+        "ownerUserId",
+        "playerId",
+        "status",
+        "text"
+      ],
+      "required": [
+        "characterId",
+        "madeAt",
+        "ownerUserId",
+        "playerId",
+        "status",
+        "text"
+      ],
+      "enums": {
+        "status": [
+          "dropped",
+          "kept",
+          "open"
+        ]
+      }
+    },
+    {
+      "concept": "v1:games:skill",
+      "file": "packs/gamespack/dsl/concepts.memql",
+      "fields": [
+        "actions",
+        "canaryMatches",
+        "confirmation",
+        "distinctBindings",
+        "failures",
+        "goalSignature",
+        "goalText",
+        "lastBinding",
+        "lastReason",
+        "lastReplayAt",
+        "learnedAt",
+        "learnedFrom",
+        "ownerUserId",
+        "promotionApprovalId",
+        "promotionProposedAt",
+        "rung",
+        "rungChangedAt",
+        "shadowMatches",
+        "state",
+        "template",
+        "templateDigest",
+        "triggers"
+      ],
+      "required": [
+        "actions",
+        "canaryMatches",
+        "failures",
+        "goalSignature",
+        "goalText",
+        "learnedAt",
+        "ownerUserId",
+        "rung",
+        "shadowMatches",
+        "state",
+        "template",
+        "templateDigest"
+      ],
+      "enums": {
+        "rung": [
+          "canary",
+          "retired",
+          "shadow",
+          "trusted"
+        ],
+        "state": [
+          "awaiting_approval",
+          "canary",
+          "retired",
+          "shadow",
+          "trusted"
+        ]
+      }
+    },
+    {
       "concept": "v1:healing:healedOverride",
       "file": "healing/concepts.memql",
       "fields": [

@@ -6,8 +6,9 @@ import (
 	"github.com/znasllc-io/memql/packs/anchor"
 )
 
-// anchor_storefront_packs.go links the STOREFRONT PACKS into the default
-// build (epic memql#5532, issue memql#5549).
+// anchor_packs.go links the DEFAULT-BUILD PACKS into every binary: the
+// storefront packs (epic memql#5532, issue memql#5549) and the games pack
+// (design record docs/superpowers/specs/2026-10-18-games-pack-design.md).
 //
 // # What this closes
 //
@@ -42,7 +43,7 @@ import (
 // after the enablement read would leave the
 // declaration unheard and reviews would ship ENABLED -- the exact outcome
 // the default exists to prevent, arriving silently.
-func (a *App) anchorStorefrontPacks() {
+func (a *App) anchorPacks() {
 	// THE REGISTRATION ITSELF LIVES IN packs/anchor, and it is idempotent.
 	// It has to be: the offline package analyzer needs an engine carrying
 	// these packs too (a product's DSL imports their concepts), and a node
@@ -55,10 +56,12 @@ func (a *App) anchorStorefrontPacks() {
 	// tag, disabled by default, reach governed by packState -- and it is
 	// anchored with reviews rather than in its own file for the reason this
 	// file exists at all: a reader asking "which packs does a default image
-	// carry?" must be able to answer it from one place.
-	anchor.Storefront()
+	// carry?" must be able to answer it from one place. THE GAMES PACK joins
+	// on the same terms; it declares no storefront surface, so only an owner
+	// may switch it on.
+	anchor.Packs()
 	if a != nil && a.Logger != nil {
-		a.Logger.Info("storefront packs linked into this build; reach is governed by "+
+		a.Logger.Info("default-build packs linked into this build; reach is governed by "+
 			"v1:platform:packState",
 			"component", memql.ComponentName,
 			"packs", anchor.Domains(),

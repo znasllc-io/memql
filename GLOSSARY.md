@@ -60,6 +60,7 @@ path, or use this detailed reference index. Layout + rules:
 
 ### Build Against It (`build/`)
 - [Building a Spine](docs/public/build/building-a-spine.md) — selectable DSL planning workflows, immutable run snapshots and bounded native operations
+- [Consuming the games pack](docs/public/build/consuming-the-games-pack.md) — memory and skill learning for a game runtime outside the cluster: recall ranked by relevance, recency and importance, forgetting a player outright, and skills learned from executed plans on the learned-procedure ladder. Ships disabled
 - [Audio Streaming](docs/public/build/audio-streaming.md) · [Build Tags](docs/public/build/build-tags.md) · [Plugin SDK](docs/public/build/plugin-sdk.md) · [Building a Pack](docs/public/build/building-a-pack.md) — worked-example developer guide: the `examples/referencepack` teaching pack, and how a STOREFRONT pack under `packs/` ships in the default build and how a shopper writes to one (epic memql#5532)
 - Generated reference: the concept catalog, rendered from the DSL by `cmd/docs-gen bundle` into each release's docs set as `reference/concepts.md` (never written into `docs/public`). The bundle, its boundary gate and its manifest are [DOCS_STANDARD.md](docs/DOCS_STANDARD.md) section 5.
 

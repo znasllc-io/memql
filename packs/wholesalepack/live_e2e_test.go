@@ -102,7 +102,7 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 		t.Fatal("nil bun.DB after migrate")
 	}
 
-	// REGISTERED THE WAY app/anchor_storefront_packs.go DOES IT, so the
+	// REGISTERED THE WAY app/anchor_packs.go DOES IT, so the
 	// adapters are in the registry and the shopper surface is declared --
 	// which is what makes this a test of the pack rather than of its DSL.
 	//

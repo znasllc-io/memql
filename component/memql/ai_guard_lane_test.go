@@ -104,14 +104,14 @@ func TestGuardedTransport_BackgroundLaneRoutesToBackgroundBucket(t *testing.T) {
 }
 
 func TestBackgroundLaneFromContext(t *testing.T) {
-	if backgroundLaneFromContext(context.Background()) {
+	if BackgroundLaneFromContext(context.Background()) {
 		t.Fatal("untagged context must report interactive (false)")
 	}
-	if !backgroundLaneFromContext(ContextWithBackgroundLane(context.Background())) {
+	if !BackgroundLaneFromContext(ContextWithBackgroundLane(context.Background())) {
 		t.Fatal("tagged context must report background (true)")
 	}
 	//nolint:staticcheck // explicitly testing the nil-context guard
-	if backgroundLaneFromContext(nil) {
+	if BackgroundLaneFromContext(nil) {
 		t.Fatal("nil context must report interactive (false)")
 	}
 }

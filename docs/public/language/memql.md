@@ -1689,6 +1689,15 @@ level plus the routing rules decide, and a provider named at a call site is a
 routing decision no rule can see. The one pin is `@defaultProvider` on the
 prompt itself.
 
+**`lane` says what the call is, and never what serves it.** `lane: "background"`
+marks a call nobody is waiting on, such as a reflection or a summary written
+after the fact. Its model calls count against the background rate bucket instead
+of the interactive one ([LLM cost control](../ai/llm-cost-control.md)), which is
+the effect that always applies, and the request also carries the `background`
+tag, which the shipped `backgroundLane` rule matches
+([AI routing](../operate/ai-routing.md)). `"interactive"`, or no `lane`, is every
+call as it was, and any other value is refused by name before the model is asked.
+
 **It is refused everywhere but a statement.** A model call in a query filter,
 a `refine`, a sort, or a spec or trait body would be one call per row examined
 — so a page of a hundred rows would be a hundred calls, charged to whoever

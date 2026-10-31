@@ -122,6 +122,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"data":           "object (required) -- the fields the prompt's body declares; `{}` when it declares none",
 				"responseSchema": "object -- optional strict JSON Schema for the response",
 				"progress":       "bool -- persist public work progress",
+				"lane":           "string -- interactive (the default) or background; background counts the call's model calls against the background rate bucket and tags the request for the backgroundLane rule",
 			},
 		},
 		{

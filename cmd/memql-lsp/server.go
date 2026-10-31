@@ -147,7 +147,7 @@ func (s *server) buildSense(notify glsp.NotifyFunc) {
 	// pack's concept (`use wholesale.concepts.{ application }`) refuses the
 	// whole build, and the editor loses its registry and its load pass for
 	// every file of the workspace. Linking is not enabling; idempotent.
-	anchor.Storefront()
+	anchor.Packs()
 	// The lines are the build's own, as its Init resolved them, so they and
 	// the build's error are one answer even when a memql.toml changes while
 	// the build runs.

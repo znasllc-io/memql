@@ -49,7 +49,7 @@ func TestShopperAuthDeclarationsAreCapturedAfterPackAnchoring(t *testing.T) {
 	}
 	app := &App{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), identityVerifier: &verifier.Verifier{}}
 	middleware := app.identityHTTPMiddleware()
-	app.anchorStorefrontPacks()
+	app.anchorPacks()
 	if !hasReviewPack() {
 		t.Fatal("packs declared no shopper routes")
 	}

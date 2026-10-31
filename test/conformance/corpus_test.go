@@ -1432,7 +1432,7 @@ func corpusProbeEngine(tree fs.FS) (*memql.MemQLEngine, func(), error) {
 	// needs the form it extends to exist -- and a cell that could only ever
 	// be refused would test the refusal rather than the annotation.
 	// Idempotent, so every cell in the run shares one registration.
-	anchor.Storefront()
+	anchor.Packs()
 	_, _, unmount := memqldsl.MountOverlayDomains(corpusQuiet, tree)
 	stop := func() {
 		unmount()

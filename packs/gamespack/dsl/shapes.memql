@@ -1,0 +1,118 @@
+// games pack -- projections. Every read in this pack names a shape, because a
+// query with no shape answers the graph bundle, whose payload fields sit one
+// level down, and a caller reading row.summary off it gets "" and no error.
+
+@description("A player, whole.")
+@row
+shape player gamesPlayerFull {
+  row.id
+  ownerUserId
+  gamertag
+  displayName
+  consented
+  row.createdAt
+}
+
+@description("An episode, whole.")
+@row
+shape episode gamesEpisodeFull {
+  row.id
+  ownerUserId
+  characterId
+  playerId
+  worldId
+  at
+  kind
+  summary
+  importance
+  row.createdAt
+}
+
+@description("A preference, whole.")
+@row
+shape preference gamesPreferenceFull {
+  row.id
+  ownerUserId
+  playerId
+  subject
+  valence
+  confidence
+  evidence
+  row.createdAt
+}
+
+@description("A promise, whole.")
+@row
+shape promise gamesPromiseFull {
+  row.id
+  ownerUserId
+  characterId
+  playerId
+  text
+  status
+  madeAt
+  row.createdAt
+}
+
+@description("A place, whole.")
+@row
+shape place gamesPlaceFull {
+  row.id
+  ownerUserId
+  worldId
+  name
+  kind
+  position
+  discoveredBy
+  at
+  row.createdAt
+}
+
+@description("A skill, whole: what it does, where it stands on the ladder and why. row.createdAt is the version's own time, which a ladder write stamps after.")
+@row
+shape skill gamesSkillFull {
+  row.id
+  ownerUserId
+  goalText
+  goalSignature
+  actions
+  template
+  templateDigest
+  triggers
+  confirmation
+  learnedFrom
+  learnedAt
+  rung
+  state
+  shadowMatches
+  canaryMatches
+  distinctBindings
+  failures
+  promotionApprovalId
+  promotionProposedAt
+  lastReplayAt
+  lastBinding
+  lastReason
+  rungChangedAt
+  row.createdAt
+}
+
+@description("A plan trace, whole.")
+@row
+shape planTrace gamesPlanTraceFull {
+  row.id
+  ownerUserId
+  characterId
+  goalText
+  goalSignature
+  trigger
+  inputs
+  steps
+  actions
+  outcome
+  reaction
+  at
+  say
+  skillId
+  row.createdAt
+}
