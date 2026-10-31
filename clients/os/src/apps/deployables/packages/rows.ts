@@ -351,6 +351,7 @@ export interface ReportDomain {
   constructs: Record<string, number>;
   files: number;
   reserved?: boolean;
+  fleetWorkflows?: string[];
 }
 
 export interface ReportGoPack {

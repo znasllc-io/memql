@@ -803,6 +803,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/queries.memql", Name: "siteAccessCodeByHash"}:           true,
 		{Path: "platform/queries.memql", Name: "siteAccessSessionByToken"}:       true,
 		{Path: "platform/queries.memql", Name: "siteAccessSessionLatestForCode"}: true,
+		// A workflow has no person to read as, and only a deploy may name who answers for it.
+		{Path: "platform/queries.memql", Name: "packagesShippingDslDomain"}:  true,
+		{Path: "platform/mutations.memql", Name: "recordPackageDslDeployer"}: true,
 
 		// The per-account front door (epic memql#5168). Every write on a door's
 		// walk is the reconciler's: what a client-reachable one would buy is the

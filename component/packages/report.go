@@ -217,6 +217,10 @@ type DslDomainReport struct {
 	// directory name or a pin file. Empty for a reserved domain, which ships
 	// nothing.
 	Namespaces []string `json:"namespaces,omitempty"`
+	// FleetWorkflows names this domain's automations declaring @usesDeployerFleet,
+	// sorted: what the deploy review tells whoever presses Deploy will use their
+	// machines (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D13).
+	FleetWorkflows []string `json:"fleetWorkflows,omitempty"`
 }
 
 // GoPackReport is a detected, deferred Go pack (D3).

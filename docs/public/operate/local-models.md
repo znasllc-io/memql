@@ -490,7 +490,8 @@ the strategies it already has. Two properties are security-load-bearing:
   everyone**, by their owners. A machine shared with specific people never
   serves it. An automation acting under a person's borrowed authority is that
   person's work and uses what is lent to them
-  ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)). [Sharing a
+  ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)), and a package's
+  workflow declaring `@usesDeployerFleet` makes its model calls that way. [Sharing a
   machine](shared-machines.md) is the whole story, including who you can lend
   a machine to and what the lender is told afterwards.
 

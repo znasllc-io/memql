@@ -1,9 +1,11 @@
 package work
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -59,5 +61,38 @@ func TestModelJournalDB_TheDecisionAndTheRouterCallLandOnTheRow(t *testing.T) {
 	app, _ := considered[0].(map[string]any)
 	if app["entry"] != "app:claude-code" || app["door"] != "app" {
 		t.Errorf("considered[0]=%v, want the app source passed over", app)
+	}
+}
+
+// A @usesDeployerFleet call acts for a person on a run that stays the deployment's:
+// its row is stamped to the person, and the blank-owner run's own reader must still
+// find it, or a strict replay of the workflow would report a divergence blaming the
+// prompt (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md).
+func TestModelJournalDB_ABorrowedCallOnADeploymentsRunIsFound(t *testing.T) {
+	eng := openWorkTestEngine(t)
+	i := New(eng, testLogger())
+	deployer := "dbtest-work-journal-deployer-" + time.Now().UTC().Format("20060102150405.000000000")
+	runId := newRowId(runConcept)
+	j := &ModelJournal{store: i.store()}
+
+	if err := j.Record(actorCtx(deployer), "", memqlengine.JournaledCall{
+		RunId: runId, StepKey: "generated", RequestHash: "hash-" + deployer,
+		Provider: "fleet:qwen3.8:27b", Model: "qwen3.8:27b", Served: "local",
+		Response: map[string]any{"text": `{"brief":"ok"}`},
+		Decision: servedDecision(),
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	cluster := auth.ContextWithSystemActor(context.Background(), "deployer-fleet-journal-test")
+	rows, err := readModelCalls(cluster, i.store(), "", runId)
+	if err != nil {
+		t.Fatalf("reading the run's journal: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("the deployment's run reads %d model calls, want the borrowed one", len(rows))
+	}
+	if got := rowString(rows[0], "provider"); got != "fleet:qwen3.8:27b" {
+		t.Errorf("provider=%q", got)
 	}
 }

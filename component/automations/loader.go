@@ -310,6 +310,10 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	if err := prepareJournalContract(&automation); err != nil {
 		return nil, err
 	}
+	if err := prepareDeployerFleetContract(&automation); err != nil {
+		return nil, err
+	}
+	automation.Domain = memql.DeclaredDomainForOrigin(path)
 
 	// The trigger filter's and the preconditions' names: the body's were
 	// compiler.CheckBody's (args_resolution.go). Both the tree loader and the
@@ -807,6 +811,9 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 		return nil, err
 	}
 	if err := prepareJournalContract(&automation); err != nil {
+		return nil, err
+	}
+	if err := prepareDeployerFleetContract(&automation); err != nil {
 		return nil, err
 	}
 	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
