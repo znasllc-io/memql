@@ -25,6 +25,11 @@ func dispatchSubcommand(args []string) (bool, int) {
 	// dependencies of its own.
 	case "error-pages":
 		return true, runErrorPagesSubcommand(args[1:])
+	// Available on EVERY node binary: a CronJob runs it on the workbench image,
+	// and it needs no database, secret or mesh, so it has no build-tag
+	// dependencies of its own.
+	case "pipeline-deadline-priority":
+		return true, runPipelineDeadlinePrioritySubcommand(args[1:])
 	case "pat":
 		return true, runPATSubcommand(args[1:])
 	case "enrolment-token":
