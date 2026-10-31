@@ -281,6 +281,7 @@ shape package packageFull {
   autoDeployChangedAt
   declares
   dslDomains
+  dslDeployedBy
   disabledDeployables
   status
   row.createdAt

@@ -185,6 +185,19 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("ai(%q): no engine handle on this node, so the AI runtime is unreachable and the prompt cannot be called", templateId)
 	}
 
+	// A WORKFLOW THAT DECLARED @usesDeployerFleet makes this call as its deployer, on
+	// the Local route, and only this call: `ctx` here dies with the call. Every other
+	// caller gets its own context back. See component/memql/deployer_fleet.go.
+	if binder, ok := i.engine.(interface {
+		ContextForDeployerFleet(context.Context) (context.Context, error)
+	}); ok {
+		bound, bindErr := binder.ContextForDeployerFleet(ctx)
+		if bindErr != nil {
+			return nil, fmt.Errorf("ai(%q): %w", templateId, bindErr)
+		}
+		ctx = bound
+	}
+
 	// THE LIVE SEAM. Everything a prompt call is -- resolve the prompt,
 	// validate the data against its body, render, route by @level through
 	// core/airoute, cache, journal -- happens inside this one call, and none

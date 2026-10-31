@@ -2503,6 +2503,21 @@ mutation package recordPackageDslDomains {
   }
 }
 
+/// Who staged this package's DSL, written with dslDomains at the same commit point
+/// (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D4). @serverOnly for
+/// dslDomains' reason, and the same guard reserves the field against a raw write.
+@serverOnly
+mutation package recordPackageDslDeployer {
+  args {
+    packageId      string!
+    dslDeployedBy  string!
+  }
+  update {
+    id:            args.packageId
+    dslDeployedBy: args.dslDeployedBy
+  }
+}
+
 /// The D11 feeds' ONLY write. Both feeds -- the webhook and the poll -- converge here, and this
 /// mutation touches exactly the two fields section C marks as feed-owned. That narrowness is the
 /// design: a feed that could write anything else would be deciding to deploy, and deploying an

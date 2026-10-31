@@ -33,6 +33,12 @@ func TestPackageDslDomainsGuardDecisions(t *testing.T) {
 		{"a client naming it beside other fields", client, map[string]any{"name": "acme", "dslDomains": []any{"acme"}}, true},
 		{"a context that carries no origin", context.Background(), map[string]any{"dslDomains": []any{"acme"}}, true},
 
+		// The deployer is reserved the same way.
+		{"a client naming a deployer", client, map[string]any{"dslDeployedBy": "alice"}, true},
+		{"a client blanking the deployer", client, map[string]any{"dslDeployedBy": ""}, true},
+		{"a client naming it beside other fields", client, map[string]any{"name": "acme", "dslDeployedBy": "alice"}, true},
+		{"internal origin naming a deployer", internal, map[string]any{"dslDeployedBy": "alice"}, false},
+
 		// The deploy and the rollback.
 		{"internal origin naming a list", internal, map[string]any{"dslDomains": []any{"acme", "beta"}}, false},
 		{"internal origin emptying the list", internal, map[string]any{"dslDomains": []any{}}, false},
@@ -56,7 +62,7 @@ func TestPackageDslDomainsGuardDecisions(t *testing.T) {
 			// The sentence a person is shown names the concept, the field, and
 			// who may write it, so they know what to remove.
 			require.Contains(t, err.Error(), conceptPlatformPackage)
-			require.Contains(t, err.Error(), "`dslDomains` refused")
+			require.Regexp(t, "`(dslDomains|dslDeployedBy)` refused", err.Error())
 			require.Contains(t, err.Error(), "written only by a package deploy or rollback")
 		})
 	}

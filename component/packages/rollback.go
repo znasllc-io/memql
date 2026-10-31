@@ -185,6 +185,11 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			"component", "packages.rollback", logger.Subject(packageDeploymentConcept, req.DeploymentId),
 			"package", req.PackageId, "deployment", req.DeploymentId, "err", derr)
 	}
+	// A rollback that put DSL back staged it, so its actor is who answers for it. One
+	// that found the DSL already active moved nothing, and leaves the record.
+	if restored.Rolled {
+		d.recordDslDeployer(ctx, req.PackageId, req.Actor.UserId, "", true)
+	}
 
 	return restored, nil
 }

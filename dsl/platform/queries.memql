@@ -1055,6 +1055,21 @@ query package packagesByRepoUrl {
   shape   packageFull
 }
 
+/// The active packages whose live DSL includes one domain, for a @usesDeployerFleet
+/// workflow finding its deployer. @serverOnly and read as the cluster: a workflow has
+/// no person to read as, and exactly one row is the only answer that serves a call.
+@serverOnly
+@cache(0)
+@unbounded("the packages of one cluster -- a domain listed by more than one is a refusal, so the caller must see them all")
+query package packagesShippingDslDomain {
+  args {
+    domain  string!
+  }
+  filter  row => args.domain in row.dslDomains
+              && statusIsActive(row)
+  shape   packageFull
+}
+
 /// Every repo-sourced package, for the D11 polling feed's sweep. Runs under the
 /// engine's own operator identity, which the admin branch admits; a person
 /// calling it reads exactly their own, which is harmless and correct.

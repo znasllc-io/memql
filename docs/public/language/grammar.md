@@ -130,7 +130,7 @@ Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
 <action-annotation>   ::= ( "@description" | "@disabled" ) [ <annotation-args> ]
 <automation-annotation> ::= ( "@actor" | "@description" | "@disabled" | "@filter"
                         | "@journalOnWrite" | "@journalRequired" | "@loop" | "@mcp"
-                        | "@mode" | "@template" | "@trigger" ) [ <annotation-args> ]
+                        | "@mode" | "@template" | "@trigger" | "@usesDeployerFleet" ) [ <annotation-args> ]
 <builtin-annotation>  ::= ( "@alias" | "@args" | "@description" | "@disabled"
                         | "@executor" | "@requiresCapability" | "@sdk" ) [ <annotation-args> ]
 <capability-annotation> ::= ( "@description" | "@disabled" | "@sideEffect" ) [ <annotation-args> ]

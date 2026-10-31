@@ -29,9 +29,12 @@ import (
 // it, but a package has client-reachable writes (registering one, its settings,
 // archiving it), so the field is reserved and the concept is not.
 
-// packageDslDomainsField is the one field of v1:platform:package this guard
-// reserves: dsl/platform/concepts.memql:package.dslDomains.
-const packageDslDomainsField = "dslDomains"
+// packageDslDomainsField and packageDslDeployedByField are the fields of
+// v1:platform:package this guard reserves: dsl/platform/concepts.memql.
+const (
+	packageDslDomainsField    = "dslDomains"
+	packageDslDeployedByField = "dslDeployedBy"
+)
 
 // validatePackageDslDomainsServerOnly refuses a write to a package without
 // internal origin whose DELTA names dslDomains.
@@ -50,6 +53,14 @@ const packageDslDomainsField = "dslDomains"
 func validatePackageDslDomainsServerOnly(ctx context.Context, delta map[string]any) error {
 	if auth.OriginFromContext(ctx).IsInternal() {
 		return nil
+	}
+	if _, named := delta[packageDslDeployedByField]; named {
+		return fmt.Errorf(
+			"%s: write to `%s` refused -- this field names the person whose fleet serves the package's "+
+				"@usesDeployerFleet workflows, and it is written only by a package deploy or rollback, under "+
+				"internal origin, through recordPackageDslDeployer: a caller who could name it would choose "+
+				"whose machines serve the call. A write that does not name the field leaves it as it is",
+			conceptPlatformPackage, packageDslDeployedByField)
 	}
 	if _, named := delta[packageDslDomainsField]; !named {
 		return nil

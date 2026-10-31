@@ -52,6 +52,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@template`](#template) |  |  |  | flag |
 | [`@trigger`](#trigger) |  |  |  | keywords |
 | [`@unbounded`](#unbounded) | string |  |  |  |
+| [`@usesDeployerFleet`](#usesdeployerfleet) |  |  |  | flag |
 
 ### Data
 
@@ -214,6 +215,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@mode`](#mode) | keyword arguments | `@mode(queued, max=10)` |
 | [`@template`](#template) | no arguments | `@template` |
 | [`@trigger`](#trigger) | keyword arguments | `@trigger(event="node.created", concept="v1:cluster:node")` |
+| [`@usesDeployerFleet`](#usesdeployerfleet) | no arguments | `@usesDeployerFleet` |
 
 The fields of its `args` block take the annotations under [args field](#args-field).
 
@@ -1276,6 +1278,14 @@ The concept's row kind: "object" (the default), "collection" or "reference".
 | [query](#query) | one string | `@unbounded("a small catalog of fixed size")` |
 
 On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded("reason"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See [authoring-rules.md](authoring-rules.md).
+
+### @usesDeployerFleet
+
+| On | Written as | Example |
+|---|---|---|
+| [automation](#automation) | no arguments | `@usesDeployerFleet` |
+
+Run each `builtin ai` call in this workflow on the fleet of the person who staged its package's DSL, on the Local route: their machines, then machines lent to them, and never an app session or a vendor. Only the model call borrows; the rest of the run stays the cluster. A refusal is an ordinary ai error. Cannot be used on a before-write hook.
 
 ### @variant
 

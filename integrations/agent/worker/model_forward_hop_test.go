@@ -27,6 +27,7 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -288,6 +289,30 @@ func TestAForwardedModelCallCannotReachAnotherUsersMachine(t *testing.T) {
 	}
 	if out.ErrorCode != "registration_refused" {
 		t.Fatalf("error code = %q, want registration_refused", out.ErrorCode)
+	}
+}
+
+// A @usesDeployerFleet workflow has no inbound session to take an assertion from.
+// The one the seam binds is what carries its model call to the replica holding the
+// deployer's machine (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D9).
+func TestADeployersBorrowedCallCrossesTheHop(t *testing.T) {
+	h := newModelHop(t, func(_ context.Context, req workerservice.ModelCallRequest, emit func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+		emit(workerservice.ModelCallDelta{Seq: 1, Content: "brief"})
+		return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop}
+	}, nil)
+	ctx, err := memqlengine.DeployerCallContext(context.Background(), h.owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := h.link.router.ForwardModelCall(ctx, nodeB, "laptop", h.owner, h.start(), 10*time.Second, nil)
+	if err != nil {
+		t.Fatalf("ForwardModelCall: %v", err)
+	}
+	if out.RefusedBeforeStart {
+		t.Fatalf("refused: %s %s", out.ErrorCode, out.ErrorMessage)
+	}
+	if out.End.GetContent() != "brief" {
+		t.Fatalf("assembled content = %q", out.End.GetContent())
 	}
 }
 
