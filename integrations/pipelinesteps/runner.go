@@ -749,7 +749,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		}
 		// Retirement can win between the first read and the claim. If it
 		// arrives after this read, cleanup sees the creating claim and must
-		// wait for the POST's result instead of reporting absence as success.
+		// wait out the POST (latePostWindow) instead of reporting absence as
+		// success. This read is also what bounds that wait, so nothing that can
+		// take time belongs between it and the POST.
 		if err := s.checkRetirement(); err != nil {
 			if releaseErr := s.releaseUnusedCreation(); releaseErr != nil {
 				s.log.Warn("pipelines: unused creation claim awaits reconciliation", "error", releaseErr)
