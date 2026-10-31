@@ -261,6 +261,26 @@ export function placementsComplete(
   });
 }
 
+/**
+ * Whether every app a gate would publish already has a site, so no address is
+ * left to ask for.
+ *
+ * `placementsComplete` is false for an empty list, and must be: a run with
+ * nothing going out is not a run. But `appsToPlace` also comes back empty when
+ * every app has its site -- an update that parked because its plan changed, or
+ * a Redeploy left at the gate -- and that run has all it needs, because an
+ * address is chosen at a FIRST deploy and remembered on the site row. Telling
+ * the two apart is this function's whole job. An app the cluster refused
+ * publishes nothing, so it neither counts as going out nor holds the answer
+ * back.
+ */
+export function everyAppPlaced(report: AnalysisReport | null, placed: readonly string[], only = ""): boolean {
+  const going = (report?.deployables ?? [])
+    .filter((d) => d.problem === undefined && d.name !== "")
+    .filter((d) => only === "" || d.name === only);
+  return going.length > 0 && going.every((d) => placed.includes(d.name));
+}
+
 /** Only analyzed, changed DSL is useful work with every website skipped. */
 export function hasInstallableDslChanges(report: AnalysisReport | null): boolean {
   return report?.ok === true && report.dslChanges === true &&

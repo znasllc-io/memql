@@ -8,6 +8,7 @@ import {
   appsToPlace,
   duplicateSource,
   dslOnlySelectionReady,
+  everyAppPlaced,
   movingStopFor,
   normalizeRepoSource,
   pathOf,
@@ -23,7 +24,7 @@ import {
   type ComposeDraft,
 } from "../../src/apps/deployables/page/compose";
 import { NICKNAME_WORDS } from "../../src/apps/deployables/packages/nickname";
-import type { DeploymentRow, PackageRow } from "../../src/apps/deployables/packages/rows";
+import type { AnalysisReport, DeploymentRow, PackageRow } from "../../src/apps/deployables/packages/rows";
 import { placementsPayload } from "../../src/apps/deployables/packages/calls";
 import {
   EMPTY_MANIFEST,
@@ -280,6 +281,36 @@ describe("whether Deploy is reachable", () => {
   it("fails on ONE bad address out of several", () => {
     const held = { storefront: address({ slug: "shop" }), reports: address({ slug: "api" }) };
     expect(placementsComplete(["storefront", "reports"], held, DOMAIN)).toBe(false);
+  });
+});
+
+describe("whether a gate has any address left to ask for", () => {
+  const app = (name: string, over: object = {}) => ({ name, kind: "spa", path: name, buildPlan: "", output: "dist", prebuilt: false, ...over });
+  const reportOf = (...deployables: object[]) => ({ deployables }) as unknown as AnalysisReport;
+  const refused = { problem: { code: "deployable_not_offered", message: "not offered", fatal: false } };
+
+  it("has none when every app going out already has a site", () => {
+    expect(everyAppPlaced(reportOf(app("storefront"), app("reports")), ["storefront", "reports"])).toBe(true);
+  });
+
+  it("has one while any app going out has no site", () => {
+    expect(everyAppPlaced(reportOf(app("storefront"), app("reports")), ["storefront"])).toBe(false);
+  });
+
+  it("does not count an app the cluster refused, which publishes nothing", () => {
+    expect(everyAppPlaced(reportOf(app("storefront"), app("ios", refused)), ["storefront"])).toBe(true);
+  });
+
+  it("is not satisfied by a run that would publish nothing at all", () => {
+    expect(everyAppPlaced(null, ["storefront"])).toBe(false);
+    expect(everyAppPlaced(reportOf(), ["storefront"])).toBe(false);
+    expect(everyAppPlaced(reportOf(app("ios", refused)), ["ios"])).toBe(false);
+  });
+
+  it("reads only the app a scoped flow is about", () => {
+    const report = reportOf(app("storefront"), app("reports"));
+    expect(everyAppPlaced(report, ["storefront"], "storefront")).toBe(true);
+    expect(everyAppPlaced(report, ["storefront"], "reports")).toBe(false);
   });
 });
 
