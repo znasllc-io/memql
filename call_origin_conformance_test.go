@@ -274,6 +274,29 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// passive order observation walks) is a clusterOwner-tier read that
 		// answers nobody's question but the cluster's.
 		"integrations/sitepreview": "the preview mint and the observation recorder -- server-initiated, three @serverOnly writers refused without it, and the actor is never touched so the composite owner tier still decides every row (epic memql#5531)",
+		// integrations/siteaccess is every read and write of a deployable's
+		// access codes and the sessions they open (design record 2026-10-29).
+		// Its six builtins are what a person calls, and each has passed the part
+		// and the organization gate before this runs; the constructs beneath them
+		// are @serverOnly, and both concepts are unreadable by a client whatever
+		// the tier says (clientUnreadableConcepts), so without the stamp every
+		// read answers nothing and every write is refused. The feature would be
+		// inert, with an empty panel to show for it.
+		//
+		// THE ACTOR IS WHAT BOUNDS IT, and there are three, which store.go's file
+		// note sets out. The reads that authorize an operator's act keep the
+		// CALLER'S actor untouched, so the composite tier still decides every row
+		// of a code, and the site and package reads are deliberately NOT stamped:
+		// they run under the caller and ARE the authorization check. The store's
+		// own reads and updates, every session read among them, run as THE CLUSTER
+		// ACTING, because a row's current owner must not decide anything: they
+		// answer for anybody who reaches them, so nothing reaches them but an act
+		// that has been authorized and the bff's handler, which has compared the
+		// edge's stamp with the site's own owner. The two creates run as the SITE'S
+		// owner, so a row is stamped with the site's owner at birth and never the
+		// operator's. The bff's access handler reaches the same store through an
+		// interface, because component/server may not stamp internal origin itself.
+		"integrations/siteaccess": "deployable access codes -- the builtins' reads and writes over rows no client reads, each past the part and the organization gate; a code's reads for an act keep the caller's actor so the tier decides, the store's own reads and updates run as the cluster acting so a row's owner decides nothing, the two creates run as the site's owner, and the site read that authorizes an act is never stamped (design record 2026-10-29)",
 		// component/edge records that it HONOURED a preview grant
 		// (touchSitePreviewGrant, @serverOnly). The edge already reads the
 		// site, the custom domain, the account door, the bound store and the

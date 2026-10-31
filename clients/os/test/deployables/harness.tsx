@@ -10,7 +10,7 @@ import { OS_REGISTRY } from "../../src/apps/registry";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { PipelinesApp } from "../../src/apps/pipelines/PipelinesApp";
 import { installSeededAccess } from "../seededAccess";
-import { setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
+import { holdsForOrganization, setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
 
 // The Deployables app's test harness.
 //
@@ -59,6 +59,27 @@ export function builtinReply(name: string, rows: Row[]): Result {
     wrapper[id] = {
       id,
       concept: `integration:test:${name}`,
+      type: "object",
+      createdAt: `2026-01-01T00:00:00.${String(999_999_999 - index).padStart(9, "0")}Z`,
+      payload: row,
+    };
+  });
+  return new Result({ data: rows.length === 0 ? [] : [wrapper] } as never);
+}
+
+/**
+ * What `integrations/siteaccess` answers: its own node ids (`siteAccess:list:<id>`)
+ * around a payload that carries the row's bare id. `builtinReply` names each node
+ * after the row, so through it a panel reading the envelope's id instead of the
+ * payload's would pass here and act on a code that does not exist.
+ */
+function siteAccessReply(kind: string, key: string, rows: Row[]): Result {
+  const wrapper: Record<string, unknown> = {};
+  rows.forEach((row, index) => {
+    const id = `siteAccess:${kind}:${String(row[key])}`;
+    wrapper[id] = {
+      id,
+      concept: "integration:siteAccess:result",
       type: "object",
       createdAt: `2026-01-01T00:00:00.${String(999_999_999 - index).padStart(9, "0")}Z`,
       payload: row,
@@ -173,6 +194,22 @@ export interface FakeSeed {
   previewProbeError?: string;
   setCandidateError?: string;
   promoteError?: string;
+  /**
+   * The rows `siteAccessCodesForSite` answers from, as the handler's `listRow`
+   * shapes them. THE STORE ITSELF RATHER THAN A COPY: the four acts write to it
+   * and the panel re-reads what they wrote, and a test that moves a row under the
+   * panel -- somebody else removing a code -- does it on this same array.
+   */
+  accessCodes?: Row[];
+  accessCodesError?: string;
+  /** What `siteAccessGates` answers. ABSENT IS NONE, what a deployable with no @accessGate answers. */
+  accessGates?: Row[];
+  accessGatesError?: string;
+  /** Fail the next act of each kind with this text, as `executeNamed` would throw it. */
+  accessCreateError?: string;
+  accessRegenerateError?: string;
+  accessSetExpiryError?: string;
+  accessRemoveError?: string;
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
   registerSourceError?: string;
@@ -385,7 +422,30 @@ export const ADD_DOMAIN_RESULT = {
 
 export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const calls: string[] = [];
+  let accessMints = 0;
+  const nextAccessCode = (): string => FIXTURE_ACCESS_CODES[accessMints++ % FIXTURE_ACCESS_CODES.length]!;
   const sites = seed.sites ?? [];
+  // `refuseOrganizationActionCapability`: an act on a code is judged by the organization
+  // copied onto the code when it was minted, and a code nobody can find is refused alike.
+  const codePastTheGate = (construct: string, codeId: string): Row => {
+    const row = seed.accessCodes?.find((r) => r["id"] === codeId);
+    const copied = String(row?.["accountId"] ?? "");
+    const capable = holdsForOrganization(copied, "read", "data") && holdsForOrganization(copied, "read", "app:deployables") && holdsForOrganization(copied, "execute", "app:deployables/access");
+    if (row === undefined || !capable) {
+      throw new Error(refusedByEngine(construct, `capability_not_held: "${construct}" is not permitted for the selected organization's target`));
+    }
+    return row;
+  };
+  const refuseIfEnded = (construct: string, row: Row): void => {
+    const refuse = (sentence: string): never => {
+      throw new Error(refusedByEngine(construct, sentence));
+    };
+    if (row["revokedAt"]) refuse("This access code was removed, and removal is final. To give someone access again, add a new code.");
+    const site = sites.find((candidate) => candidate["id"] === row["siteId"]);
+    if (site === undefined) return;
+    if (String(row["accountId"] ?? "") !== String(site["accountId"] ?? "")) refuse("This access code was minted while its deployable belonged to another organization, so it opens nothing. Remove it and add a new code.");
+    if (String(site["ownerUserId"] ?? "") === "") refuse("This deployable has no owner, so this access code opens nothing. Give it an owner and try again, or remove the code.");
+  };
   const artifacts = seed.artifacts ?? [];
   const domains = seed.domains ?? [];
   const installationRows = (credentialId: string): Row[] => {
@@ -610,6 +670,73 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("mutation revokeSitePreviewGrant(") || call.startsWith("mutation updateSitePreviewBinding(")) {
         return rowsResult([]);
+      }
+
+      // THE ACCESS CODES (design record 2026-10-29-deployable-access-codes). All
+      // six are BUILTINS, the two lists included, so each answers the node set
+      // `integrations/siteaccess` answers (`siteAccessReply`). The acts write to
+      // the seed's own rows, with what the handlers write: a regenerate moves the
+      // hint and `issuedAt` and takes `lastOpenedAt` away, because the handler
+      // reads it from the sessions of the CURRENT generation.
+      //
+      // AND THEY REFUSE WHAT THE ENGINE REFUSES, in its order: the shared gate on
+      // the organization COPIED onto the code, then `refuseIfEnded` for the two
+      // acts it covers. A fake that let these through passed a test of a Remove the
+      // engine would have refused. `refuseIfEnded` asks about the site, so a seed
+      // that names no site says nothing about one.
+      if (call.startsWith("builtin siteAccessCodesForSite(")) {
+        if (seed.accessCodesError !== undefined) throw new Error(seed.accessCodesError);
+        const id = /siteId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return siteAccessReply("list", "id", (seed.accessCodes ?? []).filter((row) => row["siteId"] === id));
+      }
+      if (call.startsWith("builtin siteAccessGates(")) {
+        if (seed.accessGatesError !== undefined) throw new Error(seed.accessGatesError);
+        return siteAccessReply("gate", "gate", seed.accessGates ?? []);
+      }
+      if (call.startsWith("builtin siteAccessCodeCreate(")) {
+        if (seed.accessCreateError !== undefined) throw new Error(seed.accessCreateError);
+        const arg = (name: string) => new RegExp(`${name}: "([^"]*)"`).exec(call)?.[1] ?? "";
+        const minting = sites.find((row) => row["id"] === arg("siteId"));
+        if (minting !== undefined && String(minting["ownerUserId"] ?? "") === "") {
+          throw new Error(refusedByEngine("siteAccessCodeCreate", "This deployable has no owner, so it cannot have access codes. Give it an owner, then add the code."));
+        }
+        const code = nextAccessCode();
+        const codeId = `code-minted-${accessMints}`;
+        const expiresAt = arg("expiresAt");
+        (seed.accessCodes ??= []).push(accessCodeRow({
+          id: codeId, label: arg("label"), siteId: arg("siteId"), gate: arg("gate"), codeHint: code.slice(-4), issuedAt: new Date().toISOString(), expiresAt,
+          ...(arg("subject") === "" ? {} : { subject: arg("subject") }),
+        }));
+        return siteAccessReply("create", "codeId", [{ codeId, expiresAt, code }]);
+      }
+      if (call.startsWith("builtin siteAccessCodeRegenerate(")) {
+        if (seed.accessRegenerateError !== undefined) throw new Error(seed.accessRegenerateError);
+        const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const row = codePastTheGate("siteAccessCodeRegenerate", codeId);
+        refuseIfEnded("siteAccessCodeRegenerate", row);
+        const code = nextAccessCode();
+        const expiresAt = /expiresAt: "([^"]*)"/.exec(call)?.[1];
+        if (expiresAt !== undefined) row["expiresAt"] = expiresAt;
+        row["codeHint"] = code.slice(-4);
+        row["issuedAt"] = new Date().toISOString();
+        row["generation"] = Number(row["generation"] ?? 1) + 1;
+        delete row["lastOpenedAt"];
+        return siteAccessReply("regenerate", "codeId", [{ codeId, expiresAt: row["expiresAt"], code }]);
+      }
+      if (call.startsWith("builtin siteAccessCodeSetExpiry(")) {
+        if (seed.accessSetExpiryError !== undefined) throw new Error(seed.accessSetExpiryError);
+        const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const expiresAt = /expiresAt: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const row = codePastTheGate("siteAccessCodeSetExpiry", codeId);
+        refuseIfEnded("siteAccessCodeSetExpiry", row);
+        row["expiresAt"] = expiresAt;
+        return siteAccessReply("setExpiry", "codeId", [{ codeId, expiresAt }]);
+      }
+      if (call.startsWith("builtin siteAccessCodeRemove(")) {
+        if (seed.accessRemoveError !== undefined) throw new Error(seed.accessRemoveError);
+        const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        codePastTheGate("siteAccessCodeRemove", codeId)["revokedAt"] = new Date().toISOString();
+        return siteAccessReply("remove", "codeId", [{ codeId }]);
       }
 
       // THE STORE READS (epic memql#5530). All three are SHAPED queries, so
@@ -1403,6 +1530,57 @@ export const OPENED_PREVIEW: Row = {
   ttlMinutes: 30,
   url: "https://shop.memql.example.com/_memql/preview?grant=mql_prv_TEST",
 } as unknown as Row;
+
+/**
+ * The plain codes the fake mints, in order.
+ *
+ * COMPOSED rather than written out, for FIXTURE_TOKEN's reason: "access" followed
+ * by a long mixed value is what gitleaks' generic-api-key rule looks for.
+ */
+export const FIXTURE_ACCESS_CODES = [
+  "K7Q4M-" + "2XPDN-" + "8RT3V-" + "WJ6HC-" + "9FBZA",
+  "M3T8R-" + "6WKQD-" + "Y2HNC-" + "P9VJB-" + "4GSXE",
+  "H5ZQW-" + "J8N2C-" + "T4DKV-" + "R7MYB-" + "3XPAF",
+] as const;
+
+/** One `siteAccessCodesForSite` row. Absent fields are absent, as `listRow` leaves them. */
+export function accessCodeRow(over: Partial<Row> & { id: string; label: string }): Row {
+  return {
+    siteId: "site-desk",
+    gate: "dashboard",
+    codeHint: "9FBZ",
+    generation: 1,
+    issuedAt: "2026-10-01T00:00:00Z",
+    expiresAt: "2099-01-01T00:00:00Z",
+    createdAt: "2026-10-01T00:00:00.123456Z",
+    ...over,
+  } as unknown as Row;
+}
+
+/** One `siteAccessGates` row. */
+export function accessGateRow(over: Partial<Row> & { gate: string }): Row {
+  return { usesSubject: false, constructs: ["deskBrief"], ...over } as unknown as Row;
+}
+
+/** What the dispatcher rejects a pending call with when the socket goes. */
+export function droppedSocket(): Error {
+  return Object.assign(new Error("stream closed"), { reason: "transport" });
+}
+
+/** The write lands and its reply is lost on the way back: the worst of the cases, and the commonest. */
+export function loseTheReply(connection: FakeConnection, construct: string): void {
+  const real = connection.query.executeNamed.bind(connection.query);
+  connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+    const answer = await real(name, call, opts);
+    if (name === construct) throw droppedSocket();
+    return answer;
+  }) as typeof connection.query.executeNamed;
+}
+
+/** A refusal as `executeNamed` throws it: the call's name and the engine's frame around the sentence. */
+export function refusedByEngine(construct: string, sentence: string): string {
+  return `${construct}: MemQL engine failed to execute query. Details: ${sentence}`;
+}
 
 /** A persisted GitHub identity-to-installation source binding. */
 export function sourceConnectionRow(over: Partial<Row> = {}): Row {

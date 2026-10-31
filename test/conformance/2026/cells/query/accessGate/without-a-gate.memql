@@ -1,0 +1,12 @@
+/// A deployable named with no gate. Both keys are required and neither has a
+/// default: a guessed gate would attach the construct to a part of the app its
+/// author never named.
+@accessGate(deployable="client-desk")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

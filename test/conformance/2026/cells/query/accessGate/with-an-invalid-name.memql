@@ -1,0 +1,11 @@
+/// A deployable written the way a package would never name one. The name has
+/// to be the manifest's: lowercase letters, digits and hyphens.
+@accessGate(deployable="Client_Desk", gate="dashboard")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

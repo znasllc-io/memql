@@ -1116,6 +1116,11 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	limit := e.effectiveWindow(plan.Limit, e.defaultListLimit(plan))
 	depth := e.effectiveDepth(plan.Depth)
+	// fresh_read.go. The depth is part of the cache key, so a shallow bundle cannot answer
+	// a read that wants the relationships.
+	if RootsOnlyReadFromContext(ctx) {
+		depth = 0
+	}
 
 	sorter, err := compileSortFields(plan.Sort)
 	if err != nil {

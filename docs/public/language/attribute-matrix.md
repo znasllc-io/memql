@@ -25,6 +25,7 @@ One table per family of constructs, and one for the fields a construct declares.
 
 | Annotation | query | mutation | logic | automation |
 |---|---|---|---|---|
+| [`@accessGate`](#accessgate) | keywords | keywords |  |  |
 | [`@actor`](#actor) | flag | flag | flag | flag |
 | [`@addToSet`](#addtoset) |  | strings |  |  |
 | [`@appendFields`](#appendfields) |  | strings |  |  |
@@ -147,6 +148,7 @@ Every construct and every kind of field, with each annotation it accepts, how th
 
 | Annotation | Written as | Example |
 |---|---|---|
+| [`@accessGate`](#accessgate) | keyword arguments | `@accessGate(deployable="client-desk", gate="dashboard")` |
 | [`@actor`](#actor) | no arguments | `@actor` |
 | [`@cache`](#cache) | one number or keyword arguments | `@cache(300)` |
 | [`@description`](#description) | one string | `@description("List the caller's open tickets, newest first.")` |
@@ -164,6 +166,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 
 | Annotation | Written as | Example |
 |---|---|---|
+| [`@accessGate`](#accessgate) | keyword arguments | `@accessGate(deployable="client-desk", gate="dashboard")` |
 | [`@actor`](#actor) | no arguments | `@actor` |
 | [`@addToSet`](#addtoset) | one or more strings | `@addToSet("disabledDeployables")` |
 | [`@appendFields`](#appendfields) | one or more strings | `@appendFields("attachmentIds")` |
@@ -423,6 +426,33 @@ Written after a field's type in the body of a `builtin`.
 ## Annotations
 
 One entry per annotation, in alphabetical order: where it is accepted and how it is written there, its keys, and what it does. An annotation marked repeatable may be written more than once on one declaration; any other is refused the second time with `annotation_repeated`.
+
+### @accessGate
+
+| On | Written as | Example |
+|---|---|---|
+| [query](#query), [mutation](#mutation) | keyword arguments | `@accessGate(deployable="client-desk", gate="dashboard")` |
+
+`@accessGate` takes these keys, each written as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `deployable` | string | The deployable this gate belongs to, as its package names it: lowercase letters, digits and hyphens, e.g. "client-desk". |
+| `gate` | string | The part of that deployable's app an access code opens: lowercase letters, digits and hyphens, starting with a letter, e.g. "dashboard". |
+
+On a query or a mutation: a visitor holding a server-checked ACCESS CODE for this gate may call this construct from the deployable's own site -- @accessGate(deployable="client-desk", gate="dashboard"). The deployable is the name its package gives it and the gate is the part of that app a code opens; a code opens exactly one gate, so the annotation is how a product says which operations each part of its app may reach. It OPENS NO ENDPOINT: there is one engine-owned route family on the site's own origin, nothing runs without a live session minted from a code an operator created, and a deployable with no codes answers every call as it answers a stranger. The construct runs under the site owner's borrowed authority, never as internal origin, so it is refused beside @serverOnly (which bars the very call a visitor makes) and beside @requiresRank or @requiresCapability (a borrowed writer-role stand-in would make them mean something the author did not intend). Four argument names are RESERVED -- siteId, accessCodeId, accessGate and accessSubject -- and are stamped by the handler, last, when the construct declares them; each must be a string, and a caller that sends one is refused. They are how a product isolates data between codes: rows carry the stamped accessCodeId or match accessSubject, and the filter says so, because a gated construct that reads rows with neither opens them to everyone holding any code for that gate. Every other declared argument is the caller's, and is untrusted input. Written once, with both keys: deployable matches ^[a-z0-9][a-z0-9-]{0,62}$ and gate matches ^[a-z][a-z0-9-]{0,39}$. The construct is bound to the package that ships it through the DSL domain of the concept it is bound to: a code reaches it only for a site whose package ships that domain, so a same-named deployable in another product opens nothing here, and a construct bound to no concept is refused. Two gated constructs may not share a name under one deployable within one domain. The call is made by the construct's qualified name, namespace.name, so it lives in the top-level directory of its domain: a nested directory's namespace cannot be written in a call, and is refused. Format: @accessGate(deployable="client-desk", gate="dashboard").
+
+A declared argument that differs from a reserved name only in case, such as `accessCodeID`, is refused at load. The handler matches the four names exactly, so it would be an ordinary caller-supplied argument, and a filter on it would read as scoped to the code while opening to any id a visitor names.
+
+A code opens gated constructs and nothing else. It protects nothing in a public bundle, which the edge serves to everyone who resolves the hostname, so private content belongs in the graph, read through a gated construct. A gated query answers with the rows of its `shape` clause, every id bare. One with no `shape` answers only the bare ids of the rows it selected, and the server logs a warning naming the site and the construct, so give it one.
+
+A gated mutation writes with the site owner's authority, and keeping one code's rows from another's is the author's to do:
+
+- A visitor-chosen id can overwrite another code's row. An insert at an id that already names a row writes a new version of it, and every row a gated mutation writes has the same owner. Leave the id out, so the engine derives it from the concept and everything the row holds, `accessCodeId` included, or build it from the stamped `accessCodeId`. Where a visitor must name the row, mark every field the mutation writes `@createOnly`.
+- The handler refuses a reserved name at the top level of the call's `args` and looks no deeper. A nested one under a declared object argument reaches the construct, and a bare `args.<object>` spread into the row writes it unless the block also names that field, which the engine applies after the spread. Accept named fields (`accept { body }`) instead of spreading an object.
+- A mutation has no shape clause, so it answers with only the bare id of the row it wrote.
+
+See [site-access-codes.md](../operate/site-access-codes.md) for the wire, what the page must do and the limits.
 
 ### @actor
 

@@ -280,6 +280,8 @@ somebody's mistake.
 | `deployable_hostname_unchosen` | A never-deployed app whose placement names no hostname. Split out of `deployable_binding_missing`, because its repair is choosing an address rather than editing the tree |
 | `dsl_domain_reserved` | A `dsl/<domain>/` whose name the engine already owns |
 | `dsl_refuses_boot` | The package's DSL does not survive the Init-grade gates; carries the construct-level errors |
+| `dsl_access_gate_foreign_deployable` | A construct gated with `@accessGate` names a deployable the manifest does not declare. A site opens a gate only for the deployable name its own package gave it, so the construct could only ever answer 404, and a name that happens to match another product's deployable must not reach into that product. Scoped to the construct's file |
+| `dsl_access_gate_foreign_domain` | A gated construct is bound to a concept of a DSL domain the package does not ship -- an engine concept, or another package's. A site opens a gate only when its package ships that domain, which a deploy that serves visitors records on the package after its DSL is staged and its roll requested (`dslDomains`, spelled as a concept id spells it, so a `namespace.pin` is recorded as the pin, and a pin with no concept behind it ships nothing; a run with every app skipped that carries DSL records it too, and a run that publishes only candidates records nothing), so the construct could only ever answer 404. Scoped to the construct's file |
 | `source_too_large` | Over the per-file, whole-tree or file-count cap |
 | `source_unreadable` | Not an archive this cluster can open, or a repository or a GitHub it cannot reach |
 | `bundle_path_invalid` | An archive entry escaping the package root |
@@ -428,6 +430,13 @@ left it, and the list marks the deployable "a deploy is waiting for you" from
 re-reads the snapshot it already stored (memql#4954, memql#4955). One row per
 attempt is what makes the timeline readable, and it is what makes a Retry's
 promise survive the click that acts on it.
+
+**Only the pipeline writes a run's row.** `packageDeployment` is
+`@serverWritten`, so a raw `insert` from any caller -- a cluster owner included
+-- is refused with `@serverWritten requires internal origin`. A rollback puts
+back the DSL a recorded run names and restores the list of domains its report
+states, so a run a client could write would be a rollback target a client could
+choose. Reading a run is unchanged: the tier still decides who sees it.
 
 ### If the connection closes after confirmation
 

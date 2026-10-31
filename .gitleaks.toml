@@ -269,3 +269,17 @@ regexes = ['''^eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJ0ZXN0In0\.signature_data_here$''
 description = "Example chat-user id in the release-train settings (design record 2026-10-27; first release memql#6339). NOT a credential, twice over: `123456789012345678` is a counting sequence, the ownerDiscordUserId value the train settings examples, tests and plan use; and a real one is a public snowflake id that anybody who sees a mention can copy, and it authorizes nothing. Gitleaks 8.30.1's `discord-client-id` rule matches the settings key followed by eighteen digits, and found it in four commits of #6339 (its plan, the coordinator tests, pipelines.md and the merge), failing main's push lane. Value-keyed with no `paths`, anchored on the exact value (memql#3484): the literal identifies itself, every other eighteen-digit value stays detectable, and `gitleaks git .` scans COMMITS, so the history keeps the finding without this entry."
 regexTarget = "secret"
 regexes = ['''^123456789012345678$''']
+
+[[allowlists]]
+description = "Deployable access codes' test fixtures and alphabet (design record 2026-10-29). NOT credentials: the design record's example code and a lookalike code, with and without hyphens, their SHA-256 digests, the Crockford alphabet every code is drawn from, and two session tokens of one repeated letter. A real code is random, shown once, and never written anywhere."
+regexTarget = "secret"
+regexes = [
+  '''^K7Q4M-?2XPDN-?8RT3V-?WJ6HC-?9FBZA$''',
+  '''^K7Q4M-2XPDN-8RT3V-WJ6HC-9F01A$''',
+  '''^0123456789ABCDEFGHJKMNPQR$''',
+  '''^0123456789ABCDEFGHJKMNPQRSTVWXYZ$''',
+  '''^5d019d0e2df8e90faa86ef5b169bfc4980778282fa6ad3b7128d1752118cf948$''',
+  '''^d6213dc13e91424d6329234d774aeeaff252696a15c5690c30deeece46907694$''',
+  '''^mql_acs_A{43}$''',
+  '''^mql_acs_B{43}$''',
+]

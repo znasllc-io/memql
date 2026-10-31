@@ -154,6 +154,10 @@ cells/logic/requiresCapability/a-list-of-strings.memql
 cells/logic/requiresCapability/with-no-value.memql
 cells/logic/requiresRank/a-string.memql
 cells/logic/requiresRank/with-an-unquoted-value.memql
+cells/mutation/accessGate/keyword-arguments.memql
+cells/mutation/accessGate/with-a-positional-value.memql
+cells/mutation/accessGate/with-requires-rank.memql
+cells/mutation/accessGate/without-a-deployable.memql
 cells/mutation/actor/reads-the-actor-undeclared.memql
 cells/mutation/actor/with-true.memql
 cells/mutation/actor/written-bare.memql
@@ -246,6 +250,14 @@ cells/provider/model/with-no-value.memql
 cells/provider/vendor/a-string.memql
 cells/provider/vendor/no-vendor.memql
 cells/provider/vendor/with-an-unquoted-value.memql
+cells/query/accessGate/a-reserved-argument-as-an-int.memql
+cells/query/accessGate/keyword-arguments.memql
+cells/query/accessGate/with-a-positional-value.memql
+cells/query/accessGate/with-an-invalid-name.memql
+cells/query/accessGate/with-an-unknown-key.memql
+cells/query/accessGate/with-server-only.memql
+cells/query/accessGate/without-a-gate.memql
+cells/query/accessGate/written-twice.memql
 cells/query/actor/reads-the-actor-undeclared.memql
 cells/query/actor/with-true.memql
 cells/query/actor/written-bare.memql

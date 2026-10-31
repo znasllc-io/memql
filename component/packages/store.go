@@ -511,6 +511,31 @@ func (s *store) recordPackageDeployables(ctx context.Context, packageId string, 
 		langparser.QuoteString(packageId), jsonLiteral(declares)))
 }
 
+// recordPackageDslDomains writes which DSL domains a package ships (design
+// record 2026-10-29, D5): the list the bff compares an access gate's domain
+// with, on every call.
+//
+// ITS OWN WRITE, not a field of recordPackageDeployables, because WHEN it is
+// written is the property it exists to keep. That one runs at analysis, as soon
+// as the tree has been read; this one runs when a deploy has committed the DSL
+// (pipeline.go) and when a rollback has put a deployment's DSL back
+// (rollback.go), and never for a run that was refused, parked or cancelled. A
+// single mutation carrying both would write the list at analysis or write
+// declares at deploy, and either is wrong.
+//
+// ALWAYS AN ARRAY, never null, for the reason recordPackageDeployables gives
+// above: the concept's []string refuses the word null, and a refused write
+// leaves the list the last deploy wrote -- here, one that still names a domain
+// the source has dropped.
+func (s *store) recordPackageDslDomains(ctx context.Context, packageId string, dslDomains []string) error {
+	if dslDomains == nil {
+		dslDomains = []string{}
+	}
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation recordPackageDslDomains(packageId: %s, dslDomains: %s)",
+		langparser.QuoteString(packageId), jsonLiteral(dslDomains)))
+}
+
 func (s *store) recordUpstreamVersion(ctx context.Context, packageId, version string, updateAvailable bool) error {
 	return s.writeInternal(ctx, fmt.Sprintf(
 		"mutation recordPackageUpstreamVersion(packageId: %s, latestKnownVersion: %s, updateAvailable: %t)",

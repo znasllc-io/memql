@@ -3034,11 +3034,14 @@ Three guards bound what the default will do on its own:
   engine caches only when it can name at least one concept the result
   reads, because an entry it cannot name is an entry it could never
   evict.
-- **`v1:identity:` is denylisted from the default path.** Authentication
-  and authorization state must read live: a revoked session or a
-  downgraded role cannot be served from a 60-second-old answer. An
-  explicit `@cache(N)` still wins -- the denylist governs what the engine
-  will do *for* you, not what an author may choose.
+- **`v1:identity:` and `v1:platform:siteAccess` are denylisted from the
+  default path.** Authentication and authorization state must read live:
+  a revoked session or a downgraded role cannot be served from a
+  60-second-old answer, and neither can a hosted site's access code, which
+  has to stop opening the site the instant it is regenerated, removed or
+  past its expiry. An explicit `@cache(N)` still wins -- the denylist
+  governs what the engine will do *for* you, not what an author may
+  choose.
 - **`MEMQL_CACHE_MAX_TTL` clamps every resolved TTL** when it is set.
 
 **Freshness is event-driven; the TTL is a backstop, not the mechanism.**

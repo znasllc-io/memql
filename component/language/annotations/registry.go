@@ -178,6 +178,10 @@ var (
 		{Name: "pack", Type: "string", Doc: "The pack whose declared shopper form this mutation extends, e.g. \"wholesale\"."},
 		{Name: "form", Type: "string", Doc: "The form's route name on that pack, e.g. \"application\"."},
 	}
+	accessGateKeys = []ArgSpec{
+		{Name: "deployable", Type: "string", Doc: "The deployable this gate belongs to, as its package names it: lowercase letters, digits and hyphens, e.g. \"client-desk\"."},
+		{Name: "gate", Type: "string", Doc: "The part of that deployable's app an access code opens: lowercase letters, digits and hyphens, starting with a letter, e.g. \"dashboard\"."},
+	}
 	loopKeys = []ArgSpec{
 		{Name: "maxDepth", Type: "int", Doc: "The most runs of this automation one causal chain may hold. An integer from 1 to the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH, default 16)."},
 		{Name: "until", Type: "expression", Doc: "The convergence predicate: a lambda of one parameter over the triggering row, until=row => row.status == \"done\". The automation's @filter must hold its negation as a top-level conjunct, which is what stops the loop."},
@@ -261,6 +265,8 @@ var placementTable = concat(
 	// ---- Query ----------------------------------------------------------
 	lifecycle(Query, "List the caller's open tickets, newest first."),
 	[]Placement{
+		{Receiver: Query, Name: "accessGate", Forms: FormKeywords, Keys: accessGateKeys,
+			Example: `@accessGate(deployable="client-desk", gate="dashboard")`},
 		{Receiver: Query, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
 		{Receiver: Query, Name: "cache", Forms: FormNumber | FormKeywords, Keys: cacheKeys, Example: "@cache(300)"},
 		{Receiver: Query, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
@@ -274,6 +280,8 @@ var placementTable = concat(
 	// ---- Mutation -------------------------------------------------------
 	lifecycle(Mutation, "Rename one of the caller's tickets."),
 	[]Placement{
+		{Receiver: Mutation, Name: "accessGate", Forms: FormKeywords, Keys: accessGateKeys,
+			Example: `@accessGate(deployable="client-desk", gate="dashboard")`},
 		{Receiver: Mutation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
 		{Receiver: Mutation, Name: "addToSet", Forms: FormString | FormStrings, Example: `@addToSet("disabledDeployables")`, Doc: docAddToSet + "\n\n" + docSetMembershipRules},
 		{Receiver: Mutation, Name: "appendFields", Forms: FormString | FormStrings, Example: `@appendFields("attachmentIds")`},
@@ -506,6 +514,7 @@ var Docs = map[string]string{
 	"addToSet":             docAddToSet,
 	"removeFromSet":        docRemoveFromSet,
 	"shopperFormExtension": "On a mutation: this construct is ONE CLIENT DOMAIN'S ADDITION to a shopper form a PACK declares -- the fields that client collects which the pack does not know about, and the concept they are stored on. It ADDS FIELDS TO AN EXISTING PUBLIC ROUTE and never opens one: putting an endpoint on a hosted site's origin stays the privilege of Go compiled into the engine. The field list is this mutation's own args block MINUS the server-stamped names (storeId, siteId, submissionId), which the body declares so it can write them. The bff validates the pack's fields and these together BEFORE anything is written, runs the pack's construct first so the pack's own gate decides, then this mutation with the same stamped submission id. Legal on a MUTATION alone -- a logic may call builtins, and a public form pointed at one would reach them under the site owner's borrowed authority. At most one extension per form. Format: @shopperFormExtension(pack=\"wholesale\", form=\"application\").",
+	"accessGate":           "On a query or a mutation: a visitor holding a server-checked ACCESS CODE for this gate may call this construct from the deployable's own site -- @accessGate(deployable=\"client-desk\", gate=\"dashboard\"). The deployable is the name its package gives it and the gate is the part of that app a code opens; a code opens exactly one gate, so the annotation is how a product says which operations each part of its app may reach. It OPENS NO ENDPOINT: there is one engine-owned route family on the site's own origin, nothing runs without a live session minted from a code an operator created, and a deployable with no codes answers every call as it answers a stranger. The construct runs under the site owner's borrowed authority, never as internal origin, so it is refused beside @serverOnly (which bars the very call a visitor makes) and beside @requiresRank or @requiresCapability (a borrowed writer-role stand-in would make them mean something the author did not intend). Four argument names are RESERVED -- siteId, accessCodeId, accessGate and accessSubject -- and are stamped by the handler, last, when the construct declares them; each must be a string, and a caller that sends one is refused. They are how a product isolates data between codes: rows carry the stamped accessCodeId or match accessSubject, and the filter says so, because a gated construct that reads rows with neither opens them to everyone holding any code for that gate. Every other declared argument is the caller's, and is untrusted input. Written once, with both keys: deployable matches ^[a-z0-9][a-z0-9-]{0,62}$ and gate matches ^[a-z][a-z0-9-]{0,39}$. The construct is bound to the package that ships it through the DSL domain of the concept it is bound to: a code reaches it only for a site whose package ships that domain, so a same-named deployable in another product opens nothing here, and a construct bound to no concept is refused. Two gated constructs may not share a name under one deployable within one domain. The call is made by the construct's qualified name, namespace.name, so it lives in the top-level directory of its domain: a nested directory's namespace cannot be written in a call, and is refused. Format: @accessGate(deployable=\"client-desk\", gate=\"dashboard\")." + "\n\n" + docAccessGateAuthoring,
 	"createOnly":           "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
 	"noUnset":              docNoUnset,
 	"scrubPii":             "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",

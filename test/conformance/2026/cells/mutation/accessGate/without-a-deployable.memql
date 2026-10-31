@@ -1,0 +1,18 @@
+/// A gate named with no deployable. Both keys are required and neither has a
+/// default: a guessed deployable would put the construct in reach of another
+/// product's codes.
+@accessGate(gate="dashboard")
+@actor
+mutation ticket recordTicketAccessGate {
+  args {
+    accessCodeId string!
+    title        string!
+  }
+  insert {
+    accept { title }
+    stamp {
+      accessCodeId: args.accessCodeId
+      ownerUserId:  actor.userId
+    }
+  }
+}

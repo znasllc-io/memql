@@ -49,3 +49,37 @@ func FreshReadFromContext(ctx context.Context) bool {
 	fresh, _ := ctx.Value(freshReadKey{}).(bool)
 	return fresh
 }
+
+// A ROOTS-ONLY READ answers with the rows its filter selected and nothing else.
+//
+// Every read expands each row's outgoing relationships to depth 1, and withDepth cannot
+// ask for less. That is the right default for a bundle a client walks, and at two
+// statements per relationship it is what a caller pays when it wants to compare three
+// fields and throw the rest away. The access surface is that caller: a site has a package
+// and an account, a code has three people and an account, so what looks like a point read
+// runs six or eight statements, on a path anybody holding a code can drive at ten requests
+// a second (deployable access codes).
+//
+// LIKE FRESHNESS, A PROPERTY OF THE CALL SITE AND NOT OF THE QUERY. The same named query
+// is exactly right expanded elsewhere, and what a read needs from it is something only the
+// caller knows.
+
+type rootsOnlyReadKey struct{}
+
+// ContextWithRootsOnlyRead marks every read made under ctx to expand nothing: its bundle
+// holds the rows the filter selected and no others. A shape that projects a row's own
+// fields comes out the same, and one that walks a relationship finds nothing to walk, so
+// mark only a call whose shape does not. Keep the marked context a local of that call.
+func ContextWithRootsOnlyRead(ctx context.Context) context.Context {
+	return context.WithValue(ctx, rootsOnlyReadKey{}, true)
+}
+
+// RootsOnlyReadFromContext reports whether ctx was marked by ContextWithRootsOnlyRead.
+// Exported for the in-process callers' tests, for FreshReadFromContext's reason.
+func RootsOnlyReadFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	rootsOnly, _ := ctx.Value(rootsOnlyReadKey{}).(bool)
+	return rootsOnly
+}
