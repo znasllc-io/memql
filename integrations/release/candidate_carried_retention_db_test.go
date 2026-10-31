@@ -28,12 +28,13 @@ import (
 	"github.com/znasllc-io/memql/integrations/work"
 )
 
-// candidate_carried_retention_db_test.go -- a candidate from a failed-only re-run stays
-// provable through the retention it will meet. Coverage reads every attempt of the
-// release on every read, however long after, and only the attempt the candidate names
-// has an artifact to keep its rows. The proof (candidate_carried.go) and the hold
-// (retentionHeldBackSQL, integrations/work) are one promise kept in two packages, so
-// these cases run the real nightly pass and then the real proof over what it left.
+// candidate_carried_retention_db_test.go -- a candidate stays provable through the
+// retention it will meet. Coverage reads every run the candidate names and every attempt
+// of its release on every read, however long after, and only a run that produced one of
+// its artifacts has one to keep its rows. The proof (candidate_coverage.go,
+// candidate_carried.go) and the hold (retentionHeldBackSQL, integrations/work) are one
+// promise kept in two packages, so these cases run the real nightly pass and then the
+// real proof over what it left.
 
 // retentionScratch is a database of the test's own, taken through one real node start. It
 // needs CREATEDB, which the db-tests lane's service user has. The pass retires everything
@@ -237,6 +238,58 @@ func TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention(t *testing.T) 
 	}
 	if _, err := r.reader.coverage(ownerCtx(), candidate); err == nil || !strings.Contains(err.Error(), "cannot be read") {
 		t.Fatalf("the proof stood without the attempts it walks: %v", err)
+	}
+}
+
+// A candidate can name a run that is not a release and pins nothing: a component's runs
+// may cover different check suites as long as they share its repository and commit.
+// Verification and coverage read that run and its steps on every read, and only the
+// candidate can keep them. Forty days on, the proof holds while the candidate is live, and
+// a push of the same commit that no candidate names has gone. Once the candidate is retired
+// the check suite goes too and the same proof refuses, which says the proof was not
+// loosened to stand without the run.
+func TestACheckSuiteACandidateNamesStaysProvablePastRetention(t *testing.T) {
+	r := newCarriedRetention(t)
+	now := time.Now()
+	_, release := r.run(carriedRunSpec{queuedAt: now, succeeded: true, steps: map[string]carriedStep{"build.image": image, "test.full": executed}})
+	suiteRun, suite := r.run(carriedRunSpec{event: "push", runKey: id.NewShortId(), queuedAt: now, succeeded: true, steps: map[string]carriedStep{"test.suite": executed}})
+	unnamed, _ := r.run(carriedRunSpec{event: "push", runKey: id.NewShortId(), queuedAt: now, succeeded: true, steps: map[string]carriedStep{"test.suite": executed}})
+	candidate := r.candidateRecording(release, nil)
+	receipt, err := r.reader.readReceipt(ownerCtx(), suite, "test.suite", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate.Evidence = append(candidate.Evidence, pl.ReleaseEvidence{Name: "test.suite", Component: "engine", WorkRunID: suite, StepKey: "test.suite", Attempt: receipt.Attempt,
+		ReceiptID: receipt.ReceiptID, ReceiptDigest: receipt.ReceiptDigest, DefinitionDigest: receipt.DefinitionDigest, ArtifactIntentIDs: receipt.ArtifactIntentIDs})
+	key := r.save(candidate)
+	r.pinArtifactOf(release)
+	// What an overlay asks of a candidate, in the order it asks (nativeCandidate).
+	proven := func(moment string) {
+		t.Helper()
+		if err := r.reader.verify(ownerCtx(), candidate); err != nil {
+			t.Fatalf("%s: verification: %v", moment, err)
+		}
+		if _, err := r.reader.coverage(ownerCtx(), candidate); err != nil {
+			t.Fatalf("%s: coverage: %v", moment, err)
+		}
+	}
+	proven("before any retention")
+
+	r.night(now, 40)
+	proven("a live candidate stopped being provable once a check suite it names passed retention")
+	if r.stored(unnamed) {
+		t.Error("the candidate held a push of its commit that it does not name")
+	}
+
+	if _, err := r.ledger.retire(ownerCtx(), key); err != nil {
+		t.Fatal(err)
+	}
+	r.night(now, 40)
+	if r.stored(suiteRun) {
+		t.Error("the check suite outlived the candidate that held it")
+	}
+	if _, err := r.reader.coverage(ownerCtx(), candidate); err == nil || !strings.Contains(err.Error(), "release run is unavailable") {
+		t.Fatalf("the proof stood without the run it names: %v", err)
 	}
 }
 

@@ -758,6 +758,7 @@ func TestOperationalRetentionPageEndsWhereTheScanEndedNotWhereTheAdmittedRowsDid
 type explainNode struct {
 	NodeType         string        `json:"Node Type"`
 	Relation         string        `json:"Relation Name"`
+	SubplanName      string        `json:"Subplan Name"`
 	ActualRows       float64       `json:"Actual Rows"`
 	ActualLoops      float64       `json:"Actual Loops"`
 	RemovedByFilter  float64       `json:"Rows Removed by Filter"`

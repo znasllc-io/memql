@@ -41,6 +41,8 @@ type candidateCoverage struct {
 // fingerprint. Missing steps cannot disappear from release review, and a
 // successful aggregate alone cannot stand in for individual execution receipts.
 // Which run modes qualify for a release is decided by the installed DSL.
+// Retention keeps every run a live candidate's evidence names, whatever its event
+// (retentionHeldBackSQL, integrations/work), so these rows are here on every read.
 func (r candidateEvidenceReader) completeRun(ctx context.Context, runID string) (candidateRunPlan, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {

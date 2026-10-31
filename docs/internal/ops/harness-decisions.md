@@ -2498,6 +2498,45 @@ workflow is in
   refused as before. Failed-only release re-runs first shipped in 0.31.9 (#6369, merged
   2026-10-29), so at the 30-day default no candidate can lose its rows before 2026-11-28.
   A rollback refuses nothing: an older engine just stops holding.
+- **A candidate also holds every run it names** (the same function). Coverage reads each
+  run in `evidence[].workRunId` whole on every read (`completeRun`), verification reads its
+  receipts, and an overlay asks both. The assembly format lets such a run be something other
+  than a release: a component's runs must share its repository and commit, and "can cover
+  different platforms or check suites". Nothing kept one with no artifact, so past the window
+  an overlay was refused: `verify`, which it asks first, could not read the check, and
+  coverage says "release run is unavailable".
+  `TestACheckSuiteACandidateNamesStaysProvablePastRetention` reproduced this before the fix. The
+  hold keeps the run and its `v1:pipelines:run` row by that name, inside the `NOT IN` that
+  already read the reused sources, so the manifests are read no more often. A named run that
+  is not a release has nothing else to read: `carriedChain` and `ProveReusedStep` each refuse
+  a run that is not a full release. The proof's rules did not change. Rejected:
+  - Dropping the `event` test from the attempts' hold. It is less SQL and 1 to 5 ms cheaper
+    per statement, and it would keep every named run, since `verify` requires one to be at
+    its component's repository and commit. But it also keeps every other run at that commit,
+    which coverage never reads: a push of it, a pull request on it, its scheduled scans, all
+    with their steps, for as long as the candidate is live, and only archiving or retiring
+    ends that.
+  - `CROSS JOIN LATERAL (VALUES ...)` for the two names, which is the plainer SQL. The planner
+    memoizes the scan on each entry, which never hits (0 of 120,000) and fills `hash_mem`. At
+    1,000 candidates a page read took 240 ms against this form's 98 ms.
+  - `jsonb_path_query` over the manifest, with no `jsonb_typeof` test. The planner expects
+    1,000 rows a candidate and stops hashing the list somewhere between 150 candidates, where
+    it was hashed, and 1,000, where a page read took over 10 s. Unhashed, the list is still
+    read once, so the loop count could not show it;
+    `TestRetentionHoldReadsTheCandidatesOncePerStatement` now fails on an unhashed list too.
+    The shipped form stays hashed because `jsonb_typeof(...)='array'` has the default 0.5%
+    selectivity, which puts the limit past 250,000 candidates at a `work_mem` of 8 MB.
+
+  Cost, on a seeded hypertable of 60,000 versions in 9 chunks with every row a release's,
+  page read then guarded delete, p50, before and after. At 150 candidates of 120 entries
+  (66 KB of JSON, 29 KB stored): 30.5 and 25.8 ms, then 34.0 and 29.7 ms. With no row a
+  release's it adds about the same. At 1,000 such candidates: 71 and 68 ms, then 98 and 94 ms. At
+  150 candidates of 1,024 entries, the most a manifest may hold: 113 and 103 ms, then 149 and
+  145 ms. Every statement stays far inside the 8 s timeout.
+
+  Saved candidates need nothing, because every manifest has always named its runs: they are
+  held from the next pass. Rows that already left stay gone, and that candidate is refused as
+  before. A rollback refuses nothing.
 - **What survives a retry, pause or replica change.** The tree, the fingerprint and
   the evidence run are all on rows. `resume` and `reopenFromRows` restore them from
   the row before a step's call is declared again, because the run's definition
@@ -2515,8 +2554,9 @@ the next version then executes everything.
 Invariants: every artifact in a candidate comes from the run it names; a reused step
 names none; a tree is compared only when both sides read it; only a directly executed
 receipt counts; a source older than 24 hours at the attempt's start counts for
-nothing; every other event still compares commits; every row a carried or reused proof
-reads stays while the candidate is neither retired nor archived.
+nothing; every other event still compares commits; every row coverage reads, for a named
+run and for a carried or reused proof, stays while the candidate is neither retired nor
+archived.
 
 Tests: `TestSameTree*`, `TestReusedReleaseReceipt*`, `TestProveReusedStep*`,
 `TestReceiptDigest*`, `TestAReceiptsDigest*`, `TestReleaseCandidate*Reused*`
@@ -2527,9 +2567,11 @@ and the db-gated `TestAReleaseReusesItsTreeOverRealRows` (`component/pipelinerun
 `TestReusedReceipt*`, `TestCandidateRecordOfAReuseIsWhatTheJournalProves`,
 `TestACarriedReuseProvesAgainstItsSource` and `TestCandidateAssemblyRecordsAReusedReceipt`
 (`integrations/release`, db-gated); `TestRetentionKeepsARunALiveCandidateReusedFrom`,
+`TestRetentionKeepsEveryRunALiveCandidateNames`,
 `TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease` and
 `TestRetentionHoldReadsTheCandidatesOncePerStatement` (`integrations/work`, db-gated).
-`TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention` and
+`TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention`,
+`TestACheckSuiteACandidateNamesStaysProvablePastRetention` and
 `TestACarriedReuseStaysProvablePastRetention` (`integrations/release`, db-gated) run the
 real nightly pass and then the real proof, on a scratch database with the real schema.
 `TestAReleaseReusesItsTreeOverRealRows` also holds that the real driver writes the fields
@@ -2539,17 +2581,15 @@ Not verified: a live release on a cluster, or the time it saves. No test runs
 `coverage` itself over rows the real driver wrote: `integrations/release` cannot run
 the driver, so its tests use hand-written journal rows. The driver test runs
 `ProveReusedStep` and what `completeRun` checks over real rows, which leaves the wiring
-in `coverage` and assembly tested only over the hand-written ones. The attempts' hold has
-not run on a production journal; its cost above is from a seeded one. Known limits:
+in `coverage` and assembly tested only over the hand-written ones. The holds on attempts and
+on named runs have not run on a production journal; their cost above is from a seeded one.
+Known limits:
 
 - a pull request whose steps passed across a failed-only re-run offers only what its
   last attempt executed;
 - an engine upgrade between a source and its release runs everything;
-- a candidate whose earlier attempts left before its installation ran the hold stays
-  refused, since no hold brings rows back;
-- a run a candidate names that is not a release and has no pinned artifact, such as a
-  check suite on a push, has nothing to keep it. The assembly format allows one, and past
-  the window coverage refuses it with "release run is unavailable";
+- a candidate whose earlier attempts or named runs left before its installation ran the
+  holds stays refused, since no hold brings rows back;
 - a retention window shorter than the time between a source and its candidate retires
   the source first, and preparation refuses it;
 - rolling back to an engine from before tree hashes refuses a candidate with

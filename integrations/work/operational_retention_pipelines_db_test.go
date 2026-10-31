@@ -28,6 +28,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1006,10 +1007,135 @@ func TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease(t *testing.T) {
 	}
 }
 
+// A candidate's evidence names complete runs, and coverage reads each of them with its
+// steps on every read (completeRun, integrations/release). A named run need not be a
+// release: a component's runs may cover different check suites as long as they share its
+// repository and commit, and such a run has no artifact to keep it. So a live candidate
+// holds every run its evidence names, whatever the run's event, and by that name alone:
+// a push of the same commit that no candidate names goes on its window.
+func TestRetentionKeepsEveryRunALiveCandidateNames(t *testing.T) {
+	db, i := sweepDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.AddDate(0, 0, -40)
+	cutoff := now.AddDate(0, 0, -30)
+	commit := strings.Repeat("a", 40)
+
+	type row struct{ concept, id string }
+	suiteWork, suiteRun := seedReleaseAttempt(t, db, "a-check-suite", "acme/engine", commit, "push", old)
+	scanWork, scanRun := seedReleaseAttempt(t, db, "a-scheduled-scan", "acme/engine", commit, "schedule", old)
+	held := []row{{runConcept, suiteWork}, {pipelinesRunConcept, suiteRun}, {runConcept, scanWork}, {pipelinesRunConcept, scanRun}}
+
+	var free []row
+	unheld := func(name, event string) {
+		work, run := seedReleaseAttempt(t, db, name, "acme/engine", commit, event, old)
+		free = append(free, row{runConcept, work}, row{pipelinesRunConcept, run})
+	}
+	unheld("another-push-of-the-commit", "push")
+	unheld("a-pull-request-at-the-commit", "pull_request")
+	free = append(free, row{runConcept, seedSystemRun(t, db, "a-system-run", runStatusSucceeded, old)})
+	// Refused before it opened any work: it names no work run, and a candidate naming a
+	// blank one must not keep it. The hold compares such a row as "".
+	free = append(free, row{pipelinesRunConcept, seedPipelinesRun(t, db, "no-work", pipelineOwner, "completed", old)})
+
+	before := map[string]bool{}
+	for _, r := range held {
+		maps.Copy(before, storedKeys(t, db, r.id))
+	}
+	// The manifest's own type, so a renamed field fails here rather than holding nothing.
+	// A candidate records a work run's id bare (completeRun compares it with a bare row).
+	manifest, err := json.Marshal(pipelines.ReleaseCandidate{
+		Components: []pipelines.ReleaseComponent{{Name: "engine", Repository: "acme/engine", Commit: commit}},
+		Evidence: []pipelines.ReleaseEvidence{
+			{Name: "unit", WorkRunID: "a-check-suite", StepKey: "tests.unit"},
+			{Name: "lint", WorkRunID: "a-check-suite", StepKey: "tests.lint"},
+			{Name: "scan", WorkRunID: "a-scheduled-scan", StepKey: "scan.all"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := "sha256:" + strings.Repeat("a", 64)
+	if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state) VALUES (?,'pipeline-owner',?,'ready')`, candidate, string(manifest)); err != nil {
+		t.Fatal(err)
+	}
+	// Live candidates that name no run. None may hold anything, and none may stop the
+	// statement: a NULL in a NOT IN list would keep every row for good, a blank would
+	// keep every run that opened no work, and jsonb_array_elements refuses a scalar.
+	for n, malformed := range []string{`{"evidence":[{"name":"no-run"}]}`, `{"evidence":[{"workRunId":""}]}`, `{"evidence":[{"reusedFrom":{"workRunId":""}}]}`, `{"evidence":[{"workRunId":null}]}`, `{"evidence":["a-check-suite",null]}`, `{"evidence":"a-check-suite"}`, `{"evidence":null}`, `{}`} {
+		if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state) VALUES (?,'pipeline-owner',?,'ready')`,
+			fmt.Sprintf("sha256:%064d", n), malformed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&verifyingArchive{})
+	admitted := func(concept string) []string {
+		t.Helper()
+		q, args := retentionCandidateRead(operationalPolicy{concept: concept, predicate: "TRUE"}, cutoff, old.Add(-24*time.Hour), cutoff, nil)
+		var candidates []map[string]any
+		if err := db.NewRaw(q, args...).Scan(t.Context(), &candidates); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(candidates))
+		for _, row := range candidates {
+			ids = append(ids, fmt.Sprint(row["id"]))
+		}
+		return ids
+	}
+	retire := func(r row) (int, error) {
+		t.Helper()
+		_, deleted, _, err := i.retireVerified(retentionOwner(), r.concept, []map[string]any{{"id": r.id, "createdAt": rfc(old)}}, r.concept == runConcept, cutoff, false)
+		return deleted, err
+	}
+	for _, state := range []string{"preparing", "ready", "approved"} {
+		if _, err := db.Exec(`UPDATE release_candidates SET state=? WHERE candidate_id=?`, state, candidate); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range held {
+			if slices.Contains(admitted(r.concept), r.id) {
+				t.Fatalf("%s: %s was admitted to history retention while a live candidate names it", state, r.id)
+			}
+			// The final transactional guard too: a read made before the candidate was
+			// prepared cannot delete a run it now names.
+			if deleted, err := retire(r); err != nil || deleted != 0 {
+				t.Fatalf("%s: deleted %s under a live candidate: %d %v", state, r.id, deleted, err)
+			}
+		}
+		for _, r := range free {
+			if !slices.Contains(admitted(r.concept), r.id) {
+				t.Errorf("%s: the candidate held %s, which it does not name", state, r.id)
+			}
+		}
+		assertStillStored(t, db, before)
+	}
+	for _, state := range []string{"retired", "archived"} {
+		if _, err := db.Exec(`UPDATE release_candidates SET state=? WHERE candidate_id=?`, state, candidate); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range held {
+			if !slices.Contains(admitted(r.concept), r.id) {
+				t.Errorf("a %s candidate still holds %s", state, r.id)
+			}
+		}
+	}
+	for _, r := range held {
+		if deleted, err := retire(r); err != nil || deleted == 0 {
+			t.Errorf("an archived candidate held %s: %d %v", r.id, deleted, err)
+		}
+		assertRetired(t, db, r.id)
+	}
+}
+
 // The hold reads the candidates once per statement, however many versions the
 // statement looks at. Read per row it detoasted every live manifest once per version,
 // which at a hundred or so candidates took a delete past its 8 s statement timeout,
 // so the same page failed every night and retention stopped (retentionHeldBackSQL).
+//
+// Two reads, and each one hashed. A third read is the cost of every manifest again. A list
+// the planner does not hash is read once too, so the loops cannot show it, but every row
+// then walks the whole list, and that took a page read past 10 s at 1,000 candidates.
+// work_mem is the Postgres default, so what the planner chooses does not depend on the
+// database the test runs on.
 func TestRetentionHoldReadsTheCandidatesOncePerStatement(t *testing.T) {
 	db, _ := sweepDB(t)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1017,7 +1143,7 @@ func TestRetentionHoldReadsTheCandidatesOncePerStatement(t *testing.T) {
 	cutoff := now.AddDate(0, 0, -30)
 	if _, err := db.Exec(`INSERT INTO release_candidates (candidate_id,owner_user_id,manifest,state)
 SELECT 'sha256:'||encode(sha256(g::text::bytea),'hex'),'pipeline-owner',
- jsonb_build_object('evidence',(SELECT jsonb_agg(jsonb_build_object('name','step-'||e,'reusedFrom',jsonb_build_object('workRunId','source-'||g))) FROM generate_series(1,30) e),
+ jsonb_build_object('evidence',(SELECT jsonb_agg(jsonb_build_object('name','step-'||e,'workRunId','named-'||g,'reusedFrom',jsonb_build_object('workRunId','source-'||g))) FROM generate_series(1,30) e),
   'components',jsonb_build_array(jsonb_build_object('repository','acme/engine','commit','commit-'||g))),'approved'
 FROM generate_series(1,200) g`); err != nil {
 		t.Fatal(err)
@@ -1048,6 +1174,9 @@ FROM generate_series(1,200) g`); err != nil {
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback() }()
+			if _, err := tx.ExecContext(context.Background(), `SET LOCAL work_mem='4MB'`); err != nil {
+				t.Fatal(err)
+			}
 			var plan []byte
 			if err := tx.QueryRowContext(context.Background(), `EXPLAIN (ANALYZE, FORMAT JSON) `+statement.query, statement.args...).Scan(&plan); err != nil {
 				t.Fatalf("explain: %v\n%.400s", err, statement.query)
@@ -1059,14 +1188,33 @@ FROM generate_series(1,200) g`); err != nil {
 				t.Fatalf("explain output: %v %s", err, plan)
 			}
 			scans, loops := relationLoops(plans[0].Plan, "release_candidates")
-			if scans == 0 {
-				t.Fatalf("the plan never read the candidates, so this says nothing: %s", plan)
+			if scans != 2 {
+				t.Fatalf("the plan holds %d reads of the candidates, want one for the runs they name and one for their components: %s", scans, plan)
 			}
 			if loops != float64(scans) {
 				t.Errorf("the candidates were read %.0f times across %d scans: the hold went back to the manifests per row", loops, scans)
 			}
+			if lists := unhashedLists(plan, plans[0].Plan, "release_candidates"); len(lists) != 0 {
+				t.Errorf("%v read the candidates and are not hashed, so every row of the statement walks their list: %s", lists, plan)
+			}
 		})
 	}
+}
+
+// unhashedLists names the subplans that read a relation and that the plan does not probe
+// by hash. Only the text of the filter using a subplan says so. An InitPlan runs once, so
+// it is no list: the delete's guard is one, holding the lists it probes.
+func unhashedLists(plan []byte, n explainNode, relation string) []string {
+	var lists []string
+	if strings.HasPrefix(n.SubplanName, "SubPlan ") {
+		if scans, _ := relationLoops(n, relation); scans > 0 && !regexp.MustCompile(`hashed `+regexp.QuoteMeta(n.SubplanName)+`\b`).Match(plan) {
+			lists = append(lists, n.SubplanName)
+		}
+	}
+	for _, child := range n.Plans {
+		lists = append(lists, unhashedLists(plan, child, relation)...)
+	}
+	return lists
 }
 
 // relationLoops is how many scans of a relation a plan holds, and their loops.
