@@ -29,6 +29,7 @@ func TestTheIndexMigrationsAreGoRegisteredOnceUnderTheirFileNames(t *testing.T) 
 		workJournalLookupMigrationName, emailDigestLookupMigrationName,
 		workRunOwnerLookupMigrationName, workRunGoalLookupMigrationName,
 		workRunOwnerWalkMigrationName, workRunSignatureLookupMigrationName, workRunRevisionLookupMigrationName,
+		authSessionHashLookupMigrationName,
 	} {
 		version, comment, _ := strings.Cut(name, "_")
 		got := byVersion[version]

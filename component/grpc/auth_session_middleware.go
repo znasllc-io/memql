@@ -1,20 +1,40 @@
 // Package memql session-revocation middleware.
 //
-// Two enforcement layers wrap the identity-verifier auth path so a
-// revoked v1:identity:authSession row blocks the bearer token
-// everywhere it might appear:
+// Two enforcement layers wrap the node's main identity-verifier auth
+// path so a revoked v1:identity:authSession row blocks the bearer
+// token wherever that path accepts it:
 //
-//   - NewSessionRevocationHTTPMiddleware: wraps the HTTP handler
-//     chain. Runs after the verifier's HTTPMiddleware -- by the time
-//     we execute, the JWT has already been signature-verified and the
-//     claims are attached. We hash the bearer token (Authorization
-//     header, memql_auth cookie, or `?token=` query param for
-//     WebSocket upgrades) and reject the request if the matching
-//     session row is revoked.
+//   - NewSessionRevocationHTTPMiddleware: runs inside the verifier's
+//     HTTPMiddleware (app.identityHTTPMiddleware builds the two as
+//     one). For a request whose JWT has been signature-verified and
+//     whose claims are attached, we hash the bearer token (Authorization
+//     header, WebSocket subprotocol, memql_auth cookie, or a deprecated
+//     query param) and reject the request if the matching session row
+//     is revoked.
 //
-//   - NewSessionRevocationStreamInterceptor: wraps the gRPC stream
-//     chain similarly, after the base verifier / no-auth interceptor
-//     has set claims.
+//   - NewSessionRevocationStreamInterceptor: does the same at stream
+//     open, inside the base verifier that it hands the stream to.
+//
+// # A BEARER NOBODY VERIFIED COSTS NOTHING
+//
+// Both layers read a session only for a bearer the verifier accepted.
+// The read is a database statement, and it used to run for any bearer
+// a request carried. The verifier steps aside on a public or
+// self-authenticated path, so `Authorization: Bearer x` on /healthz
+// cost one read per request with no credential at all, and a `?token=`
+// on an unsubscribe or email link counted as a bearer too. Before
+// memory_nodes_auth_session_hash_lookup_idx that read was 1.1 s at
+// 120,000 sessions. The index makes it cheap; waiting makes it
+// unreachable by a stranger.
+//
+// A path the verifier skips is therefore not checked here, a revoked
+// bearer included. No verifier read that bearer, and the handler
+// behind it gets no claims from it. One thing on such a path does act
+// on a bearer: the verifier matches public paths by prefix and the
+// gateway claims any POST ending in /memql/query, so POST
+// /healthz/memql/query forwards the bearer to MemqlService.Stream. The
+// stream interceptor below is what refuses it there, and nothing else
+// does (TestARevokedSessionIsRefusedThroughTheGatewayOnAPublicPrefix).
 //
 // The HTTP middleware also runs on the WebSocket upgrade -- the
 // revocation check happens at connect time. Already-established
@@ -45,14 +65,16 @@ import (
 const authCookieName = "memql_auth"
 
 // NewSessionRevocationHTTPMiddleware enforces session revocation on
-// HTTP + WebSocket-upgrade requests. Wrap AFTER the verifier auth
-// middleware so the request only reaches us when the JWT has
-// already been validated.
+// HTTP + WebSocket-upgrade requests. It MUST run inside the verifier
+// auth middleware: it acts only on a request carrying the claims the
+// verifier attached, so in front of the verifier it would enforce
+// nothing and say nothing. app.identityHTTPMiddleware builds the two
+// as one so the order cannot drift.
 //
-// Bypasses requests with no extractable token (public paths the
-// verifier middleware let through, dev/no-auth flows, etc.) --
-// failing closed there would break paths that legitimately have no
-// session row.
+// Bypasses requests with no verified claims (public and
+// self-authenticated paths the verifier stepped aside for), and
+// verified requests with no extractable token -- failing closed there
+// would break paths that legitimately have no session row.
 func NewSessionRevocationHTTPMiddleware(engine *memqlengine.MemQLEngine, logger *slog.Logger) func(http.Handler) http.Handler {
 	if engine == nil {
 		// Fail-open in dev / cluster bootstrap before the engine is
@@ -65,6 +87,10 @@ func NewSessionRevocationHTTPMiddleware(engine *memqlengine.MemQLEngine, logger 
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, verified := auth.ClaimsFromContext(r.Context()); !verified {
+				next.ServeHTTP(w, r)
+				return
+			}
 			token := extractBearerTokenHTTP(r)
 			if token == "" {
 				next.ServeHTTP(w, r)
@@ -95,8 +121,9 @@ func NewSessionRevocationHTTPMiddleware(engine *memqlengine.MemQLEngine, logger 
 }
 
 // NewSessionRevocationStreamInterceptor enforces session revocation
-// at gRPC stream-open time. Wrap AFTER the base verifier / no-auth
-// interceptor, so claims are set.
+// at gRPC stream-open time. It hands the stream to base first and
+// reads a session only from the handler base calls, so a stream base
+// refuses costs no read.
 func NewSessionRevocationStreamInterceptor(base grpc.StreamServerInterceptor, engine *memqlengine.MemQLEngine, logger *slog.Logger) grpc.StreamServerInterceptor {
 	if base == nil {
 		return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
@@ -110,35 +137,36 @@ func NewSessionRevocationStreamInterceptor(base grpc.StreamServerInterceptor, en
 		return base
 	}
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		// Run base auth first; it sets claims and rejects bad tokens.
-		// We layer revocation enforcement on top by inspecting the
-		// metadata on the original stream context (claims propagate
-		// onto a wrapped context that base hands to handler -- but
-		// we need the bearer token, which lives on the metadata of
-		// the original ss.Context()).
-		token := bearerTokenFromIncomingContext(ss.Context())
-		if token == "" {
-			// No bearer token visible (guest stream, no-auth dev,
-			// some internal call). Defer to base.
-			return base(srv, ss, info, handler)
-		}
-		session, err := LookupAuthSessionByTokenHash(ss.Context(), engine, HashBearerToken(token))
-		if err != nil {
-			if logger != nil {
-				logger.Warn("session revocation: stream lookup failed -- failing open",
-					"error", err)
+		// Base runs first; it sets claims and rejects bad tokens, and
+		// only a stream it accepted reaches this handler. The read
+		// stays on the original ss.Context(), where the bearer token's
+		// metadata lives: waiting for base changes when it runs, not
+		// as whom.
+		return base(srv, ss, info, func(srv interface{}, verified grpc.ServerStream) error {
+			token := bearerTokenFromIncomingContext(ss.Context())
+			if token == "" {
+				// No bearer token visible (guest stream, no-auth dev,
+				// some internal call). Nothing to look up.
+				return handler(srv, verified)
 			}
-			return base(srv, ss, info, handler)
-		}
-		if session != nil && !session.RevokedAt.IsZero() {
-			if logger != nil {
-				logger.Info("session revocation: stream rejected",
-					"session_id", session.ID,
-					"reason", session.RevokedReason)
+			session, err := LookupAuthSessionByTokenHash(ss.Context(), engine, HashBearerToken(token))
+			if err != nil {
+				if logger != nil {
+					logger.Warn("session revocation: stream lookup failed -- failing open",
+						"error", err)
+				}
+				return handler(srv, verified)
 			}
-			return status.Error(codes.Unauthenticated, "session revoked")
-		}
-		return base(srv, ss, info, handler)
+			if session != nil && !session.RevokedAt.IsZero() {
+				if logger != nil {
+					logger.Info("session revocation: stream rejected",
+						"session_id", session.ID,
+						"reason", session.RevokedReason)
+				}
+				return status.Error(codes.Unauthenticated, "session revoked")
+			}
+			return handler(srv, verified)
+		})
 	}
 }
 
