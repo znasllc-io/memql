@@ -56,6 +56,7 @@ message NodeClientMessage {
     ModelProbeForwardCancel model_probe_forward_cancel = 107;
     AppCallForwardRequest app_call_forward_request = 108;
     AppCallForwardCancel app_call_forward_cancel = 109;
+    AppSignInForwardRequest app_sign_in_forward_request = 110;
   }
 }
 
@@ -93,6 +94,7 @@ message NodeServerMessage {
     ModelProbeForwardResponse model_probe_forward_response = 106;
     ModelProbeForwardProgress model_probe_forward_progress = 107;
     AppCallForwardResponse app_call_forward_response = 108;
+    AppSignInForwardResponse app_sign_in_forward_response = 109;
   }
 }
 
@@ -608,6 +610,8 @@ message WorkerForwardRequest {
   string purpose = 14;
   // Receipt ID only: the stream holder must claim fresh durable authority.
   string computer_permission_id = 15;
+  // The receiver must not move an already queued operation into a recovered workspace.
+  uint64 workbench_generation = 16;
 }
 
 // WorkerForwardResponse carries the dispatch result back to the originating
@@ -993,4 +997,29 @@ message AppCallForwardResponse {
 message AppCallForwardCancel {
   string request_id = 1;
   string reason = 2;
+}
+
+// AppSignInForwardRequest carries one Fleet sign-in action from the node that took
+// the person's call to the agent holding the machine's stream. Sign-in is a person
+// at one machine's page, so there is no other machine to fall through to, and the
+// row is how they watch: this answers only whether the machine was told.
+message AppSignInForwardRequest {
+  string request_id = 1;
+  string registration_id = 2;
+  // owner_user_id is a hint held against the verified authority, as elsewhere.
+  string owner_user_id = 3;
+  string sign_in_id = 4;
+  // action is "start", "code" or "cancel".
+  string action = 5;
+  string app = 6;
+  // code is what the person pasted. Never logged, and never written to a row.
+  string code = 7;
+  ForwardedAuthority authority = 8;
+}
+
+message AppSignInForwardResponse {
+  string request_id = 1;
+  // Empty error_code means the machine was told.
+  string error_code = 2;
+  string error_message = 3;
 }

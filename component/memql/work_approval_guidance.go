@@ -2,10 +2,8 @@ package memql
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/work"
 )
@@ -17,9 +15,8 @@ import (
 // summary. This only restores instructions; it cannot authorize the old command.
 func (e *MemQLEngine) readApprovalWorkGuidance(ctx context.Context, targets []map[string]any, dates map[string]time.Time) ([]WorkGuidance, error) {
 	var out []WorkGuidance
-	runes := 0
 	for _, target := range targets {
-		rows, err := e.workRows(ctx, "workApprovalGuidanceForOwnerRun", stringArg(target, "id"))
+		rows, err := e.workGuidanceRows(ctx, "workApprovalGuidanceForOwnerRun", stringArg(target, "id"))
 		if err != nil {
 			return nil, err
 		}
@@ -33,10 +30,6 @@ func (e *MemQLEngine) readApprovalWorkGuidance(ctx context.Context, targets []ma
 				BareShortId(stringArg(row, "decidedBy")) != BareShortId(stringArg(target, "ownerUserId")) ||
 				!work.ApprovalAcceptsGuidance(stringArg(row, "kind"), subject, row["options"]) {
 				continue
-			}
-			runes += utf8.RuneCountInString(feedback)
-			if len(out) >= maxWorkGuidanceMessages || runes > maxWorkGuidanceRunes {
-				return nil, fmt.Errorf("saved guidance exceeds its bounded context")
 			}
 			guidanceID := "approval-guidance-" + BareShortId(stringArg(row, "id"))
 			out = append(out, WorkGuidance{ID: guidanceID, Prompt: "Human correction recorded instead of approving an operation. It remains guidance for unfinished work and grants no additional permission.\n" + feedback})

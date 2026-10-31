@@ -37,6 +37,7 @@ import (
 type ceilingDBProvider struct {
 	calls, timeouts int
 	reviews         int
+	reviewRequests  [][]common.ChatMessage
 	requests        [][]common.ChatMessage
 	beforeFailure   func()
 	failure         string
@@ -44,12 +45,16 @@ type ceilingDBProvider struct {
 
 // Reply review is a separate structured operation, counted independently of
 // the tool-loop attempts whose retry behavior this fixture verifies.
-func (p *ceilingDBProvider) CallChatStructured(ctx context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+func (p *ceilingDBProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if schema.Name != "work_reply_review" || !schema.Strict {
+		return "", fmt.Errorf("unexpected structured call: %s (strict=%v)", schema.Name, schema.Strict)
+	}
 	p.reviews++
-	return `{"reply":"Completed synthetic section"}`, nil
+	p.reviewRequests = append(p.reviewRequests, append([]common.ChatMessage(nil), messages...))
+	return `{"reply":"Completed synthetic section","missingEvidence":"","completion":{"kind":"information","disposition":"satisfied","gap":"","sourceRefs":[]}}`, nil
 }
 
 func (*ceilingDBProvider) Call(context.Context, string) (any, error) {
@@ -414,6 +419,14 @@ SELECT DISTINCT ON (id) id,payload FROM "MemoryNodes"
 WHERE concept='v1:work:step' AND payload->>'ownerUserId' IN (?,?)
 ORDER BY id,"createdAt" DESC) latest WHERE payload->>'status'='failed'`, owner, "v1:identity:user:"+owner).Scan(person, &failedSteps))
 				require.Empty(t, failedSteps, "on-error-continue must not conceal a failed agent/reply-review step")
+				var reviews int
+				for _, provider := range providers {
+					for _, messages := range provider.reviewRequests {
+						require.Contains(t, fmt.Sprint(messages), "read completed once", "reply review must retain the completed tool receipt after recovery")
+						reviews++
+					}
+				}
+				require.Positive(t, reviews, "completed recovery must pass independent reply review")
 				if mode != "repeated" {
 					require.Equal(t, 1, reads)
 				}

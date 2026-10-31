@@ -408,6 +408,7 @@ func handleRun(args []string) {
 			// write (appsession/protected.go).
 			WorkerPaths: workerPaths,
 			DenyPaths:   policy.DenyPaths,
+			Readiness:   appInventories.Readiness(),
 		})
 		stopSessions = sessions.StopAll
 		calls := modelcall.NewManager(modelcall.Options{
@@ -447,6 +448,7 @@ func handleRun(args []string) {
 			os.Exit(1)
 		}
 		go backups.Run(ctx, runner.RegistrationId)
+		appInventories.RunReadiness(ctx, legacyCfg.StateDir, logger)
 		logger.Info("worker starting (single-home)",
 			"cluster_url", legacyCfg.ClusterURL,
 			"name", legacyCfg.Name,
@@ -465,11 +467,14 @@ func handleRun(args []string) {
 			Models:      modelInventory,
 			Discoverer:  discoverer,
 			Metrics:     metrics,
+
+			AppReadiness: appInventories.Readiness(),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
 		}
+		appInventories.RunReadiness(ctx, workers.StateDir, logger)
 		logger.Info("worker starting (multi-home fleet)",
 			"homes", len(workers.EnabledHomes()),
 			"name", workers.WorkerName,

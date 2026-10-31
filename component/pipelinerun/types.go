@@ -105,9 +105,9 @@ const (
 )
 
 // WorkStep is one v1:work:step of a pipeline's work run, at its latest
-// version: what a resumed driver reads to keep the steps that finished and to
-// re-send the one that was running. The journal writes these rows; this
-// package only reads them.
+// version: what a resumed driver reads to keep the steps that finished, to
+// re-send the attempt that was running, and to continue a step left between
+// two attempts. The journal writes these rows; this package only reads them.
 type WorkStep struct {
 	PipelineKind pipelines.StepKind
 	Result       map[string]any
@@ -116,6 +116,17 @@ type WorkStep struct {
 	// before admission. Older receipts without it cannot authorize recovery.
 	DefinitionFingerprint   string
 	VerificationFingerprint string
+	// TreeFingerprint is the same check on the same tree, whatever the commit
+	// (definition.go, treeFingerprintOf): what a release compares to reuse a
+	// receipt. Empty unless the step declared verification and the tree is known.
+	TreeFingerprint string
+	// EvidenceRunID names the run whose receipt this step reused instead of
+	// executing (call.evidenceRunId). Empty for a step a failed-only re-run
+	// carried from an earlier attempt of its own run key.
+	EvidenceRunID string
+	// Raw is the row as read: a release runs the candidate's own receipt
+	// inspector over it before it plans a skip (evidence.go).
+	Raw map[string]any
 	// Seq is the step's place in the plan the work run was opened with.
 	Seq          int
 	Status       string
@@ -140,6 +151,12 @@ type WorkStep struct {
 	// artifacts, as the driver wrote them (already masked): what a resumed
 	// run's notification lists for a step its predecessor ran.
 	ArtifactFileIDs []string
+	// Binding is the row's binding as stored. For a step the executor was
+	// handed it holds the step's attempt history and, between two attempts, when
+	// the next may start (attemptsFromBinding, attempts.go): what a replica
+	// taking the run over reads to learn which attempt was in flight or which
+	// one is due. Read as the engine parses it; nil when the row has none.
+	Binding map[string]any
 }
 
 // Finished reports whether the row carries the step's receipt.
@@ -203,12 +220,17 @@ type Run struct {
 	PipelineID  string
 	Repository  string
 	SHA         string
-	Mode        pipelines.Mode
-	Event       pipelines.Event
-	RunKey      string
-	Attempt     int
-	Trigger     string
-	RerunOf     string
+	// TreeHash is the git tree SHA records, read once by the driver before the
+	// plan (driver.go, readTreeHash). Empty when that read failed or the run
+	// began before the field existed; the run then neither offers nor takes
+	// reuse across commits.
+	TreeHash string
+	Mode     pipelines.Mode
+	Event    pipelines.Event
+	RunKey   string
+	Attempt  int
+	Trigger  string
+	RerunOf  string
 	// RerunFailedOnly: this attempt runs only what RerunOf did not pass
 	// (epic memql#5479); the driver carries the rest over as skipped
 	// pipeline_passed_earlier.
@@ -343,14 +365,43 @@ type StepState struct {
 	// artifacts (masked, as the receipt is): what a notify stage later in
 	// the run lists in its message.
 	ArtifactFileIDs []string
+	// Attempts is the step's attempt history (attempts.go): a record of every
+	// attempt the executor was handed, in order, once that attempt ended,
+	// masked as the step's receipt is. While a step waits between attempts its
+	// Status stays running and this says why. Empty for a step that never
+	// reached the executor. A resumed drive reads it back off the step's row
+	// (resume, adoptRows), so the history a previous driver began is continued,
+	// and every receipt this drive writes restates it.
+	Attempts []attemptRecord
+	// Retrying: the step has had an attempt fail and is going again. The driver
+	// sets it, with RetryAfter, when it has durably recorded an attempt's
+	// outcome with another to follow (runStep). It stays set while that next
+	// attempt runs, and ends when that attempt's record is added to Attempts
+	// (setAttempts) -- the record supersedes the outcome the flag was set for --
+	// or with the receipt (settle). It is NOT inferred from Attempts being
+	// non-empty: a step's last record is written to Attempts an instant before
+	// its receipt, and a step that is about to pass or fail for good must not
+	// read as retrying to a progress published in that instant. RetryAfter is
+	// the wait the driver scheduled before that attempt.
+	Retrying   bool
+	RetryAfter time.Duration
 }
 
-// Report is the step as the check run reports it.
+// Report is the step as the check run reports it: its history as attempts
+// (attemptReports), and whether it is retrying now. Retrying is the driver's
+// word (StepState.Retrying) and is passed on only for a step that is running,
+// so a report never says a settled step is going again; the wording is
+// pipelines.CheckOutput's (retrySentence).
 func (s StepState) Report() pipelines.StepReport {
-	return pipelines.StepReport{
+	r := pipelines.StepReport{
 		Key: s.Key, Stage: s.Stage, Name: s.Name, Status: s.Status,
 		DurationMs: s.DurationMs, Code: s.Code, Message: s.Message, LogTail: s.LogTail,
+		Attempts: attemptReports(s.Attempts),
 	}
+	if s.Retrying && s.Status == StepRunning {
+		r.Retrying, r.RetryAfter = true, max(s.RetryAfter, 0)
+	}
+	return r
 }
 
 // InboundDelivery is one staged v1:platform:inboundRequest row as the trigger
@@ -404,6 +455,7 @@ type PipelinePatch struct {
 // RunPatch is a read-merge write to a run, on PipelinePatch's rule: nil is
 // not written, non-nil is written as given. Notes and Stages are sent whole.
 type RunPatch struct {
+	TreeHash           *string
 	ReviewEvidence     *map[string]any
 	SelectionFacts     *map[string]any
 	MaintenanceState   *string

@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/costestimate"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -1163,7 +1164,14 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 // correlation; minting a fresh id (vs. extracting the bare UUID) also avoids
 // an id collision when one request fans out to a fallback call.
 func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
+	usage := costestimate.Usage{Input: int64(rec.InputTokens), Output: int64(rec.OutputTokens), Known: true, Estimated: rec.TokensEstimated}
+	if rec.CostUsage != nil {
+		usage = *rec.CostUsage
+	}
+	equivalent := costestimate.EstimateTokens(rec.Vendor, rec.ServedModel, usage, time.Now())
 	args := map[string]any{
+		"apiEquivalent":      equivalent,
+		"actualBilling":      map[string]any{"status": "unavailable", "reason": "No provider billing receipt; token prices and app cost reports are estimates."},
 		"callId":             callId,
 		"requestId":          rec.RequestId,
 		"agentId":            rec.AgentId,
@@ -1392,6 +1400,14 @@ func (r *Router) writeRecord(rec CallRecord) {
 		callId = id.NewShortId()
 	}
 	args := buildRouterCallArgs(rec, callId)
+	if registration, local := strings.CutPrefix(rec.ExecutionSurface, "fleet:"); local {
+		args["electricityEstimate"] = map[string]any{"kind": "electricity", "status": "unavailable", "reason": "Electricity estimation is unavailable on this node."}
+		if estimator, ok := r.engine.(interface {
+			EstimateLocalElectricity(context.Context, string, string, float64) map[string]any
+		}); ok {
+			args["electricityEstimate"] = estimator.EstimateLocalElectricity(ctx, registration, rec.UserId, float64(rec.TotalDurationMs)/1000)
+		}
+	}
 	query, err := langparser.RenderCall("recordRouterCall", args)
 	if err != nil {
 		r.recordsDropped.Add(1)

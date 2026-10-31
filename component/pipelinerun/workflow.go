@@ -399,12 +399,11 @@ func cloneWorkflowLiteral(value any) any {
 }
 
 type pipelineWorkflowHost struct {
-	dr         *runDriver
-	slots      chan struct{}
-	locks      map[string]*sync.Mutex
-	byKey      map[string]*stepTrack
-	registry   *steps.Registry
-	progressMu sync.Mutex
+	dr       *runDriver
+	slots    chan struct{}
+	locks    map[string]*sync.Mutex
+	byKey    map[string]*stepTrack
+	registry *steps.Registry
 }
 
 // This value is never accepted from a caller or carried over a wire. The
@@ -541,9 +540,7 @@ func (h *pipelineWorkflowHost) Invoke(ctx context.Context, capability string, ar
 	}
 	switch capability {
 	case "integration.pipelines.reportProgress":
-		h.progressMu.Lock()
-		defer h.progressMu.Unlock()
-		h.dr.progress(ctx)
+		h.dr.progress(ctx) // serialized with runStep's own (runDriver.progressMu)
 		return nil, nil
 	case "integration.pipelines.executeStep":
 		key := stringArg(args, "stepKey")

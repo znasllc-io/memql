@@ -4084,6 +4084,7 @@
         "startedAt",
         "status",
         "title",
+        "treeHash",
         "trigger",
         "version",
         "workGoalId",
@@ -5521,7 +5522,9 @@
       "concept": "v1:router:call",
       "file": "router/concepts.memql",
       "fields": [
+        "actualBilling",
         "agentId",
+        "apiEquivalent",
         "billing",
         "cacheKind",
         "cachedInputCost",
@@ -5530,6 +5533,7 @@
         "considered",
         "degraded",
         "door",
+        "electricityEstimate",
         "errorCategory",
         "errorMessage",
         "executionSurface",
@@ -8866,6 +8870,7 @@
         "errorMessage",
         "executionAuthority",
         "expectedFootprint",
+        "feedbackContinuation",
         "finishedAt",
         "forkAtStepKey",
         "forkedFromRunId",
@@ -9017,12 +9022,14 @@
       "file": "workbench/concepts.memql",
       "fields": [
         "expiresAt",
+        "generation",
         "machineId",
         "machineOwnerUserId",
         "ownerUserId",
         "registrationId",
         "resource",
-        "runId"
+        "runId",
+        "stateLost"
       ],
       "required": [
         "expiresAt",
@@ -9118,6 +9125,7 @@
       "fields": [
         "app",
         "appSessionRef",
+        "authRefused",
         "billing",
         "cancelReason",
         "credentialExpiresAt",
@@ -9184,6 +9192,46 @@
       }
     },
     {
+      "concept": "v1:worker:appSignIn",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "app",
+        "endedAt",
+        "errorMessage",
+        "expiresAt",
+        "needsCode",
+        "ownerUserId",
+        "requestedAt",
+        "status",
+        "targetNodeId",
+        "updatedAt",
+        "url",
+        "userCode",
+        "workerId"
+      ],
+      "required": [
+        "app",
+        "expiresAt",
+        "ownerUserId",
+        "requestedAt",
+        "status",
+        "workerId"
+      ],
+      "enums": {
+        "app": [
+          "claude-code",
+          "codex"
+        ],
+        "status": [
+          "cancelled",
+          "failed",
+          "requested",
+          "succeeded",
+          "waiting"
+        ]
+      }
+    },
+    {
       "concept": "v1:worker:delegationPolicy",
       "file": "worker/concepts.memql",
       "fields": [
@@ -9198,6 +9246,26 @@
       ],
       "required": [
         "ownerUserId"
+      ]
+    },
+    {
+      "concept": "v1:worker:energyProfile",
+      "file": "worker/concepts.memql",
+      "fields": [
+        "encryptedAddress",
+        "locationRevision",
+        "ownerUserId",
+        "registrationId",
+        "research",
+        "revision",
+        "settings",
+        "tariff"
+      ],
+      "required": [
+        "locationRevision",
+        "ownerUserId",
+        "registrationId",
+        "revision"
       ]
     },
     {

@@ -72,6 +72,16 @@ func (e *ClusterAPI) readPodFileCommand(ctx context.Context, namespace, pod, con
 	if err != nil {
 		return 0, err
 	}
+	// An upgrade has no body for a media type to describe; the subprotocol below is
+	// its negotiation. And newRequest's application/json is refused: from v1.36 the
+	// API server proxies a WebSocket exec to a kubelet that declares support
+	// (ExtendWebSocketsToKubelet), the kubelet's exec route produces nothing, and its
+	// router answers 406 to an Accept that does not allow */*. Measured on k3s,
+	// 2026-10-30: v1.36.0, v1.36.4, v1.36.5 and v1.37.1 refuse; a v1.36.4 API server
+	// does not for a pod on a v1.35.9 kubelet, nor with that gate off; v1.32.13,
+	// v1.33.13, v1.34.12 and v1.35.9 upgrade whatever the Accept; no Accept gets 101
+	// on all of them.
+	req.Header.Del("Accept")
 	// Never forward the projected bearer through an API-server redirect.
 	client := *e.stream
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

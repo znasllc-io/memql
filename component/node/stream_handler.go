@@ -106,6 +106,9 @@ type WorkerForwardHandler interface {
 	// before start, so the caller's chain moves on to its next source.
 	HandleForwardedAppCall(ctx context.Context, req *nodev1.AppCallForwardRequest, send func(*nodev1.NodeServerMessage) error)
 	CancelForwardedAppCall(ctx context.Context, requestId string)
+	// HandleForwardedAppSignIn tells the machine one Fleet sign-in action. It joins
+	// here for the ModelCall half's reason: one install point for one subsystem.
+	HandleForwardedAppSignIn(ctx context.Context, req *nodev1.AppSignInForwardRequest, send func(*nodev1.NodeServerMessage) error)
 }
 
 // WorkerForwardResponseSink is the originating replica's receiver for replies
@@ -125,6 +128,8 @@ type WorkerForwardResponseSink interface {
 	DispatchModelProbeProgress(p *nodev1.ModelProbeForwardProgress)
 	// The app-door call half (the planner/app-source design, section 3a).
 	DispatchAppCall(resp *nodev1.AppCallForwardResponse)
+	// The app sign-in half: the machine was told, or why not.
+	DispatchAppSignIn(resp *nodev1.AppSignInForwardResponse)
 }
 
 // DeployControlForwardHandler is the identity-node-side entry point for a
@@ -470,6 +475,8 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 		s.handleAppCallForwardRequest(peerId, payload.AppCallForwardRequest, stream)
 	case *nodev1.NodeClientMessage_AppCallForwardCancel:
 		s.handleAppCallForwardCancel(peerId, payload.AppCallForwardCancel)
+	case *nodev1.NodeClientMessage_AppSignInForwardRequest:
+		s.handleAppSignInForwardRequest(peerId, payload.AppSignInForwardRequest, stream)
 
 	default:
 		s.logger.Debug("unhandled message type from peer",
@@ -925,6 +932,33 @@ func (s *nodeService) handleAppCallForwardRequest(peerId string, req *nodev1.App
 	// -- including the AppCallForwardCancel that would end it.
 	s.serveForward(stream.Context(), forwardFamilyApp, peerId, req.GetRequestId(), func(ctx context.Context) {
 		s.workerForwardHandler.HandleForwardedAppCall(ctx, req, stream.Send)
+	})
+}
+
+// handleAppSignInForwardRequest dispatches one sign-in action to this replica's
+// local handler.
+func (s *nodeService) handleAppSignInForwardRequest(peerId string, req *nodev1.AppSignInForwardRequest, stream nodev1.NodeService_StreamServer) {
+	if s.workerForwardHandler == nil {
+		s.logger.Warn("app sign-in forward request received but no handler configured",
+			"peer_id", peerId, "request_id", req.GetRequestId(),
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			MessageId:   id.NewShortId(),
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_AppSignInForwardResponse{
+				AppSignInForwardResponse: &nodev1.AppSignInForwardResponse{
+					RequestId:    req.GetRequestId(),
+					ErrorCode:    "not_configured",
+					ErrorMessage: "no worker forward handler on this node",
+				},
+			},
+		})
+		return
+	}
+	// ON ITS OWN GOROUTINE, as every forward is: this runs on the peer's receive
+	// loop, and the handler reads the store.
+	s.serveForward(stream.Context(), forwardFamilyAppSignIn, peerId, req.GetRequestId(), func(ctx context.Context) {
+		s.workerForwardHandler.HandleForwardedAppSignIn(ctx, req, stream.Send)
 	})
 }
 

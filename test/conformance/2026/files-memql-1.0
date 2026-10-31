@@ -76,6 +76,8 @@ cells/builtinField/enum/a-string-list.memql
 cells/builtinField/enum/with-no-value.memql
 cells/builtinField/required/with-true.memql
 cells/builtinField/required/written-bare.memql
+cells/builtinField/secret/with-true.memql
+cells/builtinField/secret/written-bare.memql
 cells/capability/description/a-string.memql
 cells/capability/description/with-no-value.memql
 cells/capability/disabled/with-true.memql

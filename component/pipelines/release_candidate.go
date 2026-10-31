@@ -75,6 +75,25 @@ type ReleaseEvidence struct {
 	ReceiptDigest     string   `json:"receiptDigest"`
 	DefinitionDigest  string   `json:"definitionDigest"`
 	ArtifactIntentIDs []string `json:"artifactIntentIds"`
+	// ReusedFrom is present only on a skip that stands on another run's receipt.
+	// Omitted when absent, so every candidate saved before reuse existed keeps
+	// its bytes and its identity.
+	ReusedFrom *ReleaseReusedFrom `json:"reusedFrom,omitempty"`
+}
+
+// ReleaseReusedFrom names the executed receipt a reused release step stands on:
+// the run that tested the same tree, and that step's receipt digest. It is
+// provenance for the person reviewing the candidate, and coverage recomputes it
+// from the journal on every read, so a value a client wrote here is refused
+// rather than believed (integrations/release/candidate_reused.go).
+type ReleaseReusedFrom struct {
+	PipelineRunID string `json:"pipelineRunId"`
+	WorkRunID     string `json:"workRunId"`
+	Attempt       int    `json:"attempt"`
+	Event         string `json:"event"`
+	Commit        string `json:"commit"`
+	TreeHash      string `json:"treeHash"`
+	ReceiptDigest string `json:"receiptDigest"`
 }
 
 // TargetID resolves through operator configuration. TargetDigest binds that
@@ -187,6 +206,14 @@ func CanonicalReleaseCandidate(input ReleaseCandidate) ([]byte, string, error) {
 			!releaseIdentity(e.WorkRunID) || !releaseIdentity(e.StepKey) || e.Attempt < 1 || !releaseIdentity(e.ReceiptID) ||
 			!releaseDigest(e.DefinitionDigest) || !releaseDigest(e.ReceiptDigest) || !ValidArtifactIntentIDs(e.ArtifactIntentIDs) {
 			return nil, "", errors.New("release evidence requires a unique name and exact work receipt")
+		}
+		if f := e.ReusedFrom; f != nil {
+			// A reused step produced nothing. One that names artifacts would let
+			// them stand on a run this candidate does not cover.
+			if !releaseIdentity(f.PipelineRunID) || !releaseIdentity(f.WorkRunID) || f.Attempt < 1 || !releaseIdentity(f.Event) ||
+				!releaseCommit.MatchString(f.Commit) || !ValidTreeHash(f.TreeHash) || !releaseDigest(f.ReceiptDigest) || len(e.ArtifactIntentIDs) != 0 {
+				return nil, "", errors.New("reused release evidence requires its exact source run, tree and receipt, and no artifacts")
+			}
 		}
 		evidence[e.Name], componentEvidence[e.Component] = true, true
 		slices.Sort(e.ArtifactIntentIDs)

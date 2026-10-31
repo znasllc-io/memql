@@ -34,18 +34,20 @@ import (
 // observers, budget arithmetic, both replier loops, the outer runner, nested
 // journals, approval and peer continuation all execute their installed code.
 type modelBudgetProvider struct {
-	calls     int
-	reviews   int
-	readFirst bool
-	requests  [][]common.ChatMessage
+	calls          int
+	reviews        int
+	readFirst      bool
+	requests       [][]common.ChatMessage
+	reviewRequests [][]common.ChatMessage
 }
 
-func (p *modelBudgetProvider) CallChatStructured(ctx context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+func (p *modelBudgetProvider) CallChatStructured(ctx context.Context, messages []common.ChatMessage, _ common.StructuredSchema) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	p.reviews++
-	return `{"reply":"Synthetic section complete"}`, nil
+	p.reviewRequests = append(p.reviewRequests, append([]common.ChatMessage(nil), messages...))
+	return `{"reply":"Synthetic section complete","missingEvidence":"","completion":{"kind":"information","disposition":"satisfied","gap":"","sourceRefs":[]}}`, nil
 }
 func (p *modelBudgetProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text call")
@@ -621,11 +623,23 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				if (rerun && !entry) || boundary == "guidance" {
 					expectedCalls = 2
 				}
+				if boundary == "reply-review" {
+					expectedCalls = 0
+				}
 				require.Equal(t, expectedCalls, providers[1].calls)
-				raw, err := json.Marshal(providers[1].requests[0])
+				var observed []common.ChatMessage
+				if boundary == "reply-review" {
+					require.Equal(t, 1, providers[1].reviews, "resume the pending review without repeating completed production")
+					observed = providers[1].reviewRequests[0]
+				} else {
+					observed = providers[1].requests[0]
+				}
+				raw, err := json.Marshal(observed)
 				require.NoError(t, err)
-				require.Contains(t, string(raw), "Recorded answer for this run")
-				require.NotEmpty(t, providers[1].requests[0][0].Content, "entry placeholder must be replaced by the installed system prompt")
+				if boundary != "reply-review" {
+					require.Contains(t, string(raw), "Recorded answer for this run")
+				}
+				require.NotEmpty(t, observed[0].Content, "entry placeholder must be replaced by the installed system prompt")
 				if tail {
 					last, marshalErr := json.Marshal(providers[1].requests[len(providers[1].requests)-1])
 					require.NoError(t, marshalErr)

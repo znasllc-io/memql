@@ -56,8 +56,9 @@ import (
 // (pipeline_passed_earlier, with no evidence run) gets no check: the attempt
 // that passed it already shows it passed on this commit, and a "skipped" check
 // of the same name would replace that pass. A step that reused another run's
-// verification at this commit (an evidence run) gets a passed check: its name
-// carries this run's event, so nothing of the other run's is replaced.
+// verification (an evidence run), at this commit or for a release on this tree,
+// gets a passed check: its name carries this run's event, so nothing of the other
+// run's is replaced.
 //
 // ANOTHER REPLICA'S CHECKS. A writer finds the step checks its run already
 // has, by external id (<run id>:<step key>), the newest for each step, before
@@ -129,7 +130,7 @@ func (dr *runDriver) offerStepChecks(token string, final bool) {
 			if s.Status == StepPending && !final {
 				continue
 			}
-			s.Status = StepSucceeded // verified at this commit in another run
+			s.Status = StepSucceeded // verified in another run, its reason says where
 		case s.Status == StepPending || s.Status == StepRunning:
 			if !final {
 				if s.Status == StepPending {

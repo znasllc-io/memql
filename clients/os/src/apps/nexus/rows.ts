@@ -310,6 +310,7 @@ export function goalFingerprint(goal: GoalRow): string {
 // ---------------------------------------------------------------------------
 
 export interface RunRow {
+  humanResumeId?: string;
   id: string;
   workTitle?: string;
   goalId: string;
@@ -347,6 +348,7 @@ export function runFromRow(row: Row): RunRow {
   const flat = flatten(row);
   const waiting = objectField(flat, "waitingOn");
   return {
+    humanResumeId: rowString(flat, "humanResumeId"),
     id: rowString(flat, "id"),
     goalId: rowString(flat, "goalId"),
     automationName: rowString(flat, "automationName"),

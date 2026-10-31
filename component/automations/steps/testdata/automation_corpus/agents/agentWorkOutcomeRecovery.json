@@ -1,0 +1,43 @@
+{
+  "automation": "agents/automations.memql agentWorkOutcomeRecovery",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "attempts": 3
+          },
+          "topic": "automation.invocation.agentWorkOutcomeRecovery"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": false,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "attempts": 3
+          },
+          "topic": "automation.invocation.agentWorkOutcomeRecovery"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": false,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

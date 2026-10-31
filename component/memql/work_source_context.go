@@ -265,7 +265,7 @@ func projectWorkCheckpointSources(checkpoints []map[string]any, runID string, re
 					continue
 				}
 			}
-			source := map[string]any{"runId": BareShortId(runID), "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": workSourcePreviewValue(message.Content)}
+			source := map[string]any{"runId": BareShortId(runID), "stepKey": checkpoint["stepKey"], "checkpointId": checkpoint["id"], "checkpointAt": checkpoint["createdAt"], "operation": call.Name, "callId": call.ID, "arguments": call.Arguments, "value": workSourcePreviewValue(message.Content)}
 			encoded, err := json.Marshal(source)
 			if err == nil && len(encoded) > 8000 && call.Arguments != "" {
 				// Large command inputs must not hide their small execution results.

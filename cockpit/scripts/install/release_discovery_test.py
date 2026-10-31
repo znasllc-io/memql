@@ -136,13 +136,46 @@ else: sys.stdout.buffer.write(body)
         self.assertEqual(result.stdout, "")
 
     def test_next_link_cannot_escape_catalog_or_loop(self):
-        for target in ("https://elsewhere.example/releases?page=2", API.replace("releases?", "issues?"), API):
+        for target in ("https://elsewhere.example/releases?page=2", API.replace("releases?", "issues?"), API,
+                       "https://elsewhere.example/repositories/1239190708/releases?page=2",
+                       "https://api.github.com/repositories/1239190708/issues?page=2",
+                       "https://api.github.com/repositories/1239190708/releases/latest?page=2",
+                       "https://api.github.com/repositories/memql/releases?page=2"):
             with self.subTest(target=target):
                 self.calls.unlink(missing_ok=True)
                 self.response(API, [release("cockpit/v0.19.0")], f'Link: <{target}>; rel="next"\r\n')
                 result = self.resolve()
                 self.assertEqual(result.returncode, 4)
                 self.assertEqual(len(self.requested()), 1)
+
+    # The header shape api.github.com sent for this catalog on 2026-10-30: a
+    # request on /repos/<owner>/<name> is paged on the repository's numeric path.
+    # Every install failed on it once the catalog passed 100 releases.
+    def test_next_link_may_use_github_numeric_repository_path(self):
+        numeric = "https://api.github.com/repositories/1239190708/releases?per_page=100"
+        second, third = numeric + "&page=2", numeric + "&page=3"
+        self.response(API, [release("v99.0." + str(i)) for i in range(100)],
+                      f'HTTP/2 200\r\nLink: <{second}>; rel="next", <{third}>; rel="last"\r\n')
+        self.response(second, [release("cockpit/v0.21.1")],
+                      f'HTTP/2 200\r\nLink: <{numeric}&page=1>; rel="prev", <{third}>; rel="next", '
+                      f'<{third}>; rel="last", <{numeric}&page=1>; rel="first"\r\n')
+        self.response(third, [release("cockpit/v0.20.5")],
+                      f'HTTP/2 200\r\nLink: <{second}>; rel="prev", <{numeric}&page=1>; rel="first"\r\n')
+        result = self.resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "cockpit/v0.21.1")
+        self.assertEqual([row["url"] for row in self.requested()], [API, second, third])
+
+    def test_numeric_next_link_cannot_change_repository(self):
+        numeric = "https://api.github.com/repositories/1239190708/releases?per_page=100"
+        other = "https://api.github.com/repositories/42/releases?per_page=100&page=3"
+        self.response(API, [release("cockpit/v0.19.0")], f'Link: <{numeric}&page=2>; rel="next"\r\n')
+        self.response(numeric + "&page=2", [release("cockpit/v0.21.1")], f'Link: <{other}>; rel="next"\r\n')
+        self.response(other, [release("cockpit/v9.9.9")])
+        result = self.resolve()
+        self.assertEqual(result.returncode, 4)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(self.requested()), 2)
 
     def test_redirect_response_cannot_invent_a_next_page(self):
         self.response(API, [release("cockpit/v0.20.1")],

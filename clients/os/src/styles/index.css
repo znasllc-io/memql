@@ -14628,7 +14628,7 @@ button.os-cluster-mesh-peer:focus-visible {
 
 /* Machine details follow one settings rhythm: section, aligned facts, then
  * the next section. Edits share their own group; all information stays open. */
-.fleet-machine-details { container: machine-details / inline-size; }
+.fleet-machine-details { container: details machine-details / inline-size; }
 .fleet-machine-details .os-facts { grid-template-columns: 160px minmax(0, 1fr); gap: 2px 24px; margin: 0; }
 .fleet-machine-details .os-facts dt, .fleet-machine-details .os-facts dd { font-size: var(--os-text-sm); line-height: 1.6; padding-block: 7px; margin: 0; }
 .fleet-machine-details .os-facts dd:has(> .os-copyvalue) { padding: 0; }

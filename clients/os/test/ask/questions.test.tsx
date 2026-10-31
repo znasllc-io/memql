@@ -69,7 +69,9 @@ it("focuses an older question when Nexus opens its work, including from Activity
   const transport = {ask:vi.fn(),openWork:async()=>({id:"original",title:"Work"}),conversations:{read:async()=>turns,list:async()=>[],create:async()=>({id:"new",title:"New"})}};
   const session = new ConversationSession(transport);
   render(<AskSurface transport={transport} conversation={session} variant="sheet" autoFocus availability={{state:"ready",message:"",refresh:vi.fn()}} />);
-  fireEvent.click(screen.getByRole("button",{name:"Activity"}));
+  await act(async () => { await session.select("original"); });
+  fireEvent.click(screen.getAllByRole("button", { name: "Message actions" })[0]!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "View activity" }));
   await act(async()=>{await session.openWork("r");});
   expect(document.activeElement).toBe(screen.getByRole("textbox",{name:"Your answer"}));
   expect(session.getSnapshot().focusQuestionId).toBeNull();

@@ -8998,12 +8998,17 @@ type RecordRouterCallArgs struct {
 	CallerKind string
 	// Which cache answered, when one did. Absent means a provider answered.
 	// Enum: exact | semantic
-	CacheKind            string
-	PromptName           string
-	PolicyName           string
-	Vendor               string
-	Model                string
-	ProviderName         string
+	CacheKind    string
+	PromptName   string
+	PolicyName   string
+	Vendor       string
+	Model        string
+	ProviderName string
+	// Dated API-equivalent estimate with source, cache/context assumptions and freshness.
+	ApiEquivalent       map[string]any
+	ElectricityEstimate map[string]any
+	// Independent billing evidence; zero subscription cost is not free work.
+	ActualBilling        map[string]any
 	InputTokens          int
 	OutputTokens         int
 	CachedInputTokens    int
@@ -9133,6 +9138,27 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 	}
 	b.WriteString("providerName: ")
 	b.WriteString(quoteMemQL(args.ProviderName))
+	if args.ApiEquivalent != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apiEquivalent: ")
+		b.WriteString(renderMemQLValue(args.ApiEquivalent))
+	}
+	if args.ElectricityEstimate != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("electricityEstimate: ")
+		b.WriteString(renderMemQLValue(args.ElectricityEstimate))
+	}
+	if args.ActualBilling != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("actualBilling: ")
+		b.WriteString(renderMemQLValue(args.ActualBilling))
+	}
 	if args.InputTokens != 0 {
 		if b.Len() > 26 {
 			b.WriteString(", ")

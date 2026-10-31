@@ -10,6 +10,9 @@ const (
 	ExecutionNative    = "native"
 	PlacementCluster   = "cluster"
 	PlacementFleet     = "fleet"
+	// Pool preserves container semantics while the installed policy selects
+	// between compatible, consented Fleet capacity and admitted cluster work.
+	PlacementPool = "pool"
 )
 
 // ExecutionOf resolves the manifest default without changing runner semantics.
@@ -50,6 +53,16 @@ func (s Step) RequiresFleet() bool {
 	return s.Placement == PlacementFleet || s.Execution == ExecutionNative || len(s.Needs) > 0
 }
 
+// CheckPoolStep holds the portable contract at the execution seam as well as
+// during manifest compilation. Pool preference never changes runtime, grants
+// repository credentials, or turns a container job into a native command.
+func CheckPoolStep(step Step) error {
+	if step.Kind != StepCommand || step.Execution != ExecutionContainer || len(step.Needs) != 0 || step.ImageBuild != nil || step.GitHubReadToken || step.ImagePullSecret != "" || step.CheckoutHistory != "" {
+		return fmt.Errorf("Pool placement requires a portable container command without host needs, image builds or cluster-only credentials and checkout history.")
+	}
+	return CheckExecution(step.Execution, step.Platform, true)
+}
+
 // Host needs do not pass through a container boundary. A fleet container needs
 // placement: fleet; docker as a need means the command itself needs a daemon.
 func CheckExecutionNeeds(execution string, needs []string) error {
@@ -83,10 +96,10 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	if err := CheckCheckoutHistory(step.CheckoutHistory, placement == PlacementFleet); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
-	if err := CheckCPUMilli(step.CPUMilli, placement == PlacementFleet); err != nil {
+	if err := CheckCPUMilli(step.CPUMilli, execution == ExecutionNative); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
-	if err := CheckMemoryMiB(step.MemoryMiB, placement == PlacementFleet); err != nil {
+	if err := CheckMemoryMiB(step.MemoryMiB, execution == ExecutionNative); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
 	if step.ImagePullSecret != "" && (placement != PlacementCluster || execution != ExecutionContainer) {
@@ -97,8 +110,11 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 			return Refuse(CodeSecretInvalid, scope, "An image pull credential cannot also be a command environment secret.")
 		}
 	}
-	if placement != PlacementCluster && placement != PlacementFleet {
-		return Refuse(CodeStepInvalid, scope, "placement must be cluster or fleet.")
+	if placement != PlacementCluster && placement != PlacementFleet && placement != PlacementPool {
+		return Refuse(CodeStepInvalid, scope, "placement must be cluster, fleet or pool.")
+	}
+	if placement == PlacementPool && (execution != ExecutionContainer || len(stepNeeds(step)) != 0 || step.ImageBuild != nil || step.CheckoutHistory != "" || step.GitHubReadToken || step.ImagePullSecret != "") {
+		return Refuse(CodeStepInvalid, scope, "Pool placement requires a portable container command without host needs, image builds or cluster-only credentials and checkout history.")
 	}
 	if placement == PlacementCluster && (execution == ExecutionNative || len(stepNeeds(step)) > 0) {
 		return Refuse(CodeStepInvalid, scope, "Native execution and host needs require fleet placement.")
@@ -106,7 +122,7 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	if err := CheckExecutionNeeds(execution, stepNeeds(step)); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
-	if err := CheckExecution(execution, platform, placement == PlacementFleet); err != nil {
+	if err := CheckExecution(execution, platform, placement == PlacementFleet || placement == PlacementPool); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
 	if execution == ExecutionNative && (len(step.Services) > 0 || len(cachesFor(spec, step)) > 0) {
@@ -134,31 +150,32 @@ func CheckExecution(execution, platform string, fleet bool) error {
 }
 
 // CheckMemoryMiB checks the portable shape. The runner separately applies
-// its operator-owned maximum before creating any Kubernetes resource.
-func CheckMemoryMiB(memory int, fleet bool) error {
+// its operator-owned maximum before creating a cluster or Fleet container.
+// Native execution cannot promise the container's hard limit.
+func CheckMemoryMiB(memory int, native bool) error {
 	if memory == 0 {
 		return nil
 	}
 	if memory < 128 || memory > 1048576 {
 		return fmt.Errorf("memoryMiB must be zero or a whole number from 128 through 1048576.")
 	}
-	if fleet {
-		return fmt.Errorf("memoryMiB requires cluster container execution.")
+	if native {
+		return fmt.Errorf("memoryMiB requires container execution.")
 	}
 	return nil
 }
 
 // CheckCPUMilli checks the portable shape. The runner separately applies
-// its operator-owned maximum before creating any Kubernetes resource.
-func CheckCPUMilli(cpu int, fleet bool) error {
+// its operator-owned maximum before creating a cluster or Fleet container.
+func CheckCPUMilli(cpu int, native bool) error {
 	if cpu == 0 {
 		return nil
 	}
 	if cpu < 1 || cpu > 256000 {
 		return fmt.Errorf("cpuMilli must be zero or a whole number from 1 through 256000.")
 	}
-	if fleet {
-		return fmt.Errorf("cpuMilli requires cluster container execution.")
+	if native {
+		return fmt.Errorf("cpuMilli requires container execution.")
 	}
 	return nil
 }

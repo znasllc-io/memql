@@ -14,6 +14,10 @@
 /// host files, Node or Go. A goal keeps its first workspace; do not assume a
 /// missing tool authorizes switching computers. Ask permission when required.
 /// http_fetch remains on the cloud public-fetch path even for a Fleet workspace.
+/// A fleet workspace can expire while this goal continues. After a state-loss
+/// receipt, workspace_recover {generation: N} explicitly opens a new empty
+/// generation on the same machine. Prior files are not restored and no command
+/// is replayed; recover useful inputs from retained Library evidence separately.
 /// http_fetch accepts {url, method?, headers?, body?, timeoutSec?, extractText?, maxBytes?}.
 /// For web-page research use extractText=true; this returns readable prose capped at 12 KiB by default.
 /// maxBytes bounds the returned body; truncated=true means the result is an excerpt.
@@ -25,7 +29,7 @@
 @handler(type="function", name="workbenchDispatchHost")
 @requiresAgentRole("assistant", "specialist")
 tool workbenchHost {
- action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "fs_export", "http_fetch")!
+ action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "fs_export", "http_fetch", "workspace_recover")!
  args object
  environment object
  runId string! @autoInjected

@@ -69,9 +69,6 @@ func (i *Integration) validateGuidanceRun(ctx context.Context, approval map[stri
 	if memql.BareShortId(rowString(approval, "ownerUserId")) != memql.BareShortId(principal.UserId) {
 		return fmt.Errorf("work: guidance needs this person's pending request")
 	}
-	if !workstate.ApprovalAcceptsGuidance(rowString(approval, "kind"), rowMap(approval, "subject"), approval["options"]) {
-		return fmt.Errorf("work: this request has its own review process and cannot resume from guidance")
-	}
 	run, err := i.readActRun(ctx, rowString(approval, "runId"))
 	if err != nil {
 		return err
@@ -85,6 +82,10 @@ func (i *Integration) validateGuidanceRun(ctx context.Context, approval map[stri
 	if rowString(run.row, "status") != runStatusWaiting || run.row["cancelRequested"] == true || rowString(rowMap(run.row, "waitingOn"), "kind") != "approval" ||
 		memql.BareShortId(rowString(rowMap(run.row, "waitingOn"), "subject")) != memql.BareShortId(rowString(approval, "id")) {
 		return fmt.Errorf("work: this run is no longer waiting on the request being discussed")
+	}
+	if !workstate.ApprovalAcceptsGuidance(rowString(approval, "kind"), rowMap(approval, "subject"), approval["options"]) &&
+		!i.progressStopWithinCurrentWindow(ctx, approval, run.row) {
+		return fmt.Errorf("work: this request has its own review process and cannot resume from guidance")
 	}
 	return nil
 }
@@ -109,6 +110,13 @@ func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetr
 	if (rowString(approval, "kind") == "feedback" && workstate.IsReasoningCheckpoint(rowMap(approval, "subject"))) ||
 		memql.WorkPermissionGuidance(rowString(approval, "kind"), rowMap(approval, "subject"), map[string]any{"feedback": text}, rowString(approval, "artifactHash")) {
 		return nil
+	}
+	// The budget question describes a refusal, not the unfinished task. Carry
+	// the saved replan intent before the latest correction so a policy repair
+	// cannot discard already-recorded owner instructions or repeat done work.
+	subject := rowMap(approval, "subject")
+	if workstate.IsProgressFeedback(subject) && rowString(subject, "resumeKind") == waitKindReplan {
+		text = "Saved unfinished work: " + rowString(subject, "resumeReason") + "\nNew guidance: " + text
 	}
 	return &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: decidedBy, symptom: workstate.SymptomPlan,
 		reason: "The person supplied guidance instead of approving the blocked action. Reconsider the unfinished work using this guidance; no permission or budget increase was granted.\n" + text + "\nOriginal request: " + rowString(approval, "question")}
