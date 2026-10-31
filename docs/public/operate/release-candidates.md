@@ -305,10 +305,13 @@ back through its attempts stops at the attempt that reused it, and that attempt'
 start bounds the age. Every artifact in the candidate still comes from the run it
 names, and a reused step can name none.
 
-A live candidate keeps two kinds of run past
+A live candidate keeps three kinds of run past
 `MEMQL_PIPELINES_RUN_RETENTION_DAYS`, so it stays provable when an overlay is built
 from it later:
 
+- **Every run its evidence names**, whatever started it. A separate check suite on a
+  push has no artifact to keep it, and coverage reads it on every read. Only the runs the
+  candidate names are kept: another push of the same commit leaves on its usual window.
 - **The runs it reused a step from.** With a shorter window, prepare the candidate
   before the source's rows leave, or preparation refuses it.
 - **Every attempt of its release.** A candidate from a failed-only re-run names one
@@ -320,15 +323,11 @@ from it later:
 A retired candidate holds nothing, and neither does an archived one: archival gives up
 its build inputs, so its own run's rows leave on their usual window.
 
-The attempts' hold reads only what a candidate's manifest has always named, so a
-candidate saved before it needs no change and is held from the next nightly pass. It
-cannot bring back rows that have already left. A candidate that lost an attempt that way
-is still refused, naming the attempt it could not read, so a new overlay needs a
-candidate from a later release.
-
-**A limit:** a run a candidate names that is not a release and has no retained artifact,
-such as a separate check suite on a push, has nothing to keep it. Once it passes the
-window, a new overlay from that candidate is refused with "release run is unavailable".
+The holds on named runs and on attempts read only what a candidate's manifest has always
+named, so a candidate saved before them needs no change and is held from the next nightly
+pass. They cannot bring back rows that have already left. A candidate that lost a run that
+way is still refused, naming the check or attempt it could not read or saying "release run
+is unavailable", so a new overlay needs a candidate from a later release.
 
 **Rolling back to an engine from before tree hashes:**
 
