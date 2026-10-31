@@ -682,9 +682,11 @@ const COPY: Record<string, RefusalCopy> = {
   },
   pipeline_passed_earlier: {
     // Re-run failed (epic memql#5479): the attempt this one re-runs passed
-    // the step with the same packages, so it is carried rather than run. The
-    // server's sentence names the attempt ("Passed in attempt 1.").
-    title: "Not run again: it passed in an earlier attempt",
+    // the step with the same packages, so it is carried rather than run. Or a
+    // run of the same commit passed it, or for a release, a run of the same
+    // source tree. The server's sentence says which ("Passed in attempt 1.",
+    // "Verified on the same source tree in run <id>.").
+    title: "Not run again: it already passed",
     next: "",
   },
 

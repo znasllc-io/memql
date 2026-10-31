@@ -2,6 +2,8 @@ package pipelinerun
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -503,6 +505,19 @@ func (s *memStore) RunsForKey(_ context.Context, runKey string) ([]Run, error) {
 	return out, nil
 }
 
+func (s *memStore) RunsForPipelineTree(_ context.Context, pipelineID, treeHash string) ([]Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Run
+	for _, r := range s.runs {
+		if sameID(r.PipelineID, pipelineID) && treeHash != "" && r.TreeHash == treeHash {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].QueuedAt.After(out[j].QueuedAt) })
+	return out, nil
+}
+
 func (s *memStore) RunsForPipelineSHA(_ context.Context, pipelineID, sha string) ([]Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -610,6 +625,15 @@ func (s *memStore) WorkSteps(_ context.Context, workRunID string) ([]WorkStep, e
 		out = append(out, workStepFromRow(row))
 	}
 	return out, nil
+}
+
+// WorkRunRow is workRunById over the row the journal wrote through the fake
+// work spine.
+func (s *memStore) WorkRunRow(_ context.Context, workRunID string) (map[string]any, error) {
+	if s.work == nil {
+		return nil, nil
+	}
+	return s.work.run(workRunID), nil
 }
 
 // CreatePipeline is createPipeline: a read-merge insert that restates the
@@ -748,6 +772,7 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 	set(&r.MaintenanceState, patch.MaintenanceState)
 	set(&r.MaintenanceGoalID, patch.MaintenanceGoalID)
 	set(&r.MaintenanceMessage, patch.MaintenanceMessage)
+	set(&r.TreeHash, patch.TreeHash)
 	set(&r.Status, patch.Status)
 	set(&r.Conclusion, patch.Conclusion)
 	set(&r.RefusalCode, patch.RefusalCode)
@@ -1107,6 +1132,12 @@ type fakeGitHub struct {
 	pullHeadErr   error
 	pullHeadCalls []string
 
+	// commitTrees is what CommitTree answers for "repository@sha", commitTreeErr
+	// its answer to every call when set, and commitTreeCalls each one asked.
+	commitTrees     map[string]string
+	commitTreeErr   error
+	commitTreeCalls []string
+
 	// treeKeeps records each Tree call's keep decision for the files it
 	// held, so a test can assert what was asked for.
 	treeCalls []string
@@ -1142,14 +1173,15 @@ type compareAnswer struct {
 
 func newFakeGitHub(t testing.TB) *fakeGitHub {
 	return &fakeGitHub{
-		t:       t,
-		nextID:  1000,
-		repos:   map[string]githubapp.RepositoryInfo{},
-		heads:   map[string]headAnswer{},
-		pulls:   map[string][]githubapp.PullRequestHead{},
-		commits: map[string]headAnswer{},
-		trees:   map[string]fstest.MapFS{},
-		compare: map[string]compareAnswer{},
+		t:           t,
+		nextID:      1000,
+		repos:       map[string]githubapp.RepositoryInfo{},
+		heads:       map[string]headAnswer{},
+		pulls:       map[string][]githubapp.PullRequestHead{},
+		commits:     map[string]headAnswer{},
+		trees:       map[string]fstest.MapFS{},
+		compare:     map[string]compareAnswer{},
+		commitTrees: map[string]string{},
 	}
 }
 
@@ -1374,6 +1406,23 @@ func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string
 		return "", "", &githubapp.StatusError{Status: 422, Endpoint: "/repos/" + repository + "/commits/" + ref}
 	}
 	return c.SHA, c.Message, nil
+}
+
+// CommitTree answers the tree a test set for the commit, or else one of the
+// commit's own: unless a test says two commits share a tree, they do not.
+func (g *fakeGitHub) CommitTree(ctx context.Context, _, repository, sha string) (string, error) {
+	watchGitHubCall(g.t, ctx, "CommitTree")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.commitTreeCalls = append(g.commitTreeCalls, repository+"@"+sha)
+	if g.commitTreeErr != nil {
+		return "", g.commitTreeErr
+	}
+	if tree, ok := g.commitTrees[repository+"@"+sha]; ok {
+		return tree, nil
+	}
+	digest := sha256.Sum256([]byte(sha))
+	return hex.EncodeToString(digest[:20]), nil
 }
 
 func (g *fakeGitHub) Tree(ctx context.Context, _, repository, sha string, keep func(string) bool, maxBytes int64) (fs.FS, error) {
@@ -1726,7 +1775,8 @@ func (w *fakeWork) Execute(ctx context.Context, query string) (any, error) {
 		id, _ := fn.Args[idArg].(string)
 		row := table[id]
 		if row == nil {
-			row = map[string]any{}
+			// What the real mutations stamp and the receipt inspector reads.
+			row = map[string]any{"id": id, "ownerUserId": actor, "createdAt": "2026-10-03T12:00:00Z"}
 			table[id] = row
 		}
 		for k, v := range fn.Args {

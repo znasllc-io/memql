@@ -43,6 +43,7 @@ shape run pipelineRunFull {
   pipelineId
   repository
   sha
+  treeHash
   mode
   event
   runKey

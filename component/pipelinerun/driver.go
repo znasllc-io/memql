@@ -453,6 +453,10 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		dr.publish(ctx) // "Preparing the run"
 	}
 
+	if !dr.readTreeHash(ctx) {
+		return verdict{}, false
+	}
+
 	// The plan. A read the drive stopped answers a refusal that is only the
 	// stop's echo, so the stop is asked about first.
 	plan, refusal := dr.readPlan(ctx)
@@ -618,6 +622,11 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 		RequestedVia: "pipeline",
 		TriggeredBy:  pipelines.WorkTriggerPrefix + string(dr.run.Mode),
 	}
+	if dr.run.TreeHash != "" {
+		// In the input, so every receipt's digest commits to the tree it tested
+		// (pipelines.InspectReusedReleaseReceipt reads it back).
+		work.Input["treeHash"] = dr.run.TreeHash
+	}
 	// The work is NAMED on the run row before it is opened: a replica that
 	// stops between the two leaves a row naming work that may not exist yet,
 	// which a resume opens (no step rows: Begin again, the same ids), and
@@ -691,6 +700,7 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 				"rerunOf", originalID)
 			return true
 		}
+		dr.adoptReleaseSlices(rows)
 	}
 	carryPassed(dr.tracks, rows, max(original.Attempt, 1), release)
 	return true
@@ -741,7 +751,9 @@ func (dr *runDriver) releaseChainFresh(ctx context.Context) (bool, error) {
 // attempt it re-runs PASSED it with the same package slice, or had carried it
 // already -- keeping the attempt it first passed in. A shard whose slice moved
 // since (the timing table learned between the attempts) runs again: a pass
-// over other packages is not a pass of these. A failed, cancelled or never
+// over other packages is not a pass of these. A release's re-run first takes the
+// attempt's split when the step covers the same packages (adoptReleaseSlices), so
+// for it only a change of packages does that. A failed, cancelled or never
 // reached step runs, and a step the plan skips keeps the plan's reason.
 //
 // A NOTIFY STEP IS NEVER CARRIED. What it delivered announced the attempt it
@@ -836,6 +848,9 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 		if t.verification != "" {
 			call["verificationFingerprint"] = t.verification
 		}
+		if t.tree != "" {
+			call["treeFingerprint"] = t.tree
+		}
 		if t.evidenceRunID != "" {
 			call["evidenceRunId"] = t.evidenceRunID
 		}
@@ -905,6 +920,13 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 		if row.Seq != index || t.definition == "" || row.DefinitionFingerprint != t.definition {
 			return "the execution definition or order changed for step " + t.step.Key
 		}
+		// A step's intent restates its declaration, and the run's definition
+		// fingerprint covers every call. So what reuse wrote there stays what the
+		// rows say: a takeover that dropped evidenceRunId, or recomputed a
+		// fingerprint from a slice the timing table has moved since, would leave
+		// a release that candidate coverage refuses as no longer matching its
+		// declared execution.
+		t.verification, t.tree, t.evidenceRunID = row.VerificationFingerprint, row.TreeFingerprint, row.EvidenceRunID
 		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))
 		}
@@ -952,9 +974,14 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 		t := &stepTrack{
 			step:       pipelines.Step{Key: row.Key, Stage: stage, Name: name, Kind: pipelines.StepCommand},
 			definition: row.DefinitionFingerprint,
-			attempt:    max(row.Attempt, 1),
-			sent:       row.Status == WorkStepRunning,
-			state:      StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
+			// As resume does: the step checks read evidenceRunID to tell a reused
+			// step from a carried one.
+			verification:  row.VerificationFingerprint,
+			tree:          row.TreeFingerprint,
+			evidenceRunID: row.EvidenceRunID,
+			attempt:       max(row.Attempt, 1),
+			sent:          row.Status == WorkStepRunning,
+			state:         StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
 		}
 		if row.Skip != nil {
 			// The skip the plan declared -- a failed-only re-run's carry among
@@ -1064,10 +1091,12 @@ type stageTracks struct {
 
 // stepTrack is one compiled step as this drive follows it.
 type stepTrack struct {
-	step          pipelines.Step
-	attempt       int
-	definition    string
-	verification  string
+	step         pipelines.Step
+	attempt      int
+	definition   string
+	verification string
+	// tree is the step's fingerprint across commits (treeFingerprintOf).
+	tree          string
 	evidenceRunID string
 	// sent: the rows say running with no receipt -- a previous driver handed
 	// it to the runner, which may still be at it. Re-sent with the same
@@ -1112,6 +1141,7 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 				step: step, attempt: 1,
 				definition:   dr.definitionOf(step),
 				verification: dr.verificationOf(step),
+				tree:         dr.treeFingerprintOf(step),
 				state:        StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
 			}
 			st.tracks = append(st.tracks, t)
@@ -1935,6 +1965,7 @@ func applyRunPatch(r *Run, p RunPatch) {
 	set(&r.MaintenanceState, p.MaintenanceState)
 	set(&r.MaintenanceGoalID, p.MaintenanceGoalID)
 	set(&r.MaintenanceMessage, p.MaintenanceMessage)
+	set(&r.TreeHash, p.TreeHash)
 	set(&r.Status, p.Status)
 	set(&r.Conclusion, p.Conclusion)
 	set(&r.RefusalCode, p.RefusalCode)

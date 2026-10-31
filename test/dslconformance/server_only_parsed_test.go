@@ -1780,13 +1780,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Caller-scoping admits exactly those calls. The only writer is
 		// component/pipelinerun, after it has minted a token through the
 		// grant and read the manifest, under the owner's borrowed authority.
-		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:     true,
-		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:            true,
-		{Path: "pipelines/queries.memql", Name: "pipelinesForScheduledScan"}:  true,
-		{Path: "pipelines/queries.memql", Name: "pipelineById"}:               true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:         true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}: true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:      true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:      true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:             true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesForScheduledScan"}:   true,
+		{Path: "pipelines/queries.memql", Name: "pipelineById"}:                true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:          true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}:  true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineTree"}: true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:       true,
 		// Scheduled recovery spans owners; the native follow-up restores its source owner.
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsAwaitingMaintenance"}:      true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinished"}:               true,

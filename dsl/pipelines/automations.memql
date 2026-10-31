@@ -289,7 +289,9 @@ automation pipelineMaintenancePolicy {
 
 /// Evidence reuse is explicitly enabled by an installation, separately from a
 /// source command's opt-in verification contract. Generic defaults rerun work.
-/// A release run is never asked: it executes every step for its candidate.
+/// A release run is asked about each successful run that tested its git tree, once
+/// the native rules admit it (component/pipelinerun/evidence.go, reuseSameTree). A
+/// source's mode is this policy's to weigh: a pull request usually runs affected.
 @template
 automation pipelineEvidenceReuse {
  args { event string! sourceEvent string! sourceMode string! ageSeconds int! }

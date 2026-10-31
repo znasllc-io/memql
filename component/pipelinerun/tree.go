@@ -60,6 +60,42 @@ func keepForRun(p string) bool {
 	return true
 }
 
+// readTreeHash reads the git tree of the run's commit and keeps it on the run row
+// and, through openWork, in its work input. The row is how a release finds this
+// run (evidence.go); the work input enters every receipt's digest, so a receipt
+// commits to the tree it tested. It runs once, before the plan: a run that
+// already names its work keeps the input it began with, and a hash read later
+// would claim a fact its receipts do not hold.
+//
+// A READ THAT FAILS DOES NOT FAIL THE RUN. It costs the run its reuse across
+// commits and nothing else: the run neither offers nor takes it, so a release
+// with no tree executes every step. Failing a pull request's checks because an
+// optional read went wrong would be the worse failure. It answers false only when
+// the drive must stop: a write the lease no longer allows.
+func (dr *runDriver) readTreeHash(ctx context.Context) bool {
+	if dr.run.TreeHash != "" || strings.TrimSpace(dr.run.WorkRunID) != "" {
+		return true
+	}
+	treeCtx, treeDone := dr.stoppable(ctx, githubCallTimeout)
+	tree, err := dr.d.GitHub.CommitTree(treeCtx, dr.token, dr.p.Repository, dr.run.SHA)
+	treeDone()
+	if err == nil && !pipelines.ValidTreeHash(tree) {
+		err = errors.New("the answer is not a whole tree hash")
+	}
+	if err != nil {
+		// Asked to stop while it read: the plan's read answers that, next.
+		if !dr.lease.isLost() && !dr.lease.isCancelled() {
+			dr.log.Info("pipelines: the commit's tree could not be read, so this run neither offers nor takes reuse across commits", "error", dr.mask(err.Error()))
+		}
+		return true
+	}
+	if err := dr.writeRun(ctx, RunPatch{TreeHash: ptr(tree)}); err != nil {
+		dr.abort("recording the run's tree", err)
+		return false
+	}
+	return true
+}
+
 // readPlan reads the tree at the run's commit and compiles its pipeline block
 // into the plan this run executes, or answers the refusal that fails the run.
 func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.Refusal) {

@@ -116,6 +116,17 @@ type WorkStep struct {
 	// before admission. Older receipts without it cannot authorize recovery.
 	DefinitionFingerprint   string
 	VerificationFingerprint string
+	// TreeFingerprint is the same check on the same tree, whatever the commit
+	// (definition.go, treeFingerprintOf): what a release compares to reuse a
+	// receipt. Empty unless the step declared verification and the tree is known.
+	TreeFingerprint string
+	// EvidenceRunID names the run whose receipt this step reused instead of
+	// executing (call.evidenceRunId). Empty for a step a failed-only re-run
+	// carried from an earlier attempt of its own run key.
+	EvidenceRunID string
+	// Raw is the row as read: a release runs the candidate's own receipt
+	// inspector over it before it plans a skip (evidence.go).
+	Raw map[string]any
 	// Seq is the step's place in the plan the work run was opened with.
 	Seq          int
 	Status       string
@@ -203,12 +214,17 @@ type Run struct {
 	PipelineID  string
 	Repository  string
 	SHA         string
-	Mode        pipelines.Mode
-	Event       pipelines.Event
-	RunKey      string
-	Attempt     int
-	Trigger     string
-	RerunOf     string
+	// TreeHash is the git tree SHA records, read once by the driver before the
+	// plan (driver.go, readTreeHash). Empty when that read failed or the run
+	// began before the field existed; the run then neither offers nor takes
+	// reuse across commits.
+	TreeHash string
+	Mode     pipelines.Mode
+	Event    pipelines.Event
+	RunKey   string
+	Attempt  int
+	Trigger  string
+	RerunOf  string
 	// RerunFailedOnly: this attempt runs only what RerunOf did not pass
 	// (epic memql#5479); the driver carries the rest over as skipped
 	// pipeline_passed_earlier.
@@ -404,6 +420,7 @@ type PipelinePatch struct {
 // RunPatch is a read-merge write to a run, on PipelinePatch's rule: nil is
 // not written, non-nil is written as given. Notes and Stages are sent whole.
 type RunPatch struct {
+	TreeHash           *string
 	ReviewEvidence     *map[string]any
 	SelectionFacts     *map[string]any
 	MaintenanceState   *string
