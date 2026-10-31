@@ -890,7 +890,7 @@ func AllWorkspacesBuild(args AllWorkspacesArgs) string {
 	return b.String()
 }
 
-// AppAvailabilityEvidence -- Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota.
+// AppAvailabilityEvidence -- Latest availability-changing receipt on this owner's machine, independent of the rolling usage window. Unrelated failures do not erase an exhausted quota or an expired login.
 //
 // Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["appAvailabilityEvidence"] in generated_concepts.go).
 type AppAvailabilityEvidenceArgs struct {

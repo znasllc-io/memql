@@ -164,3 +164,63 @@ func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {
 	_, err = peer.SelectAppForCall(ctx, req, false, []string{"codex"}, doors)
 	require.NoError(t, err, "success did not clear refusal")
 }
+
+// A login is one machine's, so a signed-out receipt blocks that machine's app
+// and nothing else, on a replica that never held the machine's stream.
+func TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	peer, err := New(db)
+	require.NoError(t, err)
+	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	key := uniqueSuffix("app-auth")
+	owner := "v1:identity:user:" + key
+	black := WorkerRegistrationConcept + ":" + key + "-black"
+	gray := WorkerRegistrationConcept + ":" + key + "-gray"
+	var ids []string
+	insert := func(concept, id string, payload map[string]any) {
+		ids = append(ids, id)
+		raw, _ := json.Marshal(payload)
+		row := memorynodes.MemoryNode{ID: id, Concept: concept, CreatedAt: time.Now().UTC(), CreatedBy: owner, Type: memorynodes.NodeTypeObject, Payload: raw, Schema: json.RawMessage(`{}`), Metadata: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`)}
+		_, err := db.NewInsert().Model(&row).Exec(context.Background())
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			_, err := db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("id = ?", id).Exec(context.Background())
+			require.NoError(t, err)
+		}
+	})
+	for _, registration := range []string{black, gray} {
+		insert(WorkerRegistrationConcept, registration, map[string]any{"ownerUserId": owner, "identityId": "test", "name": "Auth test", "capabilities": []string{"HEADLESS"}, "concurrency": map[string]any{}, "registeredAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	}
+	// Old enough to be outside appRoutingEvidence's page if that page were all
+	// that kept it, and inside the recheck window: the receipt alone must block.
+	refused := time.Now().UTC().Add(-time.Minute)
+	insert("v1:worker:appSession", "v1:worker:appSession:"+key+"-refused", map[string]any{"ownerUserId": owner, "workerId": black, "app": "claude-code", "status": "failed", "authRefused": true, "endedAt": refused.Format(time.RFC3339Nano), "errorMessage": "Failed to authenticate: OAuth session expired and could not be refreshed", "usage": map[string]any{"known": true}})
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	doors := []AppDoor{{AppId: "claude-code", Machines: []AppMachine{
+		{RegistrationId: black, Online: true, Forwardable: true, StructuredResult: true},
+		{RegistrationId: gray, Online: true, Forwardable: true, StructuredResult: true},
+	}}}
+	req := AppCallRequest{ActingUserId: owner, AppId: "*"}
+	for _, e := range []*MemQLEngine{eng, peer} {
+		until, err := e.appBlockedUntil(ctx, black, "claude-code", nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, refused.Add(15*time.Minute).Truncate(time.Millisecond), until.Truncate(time.Millisecond))
+		selected, err := e.SelectAppForCall(ctx, req, false, nil, doors)
+		require.NoError(t, err)
+		require.Equal(t, gray, selected.RegistrationId, "the machine signed out of the app was selected")
+		filtered, err := e.FilterAppDoors(ctx, doors)
+		require.NoError(t, err)
+		require.Len(t, filtered[0].Machines, 1)
+		require.Equal(t, gray, filtered[0].Machines[0].RegistrationId)
+	}
+	// One call that moved past Gray too has nothing left for this app.
+	_, err = peer.SelectAppForCall(ctx, req, false, []string{"claude-code@" + gray}, doors)
+	require.ErrorIs(t, err, ErrAppUnavailable)
+	// A later success on that machine is the proof the login works again.
+	insert("v1:worker:appSession", "v1:worker:appSession:"+key+"-recovered", map[string]any{"ownerUserId": owner, "workerId": black, "app": "claude-code", "status": "ended", "endedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	until, err := peer.appBlockedUntil(ctx, black, "claude-code", nil, nil)
+	require.NoError(t, err)
+	require.True(t, until.IsZero(), "success did not clear the refusal")
+}

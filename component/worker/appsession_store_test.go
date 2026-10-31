@@ -224,6 +224,32 @@ func TestStoreMethodsDoNotReturnAContext(t *testing.T) {
 	} = store
 }
 
+func TestSessionStoreMarksAuthRefusalIndependentlyOfReplaySafety(t *testing.T) {
+	for _, tt := range []struct {
+		status, message string
+		want            bool
+	}{
+		{"failed", "Failed to authenticate: OAuth session expired and could not be refreshed", true},
+		{"failed", "Not logged in \u00b7 Please run /login", true},
+		{"failed", "connection lost", false},
+		{"ended", "Not logged in", false},
+	} {
+		recorder := &recordingExecutor{}
+		store := &EngineStore{Engine: recorder}
+		err := store.EndAppSession(context.Background(), AppSessionRow{ID: "session", OwnerUserId: "alice", Status: tt.status, ErrorMessage: tt.message, EndedAt: time.Now(), RecordedSteps: 5, Usage: AppSessionUsage{Known: true, InputTokens: 100}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "authRefused: false"
+		if tt.want {
+			want = "authRefused: true"
+		}
+		if len(recorder.statements) != 1 || !strings.Contains(recorder.statements[0], want) {
+			t.Fatalf("auth receipt missing: %v", recorder.statements)
+		}
+	}
+}
+
 func TestSessionStoreMarksQuotaIndependentlyOfReplaySafety(t *testing.T) {
 	for _, tt := range []struct {
 		status, message string

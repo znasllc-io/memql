@@ -54,14 +54,33 @@ func (p AppRoutingPolicy) allows(app string) bool {
 	return p.Mode == "auto" || p.Mode == "roundRobin" || p.Mode == app
 }
 
-// AppQuotaRefused means the app reported a quota refusal with zero model
-// usage, no served model and no structured result. Other failures may have
-// caused effects and are never safe to replay in another app.
+// AppQuotaRefused means the app refused a turn on its usage limit before any
+// work: no model served it, it produced no result and no recorded or dropped
+// action. Other failures may have caused effects and are never safe to replay
+// in another app. See integrations/agent/worker appPreWorkRefusal for the proof.
 type AppQuotaRefused struct{ Reason string }
 
 func (e *AppQuotaRefused) Error() string { return e.Reason }
-func (e *AppQuotaRefused) Code() string  { return "app_quota_refused" }
+func (e *AppQuotaRefused) Code() string  { return AppQuotaRefusalCode }
 func (e *AppQuotaRefused) Unwrap() error { return ErrAppUnavailable }
+
+// AppAuthRefused means the app refused a turn because its login is missing or
+// expired, under the same pre-work proof as AppQuotaRefused.
+//
+// IT IS A SEPARATE ANSWER FROM A USAGE LIMIT because the remedy and the scope
+// differ. A limit belongs to the account and passes with time; a login belongs
+// to one machine and stays broken until somebody signs in there.
+type AppAuthRefused struct{ Reason string }
+
+func (e *AppAuthRefused) Error() string { return e.Reason }
+func (e *AppAuthRefused) Code() string  { return AppAuthRefusalCode }
+func (e *AppAuthRefused) Unwrap() error { return ErrAppUnavailable }
+
+// The stable tags these refusals cross the app-call hop under.
+const (
+	AppQuotaRefusalCode = "app_quota_refused"
+	AppAuthRefusalCode  = "app_auth_refused"
+)
 
 func IsAppQuotaRefusal(message string) bool {
 	message = strings.ToLower(message)
@@ -71,6 +90,65 @@ func IsAppQuotaRefusal(message string) bool {
 		}
 	}
 	return false
+}
+
+// IsAppAuthRefusal reports whether a failed session's own words say its login
+// is missing or expired.
+//
+// The phrases are what Claude Code 2.1.304 and codex-cli 0.162.1 printed for an
+// expired login and an empty home (measured 2026-10-29, pinned by
+// TestIsAppAuthRefusalNamesTheMeasuredSentences). Neither app gives a code that
+// reaches this seam, only its sentence, so an unfamiliar sentence reads as an
+// ordinary failure: no failover, and no block. A word like "credential" or
+// "auth" alone is deliberately not a phrase, because MemQL's own MCP back-channel
+// credential fails in those words and no sign-in fixes that.
+func IsAppAuthRefusal(message string) bool {
+	message = strings.ToLower(message)
+	for _, phrase := range []string{"failed to authenticate", "oauth session expired", "not logged in", "run /login", "401 unauthorized", "unauthorized (401)", "could not be refreshed", "sign in again", "signing in again", "authentication required"} {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// appExclusionSeparator joins an app and a registration in an exclusion that
+// names one machine's app, where a bare id names the app on every machine.
+const appExclusionSeparator = "@"
+
+// AppSelectionExcluded reports whether an exclusion list rules out this app on
+// this machine, for the rest of one call.
+func AppSelectionExcluded(excluded []string, app, registration string) bool {
+	for _, entry := range excluded {
+		if entry == app || entry == app+appExclusionSeparator+registration {
+			return true
+		}
+	}
+	return false
+}
+
+// appRefusalExclusion says what a failed selection rules out for the rest of
+// the call, and ok=false when the failure may not move at all.
+//
+// The two pre-work refusals rule out different things because they are about
+// different things. A usage limit is the ACCOUNT'S, and the machines of one
+// owner are normally signed into one account, so trying each would spend a
+// session on each to hear the same refusal: the app is out. A login is ONE
+// MACHINE'S, so the same app on another machine may well answer, and that is
+// the common case of a fleet where one laptop's login lapsed.
+//
+// Everything else is refused here: the session may have caused effects, and
+// running it again would repeat them.
+func appRefusalExclusion(err error, selected AppSelection) (string, bool) {
+	var quota *AppQuotaRefused
+	if errors.As(err, &quota) {
+		return selected.AppId, true
+	}
+	var signedOut *AppAuthRefused
+	if errors.As(err, &signedOut) {
+		return selected.AppId + appExclusionSeparator + selected.RegistrationId, true
+	}
+	return "", false
 }
 
 type appSignal struct {
@@ -199,16 +277,10 @@ func (e *MemQLEngine) SelectAppForCall(ctx context.Context, req AppCallRequest, 
 			if req.AppId != "*" && req.AppId != door.AppId {
 				continue
 			}
-			skip := false
-			for _, app := range excluded {
-				if app == door.AppId {
-					skip = true
-				}
-			}
-			if skip {
-				continue
-			}
 			for _, machine := range door.Machines {
+				if AppSelectionExcluded(excluded, door.AppId, machine.RegistrationId) {
+					continue
+				}
 				if !machine.Online || (!machine.LocalStream && (localOnly || !machine.Forwardable)) || (req.Schema != nil && !machine.StructuredResult) {
 					continue
 				}
