@@ -814,12 +814,14 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		return err
 	}
 
+	dslStaged := false
 	if len(rep.DslDomains) > 0 {
-		dslVersion, staged, serr := d.stageAndRoll(ctx, snapshot, rep, out)
+		dslVersion, staged, serr := d.stageAndRoll(ctx, snapshot, rep, out, req.PackageId, req.Actor.UserId)
 		if serr != nil {
 			return serr
 		}
 		out.DslVersion = dslVersion
+		dslStaged = staged
 		if !staged {
 			d.log().Info("packages: DSL unchanged; stage and roll skipped",
 				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
@@ -871,6 +873,10 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 			d.log().Warn("packages: could not record which DSL domains this package ships; its access gates stay as the previous list left them",
 				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 				"deployment", out.DeploymentId, "err", derr)
+		}
+		// A run that staged recorded its person before moving the pointer.
+		if len(rep.DslDomains) > 0 && !dslStaged {
+			d.fillDslDeployer(ctx, req.PackageId, req.Actor.UserId, rowString(pkg, "dslDeployedBy"))
 		}
 	} else {
 		d.log().Info("packages: this run publishes no serving version, so the DSL domains this package ships are left as they were",

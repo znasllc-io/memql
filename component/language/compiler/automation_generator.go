@@ -321,6 +321,10 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	if attributeFlagPresent(def.Attributes, "journalOnWrite") || attributeFlagPresent(automation.Attributes, "journalOnWrite") {
 		output["journalOnWrite"] = true
 	}
+	// Only when declared, so a definition that says nothing keeps its fingerprint.
+	if attributeFlagPresent(def.Attributes, "usesDeployerFleet") || attributeFlagPresent(automation.Attributes, "usesDeployerFleet") {
+		output["usesDeployerFleet"] = true
+	}
 
 	return &AutomationOutput{
 		Name:        def.Name,

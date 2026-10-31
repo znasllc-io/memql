@@ -346,6 +346,12 @@ is not exempt, and it is not permanently barred either -- which it was, for
 everybody including the cluster owner, until the run started resolving an
 authority at all.
 
+**Whoever stages a package's DSL answers for its workflows' model calls.** A workflow
+declaring `@usesDeployerFleet` runs each `builtin ai` call on that person's fleet, so
+the deploy review names those workflows before you confirm. A deploy that does not
+move the DSL leaves the person as recorded (`package.dslDeployedBy`). See
+[Sharing a machine](shared-machines.md).
+
 DSL is server-side authority for the whole cluster; multi-tenant DSL sandboxing
 is not built. An operator running their own instance never sees this gate.
 

@@ -160,6 +160,36 @@ name spells somebody's id. Decided by the owner on 2026-10-04
 ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); it is the
 behaviour the routing already had, now written down as a rule.
 
+**A deployed workflow can ask for its deployer's fleet.** An automation in a
+package that declares `@usesDeployerFleet` runs as the cluster like any other, and
+each `builtin ai` call it makes is planned, admitted and counted as the person who
+staged the package's DSL. Only the model call borrows: what the workflow reads and
+writes stays what the cluster may.
+
+- **Whose fleet.** The person who pressed Deploy or Rollback for the DSL that is
+  live, or the package's owner for an automatic deploy. A deploy that does not move
+  the DSL does not move the person. The deploy review names the workflows that will
+  use your machines before you confirm, and an automatic deploy whose list of them
+  changed stops for that review. Someone resuming a run acts for themselves, on their
+  own fleet, still on `Local`.
+- **Fleet only.** The call runs on the `Local` route: that person's machines first,
+  then the ones lent to them. It never reaches a signed-in app session or a vendor,
+  because a visitor's click must not spend a person's subscription.
+- **It fails closed.** No package listing the workflow's domain, more than one, no
+  person recorded, a person who may no longer author constructs, or a `Local` route
+  edited to list anything but fleet sources is a refusal, and so is every machine
+  being asleep. Each is an ordinary `ai` error, which `on error
+  continue` and the workflow's own failure path handle. Nothing falls back to the
+  cluster acting.
+- **Visitor text is data.** The seam adds no input of its own, and the `ai` builtin
+  has no tools, so an injected instruction can only change the reply's text. A
+  workflow passing visitor text to a model passes it in the prompt's `data`, whose
+  fields the prompt's body validates, never by composing it into the template.
+
+The workflow must keep one of its deployer's machines reachable to be useful, and
+that is the deployer's to arrange: `every_door_shut` naming `Local` is what an asleep
+fleet looks like from the workflow.
+
 ---
 
 ## What the owner sees afterwards
@@ -265,6 +295,8 @@ it is offered, rather than in this document.
   ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); before
   that, a pin reached your own machines only.
 - **System work** reaches only machines lent to everyone, with the owner’s consent.
+- **A `@usesDeployerFleet` workflow's model call** is its deployer's work, on the
+  `Local` route, and may not pin a machine.
 
 When a person's own machines and a lent one could both serve a call, **the
 person's own machines come first, always**, and it is not a preference an

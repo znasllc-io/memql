@@ -142,6 +142,9 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
                     </Chip>
                   ))}
                 </Chips>
+                {d.fleetWorkflows?.length ? (
+                  <p className="os-caption">These workflows will use your machines: {d.fleetWorkflows.join(", ")}.</p>
+                ) : null}
               </li>
             ))}
           </RecordList>

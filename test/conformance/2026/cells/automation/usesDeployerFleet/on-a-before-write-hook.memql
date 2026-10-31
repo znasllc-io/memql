@@ -1,0 +1,3 @@
+@trigger(before="create", concept="v1:platform:inboundRequest")
+@usesDeployerFleet
+automation hookWaitingOnALaptop { return true }

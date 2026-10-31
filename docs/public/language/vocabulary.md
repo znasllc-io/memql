@@ -20,13 +20,13 @@ Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
 | Section | Entries |
 |---|---:|
 | [Constructs](#constructs) | 18 |
-| [Annotations](#annotations) | 81 |
+| [Annotations](#annotations) | 82 |
 | [Keywords](#keywords) | 37 |
 | [Operators](#operators) | 22 |
 | [Field types](#field-types) | 12 |
 | [Functions and methods](#functions-and-methods) | 46 |
 | [Builtins](#builtins) | 10 |
-| **Total** | **226** |
+| **Total** | **227** |
 
 ## Constructs
 
@@ -136,6 +136,7 @@ The `@name` directives a construct or a field carries. WHERE each is legal, and 
 | `@trigger` | `@trigger(event="node.created", concept="v1:cluster:node")` | Event trigger for automations. Format: @trigger(event="graph.node.created.*.v1:ns:concept") or @trigger(schedule="0 0 * * * *"). Written as keyword arguments; legal on automation. |
 | `@type` | `@type("collection")` | The concept's row kind: "object" (the default), "collection" or "reference". Written as one string; legal on concept. |
 | `@unbounded` | `@unbounded("a small catalog of fixed size")` | On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded("reason"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md. Written as one string; legal on query. |
+| `@usesDeployerFleet` | `@usesDeployerFleet` | Run each `builtin ai` call in this workflow on the fleet of the person who staged its package's DSL, on the Local route: their machines, then machines lent to them, and never an app session or a vendor. Only the model call borrows; the rest of the run stays the cluster. A refusal is an ordinary ai error. Cannot be used on a before-write hook. Written as no arguments; legal on automation. |
 | `@variant` | `@variant(discriminator="kind")` | A discriminated union: @variant(discriminator="kind") on an object field, followed by one block per branch; the discriminator field's value picks the branch. Written as keyword arguments; legal on concept field. |
 | `@vendor` | `@vendor("OpenAI")` | The provider's type, which picks the client that serves it: `OpenAI` (or `OpenAIChat`), `OpenAITTS` or `OpenAIEmbedding` for OpenAI, and `Anthropic` (or `AnthropicChat`) for Anthropic, matched without regard to case. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy (`fleet:<model>`, `app:<id>`) rather than declared as children. Any other type leaves the provider registered but unavailable (`unsupported provider type`). Streaming is a parameter (`streaming true` in `params`), not a type, and a child that `@extends` a base takes the base's type. Written as one string; legal on provider. |
 | `@version` | `@version("1.0.0")` | Version tag for the seed. Written as one string; legal on concept and seed. |
