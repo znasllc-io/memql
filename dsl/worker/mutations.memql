@@ -963,6 +963,7 @@ mutation appSession endAppSession {
     producedArtifactIds  array
     appSessionRef  string
     quotaRefused bool
+    authRefused bool
     errorMessage   string
     cancelReason   string
     /// The harness's structured final answer, when it produced one. It does
@@ -988,6 +989,7 @@ mutation appSession endAppSession {
     args.producedArtifactIds
     args.appSessionRef
     args.quotaRefused
+    args.authRefused
     args.errorMessage
     args.cancelReason
     // NOT `?? {}`. A session END that carries no result must not blank a
