@@ -1650,6 +1650,44 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 	return b.String()
 }
 
+// ContinueRun -- Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation.
+type ContinueRunArgs struct {
+	RunId      string
+	RunVersion string
+	RequestId  string
+	Feedback   string
+}
+
+// ContinueRun calls the engine builtin continueRun.
+func (qc *QueryClient) ContinueRun(ctx context.Context, args ContinueRunArgs) (*Result, error) {
+	call := ContinueRunBuild(args)
+	return qc.executeNamed(ctx, "continueRun", call)
+}
+
+func ContinueRunBuild(args ContinueRunArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin continueRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runVersion: ")
+	b.WriteString(quoteMemQL(args.RunVersion))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("feedback: ")
+	b.WriteString(quoteMemQL(args.Feedback))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
 	// Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice.
@@ -2214,6 +2252,81 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 	return b.String()
 }
 
+// FleetAppSignIn -- Start signing in to an app on YOUR OWN machine, and return at once with the id of the record to watch. The machine must be yours, connected, with the app allowed for this cluster and a Cockpit that can run a sign-in; each of those is refused before anything is written. The v1:worker:appSignIn row then carries the page to open and any code to enter. The app writes its own login on the machine, and no credential ever crosses to the cluster.
+type FleetAppSignInArgs struct {
+	// v1:worker:registration.id of the machine. Another user's answers exactly as a made-up one does.
+	RegistrationId string
+	// Enum: claude-code | codex
+	App string
+}
+
+// FleetAppSignIn calls the engine builtin fleetAppSignIn.
+func (qc *QueryClient) FleetAppSignIn(ctx context.Context, args FleetAppSignInArgs) (*Result, error) {
+	call := FleetAppSignInBuild(args)
+	return qc.executeNamed(ctx, "fleetAppSignIn", call)
+}
+
+func FleetAppSignInBuild(args FleetAppSignInArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetAppSignIn(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("app: ")
+	b.WriteString(quoteMemQL(args.App))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetAppSignInCancel -- Stop a sign-in you started on your machine. Nothing changes on the machine except that the app stops waiting.
+type FleetAppSignInCancelArgs struct {
+	SignInId string
+}
+
+// FleetAppSignInCancel calls the engine builtin fleetAppSignInCancel.
+func (qc *QueryClient) FleetAppSignInCancel(ctx context.Context, args FleetAppSignInCancelArgs) (*Result, error) {
+	call := FleetAppSignInCancelBuild(args)
+	return qc.executeNamed(ctx, "fleetAppSignInCancel", call)
+}
+
+func FleetAppSignInCancelBuild(args FleetAppSignInCancelArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetAppSignInCancel(")
+	b.WriteString("signInId: ")
+	b.WriteString(quoteMemQL(args.SignInId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetAppSignInCode -- Pass the code a sign-in page showed to the app waiting on your machine. It goes to that machine and nowhere else: it is in no row, no log line and no reply. It is useless without the verifier the process on the machine holds.
+type FleetAppSignInCodeArgs struct {
+	SignInId string
+	// What the sign-in page showed. Read once and passed on; never stored or echoed.
+	Code string
+}
+
+// FleetAppSignInCode calls the engine builtin fleetAppSignInCode.
+func (qc *QueryClient) FleetAppSignInCode(ctx context.Context, args FleetAppSignInCodeArgs) (*Result, error) {
+	call := FleetAppSignInCodeBuild(args)
+	return qc.executeNamed(ctx, "fleetAppSignInCode", call)
+}
+
+func FleetAppSignInCodeBuild(args FleetAppSignInCodeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetAppSignInCode(")
+	b.WriteString("signInId: ")
+	b.WriteString(quoteMemQL(args.SignInId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("code: ")
+	b.WriteString(quoteMemQL(args.Code))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetCapacity -- What each machine you can use can take on right now. One row: {machines, measuredAt}. Each machine says how many calls are in flight against its slots, the memory free for a model and the models already loaded (memory.reported is false when its cockpit does not report capacity, and it is then admitted on its slots alone), how fast it has answered over the last two hours, and whether it is degraded. Every route's fleet door admits machines on these figures before choosing one.
 type FleetCapacityArgs struct {
 }
@@ -2227,6 +2340,65 @@ func (qc *QueryClient) FleetCapacity(ctx context.Context, args FleetCapacityArgs
 func FleetCapacityBuild(args FleetCapacityArgs) string {
 	_ = args
 	return "builtin fleetCapacity()"
+}
+
+// FleetEnergySettings -- Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup.
+type FleetEnergySettingsArgs struct {
+	RegistrationId string
+	// Enum: read | save | confirm
+	Action         string
+	Revision       string
+	SecretSettings map[string]any
+	Provider       string
+	TariffName     string
+}
+
+// FleetEnergySettings calls the engine builtin fleetEnergySettings.
+func (qc *QueryClient) FleetEnergySettings(ctx context.Context, args FleetEnergySettingsArgs) (*Result, error) {
+	call := FleetEnergySettingsBuild(args)
+	return qc.executeNamed(ctx, "fleetEnergySettings", call)
+}
+
+func FleetEnergySettingsBuild(args FleetEnergySettingsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetEnergySettings(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.Revision != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("revision: ")
+		b.WriteString(quoteMemQL(args.Revision))
+	}
+	if args.SecretSettings != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("secretSettings: ")
+		b.WriteString(renderMemQLValue(args.SecretSettings))
+	}
+	if args.Provider != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("provider: ")
+		b.WriteString(quoteMemQL(args.Provider))
+	}
+	if args.TariffName != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tariffName: ")
+		b.WriteString(quoteMemQL(args.TariffName))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
@@ -2358,33 +2530,6 @@ func FleetRecommendedBuild(args FleetRecommendedArgs) string {
 	b.WriteString("builtin fleetRecommended(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// FleetRetryAppAvailability -- Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work.
-type FleetRetryAppAvailabilityArgs struct {
-	RegistrationId string
-	// Enum: claude-code | codex
-	App string
-}
-
-// FleetRetryAppAvailability calls the engine builtin fleetRetryAppAvailability.
-func (qc *QueryClient) FleetRetryAppAvailability(ctx context.Context, args FleetRetryAppAvailabilityArgs) (*Result, error) {
-	call := FleetRetryAppAvailabilityBuild(args)
-	return qc.executeNamed(ctx, "fleetRetryAppAvailability", call)
-}
-
-func FleetRetryAppAvailabilityBuild(args FleetRetryAppAvailabilityArgs) string {
-	var b strings.Builder
-	b.WriteString("builtin fleetRetryAppAvailability(")
-	b.WriteString("registrationId: ")
-	b.WriteString(quoteMemQL(args.RegistrationId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("app: ")
-	b.WriteString(quoteMemQL(args.App))
 	b.WriteString(")")
 	return b.String()
 }

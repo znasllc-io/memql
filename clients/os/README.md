@@ -95,8 +95,8 @@ or client-visible session authority.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
   title bar open the same streaming surface. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening. Each turn uses the same durable
-  work engine as Nexus. Its goals remain visible in Nexus; Ask has no
-  per-message work menu. Explicit Stop cancels the durable goal; closing a viewer
+  work engine as Nexus. Its goals remain visible in Nexus; message menus offer
+  copying and activity inspection. Explicit Stop cancels the durable goal; closing a viewer
   only detaches and never resubmits work. Conversation checkpoints and execution progress belong
   to the shared engine.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
@@ -360,8 +360,8 @@ every app epic after it:
   and nothing logged. `live/useLiveCollection.ts` is the one place that
   contract is honoured — use it rather than constructing a collection.
 - **Check the routing rules before deciding a concept is dark.**
-  `v1:worker:registration`, `v1:worker:routingPolicy` and
-  `v1:workbench:workspace` carry explicit broadcast rules
+  `v1:worker:registration`, `v1:worker:routingPolicy`, `v1:worker:appSignIn`
+  and `v1:workbench:workspace` carry explicit broadcast rules
   (`component/node/routing.go`); `v1:cluster:node` carries one through the
   `v1:cluster:*` wildcards in the same file. Machine activity and invocation
   receipts now broadcast created/updated events, and `v1:router:call`
@@ -985,6 +985,50 @@ connection failures do not become a claim of read-only access or empty history.
   full log" and says the log is saved, rather than offering to save it; a
   failed step's last lines are the tail of that file, read through the
   Library's content route with one suffix Range.
+- **A STEP'S ATTEMPTS ARE ON ITS ROW, AND THE PAGE ONLY READS THEM.** A step the
+  engine retried carries every ended attempt in `binding.attempts`
+  (`stepFromRow` -> `StepRow.attempts`, malformed entries dropped), and the
+  run page lists them under the step in the failure account's own column and
+  type -- one line each, where it ran (the machines feed's NAME, "your fleet"
+  when it cannot name one, never an id), how it ended in the page's words (a
+  code's copy headline, else the attempt's own message, else "Failed"; never
+  the code) and a link to that attempt's own log. Only a step with two or more
+  attempts, or one still going, is annotated; a step that ran once has one
+  record and no story. A running step with an attempt behind it reads
+  **Retrying** (the check run says the same word for the same state), on the
+  attempt after the last that ended. **The last attempt of a failed step says
+  only "Failed" and offers no link**: the account below it already says why
+  and offers the same log (rule 7). Covered by `runPage.test.tsx` and
+  `words.test.ts`; rendered with `pipeline-run-retried` / `-retrying`. Not
+  verified live: a cluster with a real fleet failing over.
+- **"YOUR FLEET" MIRRORS THE ENGINE'S ROUTER, HOST COMMANDS INCLUDED.**
+  `pipelines/fleet.ts` counts a machine only if the router would offer it a
+  step: unrevoked, contract 5, its own `pipelines` label, and the owner has not
+  switched Host commands off (`ownerFeatures.headless`, read as the engine reads
+  it: a setting never saved is on, a malformed one is off). The connect flow
+  and Settings > Pipelines read the one rule.
+- **WHEN THE SWITCH IS WHAT KEEPS A MACHINE OUT, THE COPY SAYS SO.** A machine
+  whose own policy allows pipelines and whose owner switched Host commands off
+  needs a switch in Fleet, not a policy edit, so `machinesWithHostCommandsOff`
+  names the machines that switch ALONE keeps out (a machine its policy also
+  refuses is not named: turning the switch on would change nothing for it) and
+  the copy points at it instead of `policy.yaml` -- Compute's remedy and its
+  "your fleet is not offered" caption (`needsRemedy`, `fleetNotOffered`), and
+  Settings > Pipelines' fleet line (`fleetSentence`), which says it only when
+  no machine takes steps: while another does, a machine its owner switched off
+  is a choice and not a problem. Every case where the policy is the cause keeps
+  its wording and its pinned test. **THE ENGINE'S "HOST COMMANDS" IS FLEET'S
+  "COMMANDS AND FILES"**: the router and its refusals say Host commands, and
+  the machine's Settings (Owner-only features) label the same switch Commands
+  and files. The copy says both, once each -- "Host commands are off for MSI
+  Raider. Turn on Commands and files in its Fleet settings" -- so the owner who
+  read the engine's words on a failed step can find the control. The control's
+  label is one constant, `HOST_COMMANDS_SWITCH`, held to Fleet's label by
+  `words.test.ts`. Rendered with `pipeline-connect-host-commands-off`
+  (`&click=Connect pipeline`) and `settings-pipelines-host-commands-off`. Fleet's
+  own per-machine "Pipeline steps" fact still reports the machine's POLICY ("Allowed
+  by this machine's policy") and is untouched; "Commands and files: Disabled"
+  stands beside it.
 - **NOTHING HERE IS A SECOND COPY OF A RUN'S STATE OR OF ITS RULES.** The
   words are `pipelines/words.ts` (the check run's own words), the bar is the
   pure `pipelines/acts.ts` (an act the engine would refuse is absent: no re-run
@@ -1728,6 +1772,16 @@ The sheet and desk widget use `AskSurface`, backed by a shared conversation
 session. History, draft, selected conversation, live voice and Activity stay
 consistent across both surfaces. `SdkAskTransport` calls the server's
 permission-scoped MemQL agent; test transports live under `test/ask`.
+
+Message actions live in each message's upper-right menu: Copy message, Copy
+details and View activity. Hover and keyboard focus use the same quiet wash as
+Fleet Details, and touch keeps the menu button visible. The header has no
+Activity action. Returning from activity restores the message's focus and the
+conversation's draft and scroll position. Events are recorded on request turns;
+a request, its acknowledgment and its result share that turn's activity. Copy
+details identifies the selected message and explicitly records that scope.
+Unrelated turns and unassociated dictation are excluded. Behavior is covered by
+`test/ask/messageInteractions.test.tsx` and `test/ask/activityPanel.test.tsx`.
 
 Quick replies stay inline. Longer requests return a durable queue receipt, free
 the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to

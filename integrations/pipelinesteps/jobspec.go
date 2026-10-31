@@ -282,6 +282,9 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			job.Metadata.Labels[queuePriorityLabel] = class
 		}
 		job.Spec.Suspend = ptr(true)
+		if cfg.RunCeiling > 0 {
+			job.Metadata.Annotations[AnnotRunCeiling] = strconv.Itoa(int(cfg.RunCeiling / time.Minute))
+		}
 		// Kueue accounts requests. Explicit container limits must be reserved,
 		// too; namespace defaults are held to the same rule by the component.
 		reserveContainerLimits(job.Spec.Template.Spec.Containers)

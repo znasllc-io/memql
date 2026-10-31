@@ -221,7 +221,7 @@ builtin shopifyConnectStatus {
 builtin shopifyStoreAppSave {
   siteId        string!  @description("The storefront deployable whose store the app belongs to.")
   clientId      string!  @description("The Shopify app's client ID, from the Dev Dashboard.")
-  clientSecret  string!  @description("The Shopify app's client secret. Read once, sealed, and discarded; never stored or echoed in the clear.")
+  clientSecret  string!  @secret @description("The Shopify app's client secret. Read once, sealed, and discarded; never stored or echoed in the clear.")
 }
 
 /// Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser
@@ -257,7 +257,7 @@ builtin shopifyConnectBegin {
 @description("Cluster owners only. Seal a pasted Storefront API token for a storefront's store and point the store at it, or, with an empty token, clear the store's Storefront token so the next Connect Shopify mints one. A token is checked with one Storefront API request first. Returns {reason, storeId, shopDomain}; reason is 'ok', a resolution refusal, store_not_connected (the store has no row yet), storefront_token_required (clearing while a live storefront is bound), storefront_token_invalid, or secret_name_ambiguous.")
 builtin shopifyStorefrontTokenSet {
   siteId  string!  @description("The storefront deployable whose store the token is for.")
-  token   string   @description("The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded.")
+  token   string   @secret @description("The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded.")
 }
 
 /// Provider readiness contains no client credentials. Registration belongs to

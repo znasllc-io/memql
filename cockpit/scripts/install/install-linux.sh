@@ -315,14 +315,18 @@ StandardError=append:${HOME}/.memql/state/worker.log
 # the token is NOT visible in 'systemctl show' output.
 EnvironmentFile=-${env_file}
 
-# Hardening directives. The headless worker doesn't need write
-# access to the system tree or other users' home dirs; tighten
-# accordingly. The computer-use build (build tag computeruse) needs a
-# more permissive ProtectHome to drive the user's desktop, but
-# the headless install path here is the default.
+# Hardening directives. Other users' home directories and the system tree stay
+# read-only, and the worker keeps no way to gain privileges. Its own home is
+# writable because the apps it drives keep their login there (~/.claude,
+# ~/.claude.json, ~/.codex), and refresh it on any call; a session's workspace
+# defaults to ~/.local/share/memql. MemoryDenyWriteExecute and RestrictNamespaces
+# are deliberately absent: the first kills Node.js, the second refuses the
+# bubblewrap sandbox a session's shell commands run in. See
+# cockpit/docs/local-apps.md. The computer-use build (build tag computeruse) drives
+# the user's desktop on top of this.
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=${HOME}/.memql
+ReadWritePaths=${HOME}
 NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictSUIDSGID=yes
@@ -330,9 +334,7 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=yes
 RestrictRealtime=yes
-RestrictNamespaces=yes
 SystemCallArchitectures=native
 
 [Install]

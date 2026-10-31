@@ -76,7 +76,7 @@ class HostBuildGuardTests(unittest.TestCase):
         self.assertEqual("keep", target.read_text())
 
     def test_interrupted_local_and_workbench_records_are_retained(self):
-        for name in ("local-build.json", "workbench-0.lock"):
+        for name in ("local-build.json", "workbench-0.lock", "inference-active.json"):
             with self.subTest(name=name):
                 path = self.root / name
                 path.write_text("unknown retained operation")
@@ -85,6 +85,120 @@ class HostBuildGuardTests(unittest.TestCase):
                         pass
                 self.assertEqual("unknown retained operation", path.read_text())
                 path.unlink()
+
+    def test_empty_or_symlinked_inference_witness_is_not_completion(self):
+        path = self.root / "inference-active.json"
+        for symlink in (False, True):
+            with self.subTest(symlink=symlink):
+                if symlink:
+                    path.symlink_to(self.root / "missing-operation")
+                else:
+                    path.touch()
+                with self.assertRaises(guard.GuardError):
+                    with guard.host_build_guard():
+                        self.fail("uncertain inference admitted a local build")
+                self.assertTrue(path.is_symlink() if symlink else path.exists())
+                path.unlink()
+
+    def write_witness(self, record, *, age_seconds=0):
+        path = self.root / "inference-active.json"
+        path.write_text(record if isinstance(record, str) else json.dumps(record))
+        if age_seconds:
+            written = time.time() - age_seconds
+            os.utime(path, (written, written))
+        return path
+
+    @staticmethod
+    def rfc3339(seconds):
+        # The Cockpit writes a fence's end as Go's RFC3339Nano, in UTC.
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(seconds)) + ".123456789Z"
+
+    def test_inference_witness_fences_builds_until_the_time_it_names(self):
+        path = self.write_witness({"version": 2, "attempt": "a" * 32, "until": self.rfc3339(time.time() + 600)})
+        with self.assertRaises(guard.GuardError) as raised:
+            with guard.host_build_guard():
+                self.fail("a build was admitted beside a model call that may still be running")
+        self.assertIn("may still be running", str(raised.exception))
+        self.assertTrue(path.exists())
+
+    def test_inference_witness_past_its_end_admits_a_build_and_is_kept(self):
+        path = self.write_witness({"version": 2, "attempt": "a" * 32, "until": self.rfc3339(time.time() - 60)})
+        with guard.host_build_guard():
+            pass
+        self.assertTrue(path.exists(), "the guard removes no record; the Cockpit's own readers do")
+
+    def test_inference_witness_with_no_time_ends_the_bound_after_it_was_written(self):
+        bound = guard.INFERENCE_FENCE_BOUND_SECONDS
+        records = (
+            ("an older Cockpit's", {"version": 1, "attempt": "a" * 32}),
+            ("empty", ""),
+            ("a partial write", '{"version": 2, "att'),
+            ("an unreadable time", {"version": 2, "attempt": "a" * 32, "until": "soon"}),
+        )
+        for name, record in records:
+            with self.subTest(record=name):
+                path = self.write_witness(record, age_seconds=bound - 60)
+                with self.assertRaises(guard.GuardError):
+                    with guard.host_build_guard():
+                        self.fail("a record that names no time admitted a build inside the bound")
+                path = self.write_witness(record, age_seconds=bound + 60)
+                with guard.host_build_guard():
+                    pass
+                path.unlink()
+
+    def test_inference_witness_end_outlasts_the_bound_for_no_time(self):
+        # The time the record names decides, even past the bound a record with no
+        # time gets: a call may name a deadline longer than 30 minutes.
+        self.write_witness({"version": 2, "attempt": "a" * 32, "until": self.rfc3339(time.time() + 600)},
+                           age_seconds=guard.INFERENCE_FENCE_BOUND_SECONDS + 60)
+        with self.assertRaises(guard.GuardError):
+            with guard.host_build_guard():
+                self.fail("a build was admitted before the end the record names")
+
+    def test_inference_witness_fences_through_the_instant_it_names(self):
+        until = self.rfc3339(time.time() + 600)
+        self.write_witness({"version": 2, "attempt": "a" * 32, "until": until})
+        end = guard.rfc3339_seconds(until)
+        with mock.patch.object(guard.time, "time", return_value=end):
+            with self.assertRaises(guard.GuardError):
+                with guard.host_build_guard():
+                    self.fail("a build was admitted at the instant the fence ends")
+        with mock.patch.object(guard.time, "time", return_value=end + 0.01):
+            with guard.host_build_guard():
+                pass
+
+    def test_a_record_too_deep_to_parse_ends_the_bound_after_it_was_written(self):
+        path = self.write_witness("[" * 4096)
+        with self.assertRaises(guard.GuardError):
+            with guard.host_build_guard():
+                self.fail("an unreadable record admitted a build inside the bound")
+        old = time.time() - guard.INFERENCE_FENCE_BOUND_SECONDS - 60
+        os.utime(path, (old, old))
+        with guard.host_build_guard():
+            pass
+
+    def test_a_directory_in_place_of_the_inference_witness_never_ends(self):
+        path = self.root / "inference-active.json"
+        path.mkdir()
+        old = time.time() - 2 * guard.INFERENCE_FENCE_BOUND_SECONDS
+        os.utime(path, (old, old))
+        with self.assertRaises(guard.GuardError):
+            with guard.host_build_guard():
+                self.fail("a record that is not a regular file admitted a build")
+        self.assertTrue(path.is_dir())
+
+    def test_inference_witness_time_is_read_as_go_writes_it(self):
+        self.assertEqual(0, guard.rfc3339_seconds("1970-01-01T00:00:00Z"))
+        self.assertEqual(-7200, guard.rfc3339_seconds("1970-01-01T00:00:00+02:00"))
+        self.assertAlmostEqual(1.5, guard.rfc3339_seconds("1970-01-01T00:00:01.5Z"))
+        self.assertAlmostEqual(1.123456789, guard.rfc3339_seconds("1970-01-01T00:00:01.123456789Z"))
+        # Go's parser also takes a comma before the fraction, and more digits.
+        self.assertAlmostEqual(1.5, guard.rfc3339_seconds("1970-01-01T00:00:01,5Z"))
+        self.assertAlmostEqual(1.1234567891, guard.rfc3339_seconds("1970-01-01T00:00:01.1234567891Z"))
+        for text in ("soon", "1970-13-01T00:00:00Z", "1970-01-01 00:00:00Z", "1970-01-01T00:00:00+25:00",
+                     "1970-01-01T00:00:00+02:60", "١970-01-01T00:00:00Z", "", None, 5):
+            with self.subTest(text=text):
+                self.assertIsNone(guard.rfc3339_seconds(text))
 
     def test_non_object_or_unknown_marker_cannot_admit_cleanup(self):
         for content in ('null', '[]', '{}', '{"kind":"unknown","token":"test"}'):

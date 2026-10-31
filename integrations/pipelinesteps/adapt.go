@@ -20,8 +20,20 @@ import (
 //
 // Every slice and map is the StepRun's own: the driver's request is not the
 // runner's to edit, nor the other way around.
+//
+// The attempt's placement (req.Placement) is copied as three plain fields, so
+// the fleet path reads one input. Which SURFACE the attempt goes to is not
+// copied: Execute decided that before there was a StepRun, and a cluster
+// forward never carries the machine fields (refusePlacement refuses them for
+// an attempt that is not going to the fleet).
 func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) StepRun {
 	env, secrets := splitEnvironment(req)
+	var pin string
+	var exclude []string
+	var maxWait int
+	if p := req.Placement; p != nil {
+		pin, exclude, maxWait = p.PinWorker, slices.Clone(p.ExcludeWorkers), p.MaxWaitSeconds
+	}
 	var services map[string]pl.Service
 	if len(req.Step.Services) > 0 {
 		services = make(map[string]pl.Service, len(req.Step.Services))
@@ -49,6 +61,7 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		Repository:      req.Repository,
 		SHA:             req.SHA,
 		Event:           req.Event,
+		HeadBranch:      req.HeadBranch,
 		InstallationID:  req.InstallationID,
 		Image:           req.Step.Image,
 		ImagePullSecret: req.Step.ImagePullSecret,
@@ -61,6 +74,9 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		TimeoutSeconds:  timeoutSeconds,
 		DeadlineCode:    deadlineCode,
 		GoTimings:       wantsGoTimings(req.Step),
+		PinWorker:       pin,
+		ExcludeWorkers:  exclude,
+		MaxWaitSeconds:  maxWait,
 	}
 }
 

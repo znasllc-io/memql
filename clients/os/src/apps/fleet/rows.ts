@@ -1,3 +1,4 @@
+import { costEstimateFrom, type CostEstimateData } from "../../kit/CostEstimate";
 import { bareShortId, rowArray, rowNumber, rowObject, rowString, versionOrder, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../kit/measure";
@@ -277,6 +278,17 @@ export interface MachineApp {
   allowed: boolean;
   /** unknown | none | present, as the app REPORTS it. Never inferred. */
   subscription: string;
+  /** What the machine last measured: ready, signed_out, out_of_usage or unknown.
+   *  Empty only for a Cockpit that predates the checks. */
+  readiness: string;
+  /** The machine's sentence for an answer that is not ready. */
+  readinessDetail: string;
+  /** When that was measured. Empty when it has not been. */
+  checkedAt: string;
+  /** When the limit behind out_of_usage resets, when the app said. */
+  resetsAt: string;
+  /** This machine's Cockpit can run a sign-in to this app. */
+  canSignIn: boolean;
   runnable: boolean;
   /** Empty when runnable; otherwise which half is missing, so a person
    *  reading the panel knows what to go and fix. */
@@ -304,9 +316,23 @@ export function appLabel(appId: string): string {
   return APP_LABELS[appId] ?? appId;
 }
 
+/** The apps this machine says it can run a sign-in for (AppDescriptor.signIn). */
+function appsThatCanSignIn(row: Row): Set<string> {
+  const out = new Set<string>();
+  for (const item of rowArray(row, "appDescriptors") ?? []) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    if (entry["signIn"] === true && typeof entry["id"] === "string") out.add(entry["id"]);
+  }
+  return out;
+}
+
+const MEASURED_READINESS = new Set(["ready", "signed_out", "out_of_usage", "unknown"]);
+
 function appsFrom(row: Row): MachineApp[] {
   const raw = rowArray(row, "apps");
   if (raw === null) return [];
+  const signIn = appsThatCanSignIn(row);
   return raw
     .map((item): MachineApp | null => {
       if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
@@ -316,7 +342,12 @@ function appsFrom(row: Row): MachineApp[] {
       const allowed = entry["allowed"] === true;
       const signedIn = entry["signedIn"] === true;
       const known = RUNNABLE_APP_IDS.has(id);
-      const runnable = known && allowed && signedIn;
+      const reported = typeof entry["readiness"] === "string" ? entry["readiness"].trim() : "";
+      // A word this build does not know reads as unknown, as the engine's does.
+      const measured = reported === "" || MEASURED_READINESS.has(reported) ? reported : "unknown";
+      // The engine's AppInfo.Runnable, mirrored so this surface agrees with selection:
+      // only ready, or no word at all from a Cockpit that predates the checks.
+      const runnable = known && allowed && signedIn && (measured === "" || measured === "ready");
       return {
         id,
         label: appLabel(id),
@@ -324,6 +355,11 @@ function appsFrom(row: Row): MachineApp[] {
         signedIn,
         allowed,
         subscription: typeof entry["subscription"] === "string" ? entry["subscription"] : "unknown",
+        readiness: measured,
+        readinessDetail: typeof entry["readinessDetail"] === "string" ? entry["readinessDetail"] : "",
+        checkedAt: typeof entry["readinessCheckedAt"] === "string" ? entry["readinessCheckedAt"] : "",
+        resetsAt: typeof entry["usageResetsAt"] === "string" ? entry["usageResetsAt"] : "",
+        canSignIn: signIn.has(id),
         runnable,
         why: runnable
           ? ""
@@ -331,7 +367,11 @@ function appsFrom(row: Row): MachineApp[] {
             ? "Not supported by MemQL"
             : !allowed
               ? "Not allowed by Cockpit"
-              : "not signed in",
+              : measured === "out_of_usage"
+                ? "out of usage"
+                : !signedIn
+                  ? "not signed in"
+                  : "could not be checked",
       };
     })
     .filter((app): app is MachineApp => app !== null)
@@ -1003,6 +1043,9 @@ export function delegationPolicyFromRow(raw: Row): DelegationPolicyRow {
  * mistake this whole reading exists to avoid (src/kit/measure.ts).
  */
 export interface AppSessionUsage {
+  apiEquivalent?: CostEstimateData;
+  servedModel?: string;
+  servedEffort?: string;
   known: boolean;
   inputTokens: Figure;
   outputTokens: Figure;
@@ -1082,6 +1125,9 @@ function usageFrom(row: Row): AppSessionUsage {
     inputTokens: known ? figureFrom(usage, "inputTokens") : absent("unmeasured"),
     outputTokens: known ? figureFrom(usage, "outputTokens") : absent("unmeasured"),
     costUSD: known ? figureFrom(usage, "costUSD") : absent("unmeasured"),
+    apiEquivalent: costEstimateFrom(usage["apiEquivalent"]),
+    servedModel: typeof usage["servedModel"] === "string" ? usage["servedModel"] : undefined,
+    servedEffort: typeof usage["servedEffort"] === "string" ? usage["servedEffort"] : undefined,
   };
 }
 

@@ -40,12 +40,31 @@ operator configuration; repository manifests cannot choose a priority class.
 Create the referenced classes before enabling it. Malformed mappings refuse
 execution, and a missing class leaves the Job suspended until repaired.
 
+A restart of the Kueue controller costs a step time and nothing else. A new step still
+creates its Job, which stays suspended until the controller returns, and a running step
+finishes.
+
 This uses [Kueue workload priority](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/),
 which is separate from Pod scheduling priority. Resource ceilings, dedicated
 pool placement and the ClusterQueue's preemption policy still apply. With
 preemption disabled, an admitted job finishes before higher-priority waiting
 work can use its resources. Each replica derives the same class from the
-serialized pipeline event; adopted Jobs keep their existing admission state.
+serialized pipeline event; adopted Jobs keep their existing admission state. A
+retried step's next attempt is a new Job and takes its class the same way, when
+it is created; the engine never changes a Job's class afterwards, so a
+controller of the installation's own that promotes waiting Jobs promotes a
+retry's Job like any other.
+
+The optional `deploy/k8s/components/pipelines-capacity` component also moves a
+waiting step forward as its run ages, because a queue admits by class first and a
+run's ceiling counts its time queued. Every five minutes a CronJob relabels each
+suspended step Job: past half its run's ceiling to `memql-pipeline-aged` (350), in
+the last quarter to `memql-pipeline-expiring` (400), and, for a run an operator named,
+to `memql-pipeline-boosted` (375). A Job only moves up, and admitted work is never
+touched. Keep the classes you map events to below 350. An operator turns it off, states
+fixed windows or names a run with a patch to that CronJob; the component's README has
+the patch. No shipping instance overlay composes this component, so a local cluster
+has no queue and needs no promoter: its steps wait for a slot before a Job exists.
 
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
@@ -61,6 +80,19 @@ executor (`integrations/pipelinesteps`), which decides where it runs:
   offers -- and only on a pipeline connected with `compute: cluster_and_fleet`
   ([Compute](pipelines.md#compute)). The agent dispatches the step to a machine
   through its worker dispatcher ([The fleet](#the-fleet)).
+- **Through the shared pool**, for explicit `placement: pool` container steps:
+  the captured installed policy prefers eligible opted-in Fleet capacity, then
+  may permit cloud fallback after a confirmed refusal before execution. Each new
+  cloud Job and isolation probe still passes live spending admission.
+
+That is where a step's first attempt goes. A step that fails for a transient
+reason is tried again within the installation's retry limits, and the driver
+names each later attempt's place: the same machine, another machine, or the
+cluster ([Retries and failover](pipelines.md#retries-and-failover)). A fleet step
+never reaches the cluster, a cluster step never a machine, and a pool step the
+cluster at most once. A lost reply or an uncertain dispatch authorizes another
+execution only for a `repeatable` step, and a failed command only when it exited
+75.
 
 Both paths give a step the same contract environment, the same secrets and the
 same effective timeout, capture its output the same way, and file its log and
@@ -434,6 +466,7 @@ Each Job and its Secret carry:
 | annotation | `memql.io/work-run` | the `v1:work:run` id |
 | annotation | `memql.io/owner-user` | the pipeline's owner |
 | annotation | `memql.io/run-deadline` | the agent's absolute run deadline in UTC; authoritative for orphan-Secret retention |
+| annotation | `memql.io/run-ceiling-minutes` | on a queued Job only: the run ceiling that deadline was measured against, which the queue's promoter scales its windows by |
 
 The Job's name is `mp-` and 24 hex, derived from the run, the step and the
 attempt; its Secret is the same name with `-env`. The runner's own annotations
@@ -451,7 +484,9 @@ kubectl logs -n memql-pipelines job/<job name> -c step --follow
 A Job lasts only until the agent holds its outcome. A Secret no Job came to own
 -- its runner went before the Job it made owned it -- is deleted by any
 replica's orphan sweep (at startup and every 10 minutes, even with no builds)
-once its Job is gone and the stamped run deadline plus the Job TTL has passed.
+once its Job is gone and the stamped run deadline plus the Job TTL has passed,
+and, for an attempt that was stopped with its Job creation unanswered, once it
+has been stopped for five minutes ([Cancel](#cancel)).
 A different workbench ceiling cannot shorten that retention. Legacy Secrets
 without a valid deadline use their creation time plus the sweeping workbench's
 run ceiling and Job TTL as a bounded fallback.
@@ -711,7 +746,7 @@ A fleet step runs on one of the pipeline owner's opted-in machines. The
 agent dispatches it through its worker dispatcher as `workerHost.pipeline_step`
 under the pipeline purpose: no agent is named, and the gates that ask about an
 agent -- per-task approval, standing scope, the classifier -- are not asked,
-because there is none. Three other things must hold instead.
+because there is none. Four other things must hold instead.
 
 1. **The pipeline's owner consented.** The pipeline was connected
    `compute: cluster_and_fleet`. A need on a `cluster` pipeline refuses the run
@@ -741,7 +776,7 @@ because there is none. Three other things must hold instead.
    capability descriptor. The router requires an explicit scope accepting the
    requested repository before dispatch. Missing scope metadata is unknown
    consent: upgrade and reconnect older workers before using them for builds.
-   It must also report `workerHost.pipeline_step` action contract **3**. An older,
+   It must also report `workerHost.pipeline_step` action contract **5**. An older,
    missing or unknown contract refuses before dispatch; operator labels cannot
    override it. Native OS/architecture comes from the binary descriptor and is
    rechecked on the receiving replica.
@@ -761,6 +796,12 @@ because there is none. Three other things must hold instead.
    fleet step is refused `pipeline_fleet_disabled`, with nothing sent. A switch
    that cannot be read refuses too, as `pipeline_executor_error`: an unread
    switch is never taken as on.
+4. **The machine's Host commands are on.** Its owner can switch **Commands and
+   files** off in the machine's Fleet settings. The router then skips the
+   machine for pipeline steps, naming the setting. A machine switched off after
+   it was picked refuses before anything is sent (`worker_feature_disabled`),
+   and the step moves on to the next machine. When this is the only thing
+   keeping a machine out, MemQL OS says so.
 
 The machine must also offer the need, as a routing label it carries. Labels
 match exactly:
@@ -777,17 +818,27 @@ match exactly:
 for an agent's call ([The routing policy](workers-runbook.md#52-the-routing-policy)),
 with one difference: a pipeline step always moves on to the next matching
 machine when one refuses before starting, whatever the policy's `fallback` says.
+A retry can be pinned to the machine the step last ran on, or exclude the
+machines it has tried; the driver decides which from the step's journal
+([Retries and failover](pipelines.md#retries-and-failover)). Both only narrow
+the machines this routing offers, so a pinned machine that no longer qualifies
+is refused for its own reason, and a pinned attempt never moves to another
+machine.
 A refusal before start ran nothing, and a machine whose stream another agent
 replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need and allows pipelines, the step is
 refused `pipeline_no_machine_for_need`, and nothing ran. An otherwise eligible
 worker that is offline can keep admission waiting for its connection; revoked
-workers, withdrawn repository consent and incompatible contracts cannot. Under contract 4, policy rejection, busy build capacity and an unavailable
+workers, withdrawn repository consent and incompatible contracts cannot. Under contract 5, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
 When the dispatcher confirms that shared build capacity was busy or fenced by
 a retained local-build record, an eligible worker is offline, or its connection
 disappeared before dispatch, the fleet runner waits and routes again under the
-run's wall-clock ceiling. Every attempt rechecks consent and routing. Waiting does not consume
+run's wall-clock ceiling, or, for a retry, within the shorter wait the driver
+gave it: the longest retry delay, or `fleetWaitSeconds` for a pool step's move
+to another machine when the cloud may follow
+([When each side gives up](#when-each-side-gives-up)). Every dispatch
+rechecks consent and routing. Waiting does not consume
 the command's own timeout, but the run ceiling still limits its remaining
 execution time. A long wait refreshes the repository clone token and keeps
 both the old and new token masked. Cancellation ends the wait promptly.
@@ -795,26 +846,42 @@ The retained local-build fence reports its operator recovery instructions while
 waiting. Neither the worker nor the engine clears that record automatically.
 Other capacity inspection failures remain refusals; waiting on this specific
 fence requires an engine and Cockpit that both recognize `pipeline_capacity_fenced`.
-Timeouts, disconnects after dispatch, uncertain cleanup and interrupted prior
-attempts do not permit another dispatch: a command might already have performed
-an external effect. Each dispatch is recorded like an agent's call, as a
+Within one attempt, timeouts, disconnects after dispatch, uncertain cleanup and
+interrupted prior attempts do not permit another dispatch: a command might
+already have performed an external effect. Only a `repeatable` step gets a later
+attempt after a disconnect (on a machine it has not tried, first) or after an
+interrupted attempt; a timeout and an uncertain cleanup are final. Each
+dispatch is recorded like an agent's call, as a
 `v1:worker:invocation` of `workerHost.pipeline_step` naming no agent, filed under
 the work run and the step.
 
 **Execution is explicit.** `execution: container` uses the exact digest-pinned
 Linux image with the declared architecture, even on a Mac. It cannot inherit
 host Docker, GPU, display or file access through a `needs` label. Use native
-execution for host tools. A container on the fleet uses `placement: fleet`,
-without host needs. Docker must answer a live daemon identity/platform probe;
+execution for host tools. A container uses dedicated `placement: fleet` or
+eligible `placement: pool`, without host needs. Docker must answer a live daemon identity/platform probe;
 architecture emulation is refused. Native execution also probes Docker when
 `needs: { docker: true }` is declared. Labels alone do not prove daemon health.
 
-The current worker admits one pipeline command per OS user across all its
-cluster connections. A durable attempt record outlives process death. A new
-worker reconciles the recorded containers and network only against the same Docker daemon;
+The worker admits one pipeline command at a time per OS user across all its
+cluster connections. Its exclusive host lock also excludes Fleet workbench
+execution, local inference and guarded local builds for that user. Inference
+retains a durable activity witness when its runtime outcome is uncertain, so a
+process exit cannot make potentially active inference appear idle. The witness
+ends at the call's own deadline (one an older Cockpit wrote, 30 minutes after it
+was written), so a cancelled call keeps the machine from steps only until then;
+until it ends the machine answers `pipeline_capacity_unavailable`: a fleet step,
+or any later attempt, moves on to another machine, and a pool step's first
+attempt waits for the fleet as it does for a busy one. These locks coordinate admission; they do not
+impose hard CPU or memory limits on native commands or coordinate another OS
+account.
+
+Pipeline attempt records also outlive process death. A replacement worker
+reconciles recorded containers and networks only against the same Docker daemon;
 unknown daemon identity, uncertain cleanup and interrupted native execution
-remain blocked for reconciliation. This reservation does not reserve agent
-work or another OS user's capacity.
+remain blocked for reconciliation. Container commands apply their declared
+CPU and memory limits after installation bounds and available host capacity are
+checked. Omitted resource values use the worker's bounded container defaults.
 
 Container steps support up to four digest-pinned services on the declared
 platform. Services share `localhost` with the command on a per-attempt bridge,
@@ -829,7 +896,8 @@ enrollments, repository hosts, architectures, images and runtime users. Pull
 request writes never enter the trusted push/release cache. Cockpit retains up
 to 10 GiB between builds, evicting oldest cache directories; this is not a hard
 disk quota while a command runs. Native steps cannot declare services or these
-managed caches. Upgrade the engine and Cockpit together for contract 4.
+managed caches. Upgrade the engine and Cockpit together for contract 5
+([below](#contract-5-switches-in-lockstep)).
 
 Artifacts use the existing authenticated worker stream, in data frames of at
 most 256 KiB before the terminal result. The receiver spools to a private file
@@ -841,8 +909,9 @@ Output logs remain separate and secret-masked. Older workers are ineligible
 until upgraded; there is no fallback to an inline archive.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
-clone script, over `https` only), the command in the machine's own environment,
-its output streamed back masked, the artifacts packed, the checkout removed --
+clone script, over `https` only), the command using its declared native or
+container execution, its output streamed back masked, the artifacts packed,
+the checkout removed --
 is the Cockpit's, and
 [Pipeline steps on this machine](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/pipelines.md)
 (`cockpit/docs/pipelines.md` in this repository) says it. On the engine's
@@ -851,14 +920,40 @@ side:
 - The agent mints the clone token (one repository, contents read). The dispatch
   carries it with the clone URL, the commit, the command, the contract
   environment, the secrets, the artifact paths and the effective timeout.
-- The pipeline's `image`, its services and its caches are the cluster's. A fleet
-  step runs its command in the machine's own environment, with no service and
-  no cluster cache.
+- A container step uses its declared image, services and worker-local scoped
+  caches. A native step uses the machine's own environment and cannot declare
+  services or managed caches. Neither shares the cluster's cache volume.
 - The dispatch's own deadline is the step's effective timeout plus 5 minutes,
   for the clone before the command and the packing after it.
 - The output becomes the step's log through the same capture a cluster step's
   goes through ([Logs](#logs)), and its artifacts are read within the same cap
   ([Artifacts](#artifacts)).
+
+### Contract 5 switches in lockstep
+
+A machine's `workerHost.pipeline_step` contract must equal the engine's. An
+engine that requires 5 refuses every contract-4 machine, and a contract-5
+Cockpit is not eligible on an engine that requires 4, so there is no window in
+which both work. Switch the engine and every opted-in machine's Cockpit
+together, behind a global hold ([Operator run admission](pipelines.md#operator-run-admission)):
+
+1. Hold new runs: `allowNewRuns: false`, with no `allowTrainRuns`. Held runs
+   stay queued, and their clocks do not start.
+2. Let the runs in flight finish. Under the engine you are replacing, the hold
+   stops only new runs, and a fleet step of a run still going when the engine
+   changes finds no eligible machine.
+3. Deploy the engine.
+4. Upgrade every machine's Cockpit.
+5. Release the hold. An allowance admits every queued run, so a hold cannot let
+   exactly one through.
+6. Watch the first run that takes a fleet step. If it fails, hold again. Under
+   the new engine a hold also stops new cloud Jobs of runs already started
+   ([Operator run admission](pipelines.md#operator-run-admission)): their
+   cluster steps wait, using up their run's ceiling, until the hold is
+   released, while their fleet steps go on.
+
+Build the contract-5 Cockpit before the window: a release pipeline whose macOS
+steps run on your machines needs them while they still match the engine.
 
 ---
 
@@ -931,6 +1026,14 @@ A step's `artifacts:` are paths or globs relative to the working copy.
   transfer. Artifact bytes never depend on the container log. The collector
   must remain alive through transfer; the Job deadline still bounds it. A
   fleet machine uses its existing packed byte transport and separate caps.
+- **The transfer sends no `Accept` header.** It is a WebSocket exec, and from
+  Kubernetes 1.36 the API server hands that upgrade to a kubelet that declares
+  `ExtendWebSocketsToKubelet` (`.status.declaredFeatures` on the node). That
+  kubelet answers HTTP 406 to any `Accept` that does not allow `*/*`. An engine
+  through 0.31.9 sends `application/json`, so on such a node its required
+  artifacts fail `pipeline_artifact_unavailable`, reading
+  `pod file transport refused: HTTP 406`. Measured on k3s; AKS's 1.36 has not
+  been measured.
 - **What is kept**: regular files under a declared path -- never a link, a
   device or a FIFO, an absolute name or a `..` -- at most 1024 files, and the
   whole archive at most `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` (64 MiB by default,
@@ -971,11 +1074,19 @@ a cluster runner may adopt an existing Job or its stored outcome, but a missing
 Job is `pipeline_execution_uncertain`, without creating a replacement or minting
 a clone token. Fleet execution currently has no durable remote receipt lookup;
 an interrupted fleet intent is also uncertain and is not dispatched again.
-Inspect the original attempt before authorizing new work.
+`pipeline_execution_uncertain` is an unknown outcome: a `repeatable` step goes
+on to a new attempt within its retry limits
+([Retries and failover](pipelines.md#retries-and-failover)), and any other step
+fails with it. Inspect the original attempt before authorizing new work. A step
+whose row shows it between two attempts needs no recovery: the new driver
+confirms the ended attempt's resources gone, then starts the next attempt once
+the row's `nextAttemptAt` has passed.
 
-The workbench action is `pipelineStepV6` and its receipt acknowledgement is
+The workbench action is `pipelineStepV11` and its receipt acknowledgement is
 `pipelineReceiptAckV3`. Older replicas reject these actions instead of ignoring
-new execution, recovery or cleanup guarantees. Upgrade the coordinated engine
+new execution, recovery or cleanup guarantees. V11 carries the saved run's
+head branch beside its event for train-aware cloud admission; command
+environment variables cannot supply it. Upgrade the coordinated engine
 set and drain old drivers before enabling the new protocol.
 
 Job retirement fences delayed creation and confirms owned resource absence.
@@ -1004,6 +1115,19 @@ A cancelled step reports `pipeline_step_cancelled`, and what it had printed is
 still archived to the Library (a cluster step's archive ends with a line saying
 it was cancelled). A cancel that arrives after a step's outcome is recorded on
 its Job changes nothing: the outcome stands.
+
+A cancel can also land while a step's Job is being created. That request cannot
+be recalled, and with its answer lost, a missing Job does not yet prove it will
+not arrive. So the attempt gets a stop marker first, which refuses every later
+creation and which a runner reads last before each create, and its cleanup is
+refused for five minutes from the marker, longer than a request that read no
+marker can stay in flight. While that lasts, the driver's cancel stays unconfirmed
+and the run stays unfinished, showing `cancelRequested`; recovery asks again, so
+the run usually concludes within about ten minutes. A Job that arrives in that
+time is deleted like any other. After it, with no Job to find, the step's Secret
+is deleted and the cancel is confirmed. The marker stays for its own retention, so
+the attempt is never created again. The same wait applies to the receipt of a
+step that failed `pipeline_execution_uncertain` because its create went unanswered.
 
 ### Cancel-on-push
 
@@ -1061,15 +1185,16 @@ Nothing about a running step lives in one process only:
   `pipeline_runner_unavailable` after 2 minutes of that; a step a replica took
   waits on, because its Job may still be running.
 - **The node under a step's pod is drained, or the pod preempted or evicted**:
-  `pipeline_node_lost`, unless the step's command had already ended.
+  `pipeline_node_lost`, unless the step's command had already ended. The outcome
+  is unknown, so only a `repeatable` step is retried.
 - **The agent replica driving the run goes away.** Another agent replica takes
   the run over once its lease is 120 seconds stale
   ([Who drives a run](pipelines.md#who-drives-a-run)) and hands the step over
   again as the same attempt, so the runner finds the same Job, running or
-  finished.
+  finished. A step its row shows between two attempts continues at the next one.
 - **The connection to a fleet machine ends before the machine reports**:
-  `pipeline_node_lost`. A fleet step that may have started is never run again
-  on another machine.
+  `pipeline_node_lost`, an unknown outcome. Only a `repeatable` step runs again,
+  on a machine it has not tried first; any other step fails.
 
 ### When each side gives up
 
@@ -1081,7 +1206,10 @@ Nothing waits forever, and each party waits longer than the one inside it:
 | The runner, settling a step that ended | 3 minutes 30 seconds in all: recording how it ended (10 s), reading the log to its end (30 s), the clone's and services' tails (20 s), the Library writes (2 min) and recording the outcome on the Job (30 s), each phase in a window of its own | a Library that does not answer costs the step its files, never the outcome recorded on the Job |
 | The agent | while the step's Job does not exist, the run's ceiling plus 4 minutes 30 seconds; once it does, the Job's creation plus the step's timeout plus 4 minutes 30 seconds, never past the run's ceiling plus 4 minutes 30 seconds. The 4 minutes 30 seconds are the runner's settling and one more minute | one last status read decides. A recorded outcome is taken; a Job still held reads as its deadline code; a Job never created (no slot came before the run's ceiling, or the request never reached a runner) reads `pipeline_run_ceiling`; a holder gone quiet, or no answer, reads `pipeline_node_lost`. Whatever it reads, the Job is deleted |
 | The seam's driver | the run's ceiling plus 10 minutes | `pipeline_run_ceiling` |
+| The driver, between a step's attempts | 8 attempts, the installation's retry limits, or a next attempt that would start with less than a second of the run's ceiling left | the step fails with its last attempt's failure, or, when that attempt only found no free machine, with the one before it |
 | A fleet dispatch | the effective timeout plus 5 minutes | by then the machine has stopped the command at the timeout, and the step failed with its deadline code |
+| A pool step's first attempt, waiting for the owner's machines | `fleetWaitSeconds` when its installation allows the cloud; without it, the run's ceiling while a machine is busy or offline, and no wait at all when no machine could take the step | with the cloud allowed, the cluster takes the step; without it, a wait that reaches the ceiling fails `pipeline_run_ceiling`, and no machine at all leaves the step to the retry order, which routes once more and then fails it |
+| A retry's wait for a busy or offline machine | the longest retry delay, at least one second, for a pinned machine and for a move to another machine; `fleetWaitSeconds`, at least one second, for a pool step's move to another machine when its installation allows the cloud and the step has not yet had its one cluster attempt | nothing ran there; after a move, no other machine is tried for the step, and the cluster follows where the policy allows it, else the step fails |
 
 ---
 
@@ -1150,8 +1278,10 @@ this order:
 A work run with model-call or observation detail, a pending approval, a recent
 child, or a child with no owner or someone else's, is kept until that clears,
 and its goal with it. Pipeline and work journals also remain while their native
-artifact receipts still own bytes or await Library cleanup. Nothing is deleted without an archive the sweep has read
-back: a cluster with no archive container (`MEMQL_WORK_ARCHIVE_CONTAINER`, else
+artifact receipts still own bytes or await Library cleanup, and while a live release
+candidate names the run in its evidence, [reused a step](release-candidates.md#reused-steps)
+from it, or the run is an attempt of its release. Nothing is deleted without an archive
+the sweep has read back: a cluster with no archive container (`MEMQL_WORK_ARCHIVE_CONTAINER`, else
 `MEMQL_AZURE_BLOB_CONTAINER`) deletes nothing.
 
 Not retired by it:
@@ -1195,7 +1325,12 @@ does not set it, and a value that is not a positive whole number is 30.
 The substrate's codes, in the seam's catalogue beside the ones
 [Pipelines](pipelines.md#refusal-codes) lists. A **failure** fails its step and
 so its stage; a **note** changes no outcome. Each reaches the step's row, its
-run's page and, for a failed step, the check run, with its sentence.
+run's page and, for a failed step, the check run, with its sentence. A failure
+first ends one attempt: whether the step is tried again depends on what the
+attempt proves, not on its code alone
+([Retries and failover](pipelines.md#retries-and-failover)), and a step tried
+more than once lists each attempt's code. The remedies below are for a step that
+failed for good.
 
 | Code | Kind | Meaning | What to do |
 |---|---|---|---|
@@ -1209,10 +1344,10 @@ run's page and, for a failed step, the check run, with its sentence.
 | `pipeline_job_unschedulable` | failure | The step's pod could not be scheduled within 10 minutes: no node had room, or the cache claim it mounts is Pending (a storage class that does not exist; on AKS, no Blob CSI driver) | Give the steps room -- a dedicated node pool, or lower requests or ceiling in the overlay -- or turn the Blob CSI driver on (`azure-provision.sh` does) |
 | `pipeline_step_disk_exceeded` | failure | The kubelet stopped the step for the disk its pod wrote: its working copy past the workspace's size limit, or the pod's or one container's files past the namespace's ephemeral-storage limit. The working copy, what the containers write anywhere in their own filesystems and their logs all count; a declared cache does not. The message quotes the kubelet's sentence | Write less, or declare a cache for what a tool keeps between runs (Go's build cache otherwise lands in the image's home directory); an operator raises the overlay's limit |
 | `pipeline_step_memory_exceeded` | failure | The kernel's out-of-memory killer stopped a process of the step's command: the step container passed its memory limit, its own `memoryMiB` or the namespace's default. The kubelet's `OOMKilled` is on the pod alone, which goes with its Job, so the message keeps it, with the exit code (137 when the command itself was killed) and the limit the pod showed | Run fewer processes at once (for Go tests, a lower `-p` or `-parallel`), or reserve more with `memoryMiB`, up to the workbench's maximum (`MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB`, 8192 by default) |
-| `pipeline_execution_uncertain` | failure | A prior intent has no recoverable Job or fleet receipt; no replacement effect is started | Reconcile the original attempt before authorizing new work |
+| `pipeline_execution_uncertain` | failure | A prior intent has no recoverable Job or fleet receipt; no replacement effect is started for it, and only a `repeatable` step goes on to a new attempt | Reconcile the original attempt before authorizing new work |
 | `pipeline_node_lost` | failure | The cluster stopped the step's pod (a drain, a preemption, an eviction) before its command ended; the pod or Job failed with nothing saying why; the Job was deleted while another replica held it; no workbench replica reported the step within its deadline and the 4 minutes 30 seconds past it; or a fleet machine's connection ended before it reported | Re-run the step |
 | `pipeline_step_cancelled` | failure | The step was cancelled: its run was cancelled or superseded, or the drive running it ended | Re-run when ready |
-| `pipeline_no_machine_for_need` | failure | No machine of the owner's that offers the need, allows pipeline steps and is online could take the step, and nothing ran; or the machine's own pipelines policy refused it | Turn on a machine that has the need and allows pipelines in its `policy.yaml` (listing the repository, when `repos` lists any), or drop the need |
+| `pipeline_no_machine_for_need` | failure | No machine of the owner's that offers the need, allows pipeline steps and is online could take the step, and nothing ran; the machine's own pipelines policy refused it; or a retry's wait for a busy or offline machine ran out | Turn on a machine that has the need and allows pipelines in its `policy.yaml` (listing the repository, when `repos` lists any), or drop the need |
 | `pipeline_fleet_disabled` | failure | The owner's computer use is switched off, so no step runs on their machines; nothing was sent | Switch computer use back on in Fleet |
 | `pipeline_artifact_too_large` | failure | The step's artifacts were over `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` or the archive's limits (on a fleet machine, the machine's own caps), and none was stored. A command that passed has its step fail; its exit code stays | Narrow the artifact paths, or raise the cap |
 | `pipeline_artifact_unavailable` | failure | Required Job artifacts could not be completely collected, verified or stored with matching durable receipts | Inspect the step's collection or storage failure, resolve it, then re-run |
@@ -1251,7 +1386,7 @@ coverage; packaging their binaries does not exercise those hosts.
 
 | Stage | Steps | Runs on |
 |---|---|---|
-| `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
+| `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e` (compiles the cluster suite and runs the subtests of `TestPipelinesSubstrate` that read no cluster), `module-boundaries` and `bash32-smoke` | every run |
 | `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities`; on a release they record findings without failing | every event, after a failure too |
 | `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
@@ -1263,7 +1398,9 @@ coverage; packaging their binaries does not exercise those hosts.
 | `build-tools` | Unpublished toolchain OCI archive and digest metadata | releases |
 | `images` | Unpublished OCI archives and digest metadata for all seven engine node types | releases |
 
-No step names a fleet need, so this pipeline connects with `compute: cluster`.
+The manifest includes dedicated native Fleet checks, so its connection must
+permit `compute: cluster_and_fleet`. Pool placement is a separate opt-in after
+the engine capability is deployed; adding consent alone does not reroute cluster steps.
 The daily schedule runs the stages that opt into it; the history and CodeQL
 stages declare a weekly cadence. A release retains ordinary tests and dependency
 vulnerability checks without repeating those weekly scans. PR, merge-group and
@@ -1427,11 +1564,19 @@ Each of these is understood, and accepted for this release.
   are held to recorded fixtures, and the fleet's dispatcher is a stand-in with no
   machine. It does not cover the deployed agent and workbench wiring -- the
   app's adapter, the node mesh's streams, the dispatcher -- which unit and
-  in-process hop tests cover. The isolated lifecycle fixtures run weekly and
-  on demand, while affected PRs retain the no-cluster installer smoke. A change
-  to substrate code alone does not run the full lifecycle. Live qualification uses real native
-  pipeline runs and retained GitHub check receipts; the unused Actions
-  placeholder has been removed.
+  in-process hop tests cover. The subtests that read no cluster, the fork's
+  refused opening and its check run among them, also run on every pull request:
+  `checks.build-clustere2e` runs the test with no cluster named, so it runs those
+  and then skips. The rest runs only on the leg. The isolated lifecycle fixtures
+  run weekly and on demand, while affected PRs retain the no-cluster installer
+  smoke. A change to substrate code alone does not run the full lifecycle. Live
+  qualification uses real native pipeline runs and retained GitHub check
+  receipts; the unused Actions placeholder has been removed.
+- **That leg's Kubernetes is the local pin, 1.32.** So it never meets what a
+  newer cluster changes, such as the kubelet-proxied exec of
+  [Artifacts](#artifacts). `TestPodFileExecDialPassesAServerRefusingJSON` holds
+  the one header that path refused, against a fake. The whole read was proved by
+  hand on k3s v1.36.4 (2026-10-30), not by a lane.
 - **Per-workbench readiness has not yet been verified in an installed release.**
   Settings -> Pipelines separates step-dispatcher installation from reports for
   each known workbench. The report path asks each replica for its own runner
@@ -1440,10 +1585,24 @@ Each of these is understood, and accepted for this release.
   dispatcher presence does not establish that cluster steps can run. Reading
   the page does not run an isolation probe: a step proves isolation before it
   starts, or again after its prior proof expires.
-- **A step can run twice after an agent replica loses a run's lease mid-step.**
-  The old replica may take the step's outcome and have its Job deleted before the
-  new driver hands the same attempt over again, which then finds no Job and
-  starts a fresh one. The answer is the second run's; the cost is a runner.
+- **A repeatable step can run twice after an agent replica loses a run's lease
+  mid-step.** When the step's Job is gone by the time the new driver hands the
+  same attempt over again, nothing says how it ended: a `repeatable` step starts
+  its next attempt, and any other fails `pipeline_execution_uncertain`. The
+  answer is the second run's; the cost is a runner.
+- **A repeatable cluster step's earlier attempt may have run in part.** The
+  runner reports a pull, service or scheduling failure while the step's Job is
+  still alive, and the cluster can still start the command until the Job is
+  deleted. The driver confirms the Job gone before the next attempt, so two
+  attempts never run at once.
+- **A machine that needs recovery fails a step that is not repeatable.** The
+  Cockpit answers `pipeline_recovery_required` before a command and after one,
+  so the outcome is unknown: that machine is not tried again for the step, a
+  `repeatable` step moves to another machine, and any other step fails.
+- **An unknown outcome on the only eligible machine cannot fail over.** A macOS
+  step with one Mac allowing pipelines fails as it does without retries.
+- **A step waiting between attempts keeps its stage's slot**, and each machine
+  still runs one pipeline step at a time.
 - **The cloud cache on Azure Blob NFS is unmeasured.** Two things are untested
   (memql#5813):
   - cache-prep, which runs as root with every capability dropped, creates the

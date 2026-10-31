@@ -11,7 +11,29 @@ Pods or Jobs in other namespaces. There is no eviction/requeue timeout and no
 preemption. An admitted command must not be replayed to improve utilization.
 Server-side apply is required for the large CRDs.
 
+A controller outage costs a step time and nothing else. The two hooks on Jobs fail
+open, so a new step still creates its Job, which stays suspended until the controller
+returns, and a running step finishes. The image is pinned by digest and started
+`IfNotPresent`, so the controller restarts with no registry. To prove it against the
+real runner on a disposable cluster, with no Argo CD self-heal on this operator,
+because the test scales the controller to zero:
+
+```bash
+MEMQL_CAPACITY_TEST_CONTEXT=k3d-<cluster> MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT=k3d-<cluster> go test -count=1 -run TestNewStepsWaitThroughAControllerOutage ./integrations/pipelinesteps/
+```
+
 Install and verify this operator before enabling
 `../k8s/components/pipelines-capacity`. Removing it while that component is
 active leaves new work suspended. Its Application deliberately does not prune
 CRDs: deleting a CRD deletes its queue and workload records.
+
+That component's promoter (`memql pipeline-deadline-priority`) stands on a behaviour
+of this controller: a workload that has not reserved quota is re-prioritized when its
+Job's priority-class label changes, a Job that started with no class included. Before
+moving the pin, run the opt-in proofs against a disposable k3d cluster with this
+operator installed, a node labelled and tainted `memql.io/pipeline-pool=builds`, and
+`memql-workbench:local` imported:
+
+```bash
+MEMQL_CAPACITY_TEST_CONTEXT=k3d-<cluster> go test -count=1 ./deploy/kueue/install/
+```

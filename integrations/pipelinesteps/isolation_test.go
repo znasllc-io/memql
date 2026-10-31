@@ -888,7 +888,7 @@ func TestIsolationProofIsSharedByConcurrentCreates(t *testing.T) {
 	rtWaitUntil(t, "three steps waiting on one proof", func() bool {
 		h.r.isoMu.Lock()
 		defer h.r.isoMu.Unlock()
-		return h.r.isoProof != nil && h.r.isoProof.waiters == 3
+		return h.r.isoProof != nil && len(h.r.isoProof.waiters) == 3
 	})
 	h.c.with(func(*rtCluster) { held = false })
 
@@ -984,7 +984,7 @@ func TestIsolationProofStartsNothingForAStepNoLongerWaiting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	v, err := h.r.proveIsolation(ctx)
+	v, err := h.r.proveIsolation(ctx, false)
 
 	if !errors.Is(err, context.Canceled) || v != (IsolationVerdict{}) {
 		t.Errorf("= %+v, %v; want no verdict and the step's own error", v, err)
@@ -1218,7 +1218,7 @@ func TestIsolationProofAbandonedAsAStepJoinsIsProvedAgain(t *testing.T) {
 	rtWaitUntil(t, "the second step joining the stopped proof", func() bool {
 		h.r.isoMu.Lock()
 		defer h.r.isoMu.Unlock()
-		return h.r.isoProof == stopped && stopped.waiters == 1
+		return h.r.isoProof == stopped && len(stopped.waiters) == 1
 	})
 	h.c.with(func(c *rtCluster) {
 		c.quotaJobs = nil
@@ -1279,7 +1279,7 @@ func TestAdoptionNeverWaitsOnTheProof(t *testing.T) {
 		rtWaitUntil(t, "a proof in flight", func() bool {
 			h.r.isoMu.Lock()
 			defer h.r.isoMu.Unlock()
-			return h.r.isoProof != nil && h.r.isoProof.waiters == 1
+			return h.r.isoProof != nil && len(h.r.isoProof.waiters) == 1
 		})
 
 		res := h.run(t, adopted(h, t))
@@ -1368,7 +1368,7 @@ func TestIsolationCleanupDeadlineRefusesLingeringResources(t *testing.T) {
 func TestIsolationProbeRefusesToReuseUnconfirmedCleanup(t *testing.T) {
 	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
 	h.c.with(func(c *rtCluster) { c.podsAnswer = &rtUnavailable })
-	verdict, decided := h.r.probeIsolation(context.Background())
+	verdict, decided := h.r.probeIsolation(context.Background(), nil)
 	if !decided || !verdict.Inconclusive || verdict.Isolated || !strings.Contains(verdict.Detail, "cleanup remains unconfirmed") {
 		t.Fatalf("unreadable cleanup was trusted: %+v, decided=%v", verdict, decided)
 	}

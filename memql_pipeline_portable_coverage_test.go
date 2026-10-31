@@ -108,6 +108,10 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 		assertCommand("build-clustere2e", "go vet -tags "+tag+" ./test/clustere2e/")
 		assertCommand("build-clustere2e", "go test -tags "+tag+" -c -o /dev/null ./test/clustere2e/")
 	}
+	// The one run of the package on a pull request: no context named, so the
+	// subtests that read no cluster and then a skip. scripts/citags holds which
+	// subtests those are; this holds that something runs them.
+	assertCommand("build-clustere2e", "go test -tags clustere2e,agent -count=1 -run '^TestPipelinesSubstrate$' ./test/clustere2e/")
 	assertCommand("build-clustere2e", "export GOWORK=off")
 	assertCommand("module-boundaries", "bash scripts/ci/module-integrity.sh")
 	bashStep, found := engineDeclaredStep(spec, "bash32-smoke")

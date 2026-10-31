@@ -831,7 +831,9 @@ the `mcp.<domain>` endpoint.
 - **The runnable app set is CLOSED in the engine** (`claude-code`, `codex`);
   unknown ids are stored on the registration and produce no routing label.
 - **A machine is selectable only when BOTH `allowed`** (its `policy.yaml
-  apps.allow`) **and `signedIn`.** Selection is the Fleet router asked for the
+  apps.allow`) **and `signedIn`, and measured `ready`.** Cockpit checks on a
+  schedule; only a Cockpit that predates the checks, which sends no word at all,
+  stays selectable unmeasured. Selection is the Fleet router asked for the
   `app:<id>` label. A session runs only on the replica holding that machine's
   stream; a machine on a sibling replica is SKIPPED, not failed.
 - **A run is a SESSION, not a dispatch.** `AppSessionStart / Chunk / Control /
@@ -839,6 +841,9 @@ the `mcp.<domain>` endpoint.
   duplicate chunks are DROPPED.
 - **Delegation is a PREFERENCE WITH A FALLBACK** (`v1:worker:delegationPolicy`):
   no allowed, signed-in, online machine means the task runs in-process.
+- **An app that stops partway hands over; nothing else moves work that was done**
+  (`component/memql/app_takeover.go`). On the machine's `stop_reason` and a complete
+  journal, the next ready app carries on with the record of what ran.
 - **The back-channel credential's `sub` is the OWNING USER's id**, so row authz
   applies to the app as to their browser; the surface pin plus `role=system`
   keep it off every credential mutation and cluster-owner gate. Minted via

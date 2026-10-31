@@ -15,6 +15,8 @@ import (
 type candidateRunPlan struct {
 	Mode     string
 	Receipts []pl.ReleaseWorkReceipt
+	// ReusedFrom is filled by assembly alone (reusedProvenance), by step key.
+	ReusedFrom map[string]*pl.ReleaseReusedFrom
 }
 
 type candidateSkippedStep struct {
@@ -25,6 +27,9 @@ type candidateSkippedStep struct {
 	// CarriedFrom is present only on a pipeline_passed_earlier skip whose
 	// executing receipt was proven natively (candidate_carried.go).
 	CarriedFrom *candidateCarriedFrom `json:"carriedFrom,omitempty"`
+	// ReusedFrom is present only on a pipeline_passed_earlier skip that stands on
+	// another run's receipt on the same tree (candidate_reused.go).
+	ReusedFrom *pl.ReleaseReusedFrom `json:"reusedFrom,omitempty"`
 }
 
 type candidateCoverage struct {
@@ -36,6 +41,8 @@ type candidateCoverage struct {
 // fingerprint. Missing steps cannot disappear from release review, and a
 // successful aggregate alone cannot stand in for individual execution receipts.
 // Which run modes qualify for a release is decided by the installed DSL.
+// Retention keeps every run a live candidate's evidence names, whatever its event
+// (retentionHeldBackSQL, integrations/work), so these rows are here on every read.
 func (r candidateEvidenceReader) completeRun(ctx context.Context, runID string) (candidateRunPlan, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
@@ -129,6 +136,7 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 	if _, _, err := pl.CanonicalReleaseCandidate(c); err != nil {
 		return out, err
 	}
+	r = r.forOnePass()
 	type source struct{ component, run string }
 	selected := map[source]map[string]pl.ReleaseEvidence{}
 	for _, e := range c.Evidence {
@@ -154,19 +162,28 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 			if !ok || e.ReceiptID != receipt.ReceiptID || e.ReceiptDigest != receipt.ReceiptDigest {
 				return out, errors.New("candidate changed its complete run evidence")
 			}
+			var reusedFrom *pl.ReleaseReusedFrom
 			if receipt.Status == "skipped" {
 				skipped := candidateSkippedStep{Component: key.component, WorkRunID: key.run, StepKey: receipt.StepKey, Code: receipt.SkipCode}
-				// A failed-only release re-run carries passes from earlier
-				// attempts. Each one is proven against the attempt that
-				// executed it, or the candidate is refused here, naming it.
+				// A failed-only release re-run carries passes from earlier attempts,
+				// and a release reuses them from the run that tested its tree. Each
+				// one is proven against the receipt that was actually executed, or
+				// the candidate is refused here, naming it.
 				if receipt.SkipCode == pl.CodePassedEarlier {
-					from, err := r.carriedFrom(ctx, owner, key.run, receipt)
+					proof, err := r.passedEarlier(ctx, owner, key.run, receipt)
 					if err != nil {
 						return out, fmt.Errorf("carried step %s: %w", receipt.StepKey, err)
 					}
-					skipped.CarriedFrom = &from
+					skipped.CarriedFrom, skipped.ReusedFrom = proof.CarriedFrom, proof.ReusedFrom
+					reusedFrom = proof.ReusedFrom
 				}
 				out.Skipped = append(out.Skipped, skipped)
+			}
+			// The candidate's record of a reuse is what the journal proves. Coverage
+			// runs on every read, so a record that is missing, changed or invented is
+			// refused at preparation, publication and overlay alike.
+			if !sameReusedFrom(e.ReusedFrom, reusedFrom) {
+				return out, fmt.Errorf("carried step %s: the candidate does not record where its receipt came from", receipt.StepKey)
 			}
 		}
 		if !slices.Contains(out.Modes, plan.Mode) {
@@ -184,5 +201,38 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 	slices.SortFunc(out.Skipped, func(a, b candidateSkippedStep) int {
 		return strings.Compare(a.Component+"/"+a.WorkRunID+"/"+a.StepKey, b.Component+"/"+b.WorkRunID+"/"+b.StepKey)
 	})
+	return out, nil
+}
+
+func sameReusedFrom(a, b *pl.ReleaseReusedFrom) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// reusedProvenance is the provenance of each step a complete run reused, by step
+// key: what assembly writes into a candidate. It proves every skip the way coverage
+// will, so an unproven reuse refuses assembly, naming the step, before any artifact
+// is read.
+func (r candidateEvidenceReader) reusedProvenance(ctx context.Context, runID string, plan candidateRunPlan) (map[string]*pl.ReleaseReusedFrom, error) {
+	owner, err := candidateOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r = r.forOnePass()
+	out := map[string]*pl.ReleaseReusedFrom{}
+	for _, receipt := range plan.Receipts {
+		if receipt.Status != "skipped" || receipt.SkipCode != pl.CodePassedEarlier {
+			continue
+		}
+		proof, err := r.passedEarlier(ctx, owner, runID, receipt)
+		if err != nil {
+			return nil, fmt.Errorf("carried step %s: %w", receipt.StepKey, err)
+		}
+		if proof.ReusedFrom != nil {
+			out[receipt.StepKey] = proof.ReusedFrom
+		}
+	}
 	return out, nil
 }

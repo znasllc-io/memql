@@ -82,25 +82,127 @@ func retentionShare(left time.Duration, policies int) time.Duration {
 // appear orphaned and permits retirement while that parent is still running.
 const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" parent WHERE parent.concept='v1:work:run' AND parent.id=n.payload->>'runId' AND COALESCE(parent.payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned') AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerParent WHERE newerParent.concept=parent.concept AND newerParent.id=parent.id AND newerParent."createdAt">parent."createdAt"))`
 
+// Three things keep a finished pipeline run past its window, and all are read
+// without presentation gates: hiding a staged row must not let what it authorizes
+// disappear.
+//
 // Artifact cleanup authorizes each provider effect through these journals.
 // Preserve that authority until all bytes and Library presentations are retired,
 // including files pinned by publications or deliberately retained by their owner.
-// The native journal is read without presentation gates: hiding a staged file
-// must not allow its producing authority to disappear.
-func retentionArtifactsSettledSQL(concept string) string {
-	var work string
+//
+// A LIVE CANDIDATE HOLDS EVERY RUN IT NAMES: the run of each evidence entry, and the run
+// a reused step stood on. Coverage reads the first whole (completeRun, integrations/release)
+// and proves each reused step against the second (pipelines.ProveReusedStep), on every read,
+// at publication and whenever an overlay is built from the candidate, however long after.
+// A release's own rows stay while its artifacts are pinned, but the pull request it stood
+// on has no artifact to keep it, and neither does a separate check suite on a push, which a
+// component's runs may include because they need only share its repository and commit. So
+// without this hold the candidate would become unprovable a month after it was cut, and its
+// next overlay would be refused. A retired candidate is read no more. An archived one gave
+// up its build inputs, so its own run's rows leave on their usual window and holding its
+// sources past them would keep nothing provable. Neither holds anything. A candidate names a
+// work run bare: coverage compares that name with a bare row id, so no other spelling passes
+// it. Every manifest already names its runs, so a candidate saved before this hold is held
+// from the next pass, and rolling back refuses nothing: an older engine just stops holding.
+// Rows already gone stay gone, and the proof goes on refusing that candidate.
+//
+// Rejected: dropping the event test from the attempts' hold below. It is less SQL and costs
+// 1 to 5 ms less a statement, and it would keep every named run, because verification requires
+// one to be at its component's repository and commit. But it also keeps every other run at
+// that commit, none of which coverage reads: a push of it, a pull request on it and its
+// scheduled scans, each with all its steps, for as long as the candidate is live, which can be
+// for good. It would also read the components for a statement over no release row.
+//
+// TestRetentionKeepsEveryRunALiveCandidateNames holds which rows it keeps, and
+// TestACheckSuiteACandidateNamesStaysProvablePastRetention runs a real pass and then the real
+// proof over what it left.
+//
+// A LIVE CANDIDATE HOLDS ITS RELEASE'S ATTEMPTS. A candidate from a failed-only re-run
+// names one attempt, and coverage walks back through every earlier one on every read
+// (carriedChain and passedEarlier, integrations/release): each attempt's run row and,
+// where it opened work, its work run and steps. Only the named attempt has a pinned
+// artifact, so without this hold the others leave on their window and the candidate's
+// next overlay is refused. It keeps every release run at the repository and commit of a
+// component the candidate names, because that is the identity every link of the chain
+// must share (sameRelease) and what pipelines.RunKey is built from. Coverage's verify
+// compares a manifest's pair with the named attempt's journal exactly, so the spellings
+// agree. A row's event narrows it to a release's: nothing else can be in a chain.
+//
+// It reads only what every saved manifest already has, so a candidate saved before this
+// hold is held from the next pass, and rolling back refuses nothing: an older engine just
+// stops holding. Rows already gone stay gone, and the proof goes on refusing that
+// candidate. It over-reaches only to another pipeline's release of the same commit, which
+// keeps a few more rows. Rejected:
+//   - Listing the attempts in the manifest. That changes a new candidate's identity,
+//     cannot help a saved one, makes an older engine refuse it, and is one more claim
+//     coverage would have to prove.
+//   - Holding by the attempts' shared goal. Only a work run's row names the goal, so the
+//     hold would end with the named attempt's row; it would miss an attempt refused before
+//     it opened work, whose row the chain still reads; and it would split if the pipeline
+//     were renamed between attempts, since the goal's id is derived from the name.
+//
+// TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease holds which rows it keeps, and
+// TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention runs a real pass and then
+// the real proof over what it left.
+//
+// BOTH CANDIDATE HOLDS ARE UNCORRELATED NOT INS, ON PURPOSE. Postgres reads the candidates
+// once per statement and probes a hash for each row. An EXISTS per row would detoast
+// every live manifest once per version, and an index does not help: the heap is a
+// few pages, so the planner keeps its sequential scan. Measured over 5,000 versions
+// and 150 candidates of 33 KB, that EXISTS took 13 s against this statement's 8 s
+// timeout, and a cancelled delete repeats on the same page every night, which is
+// the stall retentionRunBudget's note describes. This form took under 10 ms.
+// TestRetentionHoldReadsTheCandidatesOncePerStatement holds it. Measured for the attempts'
+// hold on a hypertable of 30,000 versions in 8 chunks, 150 candidates of 43 KB and every
+// row a release's, the worst case: it reads the manifests once, in about 4 ms, taking a
+// page read from p50 30-34 ms to 34-38 ms and a guarded delete from 19-21 ms to 24-26 ms.
+// Holding by goal, measured beside it, took 45 ms and 33 ms, since it reads the journal too.
+//
+// A LIST STAYS HASHED ONLY WHILE THE PLANNER EXPECTS IT TO FIT IN hash_mem, and unhashed it is
+// still read once, so every row walks all of it. These stay hashed because
+// jsonb_typeof(...)='array' has the default selectivity of 0.5%, so the planner expects that
+// share of the candidates: a list passes hash_mem only past 250,000 of them at a work_mem of
+// 8 MB. A jsonb_path_query form needs no such test and is expected to return 1,000 rows a
+// candidate. It was hashed at 150 candidates and not at 1,000, where a page read took over
+// 10 s. The same test holds this: it fails on a list the planner did not hash.
+//
+// NAMING THE RUNS IS ONE ARRAY PER EVIDENCE ENTRY, in the read the reused sources already
+// took, so the manifests are read no more often. Measured on a hypertable of 60,000 versions
+// in 9 chunks with every row a release's, page read then guarded delete, p50, before and after:
+//   - 150 candidates of 120 entries (66 KB of JSON, 29 KB stored): 30.5 and 25.8 ms, then 34.0
+//     and 29.7 ms. With no row a release's it adds about the same.
+//   - 1,000 such candidates: 71 and 68 ms, then 98 and 94 ms.
+//   - 150 candidates of 1,024 entries, the most a manifest may hold: 113 and 103 ms, then 149
+//     and 145 ms.
+//
+// The inner query is there because a set-returning function cannot be filtered at its own
+// level. LATERAL (VALUES ...) reads more plainly and needs none, and costs far more at scale:
+// the planner puts a Memoize over it keyed on each entry, which never hits (0 of 120,000) and
+// fills hash_mem. At 1,000 candidates it took 240 and 236 ms.
+//
+// COALESCE because a run refused before it opened any work names none, and NULL NOT IN a
+// list that is not empty keeps that run forever. The list drops a blank name as well as a
+// NULL, because a blank would match that same run. The attempts' hold coalesces and filters
+// for the same reason, and sits behind the event test, so a statement over no release row
+// never reads the manifests for it.
+func retentionHeldBackSQL(concept string) string {
+	var work, source string
 	switch concept {
 	case runConcept:
-		work = `n.id`
+		work, source = `n.id`, `n.payload->'input'`
 	case pipelinesRunConcept:
-		work = `n.payload->>'workRunId'`
+		work, source = `n.payload->>'workRunId'`, `n.payload`
 	default:
 		return "TRUE"
 	}
 	return `NOT EXISTS (SELECT 1 FROM pipeline_artifact_uploads a WHERE
  a.owner_user_id=regexp_replace(n.payload->>'ownerUserId','^v1:identity:user:','')
  AND a.identity->>'WorkRunID'=regexp_replace(` + work + `,'^v1:work:run:','')
- AND (a.state<>'retired' OR a.library_purged_at IS NULL))`
+ AND (a.state<>'retired' OR a.library_purged_at IS NULL))
+ AND COALESCE(regexp_replace(` + work + `,'^v1:work:run:',''),'') NOT IN (SELECT named.run FROM (SELECT unnest(ARRAY[e->>'workRunId',e->'reusedFrom'->>'workRunId']) AS run FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'evidence') e
+ WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'evidence')='array') named WHERE named.run<>'')
+ AND (COALESCE(` + source + `->>'event','')<>'` + string(pipelines.EventRelease) + `' OR (COALESCE(` + source + `->>'repository',''),COALESCE(` + source + `->>'sha','')) NOT IN (SELECT k->>'repository',k->>'commit' FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'components') k
+ WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'components')='array' AND k->>'repository' IS NOT NULL AND k->>'commit' IS NOT NULL))`
 }
 
 // This is a closed list of operational records, never a default lifetime for
@@ -550,7 +652,7 @@ func retentionCandidateRead(p operationalPolicy, cutoff, lo, hi time.Time, after
 	}
 	inner := `SELECT n.id,n.concept,n."createdAt",n.payload FROM "MemoryNodes" n WHERE n.concept=? AND n."createdAt" >= ? AND n."createdAt" < ?` + paging + ` AND (` + p.predicate + `) ORDER BY n."createdAt",n.id`
 
-	probes := retentionArtifactsSettledSQL(p.concept) + " AND "
+	probes := retentionHeldBackSQL(p.concept) + " AND "
 	if p.concept == runConcept {
 		// Apply child eligibility before LIMIT as well as after loading: a
 		// large population awaiting longer detail retention cannot starve
@@ -826,7 +928,7 @@ func retirementDelete(concept string, withChildren bool, parentIDs []string, raw
 	// ANY logical row advanced since the archive snapshot.
 	guard := ` AND NOT EXISTS (SELECT 1 FROM keys k JOIN "MemoryNodes" n ON n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at WHERE NOT (` + retentionInactiveParentSQL + `))`
 	if concept == runConcept || concept == pipelinesRunConcept {
-		guard += ` AND NOT EXISTS (SELECT 1 FROM keys k JOIN "MemoryNodes" n ON n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at WHERE n.concept='` + concept + `' AND NOT (` + retentionArtifactsSettledSQL(concept) + `))`
+		guard += ` AND NOT EXISTS (SELECT 1 FROM keys k JOIN "MemoryNodes" n ON n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at WHERE n.concept='` + concept + `' AND NOT (` + retentionHeldBackSQL(concept) + `))`
 	}
 	params := []any{rawKeys}
 	if withChildren {

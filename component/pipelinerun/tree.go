@@ -60,6 +60,42 @@ func keepForRun(p string) bool {
 	return true
 }
 
+// readTreeHash reads the git tree of the run's commit and keeps it on the run row
+// and, through openWork, in its work input. The row is how a release finds this
+// run (evidence.go); the work input enters every receipt's digest, so a receipt
+// commits to the tree it tested. It runs once, before the plan: a run that
+// already names its work keeps the input it began with, and a hash read later
+// would claim a fact its receipts do not hold.
+//
+// A READ THAT FAILS DOES NOT FAIL THE RUN. It costs the run its reuse across
+// commits and nothing else: the run neither offers nor takes it, so a release
+// with no tree executes every step. Failing a pull request's checks because an
+// optional read went wrong would be the worse failure. It answers false only when
+// the drive must stop: a write the lease no longer allows.
+func (dr *runDriver) readTreeHash(ctx context.Context) bool {
+	if dr.run.TreeHash != "" || strings.TrimSpace(dr.run.WorkRunID) != "" {
+		return true
+	}
+	treeCtx, treeDone := dr.stoppable(ctx, githubCallTimeout)
+	tree, err := dr.d.GitHub.CommitTree(treeCtx, dr.token, dr.p.Repository, dr.run.SHA)
+	treeDone()
+	if err == nil && !pipelines.ValidTreeHash(tree) {
+		err = errors.New("the answer is not a whole tree hash")
+	}
+	if err != nil {
+		// Asked to stop while it read: the plan's read answers that, next.
+		if !dr.lease.isLost() && !dr.lease.isCancelled() {
+			dr.log.Info("pipelines: the commit's tree could not be read, so this run neither offers nor takes reuse across commits", "error", dr.mask(err.Error()))
+		}
+		return true
+	}
+	if err := dr.writeRun(ctx, RunPatch{TreeHash: ptr(tree)}); err != nil {
+		dr.abort("recording the run's tree", err)
+		return false
+	}
+	return true
+}
+
 // readPlan reads the tree at the run's commit and compiles its pipeline block
 // into the plan this run executes, or answers the refusal that fails the run.
 func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.Refusal) {
@@ -187,7 +223,43 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		}
 		in.BucketSelection = &buckets
 	}
-	return pipelines.Compile(spec, in)
+	plan, refusal := pipelines.Compile(spec, in)
+	if refusal != nil {
+		return plan, refusal
+	}
+	// The installed compute policy, read once per drive whenever the plan has a
+	// command step. It used to be read for a pool step alone, because only the
+	// capacity half of it mattered and only to a pool step; its retry limits apply
+	// to EVERY command step (spec D6), so any command step asks for it.
+	//
+	// A command step that is skipped asks too, on purpose. A replica that takes
+	// the run over compiles the plan again, and a moving input (a changed-files
+	// compare that fails the second time and so selects everything) can skip a
+	// different set of steps. The policy is bound into every command step's
+	// recovery definition (definitionOf), and a resumed run whose definitions
+	// disagree is refused, so whether the policy is read must follow the plan's
+	// step kinds, which do not move, and not its skips, which can. Steps the
+	// driver delivers itself (a notification, a report, a repository change)
+	// reach no executor and read no policy.
+	//
+	// The cost of asking is that a policy that cannot be read
+	// (parseComputePlacement) now refuses every run with a command step, before a
+	// work run or an effect exists, instead of only a run with a pool step. It is
+	// the failure an installation already gets for a bad pool policy, and the
+	// refusal names the field. TestEveryRunGetsAPolicyEvenWithoutPoolSteps pins
+	// the read, the refusal and the skipped case.
+	for _, step := range plan.Steps() {
+		if step.Kind != pipelines.StepCommand {
+			continue
+		}
+		placement, err := dr.selectComputePlacement(ctx)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "computePlacement", "The installed pipeline compute policy could not be read: %v", err)
+		}
+		dr.computePlacement = placement
+		break
+	}
+	return plan, nil
 }
 
 // changes is what this run changed: GitHub's compare of its base with its

@@ -548,7 +548,7 @@ func (r routeReadiness) unreadyReason(sources []string, job string) string {
 	}
 	switch {
 	case allApps:
-		return "No signed-in app on your machines"
+		return "No app is ready on your machines"
 	case allFleet:
 		return "No local model reachable"
 	case allVendors:

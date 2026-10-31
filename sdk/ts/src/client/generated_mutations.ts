@@ -4974,6 +4974,11 @@ export interface RecordRouterCallArgs {
   vendor: string;
   model: string;
   providerName: string;
+  /** Dated API-equivalent estimate with source, cache/context assumptions and freshness. */
+  apiEquivalent?: Record<string, unknown>;
+  electricityEstimate?: Record<string, unknown>;
+  /** Independent billing evidence; zero subscription cost is not free work. */
+  actualBilling?: Record<string, unknown>;
   inputTokens?: number;
   outputTokens?: number;
   cachedInputTokens?: number;
@@ -5039,6 +5044,9 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   parts.push("vendor: " + renderMemQLValue(args.vendor));
   parts.push("model: " + renderMemQLValue(args.model));
   parts.push("providerName: " + renderMemQLValue(args.providerName));
+  if (args.apiEquivalent !== undefined) parts.push("apiEquivalent: " + renderMemQLValue(args.apiEquivalent));
+  if (args.electricityEstimate !== undefined) parts.push("electricityEstimate: " + renderMemQLValue(args.electricityEstimate));
+  if (args.actualBilling !== undefined) parts.push("actualBilling: " + renderMemQLValue(args.actualBilling));
   if (args.inputTokens !== undefined) parts.push("inputTokens: " + renderMemQLValue(args.inputTokens));
   if (args.outputTokens !== undefined) parts.push("outputTokens: " + renderMemQLValue(args.outputTokens));
   if (args.cachedInputTokens !== undefined) parts.push("cachedInputTokens: " + renderMemQLValue(args.cachedInputTokens));

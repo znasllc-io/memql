@@ -201,6 +201,10 @@ type TurnResult struct {
 	// when --effort was passed -- which is also the answer for an app that
 	// ignored the effort it was given.
 	Effort string
+	// Readiness is what this turn says about the app's login and plan, or nil
+	// when it says nothing. A real turn is the best check there is, so it stands
+	// in for a ping (readiness.go).
+	Readiness *ReadinessSignal
 }
 
 // Spec is everything a harness needs to run a session's turns.

@@ -29,10 +29,6 @@ import (
 // PATH, the platform's terminal is resolved, and a display is confirmed
 // where one is needed. Each of those failures names itself.
 
-// openSessionExitFile is where the launcher records the app's own exit
-// code, inside the session scaffolding so it is cleaned up with it.
-const openSessionExitFile = ".memql-session/open-exit"
-
 // openWatchInterval is how often the exit file is checked while the
 // launcher runs.
 const openWatchInterval = 250 * time.Millisecond
@@ -42,7 +38,7 @@ const openWatchInterval = 250 * time.Millisecond
 //
 // openCommand resolves the platform's way of showing a window
 // (platformOpenCommand, unless a test says otherwise).
-func launchOpen(ctx context.Context, spec apps.Spec, workspace, prompt string, env []string,
+func launchOpen(ctx context.Context, spec apps.Spec, workspace, prompt string, env []string, configPath, exitFile string,
 	openCommand func(script string) ([]string, string, error)) (*child, string, error) {
 	// Preflight 1: the app itself. `open -a Terminal` succeeds whether
 	// or not the command inside the window exists, so without this the
@@ -52,13 +48,12 @@ func launchOpen(ctx context.Context, spec apps.Spec, workspace, prompt string, e
 		return nil, "", fmt.Errorf("open %s: %q is not on PATH on this machine", spec.ID, spec.Binary)
 	}
 
-	exitFile := filepath.Join(workspace, openSessionExitFile)
 	if err := os.MkdirAll(filepath.Dir(exitFile), configDirMode); err != nil {
 		return nil, "", fmt.Errorf("open %s: session directory: %w", spec.ID, err)
 	}
 	_ = os.Remove(exitFile)
 
-	script, err := writeOpenLauncher(spec, workspace, prompt, env, exitFile)
+	script, err := writeOpenLauncher(spec, workspace, prompt, env, configPath, exitFile)
 	if err != nil {
 		return nil, "", err
 	}
@@ -187,8 +182,13 @@ func readOpenExitFile(path string) (int, bool) {
 // stated here. The session bearer is deliberately not among those things
 // -- it lives in the MCP configuration file and nowhere else, and a
 // script is exactly the kind of file that gets left behind and read.
-func writeOpenLauncher(spec apps.Spec, workspace, prompt string, env []string, exitFile string) (string, error) {
+func writeOpenLauncher(spec apps.Spec, workspace, prompt string, env []string, configPath, exitFile string) (string, error) {
 	args := spec.InteractiveArgs(prompt)
+	if spec.ID == apps.IDClaudeCode {
+		// The interactive door previously discovered the shared project config.
+		// Use the same explicit private path as the automated Claude harness.
+		args = append([]string{"--mcp-config", configPath, "--strict-mcp-config", "--"}, args...)
+	}
 
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
@@ -211,7 +211,7 @@ func writeOpenLauncher(spec apps.Spec, workspace, prompt string, env []string, e
 	fmt.Fprintf(&b, "printf '%%s' \"$code\" > %s\n", shellQuote(exitFile))
 	b.WriteString("exit $code\n")
 
-	script := filepath.Join(workspace, ".memql-session", "open-launcher.sh")
+	script := filepath.Join(filepath.Dir(exitFile), "open-launcher.sh")
 	if err := os.MkdirAll(filepath.Dir(script), configDirMode); err != nil {
 		return "", fmt.Errorf("open %s: %w", spec.ID, err)
 	}

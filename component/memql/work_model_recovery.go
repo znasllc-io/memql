@@ -18,6 +18,9 @@ import (
 // dispatching any proposed tool. It cannot make an
 // uncertain tool effect retryable. The installed recipe chooses retry or ask.
 func (e *MemQLEngine) RecoverWorkModelCall(ctx context.Context, failure string, attempt, maxRetries int, messages []common.ChatMessage) (retry bool, err error) {
+	if source, ok := ctx.Value(replyReviewSourceKey{}).([]common.ChatMessage); ok {
+		messages = append([]common.ChatMessage(nil), source...)
+	}
 	defer func() {
 		var wait *work.HumanWait
 		if err != nil && !errors.As(err, &wait) {

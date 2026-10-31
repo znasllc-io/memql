@@ -74,9 +74,12 @@ func (d *Dispatcher) dispatchWorkbench(ctx context.Context, dispatch *memqlv1.To
 	}
 	runCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	result, err := isolatedWorkbenches.Execute(runCtx, workbench.Identity{Home: d.pipelineHome, Owner: c.GetOwnerUserId(), Caller: c.GetCallerUserId(), Registration: c.GetRegistrationId(), Machine: c.GetMachineId(), Run: c.GetRunId(), ExpiresAt: deadline}, workbench.Request{Action: dispatch.GetAction(), Args: args})
+	result, err := isolatedWorkbenches.Execute(runCtx, workbench.Identity{Home: d.pipelineHome, Owner: c.GetOwnerUserId(), Caller: c.GetCallerUserId(), Registration: c.GetRegistrationId(), Machine: c.GetMachineId(), Run: c.GetRunId(), ExpiresAt: deadline, Generation: c.GetWorkspaceGeneration()}, workbench.Request{Action: dispatch.GetAction(), Args: args})
 	if errors.Is(err, workbench.ErrBusy) {
 		return refuse("workbench_capacity_busy", "This machine is at workbench capacity; no operation started.")
+	}
+	if errors.Is(err, workbench.ErrStateLost) {
+		return refuse("workbench_state_lost", err.Error())
 	}
 	if err != nil {
 		return refuse("workbench_unavailable", err.Error())

@@ -21,10 +21,17 @@ func (r reviewOwnerResolver) ResolveFor(ctx context.Context, req airoute.Resolve
 	return r(ctx, req)
 }
 
-type reviewOwnerModel struct{ calls int }
+type reviewOwnerModel struct {
+	calls int
+	// fail, when set, is what the model call returns instead of a verdict.
+	fail error
+}
 
 func (m *reviewOwnerModel) CallChatStructured(_ context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
 	m.calls++
+	if m.fail != nil {
+		return "", m.fail
+	}
 	return `{"approved":true,"reason":"Reviewed exact fixture bytes."}`, nil
 }
 
@@ -124,6 +131,25 @@ func TestPipelineIndependentReviewRestoresCurrentSourceOwner(t *testing.T) {
 		role, expected = auth.RoleReader, scheduler
 		_, err := a.invokePipelineIndependentReview(scheduler, input)
 		require.NoError(t, err, "a read-only model call may not borrow the earlier developer role")
+	})
+	// The pipeline prints this call's error on a check run that is public for a
+	// public repository: through the real engine, a refusal whose text begins
+	// with the machine's reported name comes out as its code, with the original
+	// still in the chain for the callers that decide on its type.
+	t.Run("a failed model call is reported by its code", func(t *testing.T) {
+		expected = scheduler
+		original := &machineRefusal{}
+		model.fail = original
+		t.Cleanup(func() { model.fail = nil })
+		before := model.calls
+		_, err := a.invokePipelineIndependentReview(scheduler, input)
+		require.Error(t, err)
+		require.Equal(t, before+1, model.calls, "the call was made and failed")
+		requireNothingReported(t, err)
+		require.Contains(t, err.Error(), memql.RefusalCodeNoLocalModel)
+		require.True(t, strings.HasPrefix(err.Error(), "failed when called: "), err.Error())
+		var typed *machineRefusal
+		require.ErrorAs(t, err, &typed, "the original typed refusal is still in the chain")
 	})
 	t.Run("deadline cancellation and independent instructions", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(scheduler, time.Minute)

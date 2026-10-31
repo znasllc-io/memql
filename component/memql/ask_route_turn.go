@@ -68,10 +68,11 @@ func routeDelivered(status string) bool {
 
 // Why a message did not reach a goal.
 const (
-	routeReasonEnded   = "ended"
-	routeReasonReview  = "review"
-	routeReasonLimit   = "limit"
-	routeReasonRefused = "refused"
+	routeReasonContinued = "continued"
+	routeReasonEnded     = "ended"
+	routeReasonReview    = "review"
+	routeReasonLimit     = "limit"
+	routeReasonRefused   = "refused"
 )
 
 // A stop question's answer. Ended is never chosen: the snapshot projects it
@@ -86,6 +87,7 @@ const (
 // Handle (g1, g2, ...) is the only name a model ever sees; ids stay in Go.
 type askRouteGoal struct {
 	Handle, TurnID, GoalID, RunID, Title, Request string
+	ContinueVersion                               string
 	Run, Approval                                 map[string]any
 	Updates                                       []string
 }

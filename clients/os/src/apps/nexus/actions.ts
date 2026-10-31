@@ -1,3 +1,4 @@
+import { isReportingFailure } from "./outcomeRecovery";
 import { useCallback, useRef, useState } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 
@@ -524,6 +525,7 @@ export function useRecordFeedback(): RecordFeedbackState {
 export type Decision = "approved" | "rejected" | "answered";
 
 export interface ApprovalResume {
+  outcomeRecovery?: boolean;
   approvalId: string;
   runId: string;
   permissionAnswer?: Record<string, unknown>;
@@ -585,17 +587,19 @@ export function useDecideApproval(): DecideApprovalState {
       const answer = approval?.answer as Record<string, unknown> | undefined;
       const computer = approval?.kind === "scopeElevation" && subject?.computerPermission !== undefined
         && (answer?.permissionMode === "once" || answer?.permissionMode === "always");
+      const outcomeRecovery = isReportingFailure(subject) && answer?.value === "retry";
       const feedback = approval?.kind === "feedback" && approval.decision === "answered"
-        && subject?.progressLimit === true && answer && Object.keys(answer).length === 1
+        && (subject?.progressLimit === true || outcomeRecovery) && answer && Object.keys(answer).length === 1
         && (answer.value === "retry" || answer.value === "abandon" || (typeof answer.feedback === "string" && !!answer.feedback.trim()));
       if (!approval || idTail(String(approval.id ?? "")) !== key || ((approval.decision !== "approved" || !computer) && !feedback) ||
         (!computer && !feedback) || typeof approval.runId !== "string") return;
       const run = (await query.workRunForOwner({ runId: approval.runId }, { signal })).rows()[0];
       const waiting = run?.waitingOn as Record<string, unknown> | undefined;
       if (signal?.aborted || inFlight.current.has(key) || resumedApprovals.current.has(key)) return;
-      if (!run || run.status !== "waiting" || run.cancelRequested === true || waiting?.kind !== "approval" || idTail(String(waiting.subject ?? "")) !== key) return;
+      const abandonedReporting = outcomeRecovery && run?.status === "abandoned" && run.errorCode === "run_abandoned" && idTail(String(run.humanResumeId ?? "")) === key;
+      if (!run || run.cancelRequested === true || (!abandonedReporting && (run.status !== "waiting" || waiting?.kind !== "approval" || idTail(String(waiting.subject ?? "")) !== key))) return;
       setApprovalResumes(held => held[key] ? held : { ...held, [key]: {
-        approvalId, runId: approval.runId as string, ...(feedback ? { feedbackAnswer: answer } : { permissionAnswer: { permissionMode: answer!.permissionMode, permissionHash: approval.artifactHash } }), error: "",
+        approvalId, runId: approval.runId as string, outcomeRecovery, ...(feedback ? { feedbackAnswer: answer } : { permissionAnswer: { permissionMode: answer!.permissionMode, permissionHash: approval.artifactHash } }), error: "",
       } });
     } catch (err: unknown) {
       if (!signal?.aborted) setError(`Could not check whether this work can resume. ${describe(err)}`);

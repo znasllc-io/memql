@@ -17,6 +17,7 @@ import {
 } from "../rows";
 import { CredentialHealth } from "./CredentialHealth";
 import { SetupHealth } from "./SetupHealth";
+import { MachineElectricity } from "./MachineElectricity";
 import { MachineApps } from "./MachineApps";
 export { MachineAppsHelp } from "./MachineApps";
 import { MachineDetailsInfo, MachineDetailsSection } from "./MachineDetailsInfo";
@@ -86,6 +87,7 @@ export function MachineDetail({
           <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} />
           {writes.actionError && (!writes.actionErrorScope || writes.actionErrorScope === "machine") ? <Notice tone="error" sentence="The cluster refused that change." next="Nothing was written." detail={writes.actionError} /> : null}
         </MachineDetailsSection>
+        <MachineElectricity key={machine.id} machine={machine} />
         <MachineDetailsSection title="Owner-only features">
           <OwnerFeaturesGroup machine={machine} writes={writes} />
         </MachineDetailsSection>

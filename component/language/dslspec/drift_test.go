@@ -243,8 +243,8 @@ func TestFieldAnnotationsFollowTheFieldLists(t *testing.T) {
 			t.Errorf("%s fields take @%s, but FieldAnnotations lacks it", kw, name)
 		}
 	}
-	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,enum,required" {
-		t.Errorf("builtin FieldAnnotations = [%s], want [description,enum,required]", got)
+	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,enum,required,secret" {
+		t.Errorf("builtin FieldAnnotations = [%s], want [description,enum,required,secret]", got)
 	}
 	for _, kw := range []string{"shape", "spec", "trait", "policy", "rule", "seed", "provider", "use"} {
 		if c := spec.ConstructByKeyword(kw); c != nil && len(c.FieldAnnotations) != 0 {

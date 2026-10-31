@@ -230,3 +230,144 @@ func TestOwnerFeatureDisableSurvivesRemoteEventProjectionAndMissedBroadcast(t *t
 		})
 	}
 }
+
+// sentToolDispatches counts the ToolDispatch envelopes that reached the
+// machine's stream: the only evidence a command may be running on it.
+func sentToolDispatches(wire *fakeWorkerStream) int {
+	wire.mu.Lock()
+	defer wire.mu.Unlock()
+	n := 0
+	for _, msg := range wire.sent {
+		if msg.GetToolDispatch() != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// storeWithoutFeatures is a Store that cannot report the owner's feature
+// settings: embedding the interface hides ReadOwnerFeaturePolicy from the
+// OwnerFeatureStore assertion that admission makes.
+type storeWithoutFeatures struct{ Store }
+
+// The dispatcher may move a call on to another machine only when it is certain
+// nothing ran (design D5). Admission is where that is certain: it decides
+// before anything is handed to the stream. A feature withdrawn WHILE a call runs
+// is not: the machine holds the command and may have run it, and reading that
+// as "nothing ran" would run it a second time on another machine.
+func TestAdmissionRefusalIsTypedButMidCallWithdrawalIsNot(t *testing.T) {
+	hostCommandsOff := OwnerFeatures{Apps: true, ComputerUse: true}
+	exec := func(callId string) *memqlv1.ToolDispatch {
+		return &memqlv1.ToolDispatch{CallId: callId, Tool: "workerHost", Action: "exec"}
+	}
+	session := func(t *testing.T, features OwnerFeatures, version time.Time) (*streamSession, *fakeWorkerStream, *featureTestStore) {
+		t.Helper()
+		s, wire := newToolStreamTestSession()
+		t.Cleanup(s.cancel)
+		store := &featureTestStore{fakeRegistrationStore: &fakeRegistrationStore{}}
+		store.policy.Store(&OwnerFeaturePolicy{Features: features, Version: version})
+		s.server.store = store
+		return s, wire, store
+	}
+
+	t.Run("Host commands off refuses at admission with nothing sent", func(t *testing.T) {
+		s, wire, _ := session(t, hostCommandsOff, time.Unix(1, 0))
+		_, err := s.dispatch(context.Background(), exec("off"), nil)
+		if code, ok := RefusedBeforeSend(err); !ok || code != "worker_feature_disabled" {
+			t.Fatalf("RefusedBeforeSend(%v) = (%q, %v), want (worker_feature_disabled, true)", err, code, ok)
+		}
+		if n := sentToolDispatches(wire); n != 0 {
+			t.Fatalf("%d dispatch(es) reached the machine of a refused call", n)
+		}
+		// The sentence the owner reads names the switch by the name the engine
+		// uses and the label Fleet draws, so it says where to turn it back on.
+		var refused *RefusedBeforeSendError
+		if !errors.As(err, &refused) || refused.Err == nil ||
+			refused.Err.Error() != "Host commands are off for this machine in Fleet settings (Commands and files)" {
+			t.Fatalf("the refusal's sentence = %v, want it to name Host commands and the Commands and files switch", err)
+		}
+		// Layers above wrap what this returns; the type must survive that.
+		if code, ok := RefusedBeforeSend(fmt.Errorf("dispatching: %w", err)); !ok || code != "worker_feature_disabled" {
+			t.Fatalf("a wrapped refusal is no longer recognised: (%q, %v)", code, ok)
+		}
+	})
+
+	t.Run("a setting that cannot be read refuses at admission with nothing sent", func(t *testing.T) {
+		s, wire, store := session(t, OwnerFeaturesFromRow(nil), time.Unix(1, 0))
+		store.unavailable.Store(true)
+		_, err := s.dispatch(context.Background(), exec("unread"), nil)
+		if code, ok := RefusedBeforeSend(err); !ok || code != "worker_feature_unavailable" {
+			t.Fatalf("RefusedBeforeSend(%v) = (%q, %v), want (worker_feature_unavailable, true)", err, code, ok)
+		}
+		if !strings.Contains(err.Error(), "settings unavailable") || errors.Unwrap(err) == nil {
+			t.Fatalf("the read failure is no longer the refusal's cause: %v", err)
+		}
+		if n := sentToolDispatches(wire); n != 0 {
+			t.Fatalf("%d dispatch(es) reached the machine of a refused call", n)
+		}
+	})
+
+	t.Run("a setting with no version refuses at admission", func(t *testing.T) {
+		s, wire, _ := session(t, OwnerFeaturesFromRow(nil), time.Time{})
+		_, err := s.dispatch(context.Background(), exec("unversioned"), nil)
+		if code, ok := RefusedBeforeSend(err); !ok || code != "worker_feature_unavailable" {
+			t.Fatalf("RefusedBeforeSend(%v) = (%q, %v), want (worker_feature_unavailable, true)", err, code, ok)
+		}
+		if n := sentToolDispatches(wire); n != 0 {
+			t.Fatalf("%d dispatch(es) reached the machine of a refused call", n)
+		}
+	})
+
+	t.Run("a store that cannot report settings refuses at admission", func(t *testing.T) {
+		s, wire, _ := session(t, OwnerFeaturesFromRow(nil), time.Unix(1, 0))
+		s.server.store = storeWithoutFeatures{Store: s.server.store}
+		_, err := s.dispatch(context.Background(), exec("blind"), nil)
+		if code, ok := RefusedBeforeSend(err); !ok || code != "worker_feature_unavailable" {
+			t.Fatalf("RefusedBeforeSend(%v) = (%q, %v), want (worker_feature_unavailable, true)", err, code, ok)
+		}
+		if n := sentToolDispatches(wire); n != 0 {
+			t.Fatalf("%d dispatch(es) reached the machine of a refused call", n)
+		}
+	})
+
+	t.Run("an app session refused at admission is typed the same way", func(t *testing.T) {
+		s, _, _ := session(t, OwnerFeatures{Headless: true, ComputerUse: true}, time.Unix(1, 0))
+		_, err := s.openAppSession(context.Background(), AppSessionRequest{SessionId: "off", App: AppIdClaudeCode})
+		if code, ok := RefusedBeforeSend(err); !ok || code != "worker_feature_disabled" {
+			t.Fatalf("RefusedBeforeSend(%v) = (%q, %v), want (worker_feature_disabled, true)", err, code, ok)
+		}
+	})
+
+	t.Run("a withdrawal after the send is a plain error", func(t *testing.T) {
+		s, wire, _ := session(t, OwnerFeaturesFromRow(nil), time.Unix(1, 0))
+		done := make(chan error, 1)
+		go func() {
+			_, err := s.dispatch(context.Background(), exec("running"), nil)
+			done <- err
+		}()
+		deadline := time.Now().Add(2 * time.Second)
+		for sentToolDispatches(wire) == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("the dispatch never reached the machine")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		// The owner switches Host commands off while the command is on the machine.
+		s.worker.ApplyOwnerFeaturePolicy(OwnerFeaturePolicy{Features: hostCommandsOff, Version: time.Unix(2, 0)})
+		var err error
+		select {
+		case err = <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the withdrawal did not end the call")
+		}
+		if err == nil || !strings.Contains(err.Error(), "worker_feature_disabled") {
+			t.Fatalf("the call was not ended by the withdrawal: %v", err)
+		}
+		if code, ok := RefusedBeforeSend(err); ok {
+			t.Fatalf("a withdrawal AFTER the send reads as a refusal before send (%q): the command may have run, and the dispatcher would run it again on another machine", code)
+		}
+		if n := sentToolDispatches(wire); n != 1 {
+			t.Fatalf("%d dispatch(es) reached the machine, want the one that was running", n)
+		}
+	})
+}

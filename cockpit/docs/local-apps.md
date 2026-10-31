@@ -94,6 +94,10 @@ On `Register` and on **every** heartbeat:
 | `signed_in` | the app's own state files (see below) |
 | `subscription` | what the app REPORTS; `unknown` when it said nothing |
 | `allowed` | `policy.yaml apps.homes.<this cluster>.allow` — each cluster is told its own |
+| `readiness` | what this machine last **measured**: `ready`, `signed_out`, `out_of_usage` or `unknown` (see below), `unknown` until the first check. A Cockpit older than this sends nothing |
+| `readiness_checked_at` | when that was measured, by a check or by a real turn |
+| `usage_resets_at` | when the limit behind `out_of_usage` resets, when the app said |
+| `readiness_detail` | this machine's sentence for an answer that is not ready, shown in Fleet |
 
 `Register` also carries one **app descriptor** per app — the harness this
 machine drives it through and whether that harness can return a structured
@@ -127,7 +131,98 @@ upgrade invalidates it immediately); presence and auth state are read fresh on
 every beat, so signing in shows up on the **next beat** rather than the next
 reconnect.
 
+### How readiness is measured
+
+A file cannot say whether a login still works: an expired login leaves its files in
+place, and both apps' own status commands read those files. `claude auth status`
+printed `loggedIn: true`, and `codex login status` printed `Logged in using ChatGPT`,
+for logins whose refresh tokens were dead. So the worker asks each app the cheapest
+real question it offers, and what it measures overrides the files in both directions:
+`signed_out` clears `signed_in`, and an app that answered is signed in even with no
+file to read.
+
+| | Claude Code | Codex |
+|---|---|---|
+| The question | `claude auth status` (no network, no tokens), then a ping: `claude -p ok` on the cheapest model with no tools, settings, MCP servers or saved session | `codex app-server`: `account/read`, then `account/rateLimits/read`. No thread and no turn |
+| What it spends | about 600 tokens of your plan when it answers; nothing when refused | nothing |
+| How often | hourly when working, every 15 minutes otherwise | every 5 minutes |
+| Bound | at most 30 pings that may have spent in any 24 hours, kept across restarts | none needed |
+
+- **A busy machine never pings.** No check runs while that app has a session, and
+  every real turn reports what it found and counts as a check.
+- **A ping never spends API credit.** With `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_BASE_URL`, or a Bedrock, Vertex or Foundry switch in the worker's
+  environment nothing is run. A login that `auth status` names as anything but
+  `claude.ai` is not pinged. A ping whose first event reports an `apiKeySource` other
+  than `none` is stopped. While a plan is on metered overage, pings wait for the reset.
+- **An app no cluster allows is never checked.** Nothing is spent on an app this
+  machine's owner has not agreed to MemQL driving.
+- **A sign-in in a terminal is noticed.** While an app reads as signed out, a change
+  to its login file (`~/.claude/.credentials.json`, `~/.claude.json`,
+  `~/.codex/auth.json`) triggers a check on the next look, every 30 seconds. On a
+  working app it does not, because every interactive Claude Code rewrites
+  `~/.claude.json`.
+- **A limit that has passed does not hold an app out.** At the reset the app reads
+  `unknown` and the check runs then, unless a session or the ceiling is holding it off.
+  Until a check says `ready`, the engine does not send it a call.
+- **Credits count.** Codex's plan window stays at 100% after credits are bought, so the
+  check reads the credits too: with credits or an unlimited balance the app is ready,
+  unless spending has been stopped. Having credits was not observed on a real account.
+- **A check that cannot tell says `unknown`:** no network, a timeout, a flag an older
+  CLI does not know, an API-key login. **The engine admits only `ready`,** so `unknown`
+  is not routed to, and `readinessDetail` says why. One such check keeps the last answer
+  and is repeated within a minute, so a timeout on a busy machine does not take a
+  working app away. A second one in a row is the answer, and the checks fall back to
+  the ordinary cadence.
+- **A worker always sends a word,** `unknown` before its first check, because the engine
+  reads no word at all as a Cockpit that predates the checks, which stays selectable.
+
+The answers and the spending log live in `app-readiness.json` at the machine's state
+root (mode 0600), which holds states and times and never a credential. They survive a
+restart, so a service that keeps crashing does not ping on each start. An answer older
+than a day is measured again.
+
+To see it now, `memql worker apps --check` runs each app's check once and prints what
+it found. It answers to no cadence or ceiling, because you asked, so it spends a ping.
+
 ---
+
+### When an app stops partway
+
+A failed turn whose app reported its limit or a lapsed login ends the session with
+`stop_reason` (`out_of_usage` or `signed_out`). That word is what lets the engine hand a
+step that has already done work to another app, so it is sent only on the app's own
+statement. It is withdrawn when an output did not reach the Library, because the next app
+carries on from what was left, and that session's directory is kept. The directory of a run
+outlives the session, so an app taking over on this machine finds the files as they were.
+
+## Signing in from Fleet
+
+A machine's Apps page offers **Sign in** when an app reads as signed out. It works when
+you are not sitting at the machine: no browser opens there, and the page opens in your
+own browser on any computer. The app writes its own login on the machine, and no token
+crosses to the cluster.
+
+| | Claude Code | Codex |
+|---|---|---|
+| What runs | `claude auth login --claudeai` with `BROWSER=true`, so nothing opens on the machine | `codex app-server`: `account/login/start` with `chatgptDeviceCode` |
+| What you do | open the page, sign in, and paste the code it shows back into Fleet | open the page and enter the code Fleet shows |
+| What crosses the stream | the page's address, then your pasted code | the page's address and the device code |
+
+A pasted code goes to the waiting process's stdin and nowhere else. It is useless without
+the verifier that process holds, and it is written to no row and no log line. The page's
+address and the device code sit on a row only you can read, and are cleared when the
+sign-in ends.
+
+A sign-in needs the app allowed for that cluster in this machine's `policy.yaml`, which
+the worker checks again when the request arrives. It stops after 15 minutes, when you
+cancel it, when you start another for that app, or when the stream to the cluster goes.
+When it finishes, the worker checks the app at once, and Fleet moves to **Ready** on the
+next heartbeat after that.
+
+Machines report whether they can do this in `AppDescriptor.sign_in`, on `Register`. A
+Cockpit that predates it says nothing, and Fleet offers its older **Connect** instead, a
+setup goal in Ask.
 
 ## Where a session runs
 
@@ -169,6 +264,24 @@ every `fs.deny` entry. The workspace is the app's write grant, so one that
 **contains** such a path — the home directory, or `/`, which a delegation
 policy's workspace root of `~` would name — is refused as surely as one inside
 it, with `workspace ... overlaps ...` naming the path.
+
+### On Linux: the service unit
+
+The installer's user unit keeps the system tree and other users' home directories
+read-only and removes every way to gain privileges. **Your own home is writable, and
+it has to be.** Measured on 2026-10-29 under the unit it used to write (systemd 255,
+Claude Code 2.1.314, codex-cli 0.166.0), with only `~/.memql` writable:
+
+| What failed | How |
+|---|---|
+| A session's workspace | `mkdir ~/.local/share/memql: read-only file system` |
+| `codex app-server`, so every Codex session and check | `Error: Read-only file system (os error 30)`, and it exits |
+| Writing a login at all, for either app | `~/.claude`, `~/.claude.json` and `~/.codex` are read-only |
+| Node.js, under `MemoryDenyWriteExecute=yes` | it dies with status 133 on starting its JIT |
+| Claude Code's shell sandbox, under `RestrictNamespaces=yes` | `bwrap: No permissions to create new namespace` |
+
+A machine installed before this change keeps the old unit until the installer runs
+again. Its checks say `unknown` or `signed_out` and its sessions fail as above.
 
 ## What Claude Code may do in a session
 
@@ -214,15 +327,33 @@ status in the error; `pending` (still connecting) does not.
 
 | Path | What it is | Lifetime |
 |---|---|---|
-| `<workspace>/.mcp.json` | Claude Code's project-scoped MCP config, `0600`, carrying the per-run bearer | deleted at session end |
-| `<workspace>/.memql-session/codex/config.toml` | Codex's MCP config in a per-session `CODEX_HOME` | deleted at session end |
-| `<workspace>/.memql-session/transcript.log` | the full transcript | pushed to the Library, then deleted |
-| `<workspace>/.memql-session/open-launcher.sh` | the `open` kind's terminal launcher | deleted at session end |
+| `<workspace>/.memql-session/mcp-<unique>.json` | Claude Code's explicit MCP config, `0600`, carrying this session's bearer | deleted at session end |
+| `<workspace>/.memql-session/codex-<unique>/config.toml` | Codex's MCP config in a conversation-scoped `CODEX_HOME` | credential deleted at session end; provider state retained for attach |
+| `<workspace>/.memql-session/codex-refs/<ref-hash>` | workspace-local provider ref to home index, with no credentials or history | retained with the workspace |
+| `<workspace>/.memql-session/transcript-<unique>.log` | this session's full transcript | pushed to the Library, then deleted; retained on failed push |
+| `<workspace>/.memql-session/open-<unique>/` | this `open` session's launcher and exit receipt | deleted at session end |
 | `<state_dir>/appsessions/<id>.json` | the write ledger — **paths only, never the bearer** | deleted at session end |
 
-A pre-existing `.mcp.json` in the workspace is moved aside and **restored** at
-the end, so an `open` or `attach` session pointed at a real project does not
-destroy a config somebody wrote.
+Overlapping sessions never share transcript or credential paths. Claude receives
+its exact private config through `--mcp-config`, including interactive sessions;
+the project's `.mcp.json` stays untouched. Startup still restores backups named
+by an older worker's crash ledger.
+
+Codex attach reuses the original conversation's provider state in this workspace,
+with a fresh credential. An OS lock refuses a second active writer to that home
+before it can replace the credential; a crash releases the lock. Older refs use
+the former `.memql-session/codex` home in the same workspace. Attach never searches
+another workspace or the user's personal conversation history. Provider state
+and the reference index remain excluded from output retention.
+
+Temporary Chromium user-data directories are also excluded from automatic
+output retention and inline write contents. The worker recognizes `Local State`
+together with a debugging-port file or a `Default`/`Profile ...` preferences
+file, regardless of the directory's task-chosen name. It checks filenames and
+file types without reading profile contents. Screenshots, scripts and receipts
+beside the profile still travel. Put other disposable runtime files under
+`.cache/`; exclusion does not delete local state or change an archive already
+uploaded, so task-owned cleanup remains a separate operation.
 
 ### The deletion is the security control
 
@@ -722,8 +853,11 @@ Files the run created or changed in the workspace are pushed to the Library,
 plus the full transcript. Bounded, and the bounds are announced rather than
 applied silently:
 
-- 64 MiB per file, 32 files and 128 MiB total per session. Candidates omitted
-  by these limits are named in the transcript and an `outputs.json` artifact;
+- 64 MiB per source file and per output artifact, 128 MiB total, and at most
+  32 output uploads per session. More than 32 files use bounded ZIP parts
+  (stored without compression); archive overhead counts toward both byte
+  limits. At most 4096 source entries bound the manifest and ZIP metadata.
+  Candidates omitted by limits are named in an `outputs.json` artifact;
 - a repository acquired during the session is an input. Unchanged tracked
   files do not enter the upload budget. Changed files and explicitly recorded
   writes are retained, including recorded writes committed before the session
@@ -740,12 +874,46 @@ applied silently:
   different directories would otherwise arrive indistinguishable.
 
 The output manifest links retained files to their workspace-relative paths,
-sizes and Library artifact IDs, and links the transcript. It records omissions
-and transfer failures. An incomplete export reports an error and preserves the
+sizes, SHA-256 digests and Library artifact IDs, and links the transcript.
+Manifest version 2 adds `archiveEntry` when a file lives inside a ZIP, plus an
+`archives` list with each uploaded ZIP’s ID, byte length and SHA-256. Download
+the artifact, verify its digest, then read the named member and verify that
+member’s length and digest. Small sets still have individual artifacts.
+Each file is checked through one regular-file descriptor inside the workspace;
+its exact retained bytes are scanned for session credentials before bundling
+and hashed in the same read. Missing, changed or unreadable files are explicit
+gaps. Only successfully uploaded members enter `files`; failed parts name all
+their members in `omitted`. The manifest records omissions and transfer failures. An incomplete export reports an error and preserves the
 workspace for recovery; a transcript whose upload failed is also preserved.
 This is separate from the action journal, which retains file revisions as the
 app records them. Clean checkouts and dependency caches remain reusable local
-resources rather than Library copies of a repository.
+resources rather than Library copies of a repository. Existing `.tar` and
+`.zip` outputs remain eligible under the same rules. A later session takes a
+new input snapshot, so unchanged files omitted by an earlier export must be
+explicitly recovered as newly produced evidence; restarting alone does not
+retroactively retain them.
+
+Uploads declare a type from the produced bytes instead of multipart's default
+`application/octet-stream`. Recognized binary signatures retain their type.
+Text candidates must be valid UTF-8 across the whole body and contain no binary
+control bytes (tab, newline and carriage return are allowed); checking only the
+first 512 bytes would miss a binary suffix. Valid `.json` files declare
+`application/json`, Markdown declares `text/markdown`, and other text uses the
+sniffed type. An empty file stays opaque. A misleading extension cannot promote
+binary content into text. This classification preserves the exact uploaded bytes
+and digest and changes neither output limits nor credential/ownership/provenance
+checks. MIME is a format hint, not trusted content or a schema verdict.
+
+The Library deliberately honors a declared type. Its saved-file reader still
+checks the current owner and revision, its text-type gate, UTF-8 and the 2 MiB
+read bound. Previously retained opaque files are not relabeled by this change;
+they need a normal authorized upload/version or a format-specific reader.
+Readable does not imply indexed: semantic extraction and archive contents have
+their own coverage limits. `TestLibraryPushContentTypePreservesBytes` exercises
+the actual multipart upload for both file and in-memory outputs, including
+misleading names and suffix corruption. The engine's
+`UploadedJSONReadAcrossEngines` database case connects multipart ingestion to a
+fresh replica's saved-file reader and verifies that binary and owner gates hold.
 
 A file can be stored before its artifact is visible: the Library's upload route
 waits a bounded time for the index row, then answers with the file ID alone. The
@@ -758,9 +926,21 @@ produced-by provenance.
 
 ## When it does not work
 
+An approved `workerHost.exec` script may start with a no-argument command
+followed by a newline. The local shell-policy name classifier recognizes that
+newline without joining the next line to the command name. It does not rewrite
+the reviewed script: quoted multiline text, the exact-command receipt, local
+consent, working-directory checks, resource limits, and allow/deny lists retain
+their existing behavior. A scoped approval does not override the local policy.
+
 | What you see | What it means |
 |---|---|
-| `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false; the badge says which |
+| `/machines` shows the app but not selectable | one of `allowed` / `signed in` is false, or its last check did not say ready; the badge says which |
+| `Read-only file system` or `read-only file system`, from a session or a check on Linux | the machine still has the old service unit. Run the installer again ([the service unit](#on-linux-the-service-unit)) |
+| `memql worker apps --check` says `could not tell: ... could bill API credit; not pinged` | an API-key or proxy setting in the worker's environment. Correct refusal: a check never spends API credit, and the app stays selectable |
+| `This machine's Cockpit service cannot write to ~/.claude` (or `~/.codex`), from Sign in | the old Linux service unit. Run the installer again |
+| `This Codex cannot sign in by device code` | a Codex too old for it, or with no app-server. Update Codex, or run `codex login --device-auth` on the machine |
+| `Login failed: Request failed with status code 400` after pasting a code | the code was wrong or expired. Sign in again and paste the newest one |
 | The machine never appears at all | `claude` / `codex` is in none of the directories the worker searches. A service does not get your shell's `PATH`: the worker searches its own, with `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin` appended at start, and logs the result once (`worker PATH extended`). An app installed anywhere else needs that directory in the service's own `PATH` |
 | `is not allowed for this cluster by this machine's policy.yaml (apps.homes)` | the engine routed here anyway. `memql worker apps --allow <app> --home <this cluster>`, or ask why the label was derived |
 | `apps.allow is no longer read` (worker log, `memql worker apps`) | a `policy.yaml` from before consent was per cluster. Allow the app for the cluster you meant with `--home`; that removes the old list |

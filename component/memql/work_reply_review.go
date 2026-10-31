@@ -29,6 +29,12 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 		return nil, err
 	}
 	ctx = ContextWithFreshRead(ctx)
+	draftRows := MaterializeRows(args["draft"])
+	completionRequired, _ := draftRows[0]["reviewCompletion"].(bool)
+	scope, err := e.replyCompletionScope(ctx, completionRequired)
+	if err != nil {
+		return nil, err
+	}
 	runs, err := e.workRows(ctx, "workRunForOwner", run.RunId)
 	if err != nil || len(runs) != 1 || BareShortId(stringArg(runs[0], "goalId")) != BareShortId(run.GoalId) {
 		return nil, fmt.Errorf("reply review run is unavailable")
@@ -85,7 +91,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	}
 	// A greeting or self-contained composition has no retrieved evidence to
 	// audit and spends no extra model call. Failed reads above never skip.
-	if !replyHasEvidenceSources(sources) && len(recovered) == 0 && len(limitations) == 0 {
+	if !completionRequired && !replyHasEvidenceSources(sources) && len(recovered) == 0 && len(limitations) == 0 {
 		return reviewedReplyRows(draft, false)
 	}
 	call, err := parser.RenderCall("workGoalForOwner", map[string]any{"goalId": run.GoalId})
@@ -109,35 +115,28 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	// this step's replacement at its recorded time. Source previews and model
 	// drafts cannot supply authority. Refuse unavailable/oversized context rather
 	// than silently restoring a superseded hold; never rewrite saved receipts.
-	guidance, err := e.readWorkGuidance(ctx, true)
+	statement, err = e.reviewGuidanceContext(ctx, statement)
 	if err != nil {
 		return nil, fmt.Errorf("reply review current instructions: %w", err)
 	}
-	if len(guidance) > 0 {
-		var request strings.Builder
-		request.WriteString("Original goal (historical intent):\n" + statement)
-		request.WriteString("\n\nCurrent owner instructions, oldest to newest. Later corrections supersede conflicting earlier wording. These establish requested scope, not completed effects or an operation grant:\n")
-		for _, item := range guidance {
-			request.WriteString("\n" + item.Prompt + "\n")
-		}
-		statement = request.String()
-		if len(statement) > replyReviewMaxBytes {
-			return nil, fmt.Errorf("reply review current instructions exceed their bound")
-		}
-	}
+	sourceRefs := replyCompletionSources(sources, run.RunId)
 	now := time.Now()
 	evidence, err := json.Marshal(map[string]any{"currentRunId": BareShortId(run.RunId), "recordedSources": sources, "recoveredSources": recovered, "limitations": limitations, "clock": workSourceClock(sources, now), "priorUserRequests": reviewPriorRequests(conversation["messages"])})
 	if err != nil {
 		return nil, err
 	}
-	draftRows := MaterializeRows(args["draft"])
 	canContinue, _ := draftRows[0]["continueLookup"].(bool)
-	canContinue = canContinue && (classification["workload"] == "lookup" || classification["workload"] == "research")
-	review, err := reviewReplyOnce(replyReviewRoutingContext(ctx), statement, draft, string(evidence), now, canContinue, e.InvokeAIStructured)
+	canContinue = canContinue && (completionRequired || classification["workload"] == "lookup" || classification["workload"] == "research")
+	review, err := reviewReplyOnce(replyReviewRoutingContext(ctx), statement, draft, string(evidence), now, canContinue, e.InvokeAIStructured, scope)
 	if err != nil {
 		return nil, err // Never publish the unchecked draft after a failed review.
 	}
-	decision, err := json.Marshal(map[string]any{"continuationAvailable": canContinue, "missingEvidence": review.MissingEvidence})
+	if completionRequired {
+		if err := review.Completion.Validate(sourceRefs); err != nil {
+			return nil, err
+		}
+	}
+	decision, err := json.Marshal(map[string]any{"continuationAvailable": canContinue, "missingEvidence": review.MissingEvidence, "completion": review.Completion, "stepContract": scope})
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +154,7 @@ func (e *MemQLEngine) workReviewReplyBuiltin(ctx context.Context, args map[strin
 	if _, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
 		return nil, fmt.Errorf("reply review decision receipt: %w", err)
 	}
-	raw, err := json.Marshal(map[string]any{"reply": review.Reply, "missingEvidence": review.MissingEvidence, "evidenceReviewed": true})
+	raw, err := json.Marshal(map[string]any{"reply": review.Reply, "missingEvidence": review.MissingEvidence, "evidenceReviewed": true, "completion": review.Completion})
 	if err != nil {
 		return nil, err
 	}
@@ -238,15 +237,23 @@ func reviewDraftText(value any) (string, error) {
 type replyReviewInvoker func(context.Context, string, map[string]any, string, json.RawMessage, bool) (string, error)
 
 type replyReviewDecision struct {
-	Reply           string `json:"reply"`
-	MissingEvidence string `json:"missingEvidence"`
+	Reply           string               `json:"reply"`
+	MissingEvidence string               `json:"missingEvidence"`
+	Completion      *WorkReplyCompletion `json:"completion,omitempty"`
 }
 
 // Exactly one routed check under the original run's budget and cancellation.
 // A repair finding is data for the existing task, never authority for an effect.
-func reviewReplyOnce(ctx context.Context, statement, draft, sources string, now time.Time, canContinue bool, invoke replyReviewInvoker) (replyReviewDecision, error) {
+func reviewReplyOnce(ctx context.Context, statement, draft, sources string, now time.Time, canContinue bool, invoke replyReviewInvoker, scopes ...string) (replyReviewDecision, error) {
 	schema := json.RawMessage(`{"type":"object","additionalProperties":false,"required":["missingEvidence","reply"],"properties":{"missingEvidence":{"type":"string","maxLength":1200},"reply":{"type":"string","minLength":1,"maxLength":24000}}}`)
-	raw, err := invoke(ctx, "workReplyReview", map[string]any{"statement": statement, "draft": draft, "sources": sources, "now": now.UTC().Format(time.RFC3339), "canContinue": canContinue}, "work_reply_review", schema, true)
+	scope := ""
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	if scope != "" {
+		schema = json.RawMessage(`{"type":"object","additionalProperties":false,"required":["missingEvidence","reply","completion"],"properties":{"missingEvidence":{"type":"string","maxLength":1200},"reply":{"type":"string","minLength":1,"maxLength":24000},"completion":{"type":"object","additionalProperties":false,"required":["kind","disposition","gap","sourceRefs"],"properties":{"kind":{"type":"string","enum":["information","operation"]},"disposition":{"type":"string","enum":["satisfied","unfinished"]},"gap":{"type":"string","maxLength":1200},"sourceRefs":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200}}}}}}`)
+	}
+	raw, err := invoke(ctx, "workReplyReview", map[string]any{"statement": statement, "draft": draft, "sources": sources, "now": now.UTC().Format(time.RFC3339), "canContinue": canContinue, "stepContract": scope}, "work_reply_review", schema, true)
 	if err != nil {
 		return replyReviewDecision{}, fmt.Errorf("reply evidence review: %w", err)
 	}
@@ -256,6 +263,13 @@ func reviewReplyOnce(ctx context.Context, statement, draft, sources string, now 
 	}
 	if !canContinue {
 		answer.MissingEvidence = ""
+	}
+	if scope != "" {
+		if err := answer.Completion.Validate(nil); err != nil {
+			return replyReviewDecision{}, err
+		}
+	} else {
+		answer.Completion = nil
 	}
 	return answer, nil
 }

@@ -1215,6 +1215,33 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
   return this.executeNamed("composeRunRecipe", buildComposeRunRecipe(args), opts);
 };
 
+/** Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation. */
+export interface ContinueRunArgs {
+  runId: string;
+  runVersion: string;
+  requestId: string;
+  feedback: string;
+}
+
+export function buildContinueRun(args: ContinueRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("runVersion: " + renderMemQLValue(args.runVersion));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("feedback: " + renderMemQLValue(args.feedback));
+  return "builtin continueRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    continueRun(args: ContinueRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.continueRun = function (this: QueryClient, args: ContinueRunArgs = {} as ContinueRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("continueRun", buildContinueRun(args), opts);
+};
+
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
   /** Where this goal's tools execute. Auto selects by capabilities and capacity. A change from an explicit choice requires recorded permission. Computer access still requires Cockpit and scoped access permission. Child goals inherit this choice. */
@@ -1630,6 +1657,76 @@ QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRend
   return this.executeNamed("emailRender", buildEmailRender(args), opts);
 };
 
+/** Start signing in to an app on YOUR OWN machine, and return at once with the id of the record to watch. The machine must be yours, connected, with the app allowed for this cluster and a Cockpit that can run a sign-in; each of those is refused before anything is written. The v1:worker:appSignIn row then carries the page to open and any code to enter. The app writes its own login on the machine, and no credential ever crosses to the cluster. */
+export interface FleetAppSignInArgs {
+  /** v1:worker:registration.id of the machine. Another user's answers exactly as a made-up one does. */
+  registrationId: string;
+  // Enum: claude-code | codex
+  app: string;
+}
+
+export function buildFleetAppSignIn(args: FleetAppSignInArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("app: " + renderMemQLValue(args.app));
+  return "builtin fleetAppSignIn(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetAppSignIn(args: FleetAppSignInArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetAppSignIn = function (this: QueryClient, args: FleetAppSignInArgs = {} as FleetAppSignInArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetAppSignIn", buildFleetAppSignIn(args), opts);
+};
+
+/** Stop a sign-in you started on your machine. Nothing changes on the machine except that the app stops waiting. */
+export interface FleetAppSignInCancelArgs {
+  signInId: string;
+}
+
+export function buildFleetAppSignInCancel(args: FleetAppSignInCancelArgs): string {
+  const parts: string[] = [];
+  parts.push("signInId: " + renderMemQLValue(args.signInId));
+  return "builtin fleetAppSignInCancel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetAppSignInCancel(args: FleetAppSignInCancelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetAppSignInCancel = function (this: QueryClient, args: FleetAppSignInCancelArgs = {} as FleetAppSignInCancelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetAppSignInCancel", buildFleetAppSignInCancel(args), opts);
+};
+
+/** Pass the code a sign-in page showed to the app waiting on your machine. It goes to that machine and nowhere else: it is in no row, no log line and no reply. It is useless without the verifier the process on the machine holds. */
+export interface FleetAppSignInCodeArgs {
+  signInId: string;
+  /** What the sign-in page showed. Read once and passed on; never stored or echoed. */
+  code: string;
+}
+
+export function buildFleetAppSignInCode(args: FleetAppSignInCodeArgs): string {
+  const parts: string[] = [];
+  parts.push("signInId: " + renderMemQLValue(args.signInId));
+  parts.push("code: " + renderMemQLValue(args.code));
+  return "builtin fleetAppSignInCode(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetAppSignInCode(args: FleetAppSignInCodeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetAppSignInCode = function (this: QueryClient, args: FleetAppSignInCodeArgs = {} as FleetAppSignInCodeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetAppSignInCode", buildFleetAppSignInCode(args), opts);
+};
+
 /** What each machine you can use can take on right now. One row: {machines, measuredAt}. Each machine says how many calls are in flight against its slots, the memory free for a model and the models already loaded (memory.reported is false when its cockpit does not report capacity, and it is then admitted on its slots alone), how fast it has answered over the last two hours, and whether it is degraded. Every route's fleet door admits machines on these figures before choosing one. */
 export interface FleetCapacityArgs {
 }
@@ -1647,6 +1744,38 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetCapacity = function (this: QueryClient, args: FleetCapacityArgs = {} as FleetCapacityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetCapacity", buildFleetCapacity(args), opts);
+};
+
+/** Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup. */
+export interface FleetEnergySettingsArgs {
+  registrationId: string;
+  // Enum: read | save | confirm
+  action: string;
+  revision?: string;
+  secretSettings?: Record<string, unknown>;
+  provider?: string;
+  tariffName?: string;
+}
+
+export function buildFleetEnergySettings(args: FleetEnergySettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.revision !== undefined) parts.push("revision: " + renderMemQLValue(args.revision));
+  if (args.secretSettings !== undefined) parts.push("secretSettings: " + renderMemQLValue(args.secretSettings));
+  if (args.provider !== undefined) parts.push("provider: " + renderMemQLValue(args.provider));
+  if (args.tariffName !== undefined) parts.push("tariffName: " + renderMemQLValue(args.tariffName));
+  return "builtin fleetEnergySettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetEnergySettings(args: FleetEnergySettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetEnergySettings = function (this: QueryClient, args: FleetEnergySettingsArgs = {} as FleetEnergySettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetEnergySettings", buildFleetEnergySettings(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
@@ -1781,30 +1910,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetRecommended = function (this: QueryClient, args: FleetRecommendedArgs = {} as FleetRecommendedArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetRecommended", buildFleetRecommended(args), opts);
-};
-
-/** Allow the next call to retry one app on your machine after adding credits or restoring access. Does not start or replay work. */
-export interface FleetRetryAppAvailabilityArgs {
-  registrationId: string;
-  // Enum: claude-code | codex
-  app: string;
-}
-
-export function buildFleetRetryAppAvailability(args: FleetRetryAppAvailabilityArgs): string {
-  const parts: string[] = [];
-  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
-  parts.push("app: " + renderMemQLValue(args.app));
-  return "builtin fleetRetryAppAvailability(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    fleetRetryAppAvailability(args: FleetRetryAppAvailabilityArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.fleetRetryAppAvailability = function (this: QueryClient, args: FleetRetryAppAvailabilityArgs = {} as FleetRetryAppAvailabilityArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("fleetRetryAppAvailability", buildFleetRetryAppAvailability(args), opts);
 };
 
 /** Remove one of YOUR OWN machines from the fleet: revoke its registration AND the credential it connects with, as ONE act. The two used to be separate and the client composed them, which meant a window where the row said removed and the token still worked -- and a surface that made only the first call left a machine that kept its stream and could come back. The registration is resolved through your own machines, so another user's id answers exactly as a made-up one does. Revocation is an UPDATE, never a delete: the row is audit history and its credential's hash must stay taken. The machine's live stream is ended by the cluster within seconds, from whichever replica is holding it. */

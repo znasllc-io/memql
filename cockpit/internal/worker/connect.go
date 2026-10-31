@@ -432,6 +432,14 @@ func hardwareToProto(inv *hardware.Inventory) *memqlv1.HardwareInventory {
 	return hw
 }
 
+// SendAppSignInUpdate reports where a sign-in stands. It carries a page's address and
+// a device code, and never a credential.
+func (c *Connection) SendAppSignInUpdate(update *memqlv1.AppSignInUpdate) error {
+	return c.Send(&memqlv1.WorkerClientMessage{
+		Payload: &memqlv1.WorkerClientMessage_AppSignInUpdate{AppSignInUpdate: update},
+	})
+}
+
 // SendAppSessionChunk emits one piece of app-session output.
 //
 // seq is assigned by the session and passed through unchanged, including

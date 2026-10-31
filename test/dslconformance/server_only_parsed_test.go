@@ -173,6 +173,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// actor.userId alone cannot enforce private credential admission, sealed
+		// address values, revision fencing or separation of research/attestation.
+		{Path: "worker/mutations.memql", Name: "storeWorkerEnergyProfile"}: true,
 		// Capacity and revision admission cannot be replaced by actor.userId scoping.
 		{Path: "worker/mutations.memql", Name: "setWorkerModelSetup"}: true,
 		// Reports require a bounded harness turn; the singleton is seeded without an actor.
@@ -1409,6 +1412,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "worker/mutations.memql", Name: "recordModelProbeProgress"}: true,
 		{Path: "worker/mutations.memql", Name: "finishModelProbe"}:         true,
 		{Path: "worker/mutations.memql", Name: "finishModelPull"}:          true,
+		// A sign-in's two writers, with the pull's reasoning. Caller-scoping does not
+		// help, because the caller IS the row's owner. createAppSignIn carries
+		// `targetNodeId`, which only the server can read off the machine's row.
+		// updateAppSignIn is a report from a machine that only the replica holding its
+		// stream has heard, and its `url` is an address its owner is about to follow.
+		{Path: "worker/mutations.memql", Name: "createAppSignIn"}: true,
+		{Path: "worker/mutations.memql", Name: "updateAppSignIn"}: true,
 		// epic memql#5327, finding M-2. setWorkerSharing writes the OWNER'S
 		// half of a machine's sharing consent, and its own comment used to
 		// assert that the write guard refuses any actor but the owner. It does
@@ -1436,6 +1446,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// an established filesystem. Native dispatch reads consent and takes
 		// an absence fence before creating the immutable binding.
 		{Path: "workbench/mutations.memql", Name: "bindWorkbenchExecution"}: true,
+		// Row ownership cannot establish current machine consent or authorize
+		// a filesystem generation transition. The native lifecycle rechecks
+		// run authority and, for renewal/recovery, machine consent; it validates
+		// the transition and fences the exact row version before this write.
+		{Path: "workbench/mutations.memql", Name: "advanceWorkbenchExecution"}: true,
 		// Activity is measured by the stream holder. Owner scoping alone would
 		// let a browser forge live counts without holding that stream.
 		{Path: "worker/mutations.memql", Name: "updateWorkerSharingActivity"}: true,
@@ -1780,13 +1795,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Caller-scoping admits exactly those calls. The only writer is
 		// component/pipelinerun, after it has minted a token through the
 		// grant and read the manifest, under the owner's borrowed authority.
-		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:     true,
-		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:            true,
-		{Path: "pipelines/queries.memql", Name: "pipelinesForScheduledScan"}:  true,
-		{Path: "pipelines/queries.memql", Name: "pipelineById"}:               true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:         true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}: true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:      true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:      true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:             true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesForScheduledScan"}:   true,
+		{Path: "pipelines/queries.memql", Name: "pipelineById"}:                true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:          true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}:  true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineTree"}: true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:       true,
 		// Scheduled recovery spans owners; the native follow-up restores its source owner.
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsAwaitingMaintenance"}:      true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinished"}:               true,

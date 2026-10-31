@@ -94,6 +94,10 @@ type ForwardRouter struct {
 	// app session's answer can never be delivered to a generation.
 	appMu       sync.Mutex
 	appInflight map[string]*appForwardCall
+
+	// appSignInInflight is the sign-in actions waiting on their one answer.
+	appSignInMu       sync.Mutex
+	appSignInInflight map[string]chan *nodev1.AppSignInForwardResponse
 }
 
 // peerManagerSender is the production PeerSender: look the replica up by node
@@ -316,6 +320,7 @@ func (r *ForwardRouter) ForwardDispatch(
 		// it, a pipeline step held by a sibling would be refused there.
 		Purpose:              req.Purpose,
 		ComputerPermissionId: computerPermissionID(req),
+		WorkbenchGeneration:  req.workbenchGeneration,
 	}
 	if !r.sender.Send(nodeId, &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),

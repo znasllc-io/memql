@@ -19,33 +19,209 @@ paths and one task's acceptance criteria must not become routing rules.
 
 ## Delegation and return
 
+A delegated App can finish its operations but return an invalid terminal
+envelope. Both native lanes now retain that return before a separate format-only
+conversion. `agentWorkOutcomeRecovery` permits one attempt; the private reply
+stage records the attempt before inference, bound to the same execution and
+guidance as reply review. The structured Apps door has an empty tool scope and
+no inputs or images. Explicit model/effort routing and normal admission remain;
+the original whole-prompt override cannot replace the conversion contract.
+No operational provider is called again to fix a reporting format. A valid
+conversion still passes evidence/completion review with operational continuation
+disabled. A necessary substantive question uses the existing native feedback
+capability; a missing envelope is never a question for the owner.
+
+Source reads and stage writes fail closed. Another replica retains the consumed
+attempt, and newer/different source context or guidance cannot be overwritten
+with the saved draft. An uncertain inference attempt stops rather than granting
+a fresh attempt. Successful conversion survives a later evidence-review failure.
+The normalized conversion is also saved before rechecking guidance. If direction
+changes while the step runs, Retry can review those retained bytes against the
+new instructions without another conversion or operational turn. For the older
+write gap, the native reader admits exactly one successful `workOutcomeFormat`
+journal receipt after the same-generation consumed-attempt record, for the exact
+owner/run/step and retained input. The owner-scoped query is capped at two rows:
+zero or multiple matches, changed input/generation, cancellation, corrupt state,
+or an unsuccessful receipt leaves recovery stopped. It reads no App prompt or
+transcript and creates no new inference allowance. Fresh completion review is
+still mandatory; retained output is not proof that new instructions are fulfilled.
+This legacy journal adoption must originate in the step's first execution because
+older model receipts do not name a rerun generation. Later versions must already
+have their conversion in the durable stage; a timestamp alone cannot identify
+a late response from a previous execution.
+The version is read as of the consumed-attempt barrier: a reporting-only Retry
+increments the current step receipt while keeping that original attempt valid.
+`TestFormatRecoveryGuidanceRaceRetainsConversionWithoutReplay` covers the race,
+`TestFormatRecoveryConsumedAttemptReadsCompletedReceiptWithoutNewInference`
+covers the old gap, and `TestCompletedFormatReceiptRecoversOnlyOneOwnedAttemptOnPeer`
+checks the actual owner-scoped journal and refusal cases on another engine.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` changes recorded guidance during
+conversion in both provider lanes and verifies peer recovery through the real
+adapter with one production call and one conversion.
+Run-level reporting errors may outlive the recovered step. Before refusing an
+otherwise empty stage, recovery scans the current owned step's App receipts.
+An exhaustive scan with no operational App allows that new step to start; a
+completed App without its checkpoint still stops, as does an incomplete scan.
+The legacy recovery DB test and both adapter lanes cover this step boundary.
+If the saved reporting decision names a different step, the native reader first
+requires that exact owned origin to be done. Its run-level error then cannot
+block a later step merely because that step has older App receipts. An unknown
+decision binding or unfinished origin still stops; ordinary continuation gates
+remain responsible for the later step's prior effects.
+The exact pre-upgrade native `invalid delegated work outcome` failure can be
+upgraded from the latest owned operational App's native handover and public
+receipts. Its owner/run/goal/step/rerun/override and ended-success interval must
+match; ordinary new work, changed execution and Apps paused for native questions
+cannot borrow that result. There is no transcript fallback: absent prose remains
+unknown and only retained public receipts can support the reconstructed answer.
+The scan is bounded and missing proof leaves production stopped.
+The existing failure question's Retry preserves this execution request rather
+than minting a new rerun generation. The native recovery marker also selects a
+deterministic stopped-recovery path, so a classifier cannot reinterpret it as
+permission to redo operations. Budget and context ceilings still take precedence.
+`TestFormatFailureRetryPreservesCompletedExecutionBinding` verifies the approval
+write leaves model overrides, request, head and spend intact; the executing
+replica then performs the source and stage checks above. An inconclusive final
+completion review also stops without an operational continuation or replan. The
+native dispatcher also recognizes the saved reporting failure as ready after
+its Retry, without requiring the new version that an operational retry needs.
+The answer claim still arbitrates replicas; the agent still enforces retained
+source, generation and attempt checks. `TestWorkDBFailureRetryDispatchesOnceAndKeepsCompletedPrefix`
+exercises the actual decision, readiness, claim and executor path for both kinds.
+
+If dispatch never starts and the watchdog abandons the run, Nexus restores the
+existing Resume work control from the exact saved Retry. The native gate permits
+this only for watchdog abandonment, the same answered failure, an unchanged
+failed step written before that answer, and an open, unaccepted goal. It restores
+the reporting error for the agent's durable recovery, preserving request, model,
+head and spend. Newer execution, cancellation, changed decisions or accepted
+results refuse recovery. Reading the control never resumes work automatically.
+The database test covers a lost dispatch; the UI recovery tests cover reload and
+stale/cancelled controls.
+Both compact run queries include `humanResumeId`, so a fresh Nexus list can
+discover that saved answer without fetching execution inputs or private reply
+state. `TestRunSummaryDBExcludesExecutionPayloads` verifies the real projections
+and their owner gates as well as the compact response bound.
+
+`work_outcome_recovery_test.go` covers both lanes, failed conversion, failed
+review, restored attempt bounds, newer sources and substantive questions.
+`TestLegacyOutcomeRecoveryReadsExactOwnedSessionSourcesOnPeer` checks the real
+owned database path and rejects foreign, cancelled and superseded executions.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` exercises invalid as well as valid
+App returns through the real adapter and durable store on two engine instances,
+including the explicit model and effort at the formatting call. An inconclusive
+review regression proves that no operational replan or terminal reply escapes.
+These checks do not establish arbitrary model compliance or exactly-once delivery.
+An exhausted conversion, malformed format or inconclusive completion review is
+a reporting failure, not a failed mandatory journal write. Its marker prevents
+operational replanning while the executor records the failed step and stopped
+run. `ErrWorkCheckpointRequired` remains reserved for an unconfirmed journal or
+checkpoint boundary; using it for review uncertainty leaves a misleading live
+intent that the watchdog later abandons. Transport errors preserve their actual
+underlying cause, including a genuine mandatory-checkpoint failure.
+
+A completed operational turn now saves a private reply-review stage before its
+separate evidence-review call. A transient review failure previously restarted
+the entire operational turn on another replier. The checkpoint binds the full
+result, terminal envelope and exact source messages to owner, run, goal, step,
+rerun request, override and plan; a separate fingerprint covers current goal
+input and chronological owner guidance. The adapter reads fresh ownership,
+execution, cancellation and goal state before review and delivery. An answered
+continuation must still pass its exact native checkpoint proof. Review calls
+retain normal provider admission and spending gates; this record grants no tool
+permission, model calls, completion claim or owner acceptance.
+
+Both execution lanes save their exact final message sequence before handing a
+successful result to review. This barrier also covers direct App completion
+without a locally executed tool batch; an earlier progress marker alone is not
+the completed source. The App-door test exercises both lanes and compares the
+pending review's source with that durable final checkpoint, including exactly
+one completed assistant response. Cross-package Fleet fixtures explicitly wire
+their admission guard and verify reservation before dispatch; no production
+budget gate is disabled to exercise the final checkpoint.
+`TestWorkDBAppReplySourceSurvivesReplicaChange` covers the real adapter and
+durable store in both lanes: an ordinary App greeting includes its final
+response once, then a peer delivers that retained result without another App
+session. A missing or failed final checkpoint prevents the review transition.
+
+An unchanged retry reviews the retained result without production. Changed
+guidance or appended operational receipts require fresh production from the
+latest compatible source, retaining completed exchanges. The latest progress
+checkpoint is never overwritten by an older draft: recovery counters, evidence
+and guidance watermarks remain intact. Review helper capacity recovery carries
+the current operational source in native context: its durable suspension names
+that source, not the helper's compacted prompt. Later owner guidance therefore
+resumes the operational checkpoint through the ordinary exact-proof path. If a
+legacy or otherwise incompatible checkpoint has replaced that source sequence,
+review-only retry remains possible, but fresh production is
+refused until the sources can be reconciled; there is no silent fresh-turn
+fallback. Evidence continuation remains bounded by the durable repair count.
+Each pending/retired transition receives a separate observation ID so repeated
+retirements cannot resurrect an intervening draft.
+
+The pending stage is retained after delivery until the workflow settles the
+step. A crash before that journal commit can cause another review and delivery,
+but not another production turn. This is not exactly-once user delivery or a
+general exactly-once tool guarantee. A failed initial checkpoint write stops
+before review/delivery; it cannot manufacture a saved result. Pre-upgrade work
+without this stage still follows ordinary source-checkpoint recovery. Malformed
+storage, cancelled/closed work and changed execution refuse before reuse.
+`TestReplyReviewRestartDoesNotRepeatCompletedProduction` reproduces the old
+duplicate-production failure; restart/progress tests cover newer receipts,
+guidance, missing proof and storage failure. `work_reply_checkpoint_db_test.go`
+checks fresh-replica ownership, generation and repeated retirement ordering.
+The integration test for helper recovery exercises real capacity suspension,
+fresh-replica guidance and exact continuation proof without replacing source.
+
 Human corrections sent through **Discuss in Ask → Send guidance** are durable
 instructions for unfinished work. Previously they survived only in the immediate
 decision checkpoint. A later permission receipt could make the older correction
 archivable, and a fresh Apps worker could resume the superseded task. The native
 guidance reader now retrieves answered corrections from the owner's approval
 journal, including the current run and its root, on every normal guidance read.
-An acknowledgment is not a delivery cursor: a later worker reads them again and
-deduplicates in its own active context. Retry and replan generation changes do
-not invalidate human direction about the remaining goal.
+An acknowledgment is not a delivery cursor. Each executing context reads the
+owner-scoped chronological journal in pages, then checkpoints the exact consumed
+prefix with its saved exchanges. Retry and replan generation changes do not
+invalidate human direction about the remaining goal.
 
 `workApprovalGuidanceForOwnerRun` selects only the owner's answered feedback,
 with the same owner as decision maker. The reader validates the typed guidance
 contract, decision time and run binding; approved commands and rejected requests
-are not instructions. These corrections have their own 16-message/16,000-rune
-context bound. The query reads an extra row so overflow refuses explicitly
-instead of silently dropping legitimate history. This is a context bound, not
-a goal lifetime limit. Routed messages, late optional answers and corrections
-are presented in human timestamp order so source-query order cannot reverse a
-later change of direction. Restoring feedback neither grants permission nor
-replays an operation. Existing ownership, cancellation and execution checks
-still gate the read and every effect.
+are not instructions. Approval and optional-answer queries follow every storage
+page rather than mistaking the first query page for the complete journal. Sources
+are ordered by human timestamp, then receipt ID for ties. The complete source
+read currently uses memory proportional to the scoped journal and remains subject
+to ordinary cancellation and read deadlines; active model delivery is bounded.
 
-`work_approval_guidance_db_test.go` reproduces the missing correction using real
-storage and verifies later approvals, retries, another replica, delegated child
-work, chronology, ownership and overflow. The regression uses document editing;
-no repository, language or feature-specific branch is involved. These checks
-establish delivery, not model adherence or a completed user task.
+The former 16-message/16,000-character lifetime ceiling could accept a correction
+and then prevent every subsequent resume before context recovery ran. Those
+numbers now bound delivery pages, not the goal's lifetime. Each page is saved
+verbatim with a constant-size count-and-digest cursor before compaction or another
+read. Ordinary context checkpoints retain exact originals before deriving memory.
+The agent drains the remaining pages before its operational model call. One
+indivisible instruction is never clipped; genuine provider or checkpoint limits
+still stop with its original retained. A late insertion invalidates the consumed
+prefix and causes chronological rereading instead of being skipped by a timestamp
+watermark. Final reply review rebuilds the same bounded, recallable context.
+
+A cursor is restored only with the owned, generation-checked continuation. Source
+identity, rather than rendered grouping or a growing lifetime ID array, controls
+recovery rearming. An unchanged prefix on another replica is not new progress.
+Acknowledgment revalidates that prefix and writes bounded batches; it makes no
+completion claim. Existing old checkpoint ID arrays are read once when continuing
+saved work, then replaced by the cursor. Storage failure stops before another
+operation. None of these receipts, summaries or cursors grants permission, changes
+spending limits, or authorizes replaying completed effects.
+
+`work_guidance_pages_test.go` covers Unicode page reconstruction, late insertion,
+changed source identity, storage pagination, another replica, and prefix-specific
+acknowledgment. The agent guidance tests cover both execution lanes and interruption
+between calls; recovery tests cover more than the former lifetime ID limit and
+unchanged-prefix replay. The `paged-guidance` case in
+`app/work_permission_guidance_db_test.go` resumes an actual suspended nested run
+on a peer after forty corrections, preserves completed effects, and still requires
+a new exact command grant. These tests establish delivery and enforcement, not
+model adherence or successful completion of arbitrary downstream work.
 
 The live Apps check exposed a second ordering seam: the newer correction was
 present, but compaction had archived an older additive step override, and the
@@ -703,6 +879,53 @@ old three-automatic/sixteen-total caps and fixed two-hour context deadline are
 removed. Monetary limits, scoped permissions, cancellation, per-operation
 watchdogs and the existing stalled-loop detector remain independent.
 
+A stale serving replica can still write a hard call/time stop using the retired
+lifetime policy. Refresh every role that serves the affected path: the BFF's
+interactive approval, the agent's execution and the planner's replan/remedy
+each need their actual runtime build identity verified. A fresh agent pod alone
+does not establish planner compatibility. Read startup build-identity logs;
+do not launch the engine with an assumed `--version` flag (older binaries ignore
+it and start another server). Local repairs use the supported role-scoped dev
+build and must preserve unrelated release candidates and active CI.
+
+After such a repair, the existing discussion action can reconsider a saved
+hard replan call/time stop only if fresh owned state proves its versioned, already
+renewed window covers recorded spend. The original approval remains unchanged;
+guidance neither adds a window nor clears spend, credits or the evidence epoch.
+The answer and release still use the ordinary receipt gate and exact wait, and
+recovery after a partial write repeats the same fresh check. Genuine monetary
+limits, exhausted windows, missing/malformed state, closed goals, cancellation,
+foreign ownership and result reviews refuse. The saved replan reason survives
+before the latest correction; inference still reconciles receipts and passes
+explicit provider caps at admission. `TestStaleProgressStopRechecksExistingWindowWithoutRenewal`
+and `TestProgressStopRecheckDBAcrossReplicas` cover this boundary, including a
+lost release, a newly tightened monetary cap, idempotent recovery and a provider
+hard cap that still refuses after recovery.
+
+An `unevaluated` admission stop is a failed check, not measured exhaustion.
+The same discussion gate may reconsider that saved replan inside its current
+initial or renewed allowance, with complete recorded usage and current owner,
+goal, wait and artifact checks. It never recognizes recovery by matching prose,
+rewrites the old question, grants a phase claim, renews a window or clears
+usage. New questions describe verification failure accurately and remain closed
+until that gate succeeds. The retried native phase must still pass fresh logical
+and provider admission; unavailable accounting or an explicit cap still refuses.
+`TestUnevaluatedStopRecheckDBAcrossReplicas` covers a saved answer, failed release,
+tightened monetary limit, peer recovery and unchanged cumulative accounting.
+
+Provider admission recognizes compiler ownership, a claimed remedy's exact wait,
+or an answer validator's exact completed version through private native context.
+Ordinary waiting/compiling contexts cannot mint that evidence. Remedy and answer
+check deadlines start before claim/preparation, so delays cannot extend their
+claim window. Compiler ownership is rechecked against its persisted node and
+heartbeat. Stale phases do not turn into execution authority when status changes.
+Only current execution, compilation and remedy phases can renew progress from
+fresh completed evidence; terminal answer validation cannot renew. The native
+cross-replica tests in `provider_phase_db_test.go` exercise admission, claim
+expiry, changed waits/owners/nodes, cancellation, progress-credit consumption
+and unchanged provider caps. Runtime role versions must include these gates;
+changing a saved run's status to bypass them is not a recovery procedure.
+
 Recovery observes that same current cumulative window. `ModelCallBudget`
 previously reloaded the original goal estimate after calculating the renewed
 allowance, so a run beyond its first window appeared permanently exhausted to
@@ -759,7 +982,9 @@ Provider admission also distinguishes execution from native work phases. A
 the receiving planner had correctly claimed a run whose status was still
 `compiling`. Widening that test to all waiting or finished runs would allow stale
 contexts to infer after work stopped. The native entry paths instead attach a
-private, call-local phase stamp after their existing admission gates:
+private, call-local phase stamp after their existing admission gates. The shared
+helper returns only binding data; each entry path creates its own context so
+the package's no-returned-authority-context check remains enforced:
 
 | Phase | Fresh evidence checked under the workload gate | Stop condition |
 | --- | --- | --- |
@@ -849,6 +1074,42 @@ separate fail-closed receipt tracking bound; it must not be described as
 unbounded in-memory tracking or as owner acceptance.
 
 ## Recovery boundaries and remaining limits
+
+An `inferenceUnavailable` wait with a retry time now reaches agents from its
+run event, as transient retry waits already did. The cron leader can be a node
+without an executor; asking only that leader to dispatch left restored
+subscriptions waiting indefinitely. Each agent arms one local timer per exact
+wait. A non-agent sweep reannounces an unchanged overdue wait with a heartbeat,
+so agents that restarted after the original event can recover it too. That
+backstop requires the updated sweep on the current cron leader. During a rolling
+deployment an older product node can take the lease, so an agent also rebuilds
+its timers from the durable in-flight projection after its own `system.startup`
+event. The read uses the existing compiled maintenance principal and passes no
+maintenance authority into execution. Each timer restores its run owner's actor.
+Projection readiness is retried within a one-minute startup operation; failure
+is logged and leaves the saved waits to later events or an updated sweep. Node
+readiness is not blocked, and provider work does not run under that watchdog.
+
+The timer re-reads under the restored owner's authority and claims a leased key
+bound to the run, approval, wait start and retry time. Bare event IDs and canonical
+projection IDs share one timer identity and the existing canonical claim spelling;
+otherwise a late event could claim the same wait a second time. The executor checks that
+identity and goal again; changed waits, cancellation, closed work and driver-owned
+runs are refused. Recovery preserves any existing rerun request, completed
+prefix, routing, overrides, usage and progress extensions. It does not consume a
+new human answer, select a paid provider, or treat a cost-ceiling approval without
+a retry time as automatic permission. A dead claimant leaves a lease for the
+sweep to retry; fresh events alone are not proof an external effect is repeatable.
+
+[`inference_waits_test.go`](../../../integrations/work/inference_waits_test.go)
+covers early/duplicate timers, stale waits, cancellation and missed events.
+[`TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix`](../../../app/work_inference_recovery_db_test.go)
+uses separate engines, the real Postgres claim and executor, a non-agent leader
+or startup recovery without any scheduler announcement,
+and held prior execution claims. It checks one unfinished effect under a saved
+rerun request, refusal to repeat an unclassified effect without that request,
+retained prefix, and unchanged usage/extension counts.
+These fixtures do not certify a provider's actual account availability.
 
 Failure Retry creates a new execution request but preserves the failed step's
 latest admitted version override. Creating that request with an empty override
@@ -979,6 +1240,296 @@ independent instructions and cancellation. The existing driver regression
 `TestIndependentReviewRefusesLateAuthorityBeforePersistenceAndEffects` covers
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
+
+## A refused app call moves on only when nothing ran (2026-10-29)
+
+Production, engine 0.31.9: Ask with routing set to apps failed twice on one
+machine. Codex was out of credits and the call stopped there, then Claude Code
+failed with `OAuth session expired`, as it had since 2026-10-24. The
+[spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md) records
+what each app really reports.
+
+**The proof** (`appPreWorkRefusal`, `integrations/agent/worker/app_inference.go`).
+A failed session may move to another app or machine only when nothing ran: no
+served model, no structured result, no recorded or dropped action, no tokens, and
+no prose except the refusal's own sentence. Anything else may have caused effects
+and is not run again, because that would repeat them. A step that stopped partway on
+its usage or login is handed over rather than run again ("An app that stops partway
+hands its work over", below). `usage.known` is not part of the proof. A Codex turn refused by its limit reports
+no usage at all, which is why failover never fired for it. Stated tokens still
+disprove it. The alternative, trusting the sentence alone, would replay a turn
+that had already started tools. Tests:
+`TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions`,
+`TestAppFallbackCrossesReplicaForARefusalReportingNoUsage`.
+
+**Two refusals, because they are about different things**
+(`appRefusalExclusion`, `component/memql/app_selection.go`). A usage limit is the
+account's, so it rules the app out on every machine for the rest of the call:
+trying each would open a session on each to hear the same answer. A login is one
+machine's, so it rules out that machine's app and the same app elsewhere can still
+answer. A pin stays its app either way, because the selector is asked for the
+pinned app every time. When nothing is left, the caller gets the last refusal
+rather than "no enabled app matches", which would send somebody to a setting when
+their login has expired. The walk stops at 16 exclusions. Tests:
+`TestAppRefusalExclusionMatchesWhatTheRefusalIsAbout`,
+`TestPinnedAppNeverMovesToAnotherApp`,
+`TestAppFallbackThatRunsOutKeepsTheLastRefusal`.
+
+**The block is availability evidence, not permission to replay.**
+`v1:worker:appSession.quotaRefused` and `authRefused` are stamped from the error's
+words whatever the session did, and `appAvailabilityEvidence` reads the newest of
+them and of a success, on any replica. A refusal blocks until the reset its
+sentence names, and otherwise for a 15-minute recheck (`appRefusalUntil`). A login
+has no reset, and a sign-in in a terminal writes no row, so the next call after
+the window is what finds it. Test: `TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas`.
+
+**Codex's reset names no zone.** "try again at Nov 3rd, 2026 11:52 PM" is in the
+machine's zone, which a cluster node does not know. Reading it as unknown blocked
+an app out of credits for days for only 15 minutes, so every call met the refusal
+again. It is now read as the earliest instant it can mean (UTC+14), so the block
+never outlasts the real reset and can end up to a day early. A reset read as
+already past takes the recheck, not no block. Test:
+`TestAppRefusalUntilRechecksAResetThatHasAlreadyPassed`.
+
+**Limits.** The classification reads each app's sentence, so a sentence neither
+list knows is an ordinary failure: no failover and no block. The phrases were
+measured on Claude Code 2.1.304 and codex-cli 0.162.1 against fabricated expired
+logins, and on one real out-of-usage Codex. A real expired refresh token and
+Claude Code's own usage-limit sentence were not reproduced here. Failing over a
+signed-out Codex costs about 20 seconds of its own retries before the next app
+starts; checking before routing is the follow-up that removes that wait. Neither
+the failover nor the block has run against the production fleet.
+
+## A machine measures whether its apps can answer (2026-10-29)
+
+A file cannot say whether a login works, and neither can the apps' status commands,
+which read the same file (measured, [spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md)).
+So Cockpit asks each app the cheapest real question it offers and reports the answer on
+`AppInfo.readiness`. Owner's brief: checked "in intervals every once in a while", with
+limits "checked before exposing the app's route" by "a simple ping that doesn't waste a
+lot of tokens".
+
+**Measuring** (`cockpit/internal/worker/harness/readiness.go`). Codex reads
+`account/read` and `account/rateLimits/read` over its app-server, spending nothing.
+Claude Code has no such read, so it is `auth status` and then a ping. The order is the
+spending guard: an API or proxy setting in the environment runs nothing, a login that
+is not `claude.ai` is not pinged, and a ping whose init event reports an `apiKeySource`
+other than `none` is stopped. Anything unreadable is `unknown`. Tests in
+`harness/readiness_test.go` replay recorded streams.
+
+**Scheduling** (`cockpit/internal/worker/apps/readiness.go`). One tracker for the
+machine, because a login and a plan are the machine's whichever cluster asks, running
+one check at a time.
+
+| Decision | Trigger | Why | Test |
+|---|---|---|---|
+| Codex every 5 minutes, Claude Code hourly while working and every 15 minutes otherwise | the cadence | a check's price sets its rate; an hour-stale "ready" costs one failed turn at zero tokens, which then corrects the answer | `TestTrackerChecksOnEachAppsOwnCadence` |
+| Skip while a session runs | the session brackets itself | the session will report what it finds | `TestTrackerSkipsAppsWithARunningSession` |
+| A real turn counts as a check | `TurnResult.Readiness` | a busy machine never pings | `TestTrackerReusesARealTurnInsteadOfPinging` |
+| At most 30 spending pings in 24 hours | a persisted log of checks that may have spent | the spend stays bounded whatever triggers a check | `TestTrackerStopsPingingAtTheCeiling` |
+| Answers and the log survive a restart | `app-readiness.json` | a crash loop is the worst trigger there is | `TestTrackerSurvivesARestartWithoutSpendingAgain` |
+| A refused ping does not count | `ReadinessSignal.Spent` | a signed-out machine re-checks often and spends nothing | `TestTrackerCountsOnlyWhatACheckSpent` |
+| No check for an app no cluster allows | `apps.homes` | nothing is spent without the machine owner's consent | `TestTrackerChecksEachAllowedAppAndNothingElse` |
+| Re-check on a login file change only while signed out | stat of the login files | a sign-in in a terminal tells nobody, and every Claude Code rewrites `~/.claude.json` | `TestTrackerRechecksASignedOutAppWhenItsLoginFileChanges`, `TestTrackerIgnoresLoginFileChangesWhileReady` |
+| No ping during metered overage | `isUsingOverage` | each ping would be paid for | `TestTrackerDoesNotPingThroughMeteredOverage` |
+
+**Only `ready` is admitted, with one exception.** Owner, 2026-10-30: "I shouldn't be
+able to reach an app that is not online, that meaning like does not, is not ready, is
+not connected." So a Cockpit that measures is taken at its word, and `unknown` is not
+routed to. **The exception is a Cockpit that predates the checks,** which sends no word:
+refusing it would take every current machine out of routing until it upgraded, which the
+same brief ruled out, so it keeps the file-based answer it always had and a call it
+refuses moves on. A Cockpit that measures always sends a word, `unknown` before its
+first check, so the exception cannot admit an app a machine could not vouch for. It can
+be deleted once no machine in a fleet reports silence. This replaced a first design
+that left `unknown` selectable too. Tests: `TestRunnableHonoursWhatTheMachineMeasured`,
+`TestAnAppThatCouldNotBeCheckedGetsNoDoor`, `TestTrackerReportsUnknownBeforeTheFirstCheck`.
+
+**One check that cannot tell does not change the answer.** With `unknown` refused, a
+ping timing out on a busy machine would take a working app away for 15 minutes. It keeps
+the last answer and looks again within a minute, and a second one in a row is the
+answer, because the app has then gone too long unchecked to vouch for. The checks then
+return to the ordinary cadence, since an app on an API key will never say more. Test:
+`TestTrackerKeepsItsAnswerThroughOneCheckThatCouldNotTell`.
+
+**Routing** (`component/worker/apps.go`). `Runnable` adds the measurement, so the
+`app:` label, doors, the session gate and the machine refusal are one answer. It takes
+no clock, so every replica reading the row agrees, and labels cannot go stale by
+themselves. Selection also re-reads the row (`appMeasuredNotReady`), because a door may
+be a beat older than the read. Cockpit clears `signed_in` on `signed_out`, so an engine
+predating the field is right too. Tests: `TestRunnableHonoursWhatTheMachineMeasured`,
+`TestAppSelectionDBReadsReadinessOffTheRow`,
+`TestAnAppTheMachineMeasuredAsOutOfUsageGetsNoDoor`,
+`TestAnAppThatReportsNoReadinessKeepsItsDoor`.
+
+**On a machine that measures, only a check ends a refusal** (`appBlockedUntil`). Owner,
+2026-10-30: "we should keep a state and an interval checking for it until it becomes
+available, then it can be used again." The block in the section above reads session
+rows, and buying a reset or signing in writes none. So a `ready` measured after the
+refusal clears it, and neither an older check, nor one that could not tell, nor the
+reset passing does: any of those would send a person's real call to find out what the
+machine reports anyway. The state lives on the row and in `app-readiness.json`, and an
+exhausted app is asked every 15 minutes (Codex every 5) because a refused ask is free.
+Credits count: Codex's plan window stays at 100% after they are bought, so the read
+takes them first, and only spending being stopped outranks them. A Cockpit that predates
+the checks has only the clock of the section above, so a real call still finds out
+there, and a refusal moves on. Tests: `TestAppRefusalDBClearsOnANewerMeasurement`,
+`TestAppRefusalDBOutlivesItsResetUntilTheMachineSaysSo`,
+`TestTrackerRechecksAnExhaustedAppOnTheShortInterval`,
+`TestCodexLimitsReadCreditsAndSpendControl`.
+
+**The row moves for answers, not for checks.** A changed answer lands on the next beat
+as a routing change. A check that only moved its time rewrites the row at most every 30
+minutes (`appReadinessRowRefresh`), so "checked 20 minutes ago" can be up to that stale,
+which a reader loses nothing by. Test: `TestAppsEqualIgnoresACheckInsideTheRowRefresh`.
+
+**The Linux unit is why no Linux machine had completed a session.** Under `ProtectHome=read-only`
+with only `~/.memql` writable, Codex's app-server exits at start, no login can be
+written, and the default workspace cannot be created. `RestrictNamespaces` refuses the
+sandbox shell commands need, and `MemoryDenyWriteExecute` kills Node.js. The unit now
+leaves the worker's own home writable and drops those two; other users' homes and the
+system tree stay read-only, which is what the unit said it was for. This is less
+hardening than before, chosen because the alternative is apps that cannot run, and macOS
+has no such restriction at all. Gate: `lib_test.sh` checks both places the unit is
+written. A machine keeps the old unit until the installer runs again.
+
+**Limits.** The cadence is a judgement, and a login that lapses on an idle machine reads
+ready for up to an hour. Claude Code's refused-limit stream is shaped from the event's
+own vocabulary, not recorded, because no plan here was out of usage. A Codex account
+holding credits was not observed, so what a turn does then is reasoned from the read's
+fields. Whether a LaunchAgent can refresh a Keychain login was not measured. The checks ran for real through
+`memql worker apps --check` on this Mac and, against fabricated expired logins, under both
+units in a Linux VM (systemd 255). They have not run on the fleet, and neither a real
+successful Claude Code turn on Linux nor the tracker's schedule on a real machine has been
+observed.
+
+## Signing in to an app from Fleet (2026-10-29)
+
+Owner's brief: an unauthenticated app gets "a sign-in button", and "right now there's a
+button that says retry availability. That's not what we want." Fleet now shows each app's
+state with its reset time and offers Sign in. Retry is gone, because the machine's own
+checks do its job.
+
+**What crosses and what does not.** Credentials stay on the machine: the app writes its own
+login. A page's address and a device code cross the worker stream and sit on a
+`v1:worker:appSignIn` row. A pasted code crosses to the waiting process and is written
+nowhere; it is an authorization code bound to the verifier that process holds (PKCE). The
+address and the code are cleared when the sign-in ends, though an earlier row version keeps
+them, by then useless. Tests: `TestFleetAppSignInDB` reads every row version for the pasted
+code, `TestAppSignInRefusalDoesNotEchoACode`.
+
+**Who.** Only the machine's owner, at three points: the act reads through `modelSetupRow`,
+which answers only for the caller's own machines, so a cluster owner gets the stranger's
+refusal; the holder checks the verified authority and not the envelope
+(`HandleForwardedAppSignIn`); and the row's tier is plain owner with no cluster-owner
+bypass, unlike the model pull's, because a device code signs an account into a machine.
+Tests: `TestFleetAppSignInDB`, `TestAppSignInRefusesAnyoneButTheMachinesOwner`.
+
+**How it crosses replicas.** The act runs on the bff that took the call, the machine's stream
+ends on one agent, and the row is what the person watches. A start is forwarded rather than
+claimed from an event as a model pull is, because a pasted code must reach the same replica
+without being written anywhere, so the forward has to exist anyway, and it makes "that
+machine has gone" a refusal rather than a spinner. Test: `TestAppSignInCrossesTheHop`.
+
+**Fallbacks and stops.** A machine whose Cockpit predates `AppDescriptor.sign_in` gets the
+older Ask-driven Connect, because it would ignore the message. A code goes only to a sign-in
+its stream started, because after a reconnect the process holding the verifier is gone. When
+the stream ends the row closes as failed and the process stops. A sign-in stops itself after
+15 minutes, and nothing sweeps the rows: Fleet reads a live status past `expiresAt` as over,
+which is what covers a replica dying. A newer sign-in to the same app replaces an older one.
+A cancel takes the sign-in off the stream at once, because the row then holds the person's
+answer, and neither a last word from the machine nor the stream ending may rewrite it. A code
+that could not be sent stays open, so the stream ending closes it.
+On Linux, a home the service cannot write fails at the start with what to do, rather than
+after the person has done everything. Tests: `TestAppSignInClosesWhenTheStreamEnds`,
+`TestAppSignInCancelStaysCancelled`, `TestAppSignInCodeThatDidNotGoIsClosedByTheStreamEnding`,
+`TestAppSignInCodeGoesOnlyToASignInThisStreamStarted`, `TestSignInStopsWithTheStream`,
+`TestANewerSignInReplacesAnOlderOne`, `TestCheckLoginWritableSaysToUpdateTheService`.
+
+**Retry's removal.** A measurement newer than a refusal now ends its block (the section
+above), so nothing needs pressing. A machine still on a Cockpit that measures nothing has
+no such measurement: a named reset blocks until then, even if credits were bought, and
+success cannot clear it because the app is not selected. It clears when that machine's
+Cockpit upgrades. `availabilityRetriedAt` stays on stored `appRouting` rows, unread, because
+that field is a free object.
+
+**Limits.** No real login has completed through this path. The flows were run against the
+real CLIs in scratch config directories up to the page and a fabricated code, and the Fleet
+states were checked against fixtures (`clients/os/qa/app-routing.tsx`), at desktop and phone
+width, light and dark. Whether Codex's device code login is enabled for an account is that
+account's setting; a refusal then reads as the app's own sentence. The row takes no lock: the
+holder and the bff can both write it, so a `waiting` write already in flight when a cancel
+lands could land after it. The row would then read as waiting until the person cancels again
+or it expires. That is reasoned from the code and has not been observed.
+
+## An app that stops partway hands its work over (2026-10-30)
+
+Owner: "If during usage we run out of credits, then that's fine. We get the error
+message, but actually what should happen is that instead of just saying, oh, I run out
+of credits for Codex, it should now attempt Claude, for Claude Code to take over." Before
+this, only a refusal proven to precede any work moved, and a step that had done work
+failed with the app's sentence. Recorded actions have effects, so the next app is not
+given the step as if nothing happened: it gets the step, what is established to have
+happened, and where the work is, and it carries on (`component/memql/app_takeover.go`).
+
+| Situation | What happens | Why |
+|---|---|---|
+| The app stopped on its usage or login, with a complete record | The next ready app takes over, told what ran | Those reasons are about the app, and it has finished its turn with no call in flight |
+| The same, with a dropped action, an unread or short journal, or outputs not all in the Library | The step fails with the app's sentence, and says why nothing took over | Nobody could tell the next app what happened |
+| Refused before any work | The next app gets the same prompt | Nothing happened, so there is nothing to tell |
+| Any other failure, a crash or a timeout included | The step fails. Never run again automatically | An action may be half done |
+| The stop has a structured answer | The step fails as before | It already has an answer |
+| A pin or an Only strategy | Stays that app, and may only move machines on a login | A person chose it |
+| A chat turn that ran no action | The same prompt goes to the next app, unless part of an answer was already shown | Nothing but tokens was spent, and a shown answer cannot be taken back |
+| A chat turn that ran an action | Fails | It has no step, so it has no record to hand over |
+| Nothing else is ready | The step fails with the app's sentence and "no other app is ready to take over" | The record stays on its run |
+
+**The machine's word, not the sentence** (`AppSessionEnd.stop_reason`). Before any work a
+sentence is enough, because nothing can be lost. After work, a failure whose words only
+resemble a limit would put a second agent on top of whatever the first left half done. So
+only the app's own protocol counts: `TurnResult.Readiness` on a failed turn. A Cockpit
+that predates the field gets no takeover. The machine withdraws the word when an output
+did not reach the Library, because a takeover carries on from what was left. Tests:
+`TestSessionEndSaysWhenTheAppStoppedOnItsUsageOrLogin`,
+`TestSessionEndWithdrawsTheStopWhenOutputsDidNotReachTheLibrary`,
+`TestAppStoppedMidWorkTakesTheMachinesWordAndACompleteRecord`.
+
+**What establishes what happened** (`completeStop`). The journal: the actions the machine
+reported, and the MemQL tool calls the MCP node recorded, read from the rows on whichever
+replica holds the session. A recording write that fails is logged and swallowed, so a
+journal holding fewer of the machine's actions than it reported takes the takeover back.
+The app's own words travel too, marked as its account and not evidence, as the existing
+rule says of a delegated narrative. The brief is bounded, keeps the most recent actions,
+leaves out reads, and counts what it cuts. It goes on after any override, because a
+person's whole-prompt replacement must not erase what has already happened. Tests:
+`TestDelegateTakesBackAStopWithoutACompleteRecord`, `TestTheRecordSurvivesAWholePromptOverride`,
+`TestAppWorkJournalDBReadsWhatAnotherReplicaWrote`,
+`TestAppTakeoverBriefIsBoundedAndCountsWhatItLeavesOut`.
+
+**Which machine.** A run's sessions share one directory on a machine, so the machine
+holding the work is asked first, and the next app finds the files as they were left.
+Another machine may carry on when it is the only one with a ready app: what reached the
+Library is delivered as inputs, and the brief says the rest stayed behind. Chosen over
+failing the step, because work there is usually redoable and the record warns against
+repeating what reached outside. A session runs only on a stream this replica holds, so a
+machine on a sibling replica is passed over, as it is for any session. Tests:
+`TestAppSelectionDBPrefersTheMachineHoldingTheWork`,
+`TestDelegateDeliversWhatReachedTheLibraryToAnotherMachine`.
+
+**What a person sees.** The parent run gets a note naming both apps and both records, and
+the child run of each session stays. The next app is asked to say in one sentence that it
+took over. A takeover's recording starts in the middle, so its child run carries no goal
+signature and procedure learning never mines it. Tests:
+`TestDelegateGivesTheNextAppTheRecordOnTheSameMachine`,
+`TestATakeoverSessionIsNoRecordingOfTheGoal`.
+
+**Limits.** No real limit has been hit partway through a real turn: the streams are shaped
+from the recorded refused turn with tokens added. A session has one chance at the machine
+holding its stream, so with two replicas the other's machines are not considered. A person's
+own route listing `app:codex` then `app:claude-code` stays on the first, because a session
+winner's chain is itself alone; only the Apps route's `app:*` moves between apps. An action
+that started a background process cannot be seen stopping. If pulling a delivered file fails
+on another machine, that session fails as an ordinary failure.
 
 ## Pipeline AI runs local first (2026-10-29)
 
@@ -1142,6 +1693,59 @@ qualify a deployed integration or any consumer repository. Live runs and
 equivalent coverage must be verified separately. Required-check changes, merge,
 release publication and controller deployment remain separate decisions.
 
+## A queue controller outage costs a step time (2026-10-30)
+
+Kueue's webhooks on Jobs in `memql-pipelines` failed closed, so a restart of its one
+controller answered every Job write there with HTTP 500 `failed calling webhook`: for
+12.7 s after a pod delete, and 5.5 s past API readiness after a cluster restart. The
+runner reads any 5xx on a create as a create that may have landed, which is the right
+reading of a lost response, so a new step failed `pipeline_execution_uncertain` in under
+a second and the same attempt stayed failed. A replica with no isolation proof had its
+probe Job refused, and its step refused `pipeline_isolation_unenforced`. Running and
+suspended steps came through. The first installation with a queue holds 13 stranded
+creation claims since 17 October, up to three in one second. That is the shape this
+leaves, but other failures can leave it too, and they were not attributed.
+
+**`mjob.kb.io` and `vjob.kb.io` fail open** (`deploy/kueue/install/webhooks.yaml`). A
+queued Job needs neither hook to be safe: the runner creates it with `suspend: true`
+itself, so a Job a hook missed waits, and the controller makes its Workload and admits
+it in order when it returns. Only the workbench's Role can create a Job in that
+namespace, so nothing else can use the gap to start a labelled Job unsuspended. Every
+other hook stays `Fail`: no step writes those kinds, and a queue or flavor written during
+an outage would go unvalidated.
+
+Teaching the runner to wait was the alternative, since admission runs before storage and
+a 500 naming that webhook proves nothing was stored. About ten lines made new steps wait,
+but it reads an API server's sentence, and a takeover claim, a heartbeat and the probe
+are each Job writes that need the same. A second controller replica shortens a drain but
+not a cluster restart.
+
+**`imagePullPolicy: IfNotPresent`** (`deploy/kueue/install/controller.yaml`). A cluster
+restart makes a new pod, and upstream's `Always` then needs the registry: with none
+reachable the controller stayed in `ImagePullBackOff` and every new step was refused until
+the network returned. With this it was ready in 12 s, registry blocked. The kustomization
+pins the image by digest, so it is the same bytes.
+
+What survives: a Job created during an outage is an ordinary suspended Job with its
+Secret and claim, so a replica change adopts it as usual, and its execution timeout starts
+at admission. Its run's ceiling keeps counting. If the controller never returns, the step
+fails `pipeline_run_ceiling` at that ceiling; that is the stop condition.
+
+`TestAControllerOutageCannotRefuseAStepsJob` and
+`TestTheControllerRestartsWithoutItsRegistry` (`deploy/kueue/install`) hold the rendered
+values in CI, and `TestResourceQueueCreatesSuspendedJobAndReservesSidecars` holds the half
+that makes failing open safe. `TestNewStepsWaitThroughAControllerOutage` (opt-in) runs real
+runners against the real controller on both kinds of replica: it failed
+`pipeline_execution_uncertain` before this change and passes after it, with each step run
+once.
+
+Verified on a disposable k3d cluster at the pinned k3s and Kueue, with the operator applied
+directly. Not verified: AKS, reconciliation through Argo CD, a takeover by another replica
+during an outage, and a controller that accepts connections and never answers, which would
+cost each Job write up to the webhook timeout. An installation gets this when it moves its
+Kueue pin. Why a local cluster now wants this queue:
+`docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md`.
+
 ## A pipeline run says why it failed outside its steps (2026-10-27)
 
 A pipeline's workflow can fail after every step passed. On 2026-10-27 the
@@ -1287,6 +1891,107 @@ Not verified here:
 - Retry on a question the old recipe raised. It reruns the failed step under
   the installed recipe and keeps the old run's prefix.
 
+## A stopped attempt stops waiting for a Job POST that can no longer land (2026-10-30)
+
+On 2026-10-29 memql-znas run `131819ff` was cancelled. All 12 of its steps were
+terminal by 16:21:13Z, and more than 12 hours later it still read `in_progress`
+with `driverHeartbeatAt` advancing. Every recovery pass claimed it, answered the
+cancel, and stopped at `cancelRunner`: each workbench replica answered
+`cancel_failed`, because `cleanupReceipt` refused the attempt of
+`checks.package-config`. That attempt's Secret had `memql.io/job-creation:
+creating`, stamped 16:21:13.300Z, over no Job, and the run's stop marker was
+created in that same second. The cancel ended the creator's context with its POST
+unanswered. The protocol leaves `creating` in place on purpose, because the POST
+may have landed, and the refusal promised to wait until the claim was reconciled.
+
+Nothing reconciles a claim. Only the creator holding it can release it, and that
+creator has no answer to go on, or is gone. So the wait had no end, and every
+driver rightly kept the run unfinished on an unconfirmed cancel. The orphan sweep
+deferred to the same missing step: any stop marker kept a `creating` Secret, with
+its clone token, for good. On 2026-10-30 production held 13 such Secrets, the
+oldest created 2026-10-17, and two more runs were in the same loop: `735780c9`
+(claim 2026-10-24) and `defdc70b` (2026-10-25). `735780c9`'s attempt was retired
+2 seconds after its claim and its run stopped 54 minutes later, which fits a step
+failing `pipeline_execution_uncertain` whose receipt could never be cleaned up:
+the same refusal reached with no cancel. Its row was not read, so that is an
+inference.
+
+`latePostWindow` (five minutes, `integrations/pipelinesteps/retirement.go`) ends
+the wait. Once an attempt's stop marker has stood that long with no Job,
+`cleanupReceipt` deletes the Secret and confirms, and `reapSecret` may collect it.
+The window runs from the marker's `creationTimestamp`, which the API server
+stamps, because the marker is the fence: `checkRetirement` reads it last before
+every POST, so a POST leaves within one API call of a read that found none. The
+slowest POST the fence lets through lands 180 s after the stamp: 60 s for the
+marker's write to commit (the API server's default `--request-timeout`), 30 s for
+the read's answer (`k8sRequestTimeout`), then 30 s on the client and 60 s on the API
+server for the POST. The other two minutes are margin. Nothing that can take time
+may be added between that read and the POST, and the attempt's marker must stay
+the last one read. An independent review caught the fence reading it first: a
+creator could pass that read, sit in the run marker's retries (10 x 30 s + 9 x 2 s =
+318 s) while the stop and the whole wait came and went, and POST after cleanup had
+confirmed (`TestAStopThatLandsDuringTheFenceStopsThePost`).
+
+What a replica change, a retry or a pause leaves:
+
+- **The stop marker stays**, for its own retention. It refuses a later creation
+  and a delayed envelope, so a spent claim is never replayed. The claim is never
+  returned to `queued`; it goes with its Secret.
+- **The decision reads the API server and this replica's clock**, so any replica
+  can make it. The creator's memory is not consulted, and a replica's death changes
+  nothing.
+- **A refusal inside the window stores nothing new.** The driver's durable cancel
+  request or receipt stands, and recovery asks again under `abortBackoff`. The
+  backoff gives about eight minutes in all, which is derived and not measured.
+- **A Job that lands inside the window** is deleted as any Job is. One that lands
+  as cleanup deletes the Secret is caught by the absence check, which reads again.
+
+Rejected alternatives:
+
+- **Timing from the claim's stamp.** A creator can spend over ten minutes after
+  stamping it, retrying the fence's reads against a hung API server (two reads,
+  ten attempts, 30 s each), and still send. It bounds nothing.
+- **Concluding at once and leaving the Secret to maintenance.** The run would claim
+  to have stopped while a Job could still appear, which `cancel.go` promises never
+  to do.
+- **Waiting for the run's deadline**, as the sweep does for an attempt nobody
+  stopped. A cancel would read as running for up to the 12-hour ceiling.
+- **A namesake placeholder Job**, so that a late POST answers 409. It needs its own
+  retention and a timer to delete it, so it adds an object without removing the
+  time bound.
+- **A new `pipelineCancel` version.** The answer comes from API state, so a mixed
+  rollout is harmless: an old replica refuses, and the agent asks again.
+
+`TestACancelThatInterruptsAJobPostConfirmsOnceThePostCanNoLongerLand` reproduces
+the production state with a second replica answering, and
+`TestCancelHopConfirmsOnceAnInterruptedPostCanNoLongerLand` takes it through the
+real executor and forward handlers with the creating replica dead. The driver's
+half is `TestCancellationFailureRemainsUnfinishedUntilAnotherDriverConfirms`
+(`component/pipelinerun`). `TestAnOldClaimStillWaitsOutItsStopMarker`,
+`TestAPostTheLastReadMissedIsCaughtByTheAbsenceCheck`,
+`TestASecretWithNoCreationStateWaitsOutTheWindowToo`,
+`TestAnUncertainStepsReceiptCleansUpOnceItsPostCanNoLongerLand`,
+`TestAStopMarkerWithNoCreationTimeDoesNotEndTheWait` and the
+`TestMaintenance...` tests in `retirement_test.go` hold the rest.
+`TestRetirementAgainstLocalKubernetes` ran the spent claim against a real k3d API
+server, with the marker's own timestamp and the guarded delete.
+
+Not verified: the path on production, the 60 s on AKS (it is the documented
+default), and what the POST at 16:21:13Z did, because that second's logs went with
+the pods and the rows were not read.
+
+Known limits. A process frozen between its read and its POST for longer than the
+margin can still create a Job, and so can a replica whose clock runs ahead of the
+API server's by more than the margin (`fresh` already assumes clocks far closer
+than that). The Job finds no Secret, so it has no clone token and none of the step's
+secrets. A step that declares a secret cannot start, and any other, on a repository
+that clones anonymously, runs with no credentials. Its attempt's receipt is already
+written, so its result changes nothing, and the deadline and TTL it was created with
+collect it, a queued one once it is admitted. Separately, and from before this
+change: `create` has no fence between its first read and `CreateSecret`, so a Secret
+can reappear after a confirmed cleanup. The next fence finds the marker and removes
+it, and a Run that dies in between leaves it for the sweep at its run's deadline.
+
 ## A step that ran out of memory says so (2026-10-29)
 
 On 2026-10-29 the second attempt of the `cockpit/v0.21.0` release run failed
@@ -1332,6 +2037,144 @@ together. Not verified: a live cluster's out-of-memory kill through this
 path, and the kubelet's `OOMKilled` for a killed child process (an exit other
 than 137), which is a constructed case. A fleet machine reports no such
 reason, so a fleet step killed for memory still reads as its exit code.
+
+## Waiting pipeline steps move forward as their run ages (2026-10-29)
+
+A run's ceiling counts from its start, queue time included, and a strict queue
+admits by class first and age second, so age only breaks ties within a class. A
+step of a low class, or one created late in an old run, can wait out the whole
+ceiling and fail `pipeline_run_ceiling` without having started. On 2026-10-29 the
+daily and weekly scans of the first installation with a queue did that behind
+twelve hours of check and release jobs, and pull-request runs started at 06:00
+were still waiting at 15:00. That installation added a CronJob of its own the same
+day (memql-znas #277, #278). This moves it into the engine's
+`deploy/k8s/components/pipelines-capacity`.
+
+Every five minutes a pass (`memql pipeline-deadline-priority`,
+`integrations/pipelinesteps/deadline_priority.go`) lists the runner's Jobs and
+relabels each one that is suspended, in the named queue and not past its deadline:
+past half its run's ceiling to `memql-pipeline-aged` (350), in the last quarter to
+`memql-pipeline-expiring` (400), and, when an owner named its run with
+`--boost-run`, to `memql-pipeline-boosted` (375) at any age. Kueue re-prioritizes a
+workload that has not reserved quota when that label changes, and strict order then
+accumulates room for the oldest Job of the highest class. A pass records
+`memql.io/priority-promoted-from`, `-at` and `-reason` on the Job and prints one
+JSON line. No event may start at these classes, so finding one on a Job says how it
+got there.
+
+**It stays a CronJob, and becomes Go on the workbench image.** The installation's
+copy was Python on a borrowed image, chosen because its cost guard already pulled
+that image. In the engine that would have been the first Python in any deployed
+manifest, a third-party pin with no updater (Dependabot's docker updater reads
+Dockerfiles, and `.github/dependabot.yml` says why a pin without one is only quieter
+about being insecure), tests that run only if a step names them, and the runner's
+label and annotation names restated across a language boundary. A subcommand needs
+none of that: `integrations/pipelinesteps` is already linked into all seven node
+binaries, the overlay's `images:` entry for the workbench retargets the CronJob from
+the same line, the tests are ordinary Go, and the names are the runner's own
+constants. Moving it into the runner as a loop would need no image or grant either,
+and was rejected for three reasons: a bug would cost the process supervising every
+running step rather than one failed pass; it would merge a list-and-patch grant into
+the runner's; and an owner naming a run to go first, which happened six times on the
+first day, would roll the workbench under running steps rather than edit a CronJob's
+arguments. The price of the subcommand is sequencing: a component ahead of its image
+fails every pass, loudly, until the image catches up, so an installation moves both
+pins in one change. An installation that releases through the native receiver must
+also bind the new image slot (`batch/CronJob/memql/pipeline-deadline-priority`,
+container `promote`) in its `installation.json`, or `verifyImagesAndDiff` refuses
+its next release naming that slot.
+
+**Windows follow each Job's own ceiling unless stated.** The installation's windows
+were 180 and 360 minutes of a 720-minute ceiling. Carried over as defaults they
+would put every waiting Job of an installation on the 120-minute default in the top
+class at the first pass, which erases the event order the queue exists for. So the
+runner writes `memql.io/run-ceiling-minutes` on a queued Job, and an unstated window
+is that ceiling's quarter or half: the same proportions, and the same numbers at
+720. Two other sources were rejected. A flag or variable on the CronJob would be a
+third copy of `MEMQL_PIPELINES_RUN_MAX_MINUTES`, silently wrong when forgotten, and
+wrong anyway for a step already waiting when the ceiling changes. A `StepRun` field
+would change `creationDefinition`'s hash and make queued steps uncertain across a
+rolling upgrade. The ceiling read is the workbench's, the deadline the agent's;
+`components/pipelines-long-runs` sets both alike. A Job with no readable ceiling (one
+from before this) still takes a boost and any stated window; what would need the
+ceiling is not guessed, because the only thing a guess could do is promote too much,
+and with nothing else due the Job is left alone and counted `no-ceiling`.
+
+**Off, windows and boosts are declared configuration**, patches in the layer that
+composes the component, because each is an operator's decision rather than a vendor
+protocol (`docs/public/build/integration-boundary.md`). Off is the CronJob's own
+`spec.suspend`, which leaves every promoted Job where it is. Windows and boosts are
+arguments appended to the container: `--window-minutes`, `--aged-window-minutes`
+(`0` turns that tier off) and `--boost-run`. A boost ranks below expiring so it can
+never be what makes another run expire, and takes a 32-hex run id so a pasted pull
+request number is refused rather than matching nothing. The classes are not settings:
+the promise that a Job only moves up rests on knowing their order without reading
+them, which the grant does not allow. The installation's copy forgot a class once no
+run named it, so a Job left at boosted when its run came off the list was moved down
+to aged on entering that window (`TestARunDroppedFromTheBoostListKeepsItsClass`).
+
+**The queue is `StrictFIFO`, now as the component's own value.** The component
+shipped `BestEffortFIFO`, which the first installation patched away after backfill
+starved 40 GiB database steps behind a stream of 20 GiB checks, and a promoted Job
+means nothing in a queue that admits around it. Only suspended Jobs are touched: every
+patch is a compare-and-swap on the `resourceVersion` the Job was read suspended at, so
+one admitted or heartbeaten since answers 409 and waits for the next pass
+(`changed-since-list`), neither a failure nor a relabelled admitted Job. A Job past
+its deadline is left for the runner to fail, the ceiling is never extended (a step's
+deadline is pinned in its creation definition), and preemption stays `Never`.
+
+**The grant and where it runs.** Its own ServiceAccount in the mesh namespace, and one
+Role in `memql-pipelines`: `list` and `patch` on `batch/jobs`, with no `get`, no
+Secrets, no Pods and no Workloads. It holds no Secret and no database pool. It runs
+outside the step namespace because that namespace's network policy denies the API
+server's cluster address and its Jobs count against the steps' quota, and it stays
+off the build pool because that pool is tainted, with no pool name to be one
+provider's value. A pass holds no state: a missed tick is the next pass, a repeated one
+finds everything `already-promoted`, a class and its provenance live on the Job and so
+survive any replica change, a retried step is a new Job that starts at its event class
+and is promoted at the next pass, and passes keep relabelling under `stopPolicy: Hold`,
+so the order is ready when admission resumes.
+
+**It reaches the installations that compose the component, and no overlay in this
+repository does.** A local cluster has no Kueue and no queue: its steps wait for a slot
+under `count/jobs.batch` before a Job exists, so there is nothing for a pass to
+reorder, and a CronJob there would only look like coverage. Giving it one means
+installing Kueue in `make up` and in the editor's installer, reserving every local
+step container's full limit (4 GiB and 20 GiB, against that overlay's own warning about
+cold builds on a shared disk), raising the Job quota so that a queue can form, and
+widening the AppProject the cloud shares. That is a decision about local admission
+rather than about this promoter, and it is left open.
+
+Known limits. A step created late in an old run starts at its event's class and waits
+up to five minutes for its first promotion. A pass cannot read a class's value, so an
+event class above 350 would be relabelled down: `priorities.yaml` says to keep them
+below. Promotion reorders one queue and cannot make room it does not have. A step that
+can never fit blocks a strict queue from its head, and promotion can carry one there;
+that blocking was seen with a Job that did not tolerate the flavor's taint, and the
+runner's Jobs do, so the case that remains is a step larger than the queue's budget.
+
+`integrations/pipelinesteps/deadline_priority_test.go` carries the 20 decision and pass
+tests of the installation's copy, case for case, and adds the windows
+(`TestWindowsFollowEachRunsOwnCeiling`), the compare-and-swap
+(`TestAJobThatChangedSinceTheListIsLeftForTheNextPass`) and the contract with the Job
+the runner builds (`TestAQueuedJobTheRunnerBuildsIsOneAPassCanPromote`).
+`subcommand_pipeline_deadline_priority_test.go` covers the flags, the line and the exit
+codes, and runs the component's own command line. `component_test.go` renders the
+component over all three instance overlays and over the patches an installation writes
+(`TestAnInstallationSetsThePromoterFromItsOverlay`), and takes over the copy's five
+manifest tests. One half of those stays with an installation: that its own event
+classes rank below the promoted ones, since the engine ships no event class.
+`TestAChangeToThePromoterRunsItsTestsInGoTests` asks the real selector that `go-tests`
+reaches all of this, its YAML included. `TestAPromotedJobIsAdmittedFirst`
+(`deploy/kueue/install`, opt-in) runs a real pass against the pinned controller, and is
+what to run before moving the Kueue pin.
+
+Verified on a throwaway k3d cluster with the pinned Kueue: the rendered component, its
+Role, a scheduled tick of the CronJob and admission in promoted order, running a
+workbench binary built from this source over `memql-workbench:local`, against Jobs
+written in the runner's shape. Not verified: AKS, an image from the release pipeline,
+reconciliation through ArgoCD, a release through the native receiver, or a step created
+by a real runner in a queue.
 
 ## Release trains carry main (2026-10-27)
 
@@ -1500,15 +2343,18 @@ connected workflow is in
   artifact-free successful command (`pl.InspectCarriedReleaseReceipt`) with the
   same definition digest and packages. The recipe accepts
   `pipeline_passed_earlier` only together with that proof; anything unproven
-  refuses the candidate, naming the step.
+  refuses the candidate, naming the step. Coverage repeats this on every read, so a live
+  candidate holds these rows past retention
+  ([why, and how](#a-release-reuses-the-run-that-tested-its-tree-2026-10-29)).
 
 Rejected: a candidate whose evidence spans attempts (attempt 1's complete
 evidence includes its failed step, its artifacts would be pinned from a failed
 run, and the candidate format would change), and adopting only full re-runs
 (saves the version bump and pull request check but not the long run; the design
-adopts full re-runs too, which carry nothing). Cross-event reuse stays off for
-releases (#6344): a receipt from a push, pull request or merge-group run has no
-chain inside the release.
+adopts full re-runs too, which carry nothing). Reuse across events stayed off for
+releases here (#6344), because a receipt from a push, pull request or merge-group
+run has no chain inside the release. It came later with a proof of its own: see
+[A release reuses the run that tested its tree](#a-release-reuses-the-run-that-tested-its-tree-2026-10-29).
 
 Compatibility: `RerunOf` and `Chain` are omitted when empty, so a run without
 re-run facts encodes exactly as before. Journals written earlier keep their
@@ -1540,6 +2386,221 @@ Tests: `TestCarriedReleaseReceipt*` and
 last ones db-gated). Not verified here: a live release re-run on a cluster.
 This change helps only after it ships in an engine release; the release that
 carries it is still prepared under the previous rules.
+
+## A release reuses the run that tested its tree (2026-10-29)
+
+The 0.31.9 release run took 2h14m on production and its stages' own time added up
+to under an hour; the rest was queueing on the single build node, repeating what
+its pull request had just run. The owner decided on 2026-10-29 to let release runs
+reuse the pull request's results on the same tree, keeping the release-only build
+steps. #6344 had forbidden exactly this, because a release that reused a receipt
+candidate preparation then refused could never be prepared, which lost 0.31.4 and
+0.31.5. Design record:
+`docs/superpowers/specs/2026-10-29-release-same-tree-reuse-design.md`; the connected
+workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#what-a-release-reuses).
+
+- **Trigger.** A release's first attempt opening its work (`reuseSameTree`,
+  `component/pipelinerun/evidence.go`). A re-run never asks: a whole re-run is
+  someone asking for the checks to run, and a failed-only one carries inside its
+  chain.
+- **Identity** (`readTreeHash`, `component/pipelinerun/tree.go`). The driver reads
+  the commit's tree from GitHub before the plan, for every run, and writes it to the
+  run row, which is how a release finds sources (`pipelineRunsForPipelineTree`), and
+  to the work input, where the proof reads it. A read that fails costs the run its
+  reuse and nothing else: it neither offers nor takes it, and a release executes every
+  step. Failing a pull request's checks over an optional read would be the worse
+  failure. The input's tree stays out of a receipt's digest, so a rollback refuses no
+  candidate that reused nothing. The digest still commits to the tree through the
+  step's `treeFingerprint`.
+- **Same check** (`treeFingerprintOf`, `definition.go`). The verification
+  fingerprint with the tree in the commit's place and without `dependsOn`, which
+  differs between a pull request plan and a release plan on one tree and never
+  reaches the command. A verification step no longer receives `MEMQL_SHA`, so the
+  commit is not an input. `checkoutHistory` disqualifies a step: it has inputs
+  beyond the tree. Only `verification: true` steps get one.
+- **Scope.** Twenty-seven of the release plan's steps today
+  (`TestEngineVerificationStepsCompileTheSameForAPullRequestAndARelease`). Everything
+  that declares artifacts or an image runs, whatever it reports too
+  (`releaseProducer`). Rejected: reusing any artifact-free step by normalizing its
+  environment, because a step that receives `MEMQL_EVENT` may branch on it, as the
+  vulnerability scans do. So `go-checks` (reads `MEMQL_BASE_SHA`), `fuzz`,
+  `mcp-conformance` and the two Cockpit lanes keep running. Extending reuse to
+  evidence a machine produced is the owner's open decision from the fleet-first work.
+- **Vulnerability scans run in every release.** They declare artifacts, they branch
+  on the event (#6381), and they are not a function of the tree. A freshness bound
+  was defensible, and rejected because the release would ship a report older than
+  itself.
+- **The policy decides after the native rules.** `pipelineEvidenceReuse` is asked
+  about each source with its existing arguments, and the engine default stays
+  `false`. Mode is the policy's to weigh rather than a native gate: a pull request
+  runs `affected`, and the fingerprint binds what the step executed.
+- **Slices** (`reuseGroup`, `adoptReleaseSlices`). A shard's slice follows the timing
+  table, which every successful full run moves, so exact slices would almost never
+  match. A step is judged with all its shards: when the source's rows hold exactly
+  the packages the plan selected, the release takes the source's split, and either
+  every shard is covered or none is. A failed-only re-run takes its attempt's split
+  the same way, or a moved table would run every shard again.
+- **The runner may not plan what the proof refuses.** This is the invariant. Both
+  halves call `pipelines.SameTreeProblem` and
+  `pipelines.InspectReusedReleaseReceipt` over the same rows. The runner judges age
+  at the later of now and the run's start and the proof at the start, so the first
+  implies the second (`TestSameTreeWindowOfTheRunnerImpliesTheProofs`).
+  `TestAReleaseReusesItsTreeOverRealRows` runs the whole proof over rows the real
+  driver wrote.
+- **Proof and record** (`pipelines.ProveReusedStep`). It lives in `component/pipelines`
+  because `integrations/release` is another module and cannot run the driver: both
+  halves can call it there. Coverage re-derives the source on every read, and the
+  candidate's `reusedFrom` must equal it, so client JSON cannot assert it. Absent, the
+  field leaves the candidate's bytes and identity alone. The proof does not ask GitHub
+  again: each driver read its tree from the commit object, and the journal is already
+  the trust root for whether a test passed. One pass of coverage reads each row once
+  (`forOnePass`), because a publication repeats it for every artifact.
+- **Retention** (`retentionHeldBackSQL`, `integrations/work/operational_retention.go`).
+  A live candidate holds the runs it reused from, the way an artifact holds its
+  producer. A release's own rows stay while its artifacts are pinned, and a pull
+  request has none, so without the hold a release would become unprovable a month
+  after it was cut and its next overlay would be refused. Rejected: accepting the
+  sealed record once the rows are gone, which would stop proving exactly when nothing
+  else could notice. The hold is an uncorrelated `NOT IN`, read once per statement. An
+  `EXISTS` per row detoasted every live manifest once per version, and an index does
+  not help because the heap is a few pages; measured at 13 s against an 8 s statement
+  timeout, which would stall retention for good
+  (`TestRetentionHoldReadsTheCandidatesOncePerStatement`). A retired candidate holds
+  nothing, and neither does an archived one, whose own rows leave on their usual
+  window.
+- **A candidate also holds its release's attempts** (the same function). A candidate
+  from a failed-only re-run names one attempt, and coverage reads every earlier one on
+  every read: `carriedChain` walks to attempt 1, and `passedEarlier` to the attempt that
+  ran the step. Only the named attempt has a pinned artifact, so the others left on their
+  window and the candidate's next overlay was refused. That dates from #6369, and
+  `TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention` reproduced it before the
+  fix. The hold keeps every `release` run at the repository and commit of a component
+  the candidate names, which is what every link must share (`sameRelease`) and what
+  `pipelines.RunKey` is built from. The proof's rules did not change: with the rows gone
+  it refuses as before. Rejected:
+  - Listing the attempts in the manifest. It changes a new candidate's identity, cannot
+    help a saved one, makes an older engine refuse it, and is one more claim coverage
+    would have to prove.
+  - Holding by the attempts' shared `workGoalId`. It must read the journal to learn the
+    goal, so it ends with the named attempt's row. It misses an attempt refused before it
+    opened work, which names no goal while the chain still reads its row. And it splits if
+    a pipeline is renamed between attempts, because the goal id derives from the name.
+
+  Cost, on a seeded hypertable of 30,000 versions in 8 chunks with 150 live candidates of
+  43 KB and every row a release's, the worst case: the manifests are read once per
+  statement, in about 4 ms. A page read goes from p50 30-34 ms to 34-38 ms and a guarded
+  delete from 19-21 ms to 24-26 ms. The goal hold took 45 ms and 33 ms, since it reads the
+  journal too. It over-reaches only to another pipeline's release of the same commit.
+
+  Saved candidates need nothing, because every manifest already names both fields: they
+  are held from the next pass. Rows that already left stay gone, and that candidate is
+  refused as before. Failed-only release re-runs first shipped in 0.31.9 (#6369, merged
+  2026-10-29), so at the 30-day default no candidate can lose its rows before 2026-11-28.
+  A rollback refuses nothing: an older engine just stops holding.
+- **A candidate also holds every run it names** (the same function). Coverage reads each
+  run in `evidence[].workRunId` whole on every read (`completeRun`), verification reads its
+  receipts, and an overlay asks both. The assembly format lets such a run be something other
+  than a release: a component's runs must share its repository and commit, and "can cover
+  different platforms or check suites". Nothing kept one with no artifact, so past the window
+  an overlay was refused: `verify`, which it asks first, could not read the check, and
+  coverage says "release run is unavailable".
+  `TestACheckSuiteACandidateNamesStaysProvablePastRetention` reproduced this before the fix. The
+  hold keeps the run and its `v1:pipelines:run` row by that name, inside the `NOT IN` that
+  already read the reused sources, so the manifests are read no more often. A named run that
+  is not a release has nothing else to read: `carriedChain` and `ProveReusedStep` each refuse
+  a run that is not a full release. The proof's rules did not change. Rejected:
+  - Dropping the `event` test from the attempts' hold. It is less SQL and 1 to 5 ms cheaper
+    per statement, and it would keep every named run, since `verify` requires one to be at
+    its component's repository and commit. But it also keeps every other run at that commit,
+    which coverage never reads: a push of it, a pull request on it, its scheduled scans, all
+    with their steps, for as long as the candidate is live, and only archiving or retiring
+    ends that.
+  - `CROSS JOIN LATERAL (VALUES ...)` for the two names, which is the plainer SQL. The planner
+    memoizes the scan on each entry, which never hits (0 of 120,000) and fills `hash_mem`. At
+    1,000 candidates a page read took 240 ms against this form's 98 ms.
+  - `jsonb_path_query` over the manifest, with no `jsonb_typeof` test. The planner expects
+    1,000 rows a candidate and stops hashing the list somewhere between 150 candidates, where
+    it was hashed, and 1,000, where a page read took over 10 s. Unhashed, the list is still
+    read once, so the loop count could not show it;
+    `TestRetentionHoldReadsTheCandidatesOncePerStatement` now fails on an unhashed list too.
+    The shipped form stays hashed because `jsonb_typeof(...)='array'` has the default 0.5%
+    selectivity, which puts the limit past 250,000 candidates at a `work_mem` of 8 MB.
+
+  Cost, on a seeded hypertable of 60,000 versions in 9 chunks with every row a release's,
+  page read then guarded delete, p50, before and after. At 150 candidates of 120 entries
+  (66 KB of JSON, 29 KB stored): 30.5 and 25.8 ms, then 34.0 and 29.7 ms. With no row a
+  release's it adds about the same. At 1,000 such candidates: 71 and 68 ms, then 98 and 94 ms. At
+  150 candidates of 1,024 entries, the most a manifest may hold: 113 and 103 ms, then 149 and
+  145 ms. Every statement stays far inside the 8 s timeout.
+
+  Saved candidates need nothing, because every manifest has always named its runs: they are
+  held from the next pass. Rows that already left stay gone, and that candidate is refused as
+  before. A rollback refuses nothing.
+- **What survives a retry, pause or replica change.** The tree, the fingerprint and
+  the evidence run are all on rows. `resume` and `reopenFromRows` restore them from
+  the row before a step's call is declared again, because the run's definition
+  fingerprint covers every call and a call that changed would refuse the candidate
+  (`TestATakeoverKeepsWhatReuseDeclared`). A failed-only re-run carries a reused step
+  like any pass. The walk stops at the attempt that reused it, whether or not that
+  row settled as reused, since a failed stage may have blocked it first.
+
+Stop conditions: anything unproven runs the step. A read that does not answer stops
+the drive and recovery tries again, as `carryFromOriginal` does. If a candidate is
+refused anyway, the release is stuck, because a successful recorded attempt is never
+replaced (`adoptableBuildRun`): the installed policy can stop reuse for releases, and
+the next version then executes everything.
+
+Invariants: every artifact in a candidate comes from the run it names; a reused step
+names none; a tree is compared only when both sides read it; only a directly executed
+receipt counts; a source older than 24 hours at the attempt's start counts for
+nothing; every other event still compares commits; every row coverage reads, for a named
+run and for a carried or reused proof, stays while the candidate is neither retired nor
+archived.
+
+Tests: `TestSameTree*`, `TestReusedReleaseReceipt*`, `TestProveReusedStep*`,
+`TestReceiptDigest*`, `TestAReceiptsDigest*`, `TestReleaseCandidate*Reused*`
+(`component/pipelines`); `TestReleaseReuses*`,
+`TestReleaseExecutesEveryStepWithoutAProvenSource`, `TestReleaseDoesNot*`,
+`TestAFailedOnlyRelease*`, `TestATakeoverKeepsWhatReuseDeclared`, `TestTreeFingerprint*`
+and the db-gated `TestAReleaseReusesItsTreeOverRealRows` (`component/pipelinerun`);
+`TestReusedReceipt*`, `TestCandidateRecordOfAReuseIsWhatTheJournalProves`,
+`TestACarriedReuseProvesAgainstItsSource` and `TestCandidateAssemblyRecordsAReusedReceipt`
+(`integrations/release`, db-gated); `TestRetentionKeepsARunALiveCandidateReusedFrom`,
+`TestRetentionKeepsEveryRunALiveCandidateNames`,
+`TestRetentionKeepsTheAttemptsOfALiveCandidatesRelease` and
+`TestRetentionHoldReadsTheCandidatesOncePerStatement` (`integrations/work`, db-gated).
+`TestACandidateFromAFailedOnlyRerunStaysProvablePastRetention`,
+`TestACheckSuiteACandidateNamesStaysProvablePastRetention` and
+`TestACarriedReuseStaysProvablePastRetention` (`integrations/release`, db-gated) run the
+real nightly pass and then the real proof, on a scratch database with the real schema.
+`TestAReleaseReusesItsTreeOverRealRows` also holds that the real driver writes the fields
+the attempts' hold reads.
+
+Not verified: a live release on a cluster, or the time it saves. No test runs
+`coverage` itself over rows the real driver wrote: `integrations/release` cannot run
+the driver, so its tests use hand-written journal rows. The driver test runs
+`ProveReusedStep` and what `completeRun` checks over real rows, which leaves the wiring
+in `coverage` and assembly tested only over the hand-written ones. The holds on attempts and
+on named runs have not run on a production journal; their cost above is from a seeded one.
+Known limits:
+
+- a pull request whose steps passed across a failed-only re-run offers only what its
+  last attempt executed;
+- an engine upgrade between a source and its release runs everything;
+- a candidate whose earlier attempts or named runs left before its installation ran the
+  holds stays refused, since no hold brings rows back;
+- a retention window shorter than the time between a source and its candidate retires
+  the source first, and preparation refuses it;
+- rolling back to an engine from before tree hashes refuses a candidate with
+  `reusedFrom`, and leaves a run row holding a `treeHash` unwritable, so a run in
+  flight stops being driven;
+- a reused step's log stays on its source, under that run's shorter retention.
+
+The memql-znas `evidenceReuse` policy admits `push` and `merge_group` sources for a
+release today and not `pull_request`, so reuse from a push turns on with the engine
+upgrade, and a pull request's results are reused only once that policy admits them.
+This change helps only after it ships in an engine release.
 
 ## A GitHub check per pipeline step (2026-10-28)
 
@@ -1825,12 +2886,661 @@ releases should flag findings, not fail on them.
 - **Rejected for now.** Skipping the stage on releases: today's candidate
   workflow refuses a release whose steps were skipped for any reason but
   `pipeline_not_affected` or a proven `pipeline_passed_earlier`, so a skip would
-  block the candidate rather than save time. Reusing the pull request's
-  evidence in the release run is the larger saving (its tests repeat the PR's on
-  the same tree), but release runs reuse nothing by design (#6344), and changing
-  that is an engine decision of its own.
+  block the candidate rather than save time. A release now reuses its pull
+  request's checks on the same tree (see
+  [A release reuses the run that tested its tree](#a-release-reuses-the-run-that-tested-its-tree-2026-10-29)),
+  and these scans stay out of that: they declare their reports as artifacts, and
+  advisories change daily.
 - **Tests.** `TestEngineSecurityScansDoNotTurnFindingsIntoSuccess` pins the
   release-only relaxation and that every other event still fails;
   `TestNPMAuditRejectsFindingsAndIncompleteReports` covers `--report-only`
   (findings pass, an unreadable report fails). Not verified here: a live release
   run with a finding.
+## Pipeline capacity selection and spending holds
+
+Only an explicit manifest `placement: pool` asks for shared capacity preference.
+The driver's optional `computePlacement` role comes from the captured installed
+delivery policy, evaluated with immutable run identity and no native operations.
+The bounded result is copied into each step request and included in its existing
+execution-definition fingerprint. If an authored clock expression changes that
+answer on recovery, the journal refuses divergence before effects. An old snapshot or portable
+default grants no cloud fallback; repository code cannot widen the operator's
+policy. Dedicated native, image-build and privileged checkout paths keep their
+own contracts. Current machine consent and resources remain independent gates.
+
+Version 2 of the operator admission file separates a global new-run pause from
+cloud spending. Cost holds can therefore leave eligible Fleet work running.
+The optional release-train allowance still admits train runs under a global
+hold, but never overrides an explicit version 2 `allowCloud:false`; that hold can
+therefore leave an admitted train waiting for capacity
+(`TestTrainAllowancePreservesIndependentCloudHold`; how a legacy decision treats
+trains is in the release-train section below).
+Workbench reads the live cloud decision again before each command or isolation
+probe Job, including a later step in an already-started run. A held attempt saves
+its exact queued definition before waiting; a new replica can recover that
+positive evidence, while an uncertain dispatch remains uncertain. Existing Job
+adoption, settlement and cancellation do not allocate and remain available.
+Global waits precede the run clock; capacity and cloud waits after admission use
+the existing run ceiling, without spending a command timeout before creation.
+
+`TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate` covers the versioned and
+legacy admission boundary. `TestComputePlacementUsesCapturedPolicyAcrossReplicas`
+and `TestComputePlacementRejectsUnboundedOrAmbiguousPolicy` cover captured source
+and strict output bounds; `TestComputePlacementDecisionIsPartOfPoolRecoveryDefinition`
+checks the recovery binding. `TestCloudAdmissionWaitSurvivesReplicaAndLateHold`,
+`TestCloudAdmissionDoesNotBlockAdoptionOrCancellation` and
+`TestCloudAdmissionRechecksIsolationProbeAllocation` cover the cloud effects.
+These source regressions do not establish live Fleet availability, installed
+policy activation or a completed Fleet-to-cloud CI journey; those require
+separate verification against the selected deployment.
+
+Fleet CI owns the host build lock exclusively. Local model calls share that
+lock with persistent workspaces, serialize inference separately, and reserve
+every workspace slot's full RAM cap. This keeps a goal's model/tool/model cycle
+working without treating a live workspace as abandoned or charging host RAM
+against a discrete GPU's VRAM. Unlocked retained workspace records still refuse
+inference. `TestModelToolModelKeepsSameWorkbench` exercises both managers and
+retained files; `TestInferenceReservesEveryWorkbenchSlotWithoutChargingVRAM`
+covers the resource boundary.
+
+A runtime's terminal response is separate from answer validity and delivery.
+The activity witness clears after confirmed completion even when schema
+validation or delivery fails, preserving that original error. Cancellation,
+truncation and a reply lost before completion leave the witness fenced until
+the time it records: the call's own deadline, at which its request is cut off
+(that the runtime then stops is not verified; see below), or 30 minutes after it
+began for a context with no deadline (no Cockpit limit bounds a local call, so the bound is chosen). A
+fence only success cleared turned one routine cancel into a machine refusing
+pipeline steps, workbenches and model calls until someone removed the file by
+hand. Past its time the witness reads as absent; a reader that excludes every
+writer (it holds `inference.lock`, or `pipeline.lock` exclusively) removes it,
+and the workbench, which shares `pipeline.lock` with model calls, only ignores
+it, because a path-based removal there could remove a record a call has just
+written. The local build guard (`scripts/lib/host_build_guard.py`, which
+`make dev` runs) reads the end by the same rule for every record the Cockpit
+writes, and leaves a witness past its end in place: it is another program's
+record, which the Cockpit's next exclusive reader removes
+(`test_inference_witness_past_its_end_admits_a_build_and_is_kept`,
+`test_inference_witness_with_no_time_ends_the_bound_after_it_was_written`). On
+text no Cockpit writes, its parser and Go's can disagree. A witness with no time (an older Cockpit's, or a write that did not
+complete) ends 30 minutes after its file was written, so an upgrade clears it; a
+symlink or directory is never read or removed. The headroom checks still
+measure what is actually free, so a generation still finishing after its
+deadline is bounded by them. `TestManagerReleasesOnlyCompletedRuntimeErrors`
+exercises real runtime responses and a second manager against the durable
+witness; `TestACancelledCallFencesTheMachineUntilItsDeadline`,
+`TestAnInferenceFenceEndsAtTheTimeItNames`,
+`TestAnInferenceRecordWithNoTimeEndsTheBoundAfterItWasWritten`,
+`TestPipelineCapacityWaitsForAnInferenceFenceUntilItsEnd` and
+`TestWorkbenchIgnoresAnInferenceFencePastItsEndWithoutRemovingIt` cover the
+expiry. Not verified: a live runtime that keeps generating past its caller's
+deadline.
+
+On macOS the pipeline headroom gate refuses a step for memory pressure only at
+the kernel's critical level (4). At warn (2), which a busy Mac reads for long
+stretches, the available-versus-reserve check decides, and a level the worker
+does not know reads as pressure (`TestDarwinPressureBlocksOnlyAtCritical`). The
+model-call admission keeps its own reading, in which warn is pressure: a local
+call waits for headroom, up to its deadline, rather than being refused at once.
+That reading is unchanged.
+
+## Pipeline step attempts, retries and failover
+
+A command step that fails for a transient reason is tried again, a bounded
+number of times: in the same place, then on another eligible machine, then, for
+a `pool` step whose installation allows cloud, on the cluster. Design record:
+`docs/superpowers/specs/2026-10-28-pipeline-fleet-first-retries-failover-design.md`.
+What owners and operators see is in
+[Retries and failover](../../public/operate/pipelines.md#retries-and-failover)
+and [the fleet](../../public/operate/pipelines-substrate.md#the-fleet).
+
+**Trigger.** An attempt of a command step that did not succeed. The driver runs
+the attempts (`runStep`, `component/pipelinerun/driver.go`). The steps it
+delivers itself (a notification, a SARIF report, a repository change) never
+reach the executor and are never retried; the manifest refuses `repeatable` on
+the last two rather than ignore it.
+
+**Evidence: the attempt's class and the row's history, nothing else.** The
+executor classifies every attempt that did not succeed (`pipelines.AttemptClass`:
+nothing ran, retry requested, outcome unknown, final), because only it knows
+whether a dispatch reached a machine and what came back. It drops any class on a
+runner's reply, and the driver reads an empty or unknown class as final, so a
+replica of another version cannot make an ordinary failure retryable. "Nothing
+ran" needs proof, since a wrong one runs a release step twice and a missed one
+costs one retry. On the cluster almost nothing proves it: the runner reports
+while the Job and its pod are alive, and the kubelet or the scheduler can still
+start the command until the acknowledgement deletes them. The cluster's one
+"nothing ran" is the agent's own `pipeline_runner_unavailable`, made before any
+runner took the step and never on a recovery. On a machine the dispatcher's
+`RefusedBeforeStart` verdict decides, and `pipeline_recovery_required` is an
+unknown outcome because the Cockpit answers it after a command too. The codes
+the engine itself makes when it refuses before sending (`worker_feature_disabled`,
+`worker_feature_unavailable`, `pipelines_not_allowed`) are nothing ran only
+beside that verdict: a reply carrying one unflagged takes the default class, so
+another version's sibling cannot make an ordinary failure retryable. A refusal
+that will not change within a retry's delay marks the machine not retried here:
+Host commands off, pipelines no longer allowed, the machine's own policy or
+container caps (`denied_by_policy`), and a reservation it cannot take
+(`pipeline_capacity_unavailable`, which a local model call's fence answers until
+its deadline). Exit 75 is a requested retry without `repeatable`, because the
+command vouches; a timeout is final, because a hang and a stall look alike from
+outside. The reasoning for
+each code is in `integrations/pipelinesteps/attempt_class.go` and
+`attempt_class_fleet.go`. The history is the row's `binding.attempts`; each
+attempt's place is recomputed from the records before it (`placementOf`), never
+stored.
+
+**Chosen path.** The order is in the public page and in `chooseNext`'s comment
+(`component/pipelinerun/attempts.go`), a pure function of the step, the run's
+captured policy and the records, so every replica decides alike. Its less
+obvious choices:
+
+- After an unknown outcome on a machine, untried machines come before one return
+  to it: only that machine's own reservation, refusing a second command, guards
+  against two copies there.
+- A repeatable `placement: cluster` step retries the cluster after an unknown
+  outcome, up to `sameMachine` times, each after the previous attempt's Job,
+  Secret and pods are confirmed gone. Otherwise it would get no retries, since
+  nearly every cluster failure is an unknown outcome.
+- A `pool` step reaches the cluster at most once, whatever ended its attempt
+  there: the owner's cost bound on the one place that spends cloud.
+- An unpinned failover answered nothing ran and not retried here, or naming no
+  machine, means the fleet is exhausted for the rest of the step. The cluster
+  rung comes next, never a pin on the last busy machine the wait named.
+- A pool step's first attempt goes on to the cluster inside itself only when
+  the fleet stayed full through `fleetWaitSeconds` and `cloudFallback` allows
+  it: the fleet's own answer, which names no machine (`fleetPreferenceRanOut`).
+  A refusal one machine made before start for another reason (its container
+  caps, its policy, Host commands off), which the dispatcher verified
+  (`RefusedBeforeStart`, not `RefusedByGate`), ends that attempt nothing ran,
+  naming the machine, and the order decides: the same machine or another, then
+  the cluster where `cloudFallback` allows, which covers a failed fleet as well
+  as a full one. It was a final `pipeline_executor_error`, so a step declaring
+  more than a machine's caps failed for good, while the same refusal on a later
+  attempt read nothing ran. A refusal by the engine's own gate stays final.
+- Waits, each at least a second because zero would mean no bound: a pinned
+  machine at most the largest delay; a failover to another machine at most the
+  largest delay too, or `fleetWaitSeconds` for a pool step whose policy allows
+  the cloud and whose one cluster attempt is still ahead, because the cluster
+  follows it; once that attempt is spent, the largest delay. A fleet step's
+  failover used to
+  wait until the run's ceiling, holding its stage's slot for hours where the
+  step had failed at once, and a pool step's with no cloud one second, which
+  ended the step on any busy fleet. No wait shortens a started command.
+- A pool step whose installation allows no cloud waits for a busy or offline
+  machine up to the run's ceiling, but its first attempt ends at once, nothing
+  ran, when no machine could take it at all (no candidate and none offline:
+  `noMachineToWaitFor`), as a fleet step's does. The retry order then routes
+  once more after the first delay and ends the step. It used to wait until the
+  ceiling, holding its stage's slot for a machine nobody was bringing; the
+  owner chose to end it at once (2026-10-29). With the cloud allowed, the Fleet
+  preference still waits `fleetWaitSeconds` for a machine before the cluster.
+  `TestANoCloudPoolStepWithNoMachineAtAllEndsAtOnce` and the no-cloud rows of
+  `TestChooseNextFollowsTheRetryOrder` cover it.
+- A step whose last attempt only found the fleet exhausted settles with the
+  failure before it (`failureToSettle`), so its receipt and the check run say
+  three failed fetches, not `pipeline_no_machine_for_need`. The search stays in
+  the history, and its own resources are acknowledged.
+- Nothing widens: the executor refuses a place the step's placement or the
+  captured `cloudFallback` does not allow (`refusePlacement`, a final
+  `pipeline_step_invalid`).
+
+**Alternatives rejected.** Retry loops in the DSL workflow: every installation's
+workflow would change, recovery would rebuild loops over finished steps, and the
+safety rules would still live in Go, so twice. Attempts inside the executor: the
+journal would never see them, so a takeover would lose its place and the check
+run could not show them. Accepting worker contracts 4 and 5 together:
+`ActionContracts.Supports` is exact, so it would take a second requirement and
+argument encoding per step kind, and the pre-release rule forbids compatibility
+shims on Go wire contracts.
+
+**Stop conditions.** `MaxStepAttempts` (8) whatever the policy says; the run's
+ceiling (no wait begins into its last second, and no attempt starts with less
+than a second left); the captured policy's limits; and `repeatable` for any
+retry after an unknown outcome. A cancel during a wait settles the step
+cancelled. A lost lease, a refused journal write, an unconfirmed cleanup or the
+end of the workflow call running the step writes nothing more, and the row says
+what comes next.
+
+**The policy.** `pipelineComputePlacementPolicy` gains `retries`, and the driver
+now reads the policy for every run with a command step (`selectComputePlacement`,
+`readPlan`), because the limits apply to every step. So a policy phase that
+errors refuses every such run, as `pipeline_stage_invalid` scoped
+`computePlacement` and naming the field, rather than run it without the
+operator's limits. A snapshot with no placement phase takes the portable
+defaults (`sameMachine: 2`, `delaysSeconds: [30, 120]`, `otherMachines: true`,
+no cloud): "no limits named" is the case defaults are for, and "no retries"
+would let deleting a policy change how steps fail. Once a policy writes
+`retries`, all three limits are required and a null is refused
+(`parseRetryPolicy`), so the policy source always says how hard the installation
+retries. The policy is captured with the run and bound into each step's recovery
+definition, so no replica decides under other limits. Verification fingerprints
+leave it out: evidence binds what a command computes, not where or how often it
+ran.
+
+**Invariants.** A command whose outcome is unknown runs again only when its step
+is repeatable. `repeatable` means harmless to run again even while an earlier
+copy may still be running elsewhere: a failover after an unknown outcome on a
+machine does not wait for that copy to stop, because the machine is usually
+unreachable, and a stop that cannot be proved would block the failovers that
+matter. The earlier copy's late answer and artifacts are never filed. Between
+attempts the row never reads finished, so the stage workflow and the check run,
+which treat a failed step as final, see a running step.
+
+**A qualification is read again before every attempt.** A qualification run's
+authority is mutable (its pull request's head and base, the App, the source's
+owner) and it expires, and a retry is a new effect that starts up to minutes
+after the first was authorized. So `runStep` reads `attemptDeadline` at the
+executor boundary of each attempt, not once for the step: a changed authority or
+a passed expiry ends the step `pipeline_qualification_refused` having started
+nothing more, and an attempt's deadline never outlives the expiry. Reading it
+once would have let a retry start under an approval that no longer holds: a
+pull request that moved or closed, a pipeline revoked, a qualification expired.
+Covered by `TestAQualificationIsRecheckedBeforeARetry`.
+
+**Ownership and consent.** Only the engine's pipeline purpose may pin or exclude
+machines: `purposeRefusal` refuses either field on any other purpose
+(`denied_pipeline_purpose`), so a model still cannot name a machine. Both narrow
+the router's plan after its consent, contract and Host-commands checks and admit
+nothing, and the replica receiving a forward re-checks all three. The router
+skips a machine whose owner turned Host commands off (`HostCommandsOff`, also
+true for a malformed setting, as admission reads it). One turned off after
+planning refuses before send on the holding replica with the typed
+`worker_feature_disabled`, locally or forwarded, and the dispatch moves on; an
+agent's call does too, under its owner's fallback.
+
+**What survives a replica change: the row.** Its attempt number,
+`binding.attempts` (each record: attempt, class, code, message, surface,
+workerId, machineName, nodeId, jobName, startedAt, finishedAt, logFileId and
+notRetriedHere, every string masked) and `binding.nextAttemptAt`. The time is in
+the binding, not the step's `resumeAt`, which the work spine's sweeps read for
+parked work, and the binding is replaced whole on every write that names it, so
+a receipt cannot keep a stale timer. A replica that takes the run over sends an
+attempt with no record again as recover-only (on the cluster it adopts that Job
+by name; on a machine the outcome is unknown, so a repeatable step continues and
+any other fails `pipeline_execution_uncertain`), continues a recorded attempt at
+the next once its resources are confirmed gone again and `nextAttemptAt` has
+passed, and keeps a finished receipt. A history that does not lead to the row's
+attempt diverges the run rather than guess.
+
+**Retained and temporary.** Retained: each attempt's record, its own log file in
+the Library, and for a machine attempt its own `v1:worker:invocation`, whose
+`reroutedFrom` names the last machine it moved from. Temporary: the check run's
+*Retrying* line, published once the outcome is durable, gone when the next
+attempt's own outcome is recorded, and not restated by a takeover.
+
+**Published names.** The check run is public on GitHub for a public repository,
+so it names a machine only by the display name its owner chose in Fleet, else
+the first eight characters of its registration id, never the name the machine
+reported, which is usually its hostname. `pipelines.MachineWords`
+(`component/pipelines/machine_words.go`) is the one place that rule is written;
+the attempt lines and the dispatcher's and router's refusal sentences, which a
+failed step quotes whole, all call it, and the `pipelines_not_allowed` sentence
+takes its contract number from `PipelineStepContract`. The independent review's
+failed model call reaches the run-failure line as a stable code and the
+router's own words (`router.FailureReason`, for example *failed when called:
+every_door_shut: no door to a model is open for this call*), never as its text
+(`TestAFailedReviewModelCallIsReportedByItsCodeNotItsText`). The original is
+logged at warn level, tagged with the pipeline, repository, pull request and
+head commit, and the router's call ledger keeps the provider's own message. When Host commands off is the
+only reason a machine cannot take pipeline steps, MemQL OS names it and points
+at the Fleet switch, not at `policy.yaml`.
+
+**Queue priority and scheduled scans.** Each attempt is a new Job with its
+event's Kueue priority class, set when it is created and never changed, so an
+installation's controller that promotes waiting Jobs near the run's deadline
+promotes a retry's Job like any other. Scheduled scans take the same route:
+nothing in placement or the retry order reads the event, apart from the
+installed policy, which receives it.
+
+**Exit 75 for a stalled VS Code download.** The editor host runners exit with
+`exitCodeFor(error)` (`scripts/vscode/download.cjs`). It answers 75 only for a
+failure marked as it leaves `downloadVSCode`: a stall (a 2-minute idle limit, at
+most three attempts), a transport failure, or the 20-minute total time limit. A
+bad version, a missing receipt, a failed host test and anything thrown elsewhere
+stay 1. `scripts/ci/editor-host.sh` passes the status through. Known limitation:
+the 20-minute limit asks for a retry only when it ends before the step's own
+`timeout: 25m` (the editor-host steps in `memql-package.yaml`). Everything before
+the download counts against those 25 minutes (the dependencies, two `npm ci`
+runs and the compiles, uncached on the darwin steps, which declare `caches: []`),
+so with more than about five minutes of setup the step times out first, and a
+timeout is final. The stall path is unaffected.
+
+**Rollout.** With no other change, the deploy turns retries on through the
+portable default policy, and an installed policy that names no `retries` gets
+the same values. Placement does not change until a manifest marks a step `pool`,
+which follows the deploy because an older engine's strict manifest decoder
+refuses the key. Worker contract 5 is exact, so the engine and every machine's
+Cockpit switch together: operator hold; let in-flight runs finish; deploy the
+engine; upgrade every Cockpit; release the hold and watch the first run,
+holding again if it fails. A hold cannot let exactly one run through (an
+allowance admits every queued run), so the check follows the release. Only the
+old engine's hold stops nothing but new runs: under this engine a hold also
+stops new cloud Jobs of runs already started (the workbench reads the run
+allowance before every new Job), so holding again after the release leaves
+those runs' cluster steps waiting under their ceiling until it is released.
+The contract-5 Cockpit release is cut while production still runs the old
+engine, because its macOS steps need today's machines. The engine change leaves
+`cockpit/VERSION` as it is: the contract-5 Cockpit release bumps it in its own
+release PR, as memql#6372 did, because the version belongs to the release, and
+eligibility keys on the contract number, not the version. The 0.21.1 it reads was
+stamped by memql#6384 for the last contract-4 release, so that number never names
+a contract-5 Cockpit: a release cut from this code needs the bump first. The manifest change
+cannot move a `verification: true` step: reusable verification requires
+`placement: cluster` (`component/pipelines/verification.go`). Twenty steps
+carry it, the Go and database tests and the node builds and tests among them,
+so moving those waits on an owner decision: give up evidence reuse for them, or
+extend reusable verification to evidence a machine produced.
+
+**Regression tests.** Classification (`integrations/pipelinesteps`):
+`TestAttemptClassTable`, `TestFleetAttemptClassTable`,
+`TestAClusterVerdictMadeWhileTheJobIsAliveIsAnUnknownOutcome`,
+`TestAClusterRunnerUnavailableIsNothingRanOnlyWhenTheAgentMadeIt`,
+`TestAMachinesRefusalEndsAPoolStepsFirstAttempt`,
+`TestAPoolStepOverAMachinesCapsReachesTheCluster` (agent tag). Order, stops
+and waits: `TestChooseNextFollowsTheRetryOrder`, `TestAFailingStepStopsAtTheEngineCap`,
+`TestAFailoverWaitsTheLongestDelayWhenNoCloudFollows`,
+`TestAPoolStepRefusedOverAMachinesCapsReachesTheCluster`,
+`TestAStepThatOnlyFoundTheFleetFullEndsWithItsRealFailure`,
+`TestRunCeilingStopsTheRetries`, `TestCancelDuringARetryWaitSettlesCancelled`,
+`TestARepeatableClusterStepRetriesAnUnknownOutcomeOnTheCluster`,
+`TestHeldCloudGateMakesTheCloudFailoverWait`,
+`TestAPlacedFleetAttemptNeverSpillsToTheCluster`,
+`TestACloudAttemptOfAPoolStepNeedsThePoliciesLeave`,
+`TestPinnedOfflineMachineWaitIsBoundedToo`. Policy and manifest:
+`TestRetriesParseStrictly`, `TestEveryRunGetsAPolicyEvenWithoutPoolSteps`,
+`TestRetryPolicyIsPartOfTheRecoveryDefinition`, `TestRepeatableManifestKey`.
+Journal and takeover: `TestStepAttemptsAreVersionsOfOneRow`,
+`TestResumeBetweenAttemptsContinuesAtTheNextAttempt`,
+`TestAResumedRetryConfirmsTheEndedAttemptsCleanupFirst` and, with
+`MEMQL_REQUIRE_DB=1`, `TestATakeoverMidRetryResumesOverRealRows`,
+`TestATakeoverOfAnInFlightFleetAttempt`,
+`TestATakeoverAdoptsTheClusterJobOfTheCurrentAttempt`,
+`TestBetweenAttemptsTheStepNeverReadsFinished`. Two agent replicas in process
+(`integrations/agent/worker`): `TestPinnedRetryReachesTheSiblingHoldingTheMachine`,
+`TestExcludedMachinesAreSkippedAcrossReplicas`,
+`TestPinAndExcludeAreRefusedOutsideThePipelinePurpose`,
+`TestHostCommandsOffIsSkippedByTheRouterForPipelines`,
+`TestHostCommandsTurnedOffAfterPlanningMovesOnAcrossReplicas`,
+`TestMidCallFeatureWithdrawalIsNeverRepicked`. What is published:
+`TestTheCheckRunNeverPromisesARetryTheRowDoesNotHold`,
+`TestAStepReportSaysRetryingOnlyWhileItIs`, `TestMachineWords`,
+`TestARefusalNeverNamesAMachineByWhatItReported`, the run page and Compute tests
+in `clients/os/test/deployables/pipelines/`, and the exit-75 cases in
+`scripts/vscode/download.test.cjs`. Across the mesh, with `MEMQL_REQUIRE_DB=1`:
+`TestAFleetStepRetriedOnTheAgentReplica` (`test/pipelinehop`: a push delivered
+on the bff, the run driven on the agent under the policy the bff captured, a
+first attempt that ran nothing retried on the same machine). Scheduled scans:
+`TestAScheduledPoolStepGoesToTheFleet` (`integrations/pipelinesteps`, agent
+tag).
+
+**Known limitations.**
+
+- A repeatable cluster step's earlier attempt can start after its runner
+  reported and before its Job was deleted, so it may have run in part; the two
+  never overlap. Follow-up: the runner stops the pod when it decides a failure
+  before start, so those codes could read nothing ran.
+- `pipeline_recovery_required` is one Cockpit code for before and after a
+  command, so a non-repeatable step meeting a machine that needs recovery fails
+  as it did before retries. Follow-up: split the code. Likewise a runner site
+  that answers `pipeline_runner_unavailable` before any Job exists reads as
+  unknown until it has a code of its own.
+- An unknown outcome on the only eligible machine cannot fail over: a macOS step
+  with one Mac allowing pipelines fails as it does without retries.
+- A step waiting between attempts keeps its stage's slot, and each machine still
+  runs one step at a time.
+- A step wrongly marked repeatable can run twice, and a dishonest exit 75 is
+  retried within the limits; review owns both.
+- A failover to another machine waits for the check run's *Retrying* publish:
+  one GitHub call, bounded at two minutes in an outage, and publishes go one at
+  a time, so several steps retrying at once can queue behind each other.
+- The model and app door texts (`fleet_inference.go`, `fleet_context_allocation.go`
+  and `app_forward.go` in `integrations/agent/worker`) keep a machine's reported
+  name, because they
+  serve the owner's own screens, and words a machine's own Cockpit composes are
+  quoted as they arrive.
+- A wait for a busy machine that runs out marks that machine not retried for
+  the rest of the step, although nothing ran there; a machine that frees up
+  later is not tried again by that step.
+- A failover onto a fleet that stays busy for longer than the longest retry
+  delay (or `fleetWaitSeconds`, for a pool step the cloud follows) ends the
+  step, or sends a pool step on to the cluster. That is never worse than no
+  retry.
+- After a takeover, a step whose attempt was in flight and whose secrets then
+  fail to resolve settles without re-attaching to that attempt, so its Job N can
+  go on running unacknowledged. It is bounded by the Job's
+  `activeDeadlineSeconds` and `ttlSecondsAfterFinished`
+  (`integrations/pipelinesteps/jobspec.go`): a leaked Job, not a second run.
+- A pool step's attempt on a machine still asks the workbench to confirm its
+  cluster cleanup (`AcknowledgeReceipt`, `integrations/pipelinesteps/receipt.go`),
+  because a pool step does not require the fleet. With the workbench
+  unreachable, the step stops the drive for recovery instead of retrying on the
+  fleet. The step's final acknowledgement already depends on it the same way.
+- A step settled with an earlier attempt's record (after a takeover, or after a
+  last attempt that only found the fleet exhausted) reads failed even when that
+  attempt was refused: the record keeps the attempt's class and code, not its
+  outcome. Its code, words, place and log are that attempt's own; the check run
+  says "failed" where the attempt said "refused".
+
+**Not verified.** These tests prove the source contract and in-process replica
+hops. Live fleet-to-cloud failover and a production maintenance window for the
+contract-5 switch are not verified.
+
+## Release-train allowance across cloud allocation (2026-10-28)
+
+The separate Fleet/cloud spending gate must preserve main's existing train
+allowance. A legacy `allowNewRuns:false, allowTrainRuns:true` admits the train's
+run, probe and cloud commands. Version 2 additionally requires `allowCloud`, so
+an explicit spending hold wins even for a train. Ordinary runs do not inherit
+the train allowance.
+
+The driver forwards the immutable run event and head branch in `StepRequest`
+and `StepRun`, independent of command environment. Execution and queued-effect
+fingerprints bind both, so a replacement replica cannot widen a retained
+attempt's admission class. Reusable verification excludes these run-only facts
+because its command still receives neither event nor branch. The coordinated
+workbench action is `pipelineStepV11`; older actions cannot silently discard
+this identity.
+
+A shared isolation proof retains each current waiter's class and cancellation
+context, rechecking the live operator decision before every probe POST. A train
+can fund that proof only while waiting; after cancellation, ordinary waiters
+need their own allowance. A cached successful probe is only isolation evidence,
+and every command rechecks its own spending gate after using it. Recovery of
+existing Jobs and cleanup remain independent of new-allocation admission.
+
+Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
+`TestTrainAdmissionIdentityComesFromSavedRunAndBindsRecovery`,
+`TestTrainCloudAdmissionSurvivesForwardAndFundsIsolation`,
+`TestTrainCloudRecoveryBindsEventAndHeadBranch`, and
+`TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
+contract and in-process replica hop; they do not establish that a running
+installation has been upgraded.
+
+## Fleet workspace continuation
+
+The Fleet binding's original one-hour expiry accidentally ended productive
+work even while the owner-authorized goal remained active. The binding now keeps
+its owner, run and machine placement fixed while a native lifecycle renews the
+bounded lease when fewer than thirty minutes remain. Each renewal rechecks the
+active run, destination, enrollment and sharing. The receiver still enforces
+its five-minute idle limit, per-operation cancellation, machine capacity and
+pipeline exclusion. A longer-lived goal does not grant longer computer access.
+
+An expired binding or typed receiver state-loss receipt requires an explicit
+`workspace_recover` call naming the current generation. A row-version fence
+allows only one replica to advance that generation. Recovery repeats the fresh
+authority checks and prepares an empty generation on the same machine; it does
+not promise restored files or run a command. Retained Library evidence is the
+source for reconstruction. Completed effects and uncertain operations are never
+replayed automatically. A changed machine, inactive run, withdrawn sharing or
+stale generation refuses. Receiver tombstones remain; a new generation uses a
+different identity rather than deleting an old tombstone.
+
+The generation travels through both mesh forwarding and the machine constraint,
+so an old capacity-queued call cannot execute inside a replacement filesystem.
+`workerWorkbench` contract 2 requires generation-aware receivers. The database
+regression `TestWorkbenchBindingDBChoosesOneMachineAcrossReplicas` verifies
+native binding persistence, owner isolation and competing recovery. The tests
+in `workbench_continuation_test.go` cover loss, no replay, stale queued calls,
+sharing and cancellation. Cockpit's `TestActiveWorkbenchRenewsLeaseWithoutLosingFiles`
+uses a controlled clock beyond two hours, and
+`TestExplicitRecoveryUsesNewGenerationWithoutReplayingLostOperation` preserves
+tombstones and distinguishes the replacement container. These tests do not
+establish a two-hour live production run or restore ephemeral files.
+
+## Feedback after a finished, unaccepted result
+
+Ask routes a correction or request to continue to the latest finished result of
+an open goal as well as to active work. `activeWorkRun` retains its original
+meaning for queued-message projection. Closed/accepted goals, cancelled work,
+children, and older results are not automatic-continuation candidates. Unrelated
+requests still go to intake; ambiguous references still ask which goal. Discovery
+uses an owner-scoped, one-row existence query for newer or nonterminal work, so an
+older active run cannot disappear behind a page of terminal history.
+
+`work.continueRun` requires interactive owner feedback, the exact observed run
+version and an idempotency request id. Under one acquisition of the goal lifecycle,
+workload and provider gates, it rereads ownership, open/unaccepted state, result
+version, and conflicting work. Acceptance winning that gate prevents continuation;
+continuation winning it makes the old acceptance stale. Unlike an explicit step
+rerun, it never reopens accepted results. The request receipt and a native replan
+wait are written together on the same run. Duplicate payloads reuse that receipt;
+a changed payload under the same id refuses. All completed steps remain the fixed
+prefix, including the former final answer. The replanner appends the remaining
+work rather than asking the person to select a technical step or replaying an
+old effect. The sealed source must be available before a request can dispatch.
+
+Explicit feedback renews an execution window using the existing progress policy,
+reconciled with the provider ledger when present, without resetting cumulative
+usage, hard token/cost ceilings, permissions, or durable progress credits. Unknown
+or malformed provider attribution refuses; native inference admission still checks
+its actual phase, model route and operator limits before every call. The bounded
+active evidence index starts a new feedback epoch, as it does at a progress question.
+
+Each request has a stable observation identity and its original human timestamp.
+The handler journals an intent before the run write, then seals acceptance after
+it. The committed run receipt bridges a crash between those writes; an unrelated
+pending intent never becomes guidance. Before replacing that bridge, another
+continuation must seal the preceding receipt. Thus API-only feedback survives
+later requests, and a retry of any accepted id cannot renew or dispatch again.
+Observation phase writes use a timestamp strictly after the version read under
+the same gate, including when another replica's clock is behind. An accepted
+receipt never regresses to intent.
+
+The run write commits continuation. A subsequent seal failure returns an honest
+accepted response with `feedbackReceiptState: pending` and logs a repair diagnostic;
+it cannot tell Ask the message was refused after work already resumed. A retry
+seals that receipt without writing the run again. The guidance reader merges all
+accepted observations with the run bridge, always using the same stable identity
+and human time. A matching late Ask turn remains a delivery receipt but does not
+rename or duplicate its instruction, so acknowledged page prefixes stay valid.
+Routing reports continuation only after the handler acknowledges that same run.
+A refusal remains attached to the selected goal instead of silently opening another.
+
+Validation: `TestContinueFinishedResultDBAcrossReplicas` exercises two competing
+replicas, durable retry, usage/prefix preservation, native replan context and
+owner acceptance. `TestContinueConflictDBFindsOlderActiveRunBeyondHistoryPage`
+checks long history and abandoned older work. `TestContinueFeedbackWindowUsesProviderSpendAndKeepsHardLimits`
+checks actual provider counts and monetary refusals.
+`TestContinueReceiptDBRecoversPostCommitFailureAcrossSkewedReplicas` checks partial
+commit recovery, monotonic receipt phases, two API continuations and old-request
+retry. `TestAskResultFeedbackKeepsCursorAcrossSealTranscriptAndLaterAPIRequests`
+checks stable delivery across late transcript arrival and more than one query page.
+The Ask continuation tests also cover chronological guidance, transport retry,
+missing-transcript recovery, refused delivery, unrelated intake and ambiguity. `TestReplanFinishedResultAppendsWorkWithoutReplayingCompletedEffects`
+runs the real plan validator and proves the new resume point follows completed
+work. These are fixtures with the real database/plan validator; live rollout and
+completion-disposition verification are reported separately.
+
+## Current-step operation completion and retained partial effects
+
+An execution previously could finish after an honest answer said its requested
+operation was still unperformed. The operational step now requires a typed
+completion disposition from the existing bounded reply check, including specialist
+turns without a `respondToUser` envelope. Its contract combines the native current
+step task, owned running step, and current owner guidance. Information requests,
+conditional advice, later steps, and explicit owner deferrals do not require an
+unrequested effect. Direct self-contained quick replies retain their bypass through the compiled
+quick-reply recipe. Unclassified legacy agent turns receive the completion check;
+their prose alone cannot establish an information-only task. Adopted turns without
+a section task use the owned goal statement rather than treating a large source
+document as the task. Long native instructions remain intact for ordinary routed
+context admission and durable recovery; this adds no task-text length ceiling.
+
+A satisfied operation must cite available, attributed same-run tool receipts.
+Unused approvals, explicit transport errors, nonzero exits and truncated proof
+cannot satisfy it. Saved domain data that describes failures remains valid source
+data: only recognized receipt/transport status is checked mechanically. The model
+still judges relevance and sufficiency, including reuse of a previously retained
+artifact. This is a bounded semantic check, not transactional certification.
+
+The native feedback, scope, model-ceiling, Training and knowledge fixtures route
+reply review through the installed resolver and supply the strict completion
+contract. They retain review-call and saved-receipt assertions; a missing provider
+field must not be hidden by bypassing review or accepting a failed child step.
+`TestWorkDBHumanDispatchPreservesScheduledRecovery` obtains the inference wait
+identity from the installed event/timer path and retires its durable run after
+each case. This keeps the subsequent all-owner startup recovery test meaningful:
+it still rejects unexpected or duplicate deliveries instead of filtering them.
+These fixtures compile locally without a database; execution requires native CI.
+
+An unfinished disposition first uses the existing single durable checkpoint
+continuation. Its attempt count, completed exchanges and pending reply survive a
+replica change. If the operation remains unfinished, an encoded native control
+receipt selects the normal replan path instead of successful delivery. Native
+terminal and hard-limit signals retain precedence; quoted error strings inside
+the encoded explanation cannot change classification. The explanation is exposed
+only after that decision. Replanning spends the existing run retry budget; actual
+budget exhaustion still requires the ordinary owner decision. The check grants no
+permission and does not close or accept a goal.
+
+A failed top-level step can contain completed effects. Before replacing it, the
+planner reads bounded owner/run/step-scoped tool receipts, independently of model
+prose. After installation, the new execution binding receives retained same-run
+receipts independently of its generated replacement prompt. Completed prefix
+bindings remain fixed. Foreign run receipts cannot certify the operation; missing,
+oversized or crowded-out source previews explicitly require reconciliation before
+an uncertain write. Source reads fail closed. Neither reconstruction nor a new
+binding grants permission to replay a completed effect.
+
+The authored `replanGap` prompt also states the current call grammar. An
+observed replan tried `toString({ ... })`, which the language correctly refuses
+as the removed object-literal argument form. New assembled objects must be bound
+after the completed prefix and serialized through that binding. This is prompt
+guidance, not a compiler relaxation, source rewrite, extra automatic model
+attempt or permission to change completed definitions.
+`TestReplanSerializesRetainedObjectThroughUnfinishedBinding` exercises both the
+refused form and the valid replacement through compilation, Gate 1 and replan
+installation. A valid replacement resumes at the new binding and preserves its
+completed input and downstream consumer. This establishes accepted syntax and
+prefix preservation, not that every model-generated replan will be valid.
+
+Regression coverage includes `unfinished_step_test.go` at the real failure path
+(zero classifier calls, quoted vendor errors, terminal precedence and retry
+limits); `unfinished_operation_db_test.go` across independent engines through
+`LoadReplanContext`, `InstallReplan`, `PrepareRerun` and `ResumeFrom`; and prepared
+streaming/nonstreaming provider requests in `work_operation_sources_test.go`.
+Reply completion tests cover specialist output, owner deferral, direct quick
+replies, malformed dispositions, source attribution, refused/truncated evidence,
+saved reports containing failure data, and bounded omissions. The database fixture
+retains one first-file receipt and creates only the missing second-file receipt.
+It establishes the native handoff and preservation contract, not arbitrary model
+obedience or exactly-once effects. Live completion remains separately unverified
+until the repaired runtime performs and retains the requested operations.
+
+## Cost evidence and private machine research
+
+| Decision | Reason and resulting path | Implementation |
+| --- | --- | --- |
+| Attribute provider usage to one attempt | Concurrent calls and fallbacks must not borrow a shared provider's last model or cache counts. Each observed attempt carries its own receipt cell; actual response fields replace estimates only when reported. Anthropic and OpenAI input/cache conventions normalize once. | [Usage context](../../../core/common/provider_usage.go), [provider adapters](../../../component/memql/provider_cost_usage.go), [router observation](../../../component/router/observation.go) |
+| Estimate an API equivalent | Exact served-model mapping and dated official price snapshots permit reproduction. Unknown cache categories or aggregate context brackets produce ranges; aggregate model attribution is explicitly assumed. These estimates never establish actual billing or retrospectively price old unknown-model records. | [Token calculator](../../../core/costestimate/tokens.go), [reviewed quotes](../../../core/costestimate/prices.json) |
+| Research a machine's utility | A separate sealed owner profile protects the precise address. The private builtin requires resolved user/personal-token authority, including the post-rotation and cross-node stamp. Research receives only locality and can propose evidence, never attest owner verification or confirm a tariff. Location revisions reject delayed results after a move. | [Energy boundary](../../../component/memql/fleet_energy.go), [research tool](../../../dsl/worker/tools.memql), [settings UI](../../../clients/os/src/apps/fleet/machines/MachineElectricity.tsx) |
+| Admit a profile write | The native boundary validates ownership and bounds, fences both the machine registration and the energy-profile row (including its initial absence), then compares revisions before one owner-stamped internal upsert. A competing save invalidates that profile witness; a stale decision must be reread rather than retried as an overwrite. A concept-level raw-write guard prevents bypassing verification via another DSL spelling. Private builtin inputs declare `@secret`, which redacts diagnostics and excludes the callable from general capability discovery. Broader name-based diagnostic redaction is separate: ordinary `prompt` and `sectionKeys` remain discoverable without exposing their values in errors or logs. Public queries/events contain no private input projection. | [Mutation guard](../../../component/memql/executor_mutation.go), [builtin classification](../../../component/memql/builtin_converter.go), [redaction/discovery regression](../../../component/memql/builtin_input_privacy_test.go), [privacy tests](../../../component/memql/fleet_energy_test.go), [required-DB checks](../../../component/memql/fleet_energy_db_test.go), [prepared-decision race cases](../../../component/memql/fleet_energy_fence_db_test.go) |
+| Retain an evaluation snapshot | Explicit selected artifacts, source/quality/coverage, independent verdicts and outside interventions prevent a runtime success or later repair from erasing a failure. ZIP verification establishes byte identity, while attributed review covers private free text/media. New categories extend the existing corpus; unimplemented oracles stay unverified. | [Case protocol](../../public/overview/evaluation-case-records.md), [archive utility](../../../scripts/proving/archive_case.py), [scenario catalog](../../../test/proving/goals/catalog.json) |
+
+This slice is externally authored implementation. Local fixture screenshots and
+unit checks do not count as MemQL performing its own feature work or as a live
+utility lookup. Required-database checks and native CI must cover the final
+revision before integration. Shared test/runtime capacity and the active Ask
+run are not changed by this work.

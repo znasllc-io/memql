@@ -20,7 +20,7 @@ const path = require("node:path");
 const { createHostProfile } = require("../../../scripts/vscode/host-profile.cjs");
 
 const { runTests } = require("@vscode/test-electron");
-const { downloadVSCode } = require("../../../scripts/vscode/download.cjs");
+const { downloadVSCode, exitCodeFor } = require("../../../scripts/vscode/download.cjs");
 
 const EXT_ROOT = path.resolve(__dirname, "..");
 const TESTS_ENTRY = path.join(EXT_ROOT, "dist-host", "test-host", "index.js");
@@ -199,5 +199,7 @@ async function main() {
 main().catch((err) => {
   console.error("ERROR: the host smoke lane failed");
   console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-  process.exit(1);
+  // 75 asks the pipeline to retry the step after a download that can succeed
+  // on another attempt; every other failure is final.
+  process.exit(exitCodeFor(err));
 });

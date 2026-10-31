@@ -349,6 +349,67 @@ func TestQualificationDriverRefusesChangedAuthorityBeforeDispatch(t *testing.T) 
 	}
 }
 
+// A retry is a new effect, and a qualification's authority is mutable: its pull
+// request can move and its expiry can pass while a step waits between two
+// attempts. The fence is read at the executor boundary of every attempt, so a
+// second attempt never starts under an authority the first was not checked
+// against, and the step ends with the refusal rather than the first attempt's
+// failure.
+func TestAQualificationIsRecheckedBeforeARetry(t *testing.T) {
+	const manifest = `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:abc
+  stages:
+    - name: checks
+      steps:
+        - name: vet
+          run: go vet ./...
+`
+	for name, change := range map[string]func(*driveHarness, Run, *driveClock){
+		"the pull request's head moved": func(dh *driveHarness, _ Run, _ *driveClock) {
+			dh.github.pulls[repoName][0].HeadSHA = shaB
+		},
+		"the qualification expired": func(_ *driveHarness, r Run, clock *driveClock) {
+			q, err := readQualification(r.Qualification)
+			if err != nil {
+				t.Error(err)
+			}
+			clock.set(q.ExpiresAt.Add(time.Second))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dh, r := qualificationDriveManifest(t, manifest)
+			clock := &driveClock{at: testNow}
+			dh.integ.Configure(func(d *Deps) {
+				d.Now = clock.now
+				d.retryTimer = func(time.Duration) <-chan time.Time {
+					change(dh, r, clock)
+					fired := make(chan time.Time, 1)
+					fired <- clock.now()
+					return fired
+				}
+			})
+			dh.exec.answer = func(context.Context, pipelines.StepRequest) (pipelines.StepResult, error) {
+				return nothingRanResult(pipelines.CodeCloneFailed, "The workspace's git fetch failed before the command ran."), nil
+			}
+
+			deliver(t, dh.integ, r)
+
+			if sent := dh.exec.sent(); len(sent) != 1 {
+				t.Fatalf("the executor was handed %d attempts, want only the one before the change", len(sent))
+			}
+			got, _ := dh.store.run(r.ID)
+			if got.Conclusion != ConclusionFailure {
+				t.Fatalf("the run ended %s (%s %q); want a failure", got.Conclusion, got.FailureCode, got.FailureMessage)
+			}
+			if row := dh.work.stepRow("checks.vet"); row["errorCode"] != qualificationRefusal {
+				t.Errorf("the step ended %v (%v); want the qualification's refusal", row["errorCode"], row["errorMessage"])
+			}
+		})
+	}
+}
+
 func TestQualificationUncertainCreateObservesWithoutSecondPost(t *testing.T) {
 	h := connectHarness(t, connectManifest)
 	prepareQualification(h)

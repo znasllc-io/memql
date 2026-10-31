@@ -23,15 +23,30 @@ STABLE_TAG = re.compile(r"cockpit/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-
 MAX_PAGES = 100
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 TOTAL_SECONDS = 120
+# GitHub pages a /repos/<owner>/<name> listing on the repository's numeric path,
+# which is the same catalog under its other name.
+NAMED_CATALOG = re.compile(r"/repos/[^/]+/[^/]+/releases")
+NUMERIC_CATALOG = re.compile(r"/repositories/[1-9][0-9]*/releases")
 
 
 class DiscoveryError(Exception):
     pass
 
 
-def next_page(headers, initial_url):
+def same_catalog(target, initial, current):
+    """The numeric path counts only on the requested host, and only one id does."""
+    if (target.scheme, target.netloc) != (initial.scheme, initial.netloc) or target.fragment:
+        return False
+    if target.path == initial.path:
+        return True
+    return (NAMED_CATALOG.fullmatch(initial.path) is not None and
+            NUMERIC_CATALOG.fullmatch(target.path) is not None and
+            current.path in (initial.path, target.path))
+
+
+def next_page(headers, initial_url, current_url):
     """A catalog response may advance only within that same catalog."""
-    initial = urlparse(initial_url)
+    initial, current = urlparse(initial_url), urlparse(current_url)
     links = []
     for line in headers.splitlines():
         if line.startswith("HTTP/"):
@@ -58,8 +73,7 @@ def next_page(headers, initial_url):
             raise DiscoveryError("The release catalog returned invalid pagination metadata.")
         if "next" not in relation.split():
             continue
-        target = urlparse(match.group(1))
-        if (target.scheme, target.netloc, target.path) != (initial.scheme, initial.netloc, initial.path) or target.fragment:
+        if not same_catalog(urlparse(match.group(1)), initial, current):
             raise DiscoveryError("The release catalog returned an invalid next page.")
         if found is not None:
             raise DiscoveryError("The release catalog returned more than one next page.")
@@ -126,7 +140,7 @@ def resolve(api_url):
             version = tuple(int(part) for part in match.groups())
             if best is None or version > best[0]:
                 best = (version, tag)
-        url = next_page(headers, api_url)
+        url = next_page(headers, api_url, url)
     if best is None:
         raise DiscoveryError("No stable Cockpit release has been published in the MemQL repository. Nothing was installed.")
     return best[1]

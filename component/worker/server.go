@@ -235,6 +235,7 @@ func (s *server) admitRegistration(
 	w.SetModelCallFunc(session.openModelCall)
 	w.SetModelPullFunc(session.openModelPull)
 	w.SetModelProbeFunc(session.openModelProbe)
+	w.SetAppSignInFunc(session.sendAppSignIn)
 	s.registry.Add(w)
 
 	if err := stream.Send(&memqlv1.WorkerServerMessage{
@@ -491,6 +492,8 @@ type streamSession struct {
 	modelCalls       map[string]*ModelCallHandle
 	sharingChanged   chan struct{}
 	sharingStartedAt time.Time
+	// appSignIns are the sign-ins this stream started and has not heard the end of.
+	appSignIns map[string]struct{}
 	// modelPulls is the pull table. Separate from modelCalls because the
 	// id spaces are separate and a pull is not a call: conflating them
 	// would let a cancel for one reach the other.
@@ -694,6 +697,7 @@ func (s *streamSession) close(cause error) {
 		for _, h := range livePulls {
 			h.finish(ModelPullOutcome{Error: "worker_disconnected"}, ErrWorkerDisconnected)
 		}
+		s.failOpenAppSignIns()
 		s.clearConnectedNode()
 		// Log disconnect symmetrically to "worker registered" on the
 		// connect path. Without this the agent log was silent on
@@ -847,6 +851,12 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	if dispatch == nil {
 		return nil, fmt.Errorf("worker: nil dispatch")
 	}
+	// ADMISSION, and only admission, is a refusal BEFORE SEND: the owner's
+	// Host-commands (or computer-use) switch is read here, nothing has left this
+	// replica, and the error comes back typed (RefusedBeforeSendError) so the
+	// dispatcher may try another machine -- on this replica and, through the
+	// forward, on a sibling. Everything after the send below is NOT: see the
+	// select at the end of this function.
 	ctx, releaseFeature, err := s.admitOwnerFeature(ctx, ownerFeatureForTool(dispatch))
 	if err != nil {
 		return nil, err
@@ -885,6 +895,12 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 	}()
 
 	s.markSharingChanged()
+	// Nothing has been sent here either, and the cause is still left PLAIN: this
+	// check cannot tell the owner's withdrawal landing in the short window since
+	// admission from the caller's own cancel or deadline without inspecting the
+	// cause. A plain error reads as "may have run", the conservative answer: it
+	// can cost one failed attempt in a narrow window, and can never execute a
+	// command twice.
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
 	}
@@ -909,6 +925,11 @@ func (s *streamSession) dispatch(ctx context.Context, dispatch *memqlv1.ToolDisp
 				},
 			},
 		})
+		// AFTER THE SEND, the cause stays whatever cancelled the call. When the
+		// owner switched the feature off mid-call (ApplyOwnerFeaturePolicy) that
+		// is the plain featureDisabled error, never a RefusedBeforeSendError: the
+		// machine has the command and may have run it, and a refusal here would
+		// have the dispatcher run it a second time on another machine.
 		return nil, context.Cause(ctx)
 	case <-s.ctx.Done():
 		return nil, ErrWorkerDisconnected
@@ -948,6 +969,8 @@ func (s *streamSession) handle(ctx context.Context, msg *memqlv1.WorkerClientMes
 		s.handleModelProbeProgress(payload.ModelProbeProgress)
 	case *memqlv1.WorkerClientMessage_ModelProbeEnd:
 		s.handleModelProbeEnd(payload.ModelProbeEnd)
+	case *memqlv1.WorkerClientMessage_AppSignInUpdate:
+		s.handleAppSignInUpdate(payload.AppSignInUpdate)
 	case *memqlv1.WorkerClientMessage_Pong:
 		s.handlePong(payload.Pong)
 	case *memqlv1.WorkerClientMessage_RotationRequest:
@@ -1806,8 +1829,9 @@ func (s *streamSession) handleAppSessionEnd(end *memqlv1.AppSessionEnd) {
 		// What the APP said it ran, verbatim (design D9). An older cockpit
 		// sends neither and both stay empty, which is read as unknown rather
 		// than as the level or the model that was asked for.
-		Model:  end.GetModel(),
-		Effort: end.GetEffort(),
+		Model:      end.GetModel(),
+		Effort:     end.GetEffort(),
+		StopReason: NormalizeAppStopReason(end.GetStopReason()),
 	}
 	// Carried whatever the exit code says. A harness can answer the schema
 	// and still exit non-zero, and dropping the answer because the run

@@ -268,6 +268,76 @@ callers cannot select just the successful checks. Unfinished, failed,
 foreign-owned or incompatible-source runs refuse. Every evidence artifact is
 pinned and verified, including reports and metadata not selected for publication.
 
+### Reused steps
+
+A release may have skipped an artifact-free check because the run that tested
+the same git tree passed it ([What a release reuses](release-cutting.md#what-a-release-reuses)).
+Its evidence stays the release's own step, a `pipeline_passed_earlier` skip, with
+the source recorded beside it:
+
+```json
+{
+  "name": "engine-release-tests.go-tests-1-…",
+  "stepKey": "tests.go-tests#1",
+  "reusedFrom": {
+    "pipelineRunId": "…", "workRunId": "…", "attempt": 1, "event": "pull_request",
+    "commit": "…", "treeHash": "…", "receiptDigest": "sha256:…"
+  }
+}
+```
+
+The caller cannot assert this either. Coverage re-derives it from the journal on
+every read, at preparation, publication and overlay alike, and refuses a candidate
+whose record is missing, changed or claimed for a step that ran. It requires:
+
+- the release ran in full mode;
+- the source is a completed, successful run of the same owner, pipeline and
+  repository, was not asked to stop and is not a scheduled scan;
+- the source finished no more than 24 hours before the attempt that reused the step
+  started;
+- the source's journal names that run, its commit and the same tree;
+- the source's step is a command that ran, exit zero, with no artifact intents,
+  inside a work run that succeeded;
+- both rows declare the same `treeFingerprint` and packages.
+
+A failed-only re-run that carried a reused step is proven the same way: the walk
+back through its attempts stops at the attempt that reused it, and that attempt's
+start bounds the age. Every artifact in the candidate still comes from the run it
+names, and a reused step can name none.
+
+A live candidate keeps three kinds of run past
+`MEMQL_PIPELINES_RUN_RETENTION_DAYS`, so it stays provable when an overlay is built
+from it later:
+
+- **Every run its evidence names**, whatever started it. A separate check suite on a
+  push has no artifact to keep it, and coverage reads it on every read. Only the runs the
+  candidate names are kept: another push of the same commit leaves on its usual window.
+- **The runs it reused a step from.** With a shorter window, prepare the candidate
+  before the source's rows leave, or preparation refuses it.
+- **Every attempt of its release.** A candidate from a failed-only re-run names one
+  attempt, and coverage reads every earlier one on every read, including an attempt
+  refused before it opened any work. Retention keeps every release run at the repository
+  and commit of a component the candidate names, which can include another pipeline's
+  release of the same commit.
+
+A retired candidate holds nothing, and neither does an archived one: archival gives up
+its build inputs, so its own run's rows leave on their usual window.
+
+The holds on named runs and on attempts read only what a candidate's manifest has always
+named, so a candidate saved before them needs no change and is held from the next nightly
+pass. They cannot bring back rows that have already left. A candidate that lost a run that
+way is still refused, naming the check or attempt it could not read or saying "release run
+is unavailable", so a new overlay needs a candidate from a later release.
+
+**Rolling back to an engine from before tree hashes:**
+
+- A candidate with `reusedFrom` is refused, because the older engine drops the field
+  and the candidate's identity no longer matches.
+- A candidate that reused nothing still verifies, because a receipt's digest leaves
+  the input's tree out.
+- A `v1:pipelines:run` row that holds a `treeHash` cannot be written by the older
+  engine, so a run in flight at the rollback stops being driven. Re-run it.
+
 A new candidate is `ready`, with no approval ID or publication effect. Repeating
 the same inputs recovers the existing candidate and its current review state.
 `releaseGetCandidate` and `releaseCandidates` expose its durable review record.

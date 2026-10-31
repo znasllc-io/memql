@@ -654,19 +654,7 @@ func (h *codexAppServer) Start(ctx context.Context, spec Spec) error {
 	}
 	h.conn = newJSONRPCConn(proc, h.handleNotification)
 
-	// clientInfo is required (v1::InitializeParams). Naming ourselves
-	// honestly matters more than it looks: it is what an operator sees
-	// in Codex's own logs when they go looking for what drove a session
-	// they did not start.
-	init := map[string]any{
-		"clientInfo": map[string]any{
-			"name":    "memql-cockpit",
-			"title":   "MemQL Cockpit",
-			"version": "1",
-		},
-		"capabilities": map[string]any{},
-	}
-	if _, err := h.conn.call(ctx, "codex app-server", codexMethodInitialize, init); err != nil {
+	if _, err := h.conn.call(ctx, "codex app-server", codexMethodInitialize, codexInitializeParams()); err != nil {
 		return err
 	}
 	// The server rejects every other method until this lands, and it is
@@ -679,6 +667,22 @@ func (h *codexAppServer) Start(ctx context.Context, spec Spec) error {
 	h.started = true
 	h.mu.Unlock()
 	return nil
+}
+
+// codexInitializeParams is the handshake.
+//
+// clientInfo is required (v1::InitializeParams). Naming ourselves honestly matters
+// more than it looks: it is what an operator sees in Codex's own logs when they go
+// looking for what drove a session they did not start.
+func codexInitializeParams() map[string]any {
+	return map[string]any{
+		"clientInfo": map[string]any{
+			"name":    "memql-cockpit",
+			"title":   "MemQL Cockpit",
+			"version": "1",
+		},
+		"capabilities": map[string]any{},
+	}
 }
 
 // Close implements Harness and is idempotent.
@@ -773,6 +777,7 @@ func (h *codexAppServer) Turn(ctx context.Context, prompt string, sink Sink) (Tu
 
 	out := h.result(state)
 	status, reason := state.outcome()
+	out.Readiness = codexTurnReadiness(status, reason, state.failureInfo())
 	if reason == "" {
 		reason = "the app gave no reason"
 	}
@@ -1034,7 +1039,8 @@ func (h *codexAppServer) handleNotification(method string, params json.RawMessag
 				ID     string `json:"id"`
 				Status string `json:"status"`
 				Error  *struct {
-					Message string `json:"message"`
+					Message string          `json:"message"`
+					Info    json.RawMessage `json:"codexErrorInfo"`
 				} `json:"error"`
 				Items []json.RawMessage `json:"items"`
 			} `json:"turn"`
@@ -1050,6 +1056,7 @@ func (h *codexAppServer) handleNotification(method string, params json.RawMessag
 			var reason string
 			if n.Turn.Error != nil {
 				reason = n.Turn.Error.Message
+				state.noteFailureInfo(n.Turn.Error.Info)
 			}
 			state.complete(n.Turn.ID, n.Turn.Status, reason, n.Turn.Items)
 		}
@@ -1197,6 +1204,9 @@ type codexTurnState struct {
 	completed bool
 	// rerouted is the model a model/rerouted moved this turn to.
 	rerouted string
+	// info is the failed turn's codexErrorInfo, kept as printed: a word such as
+	// usageLimitExceeded, or an object holding an HTTP status.
+	info json.RawMessage
 	// pendingID holds a completion that arrived before the turn had a
 	// name, so it can be matched once it does.
 	pendingID string
@@ -1304,6 +1314,18 @@ func (t *codexTurnState) noteError(message string) {
 	if message != "" {
 		t.reason = message
 	}
+}
+
+func (t *codexTurnState) noteFailureInfo(info json.RawMessage) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.info = info
+}
+
+func (t *codexTurnState) failureInfo() json.RawMessage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.info
 }
 
 func (t *codexTurnState) complete(turnID, status, reason string, items []json.RawMessage) {

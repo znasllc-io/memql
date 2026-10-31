@@ -157,6 +157,7 @@ export interface FakeQuery {
    *  broadcast routing rule, so this seeds a collection the fake
    *  subscriptions can then fold events into. */
   modelPullsForWorker: ReturnType<typeof vi.fn>;
+  appSignInsForWorker: ReturnType<typeof vi.fn>;
   /**
    * The Models SECTION's two readings (epic memql#5096) -- the fleet catalog
    * and which doors this cluster can reach.
@@ -184,6 +185,9 @@ export interface FakeQuery {
   updateRoutingPolicy: ReturnType<typeof vi.fn>;
   setDelegationPolicy: ReturnType<typeof vi.fn>;
   fleetModelPull: ReturnType<typeof vi.fn>;
+  fleetAppSignIn: ReturnType<typeof vi.fn>;
+  fleetAppSignInCode: ReturnType<typeof vi.fn>;
+  fleetAppSignInCancel: ReturnType<typeof vi.fn>;
   // The scanner's reads and acts (epic memql#5146). None of the three reads is
   // live: `fleetRecommended` and `fleetSharingLedger` are virtual projections
   // with no graph event behind them, and a measurement changes when somebody
@@ -338,6 +342,7 @@ export function fakeConnection(seed: Partial<Record<FleetRead, Row[]>> = {}, mor
     createGoal: read("createGoal"),
 
     modelPullsForWorker: read("modelPullsForWorker"),
+    appSignInsForWorker: read("appSignInsForWorker"),
     fleetModels: builtin("fleetModels"),
     inferenceStatus: builtin("inferenceStatus"),
     delegationPolicyForUser: read("delegationPolicyForUser"),
@@ -364,6 +369,9 @@ export function fakeConnection(seed: Partial<Record<FleetRead, Row[]>> = {}, mor
     updateRoutingPolicy: async () => rowsResult([]),
     setDelegationPolicy: async () => rowsResult([]),
     fleetModelPull: async () => builtinReply("fleetModelPull", []),
+    fleetAppSignIn: async () => builtinReply("fleetAppSignIn", []),
+    fleetAppSignInCode: async () => builtinReply("fleetAppSignInCode", []),
+    fleetAppSignInCancel: async () => builtinReply("fleetAppSignInCancel", []),
     fleetRecommended: builtin("fleetRecommended"),
     fleetModelSetup: builtin("fleetModelSetup"),
     activeEmbedderBinding: async () => rowsResult(seed.activeEmbedderBinding ?? []),

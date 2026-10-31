@@ -66,8 +66,11 @@ package citags
 // catches the tags that do not.
 
 import (
+	"go/ast"
 	"go/build"
 	"go/build/constraint"
+	"go/parser"
+	"go/token"
 	"maps"
 	"os"
 	"path/filepath"
@@ -91,8 +94,10 @@ import (
 var deliberatelyNotRunInCI = map[string]string{
 	"clustere2e": "needs a provisioned cluster to run (make cluster-e2e for the 2-replica parity suite); the native build-clustere2e step " +
 		"compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run. One test of the " +
-		"package, TestPipelinesSubstrate, does run: install-cluster-e2e.yml's pipelines leg runs it against the cluster that leg " +
-		"installs (memql#5497) -- nightly and on that workflow's own paths, so it gates no pull request and is not a lane here, " +
+		"package, TestPipelinesSubstrate, does run, in two parts. That step runs it by name with no context named, which reaches only " +
+		"the subtests that read no cluster: every pull request runs those, but a filtered run is not coverage of the package, so the " +
+		"tag stays here (TestClusterE2ELaneReachesWhatReadsNoCluster holds what it reaches). The weekly installer-lifecycle.pipelines " +
+		"leg runs all of it against the cluster that leg installs (memql#5497), which gates no pull request and is not a lane here, " +
 		"and the tag stays out of the node-tag passes. That test also needs the agent's build (`//go:build clustere2e && agent`: " +
 		"it runs the executor's fleet half, which is agent-only), so the compile lane builds the package under both tag sets",
 }
@@ -633,5 +638,64 @@ func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
 	}
 	if !strings.Contains(step.Run, "set -eu\n") || strings.Contains(step.Run, "||") {
 		t.Errorf("native step %q can swallow a failed compile or vet command", jobName)
+	}
+}
+
+// TestClusterE2ELaneReachesWhatReadsNoCluster holds what the lane's one run of
+// the package reaches. It names no context and filters by name, so it runs
+// TestPipelinesSubstrate's subtests above connectSubstrateCluster and skips
+// there, and neither half fails when it stops being true: go test reads a filter
+// that matches nothing as `ok ... [no tests to run]`, and a subtest below the
+// connection simply does not run on a pull request, which is how fork-refused
+// stayed broken from 2026-10-22 to 2026-10-30 with only the weekly leg able to
+// see it. A new subtest above the connection needs no entry here. go/parser
+// ignores build constraints, so the default lane can read the file.
+func TestClusterE2ELaneReachesWhatReadsNoCluster(t *testing.T) {
+	const file = "test/clustere2e/pipelines_substrate_test.go"
+	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoRoot(t), filepath.FromSlash(file)), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var substrate *ast.FuncDecl
+	for _, decl := range parsed.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "TestPipelinesSubstrate" {
+			substrate = fn
+		}
+	}
+	if substrate == nil {
+		t.Fatalf("%s declares no TestPipelinesSubstrate: the lane's -run filter matches nothing, and go test reads that as ok", file)
+	}
+	var above []string
+	connected := false
+	for _, stmt := range substrate.Body.List {
+		if connected {
+			break
+		}
+		ast.Inspect(stmt, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fun := call.Fun.(type) {
+			case *ast.Ident:
+				connected = connected || fun.Name == "connectSubstrateCluster"
+			case *ast.SelectorExpr:
+				if fun.Sel.Name == "Run" && len(call.Args) > 0 {
+					if name, ok := call.Args[0].(*ast.BasicLit); ok {
+						above = append(above, strings.Trim(name.Value, `"`))
+					}
+				}
+			}
+			return false // a subtest's own calls are not the test's order
+		})
+	}
+	if !connected {
+		t.Fatalf("TestPipelinesSubstrate in %s never calls connectSubstrateCluster: the lane names no context, so nothing stops it there", file)
+	}
+	for _, name := range []string{"report-mapping", "normalization", "manifest", "receipt-cleanup", "library-stream", "fork-refused", "fork-doubles"} {
+		if !slices.Contains(above, name) {
+			t.Errorf("%s reads no cluster but is not above connectSubstrateCluster in %s (above it: %v), so no pull request runs it. "+
+				"Move it back above the connection.", name, file, above)
+		}
 	}
 }

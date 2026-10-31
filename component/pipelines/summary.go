@@ -18,6 +18,29 @@ type StepReport struct {
 	DurationMs       int64
 	Code, Message    string
 	LogTail          string
+	// Attempts is every attempt of the step that ended, in order, the passing
+	// one included; empty for a step that never reached the executor. A step
+	// that ran once has one record and the check run says nothing of attempts
+	// for it (retrySentence, writeFailedSteps).
+	Attempts []AttemptReport
+	// Retrying says a running step has had an attempt fail and is going again.
+	// The driver says so; it is not read off Attempts, because a step's last
+	// record is written an instant before its receipt and a step about to pass
+	// or fail for good must not read as retrying in that instant. RetryAfter is
+	// the wait the driver scheduled before the next attempt; zero is "at once"
+	// or "not recorded", and the sentence claims neither.
+	Retrying   bool
+	RetryAfter time.Duration
+}
+
+// AttemptReport is one ended attempt of a step as the check run says it: which
+// attempt, the code it ended with, and where it ran in words a person reads on
+// GitHub ("the cluster", a machine). Code is empty for the attempt that passed
+// and for a failing exit that carried none; Where is empty when no place was
+// recorded. Both are text a runner supplied: CheckOutput quotes them literally.
+type AttemptReport struct {
+	Attempt     int
+	Code, Where string
 }
 
 // RunReport is a run as the check run reports it.
@@ -434,6 +457,7 @@ func checkSummary(r RunReport, stages []stageRow) string {
 		}
 		writeRunFailure(&b, r)
 		writeFailedSteps(&b, r.Steps)
+		writeRetriedSteps(&b, r.Steps)
 	}
 	return b.String()
 }
@@ -543,9 +567,121 @@ func writeFailedSteps(b *strings.Builder, steps []StepReport) {
 			line += " (" + code + ")"
 		}
 		line += "\n"
+		// A step that took more than one attempt lists each, the one it failed
+		// on included: the line above says how the step ended, and where each
+		// attempt ran and what ended it is the rest of the story. One attempt
+		// is the step's own line and has nothing to add.
+		if len(s.Attempts) >= 2 {
+			for _, a := range s.Attempts {
+				line += fmt.Sprintf("  - Attempt %d: %s.\n", a.Attempt, attemptEnding(a))
+			}
+		}
 		if b.Len()+len(line) > checkOutputLimit-reserve {
 			more := len(failed) - i
 			fmt.Fprintf(b, "\n%d more failed %s listed on the run page.\n", more, plural(more, "step is", "steps are"))
+			return
+		}
+		b.WriteString(line)
+	}
+}
+
+// attemptTextRunes bounds the code and the place of one attempt in the summary.
+// Both are text a runner supplied and a step can have eight attempts, so an
+// unbounded pair could fill the field the failed steps count on.
+const attemptTextRunes = 80
+
+// attemptEnding is how one ended attempt reads inside a sentence: its code on
+// its place, or what is known of either. An attempt is never skipped for having
+// no code: unless it is the one that passed (the caller leaves that one out), it
+// failed, and the sentence says so, because the step went on after it. The code
+// is a code span and the place plain text, both quoted literally (codeSpan,
+// inlineText).
+func attemptEnding(a AttemptReport) string {
+	code, where := strings.TrimSpace(a.Code), inlineText(clipRunes(strings.TrimSpace(a.Where), attemptTextRunes))
+	switch {
+	case code != "" && where != "":
+		return codeSpan(clipRunes(code, attemptTextRunes)) + " on " + where
+	case code != "":
+		return codeSpan(clipRunes(code, attemptTextRunes))
+	case where != "":
+		return "failed on " + where
+	}
+	return "failed"
+}
+
+// retrySentence is what the check run says of a step that needed more than its
+// first attempt, or "" when it has nothing to say. It is decided here, from the
+// report alone, so the sentence is the same wherever the report was composed:
+//
+//   - A PASSED step with two or more attempts says which attempt it passed on and
+//     what ended each one before it. The passing attempt is the last record, so
+//     the attempts listed are the ones before it.
+//   - A RUNNING step the driver reports as retrying (Retrying) says which attempt
+//     failed, how and where, and when the next starts. Only the latest failure is
+//     named: the whole history is the step's receipt's, once it has one.
+//     "Starts after" is the wait the driver scheduled and stays true however
+//     long ago it was read, so the sentence never claims the next attempt has not
+//     begun; a wait under a second, or one the driver did not record, says the
+//     next attempt "follows".
+//
+// A step that ran once, and one still running whose driver has not said it is
+// retrying, have nothing here: StepReport.Retrying exists so that a step about
+// to pass or fail for good is never described as retrying in the instant
+// between its last attempt and its receipt.
+func retrySentence(s StepReport) string {
+	n := len(s.Attempts)
+	switch {
+	case s.Status == "succeeded" && n >= 2:
+		var b strings.Builder
+		fmt.Fprintf(&b, "Passed on attempt %d of %d.", n, n)
+		for _, a := range s.Attempts[:n-1] {
+			fmt.Fprintf(&b, " Attempt %d: %s.", a.Attempt, attemptEnding(a))
+		}
+		return b.String()
+	case s.Status == "running" && s.Retrying && n >= 1:
+		last := s.Attempts[n-1]
+		sentence := fmt.Sprintf("Retrying: attempt %d failed", last.Attempt)
+		// "failed (`code` on a place)", "failed on a place", or just "failed".
+		switch ending := attemptEnding(last); {
+		case strings.TrimSpace(last.Code) != "":
+			sentence += " (" + ending + ")"
+		case ending != "failed":
+			sentence += strings.TrimPrefix(ending, "failed")
+		}
+		sentence += fmt.Sprintf("; attempt %d ", last.Attempt+1)
+		if s.RetryAfter >= time.Second {
+			sentence += "starts after " + formatDuration(s.RetryAfter.Milliseconds())
+		} else {
+			sentence += "follows"
+		}
+		return sentence + "."
+	}
+	return ""
+}
+
+// writeRetriedSteps lists the steps that took more than one attempt and did not
+// fail: the ones that passed after a retry and the ones retrying now. A failed
+// step lists its attempts with the failures (writeFailedSteps), so a reader
+// finds a step's attempts in one place. It comes after the failed steps, which
+// get the field's room first, and is bounded the same way: as many as fit, then
+// how many more there are.
+func writeRetriedSteps(b *strings.Builder, steps []StepReport) {
+	var retried []StepReport
+	for _, s := range steps {
+		if retrySentence(s) != "" {
+			retried = append(retried, s)
+		}
+	}
+	if len(retried) == 0 {
+		return
+	}
+	b.WriteString("\n### Retried steps\n\n")
+	const reserve = 120 // room for the closing count
+	for i, s := range retried {
+		line := "- " + codeSpan(s.Key) + ": " + retrySentence(s) + "\n"
+		if b.Len()+len(line) > checkOutputLimit-reserve {
+			more := len(retried) - i
+			fmt.Fprintf(b, "\n%d more retried %s listed on the run page.\n", more, plural(more, "step is", "steps are"))
 			return
 		}
 		b.WriteString(line)

@@ -14,10 +14,13 @@ func validateSARIFStep(spec *Spec, stage string, step StepSpec) *Refusal {
 		strings.ContainsAny(r.Path, "\\\x00\r\n*?[]") || !strings.HasSuffix(r.Path, ".sarif") {
 		return Refuse(CodeStepInvalid, scope, "sarif requires one exact repository-relative .sarif artifact path.")
 	}
+	// Every key a command step takes is refused here, repeatable included: the driver
+	// delivers this step itself and no executor ever runs it, so the key would be
+	// ignored in silence.
 	if step.RepositoryChange != nil || step.GitHubReadToken || step.CheckoutHistory != "" || step.Run != "" || step.ImageBuild != nil || step.Image != "" || step.Execution != "" || step.Placement != "" ||
 		step.Platform != "" || step.CPUMilli != 0 || step.MemoryMiB != 0 || step.Packages != "" || step.Only != "" ||
 		step.Shards != 0 || step.When != nil || len(step.Needs) > 0 || len(step.Services) > 0 || step.Caches != nil ||
-		len(step.Secrets) > 0 || step.ImagePullSecret != "" || len(step.Artifacts) > 0 {
+		len(step.Secrets) > 0 || step.ImagePullSecret != "" || len(step.Artifacts) > 0 || step.Repeatable != nil {
 		return Refuse(CodeStepInvalid, scope, "sarif accepts only name, producer step, artifact path and timeout; the driver owns its execution and current source grant.")
 	}
 	if step.Timeout != "" {

@@ -58,9 +58,13 @@ import { installQaConnection } from "./connectionShim";
 import {
   ALLOWED_MACHINE,
   FAILED_LOG,
+  HOST_COMMANDS_OFF_MACHINE,
+  PIPELINES_HOST_COMMANDS_SEED,
   PIPELINES_NO_RUNS_SEED,
+  PIPELINES_RETRIES_SEED,
   PIPELINES_SEED,
   PIPELINES_UNCONNECTED_SEED,
+  RETRY_MACHINES,
   installContentRoute,
   mapPipelines,
 } from "./pipelinesSeeds";
@@ -999,6 +1003,18 @@ const VIEWS: Record<
     seed: { ...PIPELINES_SEED, runArtifacts: {}, expiredRunFilesError: "Unavailable" },
     framed: true, render: () => <RunsWindow runId="r-7" />,
   },
+  // Steps that took more than one attempt (the fleet-first retries): r-11 ended
+  // with one step passed on its second attempt and one failed on its third;
+  // r-12 is a step waiting between two attempts.
+  "pipeline-run-retried": {
+    connect: () => {
+      installContentRoute(FAILED_LOG);
+      return pipelinesConnection(PIPELINES_RETRIES_SEED, { machines: RETRY_MACHINES });
+    },
+    wrap: pipelinesWrap,
+    render: () => <RunsWindow runId="r-11" />,
+  },
+  "pipeline-run-retrying": { connect: () => pipelinesConnection(PIPELINES_RETRIES_SEED, { machines: RETRY_MACHINES }), wrap: pipelinesWrap, render: () => <RunsWindow runId="r-12" /> },
   "pipeline-run-queued": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-9" /> },
   "pipeline-run-passed": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-6" /> },
   "pipeline-run-refused": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-5" /> },
@@ -1029,6 +1045,18 @@ const VIEWS: Record<
     connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [ALLOWED_MACHINE] }),
     wrap: (el) => el,
     render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("configured", { githubApp: true, repository: true, runner: true })} />,
+  },
+  // Host commands switched off for the one machine that would take the step: the
+  // Compute stop names the switch (`&click=Connect pipeline`) and so does the line here.
+  "pipeline-connect-host-commands-off": {
+    connect: () => pipelinesConnection(PIPELINES_HOST_COMMANDS_SEED, { machines: [HOST_COMMANDS_OFF_MACHINE] }),
+    wrap: pipelinesWrap,
+    render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} />,
+  },
+  "settings-pipelines-host-commands-off": {
+    connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [HOST_COMMANDS_OFF_MACHINE] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("partial", { githubApp: true, repository: false, runner: true })} />,
   },
   "settings-pipelines-unreported": {
     connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),

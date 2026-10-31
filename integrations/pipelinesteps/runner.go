@@ -96,7 +96,7 @@ const (
 	// followLineMax is the longest piece of a log line the runner holds at
 	// once: a longer line reaches the capture cut into pieces of at most
 	// this size, each stamped like the line, so a step that prints one
-	// endless line cannot make the workbench hold it whole (Review Focus 5).
+	// endless line cannot make the workbench hold it whole.
 	followLineMax = 1 << 20
 	// apiAttempts is how many times the runner makes a call it cannot do
 	// without -- reading the Job, creating it, claiming it -- while the API
@@ -452,6 +452,8 @@ type step struct {
 	creationCause      string // bounded diagnostic only; never an authority to retry
 	creationDispatched bool
 	quotaNoted         bool
+	admissionNoted     bool
+	admissionQueued    bool
 	// claimSent is the claim this Run last sent: the Job carrying exactly it
 	// is this Run's own claim, whatever answer was lost. claimAdopts says
 	// that claim was sent over another Run's, and claimCursor is the log
@@ -662,6 +664,35 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		}
 		return s.failed(pl.CodeExecutionUncertain, "the attempt cannot start: "+apiMessage(err)), Job{}, true
 	}
+	if runDeadline.Sub(s.r.now()) < time.Second {
+		// An already-expired arrival never entered admission and owns no
+		// cleanup effect. A wait that this creator previously recorded may
+		// release its queued Secret when the same run ceiling expires.
+		if s.admissionQueued || s.secretPrepared {
+			s.deleteSecret()
+		}
+		waiting := "waiting for a free slot under the pipelines ceiling, or for a runner to take it"
+		if s.admissionNoted {
+			waiting = "waiting for cloud spending admission"
+		}
+		return s.ceilingPassed(runDeadline, waiting), Job{}, true
+	}
+	if s.r.cfg.AdmitCloud != nil && !s.admissionQueued && !s.run.RecoverOnly {
+		// A missing Job alone cannot prove a previous driver never ran it.
+		// Retain the existing queued protocol before waiting, without minting
+		// a clone token or launching an isolation probe. Another replica can
+		// then distinguish this wait from an uncertain dispatched command.
+		if _, err := s.r.kube.CreateSecret(s.ctx, BuildSecret(s.r.cfg, s.run, s.jobName, "")); err != nil {
+			if s.ctx.Err() != nil {
+				return s.abandon(nil), Job{}, true
+			}
+			return s.failed(pl.CodeRunnerUnavailable, "the cloud admission wait could not be recorded: "+apiMessage(err)), Job{}, true
+		}
+		s.admissionQueued = true
+	}
+	if !s.cloudAdmitted() {
+		return pl.StepResult{}, Job{}, false // read the Job again before waiting/retrying
+	}
 	if res, done := s.isolationGate(runDeadline); done {
 		return res, Job{}, true
 	}
@@ -749,7 +780,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		}
 		// Retirement can win between the first read and the claim. If it
 		// arrives after this read, cleanup sees the creating claim and must
-		// wait for the POST's result instead of reporting absence as success.
+		// wait out the POST (latePostWindow) instead of reporting absence as
+		// success. This read is also what bounds that wait, so nothing that can
+		// take time belongs between it and the POST.
 		if err := s.checkRetirement(); err != nil {
 			if releaseErr := s.releaseUnusedCreation(); releaseErr != nil {
 				s.log.Warn("pipelines: unused creation claim awaits reconciliation", "error", releaseErr)
@@ -758,6 +791,15 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 				return s.abandon(nil), Job{}, true
 			}
 			return s.failed(pl.CodeExecutionUncertain, "the attempt cannot create its Job: "+apiMessage(err)), Job{}, true
+		}
+		// The budget can close during isolation, token preparation or claim
+		// acquisition. Re-read at the effect boundary; release only our own
+		// unused claim so recovery knows no command was sent under the hold.
+		if !s.cloudAdmitted() {
+			if err := s.releaseUnusedCreation(); err != nil {
+				return s.failed(pl.CodeExecutionUncertain, "the held Job's queued state could not be confirmed: "+apiMessage(err)), Job{}, true
+			}
+			return pl.StepResult{}, Job{}, false
 		}
 		s.creationDispatched = true
 		j, made, err := s.r.kube.CreateJob(s.ctx, spec)
@@ -780,10 +822,10 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 				}
 				return s.failed(pl.CodeRunnerUnavailable, "the rejected Job's queued state could not be recorded: "+apiMessage(err)), Job{}, true
 			}
-			// The ceiling is full (Review Focus 4): wait for a slot, as long
-			// as the step is wanted and its run's ceiling allows, and say so
-			// once. The API server answered, so the failures that may pass
-			// start counting again.
+			// The ceiling is full: wait for a slot, as long as the step is
+			// wanted and its run's ceiling allows, and say so once. The API
+			// server answered, so the failures that may pass start counting
+			// again.
 			s.creationAttempts = 0
 			if !s.quotaNoted {
 				s.quotaNoted = true
@@ -820,6 +862,34 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 			return s.failed(code, why), Job{}, true
 		}
 	}
+}
+
+// cloudAdmission does not cache a decision or copy it into a repository-owned
+// job definition. A live hold/error denies new allocation on every replica.
+func (r *Runner) cloudAdmission(train bool) (bool, string) {
+	if r.cfg.AdmitCloud == nil {
+		return true, ""
+	}
+	allowed, err := r.cfg.AdmitCloud(r.now(), train)
+	if err != nil {
+		return false, "unavailable"
+	}
+	if !allowed {
+		return false, "held"
+	}
+	return true, ""
+}
+
+func (s *step) cloudAdmitted() bool {
+	allowed, reason := s.r.cloudAdmission(pl.IsTrainEvent(s.run.Event, s.run.HeadBranch))
+	if !allowed && !s.admissionNoted {
+		s.admissionNoted = true
+		s.log.Info("pipelines: waiting for cloud spending admission", "reason", reason)
+		if s.ensureCapture() == nil {
+			s.capture.Notice("memql: waiting for cloud spending admission; no new cloud Job has been started")
+		}
+	}
+	return allowed
 }
 
 // ownSecret makes the Job its Secret's owner, so the Secret goes with the Job

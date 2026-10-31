@@ -26,6 +26,10 @@ import (
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.
 type MemQLEngine struct {
+	// appSignInRelay reaches the replica holding a machine's stream, for Fleet's
+	// Sign in action (fleet_app_signin.go). Nil on a node with no route to one.
+	appSignInRelay AppSignInRelay
+
 	beforeWriteMu      sync.RWMutex
 	beforeWriteHooks   map[string][]BeforeWriteHook
 	beforeWriteSources map[string]map[string][]BeforeWriteHook

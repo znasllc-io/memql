@@ -473,6 +473,7 @@ var placementTable = concat(
 		// carry one either (it is retired there, never applied on insert).
 		{Receiver: BuiltinField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("patch", "minor")`},
 		{Receiver: BuiltinField, Name: "required", Forms: FormFlag, Example: "@required"},
+		{Receiver: BuiltinField, Name: "secret", Forms: FormFlag, Example: "@secret", Doc: "The native input carries a credential or private settings: redact its diagnostic values and exclude the callable from general agent capability discovery. This does not replace authorization at execution."},
 	},
 )
 

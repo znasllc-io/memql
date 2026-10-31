@@ -53,7 +53,7 @@ func (p *untypedScopeProvider) CallChatStructured(ctx context.Context, messages 
 		return "", fmt.Errorf("unexpected structured call: %s (strict=%v)", schema.Name, schema.Strict)
 	}
 	p.reviews = append(p.reviews, append([]common.ChatMessage(nil), messages...))
-	return `{"missingEvidence":"","reply":"Correction received without executing an operation"}`, nil
+	return `{"missingEvidence":"","reply":"Correction received without executing an operation","completion":{"kind":"information","disposition":"satisfied","gap":"","sourceRefs":[]}}`, nil
 }
 
 func (p *untypedScopeProvider) CallChatWithTools(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {

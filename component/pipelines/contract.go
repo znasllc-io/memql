@@ -1,5 +1,7 @@
 package pipelines
 
+import "slices"
+
 // Mode is how much of the suite a run executes (design record D1, D5).
 type Mode string
 
@@ -114,6 +116,20 @@ type Step struct {
 	CPUMilli         int               `json:"cpuMilli,omitempty"`
 	ImageBuild       *ImageBuild       `json:"imageBuild,omitempty"`
 	MemoryMiB        int               `json:"memoryMiB,omitempty"`
+	// Repeatable says that running this step's command again is harmless, so the
+	// driver may run it again after an attempt whose outcome it cannot know (a
+	// connection that dropped after the command was sent, a node that went away
+	// under the Job). A step that does not say so fails as it always did, because
+	// a second copy of a command that may already have run could publish twice or
+	// spend twice (spec D5). The manifest declares it (a pipeline default and a
+	// step override, resolved at compile time) and verification: true implies it.
+	//
+	// It is the author's word that repeating is safe and nothing more: it never
+	// widens the installation's retry limits (RetryPolicy) and never lets a step
+	// reach a place its placement or the installed policy did not allow (spec
+	// D7). An attempt that provably did not start, and a command that exits
+	// ExitRetryRequested, are retried without it.
+	Repeatable bool `json:"repeatable,omitempty"`
 	// RunAfterFailure is inherited from the stage and bound into the durable
 	// execution fingerprint, so recovery cannot change failure behavior.
 	RunAfterFailure bool   `json:"runAfterFailure,omitempty"`
@@ -158,6 +174,19 @@ type Step struct {
 // StepRequest is what the driver hands an Executor for one step. It crosses
 // NodeService as JSON, so it carries plain data only.
 type StepRequest struct {
+	// ComputePlacement comes from the installed delivery-policy snapshot, never
+	// the tested repository. Every command step carries it, because its Retries
+	// limit the driver's retries of any step. Its capacity half (FleetWaitSeconds,
+	// CloudFallback) selects capacity only for a pool-placed step, and the
+	// executor reads it for no other; machine consent, resource limits and cloud
+	// admission remain mandatory.
+	ComputePlacement *ComputePlacementPolicy `json:"computePlacement,omitempty"`
+	// Placement is where the driver sends THIS attempt (AttemptPlacement). Nil is
+	// the step's own placement: how every step's first attempt goes. Unlike
+	// ComputePlacement it is per attempt, set only by the engine's driver from
+	// the attempts it has already journaled, and it never widens what the
+	// manifest placed or the installation's policy allowed.
+	Placement *AttemptPlacement `json:"placement,omitempty"`
 	// RecoverOnly means a previous driver recorded an intent without a receipt.
 	// The executor may adopt existing work, but cannot start a replacement effect.
 	RecoverOnly bool `json:"recoverOnly,omitempty"`
@@ -183,7 +212,10 @@ type StepRequest struct {
 	BaseSHA      string     `json:"baseSha,omitempty"`
 	Mode         Mode       `json:"mode"`
 	Event        Event      `json:"event"`
-	Version      string     `json:"version"`
+	// HeadBranch is the immutable run's head, used with Event for train admission.
+	// It is trusted driver metadata, never derived from a step's environment.
+	HeadBranch string `json:"headBranch,omitempty"`
+	Version    string `json:"version"`
 	// Domain is the front-door domain of the cluster running the pipeline
 	// (its MEMQL_DOMAIN), "" when none is configured. A step reads it as
 	// MEMQL_DOMAIN to reach this cluster's public hosts -- verify-rollout's
@@ -198,6 +230,135 @@ type StepRequest struct {
 	// journaled: a step row records only the names.
 	Secrets map[string]string `json:"secrets,omitempty"`
 }
+
+// ComputePlacementPolicy is the installation's captured delivery policy for
+// where, and how hard, a run's steps are tried. It comes from the installed
+// source and never from the tested repository, and it is captured with the run,
+// so every replica that drives or takes over the run applies the same numbers
+// (spec D6). It has two halves with different reach:
+//
+//   - FleetWaitSeconds and CloudFallback choose capacity for a pool-placed step
+//     only: how long to prefer compatible Fleet capacity before considering a
+//     budget-admitted cloud job. A false CloudFallback keeps waiting for Fleet
+//     within the existing run bound.
+//   - Retries limits the driver's retries of EVERY command step.
+type ComputePlacementPolicy struct {
+	FleetWaitSeconds int         `json:"fleetWaitSeconds"`
+	CloudFallback    bool        `json:"cloudFallback"`
+	Retries          RetryPolicy `json:"retries"`
+}
+
+// Clone returns a policy that shares no storage with p. The retry delays are a
+// slice, so a plain struct copy would still alias them: the driver hands each
+// step's request its own copy, and an executor that edits what it was handed
+// must not change what a sibling step, or a replica that takes the run over,
+// reads.
+func (p ComputePlacementPolicy) Clone() ComputePlacementPolicy {
+	p.Retries.DelaysSeconds = slices.Clone(p.Retries.DelaysSeconds)
+	return p
+}
+
+// RetryPolicy is how hard the installation lets the driver retry one step (spec
+// D6 and section 6). A manifest and a command can ask for a retry (repeatable,
+// exit ExitRetryRequested) but cannot widen these limits: they are the
+// installation's decision about time and spend, and MaxStepAttempts bounds a
+// step's attempts whatever they say.
+//
+// The zero value retries nothing, which is what a policy built by hand should
+// mean. The portable limits are DefaultRetryPolicy, and the policy reader fills
+// them in when an installed policy names no retries at all.
+type RetryPolicy struct {
+	// SameMachine is how many times one place is tried again after an attempt
+	// there provably did not start, or its command asked for a retry: a machine
+	// for a fleet or pool step, the cluster for a cluster step. 0 to 3.
+	SameMachine int `json:"sameMachine"`
+	// DelaysSeconds is the wait before each of those retries, in order; the last
+	// value repeats for any further one. One to three values, each 0 to 900.
+	DelaysSeconds []int `json:"delaysSeconds"`
+	// OtherMachines lets a fleet or pool step go on to an eligible machine it has
+	// not tried once the same place is spent. It never reaches the cloud: a pool
+	// step's move to the cluster is CloudFallback's, a separate switch.
+	OtherMachines bool `json:"otherMachines"`
+}
+
+// DefaultRetryPolicy is the portable limits: two retries in the same place after
+// 30 and then 120 seconds, then any other machine. It sends no step anywhere its
+// placement and CloudFallback did not already allow. Each call returns its own
+// slice, so a caller that edits its delays cannot change the default another run
+// reads.
+func DefaultRetryPolicy() RetryPolicy {
+	return RetryPolicy{SameMachine: 2, DelaysSeconds: []int{30, 120}, OtherMachines: true}
+}
+
+// AttemptPlacement is where the driver sends one attempt of a step, and the
+// only way it says so (spec section 5 of the 2026-10-28 fleet-first retries
+// design). A step is retried by the driver, not by the executor, because only
+// the driver has the journal of what the earlier attempts proved; so each
+// attempt arrives with its place already chosen, and the executor takes it
+// literally: an attempt placed on the fleet never spills to the cluster inside
+// that attempt, and one placed on the cluster never asks a machine.
+//
+// What it cannot do is widen. The executor still refuses a place the step's own
+// manifest placement does not allow (a step that needs a machine is never given
+// to the cluster; a plain cluster step is never given to a machine) and, for a
+// pool step, a cluster attempt the installed policy did not allow.
+type AttemptPlacement struct {
+	// Surface is "" (the step's own placement), "fleet" or "cluster".
+	Surface string `json:"surface,omitempty"`
+	// PinWorker, when set, is the one machine the attempt may run on: a
+	// same-machine retry. It is a registration id an earlier attempt reported as
+	// Where.WorkerID, never a name from a model or a request. It narrows the
+	// machines the owner's own routing already offered and admits none: a pinned
+	// machine that stopped allowing pipelines refuses, and the attempt is
+	// nothing ran.
+	PinWorker string `json:"pinWorker,omitempty"`
+	// ExcludeWorkers are machines this step has already been tried on, in the
+	// order they were tried: the attempt may run on any other eligible machine.
+	ExcludeWorkers []string `json:"excludeWorkers,omitempty"`
+	// MaxWaitSeconds bounds how long a fleet attempt waits for a busy or
+	// disconnected machine before it counts as nothing ran there. Zero is no
+	// bound beyond the run's ceiling, which is a fleet step's first attempt. It
+	// is a wait for capacity: it never shortens a command that has started.
+	MaxWaitSeconds int `json:"maxWaitSeconds,omitempty"`
+}
+
+// AttemptClass says what a step's attempt that did not succeed proves about
+// whether its command could have run (spec section 4). The executor sets it
+// because only the executor knows whether a dispatch reached a machine and what
+// the machine or the Job answered; the driver retries from it and from nothing
+// else. An empty class reads as AttemptFinal, so an older or unexpected answer
+// is never retried (spec D3).
+type AttemptClass string
+
+const (
+	// AttemptNothingRan: the command did not start, so another attempt cannot
+	// run it twice. Any step may be retried after this.
+	AttemptNothingRan AttemptClass = "nothing_ran"
+	// AttemptRetryRequested: the command ran and exited ExitRetryRequested,
+	// which is the command saying another run is safe and useful. Any step may
+	// be retried after this; a command cannot ask for more than the policy gives.
+	AttemptRetryRequested AttemptClass = "retry_requested"
+	// AttemptOutcomeUnknown: the command may have run, and nothing says how it
+	// ended (the connection dropped after the dispatch left, the node under the
+	// Job went away, the command exited 0 and its artifacts did not arrive). Only
+	// a step that declares repeating it harmless (spec D5) is retried.
+	AttemptOutcomeUnknown AttemptClass = "outcome_unknown"
+	// AttemptFinal: nothing about this ending is worth another try -- an
+	// ordinary failing exit, a timeout, a cancel, a refusal, or a code nobody
+	// classified. The step fails as it did before attempts existed.
+	AttemptFinal AttemptClass = "final"
+)
+
+// ExitRetryRequested is the exit status with which a command says "transient,
+// retry me": EX_TEMPFAIL, from sysexits.h. Exiting it needs no declaration in
+// the manifest, because the command itself is saying another run is safe, and
+// it is read as AttemptRetryRequested only when it is the whole answer (no
+// typed failure beside it).
+const ExitRetryRequested = 75
+
+// MaxStepAttempts is the engine's cap on one step's attempts, whatever an
+// installation's policy says (spec D6): a policy can only lower it.
+const MaxStepAttempts = 8
 
 // Outcome is how a step ended.
 type Outcome string
@@ -218,12 +379,21 @@ type Failure struct {
 }
 
 // Where says where a step ran.
+//
+// MachineName is the display name the machine's OWNER gave it in Fleet, never
+// the name it reported (its hostname): what a person reads in the check run in
+// place of WorkerID, which is a registration id, and the check run is public on
+// GitHub for a public repository, so only a name the owner chose may reach it. A
+// fleet attempt carries it beside WorkerID; the cluster, a machine with no display
+// name, and a result recorded before it existed carry none, and a reader then falls
+// back to the id. Additive: nothing the driver decides from reads it.
 type Where struct {
 	// Surface is "cluster" or "fleet".
 	Surface       string            `json:"surface"`
 	NodeID        string            `json:"nodeId,omitempty"`
 	JobName       string            `json:"jobName,omitempty"`
 	WorkerID      string            `json:"workerId,omitempty"`
+	MachineName   string            `json:"machineName,omitempty"`
 	MachineLabels map[string]string `json:"machineLabels,omitempty"`
 }
 
@@ -259,4 +429,17 @@ type StepResult struct {
 	// beside the step that change no outcome -- a declared artifact path that
 	// matched nothing, beside a green step.
 	Notes []Failure `json:"notes,omitempty"`
+	// AttemptClass is the executor's reading of an attempt that did not succeed
+	// (AttemptClass). The executor sets it on every such result and on no
+	// other; it is never taken from a Job runner's reply, which may be another
+	// version's. Empty reads as AttemptFinal.
+	AttemptClass AttemptClass `json:"attemptClass,omitempty"`
+	// NotRetriedHere says the machine this attempt named (Where.WorkerID) should
+	// not be tried again for this step: it refused for a reason that outlasts a
+	// retry's delay (its Host commands are off, it no longer allows pipelines,
+	// it needs recovering), or the wait the driver allowed for it ran out. The
+	// driver moves to another machine at once. It is a statement about the
+	// machine, so it is false on the cluster, where the place is the cluster
+	// as a whole.
+	NotRetriedHere bool `json:"notRetriedHere,omitempty"`
 }

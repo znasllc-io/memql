@@ -108,14 +108,23 @@ type Result struct {
 	WorkerId string
 	NodeId   string
 	Labels   map[string]string
+	// MachineName is the display name the machine's OWNER gave it in Fleet,
+	// trimmed, and NEVER the name its Cockpit reported (Candidate.Name, which is its
+	// hostname unless the owner replaced it). It is set beside WorkerId, from the
+	// same candidate, so a caller that must SAY where a step ran -- a check run,
+	// which is public on GitHub for a public repository -- says "MSI Raider" and
+	// not a registration id, and never says a hostname the owner did not choose to
+	// publish. Empty when WorkerId is, and for a machine its owner gave no display
+	// name: such a machine is called by its id.
+	MachineName string
 
 	// RefusedBeforeStart is the dispatcher's own verdict that the call started
 	// on NO machine (#5494): refused at a gate, no candidate to route to, or
 	// every candidate tried refused before anything was sent to it -- this
 	// replica's own refusals (a stale row, a machine at its cap, one not
-	// allowing pipelines on its connection here) and a sibling's, under
-	// whatever code the sibling answered with, which travels through
-	// verbatim. False means a machine may have started it: the call reached
+	// allowing pipelines on its connection here, one whose owner switched the
+	// feature off since the row was read) and a sibling's, under whatever code
+	// the sibling answered with, which travels through verbatim. False means a machine may have started it: the call reached
 	// one, or a forward's answer was lost after the envelope left this node,
 	// which is indistinguishable from a call that ran.
 	//
@@ -140,6 +149,9 @@ type Result struct {
 	// WaitForConnection is the router's own evidence that an otherwise
 	// eligible pipeline worker has no stream. It is never read from a worker
 	// response. A caller still requires RefusedBeforeStart and a finite ceiling.
+	//
+	// Under a pin it is the pinned machine alone that is waited for, and a
+	// machine the request excluded never is.
 	WaitForConnection bool
 }
 
@@ -150,13 +162,17 @@ type Result struct {
 // an omission (design D4, memql#4351). An agent says what the work NEEDS --
 // RequireLabels narrows the candidate set, PreferLabels orders it -- and the
 // owner's routing policy decides which of their machines that lands on. A
-// model cannot name a machine, so it cannot hallucinate one.
+// model cannot name a machine, so it cannot hallucinate one. The one narrowing
+// by registration id is the engine's own, for a pipeline step's retry
+// (PinRegistration and ExcludeRegistrations below), and the pipeline purpose is
+// the only one that may carry it.
 type Request struct {
 	// Native-only receipt and freshly claimed constraint; never read from model args.
 	computerPermission  *permission.Grant
 	computerConstraint  *permission.Scope
 	computerOwner       string
 	workbenchConstraint *memqlv1.WorkbenchConstraint
+	workbenchGeneration uint64
 	Tool                string
 	Action              string
 	// Purpose says WHO is asking, which decides which gates apply. Empty is an
@@ -180,6 +196,37 @@ type Request struct {
 	// the candidate set. PreferLabels only orders it.
 	RequireLabels map[string]string
 	PreferLabels  map[string]string
+
+	// PinRegistration and ExcludeRegistrations narrow WHICH of the owner's
+	// machines a pipeline step may land on. They exist for the engine's retry
+	// driver: an attempt that must run where the step last ran is a pin, and one
+	// that must move excludes every machine already tried in this step. The ids
+	// are the registrations earlier attempts reported (Result.WorkerId); they
+	// never come from a model.
+	//
+	// THEY DO NOT REOPEN DESIGN D4 (above). Only the engine's pipeline executor
+	// sets them: the builtins never read them from their arguments, and
+	// purposeRefusal refuses either on every purpose but the pipeline's, which is
+	// itself admitted only under internal origin (pipelineGate). So a model still
+	// cannot name a machine, whatever it writes.
+	//
+	// They NARROW the plan and never admit: each is a test applied to the plan
+	// the router and the requirements already produced, so a pinned machine that
+	// has stopped allowing pipelines, or whose owner switched Host commands off,
+	// is reported for that reason and not waited for. Dispatching straight to a
+	// registration instead would have skipped the router and every consent it
+	// reads.
+	//
+	// A pin leaves at most one candidate, so that machine's refusal before start
+	// IS the result: the dispatcher never widens the plan to run a same-machine
+	// retry somewhere else, and what to do next is the caller's. Neither field
+	// crosses the mesh. The sender narrows its own plan and forwards to the one
+	// registration it chose, and the receiving replica re-checks the machine's
+	// consent, contract and Host commands exactly as for an unpinned dispatch.
+	//
+	// The empty pin is no pin. Regression tests: pipeline_pin_hop_test.go.
+	PinRegistration      string
+	ExcludeRegistrations []string
 
 	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
 	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
@@ -208,7 +255,8 @@ const (
 	// ForwardCompleted -- the call reached the machine. Never re-pick.
 	ForwardCompleted ForwardOutcome = iota
 	// ForwardRefusedBeforeStart -- the remote replica had no usable stream for
-	// the machine, or the machine was at its concurrency cap. Nothing ran.
+	// the machine, the machine was at its concurrency cap, or its owner had
+	// switched the feature off. Nothing ran.
 	ForwardRefusedBeforeStart
 )
 
@@ -390,6 +438,34 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			platform, _ := req.Args["platform"].(string)
 			plan.RequireNativePlatform(platform)
 		}
+		// A machine whose owner switched Host commands off can only refuse the
+		// step, so a pipeline does not spend an attempt -- or, for a machine a
+		// sibling replica holds, a forward -- finding out what its row already
+		// says. Only a pipeline step is narrowed here: an agent's call is still
+		// offered the machine, which refuses before send, and the owner's own
+		// fallback then decides whether the next machine is tried (fallbackFor).
+		plan.RequireHostCommands()
+
+		// THE RETRY DRIVER'S OWN NARROWING, LAST. Each narrowing is a test on one
+		// machine, so the machines left are the same in any order; what the order
+		// decides is the REASON recorded for a machine that two of them would turn
+		// away, because the first to reject it speaks. The owner's consents and the
+		// router's checks go first so that a machine they rule out is reported for
+		// that ("Host commands are off in Fleet settings") and not as "already
+		// tried in this step", which would send the owner looking in the wrong
+		// place. Both narrow the machines waiting for their connection too: a
+		// pinned machine that is only disconnected is the one WaitForConnection
+		// (below) asks the caller to wait for, and a machine already tried is
+		// never waited for. Only the engine's pipeline executor sets either field
+		// (purposeRefusal), so design D4 holds: no model names a machine.
+		//
+		// An empty PinRegistration is no pin. One that is only whitespace is a pin
+		// that names nothing, so it matches no machine -- the failure to want if a
+		// caller meant to pin and lost the value.
+		if req.PinRegistration != "" {
+			plan.PinRegistration(req.PinRegistration)
+		}
+		plan.ExcludeRegistrations(req.ExcludeRegistrations)
 	}
 	if err == nil && req.computerPermission != nil {
 		plan.RequireActionContract(permission.Contract, permission.Version)
@@ -515,9 +591,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 // attempt runs one candidate. It returns ForwardRefusedBeforeStart only when
 // it is CERTAIN nothing executed on the machine.
 //
-// Whatever came back names the machine (Result.WorkerId / NodeId / Labels):
-// the candidate it was attempted on, and the replica holding its stream --
-// this one for a local dispatch, the forward's target otherwise. NodeId falls
+// Whatever came back names the machine (Result.WorkerId / MachineName / NodeId /
+// Labels): the candidate it was attempted on, and the replica holding its stream --
+// this one for a local dispatch, the forward's target otherwise. MachineName is
+// the owner's display name for the candidate, stamped here and not read off the
+// reply, so a forwarded attempt names its machine as a local one does and the
+// forward's wire carries nothing new. NodeId falls
 // back to the row's connectedNodeId only on a single-node install with no node
 // id of its own, where the row is the one place an id is written.
 func (d *Dispatcher) attempt(
@@ -544,6 +623,18 @@ func (d *Dispatcher) attempt(
 	// and forwarded alike, a sibling's own refusal codes included.
 	res.RefusedBeforeStart = outcome == ForwardRefusedBeforeStart
 	res.WorkerId = cand.RegistrationId
+	// ONLY A NAME THE OWNER CHOSE. A pipeline step's result reaches a check run,
+	// which is public on GitHub for a public repository, and the name the machine
+	// REPORTED (Candidate.Name: its hostname, "Joses-MacBook-Pro", unless the owner
+	// replaced it) can say things the owner never chose to publish. So the result
+	// carries the display name the owner set in Fleet and nothing else, and a machine
+	// with none carries none: the check run then calls it by the first characters of
+	// its id, as it does a row written before names were recorded. Fleet and the run
+	// page, which only the owner sees, name a machine by its reported name when it
+	// has no display name (Candidate.Label) and are not affected. The refusals below
+	// follow the same rule (machine_words.go). Covered by
+	// TestAMachineIsNamedOnlyByTheNameItsOwnerChose.
+	res.MachineName = ownerChosenName(cand)
 	res.NodeId = nodeId
 	res.Labels = maps.Clone(cand.Labels)
 	return res, outcome
@@ -565,6 +656,13 @@ func (d *Dispatcher) isLocal(cand Candidate) bool {
 	return strings.TrimSpace(cand.ConnectedNodeId) != "" && cand.ConnectedNodeId == d.selfNodeId
 }
 
+// attemptLocal dispatches to a machine this replica holds.
+//
+// THE REFUSALS HERE NAME THE MACHINE BY checkRunName, never by Label(). The
+// fleet executor quotes a pipeline dispatch's refusal whole into a failed step's
+// message, and the check run prints it, publicly for a public repository; Label()
+// falls back to the name the machine reported, which is its hostname. Log lines
+// keep Label(). See machine_words.go.
 func (d *Dispatcher) attemptLocal(
 	ctx context.Context,
 	req Request,
@@ -581,7 +679,7 @@ func (d *Dispatcher) attemptLocal(
 		return Result{
 			OK:           false,
 			ErrorCode:    "worker_disconnected",
-			ErrorMessage: "machine " + cand.Label() + " is no longer connected to this replica",
+			ErrorMessage: checkRunName(cand) + " is no longer connected to this replica",
 		}, ForwardRefusedBeforeStart
 	}
 	// The connected stream must still belong to the caller whose inventory was
@@ -597,10 +695,9 @@ func (d *Dispatcher) attemptLocal(
 	// forward's receiver makes when a sibling dispatches instead.
 	if req.Purpose == PurposePipeline && !machineAllowsPipelines(w, req.Args) {
 		return Result{
-			OK:        false,
-			ErrorCode: codePipelinesNotAllowed,
-			ErrorMessage: "machine " + cand.Label() + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
-				" with pipeline action contract 2 and the requested native platform on its connection here",
+			OK:           false,
+			ErrorCode:    codePipelinesNotAllowed,
+			ErrorMessage: pipelinesNotAllowedWords(checkRunName(cand)),
 		}, ForwardRefusedBeforeStart
 	}
 
@@ -666,12 +763,22 @@ func (d *Dispatcher) attemptLocal(
 	} else {
 		activity.end("failed")
 	}
-	if pipelineRefusedBeforeStart(req.Purpose, out, err) || workbenchRefusedBeforeStart(req.Purpose, out, err) {
+	// A refusal the stream session made at ADMISSION (the owner's feature switch
+	// is off, or could not be read) is proof nothing was sent, whatever the
+	// purpose: it is the one dispatch error that is. Any other error here -- a
+	// stream lost mid-call, or a call the owner's switch cancelled while it ran --
+	// leaves the command possibly on the machine and stays ForwardCompleted,
+	// which is what keeps it from being run a second time elsewhere.
+	if refusedBeforeSend(err) || pipelineRefusedBeforeStart(req.Purpose, out, err) || workbenchRefusedBeforeStart(req.Purpose, out, err) {
 		return out, ForwardRefusedBeforeStart
 	}
 	return out, ForwardCompleted
 }
 
+// attemptRemote dispatches to a machine a sibling replica holds, over the
+// forward. Its own refusal names the machine by checkRunName for the reason
+// attemptLocal's do; the sibling's refusals arrive worded by the sibling, whose
+// handler names no machine.
 func (d *Dispatcher) attemptRemote(
 	ctx context.Context,
 	req Request,
@@ -692,7 +799,7 @@ func (d *Dispatcher) attemptRemote(
 		return Result{
 			OK:           false,
 			ErrorCode:    "worker_unreachable",
-			ErrorMessage: "machine " + cand.Label() + " is connected to replica " + cand.ConnectedNodeId + " and this node has no forward",
+			ErrorMessage: checkRunName(cand) + " is connected to replica " + cand.ConnectedNodeId + " and this node has no forward",
 		}, ForwardRefusedBeforeStart
 	}
 
@@ -1000,8 +1107,29 @@ func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch
 	}
 }
 
+// refusedBeforeSend reports whether the replica holding a machine's stream
+// refused the dispatch at admission, before sending anything to the machine
+// (workerservice.RefusedBeforeSendError). It is the only dispatch error that
+// proves nothing ran; see attemptLocal and ForwardHandler, which both ask it.
+func refusedBeforeSend(err error) bool {
+	_, ok := workerservice.RefusedBeforeSend(err)
+	return ok
+}
+
 func translateResult(callId string, res *memqlv1.ToolResult, err error) Result {
 	if err != nil {
+		// A refusal before send keeps its OWN code and is read before any
+		// generic reading of the error: it can wrap a deadline (a settings read
+		// that ran out of time) that would otherwise be reported as a timeout,
+		// and it must never become worker_disconnected, the code for a call that
+		// may have run -- the code the dispatcher cannot move on from.
+		if code, ok := workerservice.RefusedBeforeSend(err); ok {
+			// The code is ErrorCode; the message is the refusal's own words. A
+			// RefusedBeforeSendError reads "code: detail", and a caller that
+			// prints both (a failed step: "(code): message") would say the code
+			// twice. A wrapper's own context, if any, stays.
+			return Result{OK: false, ErrorCode: code, ErrorMessage: strings.TrimPrefix(err.Error(), code+": ")}
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return Result{OK: false, ErrorCode: "timeout", ErrorMessage: "worker call timed out"}
 		}
