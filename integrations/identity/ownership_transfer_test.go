@@ -2,10 +2,12 @@ package identity
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	componentAuth "github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // OWNERSHIP TRANSFER (memql#4838).
@@ -183,6 +185,34 @@ func TestTransferSkipsEvidenceBearingConcepts(t *testing.T) {
 		decl := conceptRowAuthz(name)
 		if decl != nil && isEvidenceOwnerField(decl.Owner) {
 			t.Fatalf("%s is listed as transferable but its owner field records who ACTED", name)
+		}
+	}
+}
+
+// AN ACCESS CODE AND ITS SESSIONS STAY WHERE THEY WERE STAMPED (deployable access codes,
+// design record 2026-10-29). The registry is loaded here because the filter is the point:
+// with nothing loaded every list is empty, and this would pass for the wrong reason. The
+// reachable positive is the site, whose own owner IS transferred.
+func TestTransferLeavesAccessCodesWhereTheyWereStamped(t *testing.T) {
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	listed := transferableConcepts("")
+	if !slices.Contains(listed, "v1:platform:site") {
+		t.Fatalf("the site is not transferable, so this filter is not what is being measured: %v", listed)
+	}
+	for _, concept := range []string{"v1:platform:siteAccessCode", "v1:platform:siteAccessSession"} {
+		if decl := conceptRowAuthz(concept); decl == nil || decl.Owner != "ownerUserId" {
+			t.Fatalf("%s no longer declares an owner field, so nothing here is excluding it: %+v", concept, decl)
+		}
+		if slices.Contains(listed, concept) {
+			t.Errorf("%s is transferable: a whole-user transfer would move it while a tied site keeps its owner", concept)
+		}
+		if named := transferableConcepts(concept); len(named) != 0 {
+			t.Errorf("naming %s is a way around the exclusion: %v", concept, named)
+		}
+		if reason := stampedAtBirth[concept]; strings.TrimSpace(reason) == "" {
+			t.Errorf("%s is excluded with no reason beside it", concept)
 		}
 	}
 }

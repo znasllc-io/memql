@@ -30,4 +30,5 @@ var (
 	EnsureWorkRunOwnerWalkIndex       = ensureWorkRunOwnerWalkIndex
 	EnsureWorkRunSignatureLookupIndex = ensureWorkRunSignatureLookupIndex
 	EnsureWorkRunRevisionLookupIndex  = ensureWorkRunRevisionLookupIndex
+	EnsureSiteAccessLookupIndexes     = ensureSiteAccessLookupIndexes
 )

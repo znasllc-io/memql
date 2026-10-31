@@ -63,7 +63,8 @@ builtin identityValidateScope {
   operation     string!
 }
 
-/// Reassign every row one principal owns to another.
+/// Reassign every row one principal owns to another, except a deployable's access codes and their
+/// sessions, which keep the owner they were stamped with.
 ///
 /// THE COUNTERPART TO RANK-STRICT WRITES (memql#4838, epic memql#4832 O1).
 /// D3 makes peer rows read-only at every rung -- owner-to-owner included -- so
@@ -86,14 +87,14 @@ builtin identityValidateScope {
 /// Audited once for the whole transfer on v1:identity:auditEvent -- the
 /// DECISIONS log -- not once per row moved: the decision was taken once, by
 /// one person, about one pair of principals.
-@description("Reassign every row one principal owns to another. Cluster-owner only; audited.")
+@description("Reassign every row one principal owns to another, except a deployable's access codes and their sessions. Cluster-owner only; audited.")
 @executor("integration.identity.transferRowOwnership")
 builtin transferRowOwnership {
   /// The principal whose rows are being handed over.
   fromUserId  string!
   /// The principal receiving them. Must exist and be active.
   toUserId    string!
-  /// Narrow the transfer to a single concept. Absent transfers every concept declaring an owned tier.
+  /// Narrow the transfer to a single concept. Absent transfers every concept declaring an owned tier, except a deployable's access codes and their sessions. Naming either of those moves nothing.
   concept     string
   /// Narrow the transfer to a single row. Offboarding is per-user; a single stuck row is not.
   rowId       string

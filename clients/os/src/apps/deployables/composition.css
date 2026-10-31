@@ -61,6 +61,49 @@
 .deployable-dialog-body { font-size: var(--os-text-base); }
 .deployable-dialog .os-stop-body { margin: 0; padding: 0; }
 .deployable-dialog .os-fact, .deployable-dialog code { overflow-wrap: anywhere; }
+/* THE ACCESS CODES PANEL. The heading keeps Add's height when Add is absent, so
+   nothing moves under the person who pressed it. A code is the name and what it
+   unlocks over its time on the trailing edge: the row has no middle facts and opens
+   nothing, so the two tracks kept for those would only narrow the sentence that
+   says a gate is gone. The trash stands under the plus, on one right edge. */
+.access-codes { display: grid; gap: 12px; min-width: 0; }
+.access-codes:focus { outline: none; }
+/* ITS TOP EDGE STANDS STILL. A modal is centred, so a question opening under a row,
+   or the form taking the list's place, moved everything in it, and the second click
+   of a double-click on Add landed on Close. Pinned, what is above a change stays put. */
+.deployable-dialog:has(.access-codes) { --access-top: min(10dvh, 88px); margin-block: var(--access-top) auto; max-height: calc(100dvh - var(--access-top) - 24px); }
+@media (max-width: 600px) { .deployable-dialog:has(.access-codes) { --access-top: 18px; } }
+.access-codes > .os-head { min-height: 36px; margin: 0; }
+/* The page's narrow rule lets a head's acts wrap under its title. This heading has
+   one short word and one icon, and the plus stays over the trash at every width. */
+.access-codes > .os-head > .os-head-actions { margin-left: auto; }
+.access-codes .os-form-field { max-width: none; }
+.access-codes .os-record-summary:empty, .access-codes .os-record-chevron { display: none; }
+.access-codes .os-row.os-record-row[data-no-icon] { grid-template-columns: minmax(0, 1fr) auto; }
+.access-codes .os-record-actions { padding-right: 0; }
+.access-code-opened { color: var(--os-muted); white-space: nowrap; }
+/* A SENTENCE THAT A CODE OPENS NOTHING, in ink with the state's dot beside it, which is
+   the record status's own language. The warn token alone is about 3.75:1 on the light
+   dialog surface, too little for a sentence at this size. */
+.access-code-warn { display: inline-flex; align-items: baseline; gap: 6px; color: var(--os-ink); }
+.access-code-warn::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--os-warn); transform: translateY(-2px); }
+.access-code-ask { padding-bottom: 12px; }
+.access-code-ask [role="group"] { display: grid; gap: 8px; }
+.access-code-ask .os-notice, .access-code-once .os-notice { gap: 8px; }
+/* THE ONE LOUD THING HERE. It is read aloud, retyped and pasted, once, so it wraps at
+   its own hyphens rather than ellipsizing as a copyable value does, and its copy
+   control stands beside it rather than at the far edge of the notice. */
+.access-code-once .os-notice { padding: 14px 16px; }
+.access-code-once-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.access-code-once-line > .os-panel-actions { margin-left: auto; }
+.access-code-once .os-copyvalue-line { gap: 8px; }
+.access-code-once .os-copyvalue-text { flex: 0 1 auto; white-space: normal; overflow-wrap: anywhere; }
+.access-code-value { font-size: var(--os-text-lg); letter-spacing: .02em; color: var(--os-ink); }
+@container os-record-list (max-width: 600px) {
+  .access-codes .os-row.os-record-row[data-no-icon] { grid-template-columns: minmax(0, 1fr); }
+  .access-codes .os-record-row[data-no-icon] .os-record-state { grid-column: 1; grid-row: 2; justify-items: start; }
+  .access-codes .os-record-actions { padding-left: 0; }
+}
 .deployable-journey-current h3 { font-size: var(--os-text-lg); font-weight: 500; margin: 0 0 12px; }
 .deployable-journey-current .os-stop-body { padding: 0; margin: 0; }
 .deployable-journey-current > .os-caption { margin-bottom: 18px; }

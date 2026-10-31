@@ -7,7 +7,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // grants design, section 2's table and section 4 "A missing part").
 //
 // An app is `read app:<id>`; a PART of one is `execute app:<id>/<part>`, and
-// Deployables is the first app to carry the vocabulary. Eleven parts, each
+// Deployables is the first app to carry the vocabulary. Twelve parts, each
 // the name of a thing a person does here, each grantable to a person or a
 // group by name:
 //
@@ -20,6 +20,8 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 //   store     attach or change the Shopify store a storefront fronts
 //   preview   publish a candidate version, exercise it against a development
 //             store, open and end a preview
+//   access    mint, regenerate, re-time and remove the access codes that open
+//             part of a deployable to a named visitor
 //   connect   preview, connect, reconnect or disconnect a source's pipeline
 //   rerun     re-run a pipeline run, whole or only its failed steps
 //   cancel    stop a queued or running pipeline run
@@ -31,7 +33,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // the organization capability table does not name them -- so reading them
 // through `partsForOrganization` would hide an act its owner holds.
 //
-// ALL ELEVEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
+// ALL TWELVE ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
 // (memql#5541) while v1:shopify:store was plain @rowAuthz(clusterOwner): a
 // developer holding the part would have been drawn the control and served no
 // rows, a refusal rendered as an empty panel (memql#5216). The store concept
@@ -67,7 +69,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // version and exercise it end to end against a development store, and still
 // not be able to put it in front of a shopper.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "connect", "rerun", "cancel", "channels"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "connect", "rerun", "cancel", "channels"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
 
@@ -91,6 +93,7 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   domains: false,
   store: false,
   preview: false,
+  access: false,
   connect: false,
   rerun: false,
   cancel: false,
@@ -106,6 +109,7 @@ export const ALL_PARTS: PartsHeld = Object.freeze({
   domains: true,
   store: true,
   preview: true,
+  access: true,
   connect: true,
   rerun: true,
   cancel: true,

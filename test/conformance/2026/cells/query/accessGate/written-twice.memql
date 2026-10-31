@@ -1,0 +1,11 @@
+/// Two gates on one construct. A construct opens one gate.
+@accessGate(deployable="client-desk", gate="dashboard")
+@accessGate(deployable="client-desk", gate="overview")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

@@ -845,6 +845,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("invalid payload JSON for mutation: %w", err)
 	}
 
+	// A PACKAGE'S LIST OF DSL DOMAINS HAS ONE WRITER, a deploy or a rollback under
+	// internal origin (platform_package_dsl_domains_guard.go). @serverOnly bars
+	// only the named mutation, and a raw insert() at an existing package id
+	// read-merges its delta, so the field is judged here, on the delta as the
+	// caller supplied it: before the claim lock below is taken, so a refused
+	// write holds nothing, and before the read-merge, after which a stored list
+	// and a forged one are one map entry.
+	if conceptMeta.Name == conceptPlatformPackage {
+		if err := validatePackageDslDomainsServerOnly(ctx, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	// Hold source claims through persistence so two replicas cannot both pass
 	// the uniqueness read before either registration becomes visible.
 	if conceptMeta.Name == conceptPlatformPackage && packageSourceClaims(payload) {
@@ -927,7 +940,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// must never replace fields merged before another replica changed them.
 	// Identity's narrow admin edits must also serialize with existing profile
 	// writers, so a concurrent legacy update cannot silently lose either edit.
-	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || conceptMeta.Name == "v1:identity:user" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
+	// An access code is a bearer credential whose every operator act is a
+	// read-merge of the whole row, so two acts racing would let the later
+	// commit store the earlier's stale read: a removed code live again, or the
+	// digest an operator just replaced back in force (measured in review at
+	// 65 to 123 of 200 rounds). The fence makes the loser fail loudly instead.
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || conceptMeta.Name == "v1:identity:user" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept || conceptMeta.Name == siteAccessCodeConcept) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {

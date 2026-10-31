@@ -1,0 +1,12 @@
+/// A gate on a construct that bars every client-originated call. A visitor's
+/// call is one, so the gate could never open it.
+@accessGate(deployable="client-desk", gate="dashboard")
+@serverOnly
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

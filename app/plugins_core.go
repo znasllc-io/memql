@@ -48,6 +48,14 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/embedding"
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"
 	_ "github.com/znasllc-io/memql/integrations/sitepreview"
+	// Deployable access codes (design record 2026-10-29). On every node type
+	// for sitepreview's reason exactly: the six builtins are declared in
+	// dsl/platform/builtins.memql, which every binary loads, so a capability
+	// present in the DSL and absent from the registry is a boot-time
+	// resolution failure -- and gating it by build tag would make whether an
+	// operator can mint a code depend on which replica their browser's stream
+	// landed on.
+	_ "github.com/znasllc-io/memql/integrations/siteaccess"
 	// Groups (epic memql#5165). On every node type for customdomain's
 	// reason: the five caller-facing verbs are reached from whichever node
 	// serves the OS shell's connection, and gating by build tag would make a

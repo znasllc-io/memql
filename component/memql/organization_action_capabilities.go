@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access":
 		return true
 	}
 	return false
@@ -47,6 +47,24 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		switch fn.Name {
 		case "sitePublishFromArtifact", "siteArchive", "siteRestore", "siteDelete", "sitePreviewOpen":
 			return "v1:platform:site", "siteId"
+		// Access codes (design record 2026-10-29-deployable-access-codes). Minting,
+		// listing the gates and listing the codes are asked about the SITE: no code
+		// exists yet when minting, and the other two ask about every code of one
+		// site. Every act on an existing code is asked about the CODE, whose
+		// accountId was copied off its site at mint time, so the organization
+		// resolves without reading the site a second time.
+		//
+		// THE LIST IS HERE BECAUSE IT IS A BUILTIN, and it is a builtin because this
+		// gate judges builtins and mutations and NEVER a query: a client-callable list
+		// would let a person who held the part in one organization read the codes of a
+		// site in another whose row tier admitted them. So every client-callable read
+		// and write on access codes is a builtin in this table, and every query and
+		// mutation beneath them is @serverOnly
+		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
+		case "siteAccessCodeCreate", "siteAccessGates", "siteAccessCodesForSite":
+			return "v1:platform:site", "siteId"
+		case "siteAccessCodeRegenerate", "siteAccessCodeSetExpiry", "siteAccessCodeRemove":
+			return "v1:platform:siteAccessCode", "codeId"
 		case "packageAnalyze", "packageDeploy", "packageCancelDeployment", "packageRollback", "packageArchive", "packageDeactivateDeployable", "packageRestore", "packageSetAutoDeploy":
 			return "v1:platform:package", "packageId"
 		}

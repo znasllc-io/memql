@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // RollbackRequest restores a package to what an earlier deployment left live.
@@ -68,6 +70,32 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			"this deployment carried MemQL DSL, so rolling back to it changes what the whole cluster can do -- which is owner or developer only.")
 	}
 
+	// A deployment that carried DSL cannot be put back without a surface to
+	// stage it on, and a rollback that restored the sites and not the DSL would
+	// leave the two apart -- and, worse for what follows, would have no DSL of the
+	// earlier deployment's to describe. So it refuses exactly as stageAndRoll does
+	// when it has no stager, and BEFORE anything moves, as the gate above does.
+	//
+	// TWO WAYS OF HAVING NO SURFACE, both answered here. A node built with no
+	// stager refuses on the nil check. A node whose stager has no storage behind
+	// it -- the integration always wires the blob stager, so this is every cluster
+	// with no object storage -- refuses in the stager's first read, which the nil
+	// check cannot see. That read changes nothing, so it is asked here rather than
+	// after the sites were repointed: there it refused with the sites already
+	// back and the DSL not, the apart-state this refusal exists to prevent. The
+	// map it returns is the one the pointer is moved from below.
+	var current map[string]string
+	if dslVersion != "" {
+		if d.Stager == nil {
+			return nil, refuse(CodeSourceUnreadable,
+				"this deployment carried MemQL DSL and this cluster has no DSL staging surface configured, so its DSL cannot be put back. Nothing was changed; roll back from a node that has one.")
+		}
+		var rerr error
+		if current, rerr = d.Stager.ReadActiveSet(ctx); rerr != nil {
+			return nil, rerr
+		}
+	}
+
 	restored := &RestoredState{DeploymentId: req.DeploymentId, DslVersion: dslVersion}
 
 	// ---- publish back FIRST ----
@@ -82,21 +110,29 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 	}
 
 	// ---- then the pointer back, and roll ----
-	if dslVersion != "" && d.Stager != nil {
-		current, rerr := d.Stager.ReadActiveSet(ctx)
-		if rerr != nil {
-			return restored, rerr
-		}
+	//
+	// dslLive says the earlier deployment's DSL is the cluster's when this block
+	// ends: put back with its roll requested just now, or found to be the active
+	// set already. (Roll returns once the rollout is asked for, so nodes may still
+	// be restarting onto it; a deploy's list is written at the same point for the
+	// same reason, and a gate needs a booted registry as well as the list.) It is
+	// what lets the list below be written, and it stays false for a deployment
+	// that recorded no DSL (nothing to put back; the rollback leaves the DSL
+	// alone) and for a recorded version that names no domain (nothing restored).
+	dslLive := false
+	if dslVersion != "" {
 		next := map[string]string{}
 		for k, v := range current {
 			next[k] = v
 		}
 		changed := false
+		named := 0
 		for _, prefix := range strings.Fields(dslVersion) {
 			domain, ok := domainFromPrefix(prefix)
 			if !ok {
 				continue
 			}
+			named++
 			if next[domain] != prefix {
 				next[domain] = prefix
 				changed = true
@@ -115,6 +151,39 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 			}
 			restored.Rolled = true
 		}
+		dslLive = named > 0
+	}
+
+	// ---- and the list of domains goes back with the DSL ----
+	//
+	// REWRITTEN FROM THE DEPLOYMENT IT RETURNS TO (design record 2026-10-29, D5),
+	// from the report that deployment recorded, and ONLY WHEN ITS DSL IS THE
+	// CLUSTER'S: put back just now, or found already active. The list is the
+	// bff's reading of which domains this package's DSL belongs to, so it is never
+	// written for DSL the cluster does not have -- the order a deploy keeps, for
+	// the same reason, and the gap between the DSL arriving and the list arriving
+	// fails closed. A rollback that did not complete returned above and wrote
+	// nothing.
+	//
+	// A deployment that recorded no DSL has none to put back, so the rollback
+	// leaves the DSL as it is and the list with it: writing that deployment's own
+	// list over DSL a later deployment added would describe DSL that is not what
+	// is live.
+	//
+	// A deployment recorded before the list existed states no namespaces, so
+	// there is nothing to restore and the honest list is empty: its gates stay
+	// closed until the next deploy writes one. A warning rather than a failure,
+	// for the reason the deploy's write is.
+	if !dslLive {
+		d.log().Info("packages: rolled back; the earlier deployment's DSL was not part of what was restored, so the record of which DSL domains this package ships is left as it was",
+			"component", "packages.rollback", logger.Subject(packageDeploymentConcept, req.DeploymentId),
+			"package", req.PackageId, "deployment", req.DeploymentId, "dslVersion", dslVersion)
+		return restored, nil
+	}
+	if derr := d.Store.recordPackageDslDomains(ctx, req.PackageId, dslDomainsFrom(reportFromRow(prior))); derr != nil {
+		d.log().Warn("packages: rolled back, but could not record which DSL domains this package ships; its access gates stay as the previous list left them",
+			"component", "packages.rollback", logger.Subject(packageDeploymentConcept, req.DeploymentId),
+			"package", req.PackageId, "deployment", req.DeploymentId, "err", derr)
 	}
 
 	return restored, nil
