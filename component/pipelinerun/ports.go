@@ -112,6 +112,10 @@ type Store interface {
 	RunsForKey(ctx context.Context, runKey string) ([]Run, error)
 	// RunsForPipelineSHA answers newest first.
 	RunsForPipelineSHA(ctx context.Context, pipelineID, sha string) ([]Run, error)
+	// RunsForPipelineTree answers the pipeline's runs of one git tree, newest
+	// first and at most fifty: what a release reads to find the run that tested
+	// its source (evidence.go). A blank tree matches nothing.
+	RunsForPipelineTree(ctx context.Context, pipelineID, treeHash string) ([]Run, error)
 	RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error)
 	// RunsUnfinished answers oldest first: recovery's read (Task 10b).
 	RunsUnfinished(ctx context.Context) ([]Run, error)
@@ -133,6 +137,10 @@ type Store interface {
 	// WorkSteps is every v1:work:step of one work run at its latest version
 	// (dsl/work's workStepsForRun): what a resumed driver keeps and re-sends.
 	WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error)
+	// WorkRunRow is one v1:work:run as read (dsl/work's workRunById), or nil when
+	// there is none: with a step's Raw row, what candidate preparation will
+	// inspect, so a release asks the same inspector before it plans a skip.
+	WorkRunRow(ctx context.Context, workRunID string) (map[string]any, error)
 	// PreviousRuns is one pipeline's runs of one event, newest queued first and
 	// at most twenty, in every status (pipelineRunsForPipelineEvent): what a
 	// notification reads to learn whether the run before this one failed. The
@@ -220,6 +228,9 @@ type GitHub interface {
 	// Compare answers complete=false when GitHub stopped listing (300+).
 	Compare(ctx context.Context, token, repository, base, head string) (files []string, complete bool, err error)
 	CommitForRef(ctx context.Context, token, repository, ref string) (sha, message string, err error)
+	// CommitTree is the hash of the git tree one exact commit records. A failure
+	// costs a run its reuse, never its checks (driver.go, readTreeHash).
+	CommitTree(ctx context.Context, token, repository, sha string) (string, error)
 	// Tree streams the repository's tarball at sha and keeps only the
 	// regular files keep admits, by repository-relative path (GitHub's
 	// synthesized top-level directory stripped). More than maxBytes of kept

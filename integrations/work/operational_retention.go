@@ -82,12 +82,36 @@ func retentionShare(left time.Duration, policies int) time.Duration {
 // appear orphaned and permits retirement while that parent is still running.
 const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" parent WHERE parent.concept='v1:work:run' AND parent.id=n.payload->>'runId' AND COALESCE(parent.payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned') AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerParent WHERE newerParent.concept=parent.concept AND newerParent.id=parent.id AND newerParent."createdAt">parent."createdAt"))`
 
+// Two things keep a finished pipeline run past its window, and both are read
+// without presentation gates: hiding a staged row must not let what it authorizes
+// disappear.
+//
 // Artifact cleanup authorizes each provider effect through these journals.
 // Preserve that authority until all bytes and Library presentations are retired,
 // including files pinned by publications or deliberately retained by their owner.
-// The native journal is read without presentation gates: hiding a staged file
-// must not allow its producing authority to disappear.
-func retentionArtifactsSettledSQL(concept string) string {
+//
+// A LIVE CANDIDATE HOLDS THE RUN IT REUSED A STEP FROM. Candidate coverage proves
+// each reused step against the run that executed it on every read, at publication
+// and whenever an overlay is built from the candidate, however long after
+// (pipelines.ProveReusedStep). A release's own rows stay while its artifacts are
+// pinned, but the pull request it stood on has no artifact to keep it, so without
+// this hold a release would become unprovable a month after it was cut, and its
+// next overlay would be refused. A retired candidate is read no more. An archived
+// one gave up its build inputs, so its own run's rows leave on their usual window
+// and holding its sources past them would keep nothing provable. Neither holds
+// anything. The candidate names the work run bare, in pipelines.ReleaseReusedFrom.
+//
+// THE HOLD IS AN UNCORRELATED NOT IN, ON PURPOSE. Postgres reads the candidates once
+// per statement and probes a hash for each row. An EXISTS per row would detoast
+// every live manifest once per version, and an index does not help: the heap is a
+// few pages, so the planner keeps its sequential scan. Measured over 5,000 versions
+// and 150 candidates of 33 KB, that EXISTS took 13 s against this statement's 8 s
+// timeout, and a cancelled delete repeats on the same page every night, which is
+// the stall retentionRunBudget's note describes. This form took under 10 ms.
+// TestRetentionHoldReadsTheCandidatesOncePerStatement holds it. COALESCE because a
+// run refused before it opened any work names none, and NULL NOT IN a list that is
+// not empty keeps that run forever.
+func retentionHeldBackSQL(concept string) string {
 	var work string
 	switch concept {
 	case runConcept:
@@ -100,7 +124,9 @@ func retentionArtifactsSettledSQL(concept string) string {
 	return `NOT EXISTS (SELECT 1 FROM pipeline_artifact_uploads a WHERE
  a.owner_user_id=regexp_replace(n.payload->>'ownerUserId','^v1:identity:user:','')
  AND a.identity->>'WorkRunID'=regexp_replace(` + work + `,'^v1:work:run:','')
- AND (a.state<>'retired' OR a.library_purged_at IS NULL))`
+ AND (a.state<>'retired' OR a.library_purged_at IS NULL))
+ AND COALESCE(regexp_replace(` + work + `,'^v1:work:run:',''),'') NOT IN (SELECT e->'reusedFrom'->>'workRunId' FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'evidence') e
+ WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'evidence')='array' AND e->'reusedFrom'->>'workRunId' IS NOT NULL)`
 }
 
 // This is a closed list of operational records, never a default lifetime for
@@ -550,7 +576,7 @@ func retentionCandidateRead(p operationalPolicy, cutoff, lo, hi time.Time, after
 	}
 	inner := `SELECT n.id,n.concept,n."createdAt",n.payload FROM "MemoryNodes" n WHERE n.concept=? AND n."createdAt" >= ? AND n."createdAt" < ?` + paging + ` AND (` + p.predicate + `) ORDER BY n."createdAt",n.id`
 
-	probes := retentionArtifactsSettledSQL(p.concept) + " AND "
+	probes := retentionHeldBackSQL(p.concept) + " AND "
 	if p.concept == runConcept {
 		// Apply child eligibility before LIMIT as well as after loading: a
 		// large population awaiting longer detail retention cannot starve
@@ -826,7 +852,7 @@ func retirementDelete(concept string, withChildren bool, parentIDs []string, raw
 	// ANY logical row advanced since the archive snapshot.
 	guard := ` AND NOT EXISTS (SELECT 1 FROM keys k JOIN "MemoryNodes" n ON n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at WHERE NOT (` + retentionInactiveParentSQL + `))`
 	if concept == runConcept || concept == pipelinesRunConcept {
-		guard += ` AND NOT EXISTS (SELECT 1 FROM keys k JOIN "MemoryNodes" n ON n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at WHERE n.concept='` + concept + `' AND NOT (` + retentionArtifactsSettledSQL(concept) + `))`
+		guard += ` AND NOT EXISTS (SELECT 1 FROM keys k JOIN "MemoryNodes" n ON n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at WHERE n.concept='` + concept + `' AND NOT (` + retentionHeldBackSQL(concept) + `))`
 	}
 	params := []any{rawKeys}
 	if withChildren {

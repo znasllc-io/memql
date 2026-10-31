@@ -61,3 +61,30 @@ func (dr *runDriver) verificationOf(step pipelines.Step) string {
 	run.Event, run.Mode, run.Version, run.InboundRequestID = "", "", "", ""
 	return dr.definitionForRun(step, run)
 }
+
+// treeFingerprintOf is verificationOf with two changes, and it is what a release
+// compares to reuse a receipt across commits (evidence.go,
+// docs/superpowers/specs/2026-10-29-release-same-tree-reuse-design.md, D2):
+//
+//   - The tree hash takes the commit's place. A merge commit and the pull request
+//     head it landed differ as commits and not as source. A verification step
+//     cannot read MEMQL_SHA (pipelines.StepRequest.Environment), so the commit is
+//     not an input to its command.
+//   - DependsOn goes. It lists the previous stage's steps, which differ between a
+//     pull request plan and a release plan on one tree, and it orders the plan
+//     without reaching the command. Left in, no step after an event-gated stage
+//     would ever match.
+//
+// A step that declares checkoutHistory has inputs beyond the tree, so it gets no
+// fingerprint and is never reused across commits. No tree, no fingerprint: an
+// unread hash must not compare equal to another unread hash.
+func (dr *runDriver) treeFingerprintOf(step pipelines.Step) string {
+	if !pipelines.ValidTreeHash(dr.run.TreeHash) || !step.Verification || step.Kind != pipelines.StepCommand || step.CheckoutHistory != "" {
+		return ""
+	}
+	run := dr.run
+	run.Event, run.Mode, run.Version, run.InboundRequestID = "", "", "", ""
+	run.SHA = dr.run.TreeHash
+	step.DependsOn = nil
+	return dr.definitionForRun(step, run)
+}

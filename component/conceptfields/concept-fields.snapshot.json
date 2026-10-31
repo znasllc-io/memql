@@ -4084,6 +4084,7 @@
         "startedAt",
         "status",
         "title",
+        "treeHash",
         "trigger",
         "version",
         "workGoalId",

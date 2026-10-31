@@ -781,7 +781,8 @@ Afterwards:
   over as skipped `pipeline_passed_earlier` (*Passed in attempt 1.*), and
   everything else runs. A shard whose slice moved since -- the timing table
   learned between the attempts -- runs again, because a pass over other
-  packages is not a pass of these. A notify stage is never carried: it
+  packages is not a pass of these. A release's re-run keeps its attempt's split
+  when the step covers the same packages. A notify stage is never carried: it
   announces the new attempt, which has an outcome of its own. A run with no
   failed or cancelled step (one that passed, or one refused before any step) is
   refused `pipeline_nothing_to_rerun`. GitHub's own re-request of the run's
@@ -1135,23 +1136,29 @@ fleet execution. Run-, event- and version-dependent environment variables are
 removed. The declaration is an author assertion: network-dependent or otherwise
 nondeterministic commands should not use it.
 
+A verification step's environment also leaves out the commit. Its receipt can stand
+for another commit with the same tree, so a command must not depend on which commit
+it is on. A step that declares `checkoutHistory` has inputs beyond the tree and is
+never reused across commits. The command could still ask git, so the rest stays the
+author's assertion.
+
 The installed `evidenceReuse` selector can admit a successful full run's directly
 completed receipt at the same commit, owner, source, engine revision, policy
 fingerprint, command definition and package slice. Evidence older than 24 hours
 is refused. Scheduled scans and explicit retries always execute. Artifact
 production and publication always retain their own receipts; a reused test does
-not stand in for either. Equal trees with different commit hashes are currently
-checked separately.
+not stand in for either. For every event but a release, equal trees with different
+commit hashes are checked separately.
 
-**A release run never reuses another event's evidence**, and the selector is
-not asked about one. Candidate preparation accepts a carried
-`pipeline_passed_earlier` step only when it proves the step against an earlier
-attempt of the same release, and a receipt from a push, pull request or
-merge-group run has no such chain. A release that carried main's receipts could
-never be prepared, so its version would be lost: 0.31.4 was lost that way to
-the push run at its commit. Reuse would save a release only its artifact-free
-checks, a few minutes. `TestReleaseRunsExecuteEveryVerificationStep` holds
-this. A failed release recovers instead by re-running its failed steps, which
+**A release compares trees instead.** A merge commit of an up-to-date pull request
+has its head's tree, so a release may reuse that run's checks though the commits
+differ. The selector is asked about each candidate source, and may admit one in
+`affected` mode: the fingerprint binds what the step executed. Candidate preparation
+then proves each reused step against the run it came from and records the source.
+Its bound is what the runner applied before planning the skip, because a successful
+release is never replaced: 0.31.4 and 0.31.5 were lost to skips the proof refused.
+[What a release reuses](release-cutting.md#what-a-release-reuses) has the rules and
+what always runs. A failed release recovers by re-running its failed steps, which
 carries passes inside the release's own attempt chain
 ([release-cutting.md](release-cutting.md#recover-a-failed-build)).
 
@@ -1284,6 +1291,11 @@ Every runner exports the same environment to a step's command:
 | `MEMQL_PACKAGES` | The step's Go import paths, separated by spaces. Empty for a step that selects none |
 | `MEMQL_SHARD` | `<i>/<k>` on a shard, absent otherwise |
 | `MEMQL_DOMAIN` | The cluster's front-door domain, through which a step reaches `api.<domain>`, `identity.<domain>` and `os.<domain>` from outside, as any client does. Absent when the cluster has none configured |
+
+A step that declares `verification: true` does not receive `MEMQL_RUN_ID`,
+`MEMQL_WORK_RUN_ID`, `MEMQL_SHA`, `MEMQL_BASE_SHA`, `MEMQL_MODE`, `MEMQL_EVENT` or
+`MEMQL_VERSION`, and receives `MEMQL_VERIFICATION=true`
+([Reusing verification evidence](#reusing-verification-evidence)).
 
 Each allowed secret is added under its own name. The platform's names win over
 a secret of the same name, which the manifest refuses anyway.
@@ -2048,7 +2060,7 @@ failed and no step reported why
 | `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |
-| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages. Or the installed policy reused another full run's receipt at this commit ([Reusing verification evidence](#reusing-verification-evidence)); a release run never does | Nothing |
+| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages. Or the installed policy reused another run's receipt: a full run at this commit, or for a release, a run of the same source tree ([Reusing verification evidence](#reusing-verification-evidence)) | Nothing |
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout
