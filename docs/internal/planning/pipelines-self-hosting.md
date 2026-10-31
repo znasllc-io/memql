@@ -871,7 +871,11 @@ deletes instead of erasing creation claims with collection deletion.
 
 Markers survive Job garbage collection. Resolved markers expire after the maximum
 supported run lifetime plus resource retention; unresolved creation evidence stays
-for reconciliation. The cross-node protocol is Step V4, receipt Ack V3 and Cancel
+for reconciliation. (Corrected October 30: nothing was ever built to reconcile it,
+so a run whose POST a cancel interrupted never concluded. The evidence now stays
+for `latePostWindow` from the stop marker; see the
+[harness decision map](../ops/harness-decisions.md#a-stopped-attempt-stops-waiting-for-a-job-post-that-can-no-longer-land-2026-10-30).)
+The cross-node protocol is Step V4, receipt Ack V3 and Cancel
 V2, so an older replica cannot claim these guarantees. Local Kubernetes testing
 exercised late admission, confirmed resource absence, and delayed original
 envelopes after both attempt and run retirement. Recovery and cancellation passed

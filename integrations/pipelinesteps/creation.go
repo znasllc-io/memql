@@ -27,7 +27,9 @@ var errCreationUncertain = errors.New("the attempt has no durable proof that Job
 // A queued Secret is positive evidence, unlike an absent Job. Before EVERY
 // Job POST the creator changes queued to its unique claim by resourceVersion.
 // Only an explicit quota/throttling rejection permits returning it to queued. A lost
-// response or lost creator leaves creating, which recovery never replays.
+// response or lost creator leaves creating, which recovery never replays: the
+// attempt's cleanup waits out latePostWindow and then removes the Secret, and its
+// stop marker refuses any later creation.
 // Existing attempts without this protocol remain conservatively uncertain.
 func creationDefinition(run StepRun) string {
 	run.RecoverOnly = false

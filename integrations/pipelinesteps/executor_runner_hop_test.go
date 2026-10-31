@@ -897,3 +897,39 @@ func TestExecuteHopQueuedStepKeepsItsRouteAndRecoversADeadQueue(t *testing.T) {
 		})
 	}
 }
+
+// The seam a run's driver calls, across the mesh, with the replica that made
+// the claim gone. Its error is what keeps the run unfinished (conclude,
+// cancelRunner), so it must go on answering one while the POST can still land,
+// and then confirm through whichever replica is left: the claim and its stop
+// marker in the API server are all that replica has to go on.
+func TestCancelHopConfirmsOnceAnInterruptedPostCanNoLongerLand(t *testing.T) {
+	w := newRunnerHop(t)
+	run := rtRun()
+	job := JobName(run.RunID, run.StepKey, run.Attempt)
+	w.h.c.putSecret(BuildSecret(w.h.cfg, run, job, rtCloneToken))
+	creator := &step{r: w.process("workbench-a").runner, run: run, jobName: job, ctx: context.Background()}
+	if held, err := creator.claimCreation(); err != nil || !held {
+		t.Fatalf("claim: %v %v", held, err)
+	}
+	w.mesh.lose("workbench-a")
+	w.kill(w.process("workbench-a"))
+
+	if err := w.e.Cancel(context.Background(), run.RunID); err == nil {
+		t.Fatal("the agent was told the cancel was confirmed while the interrupted POST could still land")
+	}
+	if !w.h.c.hasSecret(SecretName(job)) {
+		t.Fatal("cleanup destroyed creation evidence while the POST could still land")
+	}
+
+	w.h.clock.Advance(latePostWindow)
+	if err := w.e.Cancel(context.Background(), run.RunID); err != nil {
+		t.Fatalf("the run can never conclude: %v", err)
+	}
+	if w.h.c.hasSecret(SecretName(job)) || w.h.c.hasJob(job) {
+		t.Fatal("a confirmed cancel left the attempt's resources behind")
+	}
+	if !w.h.c.hasSecret(job + retirementSuffix) {
+		t.Fatal("the stop marker went with the claim: a late envelope could start the attempt")
+	}
+}
