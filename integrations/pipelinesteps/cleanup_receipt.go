@@ -21,7 +21,8 @@ func (r *Runner) cleanupReceipt(ctx context.Context, jobName string) error {
 	} else if !deploycontrol.IsNotFound(err) {
 		return err
 	}
-	if err := r.retireAttempt(ctx, jobName); err != nil {
+	marker, err := r.retireAttempt(ctx, jobName)
+	if err != nil {
 		return err
 	}
 	secretName := SecretName(jobName)
@@ -30,11 +31,26 @@ func (r *Runner) cleanupReceipt(ctx context.Context, jobName string) error {
 		if secret.Labels[LabelManagedBy] != ManagedBy {
 			return fmt.Errorf("pipelinesteps: refusing cleanup of unowned Secret %s", secretName)
 		}
-		// A POST may have left its creator but not reached admission yet.
-		// Absence cannot prove that it will not arrive later. Keep the claim
-		// and leave the durable receipt's cleanup pending until reconciled.
+		// A POST may have left its creator but not reached admission yet, and
+		// absence cannot prove that it will not arrive later, so while one
+		// still could (latePostWindow) the claim stays and the durable
+		// receipt's cleanup stays pending.
+		//
+		// After that the claim is spent, and only this code can say so. The one
+		// creator who could release it has no answer to go on (its context ended
+		// with the POST unanswered, or it is gone), so waiting for a resolution
+		// has no end: a driver that cannot confirm this keeps the run unfinished,
+		// and recovery asks again for ever (run 131819ff, 2026-10-29, in_progress
+		// with every step terminal). The Secret goes, since it holds a clone
+		// token that nothing will use. The marker stays, and refuses any later
+		// creation, so the claim is never replayed.
 		if !jobExists && secret.Annotations[annotCreation] != creationQueued {
-			return fmt.Errorf("pipelinesteps: cleanup of %s awaits resolution of Job creation", jobName)
+			if r.latePostPossible(marker) {
+				return fmt.Errorf("pipelinesteps: cleanup of %s waits until %s: a Job POST sent before the attempt was stopped may still land",
+					jobName, marker.CreationTimestamp.Add(latePostWindow).UTC().Format(time.RFC3339))
+			}
+			r.log.Info("pipelines: a stopped attempt's Job creation can no longer land, so its Secret goes with no Job",
+				"jobName", jobName, "stoppedAt", marker.CreationTimestamp, "claim", secret.Annotations[annotCreation])
 		}
 		if err := r.kube.DeleteObservedSecret(ctx, secret); err != nil {
 			return err

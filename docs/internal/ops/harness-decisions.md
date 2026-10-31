@@ -980,6 +980,64 @@ independent instructions and cancellation. The existing driver regression
 late provider/policy refusal. These tests do not qualify a live App session or
 a deployed PR review; those require installed-path verification.
 
+## A refused app call moves on only when nothing ran (2026-10-29)
+
+Production, engine 0.31.9: Ask with routing set to apps failed twice on one
+machine. Codex was out of credits and the call stopped there, then Claude Code
+failed with `OAuth session expired`, as it had since 2026-10-24. The
+[spec](../../superpowers/specs/2026-10-29-fleet-app-readiness-design.md) records
+what each app really reports.
+
+**The proof** (`appPreWorkRefusal`, `integrations/agent/worker/app_inference.go`).
+A failed session may move to another app or machine only when nothing ran: no
+served model, no structured result, no recorded or dropped action, no tokens, and
+no prose except the refusal's own sentence. Anything else may have caused effects
+and is returned as it is, because running it again would repeat them.
+`usage.known` is not part of the proof. A Codex turn refused by its limit reports
+no usage at all, which is why failover never fired for it. Stated tokens still
+disprove it. The alternative, trusting the sentence alone, would replay a turn
+that had already started tools. Tests:
+`TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions`,
+`TestAppFallbackCrossesReplicaForARefusalReportingNoUsage`.
+
+**Two refusals, because they are about different things**
+(`appRefusalExclusion`, `component/memql/app_selection.go`). A usage limit is the
+account's, so it rules the app out on every machine for the rest of the call:
+trying each would open a session on each to hear the same answer. A login is one
+machine's, so it rules out that machine's app and the same app elsewhere can still
+answer. A pin stays its app either way, because the selector is asked for the
+pinned app every time. When nothing is left, the caller gets the last refusal
+rather than "no enabled app matches", which would send somebody to a setting when
+their login has expired. The walk stops at 16 exclusions. Tests:
+`TestAppRefusalExclusionMatchesWhatTheRefusalIsAbout`,
+`TestPinnedAppNeverMovesToAnotherApp`,
+`TestAppFallbackThatRunsOutKeepsTheLastRefusal`.
+
+**The block is availability evidence, not permission to replay.**
+`v1:worker:appSession.quotaRefused` and `authRefused` are stamped from the error's
+words whatever the session did, and `appAvailabilityEvidence` reads the newest of
+them and of a success, on any replica. A refusal blocks until the reset its
+sentence names, and otherwise for a 15-minute recheck (`appRefusalUntil`). A login
+has no reset, and a sign-in in a terminal writes no row, so the next call after
+the window is what finds it. Test: `TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas`.
+
+**Codex's reset names no zone.** "try again at Nov 3rd, 2026 11:52 PM" is in the
+machine's zone, which a cluster node does not know. Reading it as unknown blocked
+an app out of credits for days for only 15 minutes, so every call met the refusal
+again. It is now read as the earliest instant it can mean (UTC+14), so the block
+never outlasts the real reset and can end up to a day early. A reset read as
+already past takes the recheck, not no block. Test:
+`TestAppRefusalUntilRechecksAResetThatHasAlreadyPassed`.
+
+**Limits.** The classification reads each app's sentence, so a sentence neither
+list knows is an ordinary failure: no failover and no block. The phrases were
+measured on Claude Code 2.1.304 and codex-cli 0.162.1 against fabricated expired
+logins, and on one real out-of-usage Codex. A real expired refresh token and
+Claude Code's own usage-limit sentence were not reproduced here. Failing over a
+signed-out Codex costs about 20 seconds of its own retries before the next app
+starts; checking before routing is the follow-up that removes that wait. Neither
+the failover nor the block has run against the production fleet.
+
 ## Pipeline AI runs local first (2026-10-29)
 
 Owner brief, 2026-10-28: a pipeline's AI -- the independent PR review, a
@@ -1142,6 +1200,59 @@ qualify a deployed integration or any consumer repository. Live runs and
 equivalent coverage must be verified separately. Required-check changes, merge,
 release publication and controller deployment remain separate decisions.
 
+## A queue controller outage costs a step time (2026-10-30)
+
+Kueue's webhooks on Jobs in `memql-pipelines` failed closed, so a restart of its one
+controller answered every Job write there with HTTP 500 `failed calling webhook`: for
+12.7 s after a pod delete, and 5.5 s past API readiness after a cluster restart. The
+runner reads any 5xx on a create as a create that may have landed, which is the right
+reading of a lost response, so a new step failed `pipeline_execution_uncertain` in under
+a second and the same attempt stayed failed. A replica with no isolation proof had its
+probe Job refused, and its step refused `pipeline_isolation_unenforced`. Running and
+suspended steps came through. The first installation with a queue holds 13 stranded
+creation claims since 17 October, up to three in one second. That is the shape this
+leaves, but other failures can leave it too, and they were not attributed.
+
+**`mjob.kb.io` and `vjob.kb.io` fail open** (`deploy/kueue/install/webhooks.yaml`). A
+queued Job needs neither hook to be safe: the runner creates it with `suspend: true`
+itself, so a Job a hook missed waits, and the controller makes its Workload and admits
+it in order when it returns. Only the workbench's Role can create a Job in that
+namespace, so nothing else can use the gap to start a labelled Job unsuspended. Every
+other hook stays `Fail`: no step writes those kinds, and a queue or flavor written during
+an outage would go unvalidated.
+
+Teaching the runner to wait was the alternative, since admission runs before storage and
+a 500 naming that webhook proves nothing was stored. About ten lines made new steps wait,
+but it reads an API server's sentence, and a takeover claim, a heartbeat and the probe
+are each Job writes that need the same. A second controller replica shortens a drain but
+not a cluster restart.
+
+**`imagePullPolicy: IfNotPresent`** (`deploy/kueue/install/controller.yaml`). A cluster
+restart makes a new pod, and upstream's `Always` then needs the registry: with none
+reachable the controller stayed in `ImagePullBackOff` and every new step was refused until
+the network returned. With this it was ready in 12 s, registry blocked. The kustomization
+pins the image by digest, so it is the same bytes.
+
+What survives: a Job created during an outage is an ordinary suspended Job with its
+Secret and claim, so a replica change adopts it as usual, and its execution timeout starts
+at admission. Its run's ceiling keeps counting. If the controller never returns, the step
+fails `pipeline_run_ceiling` at that ceiling; that is the stop condition.
+
+`TestAControllerOutageCannotRefuseAStepsJob` and
+`TestTheControllerRestartsWithoutItsRegistry` (`deploy/kueue/install`) hold the rendered
+values in CI, and `TestResourceQueueCreatesSuspendedJobAndReservesSidecars` holds the half
+that makes failing open safe. `TestNewStepsWaitThroughAControllerOutage` (opt-in) runs real
+runners against the real controller on both kinds of replica: it failed
+`pipeline_execution_uncertain` before this change and passes after it, with each step run
+once.
+
+Verified on a disposable k3d cluster at the pinned k3s and Kueue, with the operator applied
+directly. Not verified: AKS, reconciliation through Argo CD, a takeover by another replica
+during an outage, and a controller that accepts connections and never answers, which would
+cost each Job write up to the webhook timeout. An installation gets this when it moves its
+Kueue pin. Why a local cluster now wants this queue:
+`docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md`.
+
 ## A pipeline run says why it failed outside its steps (2026-10-27)
 
 A pipeline's workflow can fail after every step passed. On 2026-10-27 the
@@ -1287,6 +1398,107 @@ Not verified here:
 - Retry on a question the old recipe raised. It reruns the failed step under
   the installed recipe and keeps the old run's prefix.
 
+## A stopped attempt stops waiting for a Job POST that can no longer land (2026-10-30)
+
+On 2026-10-29 memql-znas run `131819ff` was cancelled. All 12 of its steps were
+terminal by 16:21:13Z, and more than 12 hours later it still read `in_progress`
+with `driverHeartbeatAt` advancing. Every recovery pass claimed it, answered the
+cancel, and stopped at `cancelRunner`: each workbench replica answered
+`cancel_failed`, because `cleanupReceipt` refused the attempt of
+`checks.package-config`. That attempt's Secret had `memql.io/job-creation:
+creating`, stamped 16:21:13.300Z, over no Job, and the run's stop marker was
+created in that same second. The cancel ended the creator's context with its POST
+unanswered. The protocol leaves `creating` in place on purpose, because the POST
+may have landed, and the refusal promised to wait until the claim was reconciled.
+
+Nothing reconciles a claim. Only the creator holding it can release it, and that
+creator has no answer to go on, or is gone. So the wait had no end, and every
+driver rightly kept the run unfinished on an unconfirmed cancel. The orphan sweep
+deferred to the same missing step: any stop marker kept a `creating` Secret, with
+its clone token, for good. On 2026-10-30 production held 13 such Secrets, the
+oldest created 2026-10-17, and two more runs were in the same loop: `735780c9`
+(claim 2026-10-24) and `defdc70b` (2026-10-25). `735780c9`'s attempt was retired
+2 seconds after its claim and its run stopped 54 minutes later, which fits a step
+failing `pipeline_execution_uncertain` whose receipt could never be cleaned up:
+the same refusal reached with no cancel. Its row was not read, so that is an
+inference.
+
+`latePostWindow` (five minutes, `integrations/pipelinesteps/retirement.go`) ends
+the wait. Once an attempt's stop marker has stood that long with no Job,
+`cleanupReceipt` deletes the Secret and confirms, and `reapSecret` may collect it.
+The window runs from the marker's `creationTimestamp`, which the API server
+stamps, because the marker is the fence: `checkRetirement` reads it last before
+every POST, so a POST leaves within one API call of a read that found none. The
+slowest POST the fence lets through lands 180 s after the stamp: 60 s for the
+marker's write to commit (the API server's default `--request-timeout`), 30 s for
+the read's answer (`k8sRequestTimeout`), then 30 s on the client and 60 s on the API
+server for the POST. The other two minutes are margin. Nothing that can take time
+may be added between that read and the POST, and the attempt's marker must stay
+the last one read. An independent review caught the fence reading it first: a
+creator could pass that read, sit in the run marker's retries (10 x 30 s + 9 x 2 s =
+318 s) while the stop and the whole wait came and went, and POST after cleanup had
+confirmed (`TestAStopThatLandsDuringTheFenceStopsThePost`).
+
+What a replica change, a retry or a pause leaves:
+
+- **The stop marker stays**, for its own retention. It refuses a later creation
+  and a delayed envelope, so a spent claim is never replayed. The claim is never
+  returned to `queued`; it goes with its Secret.
+- **The decision reads the API server and this replica's clock**, so any replica
+  can make it. The creator's memory is not consulted, and a replica's death changes
+  nothing.
+- **A refusal inside the window stores nothing new.** The driver's durable cancel
+  request or receipt stands, and recovery asks again under `abortBackoff`. The
+  backoff gives about eight minutes in all, which is derived and not measured.
+- **A Job that lands inside the window** is deleted as any Job is. One that lands
+  as cleanup deletes the Secret is caught by the absence check, which reads again.
+
+Rejected alternatives:
+
+- **Timing from the claim's stamp.** A creator can spend over ten minutes after
+  stamping it, retrying the fence's reads against a hung API server (two reads,
+  ten attempts, 30 s each), and still send. It bounds nothing.
+- **Concluding at once and leaving the Secret to maintenance.** The run would claim
+  to have stopped while a Job could still appear, which `cancel.go` promises never
+  to do.
+- **Waiting for the run's deadline**, as the sweep does for an attempt nobody
+  stopped. A cancel would read as running for up to the 12-hour ceiling.
+- **A namesake placeholder Job**, so that a late POST answers 409. It needs its own
+  retention and a timer to delete it, so it adds an object without removing the
+  time bound.
+- **A new `pipelineCancel` version.** The answer comes from API state, so a mixed
+  rollout is harmless: an old replica refuses, and the agent asks again.
+
+`TestACancelThatInterruptsAJobPostConfirmsOnceThePostCanNoLongerLand` reproduces
+the production state with a second replica answering, and
+`TestCancelHopConfirmsOnceAnInterruptedPostCanNoLongerLand` takes it through the
+real executor and forward handlers with the creating replica dead. The driver's
+half is `TestCancellationFailureRemainsUnfinishedUntilAnotherDriverConfirms`
+(`component/pipelinerun`). `TestAnOldClaimStillWaitsOutItsStopMarker`,
+`TestAPostTheLastReadMissedIsCaughtByTheAbsenceCheck`,
+`TestASecretWithNoCreationStateWaitsOutTheWindowToo`,
+`TestAnUncertainStepsReceiptCleansUpOnceItsPostCanNoLongerLand`,
+`TestAStopMarkerWithNoCreationTimeDoesNotEndTheWait` and the
+`TestMaintenance...` tests in `retirement_test.go` hold the rest.
+`TestRetirementAgainstLocalKubernetes` ran the spent claim against a real k3d API
+server, with the marker's own timestamp and the guarded delete.
+
+Not verified: the path on production, the 60 s on AKS (it is the documented
+default), and what the POST at 16:21:13Z did, because that second's logs went with
+the pods and the rows were not read.
+
+Known limits. A process frozen between its read and its POST for longer than the
+margin can still create a Job, and so can a replica whose clock runs ahead of the
+API server's by more than the margin (`fresh` already assumes clocks far closer
+than that). The Job finds no Secret, so it has no clone token and none of the step's
+secrets. A step that declares a secret cannot start, and any other, on a repository
+that clones anonymously, runs with no credentials. Its attempt's receipt is already
+written, so its result changes nothing, and the deadline and TTL it was created with
+collect it, a queued one once it is admitted. Separately, and from before this
+change: `create` has no fence between its first read and `CreateSecret`, so a Secret
+can reappear after a confirmed cleanup. The next fence finds the marker and removes
+it, and a Run that dies in between leaves it for the sweep at its run's deadline.
+
 ## A step that ran out of memory says so (2026-10-29)
 
 On 2026-10-29 the second attempt of the `cockpit/v0.21.0` release run failed
@@ -1332,6 +1544,144 @@ together. Not verified: a live cluster's out-of-memory kill through this
 path, and the kubelet's `OOMKilled` for a killed child process (an exit other
 than 137), which is a constructed case. A fleet machine reports no such
 reason, so a fleet step killed for memory still reads as its exit code.
+
+## Waiting pipeline steps move forward as their run ages (2026-10-29)
+
+A run's ceiling counts from its start, queue time included, and a strict queue
+admits by class first and age second, so age only breaks ties within a class. A
+step of a low class, or one created late in an old run, can wait out the whole
+ceiling and fail `pipeline_run_ceiling` without having started. On 2026-10-29 the
+daily and weekly scans of the first installation with a queue did that behind
+twelve hours of check and release jobs, and pull-request runs started at 06:00
+were still waiting at 15:00. That installation added a CronJob of its own the same
+day (memql-znas #277, #278). This moves it into the engine's
+`deploy/k8s/components/pipelines-capacity`.
+
+Every five minutes a pass (`memql pipeline-deadline-priority`,
+`integrations/pipelinesteps/deadline_priority.go`) lists the runner's Jobs and
+relabels each one that is suspended, in the named queue and not past its deadline:
+past half its run's ceiling to `memql-pipeline-aged` (350), in the last quarter to
+`memql-pipeline-expiring` (400), and, when an owner named its run with
+`--boost-run`, to `memql-pipeline-boosted` (375) at any age. Kueue re-prioritizes a
+workload that has not reserved quota when that label changes, and strict order then
+accumulates room for the oldest Job of the highest class. A pass records
+`memql.io/priority-promoted-from`, `-at` and `-reason` on the Job and prints one
+JSON line. No event may start at these classes, so finding one on a Job says how it
+got there.
+
+**It stays a CronJob, and becomes Go on the workbench image.** The installation's
+copy was Python on a borrowed image, chosen because its cost guard already pulled
+that image. In the engine that would have been the first Python in any deployed
+manifest, a third-party pin with no updater (Dependabot's docker updater reads
+Dockerfiles, and `.github/dependabot.yml` says why a pin without one is only quieter
+about being insecure), tests that run only if a step names them, and the runner's
+label and annotation names restated across a language boundary. A subcommand needs
+none of that: `integrations/pipelinesteps` is already linked into all seven node
+binaries, the overlay's `images:` entry for the workbench retargets the CronJob from
+the same line, the tests are ordinary Go, and the names are the runner's own
+constants. Moving it into the runner as a loop would need no image or grant either,
+and was rejected for three reasons: a bug would cost the process supervising every
+running step rather than one failed pass; it would merge a list-and-patch grant into
+the runner's; and an owner naming a run to go first, which happened six times on the
+first day, would roll the workbench under running steps rather than edit a CronJob's
+arguments. The price of the subcommand is sequencing: a component ahead of its image
+fails every pass, loudly, until the image catches up, so an installation moves both
+pins in one change. An installation that releases through the native receiver must
+also bind the new image slot (`batch/CronJob/memql/pipeline-deadline-priority`,
+container `promote`) in its `installation.json`, or `verifyImagesAndDiff` refuses
+its next release naming that slot.
+
+**Windows follow each Job's own ceiling unless stated.** The installation's windows
+were 180 and 360 minutes of a 720-minute ceiling. Carried over as defaults they
+would put every waiting Job of an installation on the 120-minute default in the top
+class at the first pass, which erases the event order the queue exists for. So the
+runner writes `memql.io/run-ceiling-minutes` on a queued Job, and an unstated window
+is that ceiling's quarter or half: the same proportions, and the same numbers at
+720. Two other sources were rejected. A flag or variable on the CronJob would be a
+third copy of `MEMQL_PIPELINES_RUN_MAX_MINUTES`, silently wrong when forgotten, and
+wrong anyway for a step already waiting when the ceiling changes. A `StepRun` field
+would change `creationDefinition`'s hash and make queued steps uncertain across a
+rolling upgrade. The ceiling read is the workbench's, the deadline the agent's;
+`components/pipelines-long-runs` sets both alike. A Job with no readable ceiling (one
+from before this) still takes a boost and any stated window; what would need the
+ceiling is not guessed, because the only thing a guess could do is promote too much,
+and with nothing else due the Job is left alone and counted `no-ceiling`.
+
+**Off, windows and boosts are declared configuration**, patches in the layer that
+composes the component, because each is an operator's decision rather than a vendor
+protocol (`docs/public/build/integration-boundary.md`). Off is the CronJob's own
+`spec.suspend`, which leaves every promoted Job where it is. Windows and boosts are
+arguments appended to the container: `--window-minutes`, `--aged-window-minutes`
+(`0` turns that tier off) and `--boost-run`. A boost ranks below expiring so it can
+never be what makes another run expire, and takes a 32-hex run id so a pasted pull
+request number is refused rather than matching nothing. The classes are not settings:
+the promise that a Job only moves up rests on knowing their order without reading
+them, which the grant does not allow. The installation's copy forgot a class once no
+run named it, so a Job left at boosted when its run came off the list was moved down
+to aged on entering that window (`TestARunDroppedFromTheBoostListKeepsItsClass`).
+
+**The queue is `StrictFIFO`, now as the component's own value.** The component
+shipped `BestEffortFIFO`, which the first installation patched away after backfill
+starved 40 GiB database steps behind a stream of 20 GiB checks, and a promoted Job
+means nothing in a queue that admits around it. Only suspended Jobs are touched: every
+patch is a compare-and-swap on the `resourceVersion` the Job was read suspended at, so
+one admitted or heartbeaten since answers 409 and waits for the next pass
+(`changed-since-list`), neither a failure nor a relabelled admitted Job. A Job past
+its deadline is left for the runner to fail, the ceiling is never extended (a step's
+deadline is pinned in its creation definition), and preemption stays `Never`.
+
+**The grant and where it runs.** Its own ServiceAccount in the mesh namespace, and one
+Role in `memql-pipelines`: `list` and `patch` on `batch/jobs`, with no `get`, no
+Secrets, no Pods and no Workloads. It holds no Secret and no database pool. It runs
+outside the step namespace because that namespace's network policy denies the API
+server's cluster address and its Jobs count against the steps' quota, and it stays
+off the build pool because that pool is tainted, with no pool name to be one
+provider's value. A pass holds no state: a missed tick is the next pass, a repeated one
+finds everything `already-promoted`, a class and its provenance live on the Job and so
+survive any replica change, a retried step is a new Job that starts at its event class
+and is promoted at the next pass, and passes keep relabelling under `stopPolicy: Hold`,
+so the order is ready when admission resumes.
+
+**It reaches the installations that compose the component, and no overlay in this
+repository does.** A local cluster has no Kueue and no queue: its steps wait for a slot
+under `count/jobs.batch` before a Job exists, so there is nothing for a pass to
+reorder, and a CronJob there would only look like coverage. Giving it one means
+installing Kueue in `make up` and in the editor's installer, reserving every local
+step container's full limit (4 GiB and 20 GiB, against that overlay's own warning about
+cold builds on a shared disk), raising the Job quota so that a queue can form, and
+widening the AppProject the cloud shares. That is a decision about local admission
+rather than about this promoter, and it is left open.
+
+Known limits. A step created late in an old run starts at its event's class and waits
+up to five minutes for its first promotion. A pass cannot read a class's value, so an
+event class above 350 would be relabelled down: `priorities.yaml` says to keep them
+below. Promotion reorders one queue and cannot make room it does not have. A step that
+can never fit blocks a strict queue from its head, and promotion can carry one there;
+that blocking was seen with a Job that did not tolerate the flavor's taint, and the
+runner's Jobs do, so the case that remains is a step larger than the queue's budget.
+
+`integrations/pipelinesteps/deadline_priority_test.go` carries the 20 decision and pass
+tests of the installation's copy, case for case, and adds the windows
+(`TestWindowsFollowEachRunsOwnCeiling`), the compare-and-swap
+(`TestAJobThatChangedSinceTheListIsLeftForTheNextPass`) and the contract with the Job
+the runner builds (`TestAQueuedJobTheRunnerBuildsIsOneAPassCanPromote`).
+`subcommand_pipeline_deadline_priority_test.go` covers the flags, the line and the exit
+codes, and runs the component's own command line. `component_test.go` renders the
+component over all three instance overlays and over the patches an installation writes
+(`TestAnInstallationSetsThePromoterFromItsOverlay`), and takes over the copy's five
+manifest tests. One half of those stays with an installation: that its own event
+classes rank below the promoted ones, since the engine ships no event class.
+`TestAChangeToThePromoterRunsItsTestsInGoTests` asks the real selector that `go-tests`
+reaches all of this, its YAML included. `TestAPromotedJobIsAdmittedFirst`
+(`deploy/kueue/install`, opt-in) runs a real pass against the pinned controller, and is
+what to run before moving the Kueue pin.
+
+Verified on a throwaway k3d cluster with the pinned Kueue: the rendered component, its
+Role, a scheduled tick of the CronJob and admission in promoted order, running a
+workbench binary built from this source over `memql-workbench:local`, against Jobs
+written in the runner's shape. Not verified: AKS, an image from the release pipeline,
+reconciliation through ArgoCD, a release through the native receiver, or a step created
+by a real runner in a queue.
 
 ## Release trains carry main (2026-10-27)
 

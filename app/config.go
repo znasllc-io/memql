@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/envregistry"
+	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/server"
@@ -206,8 +207,17 @@ func (a *App) configAndAuth() {
 // wrapped, after databaseAndConcepts anchors packs. Capturing in configAndAuth
 // would omit the shopper routes on a fresh process and reject them with 401
 // before their handler's site/owner/store authorization can run.
+//
+// The session-revocation check is built in behind the verifier rather than
+// appended to a.middlewares beside it. It acts only on a request carrying the
+// claims the verifier attaches, so placed ahead of the verifier it would stop
+// enforcing without a sound, and one composition leaves no order to get wrong.
+// It needs a backing store, and a.engine is set by the time the mux is wrapped.
 func (a *App) identityHTTPMiddleware() server.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
+		if a.engine != nil {
+			next = memqlgrpc.NewSessionRevocationHTTPMiddleware(a.engine, a.Logger)(next)
+		}
 		return verifier.HTTPMiddleware(a.identityVerifier, verifier.MiddlewareOptions{
 			Logger:                 a.Logger,
 			PublicPaths:            server.PublicPaths(),

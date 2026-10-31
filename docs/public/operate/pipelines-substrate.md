@@ -40,12 +40,27 @@ operator configuration; repository manifests cannot choose a priority class.
 Create the referenced classes before enabling it. Malformed mappings refuse
 execution, and a missing class leaves the Job suspended until repaired.
 
+A restart of the Kueue controller costs a step time and nothing else. A new step still
+creates its Job, which stays suspended until the controller returns, and a running step
+finishes.
+
 This uses [Kueue workload priority](https://kueue.sigs.k8s.io/docs/concepts/workload_priority_class/),
 which is separate from Pod scheduling priority. Resource ceilings, dedicated
 pool placement and the ClusterQueue's preemption policy still apply. With
 preemption disabled, an admitted job finishes before higher-priority waiting
 work can use its resources. Each replica derives the same class from the
 serialized pipeline event; adopted Jobs keep their existing admission state.
+
+The optional `deploy/k8s/components/pipelines-capacity` component also moves a
+waiting step forward as its run ages, because a queue admits by class first and a
+run's ceiling counts its time queued. Every five minutes a CronJob relabels each
+suspended step Job: past half its run's ceiling to `memql-pipeline-aged` (350), in
+the last quarter to `memql-pipeline-expiring` (400), and, for a run an operator named,
+to `memql-pipeline-boosted` (375). A Job only moves up, and admitted work is never
+touched. Keep the classes you map events to below 350. An operator turns it off, states
+fixed windows or names a run with a patch to that CronJob; the component's README has
+the patch. No shipping instance overlay composes this component, so a local cluster
+has no queue and needs no promoter: its steps wait for a slot before a Job exists.
 
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
@@ -434,6 +449,7 @@ Each Job and its Secret carry:
 | annotation | `memql.io/work-run` | the `v1:work:run` id |
 | annotation | `memql.io/owner-user` | the pipeline's owner |
 | annotation | `memql.io/run-deadline` | the agent's absolute run deadline in UTC; authoritative for orphan-Secret retention |
+| annotation | `memql.io/run-ceiling-minutes` | on a queued Job only: the run ceiling that deadline was measured against, which the queue's promoter scales its windows by |
 
 The Job's name is `mp-` and 24 hex, derived from the run, the step and the
 attempt; its Secret is the same name with `-env`. The runner's own annotations
@@ -451,7 +467,9 @@ kubectl logs -n memql-pipelines job/<job name> -c step --follow
 A Job lasts only until the agent holds its outcome. A Secret no Job came to own
 -- its runner went before the Job it made owned it -- is deleted by any
 replica's orphan sweep (at startup and every 10 minutes, even with no builds)
-once its Job is gone and the stamped run deadline plus the Job TTL has passed.
+once its Job is gone and the stamped run deadline plus the Job TTL has passed,
+and, for an attempt that was stopped with its Job creation unanswered, once it
+has been stopped for five minutes ([Cancel](#cancel)).
 A different workbench ceiling cannot shorten that retention. Legacy Secrets
 without a valid deadline use their creation time plus the sweeping workbench's
 run ceiling and Job TTL as a bounded fallback.
@@ -1004,6 +1022,19 @@ A cancelled step reports `pipeline_step_cancelled`, and what it had printed is
 still archived to the Library (a cluster step's archive ends with a line saying
 it was cancelled). A cancel that arrives after a step's outcome is recorded on
 its Job changes nothing: the outcome stands.
+
+A cancel can also land while a step's Job is being created. That request cannot
+be recalled, and with its answer lost, a missing Job does not yet prove it will
+not arrive. So the attempt gets a stop marker first, which refuses every later
+creation and which a runner reads last before each create, and its cleanup is
+refused for five minutes from the marker, longer than a request that read no
+marker can stay in flight. While that lasts, the driver's cancel stays unconfirmed
+and the run stays unfinished, showing `cancelRequested`; recovery asks again, so
+the run usually concludes within about ten minutes. A Job that arrives in that
+time is deleted like any other. After it, with no Job to find, the step's Secret
+is deleted and the cancel is confirmed. The marker stays for its own retention, so
+the attempt is never created again. The same wait applies to the receipt of a
+step that failed `pipeline_execution_uncertain` because its create went unanswered.
 
 ### Cancel-on-push
 

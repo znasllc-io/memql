@@ -25,6 +25,9 @@ func TestWorkJournalLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 func TestEmailProviderLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 	testWorkIndex(t, "memory_nodes_email_provider_lookup_idx", database.EnsureEmailProviderLookupIndex)
 }
+func TestAuthSessionHashLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_auth_session_hash_lookup_idx", database.EnsureAuthSessionHashLookupIndex)
+}
 func TestWorkRunOwnerLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 	testWorkIndex(t, "memory_nodes_work_run_owner_lookup_idx", database.EnsureWorkRunOwnerLookupIndex)
 }

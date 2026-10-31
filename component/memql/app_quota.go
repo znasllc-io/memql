@@ -15,13 +15,38 @@ import (
 
 var appResetDate = regexp.MustCompile(`(?i)resets? ([a-z]{3} [0-9]{1,2}) at ([0-9]{1,2}(?::[0-9]{2})?\s*[ap]m) \(([A-Za-z_]+/[A-Za-z_/]+)\)`)
 var appResetISO = regexp.MustCompile(`(?i)(?:resets?(?: at)?|try again at) (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2}))`)
+var appResetUnzoned = regexp.MustCompile(`(?i)try again at ([a-z]{3}) ([0-9]{1,2})(?:st|nd|rd|th)?, ([0-9]{4}) ([0-9]{1,2}:[0-9]{2}) ?([ap]m)`)
 
-// AppQuotaReset parses only an explicitly zoned provider reset. A machine-local
-// date without its zone is ambiguous on a cluster node and remains unknown.
+// appResetEarliestZone is the easternmost UTC offset any zone uses: a local
+// date read at UTC minus this is the earliest instant it can mean.
+const appResetEarliestZone = 14 * time.Hour
+
+// appRefusalRecheck bounds how long a refusal with no known end blocks an app:
+// a recheck, never an invented credit balance or a claim about a login.
+const appRefusalRecheck = 15 * time.Minute
+
+// AppQuotaReset reads when a provider says a usage limit resets, from its own
+// sentence. Zero means it did not say anything this can read.
+//
+// A ZONED RESET IS TAKEN AS WRITTEN. Codex's "try again at Nov 3rd, 2026
+// 11:52 PM" names no zone: it is the machine's, which a cluster node does not
+// know. Unknown was the first answer here, and it blocked an app out of credits
+// for days for only appRefusalRecheck, so every call met the refusal again. So
+// the date is read as the EARLIEST instant it can mean. The block can then end
+// up to a day before the real reset and never after it, and what the early end
+// costs is one more zero-token refusal, which appRefusalUntil rechecks. A
+// reset measured by the machine's own probe has no such gap.
 func AppQuotaReset(message string, reportedAt time.Time) time.Time {
 	if m := appResetISO.FindStringSubmatch(message); len(m) > 0 {
 		reset, _ := time.Parse(time.RFC3339, m[1])
 		return reset
+	}
+	if m := appResetUnzoned.FindStringSubmatch(message); len(m) > 0 {
+		local, err := time.ParseInLocation("2006 Jan 2 3:04pm", m[3]+" "+m[1]+" "+m[2]+" "+m[4]+strings.ToLower(m[5]), time.UTC)
+		if err != nil {
+			return time.Time{}
+		}
+		return local.Add(-appResetEarliestZone)
 	}
 	m := appResetDate.FindStringSubmatch(message)
 	if len(m) == 0 {
@@ -47,19 +72,30 @@ func AppQuotaReset(message string, reportedAt time.Time) time.Time {
 	return reset
 }
 
-func appQuotaUntil(row map[string]any) time.Time {
-	if mapString(row, "status") != "failed" || !IsAppQuotaRefusal(mapString(row, "errorMessage")) {
+// appRefusalUntil is when a failed session's refusal stops blocking its app on
+// its machine, or zero for a row that is not a refusal.
+//
+// A LOGIN HAS NO RESET, so it takes the bounded recheck: a sign-in in a terminal
+// writes no row here, and the next call after the window is what finds it. A
+// reset the sentence names that has ALREADY PASSED takes the recheck too, because
+// the app just refused anyway: appResetEarliestZone can read a reset up to a day
+// early, and no block at all would have every call meet the refusal again.
+func appRefusalUntil(row map[string]any) time.Time {
+	message := mapString(row, "errorMessage")
+	quota, signedOut := IsAppQuotaRefusal(message), IsAppAuthRefusal(message)
+	if mapString(row, "status") != "failed" || (!quota && !signedOut) {
 		return time.Time{}
 	}
 	end, err := time.Parse(time.RFC3339Nano, mapString(row, "endedAt"))
 	if err != nil {
 		return time.Time{}
 	}
-	if reset := AppQuotaReset(mapString(row, "errorMessage"), end); !reset.IsZero() {
-		return reset
+	if quota {
+		if reset := AppQuotaReset(message, end); reset.After(end) {
+			return reset
+		}
 	}
-	// Unknown reset: a bounded recheck, never an invented credit balance.
-	return end.Add(15 * time.Minute)
+	return end.Add(appRefusalRecheck)
 }
 
 // Latest quota/success evidence is read independently of the rolling usage
@@ -71,10 +107,11 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 		return time.Time{}, err
 	}
 	rows := append([]map[string]any{}, MaterializeRows(res)...)
-	// Compatibility with sessions recorded before quotaRefused was stamped.
+	// Compatibility with sessions recorded before quotaRefused and authRefused
+	// were stamped.
 	for _, row := range recent {
 		if mapString(row, "app") == app && strings.TrimPrefix(mapString(row, "workerId"), WorkerRegistrationConcept+":") == strings.TrimPrefix(registration, WorkerRegistrationConcept+":") {
-			if mapString(row, "status") == "ended" || !appQuotaUntil(row).IsZero() {
+			if mapString(row, "status") == "ended" || !appRefusalUntil(row).IsZero() {
 				rows = append(rows, row)
 			}
 		}
@@ -92,7 +129,7 @@ func (e *MemQLEngine) appBlockedUntil(ctx context.Context, registration, app str
 	if !retry.IsZero() && !retry.Before(latestAt) {
 		return time.Time{}, nil
 	}
-	return appQuotaUntil(latest), nil
+	return appRefusalUntil(latest), nil
 }
 
 func (e *MemQLEngine) evaluateFleetRetryAppAvailability(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {

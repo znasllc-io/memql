@@ -9118,6 +9118,7 @@
       "fields": [
         "app",
         "appSessionRef",
+        "authRefused",
         "billing",
         "cancelReason",
         "credentialExpiresAt",
