@@ -1,0 +1,120 @@
+# Moves a waiting pipeline step forward as its run ages, so old runs finish first
+# and a step near its deadline goes to the front rather than expiring behind younger
+# work. What a pass does, and what it never does:
+# integrations/pipelinesteps/deadline_priority.go and the README here.
+#
+# THE IMAGE IS THE WORKBENCH'S, and nothing new is pinned. The promoter is a
+# subcommand of the engine binary, so whatever an installation's `images:` block
+# does to the workbench it does to this too, from the same line, on a digest its
+# release already qualified and scanned. Compose this component in the same layer
+# as that block, or the placeholder below is what the kubelet is asked to pull.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-deadline-priority
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: pipeline-deadline-priority
+    app.kubernetes.io/part-of: memql
+automountServiceAccountToken: true
+---
+# Only list and patch step Jobs in the step namespace: no get of Secrets, no Pods,
+# no Workloads. Kueue itself carries the label onto the Workload.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipeline-deadline-priority
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/name: pipeline-deadline-priority
+    app.kubernetes.io/part-of: memql
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [list, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-deadline-priority
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/name: pipeline-deadline-priority
+    app.kubernetes.io/part-of: memql
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-deadline-priority
+    namespace: memql
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pipeline-deadline-priority
+---
+# In the mesh namespace, granted across, because the step namespace is built for
+# steps: its network policy denies the API server's cluster address, every Job there
+# counts against the steps' quota, and its LimitRange would reserve a whole step's
+# disk.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipeline-deadline-priority
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: pipeline-deadline-priority
+    app.kubernetes.io/part-of: memql
+spec:
+  # Every five minutes: a Job entering a tier waits at most that for its promotion.
+  schedule: "*/5 * * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Above the subcommand's own 100-second budget, so a wedged API server ends a
+      # pass with its reason rather than a kill.
+      activeDeadlineSeconds: 120
+      # One shot per tick: the next pass is five minutes away and repeats nothing.
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          # The NAME label alone, and not part-of=memql: the node PodMonitor scrapes
+          # every pod carrying that, and this one serves nothing.
+          labels:
+            app.kubernetes.io/name: pipeline-deadline-priority
+        spec:
+          serviceAccountName: pipeline-deadline-priority
+          restartPolicy: Never
+          # 65532 is the runtime image's nonroot user. No nodeSelector and no
+          # toleration: the build pool is tainted, which is what keeps this off the
+          # pool it is freeing, and a pool name would be one provider's value.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: promote
+              image: acrmemql.azurecr.io/memql-workbench:0.9.9
+              command: ["/app/memql", "pipeline-deadline-priority"]
+              # An installation APPENDS to this list from its overlay (--window-minutes,
+              # --aged-window-minutes, --boost-run; the README has the patch), which
+              # needs it to exist. No window is stated here: each Job's follow its own
+              # run's ceiling, which differs per installation and can differ per run.
+              args:
+                - --namespace=memql-pipelines
+                - --queue=memql-background
+              env:
+                # Under the 128Mi limit, so the collector works before the kernel does.
+                - { name: GOMEMLIMIT, value: "100MiB" }
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { cpu: 500m, memory: 128Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]

@@ -47,6 +47,17 @@ preemption disabled, an admitted job finishes before higher-priority waiting
 work can use its resources. Each replica derives the same class from the
 serialized pipeline event; adopted Jobs keep their existing admission state.
 
+The optional `deploy/k8s/components/pipelines-capacity` component also moves a
+waiting step forward as its run ages, because a queue admits by class first and a
+run's ceiling counts its time queued. Every five minutes a CronJob relabels each
+suspended step Job: past half its run's ceiling to `memql-pipeline-aged` (350), in
+the last quarter to `memql-pipeline-expiring` (400), and, for a run an operator named,
+to `memql-pipeline-boosted` (375). A Job only moves up, and admitted work is never
+touched. Keep the classes you map events to below 350. An operator turns it off, states
+fixed windows or names a run with a patch to that CronJob; the component's README has
+the patch. No shipping instance overlay composes this component, so a local cluster
+has no queue and needs no promoter: its steps wait for a slot before a Job exists.
+
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
 
@@ -434,6 +445,7 @@ Each Job and its Secret carry:
 | annotation | `memql.io/work-run` | the `v1:work:run` id |
 | annotation | `memql.io/owner-user` | the pipeline's owner |
 | annotation | `memql.io/run-deadline` | the agent's absolute run deadline in UTC; authoritative for orphan-Secret retention |
+| annotation | `memql.io/run-ceiling-minutes` | on a queued Job only: the run ceiling that deadline was measured against, which the queue's promoter scales its windows by |
 
 The Job's name is `mp-` and 24 hex, derived from the run, the step and the
 attempt; its Secret is the same name with `-env`. The runner's own annotations
