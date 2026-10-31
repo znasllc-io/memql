@@ -338,7 +338,12 @@ func (e *ClusterAPI) newRequest(ctx context.Context, method, path, contentType s
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+e.tokenNow())
+	// No token means an operator's `kubectl proxy` is in front (NewClusterAPIWith),
+	// which adds their credential only to a request naming none: a blank bearer
+	// would reach the API server as the credential.
+	if token := e.tokenNow(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Accept", "application/json")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)

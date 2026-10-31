@@ -15,3 +15,14 @@ Install and verify this operator before enabling
 `../k8s/components/pipelines-capacity`. Removing it while that component is
 active leaves new work suspended. Its Application deliberately does not prune
 CRDs: deleting a CRD deletes its queue and workload records.
+
+That component's promoter (`memql pipeline-deadline-priority`) stands on a behaviour
+of this controller: a workload that has not reserved quota is re-prioritized when its
+Job's priority-class label changes, a Job that started with no class included. Before
+moving the pin, run the opt-in proofs against a disposable k3d cluster with this
+operator installed, a node labelled and tainted `memql.io/pipeline-pool=builds`, and
+`memql-workbench:local` imported:
+
+```bash
+MEMQL_CAPACITY_TEST_CONTEXT=k3d-<cluster> go test -count=1 ./deploy/kueue/install/
+```
