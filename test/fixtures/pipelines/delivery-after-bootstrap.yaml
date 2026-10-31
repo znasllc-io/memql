@@ -794,6 +794,10 @@ pipeline:
           # architecture test passes in 80s-95s locally under these flags.
           # TestEngineManifestGateStepHasHeadroom holds the floor.
           timeout: 30m
+          # The namespace's default 4Gi killed this step on memql#6394 (exit 137,
+          # 2026-10-30) partway through its packages, though other runs of it
+          # fit, so it sits at the edge. The same test holds this floor too.
+          memoryMiB: 6144
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
