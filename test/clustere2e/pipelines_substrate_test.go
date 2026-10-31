@@ -20,8 +20,8 @@ package clustere2e
 // dispatcher it drives is, and this leg runs that half for real rather than a
 // stand-in for it. With `clustere2e` alone the file is not compiled, so the
 // test does not exist: the CI leg asks for a PASS line, not merely for no
-// failure, and ci.yml's build-clustere2e lane compiles the package under both
-// tag sets.
+// failure, and the native checks.build-clustere2e step compiles the package
+// under both tag sets.
 //
 // WHAT IS REAL, AND WHAT STANDS IN (ruling R41). A deployed engine cannot be
 // pointed at a fake GitHub without configuration the product does not have --
@@ -64,8 +64,8 @@ package clustere2e
 //
 // RUN, against a cluster made for it. The test creates Jobs and Secrets in the
 // cluster's memql-pipelines namespace and holds slots of its ceiling while it
-// runs, so it belongs on a throwaway cluster -- or on the one
-// install-cluster-e2e.yml's `pipelines` leg installs from source -- never on a
+// runs, so it belongs on a throwaway cluster -- or on the one the native
+// installer-lifecycle.pipelines leg installs from source -- never on a
 // development cluster somebody else is using. Name the k3s scripts/k3d/up.sh
 // pins (K3S_VERSION), which is what the leg's cluster runs: k3d's own default
 // moves, and on v1.36.4 the API server refuses every step's artifact read, HTTP
@@ -91,13 +91,26 @@ package clustere2e
 // The subtests that read no cluster run before it is reached, so they run --
 // and can fail -- with no context named: report-mapping and normalization,
 // which hold the test's own restatements of the driver's step report and of
-// the fixtures' normalization, then manifest, receipt-cleanup, library-stream
-// and fork-doubles. fork-refused reads no cluster either, but it comes after the
-// connection, so it runs only when a context is named.
+// the fixtures' normalization, then manifest, receipt-cleanup, library-stream,
+// fork-refused and fork-doubles.
+//
+// WHAT A PULL REQUEST RUNS. Those subtests: checks.build-clustere2e runs this
+// test with no context named, which needs no cluster, and with no
+// MEMQL_DATABASE_DSN the package's TestMain touches no database. Until it did,
+// only the weekly leg ran any of this test, so a29292bbe's new Store call, which
+// fork-refused's double did not answer, compiled and stayed broken from
+// 2026-10-22 to 2026-10-30. Everything below the connection still runs only on
+// the leg. fork-refused comes before fork-doubles on purpose: fork-doubles calls
+// that double directly, so a method it lacks panics there with no name on the
+// stack and ends the binary, where fork-refused reports it by name.
 //
 // THE FIXTURES. `-update` rewrites the recorded check runs
 // (testdata/pipelines/check_run.json and fork_check_run.json) from the run,
-// normalized; the committed ones are what a real run produced.
+// normalized; the committed ones are what a real run produced. With no context
+// named it reaches only fork_check_run.json, and that rewrite is the same one
+// a cluster would give: the seam composes the fork's check run over rows held in
+// memory and writes it to a recording GitHub, so nothing in it comes from a
+// cluster. check_run.json stays as it was and takes a cluster to record.
 // testdata/pipelines/fork_delivery.json is not recorded by the test: it is
 // GitHub's documented pull_request.opened payload (octokit/webhooks,
 // payload-examples/api.github.com/pull_request/opened.payload.json, the
@@ -154,7 +167,7 @@ import (
 )
 
 var updatePipelinesFixtures = flag.Bool("update", false,
-	"rewrite testdata/pipelines/check_run.json and fork_check_run.json from this run of TestPipelinesSubstrate")
+	"rewrite testdata/pipelines/fork_check_run.json and, with a context named, check_run.json from this run of TestPipelinesSubstrate")
 
 const (
 	// The engine's identity and the mesh namespace it runs in: the subject
@@ -207,13 +220,43 @@ var substratePackages = []string{"alpha", "beta", "delta", "gamma"}
 // ---------------------------------------------------------------------------
 
 func TestPipelinesSubstrate(t *testing.T) {
-	// The test's own restatements of the seam, held first: they read no
-	// cluster, so they run -- and can fail -- before the skip below.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// What reads no cluster comes first, so it runs -- and can fail -- before
+	// the skip below. That makes this part what every pull request runs:
+	// checks.build-clustere2e runs this test with no context named. A subtest
+	// stays above the connection unless it reads the cluster
+	// (scripts/citags' TestClusterE2ELaneReachesWhatReadsNoCluster).
 	t.Run("report-mapping", testSubstrateReportMapping)
 	t.Run("normalization", testSubstrateNormalization)
 	t.Run("manifest", func(t *testing.T) { compileSubstratePlan(t) })
 	t.Run("receipt-cleanup", testSubstrateReceiptCleanup)
 	t.Run("library-stream", TestSubstrateRecordingLibraryStream)
+	t.Run("fork-refused", func(t *testing.T) {
+		// A pull request whose head lives in another repository runs somebody
+		// else's code: the seam refuses it at the opening -- a run concluded
+		// refused, never queued -- and says so in a FAILING check run.
+		delivery := readSubstrateFixture(t, "fork_delivery.json")
+		trigger, ignored, err := pl.ClassifyDelivery("pull_request", delivery)
+		if err != nil || ignored != nil {
+			t.Fatalf("ClassifyDelivery(fork_delivery.json) = ignored %+v, error %v; want a pull request it acts on", ignored, err)
+		}
+		if !trigger.Fork || trigger.Event != pl.EventPullRequest || trigger.HeadRepository == "" ||
+			strings.EqualFold(trigger.HeadRepository, trigger.Repository) {
+			t.Fatalf("ClassifyDelivery read the delivery as %+v; want a pull request from a fork", trigger)
+		}
+		opened, body := openForkRun(t, logger, delivery, trigger)
+		if opened.Status != pipelinerun.StatusCompleted || opened.Conclusion != pipelinerun.ConclusionRefused ||
+			opened.RefusalCode != pl.CodeForkRefused {
+			t.Errorf("the fork's run opened %s / %s / %q; want completed, refused, %s",
+				opened.Status, opened.Conclusion, opened.RefusalCode, pl.CodeForkRefused)
+		}
+		got, err := normalizedCheckRun(body, opened.ID, trigger.SHA)
+		if err != nil {
+			t.Fatalf("the fork's check run is not JSON: %v\n%s", err, body)
+		}
+		matchSubstrateFixture(t, "fork_check_run.json", got)
+	})
 	t.Run("fork-doubles", testSubstrateForkDoubles)
 
 	cluster := connectSubstrateCluster(t)
@@ -226,7 +269,6 @@ func TestPipelinesSubstrate(t *testing.T) {
 	engine := engineClusterAPI(ctx, t, cluster, namespace)
 	compiled := compileSubstratePlan(t)
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	library := &recordingLibrary{}
 	tokens := &anonymousCloneTokens{}
 	dispatcher := &noMachineDispatcher{}
@@ -411,32 +453,6 @@ func TestPipelinesSubstrate(t *testing.T) {
 			"apis/batch/v1/namespaces/"+namespace+"/jobs/"+job, "", nil); err != nil || status != http.StatusNotFound {
 			t.Errorf("reading Job %s, the fleet step's name, answered status %d (%v); want 404", job, status, err)
 		}
-	})
-
-	t.Run("fork-refused", func(t *testing.T) {
-		// A pull request whose head lives in another repository runs somebody
-		// else's code: the seam refuses it at the opening -- a run concluded
-		// refused, never queued -- and says so in a FAILING check run.
-		delivery := readSubstrateFixture(t, "fork_delivery.json")
-		trigger, ignored, err := pl.ClassifyDelivery("pull_request", delivery)
-		if err != nil || ignored != nil {
-			t.Fatalf("ClassifyDelivery(fork_delivery.json) = ignored %+v, error %v; want a pull request it acts on", ignored, err)
-		}
-		if !trigger.Fork || trigger.Event != pl.EventPullRequest || trigger.HeadRepository == "" ||
-			strings.EqualFold(trigger.HeadRepository, trigger.Repository) {
-			t.Fatalf("ClassifyDelivery read the delivery as %+v; want a pull request from a fork", trigger)
-		}
-		opened, body := openForkRun(t, logger, delivery, trigger)
-		if opened.Status != pipelinerun.StatusCompleted || opened.Conclusion != pipelinerun.ConclusionRefused ||
-			opened.RefusalCode != pl.CodeForkRefused {
-			t.Errorf("the fork's run opened %s / %s / %q; want completed, refused, %s",
-				opened.Status, opened.Conclusion, opened.RefusalCode, pl.CodeForkRefused)
-		}
-		got, err := normalizedCheckRun(body, opened.ID, trigger.SHA)
-		if err != nil {
-			t.Fatalf("the fork's check run is not JSON: %v\n%s", err, body)
-		}
-		matchSubstrateFixture(t, "fork_check_run.json", got)
 	})
 
 	t.Run("check-run", func(t *testing.T) {
@@ -859,7 +875,7 @@ func connectSubstrateCluster(t *testing.T) *substrateCluster {
 	if contextName == "" {
 		t.Skip("MEMQL_E2E_KUBECONTEXT not set -- this leg runs steps as Jobs in a cluster's memql-pipelines namespace, " +
 			"so it runs only against a cluster named on purpose: set it to the kube context of a cluster that runs the " +
-			"pipelines component (install-cluster-e2e.yml's pipelines leg does), and MEMQL_E2E_KUBECONFIG when that " +
+			"pipelines component (the native installer-lifecycle.pipelines leg does), and MEMQL_E2E_KUBECONFIG when that " +
 			"context's kubeconfig is not $KUBECONFIG or ~/.kube/config")
 	}
 	path := substrateKubeconfigPath()
@@ -2382,7 +2398,7 @@ func matchSubstrateFixture(t *testing.T, name string, got []byte) {
 	}
 	want, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%s cannot be read (%v); record it with -update against a cluster", path, err)
+		t.Fatalf("%s cannot be read (%v); record it with -update", path, err)
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("the check run the seam composed differs from %s (both normalized).\n--- got\n%s--- want\n%s"+

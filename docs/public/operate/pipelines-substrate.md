@@ -1251,7 +1251,7 @@ coverage; packaging their binaries does not exercise those hosts.
 
 | Stage | Steps | Runs on |
 |---|---|---|
-| `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
+| `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e` (compiles the cluster suite and runs the subtests of `TestPipelinesSubstrate` that read no cluster), `module-boundaries` and `bash32-smoke` | every run |
 | `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities`; on a release they record findings without failing | every event, after a failure too |
 | `secrets-current` | `gitleaks` over every new commit since the pinned event base | pull requests, merge groups and pushes, after a failure too |
 | `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
@@ -1427,11 +1427,14 @@ Each of these is understood, and accepted for this release.
   are held to recorded fixtures, and the fleet's dispatcher is a stand-in with no
   machine. It does not cover the deployed agent and workbench wiring -- the
   app's adapter, the node mesh's streams, the dispatcher -- which unit and
-  in-process hop tests cover. The isolated lifecycle fixtures run weekly and
-  on demand, while affected PRs retain the no-cluster installer smoke. A change
-  to substrate code alone does not run the full lifecycle. Live qualification uses real native
-  pipeline runs and retained GitHub check receipts; the unused Actions
-  placeholder has been removed.
+  in-process hop tests cover. The subtests that read no cluster, the fork's
+  refused opening and its check run among them, also run on every pull request:
+  `checks.build-clustere2e` runs the test with no cluster named, so it runs those
+  and then skips. The rest runs only on the leg. The isolated lifecycle fixtures
+  run weekly and on demand, while affected PRs retain the no-cluster installer
+  smoke. A change to substrate code alone does not run the full lifecycle. Live
+  qualification uses real native pipeline runs and retained GitHub check
+  receipts; the unused Actions placeholder has been removed.
 - **Per-workbench readiness has not yet been verified in an installed release.**
   Settings -> Pipelines separates step-dispatcher installation from reports for
   each known workbench. The report path asks each replica for its own runner
