@@ -548,7 +548,7 @@ func parseAndScan(t *testing.T, name, src string) ([]string, int) {
 // it appeared in no declaration and failed no check. The fix records it via
 // a.middlewareRoutes -- which closes that instance. It does not, on its own,
 // stop the NEXT middleware being equally invisible: `a.middlewares = append(...)`
-// appears at five sites and exactly one of them declares any path.
+// appears at four sites and exactly one of them declares any path.
 //
 // So this gate makes the channel explicit. Every middleware registration is
 // either known to serve no request path of its own, or must declare what it
@@ -570,11 +570,10 @@ func TestEveryMiddlewareRegistrationIsAccountedFor(t *testing.T) {
 		claimsPaths bool
 	}
 	accounted := map[string]middlewareNote{
-		"PanicRecoveryMiddleware":            {why: "wraps the chain; serves no path of its own"},
-		"SecurityHeadersMiddleware":          {why: "sets response headers; serves no path of its own"},
-		"identityHTTPMiddleware":             {why: "defers verifier construction until packs are anchored; gates paths, claims none"},
-		"NewSessionRevocationHTTPMiddleware": {why: "inspects the token on every request; claims no path"},
-		"Middleware":                         {why: "the gRPC gateway -- CLAIMS POST /memql/query via memqlgrpc.InterceptedPaths()", claimsPaths: true},
+		"PanicRecoveryMiddleware":   {why: "wraps the chain; serves no path of its own"},
+		"SecurityHeadersMiddleware": {why: "sets response headers; serves no path of its own"},
+		"identityHTTPMiddleware":    {why: "defers verifier construction until packs are anchored; gates paths and checks session revocation behind the verifier, claims none"},
+		"Middleware":                {why: "the gRPC gateway -- CLAIMS POST /memql/query via memqlgrpc.InterceptedPaths()", claimsPaths: true},
 	}
 	// Functions that feed a.middlewareRoutes, by name. Collected in the same
 	// walk so a claimsPaths middleware can be required to sit in one.
