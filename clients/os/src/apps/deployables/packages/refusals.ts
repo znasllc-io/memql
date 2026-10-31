@@ -115,6 +115,22 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This package's MemQL would stop a node starting",
     next: "These are the same checks a node runs at boot, so nothing was deployed. Fix them in the source and deploy again.",
   },
+  dsl_access_gate_foreign_deployable: {
+    // A GATE THAT COULD ONLY EVER ANSWER 404 (design record 2026-10-29, D5).
+    // The server's sentence names the construct, its file and the deployables
+    // this package does declare, so it renders verbatim; this supplies the
+    // headline and the one thing the sentence leaves to the reader, that
+    // nothing was deployed.
+    title: "A gate in this package names an app it does not declare",
+    next: "Nothing was deployed. Name one of this package's own deployables in the gate, then deploy again.",
+  },
+  dsl_access_gate_foreign_domain: {
+    // The same rule's other half: the deployable is fine, and the construct
+    // reads or writes a concept of a domain this package does not ship. The
+    // repair is a different line, which is why it is a different code.
+    title: "A gate in this package is bound to MemQL it does not ship",
+    next: "Nothing was deployed. Bind the gated construct to a concept of one of this package's own domains, then deploy again.",
+  },
   source_too_large: {
     // The code covers the SOURCE and the BUILT OUTPUT, and COUNTS as well as
     // sizes: stages.go raises it for a built tree over the byte cap and for

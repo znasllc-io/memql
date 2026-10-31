@@ -173,6 +173,46 @@ func candidatesOnly(outcomes []DeployableOutcome) bool {
 	return candidates > 0
 }
 
+// writesDslDomains is whether a run records the DSL domains its package ships
+// (package.dslDomains), decided from the PLAN because the write comes before
+// the publish and so before there are outcomes to ask.
+//
+// THE LIST IS WHAT EVERY VISITOR'S ACCESS GATE IS COMPARED WITH, so it moves
+// only with a run that changes what visitors are served: one that publishes a
+// serving version, or one that publishes nothing and carries DSL. The second is
+// the run with every app skipped that refuseCandidateDslChange sends a person to
+// -- the DSL it stages and rolls is the whole of its deploy. A run that
+// publishes only candidates leaves every visitor on the serving build, and the
+// list that build's gates were opened by has to stay that build's: written from
+// a candidate's tree it closes every access code when that tree ships no DSL,
+// and closes the gates of a domain the cluster still runs when that tree
+// dropped one (docs/public/operate/deployables.md). A run that publishes
+// nothing and carries no DSL changed nothing a visitor is served either, and
+// writing an empty list there would close the same gates.
+//
+// MIRRORS publish, which is what makes the answer the same one the outcomes
+// would give: a deployable is published when it is not skipped and the build
+// produced a bundle for it, and anything but an explicit candidate target is the
+// serving version.
+func writesDslDomains(rep *Report, placements map[string]Placement, bundles map[string]edge.Bundle) bool {
+	if rep == nil {
+		return false
+	}
+	candidates := 0
+	for _, dep := range rep.Deployables {
+		p := placements[dep.Name]
+		if _, built := bundles[dep.Name]; p.Skip || !built {
+			continue
+		}
+		if p.Target == edge.TargetCandidate {
+			candidates++
+			continue
+		}
+		return true
+	}
+	return candidates == 0 && len(rep.DslDomains) > 0
+}
+
 // errNoStager is changedDslDomains' answer on a node with no DSL staging
 // surface: not a failure to read, but no way to ask.
 var errNoStager = errors.New("packages: this node has no DSL staging surface to compare against")

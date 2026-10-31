@@ -82,6 +82,9 @@ type fakeStager struct {
 	staged  []string
 	written int
 	onWrite func()
+	// readErr is what ReadActiveSet answers: a staging surface that cannot be
+	// read, as the production stager's is on a cluster with no object storage.
+	readErr error
 }
 
 func (s *fakeStager) StageDomain(_ context.Context, domain string, tree fs.FS) (string, error) {
@@ -103,6 +106,9 @@ func (s *fakeStager) PrefixFor(domain string, tree fs.FS) (string, error) {
 }
 
 func (s *fakeStager) ReadActiveSet(context.Context) (map[string]string, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
 	out := map[string]string{}
 	for k, v := range s.active {
 		out[k] = v

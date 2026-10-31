@@ -1138,6 +1138,248 @@ mutation sitePreviewObservation recordSitePreviewObservation {
   }
 }
 
+// ---- Access codes and the sessions they open (design record 2026-10-29-deployable-access-codes) ----
+//
+// EVERY WRITE HERE IS @serverOnly, AND THERE IS NO REACHABLE MUTATION BESIDE THEM. This is the
+// preview group's split taken one step further: revokeSitePreviewGrant stayed reachable because it
+// writes one timestamp and decides nothing the tier has not decided, and the access group has no
+// such write. The four things an operator does are BUILTINS (siteAccessCodeCreate, Regenerate,
+// SetExpiry and Remove), because a builtin is where the code is minted, the gate is checked, the
+// organization is judged and the audit event is written -- and a reachable mutation would have
+// skipped all four. So every client-callable read and write on access codes is a builtin passing the
+// same gate (dsl/platform/builtins.memql), and every query and mutation beneath those builtins is
+// @serverOnly.
+//
+// @serverOnly BARS ONLY THE NAMED CALL, which is why both concepts are also @serverWritten
+// (dsl/platform/concepts.memql): an insert() that names the concept never consults it, and a second
+// insert at an existing id is an update. Without the concept's own gate, the site's owner could write
+// a code row with a digest and an expiry they chose, around every mutation below.
+//
+//   createSiteAccessCode       @serverOnly -- writes the digest of a bearer credential
+//   rotateSiteAccessCode       @serverOnly -- replaces it, and moves the generation sessions are held to
+//   setSiteAccessCodeExpiry    @serverOnly -- writes the only bound a bearer credential has
+//   removeSiteAccessCode       @serverOnly -- ends a code, and must reach the audit log
+//   createSiteAccessSession    @serverOnly -- opens a session, which is what a code is for
+//   endSiteAccessSession       @serverOnly -- the bff's say-so that a visitor left
+//
+// THERE IS NO WRITE OF A CODE FOR A VISITOR'S USE, AND THAT IS DELIBERATE (design D13). Every write to a
+// code is a read-merge of the whole row, so a write on a visitor's schedule races every operator act
+// on the same row; review measured a prototype of such a 'last used' stamp undoing a removal in
+// 123 of 200 rounds and putting a replaced digest back in 65. When a code was last opened is read from its sessions
+// (siteAccessSessionLatestForCode). The four operator acts on the code share the row with each
+// other and nothing else, and the row carries the engine's row-version fence (executor_mutation.go):
+// of two that race, the loser is refused with 'row version changed before the write committed' and
+// has written nothing, so a caller re-reads and decides again rather than undoing the other.
+//
+// ALL SIX CARRY INTERNAL ORIGIN, stamped inline by integrations/siteaccess, which the bff reaches
+// through an interface because component/server may not stamp it itself (the sitePreview precedent).
+// THE TWO CREATES RUN AS THE SITE'S OWNER, so `ownerUserId` is stamped as the SITE'S at birth and never
+// the operator's. THE FOUR UPDATES RUN AS THE CLUSTER ACTING, so a row's current owner has no say in
+// them: that stamp stays where it landed (an ownership transfer skips both concepts), while the site
+// can go on to have another owner. The person behind an operator's act is therefore NOT the actor, which
+// is why `lastChangedBy` is an argument on the four operator writes -- and why those four are server-only
+// all the more: an argument naming who made a change is a claim a client could otherwise make about anybody.
+
+/// Mint an access code (design record 2026-10-29-deployable-access-codes). @serverOnly: `codeHash` is
+/// the digest of a bearer credential and `expiresAt` is the only bound on it, so neither may be a
+/// caller's choice. `siteAccessCodeCreate` (dsl/platform/builtins.memql) is the reachable surface.
+///
+/// `ownerUserId` IS STAMPED FROM THE ACTOR AND IS NOT AN ARGUMENT, for createSitePreviewGrant's
+/// reason exactly. The concept declares the composite owner tier over this field, and a tier over a
+/// caller-supplied value records a guarantee nothing provides (TestDeclaredOwnerFieldsAreServerStamped
+/// is what refuses it). The builtin runs this write as the SITE'S owner, so the stamp is the site's
+/// owner whoever asked. Nothing that decides whether a code opens reads it afterwards: the bff's store
+/// finds the row as the cluster acting.
+///
+/// SCOPING TO actor.userId IS NOT THE FIX, AND IT IS ALREADY DONE. The stamp above is exactly that
+/// scoping, and the composite owner tier decides the row. What it cannot establish is what the row
+/// CLAIMS: that the digest was minted rather than supplied, that the expiry was computed inside the
+/// bounds rather than chosen, and that the gate is one this deployable declares. Only the Go frame
+/// that minted the code knows those three, so only it may write the row.
+///
+/// `accountId` IS AN ARGUMENT AND `generation` IS NOT. The account is a fact about the SITE, read
+/// by the integration under the caller and copied here so that the tier's third arm and the
+/// organization gate can decide an act on the code without reading the site again. `generation` is
+/// stamped 1, because a minted code is the first generation of itself and only rotateSiteAccessCode
+/// moves it.
+@actor
+@serverOnly
+mutation siteAccessCode createSiteAccessCode {
+  args {
+    codeId         string!
+    siteId         string!
+    accountId      string
+    label          string!
+    gate           string!
+    subject        string
+    codeHash       string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    codeHint       string!
+    issuedAt       datetime!
+    expiresAt      datetime!
+    lastChangedBy  string!
+  }
+  insert {
+    accept { siteId, accountId, label, gate, subject, codeHash, codeHint, issuedAt, expiresAt, lastChangedBy }
+    stamp {
+      id:           args.codeId
+      ownerUserId:  actor.userId
+      generation:   1
+    }
+  }
+}
+
+/// Replace a code's secret and nothing else (design record 2026-10-29-deployable-access-codes), which
+/// is the whole contract of regenerating: the id, label, gate, subject and owner are untouched, so
+/// rows a product stamped with this id stay attached across a rotation. @serverOnly for
+/// createSiteAccessCode's reason, and for a second: `generation` is what ends every session of the
+/// secret being replaced, so a caller who wrote it could keep sessions open past a regeneration, or
+/// end everybody's.
+///
+/// `generation` IS AN ARGUMENT, the integration's reading of the row plus one. The engine has no
+/// arithmetic to increment it here, and writing it in a separate statement would leave a window in
+/// which the secret has changed and the generation has not -- sessions of the old secret would
+/// still match.
+///
+/// actor.userId SCOPING COULD NOT BE THE FIX: the write runs as the cluster acting, whose update never
+/// moves the row's owner. What scoping cannot say is the thing this write claims -- that the digest is
+/// a freshly minted one, and that the expiry was computed rather than chosen -- and that is the
+/// integration's to establish, which is what @serverOnly names.
+///
+/// `revokedAt` IS NOT CLEARED, AND NEVER NEEDS TO BE: removal is final, and siteAccessCodeRegenerate
+/// refuses a removed code, so a rotation only ever lands on a live or an expired one. Nor is anything
+/// reset to say the new secret is unused: 'last opened' is the newest session of the CURRENT
+/// generation, so moving `generation` is what makes the new secret read as not opened, with no write
+/// of its own.
+@serverOnly
+mutation siteAccessCode rotateSiteAccessCode {
+  args {
+    codeId         string!
+    codeHash       string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    codeHint       string!
+    generation     int!
+    issuedAt       datetime!
+    expiresAt      datetime!
+    lastChangedBy  string!
+  }
+  update {
+    accept { codeHash, codeHint, generation, issuedAt, expiresAt, lastChangedBy }
+    stamp {
+      id:  args.codeId
+    }
+  }
+}
+
+/// Move a code's expiry without changing the code (design record 2026-10-29-deployable-access-codes).
+/// It takes effect on the next request, because validity is read from this row every time, and an
+/// extended expiry REVIVES an expired code: the operator did not have to hand anybody a new one.
+///
+/// @serverOnly because `expiresAt` is the only bound a bearer credential has, and the bounds it must
+/// sit inside (more than a minute away, at most 366 days) are the integration's to enforce.
+/// actor.userId scoping is not the fix: the write runs as the cluster acting, after the builtin has
+/// authorized the person under their own actor, and a caller who is allowed to read the row is not
+/// thereby allowed to choose its lifetime outside those bounds, or to extend a code the organization
+/// gate would refuse them.
+///
+/// `generation` AND `codeHash` ARE NOT TOUCHED. Changing when a code stops is not changing what it
+/// is, and an advanced generation would end sessions a mere re-timing has no reason to end.
+@serverOnly
+mutation siteAccessCode setSiteAccessCodeExpiry {
+  args {
+    codeId         string!
+    expiresAt      datetime!
+    lastChangedBy  string!
+  }
+  update {
+    accept { expiresAt, lastChangedBy }
+    stamp {
+      id:  args.codeId
+    }
+  }
+}
+
+/// End a code (design record 2026-10-29-deployable-access-codes). A SOFT END, like revoking a preview:
+/// the row stays as the record that the code existed, for which gate and subject, and until when,
+/// which is what is asked after something unexpected has been seen. Every session opened with it
+/// stops being honoured at once, because the bff reads this field on every request. REMOVAL IS FINAL:
+/// nothing writes `revokedAt` back to empty, and regenerating a removed code is refused, so the way
+/// to give somebody access again is to add a new code.
+///
+/// THE ONE WRITE IN THIS GROUP THAT revokeSitePreviewGrant'S REASONING WOULD HAVE LEFT REACHABLE: it
+/// carries no credential, and it writes one timestamp. It is @serverOnly anyway because an operator
+/// act that ends access must reach the audit log, and only siteAccessCodeRemove writes the event.
+/// Reachable, this would end a code with no trace of who. actor.userId scoping does not touch that:
+/// the write runs as the cluster acting, which is exactly why the person behind it is an argument.
+@serverOnly
+mutation siteAccessCode removeSiteAccessCode {
+  args {
+    codeId         string!
+    revokedAt      datetime!
+    lastChangedBy  string!
+  }
+  update {
+    accept { revokedAt, lastChangedBy }
+    stamp {
+      id:  args.codeId
+    }
+  }
+}
+
+/// Open an access session (design record 2026-10-29-deployable-access-codes). @serverOnly: opening a
+/// session is the thing a code is FOR, and a caller who could write one would have the access with
+/// no code. `tokenHash` is the digest of a cookie value the bff has just minted, and `generation` is
+/// the code's at that instant. `issuedAt` is UTC RFC 3339 at whole seconds and always that form:
+/// siteAccessSessionLatestForCode orders sessions by its text.
+///
+/// `ownerUserId` IS STAMPED FROM THE ACTOR AND IS NOT AN ARGUMENT, for createSiteAccessCode's reason.
+/// The bff writes as the owner the edge stamped on the request, re-checked against the site, so the
+/// owner here is the site's and never a visitor: a visitor has no identity to stamp.
+///
+/// SCOPING TO actor.userId IS ALREADY DONE AND IS NOT WHAT BARS THIS FROM THE WIRE. What scoping
+/// cannot establish is that a valid code was just presented and its generation read, and a caller
+/// scoped perfectly to themselves could still write a session for a code they never held. Only the
+/// handler that checked the code knows, which is what @serverOnly names.
+@actor
+@serverOnly
+mutation siteAccessSession createSiteAccessSession {
+  args {
+    sessionId   string!
+    siteId      string!
+    codeId      string!
+    generation  int!
+    tokenHash   string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    issuedAt    datetime!
+  }
+  insert {
+    accept { siteId, codeId, generation, tokenHash, issuedAt }
+    stamp {
+      id:           args.sessionId
+      ownerUserId:  actor.userId
+    }
+  }
+}
+
+/// End an access session (design record 2026-10-29-deployable-access-codes): the visitor's `leave`.
+/// A SOFT END, as everywhere: the row stays, and a session with `endedAt` resolves as `ended`.
+/// Expiry, regeneration and removal do not wait for this write: they are comparisons the bff makes
+/// against the code and the clock on every request, which is why none of them needs a sweep.
+///
+/// @serverOnly, and actor.userId scoping is not the fix: the write runs as the cluster acting, which
+/// reaches ANY session, and an owner's scope would admit any of that owner's. The property is that the
+/// visitor ending it is the holder of the cookie, which only the handler that hashed the cookie
+/// knows -- a client-callable end by id would let anybody who learned a session id end another
+/// visitor's.
+@serverOnly
+mutation siteAccessSession endSiteAccessSession {
+  args {
+    sessionId  string!
+    endedAt    datetime!
+  }
+  update {
+    id:       args.sessionId
+    endedAt:  args.endedAt
+  }
+}
+
 /// Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for
 /// history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge
 /// resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row
@@ -2209,6 +2451,55 @@ mutation package recordPackageDeployables {
   update {
     id:       args.packageId
     declares: args.declares
+  }
+}
+
+/// Record which DSL domains a source ships, from the deploy that committed them or the rollback that
+/// restored them -- and from nothing else.
+///
+/// The list is what the bff compares an access gate's domain with, on every call, to decide whether a
+/// construct belongs to the package whose site a visitor is on (design record 2026-10-29, D5). So WHEN
+/// it is written is the whole point, and it is not at analysis: a run that is refused, parked at the
+/// confirm gate, cancelled or failed must not change which domains a package owns, and neither may an
+/// analysis nobody deploys. A deploy writes it from its own report once the DSL it carries is staged
+/// and its roll requested -- or found unchanged, or there is none -- and before any site is published,
+/// so the window between the DSL going live and the list arriving fails closed rather than open; a
+/// node still restarting onto new DSL has no registry entry for a gate that DSL adds, so the list
+/// arriving first opens nothing early. It writes only when the run changes what a visitor is served --
+/// a serving version published, or nothing published and DSL carried -- so a run that publishes only
+/// candidates leaves it alone. A rollback rewrites it from the report of the deployment it returns
+/// to -- a row only the pipeline can write, since the deployment concept is @serverWritten -- after
+/// the cluster's pointer names that deployment's DSL again, whether it was put back or already did,
+/// and not at all when it puts no DSL back, so the list never describes DSL the pointer does not name.
+/// recordPackageDeployables is the analysis's write and is kept apart from this one for that reason:
+/// it records what the manifest DECLARES, which is true of a tree whether or not anyone deploys it.
+///
+/// @serverOnly because it is the PIPELINE's record of what a committed deploy shipped, not a claim a
+/// client may make: a caller able to write it could make a package own a domain it does not ship, and
+/// have another product's gates open for its sites. @serverOnly bars only this NAMED call, though: a
+/// raw insert at an existing package id read-merges its delta onto the row, so the engine's package
+/// write guard (component/memql/platform_package_dsl_domains_guard.go) refuses any write to a package
+/// that names the field without internal origin. Both are needed; neither covers the other's door.
+///
+/// actor.userId scoping is not the fix, for both of the reasons the other pipeline writers give. It
+/// runs during a deploy and a rollback, where stages hand off across nodes and actor.userId is EMPTY
+/// on the very path that has to write -- a caller-scoped form could never write at all. And the thing
+/// worth refusing here is not cross-user reach: it is somebody asserting that a package THEY OWN
+/// ships a domain its tree does not contain. Scoping bounds whose rows are touched, never what may be
+/// claimed about them.
+///
+/// Rewritten whole, never merged: the tree is the authority on what the source ships, and a domain
+/// dropped upstream must LEAVE this list or the package would go on owning a namespace it no longer
+/// ships.
+@serverOnly
+mutation package recordPackageDslDomains {
+  args {
+    packageId   string!
+    dslDomains  []string!
+  }
+  update {
+    id:         args.packageId
+    dslDomains: args.dslDomains
   }
 }
 

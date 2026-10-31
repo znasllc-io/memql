@@ -97,6 +97,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerWorkRunOwnerWalkIndex(m, logger)
 	registerWorkRunSignatureLookupIndex(m, logger)
 	registerWorkRunRevisionLookupIndex(m, logger)
+	registerSiteAccessLookupIndexes(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {

@@ -1,0 +1,16 @@
+/// The deployable named as a bare string rather than as deployable= and gate=.
+@accessGate("client-desk")
+@actor
+mutation ticket recordTicketAccessGate {
+  args {
+    accessCodeId string!
+    title        string!
+  }
+  insert {
+    accept { title }
+    stamp {
+      accessCodeId: args.accessCodeId
+      ownerUserId:  actor.userId
+    }
+  }
+}

@@ -280,6 +280,7 @@ shape package packageFull {
   autoDeploy
   autoDeployChangedAt
   declares
+  dslDomains
   disabledDeployables
   status
   row.createdAt
@@ -423,6 +424,62 @@ shape sitePreviewObservation sitePreviewObservationFull {
   failure
   durationMs
   row.createdAt
+}
+
+/// An access code as everything but a visitor sees it (design record 2026-10-29-deployable-access-codes).
+///
+/// `codeHash` IS ABSENT, and its absence is the decision, sitePreviewGrantFull's reasoning once more.
+/// The digest cannot be presented, but it is the stored form of a bearer credential, and projecting
+/// it would put it on every screen and into every log line that renders a code, for no reader who
+/// needs it. The bff FILTERS on it (siteAccessCodeByHash) and never reads it back.
+///
+/// `ownerUserId` and `lastChangedBy` are absent too. The first decides who may see the row, and the
+/// tier has already decided that by the time it is projected; the second is the audit log's answer to
+/// 'who did that', and the log is where it is read.
+///
+/// `accountId` IS PRESENT, AND THE REASON IS A COMPARISON. It is the organization copied from the site
+/// when the code was minted, and a code whose copy differs from its site's CURRENT organization is one
+/// a move left behind: the move is refused while a code is live, but the scan that refuses it can pass
+/// just before a mint that is already copying the old organization commits. Nothing is locked for that.
+/// The bff's handler refuses a code whose copy differs from its site's, and every act re-reads the site
+/// under the caller, so the stale copy is harmless as long as a reader can see it. It is not a secret
+/// -- the tier already keys on it -- and like every relationship field it arrives canonical, so compare
+/// it bare.
+///
+/// THERE IS NO 'LAST USED' HERE BECAUSE THE ROW HAS NONE: nothing a visitor does writes a code. When a
+/// code was last opened is the newest session of its current generation, which the list handler adds
+/// to each row as `lastOpenedAt` (siteAccessSessionLatestForCode) -- a fact about the sessions, not a
+/// field of this projection.
+@row
+shape siteAccessCode siteAccessCodeView {
+  row.id
+  siteId
+  accountId
+  label
+  gate
+  subject
+  codeHint
+  generation
+  issuedAt
+  expiresAt
+  revokedAt
+  row.createdAt
+}
+
+/// An access session as the bff reads it to answer one request (design record
+/// 2026-10-29-deployable-access-codes).
+///
+/// `tokenHash` and `ownerUserId` are ABSENT. The bff FILTERS on the digest and never reads it back,
+/// and the owner is the stamp it already holds; neither belongs in a projection that exists to say
+/// which code, which site, which generation and whether it ended.
+@row
+shape siteAccessSession siteAccessSessionFull {
+  row.id
+  siteId
+  codeId
+  generation
+  issuedAt
+  endedAt
 }
 
 /// Public source selection facts; credentials are referenced only by ID.

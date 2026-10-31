@@ -100,6 +100,9 @@ func (h *Handler) serveIdentityXHR(w http.ResponseWriter, r *http.Request, site 
 			if isIdentityUIRequest(pr.In) && pr.In.Method == http.MethodGet && pr.In.Header.Get("Origin") == "" {
 				pr.Out.Header.Set("Origin", "https://"+pr.In.Host)
 			}
+			// A visitor's access session is nothing to identity, and it reaches this
+			// path only because a __Host- cookie reaches every path. See accessStripCookie.
+			accessStripCookie(pr.Out.Header)
 			// Keep the path identity mounted: /oauth/token stays /oauth/token.
 			pr.Out.Host = target.Host
 			if isIdentityUIRequest(pr.In) || isIdentityPasskeyRequest(pr.In) {

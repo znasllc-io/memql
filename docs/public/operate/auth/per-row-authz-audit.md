@@ -212,7 +212,13 @@ a destination that does not exist or is deactivated (transferring into a
 void leaves the rows exactly as unwritable, with an audit trail saying
 otherwise), skips cluster-owned rows, and excludes self-owned tiers
 entirely — their "owner field" is the row's own id, so a transfer would
-rename the row.
+rename the row. It also excludes two concepts whose owner stays where it
+was stamped, `v1:platform:siteAccessCode` and
+`v1:platform:siteAccessSession`: a deployable's access code belongs to
+whoever owned the deployable when the code was minted, nothing that
+decides whether it opens reads that field, and moving it would part it
+from a deployable that kept its owner. Naming either concept moves
+nothing.
 
 > **Fields are read through the filter's lambda parameter.** In edition
 > 2026 `row.ownerUserId` is the payload field and `row.id` the intrinsic,

@@ -138,6 +138,19 @@ func captureStore(t *testing.T) []string {
 	})
 	_ = s.recordDeployedVersion(ctx, "v1:platform:package:abc", "abcdef1234567890", false)
 	_ = s.recordPackageName(ctx, "v1:platform:package:abc", "acme")
+	// What the source declares (written at analysis) and which DSL domains it
+	// ships (written by a deploy and by a rollback, design record 2026-10-29,
+	// D5): two writes, kept apart. Both lists come off a tree somebody else
+	// wrote, so both carry the four control bytes. The second call of each is the
+	// empty list, which must render as [] and not as null; and TestRendered
+	// ArgumentsAreDeclared exists for the second pair -- an argument this
+	// package sends and the mutation does not declare is dropped, not refused,
+	// and the package would go on claiming whatever the last deploy left.
+	_ = s.recordPackageDeployables(ctx, "v1:platform:package:abc",
+		[]DeclaredDeployable{{Name: "storefront", Kind: KindStorefront}, {Name: awkwardText, Kind: KindStatic}})
+	_ = s.recordPackageDeployables(ctx, "v1:platform:package:abc", nil)
+	_ = s.recordPackageDslDomains(ctx, "v1:platform:package:abc", []string{"acme", awkwardText})
+	_ = s.recordPackageDslDomains(ctx, "v1:platform:package:abc", nil)
 	_ = s.recordUpstreamVersion(ctx, "v1:platform:package:abc", "fedcba0987654321", true)
 	_ = s.bindSiteToPackage(ctx, "v1:platform:site:ghi", "v1:platform:package:abc", "storefront")
 	_ = s.setPackageStatus(ctx, "v1:platform:package:abc", "archived")

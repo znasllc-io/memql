@@ -45,6 +45,15 @@ func TestEmailDigestLookupIndexesBuildAndRepairChunkCoverage(t *testing.T) {
 		t.Run(index, func(t *testing.T) { testWorkIndex(t, index, database.EnsureEmailDigestLookupIndexes) })
 	}
 }
+func TestSiteAccessLookupIndexesBuildAndRepairChunkCoverage(t *testing.T) {
+	for _, index := range []string{
+		"memory_nodes_access_tokenhash_lookup_idx",
+		"memory_nodes_access_codeid_lookup_idx",
+		"memory_nodes_access_codehash_lookup_idx",
+	} {
+		t.Run(index, func(t *testing.T) { testWorkIndex(t, index, database.EnsureSiteAccessLookupIndexes) })
+	}
+}
 func testWorkIndex(t *testing.T, indexName string, build func(context.Context, *bun.DB, *slog.Logger, string) error) {
 	admin := conceptIndexDB(t)
 	ctx := context.Background()

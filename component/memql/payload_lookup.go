@@ -54,6 +54,12 @@ var payloadLookups = []payloadLookup{
 		partial: []payloadEquality{{"automationName", "reviseLibraryDocument"}}},
 	{index: "memory_nodes_recipient_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:recipient"}},
 	{index: "memory_nodes_consent_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:consentEvent"}},
+	// The access surface's two credential lookups and "last opened"
+	// (deployable access codes). A digest names one row, so these are the reads
+	// a visitor's request makes first, and they must not cost the concept.
+	{index: "memory_nodes_access_tokenhash_lookup_idx", field: "tokenHash", concepts: []string{"v1:platform:siteAccessSession"}},
+	{index: "memory_nodes_access_codeid_lookup_idx", field: "codeId", concepts: []string{"v1:platform:siteAccessSession"}},
+	{index: "memory_nodes_access_codehash_lookup_idx", field: "codeHash", concepts: []string{"v1:platform:siteAccessCode"}},
 }
 
 // payloadLookupFor returns the lookup index serving term on concept for a read

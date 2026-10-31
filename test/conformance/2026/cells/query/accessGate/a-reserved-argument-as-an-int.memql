@@ -1,0 +1,11 @@
+/// accessCodeId is stamped by the access handler as a string. Declared as an
+/// int it would be a stamp the construct's own validation refuses on every call.
+@accessGate(deployable="client-desk", gate="dashboard")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId int!
+  }
+  filter row => row.ownerUserId == actor.userId && row.count == args.accessCodeId
+  paginate 20
+}

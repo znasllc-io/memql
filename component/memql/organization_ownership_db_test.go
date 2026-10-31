@@ -101,7 +101,24 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		{"v1:platform:packageDeployment", "run-" + suffix, map[string]any{"packageId": "v1-platform-package-" + suffix, "status": "analyzing"}},
 	}
 	for _, child := range childRows {
-		if err := organizationInsert(t, engine, actor, child.concept, child.id, child.payload); err != nil {
+		if child.concept == "v1:platform:packageDeployment" {
+			// A run is @serverWritten: no client creates one, the pipeline does,
+			// through openPackageDeployment (@serverOnly) as the package's owner
+			// under the engine's own origin -- it borrows the owner exactly so. So the
+			// fixture opens it that way, and what is measured below is what the
+			// derivation does for that write; it does not depend on the origin. A
+			// client's own raw insert is refused first, so a fixture that went stale
+			// would say so.
+			if err := organizationInsert(t, engine, actor, child.concept, child.id, child.payload); err == nil || !strings.Contains(err.Error(), "@serverWritten requires internal origin") {
+				t.Fatalf("a client created a deployment run: %v", err)
+			}
+			open := fmt.Sprintf(`mutation openPackageDeployment(deploymentId: %s, packageId: %s, startedAt: %s)`,
+				langparser.QuoteString(child.id), langparser.QuoteString(stringFromAny(child.payload["packageId"])),
+				langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)))
+			if _, err := engine.Execute(auth.ContextWithInternalOrigin(actor), open); err != nil {
+				t.Fatalf("child %s: %v", child.concept, err)
+			}
+		} else if err := organizationInsert(t, engine, actor, child.concept, child.id, child.payload); err != nil {
 			t.Fatalf("child %s: %v", child.concept, err)
 		}
 		var rows []memorynodes.MemoryNode
