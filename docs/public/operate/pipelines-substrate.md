@@ -1026,6 +1026,14 @@ A step's `artifacts:` are paths or globs relative to the working copy.
   transfer. Artifact bytes never depend on the container log. The collector
   must remain alive through transfer; the Job deadline still bounds it. A
   fleet machine uses its existing packed byte transport and separate caps.
+- **The transfer sends no `Accept` header.** It is a WebSocket exec, and from
+  Kubernetes 1.36 the API server hands that upgrade to a kubelet that declares
+  `ExtendWebSocketsToKubelet` (`.status.declaredFeatures` on the node). That
+  kubelet answers HTTP 406 to any `Accept` that does not allow `*/*`. An engine
+  through 0.31.9 sends `application/json`, so on such a node its required
+  artifacts fail `pipeline_artifact_unavailable`, reading
+  `pod file transport refused: HTTP 406`. Measured on k3s; AKS's 1.36 has not
+  been measured.
 - **What is kept**: regular files under a declared path -- never a link, a
   device or a FIFO, an absolute name or a `..` -- at most 1024 files, and the
   whole archive at most `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` (64 MiB by default,
@@ -1564,6 +1572,11 @@ Each of these is understood, and accepted for this release.
   smoke. A change to substrate code alone does not run the full lifecycle. Live
   qualification uses real native pipeline runs and retained GitHub check
   receipts; the unused Actions placeholder has been removed.
+- **That leg's Kubernetes is the local pin, 1.32.** So it never meets what a
+  newer cluster changes, such as the kubelet-proxied exec of
+  [Artifacts](#artifacts). `TestPodFileExecDialPassesAServerRefusingJSON` holds
+  the one header that path refused, against a fake. The whole read was proved by
+  hand on k3s v1.36.4 (2026-10-30), not by a lane.
 - **Per-workbench readiness has not yet been verified in an installed release.**
   Settings -> Pipelines separates step-dispatcher installation from reports for
   each known workbench. The report path asks each replica for its own runner

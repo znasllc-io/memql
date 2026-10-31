@@ -68,8 +68,7 @@ package clustere2e
 // installer-lifecycle.pipelines leg installs from source -- never on a
 // development cluster somebody else is using. Name the k3s scripts/k3d/up.sh
 // pins (K3S_VERSION), which is what the leg's cluster runs: k3d's own default
-// moves, and on v1.36.4 the API server refuses every step's artifact read, HTTP
-// 406. And give it the build node, as up.sh does: the ConfigMap's
+// moves. And give it the build node, as up.sh does: the ConfigMap's
 // MEMQL_PIPELINES_NODE_POOL pins every step to that pool, and with no node in it
 // a step waits rather than running elsewhere:
 //
