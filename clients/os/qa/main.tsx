@@ -307,6 +307,9 @@ const DSL_ONLY_REVIEW = { ...PARKED, report: { ...PARKED.report, dslChanges: tru
   deployables: PARKED.report.deployables.map((app,index)=>({...app,name:index===0?"memql-website":"znas-website"})),
 } };
 
+// An update parked over an app that already serves: nothing left to place.
+const PLACED_REVIEW = { ...PARKED, report: { ...PARKED.report, deployables: [PARKED.report.deployables[0]!] } };
+
 const LISTS: FakeSeed = {
   sites: LIST_SITES,
   packages: [ACME, WIDGETS, BROCHURE, LEGACY, FRESH] as never,
@@ -1013,6 +1016,7 @@ const VIEWS: Record<
   "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
   "analysis-pending": { connect: () => analysisConnection("pending"), framed: true, render: () => <Lists section="deployables" /> },
   "analysis-failed": { connect: () => analysisConnection("failed"), framed: true, render: () => <Lists section="deployables" /> },
+  "package-placed-review": { seed: { packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }] }], sites: [LIST_SITES[0]!], awaitingConfirm: [PLACED_REVIEW], deployments: { "pkg-acme": [PLACED_REVIEW] } }, framed: true, render: () => <Lists section="deployables" /> },
   "package-dsl-only": { seed:{ packages:[{...ACME,declares:DSL_ONLY_REVIEW.report.deployables.map(app=>({name:app.name,kind:app.kind}))}],sites:[],awaitingConfirm:[DSL_ONLY_REVIEW],deployments:{"pkg-acme":[DSL_ONLY_REVIEW]} },framed:true,render:()=> <Lists section="deployables" /> },
   "analysis-review": { connect: () => analysisConnection("review"), framed: true, render: () => <Lists section="deployables" /> },
   "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },
