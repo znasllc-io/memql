@@ -1,6 +1,6 @@
 import { useGraphRevision } from "../../../live/useGraphRevision";
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { ArrowUpRight, Box, Pencil } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
@@ -17,7 +17,7 @@ import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { formatBytes, formatMoment } from "../../../kit/format";
 import { flatten } from "../../../kit/rows";
-import { machineName, type MachineRow } from "../rows";
+import { isRevoked, machineName, type MachineRow } from "../rows";
 import { isWorkerOnline } from "../online";
 import { formatParams, formatContext } from "../models/ordering";
 import { EmbeddingStatus } from "../models/EmbeddingStatus";
@@ -56,7 +56,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const [saving, setSaving] = useState(false);
   const savePending = useRef(false);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState("");
+  const [finished, setFinished] = useState<"" | "saved" | "returned">("");
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -83,28 +83,31 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const dirty = editing && !sameModelChoices(draft, editBase?.choices ?? {});
   const editView = view ?? editBase;
   const staleDraft = editing && !!view && view.revision !== revision;
-  const canChange = own && !!connection && !!view && !reading.error && !staleDraft;
-  const beginEdit = () => { if (!view) return; setEditBase(view); setDraft({ ...(view.revision ? view.choices : view.suggestedChoices) }); setRevision(view.revision); setError(""); setSaved(""); };
-  const commit = async (write: () => Promise<unknown>, done: string) => {
+  const canChange = own && !isRevoked(machine) && !!connection && !!view && !reading.error && !staleDraft;
+  const beginEdit = () => { if (!view) return; setEditBase(view); setDraft({ ...(view.revision ? view.choices : view.suggestedChoices) }); setRevision(view.revision); setError(""); setFinished(""); };
+  const commit = async (construct: string, write: () => Promise<unknown>, outcome: "saved" | "returned") => {
     if (!canChange || savePending.current) return;
     savePending.current = true;
     setSaving(true); setError("");
     try {
       await write();
-      setDraft(null); setEditBase(null); setSaved(done); reading.reread();
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)); reading.reread(); }
+      setDraft(null); setEditBase(null); setFinished(outcome); reading.reread();
+    } catch (err) { setError(refusalSentence(err, construct)); reading.reread(); }
     finally { savePending.current = false; setSaving(false); }
   };
   const save = () => {
     if (!draft || !capacity.fits) return;
-    void commit(() => connection!.query.fleetSetModelSetup({ registrationId: machine.id, revision, choices: draft }), "Model setup saved.");
+    void commit("fleetSetModelSetup", () => connection!.query.fleetSetModelSetup({ registrationId: machine.id, revision, choices: draft }), "saved");
   };
   const returnToAutomatic = () => {
-    void commit(async () => {
+    void commit("fleetClearModelSetup", async () => {
       const receipt = (await connection!.query.fleetClearModelSetup({ registrationId: machine.id, revision })).rows()[0];
       if (!receipt || flatten(receipt)["automatic"] !== true) throw new Error("The cluster did not confirm the change. Your choices may still be in place.");
-    }, "Returned to automatic.");
+    }, "returned");
   };
+  // Said only while the page agrees: until the read lands it still shows the saved
+  // choices, and a later save elsewhere would make the sentence untrue.
+  const finishedNote = finished === "saved" ? "Model setup saved." : finished === "returned" && !view?.revision ? "Returned to automatic." : "";
   const back = () => { setSelected(null); setError(""); };
   const toModels = () => { setSelected(null); setCatalogOpen(false); setError(""); };
   const install = async (model: SetupModel) => {
@@ -182,9 +185,9 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
           </div>
           <p className="os-caption">{editing && !capacity.fits ? "Choose smaller models or reuse one across tasks." : automatic ? "Memory estimate for MemQL’s automatic picks · room left for your system" : "Memory estimate · room left for your system"}</p>
         </MachineDetailsSection>
-        {installed.length > 0 || view.revision ? <MachineDetailsSection title="Model setup">
+        {installed.length > 0 || view.revision || finishedNote ? <MachineDetailsSection title="Model setup">
           <div className="fleet-models-setup-title"><span className="os-caption">{view.revision ? "Your choices" : "MemQL chooses automatically"}</span>
-            {own && !editing ? <IconButton label="Change model setup" onClick={beginEdit}><Pencil size={16} aria-hidden /></IconButton> : null}
+            {own && !editing && !isRevoked(machine) ? <IconButton label="Change model setup" onClick={beginEdit}><Pencil size={16} aria-hidden /></IconButton> : null}
           </div>
           <div className="fleet-models-choices">
             {MODEL_PURPOSES.map(([id,label]) => <div className="fleet-models-choice" key={id}>
@@ -193,7 +196,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
             </div>)}
           </div>
           {view.warning ? <Notice tone="warn" sentence="Your saved setup needs attention." detail={view.warning} /> : null}
-          {saved && !editing ? <p className="os-caption" role="status">{saved}</p> : null}
+          {finishedNote && !editing ? <p className="os-caption" role="status">{finishedNote}</p> : null}
         </MachineDetailsSection> : null}
       </> : null}
       <MachineDetailsSection title="Installed">

@@ -1048,17 +1048,23 @@ than removing the field, because a read-merge only overwrites keys, and a null i
 refused twice: `setWorkerModelSetup`'s required argument reads it as missing, and
 the concept's schema types the field as an object. Every reader decides on the
 revision, so empty and absent read alike, and a revision with no choices still
-serves nothing. It shares `admitModelSetupWrite` with saving, so own-machine
-admission, the row version fence and the revision check run in that order on both.
-It runs no capacity or bound-embedder check, because automatic narrows nothing and
-the machine's own memory gate still judges each call. A machine already on
-automatic gets no new row version. The empty block survives later heartbeats and
-renames, which carry it through the read-merge. Calls already running finish, and
-a call waiting on the setup slot rereads the row after its wait. Tests:
+serves nothing. Saving and clearing share `writeModelSetup`, the one write path, so
+own-machine admission, the row version fence and the revision check run in that
+order on both and neither can write outside the fence. The fence refuses a
+heartbeat just as it refuses a rival, so the write tries again, up to three times.
+The revision check on the next attempt tells them apart: a heartbeat leaves the
+revision alone and the write goes through, and a rival gets the plain "changed"
+refusal. The clear runs no capacity or bound-embedder check, because automatic
+narrows nothing and the machine's own memory gate still judges each call. A
+machine already on automatic gets no new row version. The empty block survives
+later heartbeats and renames, which carry it through the read-merge. Calls already
+running finish, and a call waiting on the setup slot rereads the row after its
+wait. Tests:
 `TestAClearedMachineServesAnyModelItOffersAndContextsAbove32K`,
 `TestClearingAModelSetupRefusesAStaleRevisionAndAMachineThatIsNotYours`,
 `TestOnlyTheOwnerWriteCanClearAModelSetup`,
 `TestARivalLandingAfterAdmissionRefusesTheAdmittedWrite`,
+`TestAHeartbeatRacingTheWriteDoesNotRefuseIt`,
 `TestAMachineReturnedToAutomaticAdmitsAnyModelAndALargerContext`,
 `TestACallWaitingOnTheSetupSlotSeesTheMachineReturnToAutomatic`. Not verified on a
 production machine: these run against a real database and fake worker streams.

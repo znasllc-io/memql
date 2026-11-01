@@ -353,67 +353,87 @@ func (e *MemQLEngine) setupBoundEmbedder(ctx context.Context, labels map[string]
 	return "", nil
 }
 
-// admitModelSetupWrite is what every owner change to a machine's setup passes
-// before deciding anything, so saving and clearing cannot drift apart. It returns
-// the fenced context the write must use and the row as of that fence.
-func (e *MemQLEngine) admitModelSetupWrite(ctx context.Context, registration, revision string) (context.Context, map[string]any, error) {
-	// Own-machine admission precedes the unscoped version witness.
-	if _, err := e.modelSetupRow(ctx, registration); err != nil {
-		return nil, nil, err
+// modelSetupWriteAttempts bounds what heartbeats can cost one owner write. A
+// machine reports every few seconds and the write takes milliseconds, so running
+// out means something is writing the row far faster than a heartbeat does.
+const modelSetupWriteAttempts = 3
+
+// writeModelSetup is the one path for an owner's change to a machine's setup, so
+// saving and clearing cannot drift apart. Each attempt runs own-machine admission,
+// the row version fence and the revision check, asks decide what to store as of
+// that fence, and writes it under that fence. A nil setup means nothing to write.
+//
+// HEARTBEATS RACE THIS WRITE, and the fence refuses them just as it refuses a rival,
+// because it sees only that the row moved. The next attempt tells the two apart by
+// checking the revision again: a heartbeat leaves it alone and the write goes
+// through, while a rival's save or clear gets the plain "changed" refusal rather
+// than being overwritten by a decision made without seeing it.
+func (e *MemQLEngine) writeModelSetup(ctx context.Context, registration, revision string, decide func(context.Context, map[string]any) (map[string]any, error)) error {
+	for attempt := 0; attempt < modelSetupWriteAttempts; attempt++ {
+		// Own-machine admission precedes the unscoped version witness.
+		if _, err := e.modelSetupRow(ctx, registration); err != nil {
+			return err
+		}
+		fenced, err := e.fenceWriteTarget(ctx, WorkerRegistrationConcept, registration)
+		if err != nil {
+			return err
+		}
+		row, err := e.modelSetupRow(fenced, registration)
+		if err != nil {
+			return err
+		}
+		if mapString(row, "revokedAt") != "" {
+			return fmt.Errorf("Pair this machine again before changing its models")
+		}
+		if ModelSetupFromRow(row["modelSetup"]).Revision != revision {
+			return fmt.Errorf("The model setup changed. Reload it and try again.")
+		}
+		setup, err := decide(fenced, row)
+		if err != nil || setup == nil {
+			return err
+		}
+		call, err := langparser.RenderCall("setWorkerModelSetup", map[string]any{"registrationId": registration, "setup": setup})
+		if err != nil {
+			return err
+		}
+		if _, err := e.Execute(auth.ContextWithInternalOrigin(fenced), call); !errors.Is(err, ErrRowVersionChanged) {
+			return err
+		}
 	}
-	ctx, err := e.fenceWriteTarget(ctx, WorkerRegistrationConcept, registration)
-	if err != nil {
-		return nil, nil, err
-	}
-	row, err := e.modelSetupRow(ctx, registration)
-	if err != nil {
-		return nil, nil, err
-	}
-	if mapString(row, "revokedAt") != "" {
-		return nil, nil, fmt.Errorf("Pair this machine again before changing its models")
-	}
-	if ModelSetupFromRow(row["modelSetup"]).Revision != revision {
-		return nil, nil, fmt.Errorf("The model setup changed. Reload it and try again.")
-	}
-	return ctx, row, nil
+	return fmt.Errorf("This machine's record kept changing. Try again.")
 }
 
 func (e *MemQLEngine) evaluateFleetSetModelSetup(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	registration := stringArg(args, "registrationId")
-	ctx, row, err := e.admitModelSetupWrite(ctx, registration, stringArg(args, "revision"))
-	if err != nil {
-		return nil, err
-	}
-	choices, ok := args["choices"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("model choices must be an object")
-	}
-	setup := ModelSetupFromRow(map[string]any{"choices": choices})
-	if len(setup.Choices) != len(choices) {
-		return nil, fmt.Errorf("model choices must contain model names")
-	}
-	catalog, err := e.catalogProfiles(ContextWithFreshRead(ctx))
-	if err != nil {
-		return nil, err
-	}
-	catalog = mergeSetupProfiles(catalog)
-	hw, platform, labels := setupHardware(row)
-	if _, err := validateModelChoices(setup.Choices, catalog, hw, platform, labels); err != nil {
-		return nil, err
-	}
-	bound, err := e.setupBoundEmbedder(ctx, labels)
-	if err != nil {
-		return nil, err
-	}
-	if bound != "" && setup.Choices["embeddings"] != bound {
-		return nil, fmt.Errorf("Memory search uses %s. Keep that model until the corpus has been reindexed.", bound)
-	}
 	revision := id.NewShortId()
-	call, err := langparser.RenderCall("setWorkerModelSetup", map[string]any{"registrationId": registration, "setup": map[string]any{"revision": revision, "choices": choices}})
+	err := e.writeModelSetup(ctx, registration, stringArg(args, "revision"), func(ctx context.Context, row map[string]any) (map[string]any, error) {
+		choices, ok := args["choices"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("model choices must be an object")
+		}
+		setup := ModelSetupFromRow(map[string]any{"choices": choices})
+		if len(setup.Choices) != len(choices) {
+			return nil, fmt.Errorf("model choices must contain model names")
+		}
+		catalog, err := e.catalogProfiles(ContextWithFreshRead(ctx))
+		if err != nil {
+			return nil, err
+		}
+		catalog = mergeSetupProfiles(catalog)
+		hw, platform, labels := setupHardware(row)
+		if _, err := validateModelChoices(setup.Choices, catalog, hw, platform, labels); err != nil {
+			return nil, err
+		}
+		bound, err := e.setupBoundEmbedder(ctx, labels)
+		if err != nil {
+			return nil, err
+		}
+		if bound != "" && setup.Choices["embeddings"] != bound {
+			return nil, fmt.Errorf("Memory search uses %s. Keep that model until the corpus has been reindexed.", bound)
+		}
+		return map[string]any{"revision": revision, "choices": choices}, nil
+	})
 	if err != nil {
-		return nil, err
-	}
-	if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
 		return nil, err
 	}
 	return singleVirtualRow("v1:worker:modelSetupResult", registration, map[string]any{"revision": revision})
@@ -434,23 +454,18 @@ func (e *MemQLEngine) evaluateFleetSetModelSetup(ctx context.Context, args map[s
 // NO CAPACITY OR BOUND-EMBEDDER CHECK. Those protect what a saved setup narrows a
 // machine to. Automatic narrows nothing, so the bound embedding model stays
 // served, and the machine's own memory gate still judges each call.
-//
-// Admission has just proved the stored revision equals the caller's, so an empty
-// one means the machine is already automatic and there is nothing to write.
 func (e *MemQLEngine) evaluateFleetClearModelSetup(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	registration, revision := stringArg(args, "registrationId"), stringArg(args, "revision")
-	ctx, _, err := e.admitModelSetupWrite(ctx, registration, revision)
+	err := e.writeModelSetup(ctx, registration, revision, func(context.Context, map[string]any) (map[string]any, error) {
+		// The revision check has just proved the stored revision is this one, so an
+		// empty one means the machine is already automatic: nothing to write.
+		if revision == "" {
+			return nil, nil
+		}
+		return map[string]any{}, nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	if revision != "" {
-		call, err := langparser.RenderCall("setWorkerModelSetup", map[string]any{"registrationId": registration, "setup": map[string]any{}})
-		if err != nil {
-			return nil, err
-		}
-		if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
-			return nil, err
-		}
 	}
 	return singleVirtualRow("v1:worker:modelSetupResult", registration, map[string]any{"revision": "", "automatic": true})
 }

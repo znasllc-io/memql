@@ -28,11 +28,17 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
   const [asking, setAsking] = useState(false);
   const question = useRef<HTMLDivElement>(null);
   const askedBy = useRef<HTMLButtonElement>(null);
+  const wayOut = useRef<HTMLButtonElement>(null);
   const wasAsking = useRef(false);
-  const showQuestion = asking && !!returnToAutomatic;
+  const canReturn = !!returnToAutomatic;
+  // A question whose act was withdrawn is over. It must not reopen by itself when
+  // the act comes back, and take focus from wherever the person went.
+  useEffect(() => { if (!canReturn) setAsking(false); }, [canReturn]);
+  const showQuestion = asking && canReturn;
   useEffect(() => {
     if (showQuestion) question.current?.focus();
-    else if (wasAsking.current) askedBy.current?.focus();
+    // Only when focus went with the question: somebody who moved on keeps their place.
+    else if (wasAsking.current && document.activeElement === document.body) (askedBy.current ?? wayOut.current)?.focus();
     wasAsking.current = showQuestion;
   }, [showQuestion]);
   const dragging = useRef("");
@@ -153,7 +159,7 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
     </div>
     {!capacity.fits ? <Notice tone="warn" sentence="This setup needs attention." next="Clear unavailable assignments, choose smaller models or reuse one across tasks." /> : null}
     {saveError ? <Notice tone="error" sentence="That change could not be completed." detail={saveError} /> : null}
-    {showQuestion ? <div ref={question} role="group" tabIndex={-1} aria-label={`Returning ${returnToAutomatic.machine} to automatic`} className="fleet-assignment-return"><InPlaceAsk className="os-fleet-confirm">
+    {showQuestion ? <div key="question" ref={question} role="group" tabIndex={-1} aria-label={`Returning ${returnToAutomatic.machine} to automatic`} className="fleet-assignment-return"><InPlaceAsk className="os-fleet-confirm">
       {/* Saying what changes is the point of asking: this is not Use suggested,
           which only fills the draft and, once saved, keeps a saved setup's limits. */}
       <p className="os-fleet-confirm-line">Return <strong>{returnToAutomatic.machine}</strong> to automatic? MemQL will choose from every model this machine offers, including any you left out here. Calls are no longer limited to 32K context or to one at a time.</p>
@@ -162,9 +168,9 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
         <Button disabled={saving} onClick={() => setAsking(false)}>Keep my choices</Button>
         <Button tone="primary" busy={saving} busyLabel="Returning…" onClick={returnToAutomatic.onConfirm}>Return to automatic</Button>
       </div>
-    </InPlaceAsk></div> : <div className="os-panel-actions fleet-assignment-actions">
+    </InPlaceAsk></div> : <div key="actions" className="os-panel-actions fleet-assignment-actions">
       {returnToAutomatic ? <button ref={askedBy} type="button" className="os-link" disabled={saving} onClick={() => setAsking(true)}>Return to automatic</button> : null}
-      <button type="button" className="os-link" disabled={saving} onClick={onDiscard}>{sameModelChoices(choices, view.choices) && view.revision ? "Done" : "Discard changes"}</button>
+      <button ref={wayOut} type="button" className="os-link" disabled={saving} onClick={onDiscard}>{sameModelChoices(choices, view.choices) && view.revision ? "Done" : "Discard changes"}</button>
       {capacity.fits && canSave ? <Button tone="primary" busy={saving} busyLabel="Saving setup…" onClick={onSave}>Save setup</Button> : null}
     </div>}
   </div>;

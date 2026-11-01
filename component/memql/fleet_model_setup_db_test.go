@@ -149,6 +149,38 @@ func (f clearedSetupFixture) versions() int64 {
 	return count
 }
 
+// The whole sentence, because the fence's own "row version changed" contains the
+// word too, and a person should be told in words.
+const modelSetupChangedRefusal = "The model setup changed. Reload it and try again."
+
+// engineWithRenameOnWrite is a second replica whose writes of this concept see an
+// ordinary write of the same row land mid-write, on the attempts rename chooses.
+func (f clearedSetupFixture) engineWithRenameOnWrite(rename func(attempt int) bool) (writer struct {
+	engine   *MemQLEngine
+	attempts *int
+}) {
+	f.t.Helper()
+	engine, err := New(f.db)
+	require.NoError(f.t, err)
+	require.NoError(f.t, engine.Init(memorynodes.DefaultRegistry()))
+	attempts := 0
+	engine.SetBeforeWriteHookSource("rename", map[string][]BeforeWriteHook{WorkerRegistrationConcept: {{
+		Name: "rename", On: "update",
+		Apply: func(context.Context, map[string]any) error {
+			attempts++
+			if rename(attempts) {
+				call, err := langparser.RenderCall("renameWorker", map[string]any{"registrationId": f.registration, "displayName": "Renamed"})
+				require.NoError(f.t, err)
+				_, err = f.eng.Execute(f.actor, call)
+				require.NoError(f.t, err)
+			}
+			return nil
+		},
+	}}})
+	writer.engine, writer.attempts = engine, &attempts
+	return writer
+}
+
 func virtualRowPayload(t *testing.T, rows []memorynodes.MemoryNode) map[string]any {
 	t.Helper()
 	require.Len(t, rows, 1)
@@ -224,8 +256,8 @@ func TestClearingAModelSetupRefusesAStaleRevisionAndAMachineThatIsNotYours(t *te
 		revision string
 		want     string
 	}{
-		{"a stale revision", f.actor, "an-older-revision", "changed"},
-		{"no revision, as a page that last read it automatic sends", f.actor, "", "changed"},
+		{"a stale revision", f.actor, "an-older-revision", modelSetupChangedRefusal},
+		{"no revision, as a page that last read it automatic sends", f.actor, "", modelSetupChangedRefusal},
 		{"somebody else's machine", auth.ContextWithUserActor(context.Background(), stranger), revision, "no machine of yours"},
 		// The row's tier ORs in clusterOwner, so a write guard alone would let a
 		// cluster owner through. The owner's own list is what refuses them.
@@ -242,7 +274,7 @@ func TestClearingAModelSetupRefusesAStaleRevisionAndAMachineThatIsNotYours(t *te
 
 	t.Run("the revision the clear replaced", func(t *testing.T) {
 		require.NoError(t, f.clear(f.actor, revision))
-		require.ErrorContains(t, f.clear(f.actor, revision), "changed")
+		require.ErrorContains(t, f.clear(f.actor, revision), modelSetupChangedRefusal)
 	})
 }
 
@@ -317,29 +349,29 @@ func TestOnlyTheOwnerWriteCanClearAModelSetup(t *testing.T) {
 	}
 }
 
-// THE GAP ONLY ADMISSION'S FENCE COVERS, without leaving it to timing. The write
-// path fences this concept itself just before its read-merge, which is why the
-// hook test below holds with or without this fence. What the write's own fence
-// cannot catch is a rival landing after the revision check and before that
-// read-merge: it would witness the rival's version, pass, and overwrite a decision
-// the check never saw. Measured: the racing test catches a missing fence in about
-// one run of three, and this one in every run.
+// THE GAP ONLY ADMISSION'S FENCE COVERS, without leaving it to timing. decide runs
+// after the revision check and before the write, so a rival landing there is
+// exactly what that fence exists for. The write path fences this concept itself
+// just before its read-merge, so a fence taken that late would witness the rival's
+// version, pass, and overwrite a decision the check never saw, which is also why
+// the hook test below holds with or without this one. The racing test cannot be
+// relied on here: the faster write almost always lands first.
 func TestARivalLandingAfterAdmissionRefusesTheAdmittedWrite(t *testing.T) {
 	f := newClearedSetupFixture(t)
 	revision := f.save("", map[string]any{"tools": f.picked})
-	fenced, _, err := f.eng.admitModelSetupWrite(f.actor, f.registration, revision)
-	require.NoError(t, err)
-	rival := f.save(revision, map[string]any{"tools": f.leftOut})
-	call, err := langparser.RenderCall("setWorkerModelSetup", map[string]any{"registrationId": f.registration, "setup": map[string]any{}})
-	require.NoError(t, err)
-	_, err = f.eng.Execute(auth.ContextWithInternalOrigin(fenced), call)
-	require.ErrorIs(t, err, ErrRowVersionChanged)
+	rival := ""
+	err := f.eng.writeModelSetup(f.actor, f.registration, revision, func(context.Context, map[string]any) (map[string]any, error) {
+		rival = f.save(revision, map[string]any{"tools": f.leftOut})
+		return map[string]any{}, nil
+	})
+	require.ErrorContains(t, err, modelSetupChangedRefusal)
 	require.Equal(t, rival, f.stored(f.eng).Revision, "the rival's decision must stand")
 }
 
 // A rival landing while the write is under way, on another replica. A before-write
 // hook runs after the write's read-merge and before it commits, so the interleaving
-// is exact, and the evaluator has to report the refusal rather than a success.
+// is exact. The fence refuses the write, and the next attempt's revision check is
+// what tells the person, in words, that their read is out of date.
 func TestARivalLandingMidWriteRefusesTheWriteItBeat(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -385,11 +417,64 @@ func TestARivalLandingMidWriteRefusesTheWriteItBeat(t *testing.T) {
 					return nil
 				},
 			}}})
-			require.ErrorIs(t, tc.write(writer, f, revision), ErrRowVersionChanged)
+			require.ErrorContains(t, tc.write(writer, f, revision), modelSetupChangedRefusal)
 			require.True(t, landed, "the rival never landed, so this proved nothing")
 			require.Equal(t, standing, f.stored(f.eng).Revision, "the rival's decision must stand")
 		})
 	}
+}
+
+// A HEARTBEAT IS NOT A RIVAL. It moves the row's version and leaves the revision
+// alone, so the fence refuses the write and the next attempt goes through, keeping
+// what the heartbeat wrote. A rename stands in for one: any ordinary write of the
+// row moves its version the same way.
+func TestAHeartbeatRacingTheWriteDoesNotRefuseIt(t *testing.T) {
+	cases := []struct {
+		name  string
+		write func(e *MemQLEngine, f clearedSetupFixture, revision string) error
+		check func(t *testing.T, setup ModelSetup)
+	}{
+		{
+			"a clear",
+			func(e *MemQLEngine, f clearedSetupFixture, revision string) error {
+				_, err := e.evaluateFleetClearModelSetup(f.actor, map[string]any{"registrationId": f.registration, "revision": revision})
+				return err
+			},
+			func(t *testing.T, setup ModelSetup) { require.Empty(t, setup.Revision) },
+		},
+		{
+			"a save",
+			func(e *MemQLEngine, f clearedSetupFixture, revision string) error {
+				_, err := e.evaluateFleetSetModelSetup(f.actor, map[string]any{"registrationId": f.registration, "revision": revision, "choices": map[string]any{"tools": f.leftOut}})
+				return err
+			},
+			func(t *testing.T, setup ModelSetup) { require.NotEmpty(t, setup.Revision) },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newClearedSetupFixture(t)
+			writer := f.engineWithRenameOnWrite(func(attempt int) bool { return attempt == 1 })
+			revision := f.save("", map[string]any{"tools": f.picked})
+			require.NoError(t, tc.write(writer.engine, f, revision))
+			require.Equal(t, 2, *writer.attempts, "the write had to try again, or this proved nothing")
+			tc.check(t, f.stored(f.eng))
+			row, err := f.eng.modelSetupRow(f.actor, f.registration)
+			require.NoError(t, err)
+			require.Equal(t, "Renamed", row["displayName"], "the retry must keep what the heartbeat wrote")
+		})
+	}
+}
+
+// The retries are bounded, and running out of them changes nothing.
+func TestAWriteThatNeverStopsRacingGivesUpWithoutWriting(t *testing.T) {
+	f := newClearedSetupFixture(t)
+	writer := f.engineWithRenameOnWrite(func(int) bool { return true })
+	revision := f.save("", map[string]any{"tools": f.picked})
+	_, err := writer.engine.evaluateFleetClearModelSetup(f.actor, map[string]any{"registrationId": f.registration, "revision": revision})
+	require.ErrorContains(t, err, "kept changing")
+	require.Equal(t, modelSetupWriteAttempts, *writer.attempts)
+	require.Equal(t, revision, f.stored(f.eng).Revision, "giving up must leave the setup in place")
 }
 
 // Two BFF replicas share no lock. The row version fence and the revision admit
@@ -404,7 +489,7 @@ func TestAClearAndASaveRacingOnTwoReplicasAdmitOne(t *testing.T) {
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		var clearErr, saveErr error
-		var saved string
+		var saveRows []memorynodes.MemoryNode
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
@@ -414,11 +499,7 @@ func TestAClearAndASaveRacingOnTwoReplicasAdmitOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			rows, err := peer.evaluateFleetSetModelSetup(f.actor, map[string]any{"registrationId": f.registration, "revision": revision, "choices": map[string]any{"tools": f.leftOut}})
-			saveErr = err
-			if err == nil {
-				saved = virtualRowPayload(t, rows)["revision"].(string)
-			}
+			saveRows, saveErr = peer.evaluateFleetSetModelSetup(f.actor, map[string]any{"registrationId": f.registration, "revision": revision, "choices": map[string]any{"tools": f.leftOut}})
 		}()
 		close(start)
 		wg.Wait()
@@ -429,6 +510,7 @@ func TestAClearAndASaveRacingOnTwoReplicasAdmitOne(t *testing.T) {
 			revision = f.save("", map[string]any{"tools": f.picked})
 			continue
 		}
+		saved := virtualRowPayload(t, saveRows)["revision"].(string)
 		require.Equal(t, saved, stored.Revision, "the save won, so the machine is on its choices")
 		revision = saved
 	}
