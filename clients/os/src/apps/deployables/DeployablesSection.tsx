@@ -382,7 +382,7 @@ export function DeployablesSection({
           packages={packageRows}
           packageFeed={{ state: packages?.snapshot.state ?? "seeding", error: packages?.snapshot.error ?? "", retry: onReseed }}
           siteFeed={{ state: sites?.snapshot.state ?? "seeding", error: sites?.snapshot.error ?? "" }}
-          placedSources={siteRows.map(s => ({ packageId: s.packageId, name: s.packageDeployableName, siteId: s.id }))}
+          placedSources={siteRows.map(s => ({ packageId: s.packageId, name: s.packageDeployableName, siteId: s.id, hostname: s.hostname, status: s.status }))}
           onOpenDeployable={openSite}
           placed={
             parkedFor === null
