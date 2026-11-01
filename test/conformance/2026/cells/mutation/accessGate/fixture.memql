@@ -1,0 +1,9 @@
+/// A support ticket: the row this cell's cases write. A gated write stamps the
+/// code it was made under, so the fixture carries it.
+concept ticket {
+  ownerUserId   string
+  accessCodeId  string
+  accessSubject string
+  title         string
+  status        string
+}

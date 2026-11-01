@@ -599,6 +599,10 @@ func (e *Executor) ResumeFrom(
 	// Inject system actor for automation execution
 	ctx = contextWithSystemActor(ctx, automation.Name)
 
+	// As executeWithEvent does: a resumed run's model calls are declared the same way
+	// its first attempt's were (component/memql/deployer_fleet.go).
+	ctx = memql.ContextWithDeployerFleet(ctx, automation.UsesDeployerFleet, automation.Domain)
+
 	// Create new execution tracking the resume
 	triggeredBy := fmt.Sprintf("resumed:%s", journal.RunId)
 	exec := NewExecution(automation.Name, triggeredBy)

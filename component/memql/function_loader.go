@@ -555,6 +555,21 @@ func tryParseFunctionSliceInNamespace(expectedName, expectedKind, content, origi
 		RequiresCapability: capabilityAttributeValue(funcDef.Attributes),
 	}
 
+	// @accessGate: the gate a site's access code opens to reach this construct
+	// (design record 2026-10-29). Read here, before the body, for a query AND a
+	// mutation -- the two kinds it is legal on -- and for the other kinds too,
+	// so that one that somehow carries it is refused by the registration pass
+	// rather than quietly read as no gate at all. Only the SHAPE is read: the
+	// names, and that both are written. Whether the construct may carry a gate
+	// at all, and whether another construct claims its name, needs everything
+	// else it declares and every other construct, so loadAccessGates asks it
+	// once at boot.
+	accessGate, err := accessGateDeclaration(funcDef)
+	if err != nil {
+		return nil, fmt.Errorf("function %q: %w", expectedName, err)
+	}
+	fn.AccessGate = accessGate
+
 	// Handle rate limit
 
 	// Handle args assertions populated from the function's args block.

@@ -1,0 +1,12 @@
+/// The open tickets a code's holder may see: only the rows stamped with that
+/// code. accessCodeId is reserved, so the access handler stamps it and a
+/// caller cannot choose it.
+@accessGate(deployable="client-desk", gate="dashboard")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

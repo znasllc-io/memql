@@ -270,6 +270,10 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   deployable_hostname_unchosen: "whereItLives",
   dsl_domain_reserved: "whatItIs",
   dsl_refuses_boot: "whatItIs",
+  // A gate the package cannot open is a question about what its MemQL IS, and
+  // the repair is in the source, as dsl_refuses_boot's is.
+  dsl_access_gate_foreign_deployable: "whatItIs",
+  dsl_access_gate_foreign_domain: "whatItIs",
   dsl_requires_authoring: "whatItIs",
   deployable_build_failed: "build",
   deployable_publish_failed: "live",

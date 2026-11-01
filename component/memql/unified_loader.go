@@ -160,10 +160,27 @@ func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, erro
 // of its own (memoryNodes.NewRegistry) and hands that to Init. Boot still does
 // both, in that order, through the wrapper above.
 func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNodes.Concept, []ConceptSkip, error) {
+	concepts, _, skips, err := buildUnifiedConceptsWithOrigins(logger, tree)
+	return concepts, skips, err
+}
+
+// buildUnifiedConceptsWithOrigins is BuildUnifiedConcepts that also says which
+// file declared each concept it built: origins maps a built concept's canonical
+// id to the tree-relative path of its declaration, and holds an entry for
+// exactly the concepts in the returned map (one that failed to build is a skip,
+// not an origin).
+//
+// Package analysis needs it to tell a candidate's concepts from the rest of the
+// merged tree it validates over -- the engine's, and every other product
+// installed on the node -- because the domains a package ships are the domains
+// of the concepts ITS files declare, spelled exactly as the loader assembled
+// them. Asking the loader, rather than re-deriving ids from namespace.pin files,
+// is what makes a pin with no concept behind it ship nothing.
+func buildUnifiedConceptsWithOrigins(logger *slog.Logger, tree fs.FS) (map[string]*memoryNodes.Concept, map[string]string, []ConceptSkip, error) {
 	var skips []ConceptSkip
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
-		return nil, nil, fmt.Errorf("walk unified DSL tree: %w", err)
+		return nil, nil, nil, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
 	// A domain whose language line the engine refuses contributes NO concept
@@ -281,6 +298,7 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 	// Pass 2: resolve relationship targets through the index, then build +
 	// register each concept.
 	concepts := make(map[string]*memoryNodes.Concept)
+	origins := make(map[string]string)
 
 	for _, cf := range files {
 		for _, decl := range cf.decls {
@@ -292,7 +310,7 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 				// mis-namespaced concept changes canonical ids, so boot,
 				// the memqllint parity tier, and the sense build must all
 				// fail loudly here.
-				return nil, skips, fmt.Errorf("%s: %w", cf.path, idErr)
+				return nil, nil, skips, fmt.Errorf("%s: %w", cf.path, idErr)
 			}
 
 			resolveRelationshipTargets(decl, cf.dir, cf.uses, index, id, logger)
@@ -314,10 +332,11 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 			}
 
 			concepts[id] = concept
+			origins[id] = cf.path
 		}
 	}
 
-	return concepts, skips, nil
+	return concepts, origins, skips, nil
 }
 
 // conceptIdRefusal answers a failed concept-id assembly with the annotation

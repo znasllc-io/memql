@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/server"
 )
 
 // serverPkgDir is where the exhaustiveness gate scans. Relative to this
@@ -460,6 +461,40 @@ func TestCollectKeepsABareTrailingSlashPathWithoutABase(t *testing.T) {
 	if !haveInbound {
 		t.Errorf("/inbound/ was dropped; the trailing-slash collapse must only fire when the "+
 			"base form is ALSO present. got=%v", got)
+	}
+}
+
+// THE ACCESS SURFACE NEVER REACHES THE FRONT DOOR, the prefix or any exact route. A
+// rule here would publish, at api.<domain>, the route that decides who is let into a
+// deployable, with none of the caps and rate limits the edge puts in front of it.
+func TestTheAccessSurfaceRemainsWithheldFromIngress(t *testing.T) {
+	emitted := collect()
+	if len(server.AccessSurfacePaths()) == 0 || len(server.AccessSelfAuthenticatedPaths()) == 0 {
+		t.Fatal("the surface declares nothing, so this proves nothing")
+	}
+	for _, path := range emitted {
+		if path == "/access" || strings.HasPrefix(path, "/access/") {
+			t.Fatalf("access route exposed at API ingress: %s", path)
+		}
+	}
+	// The premise: both aggregates really do carry it, so it is the classification
+	// keeping it out rather than nobody having declared it.
+	for _, want := range []struct {
+		name  string
+		paths []string
+	}{
+		{"HandlerAuthorizedPaths", server.HandlerAuthorizedPaths()},
+		{"SelfAuthenticatedPaths", server.SelfAuthenticatedPaths()},
+	} {
+		found := false
+		for _, path := range want.paths {
+			if strings.HasPrefix(path, "/access/") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s() does not carry the access surface, so this test proves nothing", want.name)
+		}
 	}
 }
 

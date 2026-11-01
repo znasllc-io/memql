@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@accessGate on a query takes keyword arguments"
+    },
+    {
+      "file": "with-an-unknown-key.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_key",
+      "message": "@accessGate on a query has no key gates"
+    },
+    {
+      "file": "written-twice.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_repeated",
+      "message": "@accessGate is written more than once on a query"
+    },
+    {
+      "file": "without-a-gate.memql",
+      "verdict": "refuse_load",
+      "message": "@accessGate requires both deployable= and gate= (gate= is missing)"
+    },
+    {
+      "file": "with-an-invalid-name.memql",
+      "verdict": "refuse_load",
+      "message": "@accessGate deployable=\"Client_Desk\" is not a deployable name"
+    },
+    {
+      "file": "with-server-only.memql",
+      "verdict": "refuse_load",
+      "message": "carries both @accessGate and @serverOnly, which contradict each other",
+      "note": "Raised by the registration pass (memql.accessGateRegistration) rather than the parser, because it needs everything else the construct declares."
+    },
+    {
+      "file": "a-reserved-argument-as-an-int.memql",
+      "verdict": "refuse_load",
+      "message": "declares the reserved argument accessCodeId as int, but the access handler stamps it as a string",
+      "note": "Reserved arguments are siteId, accessCodeId, accessGate and accessSubject. Each must be a string."
+    }
+  ]
+}

@@ -258,10 +258,12 @@ stating floors, and `TestOsRegistryRequiresMatchTheAppSeeds`
 (`component/memql`) fails the build when a manifest names a resource no seed
 declares or a seeded app resource has no manifest. Deployables is the first app to
 carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`, `preview`,
-`store`, and the pipelines parts `connect`, `rerun`, `cancel`, `channels`), all
-seeded on owner and developer; the mapping from part to construct is the table
-in the design record, and the pipelines builtins' in
-[Pipelines](../pipelines.md#connecting-a-pipeline). Two pipelines SECTIONS are
+`store`, `access`, and the pipelines parts `connect`, `rerun`, `cancel`,
+`channels`), all seeded on owner and developer; the mapping from part to
+construct is the table in the design record, and the pipelines builtins' in
+[Pipelines](../pipelines.md#connecting-a-pipeline). `access` -- the acts on a
+deployable's access codes -- is judged against the deployable's own organization,
+as `preview` is ([Access codes](../site-access-codes.md)). Two pipelines SECTIONS are
 reads rather than parts: `read app:deployables/runs` (the Runs tab, owner and
 developer -- the runs it lists are read owner-scoped, so a role that cannot
 connect a pipeline would only see it empty) and `read app:settings/pipelines`

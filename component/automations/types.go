@@ -142,6 +142,13 @@ type Automation struct {
 	// failure or human wait. Successful no-ops create no work rows.
 	JournalOnWrite bool `json:"journalOnWrite,omitempty"`
 
+	// UsesDeployerFleet runs each `builtin ai` call on the fleet of the person who
+	// staged this automation's package's DSL (component/memql/deployer_fleet.go).
+	UsesDeployerFleet bool `json:"usesDeployerFleet,omitempty"`
+	// Domain is the DSL domain this automation was loaded from, read from its path
+	// at load and never from its source. Not part of the definition's fingerprint.
+	Domain string `json:"-"`
+
 	// Loop is @loop(maxDepth=N, until=row => P): this automation closes a
 	// deliberate cycle the load would otherwise refuse, and bounds it (D18,
 	// epic memql#5380). Nil when the annotation is absent.

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -39,14 +40,22 @@ func TestResultCachePostureIsPinned(t *testing.T) {
 			"this pin together, deliberately.", defaultResultCacheTTLSeconds)
 	}
 
-	if len(cacheDenylistedConceptPrefixes) != 1 || cacheDenylistedConceptPrefixes[0] != "v1:identity:" {
-		t.Errorf("cacheDenylistedConceptPrefixes = %v, want exactly [\"v1:identity:\"].\n"+
+	// The second prefix is the one reviewed addition since the pin was set:
+	// a hosted site's access codes and sessions, whose validity is decided
+	// from the database on every request so that a regenerated, removed or
+	// expired code stops opening the site at that instant (access codes design
+	// record, 2026-10-29, D11, owner-approved the same day). Its reason is in
+	// the adoption table of the caching design record, beside identity's.
+	wantDenylist := []string{"v1:identity:", "v1:platform:siteAccess"}
+	if !reflect.DeepEqual(cacheDenylistedConceptPrefixes, wantDenylist) {
+		t.Errorf("cacheDenylistedConceptPrefixes = %v, want exactly %v.\n"+
 			"EMPTYING it would let authn/authz state ride the 60s default: a revoked session, a "+
-			"downgraded role or a deleted credential served from cache for up to a minute. "+
+			"downgraded role or a deleted credential served from cache for up to a minute, and an "+
+			"access code that was regenerated or has expired would go on opening a site. "+
 			"GROWING it is not free either -- every added prefix silently erodes the hit ratio -- "+
 			"so an addition belongs in the reviewed adoption table with a reason, not here as a "+
 			"quiet edit (owner decision D1/D4, 2026-08-25, memql#4533).",
-			cacheDenylistedConceptPrefixes)
+			cacheDenylistedConceptPrefixes, wantDenylist)
 	}
 }
 

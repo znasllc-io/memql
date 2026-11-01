@@ -87,6 +87,14 @@ type LoadReport struct {
 	// from HasProblems -- a deprecated form loads until its window is spent.
 	Warnings []baseloader.Warning
 
+	// AccessGates is the view the access gate registration pass built, in the
+	// registry's own order -- the gates this load would open, whether or not it
+	// published them (design record 2026-10-29, section 7). A candidate
+	// validation publishes nothing, so this is the only place its gates are
+	// kept, and package analysis reads them from here. A refused or disabled
+	// construct is not in it.
+	AccessGates []AccessGateEntry
+
 	// deprecatedUses is every use of a deprecated form the load's sources
 	// spell, whatever release its window stands at
 	// (MemQLEngine.DeprecatedUses).
@@ -158,6 +166,17 @@ func (r *LoadReport) SetDuplicates(dups []DuplicateConstruct) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.Duplicates = dups
+}
+
+// SetAccessGates records the view the access gate registration pass built. It
+// takes ownership of the slice: the pass hands over copies.
+func (r *LoadReport) SetAccessGates(entries []AccessGateEntry) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.AccessGates = entries
 }
 
 // AddWarning records one finding that does not fail the load. Does NOT

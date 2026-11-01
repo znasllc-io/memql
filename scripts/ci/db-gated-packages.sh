@@ -191,6 +191,12 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # the Deployables page draws Go live from one and the engine enforces the
 # other -- and that parity is a claim about real rows read as the deployment
 # and as the caller, which a fake engine answers either way.
+# Deployable access codes added `integrations/siteaccess`. Every act on a code
+# is a claim about what the row holds afterwards and who the engine took each
+# read and write to be: the version fence that refuses a write decided from a
+# stale read, the tier that admits one person and not another, the @serverOnly
+# gate that refuses a read with no origin stamped. A fake engine has none of
+# those, so it could not fail for the reason those tests exist.
 # memql#5705 added `component/datasync`. The sync runtime's health row
 # (v1:platform:syncState) is written through the real engine, and the defect
 # the PR fixes -- a row id whose short segment carried colons, refused by the
@@ -297,6 +303,7 @@ readonly DB_GATED_TREES=(
 	"integrations/release"
 	"integrations/shopify"
 	"integrations/email"
+	"integrations/siteaccess"
 	"integrations/sitepreview"
 	"integrations/work"
 	"integrations/workbench"

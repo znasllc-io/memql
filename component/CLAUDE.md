@@ -267,7 +267,8 @@ The heart of the system - executes all MemQL queries.
 - **Query Planning** - Optimize execution plans
 - **Result Cache** - Pure reads are cached BY DEFAULT for 60s
   (`result_cache_policy.go`); `@cache(N)` overrides, `@cache(0)` opts out,
-  `v1:identity:` is denylisted from the default path. Freshness is
+  `v1:identity:` and `v1:platform:siteAccess` are denylisted from the
+  default path. Freshness is
   event-driven: a write evicts its concept's dependent entries on the
   writing node synchronously and broadcasts `cache.invalidate.<concept>`
   to the rest of the mesh. The TTL is a backstop, not the mechanism. See

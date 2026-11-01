@@ -1,0 +1,10 @@
+/// A support ticket: the row this cell's cases read. A gated read isolates its
+/// rows by the code that is stamped on them, so the fixture carries it.
+concept ticket {
+  ownerUserId   string
+  accessCodeId  string
+  accessSubject string
+  title         string
+  status        string
+  count         int
+}

@@ -149,7 +149,7 @@ export function DialogFrame({
         <div className="os-dialog-header-actions">
         {headerActions}
         {closeLabel ? (
-          <Button tone="quiet" ariaLabel={closeLabel} onClick={dismiss}>
+          <Button tone="quiet" ariaLabel={closeLabel} disabled={busy} onClick={dismiss}>
             <X size={16} aria-hidden />
           </Button>
         ) : null}
