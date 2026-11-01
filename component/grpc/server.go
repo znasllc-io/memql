@@ -1236,8 +1236,13 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 			s.logger.Debug("subscription matched, sending event", "subscriptionId", subscriptionId, "pattern", matched, "topic", event.Topic)
 		}
 
+		// A thinned copy is a row too large to broadcast, without its largest
+		// fields (component/node/eventbridge_thin.go). Rendering it would blank
+		// them on the client's copy of the row, so it goes out id-only and the
+		// client reads the whole row, as for the `granted` tier.
 		omitted := admission == memqlengine.SubscriptionIdOnly ||
-			(info.idOnly && strings.HasPrefix(event.Topic, events.TopicGraphNode+"."))
+			(info.idOnly && strings.HasPrefix(event.Topic, events.TopicGraphNode+".")) ||
+			event.PayloadThinned()
 		wirePayload := &fullPayload
 		if omitted {
 			wirePayload = &identityPayload

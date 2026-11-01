@@ -28,6 +28,10 @@ const (
 	// MeshHopLimited is a copy this node did not relay because it had already
 	// travelled the hop limit.
 	MeshHopLimited = "hop_limited"
+	// MeshThinned is an event this node originated too large to broadcast whole:
+	// it went out without its largest fields (component/node/eventbridge_thin.go).
+	// One per event, counted where the row was written.
+	MeshThinned = "thinned"
 )
 
 // The transports a copy can leave on, and what happened to it.
@@ -49,7 +53,7 @@ var meshEventsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: namespace,
 	Subsystem: "mesh",
 	Name:      "events_total",
-	Help:      "EVERY MESH NODE TYPE writes this series. Broadcast events at this node, by outcome: originated (published here and put on the mesh), heard (delivered by a peer and published here -- a first sighting), relayed (passed on to this node's other peers), duplicate (a copy of an event already heard, dropped), hop_limited (a copy not relayed because it had travelled the hop limit). THE ONE TO ALERT ON IS heard: a mesh node whose heard rate is FLAT ZERO while its peers' is not is an island -- it is running, it is healthy, and it hears nothing the rest of the cluster does (memql#5338). Identity is the exception and reads zero by design: it sends and never hears. duplicate is normal and grows with the number of links; hop_limited should stay at zero.",
+	Help:      "EVERY MESH NODE TYPE writes this series. Broadcast events at this node, by outcome: originated (published here and put on the mesh), heard (delivered by a peer and published here -- a first sighting), relayed (passed on to this node's other peers), duplicate (a copy of an event already heard, dropped), hop_limited (a copy not relayed because it had travelled the hop limit), thinned (an event originated here, a row too large to broadcast whole, sent without its largest fields). THE ONE TO ALERT ON IS heard: a mesh node whose heard rate is FLAT ZERO while its peers' is not is an island -- it is running, it is healthy, and it hears nothing the rest of the cluster does (memql#5338). Identity is the exception and reads zero by design: it sends and never hears. duplicate is normal and grows with the number of links; hop_limited should stay at zero.",
 }, []string{"outcome"})
 
 var meshCopiesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{

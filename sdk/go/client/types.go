@@ -165,6 +165,8 @@ type Event struct {
 	// It happens when the row's concept declares the `granted` row-authz
 	// tier, whose predicate is a relationship spec: deciding it needs a
 	// join the fan-out cannot perform against one row in isolation.
+	// A row too large to broadcast, written on another node, arrives the same
+	// way whatever its tier.
 	// RE-READ the row through the normal authorized read path and use what
 	// that returns; if the read refuses, the caller was not entitled to
 	// the row and the event should be dropped.
