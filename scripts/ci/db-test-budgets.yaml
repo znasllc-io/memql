@@ -9,7 +9,11 @@ classes: |
   # exhausted its 600s package alarm while a new test was only 1s old.
   # Allow aggregate suite headroom; retain every test, its operation
   # deadlines, the isolated database and the same execution resources.
-  db      memql     component/memql     900s     serial    2
+  # The consolidated tree passed every other shard, then twice exhausted the 900s
+  # package alarm while a new test was 0s and 3s old; the same shard took 838s
+  # on the tree before it. Give the suite headroom; keep every test and its
+  # operation deadlines.
+  db      memql     component/memql     1200s    serial    2
   db      packages  component/packages  300s     -         1
   # All 809 Work cases pass in 176.217s on the bounded AKS runner.
   # Give this whole package headroom over the old 180s alarm; keep
