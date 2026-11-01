@@ -2229,6 +2229,32 @@ func FleetCapacityBuild(args FleetCapacityArgs) string {
 	return "builtin fleetCapacity()"
 }
 
+// FleetClearModelSetup -- Return your machine to automatic model routing by removing its saved choices, with a revision check. Existing calls finish. Later calls can use any model the machine offers and contexts above 32K, and are no longer run one at a time.
+type FleetClearModelSetupArgs struct {
+	RegistrationId string
+	Revision       string
+}
+
+// FleetClearModelSetup calls the engine builtin fleetClearModelSetup.
+func (qc *QueryClient) FleetClearModelSetup(ctx context.Context, args FleetClearModelSetupArgs) (*Result, error) {
+	call := FleetClearModelSetupBuild(args)
+	return qc.executeNamed(ctx, "fleetClearModelSetup", call)
+}
+
+func FleetClearModelSetupBuild(args FleetClearModelSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetClearModelSetup(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
 type FleetModelProbeArgs struct {
 	// v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.

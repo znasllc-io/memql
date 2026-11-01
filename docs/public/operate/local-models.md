@@ -236,6 +236,14 @@ advertised does not count, although Fleet's model list still shows everything
 any machine reported. An embedding model never answers a chat or a structured
 call, even when an older Cockpit claims tools or structured output for it.
 
+**A machine is on automatic until its owner saves a model setup.** Automatic
+lets MemQL use any model the machine offers, at any context the machine
+supports. A saved setup serves only the model chosen for each task, at up to 32K
+context, one call at a time. To go back, open the machine's **Models** page,
+change the setup and choose **Return to automatic**. *Use suggested* is not the
+same thing: it fills in MemQL's picks as your own choices, so saving them keeps
+those limits.
+
 #### Pulling a model from MemQL OS
 
 A machine's page in Fleet → Machines carries a **Models** group: what the

@@ -363,6 +363,10 @@ and bound-memory-search checks on every assignment path. The editor replaces
 the Models overview while open and preserves a refused draft. Save setup and
 Discard changes use one plain, right-aligned page action row outside the board;
 there is no nested lifecycle footer or “Choose your setup” status bar.
+While a saved setup stands, Return to automatic comes first in that row. It asks
+in place, naming the machine and what changes, and removes the saved choices.
+Use suggested only fills the draft, so saving it keeps a saved setup's limits;
+keep the two distinct, because the same picks saved are still a saved setup.
 Installed model details and the machine catalog extend the same window trail:
 Models → model, or Models → Catalog → model. Back returns one level along
 that path, and the Models crumb returns to the overview. Neither destination

@@ -18,7 +18,9 @@ import (
 
 // ModelSetup is owner-selected routing, persisted on the registration so both
 // the provider selector and the stream-holding replica read the same decision.
-// Absence preserves automatic routing. An explicit empty setup serves nothing.
+// The revision decides: every saved setup has one, and no revision is automatic
+// routing, whether the block was never written or fleetClearModelSetup emptied
+// it. A revision with no choices is a saved setup that serves nothing.
 type ModelSetup struct {
 	Revision string
 	Choices  map[string]string
@@ -351,26 +353,36 @@ func (e *MemQLEngine) setupBoundEmbedder(ctx context.Context, labels map[string]
 	return "", nil
 }
 
-func (e *MemQLEngine) evaluateFleetSetModelSetup(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
-	registration := stringArg(args, "registrationId")
+// admitModelSetupWrite is what every owner change to a machine's setup passes
+// before deciding anything, so saving and clearing cannot drift apart. It returns
+// the fenced context the write must use and the row as of that fence.
+func (e *MemQLEngine) admitModelSetupWrite(ctx context.Context, registration, revision string) (context.Context, map[string]any, error) {
 	// Own-machine admission precedes the unscoped version witness.
 	if _, err := e.modelSetupRow(ctx, registration); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ctx, err := e.fenceWriteTarget(ctx, WorkerRegistrationConcept, registration)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	row, err := e.modelSetupRow(ctx, registration)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if mapString(row, "revokedAt") != "" {
-		return nil, fmt.Errorf("Pair this machine again before changing its models")
+		return nil, nil, fmt.Errorf("Pair this machine again before changing its models")
 	}
-	previous := ModelSetupFromRow(row["modelSetup"])
-	if previous.Revision != stringArg(args, "revision") {
-		return nil, fmt.Errorf("The model setup changed. Reload it before saving.")
+	if ModelSetupFromRow(row["modelSetup"]).Revision != revision {
+		return nil, nil, fmt.Errorf("The model setup changed. Reload it and try again.")
+	}
+	return ctx, row, nil
+}
+
+func (e *MemQLEngine) evaluateFleetSetModelSetup(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
+	registration := stringArg(args, "registrationId")
+	ctx, row, err := e.admitModelSetupWrite(ctx, registration, stringArg(args, "revision"))
+	if err != nil {
+		return nil, err
 	}
 	choices, ok := args["choices"].(map[string]any)
 	if !ok {
@@ -405,6 +417,42 @@ func (e *MemQLEngine) evaluateFleetSetModelSetup(ctx context.Context, args map[s
 		return nil, err
 	}
 	return singleVirtualRow("v1:worker:modelSetupResult", registration, map[string]any{"revision": revision})
+}
+
+// evaluateFleetClearModelSetup returns one of the caller's machines to automatic
+// routing. Saving cannot do this: it always mints a revision, so "Use suggested"
+// with the same picks still reads as a saved setup, with its 32K ceiling and its
+// one call at a time.
+//
+// THE BLOCK GOES TO EMPTY, NOT TO ABSENT. A read-merge overwrites keys and never
+// removes one, and a null cannot be written: setWorkerModelSetup's required
+// `setup` reads it as missing, and the concept's schema types the field as an
+// object. Empty is safe because every reader decides on the revision
+// (ModelSetup.Allows, admitModelSetup), and the consent guard then carries it
+// through later writes as the stored value it is.
+//
+// NO CAPACITY OR BOUND-EMBEDDER CHECK. Those protect what a saved setup narrows a
+// machine to. Automatic narrows nothing, so the bound embedding model stays
+// served, and the machine's own memory gate still judges each call.
+//
+// Admission has just proved the stored revision equals the caller's, so an empty
+// one means the machine is already automatic and there is nothing to write.
+func (e *MemQLEngine) evaluateFleetClearModelSetup(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
+	registration, revision := stringArg(args, "registrationId"), stringArg(args, "revision")
+	ctx, _, err := e.admitModelSetupWrite(ctx, registration, revision)
+	if err != nil {
+		return nil, err
+	}
+	if revision != "" {
+		call, err := langparser.RenderCall("setWorkerModelSetup", map[string]any{"registrationId": registration, "setup": map[string]any{}})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
+			return nil, err
+		}
+	}
+	return singleVirtualRow("v1:worker:modelSetupResult", registration, map[string]any{"revision": "", "automatic": true})
 }
 
 const modelDiskReserve uint64 = 5 << 30

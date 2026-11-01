@@ -1038,6 +1038,14 @@ builtin fleetSetModelSetup {
 }
 
 @sdk
+@executor("fleetClearModelSetup")
+@description("Return your machine to automatic model routing by removing its saved choices, with a revision check. Existing calls finish. Later calls can use any model the machine offers and contexts above 32K, and are no longer run one at a time.")
+builtin fleetClearModelSetup {
+  registrationId string!
+  revision string!
+}
+
+@sdk
 @executor("fleetSetAppRouting")
 @description("Save the owner's app strategy on one machine, with a revision check.")
 builtin fleetSetAppRouting {

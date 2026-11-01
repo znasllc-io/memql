@@ -1649,6 +1649,29 @@ QueryClient.prototype.fleetCapacity = function (this: QueryClient, args: FleetCa
   return this.executeNamed("fleetCapacity", buildFleetCapacity(args), opts);
 };
 
+/** Return your machine to automatic model routing by removing its saved choices, with a revision check. Existing calls finish. Later calls can use any model the machine offers and contexts above 32K, and are no longer run one at a time. */
+export interface FleetClearModelSetupArgs {
+  registrationId: string;
+  revision: string;
+}
+
+export function buildFleetClearModelSetup(args: FleetClearModelSetupArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "builtin fleetClearModelSetup(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetClearModelSetup(args: FleetClearModelSetupArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetClearModelSetup = function (this: QueryClient, args: FleetClearModelSetupArgs = {} as FleetClearModelSetupArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetClearModelSetup", buildFleetClearModelSetup(args), opts);
+};
+
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
 export interface FleetModelProbeArgs {
   /** v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does. */

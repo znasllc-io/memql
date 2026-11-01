@@ -64,7 +64,7 @@ func validateWorkerConsentServerOnly(ctx context.Context, prior, final map[strin
 	for _, field := range workerRegistrationConsentFields {
 		if payloadFieldChanged(prior, final, field) {
 			if field == "modelSetup" {
-				return errWorkerConsentWrite(field, "the owner-selected setup, validated by fleetSetModelSetup")
+				return errWorkerConsentWrite(field, "the owner-selected setup, validated by fleetSetModelSetup and emptied only by fleetClearModelSetup")
 			}
 			return errWorkerConsentWrite(field,
 				"its owner's consent to lend the machine, which only fleetSetSharing writes, through the caller's own machines")
