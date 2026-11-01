@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -499,6 +500,83 @@ func TestChunkedNewVersionGatesAtInitAndSupersedesAtComplete(t *testing.T) {
 	}
 	if len(store.snapshotSupersedes()) != 1 {
 		t.Error("the re-complete superseded a second time")
+	}
+}
+
+// A RETRIED COMPLETE FINDS THE VERSION IT ALREADY LANDED, whichever way the row
+// names the object: the URL this route stores, the same URL escaped, or the bare
+// key it stored before (a session can sit open across a release). The status flip
+// was what got lost, so storage and the head must both be left alone.
+func TestChunkedCompleteRetryFindsTheVersionThatLanded(t *testing.T) {
+	storedAs := map[string]func(object string) string{
+		"the URL": func(object string) string {
+			return (&url.URL{Scheme: "https", Host: "example.blob.core.windows.net", Path: "/b/" + object}).String()
+		},
+		"the bare key": func(object string) string { return object },
+	}
+	for name, stored := range storedAs {
+		for _, fileName := range []string{"clip.mp4", "clip 100%25 #1?.mp4"} {
+			for _, moved := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/moved=%t", name, fileName, moved), func(t *testing.T) {
+					store := newFakeLibraryStore()
+					seedVersionedFile(store, newFakeBlob(), "user-a", "artifact-1", "file-1", []byte("v1"), "video/mp4", "clip.mp4", 1)
+					sessions := newFakeSessionStore()
+					blocks := newFakeBlocks()
+					h := sessionsHandler(store, sessions, blocks, 4, nil)
+					out := openSession(t, h, "user-a", map[string]any{
+						"name": fileName, "size": 4, "mimeType": "video/mp4", "targetArtifactId": "artifact-1",
+					})
+					session, err := sessions.ByID(auth.ContextWithUserActor(t.Context(), "user-a"), out.UploadId)
+					if err != nil || session == nil {
+						t.Fatalf("read the session back: %+v %v", session, err)
+					}
+
+					head := store.files[LibraryFileConceptRef("file-1")]
+					if moved {
+						// Another save has gone on top since: the version is a row now.
+						head.VersionNumber, head.BlobUrl = 3, stored("library/user-a/file-1/later/clip.mp4")
+						store.versions["file-1"] = map[int]*LibraryFileVersionRow{2: {ID: "file-1-v2", FileId: "file-1", VersionNumber: 2, BlobUrl: stored(session.BlobPath)}}
+					} else {
+						head.VersionNumber, head.BlobUrl = 2, stored(session.BlobPath)
+					}
+
+					rec := doJSON(t, h, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil)
+					if rec.Code != http.StatusOK {
+						t.Fatalf("the retry = %d, want 200; body: %s", rec.Code, rec.Body.String())
+					}
+					if got := decodeUpload(t, rec); got.ArtifactId != "artifact-1" || got.VersionNumber != 2 {
+						t.Errorf("the retry answered %+v, want artifact-1 at version 2", got)
+					}
+					if blocks.commitCount() != 0 || len(store.snapshotSupersedes()) != 0 {
+						t.Errorf("the retry committed %d times and superseded %d times; the version had landed",
+							blocks.commitCount(), len(store.snapshotSupersedes()))
+					}
+					if sessions.statusOf(out.UploadId) != "completed" {
+						t.Errorf("session is %q, want completed", sessions.statusOf(out.UploadId))
+					}
+				})
+			}
+		}
+	}
+}
+
+// A head that moved on through somebody else's bytes is not this session's version.
+func TestChunkedCompleteRefusesAVersionThatNamesAnotherObject(t *testing.T) {
+	store := newFakeLibraryStore()
+	seedVersionedFile(store, newFakeBlob(), "user-a", "artifact-1", "file-1", []byte("v1"), "video/mp4", "clip.mp4", 1)
+	sessions := newFakeSessionStore()
+	blocks := newFakeBlocks()
+	h := sessionsHandler(store, sessions, blocks, 4, nil)
+	out := openSession(t, h, "user-a", map[string]any{
+		"name": "clip.mp4", "size": 4, "mimeType": "video/mp4", "targetArtifactId": "artifact-1",
+	})
+	head := store.files[LibraryFileConceptRef("file-1")]
+	head.VersionNumber, head.BlobUrl = 2, "library/user-a/file-1/other/clip.mp4"
+	if rec := doJSON(t, h, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil); rec.Code != http.StatusConflict {
+		t.Fatalf("complete over another version = %d, want 409; body: %s", rec.Code, rec.Body.String())
+	}
+	if sessions.statusOf(out.UploadId) != "open" {
+		t.Errorf("session is %q, want open", sessions.statusOf(out.UploadId))
 	}
 }
 

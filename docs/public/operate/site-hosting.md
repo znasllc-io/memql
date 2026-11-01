@@ -252,8 +252,8 @@ Library and the app deploys it with `sitePublishFromArtifact`, which reads
 the bytes from object storage server-side -- see
 [Deployables](deployables.md#deploying-from-the-library).
 
-Library publishing accepts the storage locations written by both browser and
-chunked uploads: Azure/Azurite URLs and container-relative keys. The publisher
+Library publishing accepts both ways a file's row names its bytes: Azure/Azurite
+URLs and container-relative keys. The publisher
 resolves the URL using the Library storage parser, checks its container against
 the configured Library container, and checks the resolved key against the file
 owner before reading any bytes. A foreign container, another owner's prefix,
