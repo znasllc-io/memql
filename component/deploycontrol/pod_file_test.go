@@ -66,6 +66,49 @@ func TestPodFileTransport(t *testing.T) {
 	}
 }
 
+// The fake answers an exec upgrade as k3s v1.36.4 did (2026-10-30): 406 to an
+// Accept that does not allow */*, in the kubelet's words, and 101 otherwise.
+// v1.32.13 upgrades whatever the Accept, so neither a cluster on the k3s pin nor a
+// fake that ignored Accept could see this, and on v1.36.4 every step with a
+// required artifact failed pipeline_artifact_unavailable. Both read primitives
+// reach the server through the one dial.
+func TestPodFileExecDialPassesAServerRefusingJSON(t *testing.T) {
+	const content = "artifact"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if accept := r.Header.Get("Accept"); accept != "" && !strings.Contains(accept, "*/*") {
+			http.Error(w, "406: Not Acceptable\n\nAvailable representations: ", http.StatusNotAcceptable)
+			return
+		}
+		if servePodFileSize(t, w, r, int64(len(content))) {
+			return
+		}
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{podFileProtocol}})
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{1}, content...))
+		_ = c.Write(r.Context(), websocket.MessageBinary, append([]byte{3}, `{"status":"Success"}`...))
+		_ = c.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer srv.Close()
+	api := NewClusterAPIWith(srv.URL, "", srv.Client())
+	for _, tc := range []struct {
+		name string
+		read func(context.Context, string, string, string, string, io.Writer, int64) (int64, error)
+	}{
+		{"whole", api.ReadPodFile},
+		{"ranges", api.ReadPodFileResumable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if _, err := tc.read(t.Context(), "builds", "job", "collector", "/artifact", &out, int64(len(content))); err != nil || out.String() != content {
+				t.Fatalf("body=%q error=%v", out.String(), err)
+			}
+		})
+	}
+}
+
 func TestPodFileRefusesRedirectAndUnboundedRequests(t *testing.T) {
 	var visits atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { visits.Add(1) }))

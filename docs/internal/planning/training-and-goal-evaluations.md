@@ -25,6 +25,8 @@ domain independent; software expertise belongs in reviewed skills and lessons.
 | Baseline | First manually run model/scenario matrix | Complete raw result records including failures and interventions | Not run |
 | Repeat | Configurable monthly product evaluation, comparison with prior compatible runs | Explicit model/budget/fixture authority; schedule disabled until owner enables it | Planned |
 | Demonstrate | Documentation cases connecting capability claims to real goals and observable artifacts | Original request, full setup, actual bindings, acceptance evidence, human assistance and limits | Publishing format added; software case5817 remains unfinished |
+| Archive | Bounded case exports across software, documents, files, research and short/long workflows | Results, proof, intervention history, coverage and verified ZIP manifest retained in MemQL | Protocol documented; initial assisted snapshot captured manually; automatic capture planned |
+| Publish | Deployable public case library and compatible baseline comparisons | Reviewed exports, inspectable failures, artifact downloads, native CI and deployment receipt | Planned; no website built or deployed by this phase |
 
 Milestones are slices of this request, not claims that later work is already
 implemented. Update their state only when their acceptance evidence exists.
@@ -131,6 +133,54 @@ coaching, approvals and missing regression/delivery evidence must remain
 visible. Do not retrofit the new skill bindings onto a run that did not record
 them, and do not treat its live product issue as an evaluation fixture.
 
+### Case collection and public website plan
+
+The owner expanded this into a growing suite across categories and planned goal
+lengths, including PDF/document creation, other files, research and extended
+workflows. Follow the [case record and ZIP protocol](../../public/overview/evaluation-case-records.md).
+Keep private manually observed snapshots in owner storage outside the public
+checkout. Only reviewed, authorized projections enter `test/proving/cases`; the existing
+`test/proving/goals/results/index.json` remains the controlled runner's result
+index. Do not insert an assisted production exercise into its unrun baseline.
+
+Manually observed assisted exercises retain failed verdicts, external repairs
+and incomplete coverage. They do not establish autonomous success. Exact
+requests, private lineage and unreviewed receipts stay in owner storage.
+
+Implement in these slices without changing the Training UI in this exercise:
+
+1. **Document and capture:** retain immutable case snapshots, public guidance,
+   observed receipts, external interventions and bounded ZIPs. Verify readability
+   from MemQL and goal/run links separately from a successful upload.
+2. **Automate export:** extend existing owned Work, Library and evaluation paths;
+   discover root/child lineage and deduplicate receipts. Add category-independent
+   collection with category-specific artifact checks. Preserve partial results
+   on failures, permission waits and cancellation. Require actual served-model
+   attribution, independent cost-known semantics and complete usage coverage
+   before claiming totals. Export failure must remain visible and must not discard
+   the only working copy of necessary evidence.
+3. **Build the website:** generate a read-only site from reviewed exports. Provide
+   filters, setup comparisons, case/trial timelines, readable criteria, artifact
+   previews and ZIP downloads. Show unfinished and failed trials by default;
+   publish no private journal access, credentials or raw internal instructions.
+   Use the existing docs/site delivery pipeline where suitable; select the host
+   and deployment target when implementation begins.
+4. **Establish baselines:** run versioned fixtures with declared budgets and
+   assistance policies across categories and lengths. Repeat compatible trials,
+   report denominators/variance and surface regressions. Keep the current fleet
+   matrix unchanged; an Apps matrix requires its own explicit setup and budget.
+5. **Deliver and maintain:** run native CI on the exact site/export revision,
+   verify archive checksums and artifact rendering, retain deployment provenance,
+   and clean only temporary resources after evidence persistence. Scheduling
+   remains disabled until explicitly configured.
+
+Acceptance for the website includes a fresh export containing a success, failure,
+unfinished case, missing-usage case and assisted case; working downloads with
+checked hashes; incompatible comparisons visibly refused or separated; and
+privacy review of the exact public export. A generated page alone does not prove
+these behaviors. The case corpus informs reviewed lesson proposals and regression
+tests; publication does not automatically enable a lesson or change model weights.
+
 ## Work-quality changes from the coaching exercise
 
 The approved first phase extends the existing recovery checkpoint, optional
@@ -210,3 +260,18 @@ older indexed version after retirement. These use an isolated PostgreSQL
 instance with pgvector and deterministic provider fixtures; they are not a
 live benchmark or TimescaleDB cluster certification. UI checks use synthetic
 records, including failed-save draft preservation and narrow light/dark views.
+
+### 22 October pricing and cross-category evidence slice
+
+The isolated pricing branch adds API-equivalent quotes, private owner machine
+energy settings, and the [cost estimate contract](../../public/operate/inference-cost-estimates.md).
+It does not change Training, the active Ask runtime, or the fleet-only matrix.
+Catalog 1.1.0 adds six planned scenarios through the existing catalog/fixture
+loader; required specialized oracles remain unimplemented and unverified.
+The new optional planned-length field preserves the original 14 fingerprints.
+
+The reusable archive command now enforces explicit selection and verifies
+bounded members, CRC, inventory and hashes. It requires attributed privacy
+review for free text/media and performs no upload or publication. Native
+Library retention/goal association, new live trials, exact-revision native CI,
+and the public website remain separate outstanding acceptance evidence.

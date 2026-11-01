@@ -133,9 +133,14 @@ func (r *Runner) reapSecret(parent context.Context, meta ObjectMeta, jobName str
 	ctx, cancel := context.WithTimeout(parent, quickCallTimeout)
 	defer cancel()
 	if strings.HasPrefix(meta.Annotations[annotCreation], "creating ") {
-		_, err := r.kube.SecretMetadata(ctx, jobName+retirementSuffix)
-		if !deploycontrol.IsNotFound(err) {
-			return false // retirement with an unresolved POST needs reconciliation
+		// A stopped attempt's claim is judged as its cleanup judges one. There
+		// is no reconciliation to wait for: nothing else ever resolves a claim,
+		// so keeping one for that kept its clone token for good. An attempt
+		// nobody stopped has no marker, and by here its creator has run out of
+		// run to POST in.
+		marker, err := r.kube.SecretMetadata(ctx, jobName+retirementSuffix)
+		if !deploycontrol.IsNotFound(err) && (err != nil || r.latePostPossible(marker)) {
+			return false
 		}
 	}
 	switch _, err := r.kube.GetJob(ctx, jobName); {

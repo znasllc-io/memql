@@ -22,7 +22,7 @@ async function setup() {
 }
 async function openList() { await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Conversations" })); }); }
 
-it("opens a searchable full-panel list and switches directly between it and Activity without back buttons", async () => {
+it("opens a searchable full-panel list and returns to the current conversation", async () => {
  await setup(); await openList();
  expect(screen.getByRole("region", { name: "Conversations" })).toBeTruthy();
  expect(screen.queryByRole("log")).toBeNull();
@@ -30,9 +30,7 @@ it("opens a searchable full-panel list and switches directly between it and Acti
  fireEvent.change(screen.getByRole("textbox", { name: "Find a conversation" }), { target: { value: " OLDER " } });
  expect(screen.queryByRole("button", { name: "Current thread" })).toBeNull();
  expect(screen.getByRole("button", { name: "Older conversation" })).toBeTruthy();
- fireEvent.click(screen.getByRole("button", { name: "Activity" }));
- expect(screen.getByRole("region", { name: "Conversation activity" })).toBeTruthy();
- expect(screen.getByRole("button", { name: "Conversations" })).toBeTruthy();
+ expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
  fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
  expect(screen.getByText("Current message")).toBeTruthy();
 });

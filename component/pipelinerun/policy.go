@@ -35,6 +35,7 @@ var optionalPolicyRoles = map[string]string{
 	"maintenance":       "pipelineMaintenancePolicy",
 	"evidenceReuse":     "pipelineEvidenceReuse",
 	"independentReview": "pipelineIndependentReviewPolicy",
+	"computePlacement":  "pipelineComputePlacementPolicy",
 }
 
 // Capture admits the union; each invocation below receives only its own native

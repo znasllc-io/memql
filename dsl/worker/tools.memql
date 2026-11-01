@@ -70,3 +70,21 @@ tool workerComputer {
  agentId string! @autoInjected
  runId string! @autoInjected
 }
+
+/// Retain electricity research from official utility/service-area and tariff
+/// sources. Use only the locality/postcode the owner authorized, never retrieve
+/// or disclose a precise machine address. Do not guess a utility from a city.
+/// Include all plausible providers for confirmation; unavailable is valid.
+/// research: {status: found|ambiguous|unavailable, candidates:[{name,sourceUrl,
+/// evidence}], tariffs:[{provider,name,currency,timezone,sourceUrls,checkedAt,
+/// refreshAfter,effectiveFrom,effectiveUntil?,rateBands:[{name,perKWh,
+/// appliesWhen}],assumptions:[]}],notes,runId}. Dates are ISO; effective dates
+/// YYYY-MM-DD; checkedAt/refreshAfter RFC3339. Capture every applicable TOU and
+/// tier band; state tax/fee exclusions. No bill, no known tariff selection.
+@handler(type="function", name="fleetRecordElectricityResearch")
+@requiresAgentRole("assistant", "specialist")
+tool recordElectricityResearch {
+  registrationId string!
+  locationRevision string!
+  research object!
+}

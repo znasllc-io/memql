@@ -5,15 +5,17 @@ package workbench
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
 	Capability = "WORKBENCH"
-	Contract   = 1
+	Contract   = 2
 	// Multi-platform official Python image, pinned including its filesystem.
 	Image        = "docker.io/library/python@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a"
 	Slots        = 2
@@ -23,14 +25,17 @@ const (
 	MaxOutput    = 1 << 20
 	MaxInput     = 16 << 20
 	IdleTTL      = 5 * time.Minute
-	Lifetime     = time.Hour
+	Lifetime     = time.Hour // Maximum single lease; active authorized work can renew it.
 )
+
+var ErrStateLost = errors.New("workbench filesystem is no longer available")
 
 // Identity is supplied by the authenticated enrollment, never command args.
 // Each borrower/run/enrollment gets a separate container and filesystem.
 type Identity struct {
 	Home, Owner, Caller, Registration, Machine, Run string
 	ExpiresAt                                       time.Time
+	Generation                                      uint64
 }
 
 func (id Identity) Key() (string, error) {
@@ -39,6 +44,11 @@ func (id Identity) Key() (string, error) {
 		if strings.TrimSpace(p) == "" || len(p) > 512 || strings.ContainsRune(p, 0) {
 			return "", fmt.Errorf("workbench authority is incomplete")
 		}
+	}
+	// Generation zero preserves the original identity. Only an explicit,
+	// cluster-authorized recovery can name a new ephemeral filesystem.
+	if id.Generation != 0 {
+		parts = append(parts, strconv.FormatUint(id.Generation, 10))
 	}
 	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(h[:]), nil

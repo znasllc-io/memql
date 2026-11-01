@@ -17,7 +17,7 @@ import { ProblemNotice } from "../deployables/packages/ReportView";
 import { useGithubApp, type GithubAppActions } from "../deployables/sources/useGithubApp";
 import { bare } from "../deployables/people";
 import { machineFromRow } from "../fleet/rows";
-import { machinesAllowingPipelines } from "../deployables/pipelines/fleet";
+import { machinesAllowingPipelines, machinesWithHostCommandsOff } from "../deployables/pipelines/fleet";
 import {
   fleetSentence,
   missingPermissionsWords,
@@ -285,7 +285,7 @@ function FleetLine({ fleet }: { fleet: FleetReading }) {
   if (fleet.state === "absent") return null;
   if (fleet.state === "reading") return <InlineSkeleton label="Loading your machines" />;
   if (fleet.state === "unread") return <p className="os-pipelines-fleet">Your machines could not be read.</p>;
-  return <p className="os-pipelines-fleet">{fleetSentence(fleet.count)}</p>;
+  return <p className="os-pipelines-fleet">{fleetSentence(fleet.count, fleet.hostCommandsOff)}</p>;
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ function LaggingNotice({ installation }: { installation: LaggingInstallation }) 
 
 /** No machines feed at all (no connection), still asking, a read that did
  *  not answer, or the count. */
-type FleetReading = { state: "absent" } | { state: "reading" } | { state: "unread" } | { state: "read"; count: number };
+type FleetReading = { state: "absent" } | { state: "reading" } | { state: "unread" } | { state: "read"; count: number; hostCommandsOff: readonly string[] };
 
 /** How many of the viewer's machines allow pipelines, from the one machines
  *  feed the shell retains -- never a second read of the same concept. */
@@ -366,11 +366,11 @@ function useMachinesAllowingPipelines(viewerId: string): FleetReading {
   const { collection, feedState } = useMachines();
   const subscribe = useCallback((listener: () => void) => collection?.subscribe(listener) ?? (() => {}), [collection]);
   const snapshot = useSyncExternalStore(subscribe, () => collection?.snapshot ?? null, () => null);
-  const count = useMemo(
-    () => machinesAllowingPipelines((snapshot?.rows ?? []).map(machineFromRow), viewerId),
-    [snapshot, viewerId],
-  );
-  if (feedState === "live" || feedState === "degraded") return { state: "read", count };
+  const { count, hostCommandsOff } = useMemo(() => {
+    const machines = (snapshot?.rows ?? []).map(machineFromRow);
+    return { count: machinesAllowingPipelines(machines, viewerId), hostCommandsOff: machinesWithHostCommandsOff(machines, viewerId) };
+  }, [snapshot, viewerId]);
+  if (feedState === "live" || feedState === "degraded") return { state: "read", count, hostCommandsOff };
   if (feedState === "seeding") return { state: "reading" };
   if (feedState === "absent") return { state: "absent" };
   return { state: "unread" };

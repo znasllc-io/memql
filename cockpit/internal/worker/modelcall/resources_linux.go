@@ -49,6 +49,7 @@ func readMemoryHeadroom() (memoryHeadroom, error) {
 	if raw, err := exec.CommandContext(ctx, "nvidia-smi", "--query-gpu=memory.total,memory.free", "--format=csv,noheader,nounits").Output(); err == nil {
 		if gpu, ok := nvidiaHeadroom(string(raw)); ok {
 			gpu.Pressure = out.Available < gib
+			gpu.DedicatedGPU = true
 			return gpu, nil
 		}
 	}
@@ -69,6 +70,7 @@ func readMemoryHeadroom() (memoryHeadroom, error) {
 		}
 	}
 	if gpu.Total != 0 {
+		gpu.DedicatedGPU = true
 		return gpu, nil
 	}
 	return out, nil

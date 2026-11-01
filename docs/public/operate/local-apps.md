@@ -83,12 +83,130 @@ machine. The alternative — selecting on presence and discovering the refusal
 on the far side — commits a plan to a machine that then rejects it, and the
 resulting failure names the wrong thing.
 
+### What the machine measures
+
+`signedIn` used to mean only that the app's credential files exist, so an expired
+login read as signed in. Each machine now checks on a schedule that its apps can
+really answer, and reports `readiness` on the same entry:
+
+| `readiness` | What it means | Selectable |
+|---|---|---|
+| `ready` | signed in with usage left, as of the last check or real turn | yes |
+| `signed_out` | no login, or an expired one. `signedIn` is false too | no |
+| `out_of_usage` | signed in with no usage left. `usageResetsAt` says until when, if the app did | no |
+| `unknown` | the machine has not checked yet, or its check could not tell. `readinessDetail` says why | no |
+| absent | a Cockpit that predates the checks | yes, as the one exception |
+
+**Selection admits only `ready`.** An app that is offline, signed out, out of usage or
+unchecked cannot be reached, and Ask's Apps route reads as not ready when no app can
+answer.
+
+**A Cockpit that predates the checks is the one exception.** It sends no word at all,
+and refusing it would take every current machine out of routing until it upgraded. So
+it keeps the file-based answer it always had, reads as *Not checked* in Fleet, and a
+call it refuses moves on to the next app. A Cockpit that measures always sends a word,
+`unknown` before its first check, so this cannot admit an app a machine could not vouch
+for. The exception can be removed once no machine in a fleet reports silence.
+
+The answer lives on the registration row, so a replica without the machine's stream
+reads the same thing, and selection reads the row again rather than trusting a door
+built a moment earlier. The engine compares no clock: the machine re-checks at a
+reset and reports the change.
+
+Codex's check spends nothing and runs every 5 minutes. Claude Code has no free way to
+ask, so it is pinged hourly while it works, for about 600 tokens, at most 30 times a day
+per machine, and never with anything that could bill API credit. An app that is not
+working is asked every 15 minutes, because a refused ping is free. A running session
+suppresses the check, and every real turn counts as one, so a busy machine never pings.
+One check that cannot tell keeps the last answer and is repeated within a minute, so a
+timeout on a busy machine does not take a working app away.
+[The machine side](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/local-apps.md)
+has the details.
+
+**An exhausted app stays out until its machine says otherwise.** The state is durable:
+the machine's check keeps asking, and its reset time and credits decide when the app
+comes back. A reset passing does not send anybody's real call to find out, and neither
+does a timer. Buying credits or a reset shows within that app's check interval.
+
 Signing into an app takes effect on the **next heartbeat**, not the next
 reconnect: an inventory change is applied to the live registry immediately and
 persisted outside the 60-second `lastSeenAt` throttle, because it is a routing
 change. Persisting it there is also what lets a **planner** node answer "is a
 machine with this app online" — that node holds no worker streams at all, so
 the row and its derived labels are the only thing it can read.
+
+### When an app refuses a call
+
+An app the machine last measured as working can still turn a call away, because the
+login expired or the plan ran out since that check, and a Cockpit that predates the
+checks measures nothing. The call moves to the next app **only when nothing ran**: no model
+served it, it has no result, no action was recorded or dropped, no tokens were
+reported, and the only text is the refusal itself. Any other failure may have
+caused effects, so it is returned rather than run again.
+
+| What the app said | What the rest of the call skips | How long that machine's app is skipped |
+|---|---|---|
+| Out of usage | that app on every machine, because a limit belongs to the account | until a check on that machine says it can answer |
+| Signed out or expired | that app on that machine, because a login belongs to one machine | until a check on that machine says it can answer |
+
+A Cockpit that predates the checks has only the clock: a limit lasts until the reset the
+app names, or 15 minutes if it names none, and a login lasts 15 minutes. The next call
+after that is what finds out, and a refusal then moves on to the next app.
+
+A call pinned to one app stays on that app and may only move to another machine.
+When nothing is left, the call fails with the app's own sentence.
+
+Codex names its reset in the machine's time zone without saying which, so the
+engine reads the earliest time it could mean. An app can come back up to a day
+before its real reset; the next call then costs one more refusal and no tokens.
+
+### Signing in from Fleet
+
+A machine's Apps page in Fleet offers **Sign in** when an app reads as signed out. It
+works when you are not at the machine, because the page opens in your own browser and
+none opens there. Only the machine's owner can start one, and the app must already be
+allowed for this cluster in the machine's own `policy.yaml`.
+
+**The login stays on the machine.** The app writes it there, and no token crosses to the
+cluster. What crosses is the sign-in page's address, a device code to enter on it (Codex),
+or a code the page shows that you paste back (Claude Code). A pasted code goes to the app
+waiting on the machine and is written to no row and no log line. It is useless without the
+verifier that process holds.
+
+The address and the device code are on a `v1:worker:appSignIn` row only the machine's owner
+can read, with no cluster-owner access, and are cleared when the sign-in ends. It runs on
+the agent holding the machine's stream, whichever replica took your call
+(`fleetAppSignIn` forwards it). A machine whose Cockpit predates this gets the older
+**Connect** instead, a setup goal in Ask.
+
+There is no button to retry an app, because the machine checks on its own. A `ready`
+measured after a refusal ends the block that refusal started.
+
+### When an app stops partway
+
+A step that has already done work cannot simply be run again, because its actions have
+effects. So when an app runs out of usage or loses its login partway through a step, the
+next ready app **takes over**: it gets the same step, the record of what ran, and where the
+work is, and it carries on.
+
+- **The machine has to say so.** The app's own protocol must report the limit or the
+  login. Any other failure, a crash or a timeout included, may have left an action half
+  done and is never taken over. A Cockpit that predates this reports nothing, so the step
+  fails as before.
+- **The record has to be complete.** The journal of what ran is what the next app is told
+  as fact, and what the first app wrote travels as its own account, not as evidence. If an
+  action was dropped, or an output did not reach the Library, nothing takes over and the
+  step fails saying why.
+- **The next app is on the same machine if it can be,** in the same working directory,
+  with the files as they were left. Otherwise another of your machines carries on, with what
+  reached the Library delivered to its working directory.
+- **A choice stays a choice.** An app you pinned, or an Only strategy, stays that app.
+- **You can see it.** The run gets a note naming both apps, each session's record stays on
+  its own child run, and the next app says that it took over.
+
+A chat turn with no step has no record to hand over. One that ran no action sends the same
+prompt to the next app, unless part of an answer was already shown. If nothing else is ready,
+the step fails with the app's own sentence, and the work so far is kept.
 
 ### Which machine, and on which replica
 
@@ -554,6 +672,8 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 | `cockpit-app: the backend is registered but not wired on this node` | the Task reached a node with no WorkerService. Only an agent node serves one |
 | `cockpit-app: no credential minter configured` | `MEMQL_IDENTITY_VERIFIER_BASE_URL` or `MEMQL_NODE_BOOTSTRAP_TOKEN` is unset on the agent. The run is REFUSED rather than started with a blank bearer — an app with no credential reaches nothing over MCP and reports that as "MemQL's tools are broken" |
 | `no machine online with claude-code allowed and signed in` | check Fleet -> Machines page; the badge says which half is missing |
+| `Failed to authenticate: OAuth session expired`, `Not logged in`, `401 Unauthorized` | the app's login on that machine is missing or expired, even though Fleet may show it signed in. Press **Sign in** on that machine's Apps page in Fleet, or run `claude auth login` or `codex login` on the machine. The call has already moved on where another app could take it |
+| `You've hit your usage limit` | that app's plan is out of usage. It is skipped until the reset it names, and the call moved on where another app could take it |
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
 | `app_holder_unreachable` / "the agent holding its stream (...) is not reachable from this node" | the registration names an agent replica this node cannot reach (restarted, or the row is stale). Nothing started; the route moved on. The machine re-registers on a live replica within a heartbeat |
 | `app_holder_gone` | the agent holding the machine went away while the session ran. The session may have run on the machine; the call is not re-run elsewhere and the route moved on |
@@ -584,3 +704,7 @@ per platform.
 - [MCP connect](mcp-connect.md) — the endpoint the back-channel dials
 - [LLM cost control](../ai/llm-cost-control.md) — the layered spend guardrails
 - [Service-account JWTs](auth/service-account-jwt.md) — the credential class
+
+See [inference cost estimates](inference-cost-estimates.md) for the distinction
+between app-reported usage, a dated API-equivalent estimate and actual billing.
+A subscription or zero legacy cost report does not establish that work was free.

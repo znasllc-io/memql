@@ -58,12 +58,13 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	// The version is part of the action: an older replica must reject the
 	// request, not silently discard execution/recovery fields it cannot enforce.
+	// V11 binds the run's head branch to its train/cloud admission class.
 	// V10 carries declared checkout history; an older runner must not silently
 	// substitute a shallow clone. V9 separated resource admission from execution
 	// start so a queued Job does not spend its step timeout before admission.
 	// Durable retirement fences the pre-create claim.
 	// Older runners could create an attempt after its receipt was cleaned up.
-	PipelineStepAction = "pipelineStepV10"
+	PipelineStepAction = "pipelineStepV11"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.

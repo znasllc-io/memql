@@ -39,6 +39,7 @@ const (
 	forwardFamilyModelPull  = "modelPull"
 	forwardFamilyModelProbe = "modelProbe"
 	forwardFamilyApp        = "app"
+	forwardFamilyAppSignIn  = "appSignIn"
 )
 
 // forwardCancelMemory is how long a cancel for a request this node has not

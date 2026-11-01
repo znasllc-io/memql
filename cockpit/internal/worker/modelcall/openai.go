@@ -179,6 +179,7 @@ func (c *openAIClient) chatRaw(ctx context.Context, body map[string]any, emit em
 		}
 		payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
 		if string(payload) == "[DONE]" {
+			out.RuntimeCompleted = true
 			sawTerminator = true
 			break
 		}
@@ -269,7 +270,7 @@ func (c *openAIClient) Embed(ctx context.Context, req EmbedRequest) (Result, err
 		}
 		out[at] = d.Embedding
 	}
-	res := Result{FinishReason: FinishStop, Embeddings: out, Usage: Usage{Model: parsed.Model}}
+	res := Result{RuntimeCompleted: true, FinishReason: FinishStop, Embeddings: out, Usage: Usage{Model: parsed.Model}}
 	if parsed.Usage != nil {
 		res.Usage.InputTokens = parsed.Usage.PromptTokens
 		res.Usage.Known = true

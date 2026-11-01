@@ -87,7 +87,7 @@ func TestResourcesReclaimOnlyOwnedIdleModelsBeforeDifferentRuntime(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 	if _, exists := r.owned[resourceKey(old)]; exists {
 		t.Fatal("unloaded runner retained")
 	}
@@ -103,7 +103,7 @@ func TestResourcesWaitForHeadroomAndCancelWithoutLeakingGate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Millisecond)
 	defer cancel()
 	if release, err := r.acquire(ctx, info, http.DefaultClient, slog.Default()); err == nil {
-		release()
+		release.close()
 		t.Fatal("overcommitted memory")
 	}
 	available.Store(24 * gib)
@@ -111,7 +111,7 @@ func TestResourcesWaitForHeadroomAndCancelWithoutLeakingGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 }
 
 func TestResourcesDoNotUnloadWarmModel(t *testing.T) {
@@ -129,7 +129,7 @@ func TestResourcesDoNotUnloadWarmModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 }
 
 func TestResourcesRejectPressureUnknownProbeAndImpossiblePeak(t *testing.T) {
@@ -147,7 +147,7 @@ func TestResourcesRejectPressureUnknownProbeAndImpossiblePeak(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 			defer cancel()
 			if release, err := r.acquire(ctx, models.Info{ID: "model", PeakMemoryBytes: 16 * gib}, http.DefaultClient, slog.Default()); err == nil {
-				release()
+				release.close()
 				t.Fatal("unsafe admission")
 			}
 		})

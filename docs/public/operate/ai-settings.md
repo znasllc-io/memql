@@ -113,7 +113,7 @@ The routes a person picks from for each message in Ask:
   you see and use them. **New route** is on the section heading.
 
 Each row says whether the route can serve every job for you right now, or why
-not: "Needs an embedding model", "No signed-in app on your machines".
+not: "Needs an embedding model", "No app is ready on your machines".
 
 ### A route's page
 

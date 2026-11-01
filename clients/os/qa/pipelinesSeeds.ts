@@ -164,6 +164,85 @@ const RUNNING_STEPS: Row[] = [
   running("deploy.ship", { seq: 5, status: "pending", durationMs: 0, binding: {}, logFileId: "" }),
 ];
 
+// ---- steps that took more than one attempt (the fleet-first retries) -----------
+
+/** The viewer's machines the attempts ran on, named as the Fleet app names them. */
+export const RETRY_MACHINES: Row[] = [
+  { id: "v1:worker:registration:m-raider", ownerUserId: VIEWER, name: "msi-raider", displayName: "MSI Raider", platformInfo: { os: "linux", arch: "amd64", hostname: "msi-raider" },
+    labels: { pipelines: "allowed" }, operatorLabels: {}, concurrency: { HEADLESS: 2 }, activeCount: 0, registeredAt: "2026-09-01T00:00:00Z", connectedNodeId: "agent-0", lastSeenAt: new Date().toISOString() } as unknown as Row,
+  { id: "v1:worker:registration:m-cyber", ownerUserId: VIEWER, name: "cyberpc", displayName: "CyberPC", platformInfo: { os: "linux", arch: "amd64", hostname: "cyberpc" },
+    labels: { pipelines: "allowed" }, operatorLabels: {}, concurrency: { HEADLESS: 2 }, activeCount: 0, registeredAt: "2026-09-01T00:00:00Z", connectedNodeId: "agent-0", lastSeenAt: new Date().toISOString() } as unknown as Row,
+];
+
+const attemptOf = (attempt: number, over: Record<string, unknown>) => ({ attempt, surface: "fleet", workerId: "m-raider", logFileId: `file-r11-${attempt}`, ...over });
+const retried = (key: string, over: Record<string, unknown>) => stepRow(key, { runId: "v1:work:run:wr-11", ...over });
+
+/**
+ * A run whose steps needed more than their first attempt: one passed on its
+ * second, one failed on its third, one ran once. The failed step's last attempt
+ * is the step's log, so its tail is the content route's.
+ */
+const RETRIED_STEPS: Row[] = [
+  retried("checks.vet", { seq: 0, durationMs: 21000, logFileId: "" }),
+  retried("tests.go-tests#1", {
+    seq: 1, durationMs: 398000, logFileId: "file-r11-2",
+    binding: { surface: "fleet", workerId: "m-raider", nodeId: "agent-0", attempts: [
+      attemptOf(1, { class: "nothing_ran", code: "pipeline_clone_failed", message: "The machine's git fetch failed before the command ran." }),
+      attemptOf(2, {}),
+    ] },
+  }),
+  retried("tests.go-tests#2", {
+    seq: 2, status: "failed", durationMs: 388000, errorMessage: "The step's command exited with status 1.", logFileId: "file-r11-3",
+    binding: { surface: "fleet", workerId: "m-cyber", nodeId: "agent-0", attempts: [
+      attemptOf(1, { class: "nothing_ran", code: "pipeline_clone_failed", message: "The machine's git fetch failed before the command ran.", logFileId: "file-r11-1" }),
+      attemptOf(2, { class: "nothing_ran", code: "pipeline_clone_failed", message: "The machine's git fetch failed before the command ran.", logFileId: "file-r11-1b" }),
+      attemptOf(3, { class: "final", workerId: "m-cyber", message: "The step's command exited with status 1." }),
+    ] },
+  }),
+  retried("tests.os", { seq: 3, durationMs: 96000, logFileId: "file-r11-os", binding: { surface: "fleet", workerId: "m-cyber", attempts: [attemptOf(1, { workerId: "m-cyber", logFileId: "file-r11-os" })] } }),
+  retried("deploy.ship", { seq: 4, status: "skipped", errorCode: "pipeline_stage_blocked", result: { reason: "Not run: stage tests failed." }, binding: {} }),
+];
+
+const RETRIED_FILES: Row[] = ["file-r11-1", "file-r11-1b", "file-r11-2", "file-r11-3"].map((id) => (
+  { id: `artifact-${id}`, sourceConceptRef: `v1:library:file:${id}`, title: "log", format: "text", producedByRunId: "wr-11" } as unknown as Row
+));
+
+const waiting = (key: string, over: Record<string, unknown>) => stepRow(key, { runId: "v1:work:run:wr-12", ...over });
+
+/** A step waiting for its next attempt: the first ended, the row says when the second may start. */
+const RETRYING_STEPS: Row[] = [
+  waiting("checks.vet", { seq: 0, durationMs: 19000, logFileId: "" }),
+  waiting("tests.go-tests#1", {
+    seq: 1, status: "running", durationMs: 0, logFileId: "",
+    binding: { attempts: [attemptOf(1, { class: "nothing_ran", code: "pipeline_clone_failed", message: "The machine's git fetch failed before the command ran.", logFileId: "file-r12-1" })],
+      nextAttemptAt: new Date(Date.now() + 30_000).toISOString() },
+  }),
+  waiting("tests.go-tests#2", { seq: 2, status: "running", durationMs: 0, logFileId: "", binding: { surface: "fleet", workerId: "m-cyber" } }),
+  waiting("deploy.ship", { seq: 3, status: "pending", durationMs: 0, binding: {}, logFileId: "" }),
+];
+
+const RETRY_RUNS: Row[] = [
+  runRow({
+    id: "r-11", ownerUserId: VIEWER, pullRequest: 46, headBranch: "flaky-fetch", title: "Retry a failed fetch on the same machine",
+    sha: "8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b", conclusion: "failure", workRunId: "wr-11",
+    stages: [
+      { name: "checks", status: "passed", durationMs: 21000, steps: 1, failed: 0 },
+      { name: "tests", status: "failed", durationMs: 398000, steps: 3, failed: 1 },
+      { name: "deploy", status: "blocked", durationMs: 0, steps: 1, failed: 0 },
+    ],
+    ...finishedAfter(14, 440000),
+  }),
+  runRow({
+    id: "r-12", ownerUserId: VIEWER, pullRequest: 47, headBranch: "retry-wait", title: "Wait between a step's attempts",
+    sha: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", status: "in_progress", conclusion: "", workRunId: "wr-12", ...at(3), finishedAt: "", durationMs: 0,
+    stages: [
+      { name: "checks", status: "passed", durationMs: 19000, steps: 1, failed: 0 },
+      { name: "tests", status: "running", durationMs: 0, steps: 2, failed: 0 },
+      { name: "deploy", status: "waiting", durationMs: 0, steps: 1, failed: 0 },
+    ],
+  }),
+];
+
 /** The last 40 lines a failing Go shard prints, as the content route's suffix range answers them. */
 export const FAILED_LOG = [
   "=== RUN   TestCartTotals",
@@ -206,6 +285,14 @@ export const PIPELINES_SEED: FakeSeed = {
   pipelineRuns: RUNS,
   workSteps: { "wr-7": FAILED_STEPS, "wr-8": RUNNING_STEPS, "wr-10": OUTSIDE_STEPS, "wr-uncertain": uncertainStepRows() },
   runArtifacts: { "wr-7": FAILED_FILES },
+};
+
+/** Runs whose steps took more than one attempt, with the machines that ran them. */
+export const PIPELINES_RETRIES_SEED: FakeSeed = {
+  ...PIPELINES_SEED,
+  pipelineRuns: [...RETRY_RUNS, ...(PIPELINES_SEED.pipelineRuns ?? [])],
+  workSteps: { ...PIPELINES_SEED.workSteps, "wr-11": RETRIED_STEPS, "wr-12": RETRYING_STEPS },
+  runArtifacts: { ...PIPELINES_SEED.runArtifacts, "wr-11": RETRIED_FILES },
 };
 
 /** A pipeline connected, nothing run yet. */
@@ -254,6 +341,27 @@ export const ALLOWED_MACHINE = {
   lastSeenAt: new Date().toISOString(),
 } as unknown as Row;
 
+/** The shop's manifest with a step that needs Docker: it can run only on one of the viewer's machines. */
+export const PREVIEW_NEEDS_DOCKER = {
+  ...(PREVIEW as unknown as Record<string, unknown>),
+  stages: [
+    { name: "checks", on: [], channel: "", steps: [previewStep("vet"), previewStep("lint")] },
+    { name: "tests", on: [], channel: "", steps: [previewStep("go-tests", { packages: "affected", shards: 2 }), previewStep("os", { bucket: "os", needs: ["docker"] })] },
+    { name: "deploy", on: ["push"], channel: "", steps: [previewStep("ship", { secrets: ["SHOP_TOKEN"] })] },
+  ],
+  needs: ["docker"],
+} as unknown as Row;
+
+/** A machine of the viewer's whose own policy allows pipeline steps and whose owner switched Host commands off in Fleet. */
+export const HOST_COMMANDS_OFF_MACHINE = {
+  ...(ALLOWED_MACHINE as unknown as Record<string, unknown>),
+  id: "v1:worker:registration:m-raider",
+  name: "msi-raider",
+  displayName: "MSI Raider",
+  capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 5 } },
+  ownerFeatures: { headless: false },
+} as unknown as Row;
+
 /** The shop's source with no pipeline yet: what Connect pipeline opens over. */
 export const PIPELINES_UNCONNECTED_SEED: FakeSeed = {
   packages: PACKAGES.slice(0, 1),
@@ -261,6 +369,9 @@ export const PIPELINES_UNCONNECTED_SEED: FakeSeed = {
   pipelineRuns: [],
   pipelinePreview: PREVIEW,
 };
+
+/** The shop's unconnected source whose manifest has a step that needs a machine of the viewer's. */
+export const PIPELINES_HOST_COMMANDS_SEED: FakeSeed = { ...PIPELINES_UNCONNECTED_SEED, pipelinePreview: PREVIEW_NEEDS_DOCKER };
 
 /** Pipelines on two of the list seed's sources, for the Overview map's Checks nodes. */
 export function mapPipelines(): Pick<FakeSeed, "pipelines" | "pipelineRuns"> {

@@ -20,6 +20,7 @@ shape workspace workspaceFull {
 @row
 shape executionBinding executionBindingFull {
   row.id
+  row.createdAt
   runId
   ownerUserId
   resource
@@ -27,4 +28,6 @@ shape executionBinding executionBindingFull {
   machineId
   machineOwnerUserId
   expiresAt
+  generation
+  stateLost
 }

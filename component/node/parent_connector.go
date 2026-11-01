@@ -470,6 +470,15 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 			qpsink.DispatchModelProbeProgress(payload.ModelProbeForwardProgress)
 		}
 
+	case *nodev1.NodeServerMessage_AppSignInForwardResponse:
+		// The machine was told about a sign-in this node forwarded, or why not.
+		pc.mu.Lock()
+		ssink := pc.workerForwardSink
+		pc.mu.Unlock()
+		if ssink != nil {
+			ssink.DispatchAppSignIn(payload.AppSignInForwardResponse)
+		}
+
 	case *nodev1.NodeServerMessage_AppCallForwardResponse:
 		// Terminal answer for an app-door call this node forwarded (the
 		// planner/app-source design, section 3a).

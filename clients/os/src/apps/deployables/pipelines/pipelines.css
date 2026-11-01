@@ -289,8 +289,30 @@
   color: var(--os-muted);
 }
 
+/* ---- a step's attempts ---------------------------------------------------- *
+ * The step detail's own column and type, for a step that took more than one
+ * attempt: a line each, under the name it belongs to. The link is the one the
+ * failure account carries (.pipeline-log-acts), at the same gap. */
+.pipeline-attempts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 12px 40px;
+  list-style: none;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+.pipeline-attempt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 18px;
+  min-width: 0;
+}
+
 @media (max-width: 560px) {
-  .pipeline-step-failure {
+  .pipeline-step-failure,
+  .pipeline-attempts {
     padding-left: 0;
   }
   .os-rail.pipeline-stops {

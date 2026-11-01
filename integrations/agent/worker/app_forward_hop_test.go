@@ -100,6 +100,17 @@ func (l *appLink) Send(nodeId string, msg *nodev1.NodeClientMessage) bool {
 	}
 	crossed := wire(l.t, msg, &nodev1.NodeClientMessage{})
 	switch payload := crossed.GetPayload().(type) {
+	case *nodev1.NodeClientMessage_AppSignInForwardRequest:
+		l.wg.Add(1)
+		go func() {
+			defer l.wg.Done()
+			l.handler.HandleForwardedAppSignIn(l.streamCtx, payload.AppSignInForwardRequest, func(m *nodev1.NodeServerMessage) error {
+				back := wire(l.t, m, &nodev1.NodeServerMessage{})
+				l.router.DispatchAppSignIn(back.GetAppSignInForwardResponse())
+				return nil
+			})
+		}()
+		return true
 	case *nodev1.NodeClientMessage_AppCallForwardRequest:
 		l.mu.Lock()
 		l.requests = append(l.requests, payload.AppCallForwardRequest)
@@ -164,9 +175,10 @@ type machineHarness struct {
 	controls []*memqlv1.AppSessionControl
 	// answer is the structured result a session returns; hang leaves the
 	// session running until it is cancelled.
-	answer      string
-	hang        bool
-	quotaApp    string
+	answer string
+	hang   bool
+	// refusals are the outcomes an app reports before it does any work.
+	refusals    map[string]workerservice.AppSessionOutcome
 	streamUntil <-chan struct{}
 }
 
@@ -178,7 +190,7 @@ func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionR
 	m.mu.Lock()
 	m.starts = append(m.starts, req)
 	m.actors = append(m.actors, actor)
-	hang, answer, quotaApp, streamUntil := m.hang, m.answer, m.quotaApp, m.streamUntil
+	hang, answer, refusals, streamUntil := m.hang, m.answer, m.refusals, m.streamUntil
 	m.mu.Unlock()
 
 	var finish func(workerservice.AppSessionOutcome)
@@ -192,8 +204,8 @@ func (m *machineHarness) open(ctx context.Context, req workerservice.AppSessionR
 	})
 	if !hang {
 		go func() {
-			if req.App == quotaApp {
-				finish(workerservice.AppSessionOutcome{ExitCode: 1, Error: "You've hit your weekly limit", Usage: workerservice.AppSessionUsage{Known: true}})
+			if refusal, refused := refusals[req.App]; refused {
+				finish(refusal)
 				return
 			}
 			seq := uint64(1)

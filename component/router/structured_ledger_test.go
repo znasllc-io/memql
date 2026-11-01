@@ -278,6 +278,18 @@ func TestAnUntypedFailureIsNamedByItsCategory(t *testing.T) {
 	}
 }
 
+// A REFUSED APP SAYS WHAT REFUSED IT in the record's own words: the decision row
+// is how a person learns the app needs a sign-in, and the app's sentence stays out
+// of it because a decision line can be read by someone the machine was lent to.
+func TestAnAppRefusalIsNamedByWhatItRefused(t *testing.T) {
+	if got := FailureReason(&memql.AppAuthRefused{Reason: "Not logged in on /Users/alice"}); got != "failed when called: app_auth_refused: the app's login on that machine is missing or expired" {
+		t.Errorf("FailureReason(signed out) = %q", got)
+	}
+	if got := FailureReason(fmt.Errorf("app session: %w", &memql.AppQuotaRefused{Reason: "usage limit for alice@example.com"})); got != "failed when called: app_quota_refused: the app's plan is out of usage" {
+		t.Errorf("FailureReason(out of usage) = %q", got)
+	}
+}
+
 // usageCloud reports what it measured, the way the fleet and Anthropic
 // structured providers do.
 type usageCloud struct{ everyCloud }

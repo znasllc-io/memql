@@ -13,12 +13,14 @@ before an operator removes that exact marker under the shared exclusive lock.
 
 import argparse
 import contextlib
+import datetime
 import fcntl
 import hashlib
 import json
 import os
 import pathlib
 import pwd
+import re
 import secrets
 import signal
 import stat
@@ -31,6 +33,14 @@ TOKEN_ENV = "MEMQL_HOST_BUILD_LOCK_TOKEN"
 DEFAULT_MIN_FREE_MIB = 20480
 MARKER_NAME = "local-build.json"
 CANCEL_GRACE_SECONDS = 5
+# The Cockpit's local model call fence, read by the rule its own readers apply
+# (cockpit/internal/worker/capacity/host_inference.go): a version 2 record names
+# when it ends; one that names none ends INFERENCE_FENCE_BOUND_SECONDS after its
+# file was last written (the Cockpit's InferenceFenceBound).
+INFERENCE_NAME = "inference-active.json"
+INFERENCE_RECORD_VERSION = 2
+INFERENCE_FENCE_BOUND_SECONDS = 30 * 60
+RFC3339 = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})([.,]\d+)?(Z|[+-]\d{2}:\d{2})", re.ASCII)
 
 
 class GuardError(RuntimeError):
@@ -64,6 +74,65 @@ def read_marker(root):
         return marker
     finally:
         os.close(fd)
+
+
+def rfc3339_seconds(text):
+    """The epoch seconds of an RFC 3339 time as the Cockpit writes it, else None.
+
+    The Cockpit writes Go's RFC3339Nano in UTC. Text no Cockpit writes can still
+    be read differently here than by Go's parser; either answer is then a time
+    the record itself names, or the file's age when neither reads one.
+    """
+    match = RFC3339.fullmatch(text) if isinstance(text, str) else None
+    if match is None:
+        return None
+    year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
+    try:
+        when = datetime.datetime(year, month, day, hour, minute, second, tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError:
+        return None
+    zone = match.group(8)
+    if zone != "Z":
+        hours, minutes = int(zone[1:3]), int(zone[4:6])
+        if hours > 23 or minutes > 59:
+            return None
+        when -= (-1 if zone[0] == "-" else 1) * (hours * 3600 + minutes * 60)
+    fraction = match.group(7)
+    return when + (float("0." + fraction[1:]) if fraction else 0)
+
+
+def inference_fence_end(root):
+    """When the retained model call fence ends, in epoch seconds; None for no fence.
+
+    A record that is not a regular file is never interpreted, as the Cockpit
+    never writes one: GuardError, whose recovery is an operator's. A record
+    that names no readable end (an older Cockpit's, or a write that did not
+    complete) ends the bound after its file was last written.
+    """
+    path = root / INFERENCE_NAME
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        raise GuardError("An inference record that cannot be verified needs reconciliation before a local build can start")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino) or not stat.S_ISREG(opened.st_mode):
+            raise GuardError("An inference record that cannot be verified needs reconciliation before a local build can start")
+        data = os.read(fd, 4096)
+    finally:
+        os.close(fd)
+    try:
+        record = json.loads(data)
+    except (ValueError, RecursionError):
+        record = None
+    if isinstance(record, dict) and record.get("version") == INFERENCE_RECORD_VERSION:
+        until = rfc3339_seconds(record.get("until"))
+        if until is not None:
+            return until
+    return opened.st_mtime + INFERENCE_FENCE_BOUND_SECONDS
 
 
 def recovery_message():
@@ -104,6 +173,16 @@ def host_build_guard(inherited_fd=None, *, _completed_record=None):
             raise GuardError("This machine is already building or running a Fleet workbench; retry when it finishes") from error
         if os.fstat(fd).st_size:
             raise GuardError("An interrupted Fleet pipeline needs reconciliation before a local build can start")
+        # Inference may outlive the worker process that held the shared lock, so
+        # its record fences builds until the time it names: the call's own
+        # deadline, at which its request is cut off. Before then a PID's
+        # disappearance proves nothing. Past it the record reads as absent, as
+        # for the Cockpit's readers. It is another program's record, so this
+        # helper leaves it for the Cockpit's next exclusive reader to remove.
+        end = inference_fence_end(root)
+        if end is not None and time.time() <= end:
+            ends = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end))
+            raise GuardError(f"A local model call may still be running on this machine (until {ends} at the latest); retry after it ends")
         for path in root.glob("workbench-*.lock"):
             info = path.lstat()
             if not regular_owned(info) or info.st_size:
