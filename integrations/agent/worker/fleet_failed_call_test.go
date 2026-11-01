@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -310,9 +312,8 @@ func TestAFailedCallNamesTheMachineItWasPlacedOn(t *testing.T) {
 		}
 	})
 	t.Run("cancelled while it ran", func(t *testing.T) {
-		started := make(chan struct{})
-		h := newModelHop(t, func(ctx context.Context, _ workerservice.ModelCallRequest, _ func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
-			close(started)
+		h := newModelHop(t, func(ctx context.Context, _ workerservice.ModelCallRequest, emit func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+			emit(workerservice.ModelCallDelta{Seq: 1, Content: "a partial answer"})
 			<-ctx.Done()
 			return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishCancelled}
 		}, nil)
@@ -320,11 +321,7 @@ func TestAFailedCallNamesTheMachineItWasPlacedOn(t *testing.T) {
 		f.selfNodeId, f.forward = nodeA, h.link.router
 		ctx, cancel := context.WithCancel(authorityCtx(t, h.owner))
 		defer cancel()
-		go func() {
-			<-started
-			cancel()
-		}()
-		res, err := f.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+		res, err := f.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat, OnDelta: func(string) { cancel() }})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("err = %v, want the cancellation", err)
 		}
@@ -332,6 +329,146 @@ func TestAFailedCallNamesTheMachineItWasPlacedOn(t *testing.T) {
 			t.Fatalf("result beside the cancellation = %+v, want the machine it was running on", res)
 		}
 	})
+}
+
+// A forward's sender has only the machine's own word that the call arrived. The
+// holding replica may still be queueing it behind a full slot when the caller's
+// deadline fires, and a machine that never saw a call cannot have failed it. On a
+// two-replica fleet, charging it would make a busy machine read as a failing one
+// depending on which replica the caller landed on.
+func TestAForwardedCallNothingCameBackFromNamesNoMachine(t *testing.T) {
+	machineCalls := &atomic.Int32{}
+	h := newModelHop(t, func(context.Context, workerservice.ModelCallRequest, func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+		machineCalls.Add(1)
+		return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop}
+	}, nil)
+	f := newFleetInference(t, h.store)
+	f.selfNodeId, f.forward = nodeA, h.link.router
+	w := h.link.handler.registry.WorkerById("laptop")
+	for range 2 {
+		if err := w.AcquireModel(context.Background(), hopModel, 0); err != nil {
+			t.Fatal(err)
+		}
+		defer w.ReleaseModel(hopModel)
+	}
+	ctx, cancel := context.WithTimeout(authorityCtx(t, h.owner), 200*time.Millisecond)
+	defer cancel()
+	res, err := f.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the caller's deadline", err)
+	}
+	if machineCalls.Load() != 0 {
+		t.Fatalf("the machine ran %d calls, want none: its slots were taken", machineCalls.Load())
+	}
+	if res.ExecutionSurface != "" {
+		t.Fatalf("result beside the deadline = %+v, want no machine named: none is known to have seen the call", res)
+	}
+}
+
+func declined(code string) workerservice.ModelCallOutcome {
+	return workerservice.ModelCallOutcome{Error: "declined", ErrorCode: code, FinishReason: workerservice.ModelFinishError}
+}
+
+// A machine that declines a call before handing it to a runtime is not failing:
+// it is at its cap, its advertisement was a beat stale, or the call itself was
+// wrong. The degraded check's verdict is machine-wide, so charging it would set a
+// healthy machine aside for every model it holds.
+func TestAMachineThatDeclinedACallIsNotNamed(t *testing.T) {
+	for _, code := range []string{
+		"model_not_offered", "model_concurrency_exceeded", "unsupported_kind", "modality_unsupported",
+		"payload_unavailable", "schema_unsupported", "tools_unsupported", "duplicate_request",
+	} {
+		t.Run(code+" on this replica", func(t *testing.T) {
+			h := newFailingFleet(t)
+			h.f.registry.WorkerById("flaky").SetModelCallFunc(ending(h.flakyCalls, declined(code)))
+			res, err := h.f.Call(authorityCtx(t, failedCallOwner), memqlengine.FleetCallRequest{ActingUserId: failedCallOwner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+			var failed *workerservice.ModelCallFailed
+			if !errors.As(err, &failed) || failed.Code() != code {
+				t.Fatalf("err = %v, want the machine's own decline with its code", err)
+			}
+			if res.ExecutionSurface != "" {
+				t.Fatalf("result beside the decline = %+v, want no machine named", res)
+			}
+		})
+		t.Run(code+" across the hop", func(t *testing.T) {
+			h := newModelHop(t, func(context.Context, workerservice.ModelCallRequest, func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+				return declined(code)
+			}, nil)
+			f := newFleetInference(t, h.store)
+			f.selfNodeId, f.forward = nodeA, h.link.router
+			res, err := f.Call(authorityCtx(t, h.owner), memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+			if err == nil {
+				t.Fatal("the machine declined the call and the caller was told it worked")
+			}
+			if res.ExecutionSurface != "" {
+				t.Fatalf("result beside the decline = %+v, want no machine named", res)
+			}
+		})
+	}
+}
+
+// Everything else a machine ends a call with counts, a code this engine has never
+// seen included: it says the machine took the call and it did not end well.
+func TestAMachineThatFailedACallIsNamedWhateverItsCode(t *testing.T) {
+	for _, code := range []string{"runtime_error", "timeout", "worker_stopped", "", "a_code_from_a_newer_cockpit"} {
+		t.Run("code "+code, func(t *testing.T) {
+			h := newFailingFleet(t)
+			h.f.registry.WorkerById("flaky").SetModelCallFunc(ending(h.flakyCalls, declined(code)))
+			res, err := h.f.Call(authorityCtx(t, failedCallOwner), memqlengine.FleetCallRequest{ActingUserId: failedCallOwner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+			if err == nil {
+				t.Fatal("the machine failed the call and the caller was told it worked")
+			}
+			if res.ExecutionSurface != flakySurface {
+				t.Fatalf("result beside the failure = %+v, want %q", res, flakySurface)
+			}
+		})
+	}
+}
+
+// The same declines through the whole path: they leave no evidence, so a machine
+// at its cap keeps its place in the order.
+func TestAMachineDecliningItsCallsIsNotSetAside(t *testing.T) {
+	h := newFailingFleet(t)
+	h.f.registry.WorkerById("flaky").SetModelCallFunc(ending(h.flakyCalls, declined("model_concurrency_exceeded")))
+	ctx := failedCallCtx(t)
+	for i := 0; i < 5; i++ {
+		if _, err := h.ask(t, ctx); err == nil {
+			t.Fatalf("call %d: the machine declined it and the caller was told it worked", i)
+		}
+		if row := h.ledger.next(t); row["outcome"] != "error" || row["executionSurface"] != "" {
+			t.Fatalf("call %d wrote outcome=%v executionSurface=%v, want error naming no machine", i, row["outcome"], row["executionSurface"])
+		}
+	}
+	if h.flakyCalls.Load() != 5 || h.steadyCalls.Load() != 0 {
+		t.Fatalf("flaky took %d calls and steady %d, want the machine at its cap still first", h.flakyCalls.Load(), h.steadyCalls.Load())
+	}
+}
+
+// modelCallDeclines copies what the Cockpit knows, and nothing else ties the two
+// together. A new refusal missing from the list would read as a machine failing,
+// so every code the Cockpit refuses a call with has to be on it. CodeWorkerStopped
+// is the one exception, on purpose: the stream went, and that is the machine.
+func TestEveryRefusalTheCockpitSendsIsADecline(t *testing.T) {
+	src, err := os.ReadFile("../../../cockpit/internal/worker/modelcall/session.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?m)^\s*(Code\w+)\s*=\s*"([a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
+		values[m[1]] = m[2]
+	}
+	sent := regexp.MustCompile(`(?:refuse\(|sendRefusal\(sender, requestID, )(Code\w+)`).FindAllStringSubmatch(string(src), -1)
+	if len(sent) == 0 || len(values) == 0 {
+		t.Fatal("scanned the Cockpit's session and found no refusals: the scan is broken, not the list")
+	}
+	for _, m := range sent {
+		if m[1] == "CodeWorkerStopped" {
+			continue
+		}
+		if !modelCallDeclines[values[m[1]]] {
+			t.Errorf("the Cockpit refuses a call with %s (%q), and modelCallDeclines does not list it", m[1], values[m[1]])
+		}
+	}
 }
 
 // A lent machine's failure says whose it was, under the rule a served call

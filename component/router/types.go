@@ -196,7 +196,7 @@ type CallRecord struct {
 	// beside the winning model's window, which is what makes an under-counted
 	// estimate diagnosable rather than merely wrong.
 	MinContextTokens int
-	// MachineOwnerUserId names whose machine served a local call. Empty until
+	// MachineOwnerUserId names whose machine took a local call. Empty until
 	// epic 4 (shared machines) fills it.
 	MachineOwnerUserId string
 

@@ -366,7 +366,7 @@ type FleetCallResult struct {
 	ExecutionSurface string
 	// MachineLabel is the human-readable name for a card or a log line.
 	MachineLabel string
-	// MachineOwnerUserId names WHOSE MACHINE served the call, and ONLY when
+	// MachineOwnerUserId names WHOSE MACHINE took the call, and ONLY when
 	// that owner is not the caller (epic memql#5327, design D15).
 	//
 	// EMPTY ON YOUR OWN MACHINE, deliberately, and repeating userId there
@@ -999,7 +999,7 @@ func (p *fleetProvider) ExecutionSurface() string {
 // inference runs on an enrolled machine and is never a metered vendor call.
 func (p *fleetProvider) Billing() string { return "local" }
 
-// MachineOwner reports whose machine served the last call, and "" when it was
+// MachineOwner reports whose machine took the last call, and "" when it was
 // the caller's own or when nothing has been served (epic memql#5327, D15).
 //
 // It satisfies a structural interface declared in component/router, beside

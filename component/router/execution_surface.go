@@ -59,7 +59,7 @@ func surfaceOf(p any) string {
 	return r.ExecutionSurface()
 }
 
-// machineOwnerReporter is what a provider says about WHOSE MACHINE served the
+// machineOwnerReporter is what a provider says about WHOSE MACHINE took the
 // most recent call.
 //
 // STRUCTURAL, beside surfaceReporter and for its reason: component/router pins
@@ -86,7 +86,7 @@ type machineOwnerReporter interface {
 	MachineOwner() string
 }
 
-// machineOwnerOf asks a provider whose machine served the call.
+// machineOwnerOf asks a provider whose machine took the call.
 func machineOwnerOf(p any) string {
 	r, ok := p.(machineOwnerReporter)
 	if !ok {
