@@ -320,6 +320,7 @@ var placementTable = concat(
 		{Receiver: Automation, Name: "mode", Forms: FormKeywords, Keys: modeKeys, Example: `@mode(queued, max=10)`},
 		{Receiver: Automation, Name: "template", Forms: FormFlag, Example: "@template"},
 		{Receiver: Automation, Name: "trigger", Forms: FormKeywords, Keys: triggerKeys, Example: `@trigger(event="node.created", concept="v1:cluster:node")`},
+		{Receiver: Automation, Name: "usesDeployerFleet", Forms: FormFlag, Example: "@usesDeployerFleet"},
 	},
 
 	// ---- Action / Capability --------------------------------------------
@@ -497,9 +498,10 @@ func concat(groups ...[]Placement) []Placement {
 // own Placement.Doc; every other placement shows this one (enforced by
 // TestEveryPlacementHasADoc).
 var Docs = map[string]string{
-	"retention":       docRetention,
-	"journalRequired": "Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming.",
-	"journalOnWrite":  "For a background event firing, hold the journal until its first engine graph write, failure or human wait. Successful no-ops leave no run or step rows. Manual runs and adopted runs keep their journal. Do not use for external or raw SQL effects that do not report an engine write. Cannot be combined with journalRequired.",
+	"retention":         docRetention,
+	"journalRequired":   "Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming.",
+	"journalOnWrite":    "For a background event firing, hold the journal until its first engine graph write, failure or human wait. Successful no-ops leave no run or step rows. Manual runs and adopted runs keep their journal. Do not use for external or raw SQL effects that do not report an engine write. Cannot be combined with journalRequired.",
+	"usesDeployerFleet": "Run each `builtin ai` call in this workflow on the fleet of the person who staged its package's DSL, on the Local route: their machines, then machines lent to them, and never an app session or a vendor. Only the model call borrows; the rest of the run stays the cluster. A refusal is an ordinary ai error. Cannot be used on a before-write hook.",
 	// Lifecycle / shared.
 	"disabled":             "Disable this definition.",
 	"description":          "Human-readable description of this definition. PREFER the /// doc-comment form (#2601): a /// block immediately above the declaration IS the description and wins over this annotation; @description remains the valid compatibility fallback -- the tree gate rejects the redundant long form (including a bare @description shadowed by a /// block). Aim for ~500 characters (editorial target).",

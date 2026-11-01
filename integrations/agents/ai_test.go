@@ -278,3 +278,53 @@ func TestStructuredPromptRejectsUndecodableObject(t *testing.T) {
 		}
 	}
 }
+
+// deployerFleetEngine answers the seam the way the engine does for a workflow that
+// declared @usesDeployerFleet.
+type deployerFleetEngine struct {
+	promptRecordingEngine
+	bindErr error
+	gotKey  any
+}
+
+type deployerFleetTestKey struct{}
+
+func (e *deployerFleetEngine) ContextForDeployerFleet(ctx context.Context) (context.Context, error) {
+	if e.bindErr != nil {
+		return nil, e.bindErr
+	}
+	return context.WithValue(ctx, deployerFleetTestKey{}, "the deployer"), nil
+}
+
+func (e *deployerFleetEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
+	e.gotKey = ctx.Value(deployerFleetTestKey{})
+	return e.promptRecordingEngine.InvokeAI(ctx, templateId, data)
+}
+
+// The model call runs on the context the seam returns, which is the whole of what
+// this executor does for a declared workflow.
+func TestTheBuiltinCallsTheModelOnTheDeployerSeamsContext(t *testing.T) {
+	engine := &deployerFleetEngine{promptRecordingEngine: promptRecordingEngine{reply: "ok"}}
+	cap := aiHandler(t, engine)
+	if _, err := cap.Handler(context.Background(), map[string]any{"templateId": "brief", "data": map[string]any{}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if engine.gotKey != "the deployer" {
+		t.Fatalf("the model call ran on %v, not the context the seam returned", engine.gotKey)
+	}
+}
+
+// A refusal is an ordinary ai error, names its prompt, and spends no model call:
+// nothing falls back to acting as the cluster.
+func TestADeployerFleetRefusalStopsTheCall(t *testing.T) {
+	engine := &deployerFleetEngine{bindErr: &memql.DeployerFleetRefusal{Domain: "shop", Reason: "no active package ships this domain"}}
+	cap := aiHandler(t, engine)
+	_, err := cap.Handler(context.Background(), map[string]any{"templateId": "brief", "data": map[string]any{}}, 0)
+	var refusal *memql.DeployerFleetRefusal
+	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), `ai("brief")`) {
+		t.Fatalf("err = %v, want the refusal, naming the prompt", err)
+	}
+	if engine.calls != 0 {
+		t.Fatal("a refused call reached the model")
+	}
+}

@@ -104,7 +104,14 @@ func PlanFingerprint(rep *Report) string {
 		// It never had: the Actor was a bare literal with no authority, so
 		// the gate refused every DSL-carrying automatic run, the cluster
 		// owner's included.
-		domains = append(domains, dd.Domain+"|"+boolWord(dd.Reserved, "reserved", "ok"))
+		entry := dd.Domain + "|" + boolWord(dd.Reserved, "reserved", "ok")
+		// EXCEPT WHICH WORKFLOWS WILL USE THE DEPLOYER'S MACHINES. That is a person's
+		// consent rather than a change to what the cluster can do, and a push adding one
+		// must wait for someone to read the review (deployer-fleet design, D13).
+		if len(dd.FleetWorkflows) > 0 {
+			entry += "|fleet=" + strings.Join(dd.FleetWorkflows, ",")
+		}
+		domains = append(domains, entry)
 	}
 	sort.Strings(domains)
 	parts = append(parts, "dsl="+strings.Join(domains, ";"))

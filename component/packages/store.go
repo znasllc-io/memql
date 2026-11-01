@@ -536,6 +536,13 @@ func (s *store) recordPackageDslDomains(ctx context.Context, packageId string, d
 		langparser.QuoteString(packageId), jsonLiteral(dslDomains)))
 }
 
+// recordPackageDslDeployer records who staged this package's DSL.
+func (s *store) recordPackageDslDeployer(ctx context.Context, packageId, userId string) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation recordPackageDslDeployer(packageId: %s, dslDeployedBy: %s)",
+		langparser.QuoteString(packageId), langparser.QuoteString(userId)))
+}
+
 func (s *store) recordUpstreamVersion(ctx context.Context, packageId, version string, updateAvailable bool) error {
 	return s.writeInternal(ctx, fmt.Sprintf(
 		"mutation recordPackageUpstreamVersion(packageId: %s, latestKnownVersion: %s, updateAvailable: %t)",

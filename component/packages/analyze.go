@@ -245,6 +245,7 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 			if c, ok := counts[d]; ok {
 				dr.Constructs = c.byKind
 				dr.Files = c.files
+				dr.FleetWorkflows = c.fleetWorkflows
 			}
 		}
 		if dr.Constructs == nil {
@@ -348,8 +349,9 @@ func namesPhrase(verb, none string, names []string) string {
 // ---------------------------------------------------------------------------
 
 type domainCounts struct {
-	byKind map[string]int
-	files  int
+	fleetWorkflows []string
+	byKind         map[string]int
+	files          int
 }
 
 // countConstructs counts declarations per domain, from the PARSED tree rather
@@ -383,10 +385,36 @@ func countConstructs(dslTree fs.FS) map[string]domainCounts {
 			if kind := constructKind(def); kind != "" {
 				dc.byKind[kind]++
 			}
+			if name := deployerFleetWorkflow(def); name != "" {
+				dc.fleetWorkflows = append(dc.fleetWorkflows, name)
+			}
 		}
+		sort.Strings(dc.fleetWorkflows)
 		out[domain] = dc
 	}
 	return out
+}
+
+// deployerFleetWorkflow is the name of the automation a parsed definition declares
+// @usesDeployerFleet on, or "". The compiler reads the flag off either the wrapper
+// or the body, so this does.
+func deployerFleetWorkflow(def languageAst.Node) string {
+	fn, ok := def.(*languageAst.FunctionDef)
+	if !ok {
+		return ""
+	}
+	body, ok := fn.Body.(*languageAst.AutomationDef)
+	if !ok {
+		return ""
+	}
+	for _, attrs := range [][]*languageAst.Attribute{fn.Attributes, body.Attributes} {
+		for _, attr := range attrs {
+			if attr != nil && attr.Name == "usesDeployerFleet" {
+				return fn.Name
+			}
+		}
+	}
+	return ""
 }
 
 // constructKind names the DSL construct a parsed definition is, or "" for a

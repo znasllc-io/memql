@@ -2363,6 +2363,16 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 
 A body compiles at load to a list of steps in the order written; nothing is reordered. Each call is one step: journaled on the run, previewed by a dry run, retried by `retry(n)` and by a resume. An `if` or a `switch` flattens into the steps of its branches, each carrying its branch's condition, so a switch compares with typed equality (`1 == "1"` is false). A logic called inside a run journals its statements as steps of that run.
 
+An automation in a package may declare `@usesDeployerFleet`, so that each
+`builtin ai` call it makes runs on the fleet of the person who staged the package's
+DSL, on the `Local` route. Without it an automation runs as the cluster, which
+reaches only a machine lent to everyone. Only the model call borrows, and a call
+with no person to act for is an ordinary `ai` error, so `on error continue` is how a
+workflow keeps its saved work when the machines are asleep.
+
+It cannot be used on a before-write hook, and it does not cover `agent` or
+`runAgentTurn`. [Sharing a machine](../operate/shared-machines.md) has the rules.
+
 An automation may declare `@journalRequired` when work must stop if its record
 cannot be confirmed. This requires a persisted run before starting, a step
 intent before its call, a receipt before advancing, and a terminal write before

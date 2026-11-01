@@ -2503,6 +2503,23 @@ mutation package recordPackageDslDomains {
   }
 }
 
+/// Who is staging this package's DSL, written just before the pointer moves
+/// (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D4). Not scoped to actor.userId
+/// for dslDomains' reason, since a deploy's stages hand off across nodes with no actor, and what
+/// is worth refusing is a caller naming whose machines serve the package's workflows. The same
+/// guard reserves the field against a raw write.
+@serverOnly
+mutation package recordPackageDslDeployer {
+  args {
+    packageId      string!
+    dslDeployedBy  string!
+  }
+  update {
+    id:            args.packageId
+    dslDeployedBy: args.dslDeployedBy
+  }
+}
+
 /// The D11 feeds' ONLY write. Both feeds -- the webhook and the poll -- converge here, and this
 /// mutation touches exactly the two fields section C marks as feed-owned. That narrowness is the
 /// design: a feed that could write anything else would be deciding to deploy, and deploying an
