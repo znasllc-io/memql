@@ -156,6 +156,8 @@ func TestOwnedWorkOutcomeRejectsBeforeEffectsAndRepairsBoundedly(t *testing.T) {
 					}
 					p := &outcomeProvider{steps: [][]common.ToolCall{tt.calls, second}}
 					r := testReplier()
+					saved := &workPromptEngine{}
+					r.engine = saved
 					executor := &questionExecutor{}
 					r.stamper = newToolRecorder(executor, r.logger)
 					var result *TurnResult
@@ -171,6 +173,9 @@ func TestOwnedWorkOutcomeRejectsBeforeEffectsAndRepairsBoundedly(t *testing.T) {
 					}
 					if repair && (err != nil || result == nil || !strings.Contains(result.FinalText, "invoice")) {
 						t.Fatalf("repair failed: result=%+v err=%v", result, err)
+					}
+					if repair && len(saved.savedContinuation) == 0 {
+						t.Fatal("repaired outcome did not persist its final source")
 					}
 					if !repair && (err == nil || !strings.Contains(err.Error(), "bounded repair")) {
 						t.Fatalf("invalid output accepted: %v", err)

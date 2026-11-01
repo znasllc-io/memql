@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "files": {
+    "question.txt": "Compare the three fictional public-library proposals using the supplied source excerpts. Cite file and section for each material claim; flag disagreements and missing cost/schedule evidence. Recommend what to verify next. No external lookup is needed.\n",
+    "sources.md": "# Public meeting excerpt, 2026-01-14\nProposal A: 100 seats; capital estimate USD 900000; opening target December 2026. Proposal B: 80 seats; capital estimate USD 750000; opening target March 2027.\n# Consultant revision, 2026-02-02\nProposal A: revised capital estimate USD 1100000, excludes site remediation. Proposal C: 120 seats, capital cost not supplied; no opening date.\n# Community survey summary, 2026-02-10\nDemand favors extended evening hours. No staffing budget or sample methodology is supplied.\n",
+    "NOTES.txt": "Unrelated operator notes: preserve exactly.\n",
+    ".memql-evaluation.json": "{\"schemaVersion\": 1, \"fixtureVersion\": \"1.0.0\", \"fixturePurpose\": \"planned cross-category evaluation; not a live result\"}\n"
+  }
+}

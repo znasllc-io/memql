@@ -311,6 +311,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	step := Step{
 		Verification:    declared.Verification,
+		Repeatable:      repeatableOf(c.spec, declared),
 		GitHubReadToken: declared.GitHubReadToken,
 		CheckoutHistory: declared.CheckoutHistory,
 		ImageBuild:      CloneImageBuild(declared.ImageBuild),
@@ -485,6 +486,24 @@ func (c *planCompiler) servicesFor(names []string) map[string]Service {
 	return out
 }
 
+// repeatableOf resolves whether a command step may be run again after an attempt
+// whose outcome is unknown (spec D5). Verification says yes on its own: such a
+// command only recomputes an answer from its inputs and produces nothing, so a
+// second run can only repeat the answer. Otherwise the step's own word decides,
+// and a step that says nothing takes the pipeline's, which is false unless the
+// manifest said otherwise. Validate has already refused a verification step that
+// says no, so the first rule never overrules what an author wrote.
+func repeatableOf(spec *Spec, step StepSpec) bool {
+	switch {
+	case step.Verification:
+		return true
+	case step.Repeatable != nil:
+		return *step.Repeatable
+	default:
+		return spec.Repeatable
+	}
+}
+
 func stepTimeoutSeconds(timeout string) int {
 	d := DefaultStepTimeout
 	if timeout != "" {
@@ -578,7 +597,7 @@ func stepNeeds(declared StepSpec) []string {
 // stepConsent refuses a step whose needs the owner has not consented to send
 // to the fleet, or whose secrets the owner has not allowed.
 func stepConsent(scope string, declared StepSpec, compute Compute, allowedSecrets []string) *Refusal {
-	if PlacementOf(declared) == PlacementFleet && compute != ComputeClusterAndFleet {
+	if (PlacementOf(declared) == PlacementFleet || PlacementOf(declared) == PlacementPool) && compute != ComputeClusterAndFleet {
 		if compute == "" {
 			compute = ComputeCluster
 		}

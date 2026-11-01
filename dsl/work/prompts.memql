@@ -100,11 +100,20 @@ prompt workConversationReply {
 @level("strong")
 @templateFile("prompts/workReplyReview.tmpl")
 prompt workReplyReview {
+ stepContract string
  canContinue bool!
  statement string!
  draft string!
  sources string!
  now string!
+}
+
+/// Convert a retained delegated result without repeating its operations.
+@level("strong")
+@templateFile("prompts/workOutcomeFormat.tmpl")
+prompt workOutcomeFormat {
+ saved string!
+ direction string!
 }
 
 /// Check evidence before committing a requested file. A missing source returns a conversational answer.

@@ -120,10 +120,8 @@ func TestRouteDeliveryForEveryState(t *testing.T) {
 	}
 }
 
-// The reader holds at most 16 messages and 16,000 runes for a run, and one
-// message is at most 4,000 runes. One more message past either bound is Not
-// delivered (limit); a message that fits exactly is queued.
-func TestGuidanceTargetsLockedRefusesPastTheCap(t *testing.T) {
+// One message remains bounded; lifetime journal growth is not an intake limit.
+func TestGuidanceTargetsLockedBoundsEachMessage(t *testing.T) {
 	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Run: run}}
 	fresh := map[string]map[string]any{"run": run}
@@ -141,12 +139,12 @@ func TestGuidanceTargetsLockedRefusesPastTheCap(t *testing.T) {
 	}
 
 	require.Equal(t, queued("Use Celsius."), deliver(guidanceTurns("run", repeatedText("Note.", 15)...), "Use Celsius."), "the sixteenth message fits")
-	require.Equal(t, limited("Use Celsius."), deliver(guidanceTurns("run", repeatedText("Note.", 16)...), "Use Celsius."), "sixteen already")
+	require.Equal(t, queued("Use Celsius."), deliver(guidanceTurns("run", repeatedText("Note.", 16)...), "Use Celsius."), "later guidance stays deliverable")
 
 	// Runes, not bytes: every letter here is two bytes.
 	twenty := strings.Repeat("ü", 20)
 	full := []string{strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 3990)}
-	require.Equal(t, limited(twenty), deliver(guidanceTurns("run", full...), twenty), "15,990 runes and 20 more")
+	require.Equal(t, queued(twenty), deliver(guidanceTurns("run", full...), twenty), "15,990 runes and 20 more")
 	exact := []string{strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 3980)}
 	require.Equal(t, queued(twenty), deliver(guidanceTurns("run", exact...), twenty), "15,980 runes and 20 more is exactly 16,000")
 
@@ -154,10 +152,7 @@ func TestGuidanceTargetsLockedRefusesPastTheCap(t *testing.T) {
 	require.Equal(t, limited(strings.Repeat("é", 4001)), deliver(nil, strings.Repeat("é", 4001)), "one message is at most 4,000 runes")
 }
 
-// The cap counts exactly what the reader reads for the run -- its targets with
-// no request, queued or received, under any spelling of its id -- so the
-// reader can never be handed more than 16 messages or 16,000 runes, and
-// nothing it never reads can refuse a message it would accept.
+// Only guidance for the selected run participates in its chronological journal.
 func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
 	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Run: run}}
@@ -190,56 +185,59 @@ func TestGuidanceTargetsLockedCountsWhatTheReaderReads(t *testing.T) {
 	require.Equal(t, []int{16, 87}, []int{messages, runes})
 
 	second := guidanceTargetsLocked(thisConversation, transcript, goals, fresh, "Use Fahrenheit.")
-	require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeNotDelivered, Reason: routeReasonLimit, Text: "Use Fahrenheit."}}, second)
+	require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeQueued, Text: "Use Fahrenheit."}}, second)
 
-	// However messages arrive, what is recorded never takes the reader past
-	// its bounds, and the bounds are reached.
+	// Many individually bounded messages remain deliverable.
 	var arriving askTranscript
-	refused := 0
 	for n := range 40 {
-		target := guidanceTargetsLocked(thisConversation, arriving, goals, fresh, strings.Repeat("é", 1+(n*1777)%4000))
-		require.Len(t, target, 1)
-		if target[0].Status != routeQueued {
-			refused++
-		}
-		arriving.Turns = append(arriving.Turns, AskTurn{ID: fmt.Sprintf("arriving-%d", n), Routed: &AskRouting{Targets: target}})
-		messages, runes := readerLoad(arriving, run)
-		require.LessOrEqual(t, messages, 16)
-		require.LessOrEqual(t, runes, 16000)
+		targets := guidanceTargetsLocked(thisConversation, arriving, goals, fresh, strings.Repeat("é", 1+(n*1777)%4000))
+		require.Len(t, targets, 1)
+		require.Equal(t, routeQueued, targets[0].Status)
+		arriving.Turns = append(arriving.Turns, AskTurn{ID: fmt.Sprintf("arriving-%d", n), Routed: &AskRouting{Targets: targets}})
 	}
-	require.NotZero(t, refused)
+	messages, _ = readerLoad(arriving, run)
+	require.Equal(t, 40, messages)
+
 }
 
-// A goal at its guidance cap is Not delivered (limit) through the whole
-// delivery: the request phase leaves a goal that waits on no request alone,
-// and the locked phase refuses it. Recording the refusal leaves the agent's
-// read exactly as it was, so nothing written can make that read fail.
-func TestDeliverRouteRefusesPastTheGuidanceCap(t *testing.T) {
+// Lifetime history is paged, so another bounded message remains deliverable.
+// The per-message limit still rejects oversized guidance without changing what
+// the agent can read from the retained journal.
+func TestDeliverRouteBeyondFormerLifetimeCapsKeepsGuidanceReadable(t *testing.T) {
 	run := conversationRun(map[string]any{"id": "run", "goalId": "goal", "status": "running"})
 	goals := []askRouteGoal{{Handle: "g1", TurnID: "weather", GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Request: "What's the weather in Tucson?", Run: run}}
 	for _, c := range []struct {
-		name    string
-		earlier []string
-		text    string
+		name      string
+		earlier   []string
+		text      string
+		oversized bool
 	}{
-		{"sixteen messages already", repeatedText("Note.", 16), "Use Celsius."},
-		{"15,990 runes and a 20-rune message", []string{strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 3990)}, strings.Repeat("ü", 20)},
+		{"sixteen messages already", repeatedText("Note.", 16), "Use Celsius.", false},
+		{"15,990 runes and a 20-rune message", []string{strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 4000), strings.Repeat("é", 3990)}, strings.Repeat("ü", 20), false},
+		{"one oversized message", repeatedText("Note.", 16), strings.Repeat("é", 4001), true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			transcript := askTranscript{Turns: guidanceTurns("run", c.earlier...)}
 			beforeMessages, beforeRunes := readerLoad(transcript, run)
 			kind, _, _ := routeDeliveryFor(run, nil)
 			require.Equal(t, deliverGuidance, kind)
-			// A zero engine: the request phase must not read or call anything
-			// for a goal that waits on no request.
+			// No request is pending, so the request phase must not call anything.
 			delivered, rest := (&MemQLEngine{}).deliverApprovalTargets(context.Background(), goals, c.text)
 			require.Empty(t, delivered)
 			require.Equal(t, goals, rest)
 			targets := guidanceTargetsLocked(thisConversation, transcript, rest, map[string]map[string]any{"run": run}, c.text)
-			require.Equal(t, []AskRouteTarget{{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeNotDelivered, Reason: routeReasonLimit, Text: c.text}}, targets)
-			transcript.Turns = append(transcript.Turns, AskTurn{ID: "over", Prompt: c.text, Routed: &AskRouting{Targets: targets}})
+			want := AskRouteTarget{GoalID: "goal", RunID: "run", Title: "Weather in Tucson", Status: routeQueued, Text: c.text}
+			if c.oversized {
+				want.Status, want.Reason = routeNotDelivered, routeReasonLimit
+			}
+			require.Equal(t, []AskRouteTarget{want}, targets)
+			transcript.Turns = append(transcript.Turns, AskTurn{ID: "later", Prompt: c.text, Routed: &AskRouting{Targets: targets}})
 			messages, runes := readerLoad(transcript, run)
-			require.Equal(t, []int{beforeMessages, beforeRunes}, []int{messages, runes})
+			if c.oversized {
+				require.Equal(t, []int{beforeMessages, beforeRunes}, []int{messages, runes})
+			} else {
+				require.Equal(t, []int{beforeMessages + 1, beforeRunes + len([]rune(c.text))}, []int{messages, runes})
+			}
 		})
 	}
 }

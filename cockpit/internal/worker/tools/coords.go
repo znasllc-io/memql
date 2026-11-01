@@ -13,35 +13,11 @@
 //     (long edge clamped to defaultMaxLongEdge) -- this is what the
 //     model actually sees and therefore the space it speaks.
 //
-// The worker maps emitted-space coordinates to logical input
-// coordinates deterministically from the current display geometry
-// plus the fixed downscale policy, so the mapping is stateless and
-// reproducible per call: no per-screenshot state is retained between
-// a screenshot and the mouse action that follows it. Screenshot
-// payloads report width/height (emitted), sourceWidth/sourceHeight
-// (captured), scale (emitted/captured) and logicalWidth/logicalHeight
-// so the mapping is reversible by the caller.
-//
-// Note: workerComputer.screenshot accepts a maxLongEdge override for
-// inspection/zoom use; mouse-action mapping always assumes the
-// default policy, so click targets should be derived from
-// default-policy screenshots.
-//
-// Multi-display (memql-cockpit#165): screenshot, mouse_move and
-// mouse_drag accept an optional `display` arg (an id from
-// display_info; default 0 = primary). Coordinates are ALWAYS
-// interpreted in the emitted-screenshot space OF THAT DISPLAY -- the
-// space a screenshot with the same `display` value emits -- never in
-// a cross-display virtual space, so the mapping stays stateless: the
-// worker never remembers which display was screenshotted last. The
-// mapper for display D maps emitted coords into D-local logical
-// coords and then offsets by D's origin in the virtual desktop
-// (OriginX/OriginY, negative for displays left of / above the
-// primary). When `display` is absent the primary-display mapping is
-// exactly the single-display behavior. Mapped logical points must
-// land inside SOME display rect (validatePointInDisplays): the
-// virtual desktop is a union of per-display rects, and a point in a
-// gap between monitors is out_of_bounds, not a valid target.
+// Target-addressed input retains this mapping with the exact screenshot receipt,
+// including a caller's maxLongEdge override, display/region origin and image
+// dimensions. Coordinates must be inside that emitted image and the bound
+// window. The mapper itself is pure; input_target.go owns receipt lifetime.
+// Legacy helpers below remain available to tests and read-only geometry code.
 //
 // Everything in this file is pure (no build tag, no display needed)
 // so CI can test it headlessly.
@@ -71,8 +47,8 @@ const (
 // CoordinateMapper converts between the emitted screenshot image
 // space (what the model sees) and the logical input space (what
 // RobotGo acts in), given the captured (physical) dimensions that
-// link the two. Construct one per call from live display geometry;
-// it holds no cross-call state.
+// link the two. Construct from the actual screenshot geometry;
+// the input guard retains it with that screenshot receipt.
 type CoordinateMapper struct {
 	LogicalW, LogicalH   int // logical input space (RobotGo points)
 	CapturedW, CapturedH int // physical capture dimensions

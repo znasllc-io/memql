@@ -478,8 +478,11 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		}
 	})
 	surface := AppSurfacePrefix + req.AppId + "@" + result.WorkerId
-	if quota := appQuotaRefusal(result); quota != nil {
-		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, quota
+	if refusal := appPreWorkRefusal(result); refusal != nil {
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, refusal
+	}
+	if refusal := appStoppedWithNoActions(result); refusal != nil {
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, refusal
 	}
 	if err != nil {
 		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true,
@@ -510,12 +513,85 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 	}, true, nil
 }
 
-func appQuotaRefusal(result workerservice.RunResult) *memqlengine.AppQuotaRefused {
-	if result.Status == workerservice.AppSessionStatusFailed && result.Usage.Known &&
-		result.Usage.InputTokens == 0 && result.Usage.OutputTokens == 0 &&
-		result.Model == "" && len(result.Result) == 0 && result.DroppedActions == 0 && result.RecordedActions == 0 &&
-		memqlengine.IsAppQuotaRefusal(result.ErrorMessage) {
+// appPreWorkRefusal is the typed refusal for a session the app turned away
+// before doing anything, or nil. It is the ONE proof that lets a call move to
+// another app: everything else may have caused effects, and running it again
+// would repeat them.
+//
+// WHAT PROVES IT is that nothing ran: no served model, no structured result, no
+// recorded or dropped action, no tokens and no prose of the model's own.
+//
+// usage.known IS NOT PART OF THE PROOF, deliberately. It says whether the app
+// reported its spend, and a refused turn may have nothing to report: Codex's
+// usage-limit refusal states no usage at all (measured on codex-cli 0.162.1,
+// 2026-10-29), which is why failover never fired for it while this required
+// Known. Tokens, when stated, still disprove it.
+//
+// A refusal's own sentence is not model prose. Claude Code repeats it as a
+// synthetic assistant message ("model":"<synthetic>", measured on 2.1.304), so it
+// reaches the transcript's answer as well as the error. Anything else there is
+// text a model wrote, and proves the turn got that far. Regression tests:
+// TestPreWorkRefusalRequiresNoModelWorkOrRecordedActions and the
+// TestAppFallbackCrossesReplica tests.
+func appPreWorkRefusal(result workerservice.RunResult) error {
+	if result.Status != workerservice.AppSessionStatusFailed ||
+		result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 ||
+		result.Model != "" || len(result.Result) != 0 || result.DroppedActions != 0 || result.RecordedActions != 0 ||
+		!strings.Contains(result.ErrorMessage, strings.TrimSpace(result.Answer)) {
+		return nil
+	}
+	switch {
+	case memqlengine.IsAppQuotaRefusal(result.ErrorMessage):
 		return &memqlengine.AppQuotaRefused{Reason: result.ErrorMessage}
+	case memqlengine.IsAppAuthRefusal(result.ErrorMessage):
+		return &memqlengine.AppAuthRefused{Reason: result.ErrorMessage}
+	}
+	return nil
+}
+
+// appStoppedMidWork is the typed stop for a session that did work on a step and then
+// stopped on its usage or login, or nil. It is the second proof that lets a step move,
+// and a takeover carries on rather than starting again (memql's app_takeover.go).
+//
+// THE MACHINE'S WORD, NOT THE SENTENCE. Before any work a sentence is enough, because
+// nothing can be lost. After work, a failure whose words merely resemble a limit would
+// put a second agent on top of whatever the first left half done, so only the app's own
+// protocol counts, and a Cockpit that predates the field gets no takeover.
+//
+// A DROPPED ACTION OR A STRUCTURED ANSWER STOPS IT. The first means nobody can say what
+// happened, and the second means the step has an answer. The delegate checks the journal
+// itself once it has read it (completeStop).
+func appStoppedMidWork(result workerservice.RunResult, appId string) *memqlengine.AppStoppedMidWork {
+	if result.Status != workerservice.AppSessionStatusFailed || result.StopReason == "" ||
+		result.DroppedActions != 0 || len(result.Result) != 0 {
+		return nil
+	}
+	return &memqlengine.AppStoppedMidWork{
+		AppId:           appId,
+		RegistrationId:  result.WorkerId,
+		Kind:            result.StopReason,
+		Reason:          result.ErrorMessage,
+		SessionId:       result.SessionId,
+		RecordedActions: result.RecordedActions,
+		LastWords:       result.Answer,
+		ArtifactIds:     result.ProducedArtifactIds,
+	}
+}
+
+// appStoppedWithNoActions is the chat door's case: one model call that stopped on its
+// usage or login having run no action, so nothing but tokens was spent and the next app
+// can simply answer the same prompt. A chat call with actions has no step to hand over,
+// and is returned as the failure it is.
+func appStoppedWithNoActions(result workerservice.RunResult) error {
+	if result.Status != workerservice.AppSessionStatusFailed || result.RecordedActions != 0 ||
+		result.DroppedActions != 0 || len(result.Result) != 0 {
+		return nil
+	}
+	switch result.StopReason {
+	case workerservice.AppStopOutOfUsage:
+		return &memqlengine.AppQuotaRefused{Reason: result.ErrorMessage}
+	case workerservice.AppStopSignedOut:
+		return &memqlengine.AppAuthRefused{Reason: result.ErrorMessage}
 	}
 	return nil
 }

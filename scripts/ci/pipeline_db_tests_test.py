@@ -32,12 +32,12 @@ class DatabaseBudgets(unittest.TestCase):
                 execute.assert_called_once_with(["./component/memql"], self.classes, self.parallelism)
 
     def test_real_table_preserves_every_selected_package_and_budget(self):
-        packages = ["component/memql", "component/packages", "integrations/work", "integrations/library", "component/campaigns", "component/pipelinerun", "component/memql/sense"]
+        packages = ["component/memql", "component/packages", "integrations/work", "integrations/library", "integrations/release", "component/campaigns", "component/pipelinerun", "component/memql/sense"]
         selected = [runner.MODULE + p for p in packages]
         commands = runner.commands(selected, self.classes, self.parallelism)
         self.assertCountEqual([p for _, command in commands for p in command[6:]], selected)
         by_class = dict(commands)
-        for name, timeout in [("memql", "900s"), ("packages", "300s"), ("work", "300s"), ("library", "180s"), ("campaigns", "600s"), ("default", "180s")]:
+        for name, timeout in [("memql", "900s"), ("packages", "300s"), ("work", "300s"), ("library", "180s"), ("release", "300s"), ("campaigns", "600s"), ("default", "180s")]:
             self.assertEqual(by_class[name][:6], ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=" + timeout])
 
     def test_shared_parallelism_is_bounded_and_not_inherited_from_cpu_count(self):

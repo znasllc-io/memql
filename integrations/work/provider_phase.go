@@ -28,6 +28,13 @@ type providerPhase struct {
 	expiresAt              time.Time
 }
 
+// Return only the phase binding. Its caller owns the context and keeps the
+// package's no-returned-authority-context invariant.
+func bindProviderPhase(rc common.RunContext, phase providerPhase) providerPhase {
+	phase.runID, phase.goalID, phase.ownerID = rc.RunId, rc.GoalId, rc.OwnerUserId
+	return phase
+}
+
 // Called under the workload gate after an owner-scoped fresh run read. A phase
 // context stays bound to that phase even after the run resumes execution.
 func (i *Integration) admitProviderPhase(ctx context.Context, rc common.RunContext, run map[string]any) error {

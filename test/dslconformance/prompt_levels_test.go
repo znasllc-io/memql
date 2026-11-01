@@ -64,6 +64,10 @@ var promptLevels = map[string]string{
 	// Distinguishing supported observations from inferred scope, cause or safety
 	// needs judgment over the recorded receipts before a final answer is delivered.
 	"workReplyReview": "strong",
+	// Repairing a retained delegated answer must preserve observed effects,
+	// owner direction and missing-evidence limits without repeating operations.
+	// That judgment belongs to the same strong tier as the final answer review.
+	"workOutcomeFormat": "strong",
 	// Quick conversational replies have no research, file or tool obligations.
 	// Fast avoids paying for a strong agent loop after the classifier already
 	// excluded those tasks; the run still carries its ordinary call/time budget.

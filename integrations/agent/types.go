@@ -7,6 +7,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -112,15 +113,24 @@ type RetrievedChunk struct {
 // must implement it even though lightweight replier fixtures need only the
 // methods exercised by their test. The app asserts this at compile time.
 type WorkRuntime interface {
-	RecoverWorkModelCall(context.Context, string, int, int, []common.ChatMessage) (bool, error)
-	PauseWorkForBudget(context.Context, *memql.RunCeilingError, []common.ChatMessage) error
+	ReadLegacyWorkOutcome(context.Context) (*memql.WorkDelegatedOutcome, error)
+	WorkDelegatedOutcomeSource(context.Context, string, []common.ChatMessage) ([]common.ChatMessage, error)
+	FormatWorkOutcome(context.Context, memql.WorkDelegatedOutcome, json.RawMessage) (string, error)
+	ReadCompletedWorkOutcomeFormat(context.Context, memql.WorkDelegatedOutcome) (string, error)
+	ReadWorkReplanSources(context.Context) (string, error)
 	ReadWorkGuidance(context.Context) ([]memql.WorkGuidance, error)
 	AcknowledgeWorkGuidance(context.Context, []string) error
+	RecoverWorkModelCall(context.Context, string, int, int, []common.ChatMessage) (bool, error)
+	PauseWorkForBudget(context.Context, *memql.RunCeilingError, []common.ChatMessage) error
+	ReadWorkGuidancePage(context.Context, memql.WorkGuidanceCursor) (memql.WorkGuidancePage, error)
+	AcknowledgeWorkGuidancePage(context.Context, memql.WorkGuidanceCursor) error
 	WorkCallFailure(context.Context) error
 	PrepareWorkTool(context.Context) error
 	ContextWithWorkCallDeadline(context.Context) (context.Context, context.CancelFunc, error)
 	SaveWorkContinuation(context.Context, []common.ChatMessage) error
 	DelegatedWorkHumanWait(context.Context, string) error
 	RestoreWorkContinuation(context.Context, []common.ChatMessage) ([]common.ChatMessage, error)
+	ReadWorkReplyReview(context.Context) (memql.WorkReplyReviewCheckpoint, error)
+	SaveWorkReplyReview(context.Context, memql.WorkReplyReviewBinding, json.RawMessage) error
 	CompactWorkContext(context.Context, []common.ChatMessage, []common.ToolDefinition, int) ([]common.ChatMessage, error)
 }

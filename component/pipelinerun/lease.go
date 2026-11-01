@@ -44,9 +44,11 @@ import (
 //     nothing of this drive writes again.
 //
 // A LOST LEASE STOPS EVERY WRITE AND CANCELS NOTHING. The replica that took
-// the run over re-sends each step that has no receipt with the SAME attempt,
-// and the runner re-attaches it by (run, step key, attempt); cancelling what is
-// in flight here would kill the work it is re-attaching to.
+// the run over re-sends each step whose attempt in flight has no recorded end
+// with the SAME attempt, which the runner re-attaches by (run, step key,
+// attempt), and continues a step between two attempts at the next one, from
+// its row (resume); cancelling what is in flight here would kill the work it
+// is re-attaching to.
 
 const (
 	// leaseRenewEvery is how often a driver renews its lease.

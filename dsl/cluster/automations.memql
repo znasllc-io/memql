@@ -288,10 +288,13 @@ automation releasePrepareCandidateWorkflow {
   // Empty package selections are explicitly planned skips, not executed tests.
   // A pass a failed-only re-run carried from an earlier attempt of the same
   // release qualifies only with carriedFrom, the receipt chain coverage proved
-  // natively (integrations/release/candidate_carried.go). Blocked or
-  // undeclared skips fail natively.
+  // natively (integrations/release/candidate_carried.go). A pass reused from the
+  // run that tested the same tree qualifies only with reusedFrom, the source
+  // coverage proved the same way and the candidate records
+  // (integrations/release/candidate_reused.go). Blocked or undeclared skips fail
+  // natively.
   if facts.skipped.any(item => item.code != "pipeline_not_affected"
-    && !(item.code == "pipeline_passed_earlier" && item.carriedFrom != nil)) {
+    && !(item.code == "pipeline_passed_earlier" && (item.carriedFrom != nil || item.reusedFrom != nil))) {
     builtin releaseCandidateRefuse()
   }
   builtin releaseCandidateCheckVersions()

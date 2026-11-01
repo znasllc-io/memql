@@ -17,11 +17,9 @@ const buildHasComputerUse = true
 // uses (computer_computeruse.go) -- so the descriptor can never drift from
 // what the router actually serves. Sorted for a stable wire shape.
 //
-// window_list / window_focus are advertised since memql-cockpit#167
-// shipped real implementations (macOS CGWindowList, Linux/X11 EWMH).
-// On a Wayland session they return a structured
-// unsupported_on_platform failure at call time -- the descriptor's
-// displayServer field is the up-front signal for that.
+// This returns the vocabulary; computeCapabilities filters refused actions.
+// inputTargetPolicy reports which inputs have a target-addressed backend;
+// legacy global input handlers cannot be reached through the dispatcher.
 func supportedComputerActions() []string {
 	out := make([]string, 0, len(computerActionHandlers))
 	for action := range computerActionHandlers {

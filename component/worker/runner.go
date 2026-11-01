@@ -277,6 +277,10 @@ type RunResult struct {
 	// common case, since Claude Code's headless output states none.
 	Model  string
 	Effort string
+	// StopReason says the app stopped for a reason outside the work, on the machine's
+	// word, and that it can vouch for what the app left behind. It is the first of
+	// what a takeover needs (component/memql/app_takeover.go).
+	StopReason string
 }
 
 // ProgressFunc receives each chunk as it arrives, so a caller can
@@ -567,6 +571,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		Result:              outcome.Result,
 		Model:               outcome.Model,
 		Effort:              outcome.Effort,
+		StopReason:          outcome.StopReason,
 	}
 	// MCP submit writes on another replica; the cockpit's final wire event
 	// need not contain it. Read that answer before closing the recording so a
@@ -706,6 +711,8 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.Status = result.Status
 	row.ExitCode = result.ExitCode
 	row.Usage = result.Usage
+	row.Model = result.Model
+	row.Effort = result.Effort
 	row.Billing = result.Billing
 	row.TranscriptTruncated = result.TranscriptTruncated
 	row.ProducedArtifactIds = result.ProducedArtifactIds
@@ -715,6 +722,7 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.Result = result.Result
 	row.AppSessionRef = result.AppSessionRef
 	row.ErrorMessage = result.ErrorMessage
+	row.StopReason = result.StopReason
 	row.EndedAt = r.now()
 
 	// A detached context for both writes: the caller's may already be

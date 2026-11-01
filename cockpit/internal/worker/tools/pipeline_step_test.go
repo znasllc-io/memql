@@ -102,6 +102,7 @@ func allowLocalClones(t *testing.T) {
 func pipelineTestPolicy(t *testing.T, extra string) (*Policy, string) {
 	t.Helper()
 	isolatePipelineCapacity(t)
+	fakePipelineHostHeadroom(t)
 	root := filepath.Join(t.TempDir(), "pipelines")
 	return policyWith(t, "pipelines:\n  allow: true\n  workspace_root: "+root+"\n"+extra), root
 }
@@ -933,6 +934,7 @@ func TestPipelineStepPacksTheDeclaredArtifacts(t *testing.T) {
 // trailing slash is the directory.
 func TestPipelineStepArtifactGlobsAreRelativeToTheCheckoutOnly(t *testing.T) {
 	isolatePipelineCapacity(t)
+	fakePipelineHostHeadroom(t)
 	allowLocalClones(t)
 	fx := newPipelineFixture(t)
 	root := filepath.Join(t.TempDir(), "ci [main] *")

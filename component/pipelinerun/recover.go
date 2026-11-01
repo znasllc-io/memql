@@ -267,6 +267,11 @@ func finalStepReports(ctx context.Context, d Deps, r Run) ([]pipelines.StepRepor
 		s := StepState{Key: row.Key, Stage: stage, Name: row.Name, Status: StepPending}
 		if row.Finished() {
 			s = stateFromRow(s, row)
+			// The receipt restates the step's whole attempt history, so the
+			// republished report tells the retries the original would have:
+			// whether the final check run said "Passed on attempt 2 of 2" must not
+			// depend on which write of it landed.
+			s.Attempts, _ = attemptsFromBinding(row.Binding)
 		}
 		out = append(out, s.Report())
 	}

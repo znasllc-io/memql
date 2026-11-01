@@ -207,6 +207,12 @@ func defaultRoutingRules() []RoutingRule {
 		// every two seconds while a download runs.
 		{Pattern: "graph.node.created.v1:worker:modelPull", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:worker:modelPull", TargetType: ""},
+		// A SIGN-IN'S ROW IS WRITTEN ON THE AGENT HOLDING THE MACHINE and read on the
+		// Fleet page a bff serves: without this the sign-in link never reaches the
+		// person who pressed the button. The volume is that person pressing it. No
+		// node consumes these; the browser does.
+		{Pattern: "graph.node.created.v1:worker:appSignIn", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:appSignIn", TargetType: ""},
 		// THE ROLE CATALOG (epic memql#5166). A role is written on whichever
 		// replica served the builtin and READ by every gate on every replica:
 		// the data-plane capability gate, the row gate's rank ladder,

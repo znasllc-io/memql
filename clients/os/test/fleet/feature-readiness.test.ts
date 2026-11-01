@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { machineFromRow } from "../../src/apps/fleet/rows";
-import { machineFeatureStates, machineAppAvailability } from "../../src/apps/fleet/machines/features";
+import { machineFeatureStates, appStatus } from "../../src/apps/fleet/machines/features";
 import { checksFor, EMPTY_DRAFT } from "../../src/apps/fleet/addMachine/flow";
 import { installCommand } from "../../src/apps/fleet/addMachine/install";
 import { machineRow } from "./harness";
@@ -25,7 +25,7 @@ describe("separate feature readiness", () => {
     const machine = ready(); machine.workbenchContract = 0; machine.ownerFeatures = { headless: false, apps: false, computerUse: false, updatedAt: "" };
     const states = Object.fromEntries(machineFeatureStates(machine, now).map(state => [state.key, state.answer]));
     expect(states.workbench).toBe("Not set up"); expect(states.models).toBe("Available"); expect(states.apps).toBe("Disabled"); expect(states.headless).toBe("Disabled"); expect(states.computerUse).toBe("Disabled");
-    expect(machineAppAvailability(machine, true, now)).toBe("Disabled in Settings");
+    expect(appStatus(machine, machine.apps[0], now)).toBe("Disabled in Settings");
   });
   it("includes workbench setup only when selected and refuses malformed runtime claims", () => {
     const command = (workbench: boolean) => installCommand({ platform: "mac", token: "fixture", clusterUrl: "https://api.example.test", computerUse: false, inference: false, workbench });

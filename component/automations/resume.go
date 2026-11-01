@@ -143,6 +143,9 @@ type RunJournal struct {
 	// that executes the run needs nothing from the node that took the turn.
 	// The zero value routes by the rules.
 	Routing common.RouteChoice
+	// OutcomeRecovery retains a completed App's reporting-only failure. Its
+	// human answer resumes the same generation, unlike a fresh effect retry.
+	OutcomeRecovery bool
 }
 
 // StepState is one step's latest journal row: its status and its attempt.
@@ -287,6 +290,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
 	j.Spine, _ = run["spine"].(map[string]any)
 	j.HumanResumeId = stringField(run, "humanResumeId")
+	j.OutcomeRecovery = work.IsOutcomeRecoveryFailure(stringField(run, "errorMessage"))
 	j.ParentRunId = stringField(run, "parentRunId")
 	j.CancelRequested = boolField(run, "cancelRequested")
 	j.Variables, _ = run["variables"].(map[string]any)

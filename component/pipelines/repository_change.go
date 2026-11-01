@@ -181,7 +181,10 @@ func validateRepositoryChangeStep(spec *Spec, stage string, step StepSpec) *Refu
 	if r == nil || !repositoryChangeName.MatchString(r.Rule) || !repositoryChangePath(r.Path) || !strings.HasSuffix(r.Path, ".json") {
 		return Refuse(CodeStepInvalid, scope, "repositoryChange requires a named operator rule and an exact retained .json proposal path.")
 	}
-	if step.SARIF != nil || step.GitHubReadToken || step.CheckoutHistory != "" || step.Run != "" || step.ImageBuild != nil || step.Image != "" || step.Execution != "" || step.Placement != "" || step.Platform != "" || step.CPUMilli != 0 || step.MemoryMiB != 0 || step.Packages != "" || step.Only != "" || step.Shards != 0 || step.When != nil || len(step.Needs) > 0 || len(step.Services) > 0 || step.Caches != nil || len(step.Secrets) > 0 || step.ImagePullSecret != "" || len(step.Artifacts) > 0 {
+	// Every key a command step takes is refused here, repeatable included: the driver
+	// delivers this step itself and no executor ever runs it, so the key would be
+	// ignored in silence.
+	if step.SARIF != nil || step.GitHubReadToken || step.CheckoutHistory != "" || step.Run != "" || step.ImageBuild != nil || step.Image != "" || step.Execution != "" || step.Placement != "" || step.Platform != "" || step.CPUMilli != 0 || step.MemoryMiB != 0 || step.Packages != "" || step.Only != "" || step.Shards != 0 || step.When != nil || len(step.Needs) > 0 || len(step.Services) > 0 || step.Caches != nil || len(step.Secrets) > 0 || step.ImagePullSecret != "" || len(step.Artifacts) > 0 || step.Repeatable != nil {
 		return Refuse(CodeStepInvalid, scope, "repositoryChange accepts only name, rule, producer step, artifact path and timeout; no command receives a writer credential.")
 	}
 	if step.Timeout != "" {

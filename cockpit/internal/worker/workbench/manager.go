@@ -20,13 +20,13 @@ type Engine interface {
 	Execute(context.Context, Runtime, string, Request) (Result, error)
 }
 type workspace struct {
-	mu               sync.Mutex
-	key, name, home  string
-	reservation      *reservation
-	runtime          Runtime
-	created, touched time.Time
-	deadline         time.Time
-	closed           bool
+	mu              sync.Mutex
+	key, name, home string
+	reservation     *reservation
+	runtime         Runtime
+	touched         time.Time
+	deadline        time.Time
+	closed          bool
 }
 type Manager struct {
 	mu     sync.Mutex
@@ -68,7 +68,7 @@ func (m *Manager) Execute(ctx context.Context, id Identity, request Request) (Re
 	if w == nil {
 		if _, err = os.Stat(filepath.Join(m.root, "workbench-ended-"+key)); err == nil {
 			m.mu.Unlock()
-			return Result{}, fmt.Errorf("workbench expired or interrupted; start a new goal")
+			return Result{}, fmt.Errorf("%w; explicitly recover this goal's workspace before continuing; nothing was replayed", ErrStateLost)
 		}
 		// Reserve under the map lock. Docker creation happens with only this
 		// workspace locked; unrelated work remains responsive.
@@ -77,7 +77,7 @@ func (m *Manager) Execute(ctx context.Context, id Identity, request Request) (Re
 			m.mu.Unlock()
 			return Result{}, err
 		}
-		w = &workspace{key: key, home: id.Home, reservation: lease, created: m.now(), touched: m.now(), deadline: id.ExpiresAt}
+		w = &workspace{key: key, home: id.Home, reservation: lease, touched: m.now(), deadline: id.ExpiresAt}
 		w.mu.Lock()
 		m.spaces[key] = w
 		m.mu.Unlock()
@@ -95,11 +95,16 @@ func (m *Manager) Execute(ctx context.Context, id Identity, request Request) (Re
 	}
 	defer w.mu.Unlock()
 	if w.closed {
-		return Result{}, fmt.Errorf("workbench has ended; start a new goal")
+		return Result{}, ErrStateLost
 	}
-	if !m.now().Before(w.deadline) || m.now().Sub(w.created) >= Lifetime {
+	if !m.now().Before(w.deadline) {
 		m.retire(w)
-		return Result{}, fmt.Errorf("workbench lifetime reached; start a new goal")
+		return Result{}, ErrStateLost
+	}
+	// Fresh dispatch authority may renew a live generation, but cannot revive
+	// an expired one. Idle cleanup and uncertain-operation tombstones still win.
+	if id.ExpiresAt.After(w.deadline) {
+		w.deadline = id.ExpiresAt
 	}
 	w.touched = m.now()
 	result, err := m.engine.Execute(ctx, w.runtime, w.name, request)
@@ -107,7 +112,7 @@ func (m *Manager) Execute(ctx context.Context, id Identity, request Request) (Re
 		// An uncertain command result may have side effects. Destroy the workspace
 		// and retain a tombstone; never label this as a retryable capacity refusal.
 		m.retire(w)
-		return Result{}, fmt.Errorf("workbench execution was interrupted; nothing was replayed: %w", err)
+		return Result{}, fmt.Errorf("%w: execution was interrupted; nothing was replayed: %w", ErrStateLost, err)
 	}
 	w.touched = m.now()
 	return result, nil

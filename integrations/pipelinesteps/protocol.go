@@ -53,6 +53,10 @@ type StepRun struct {
 	// command environment. Verification deliberately omits MEMQL_EVENT there;
 	// its admission class must not change its command or cache trust.
 	Event pl.Event `json:"event,omitempty"`
+	// HeadBranch accompanies Event from the immutable run, not Env. Together
+	// they select the operator's train allowance; creationDefinition binds both
+	// so another replica cannot promote a queued ordinary attempt into a train.
+	HeadBranch string `json:"headBranch,omitempty"`
 	// InstallationID is the GitHub App installation the clone token is minted
 	// under; 0 is an anonymous clone of a public repository.
 	InstallationID int64  `json:"installationId,omitempty"`
@@ -93,6 +97,14 @@ type StepRun struct {
 	RunDeadline string `json:"runDeadline"`
 	// GoTimings asks the runner to read Go test timings out of the output.
 	GoTimings bool `json:"goTimings,omitempty"`
+	// PinWorker, ExcludeWorkers and MaxWaitSeconds are the attempt's placement
+	// on the fleet (pl.AttemptPlacement), copied here by stepRunFor so the
+	// fleet path has one input. Only a fleet attempt ever carries them: the
+	// executor refuses a placement that names machines for an attempt that is
+	// not going to one, so a cluster forward's StepRun never has them.
+	PinWorker      string   `json:"pinWorker,omitempty"`
+	ExcludeWorkers []string `json:"excludeWorkers,omitempty"`
+	MaxWaitSeconds int      `json:"maxWaitSeconds,omitempty"`
 }
 
 // A StepRun carries resolved secret values because the runner needs them, so

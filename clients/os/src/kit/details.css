@@ -8,7 +8,8 @@
 .os-details .os-facts dd:has(> .os-copyvalue) { padding: 0; }
 .os-setting-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: start; gap: 24px; padding-block: 8px 16px; }
 .os-setting-name { color: var(--os-muted); font-size: var(--os-text-sm); padding-top: 7px; }
-.os-setting-value > :is(.os-input, .os-select) { width: 100%; max-width: 34rem; }
+.os-setting-value > :is(.os-input, .os-select, .os-select-wrap) { width: 100%; max-width: 34rem; }
+.os-setting-value > .os-select-wrap > .os-select { width: 100%; min-width: 0; }
 @container (max-width: 760px) {
   .os-details-section { grid-template-columns: minmax(0, 1fr); gap: 14px; padding-block: 24px; }
   .os-details-section > .os-subhead { margin: 0; }

@@ -232,6 +232,36 @@ func TestCommitForRefResolvesARefToItsCommit(t *testing.T) {
 	}
 }
 
+// A commit's tree hash is what two runs at different commits are compared by, so
+// only a reply that names the exact commit and a whole hash counts.
+func TestCommitTreeReadsTheTreeOfOneExactCommit(t *testing.T) {
+	now := time.Now().UTC()
+	tree := strings.Repeat("7", 40)
+	hub := newHub().json("/repos/acme/widget/git/commits/"+headSHA, http.StatusOK,
+		`{"sha":"`+headSHA+`","tree":{"sha":"`+tree+`","url":"ignored"},"message":"Merge"}`)
+	c := testClient(t, hub, &now)
+	got, err := c.CommitTree(context.Background(), installToken, "acme", "widget", headSHA)
+	if err != nil {
+		t.Fatalf("commit tree: %v", err)
+	}
+	if got != tree {
+		t.Fatalf("tree = %q, want %q", got, tree)
+	}
+	for name, body := range map[string]string{
+		"another commit": `{"sha":"` + strings.Repeat("f", 40) + `","tree":{"sha":"` + tree + `"}}`,
+		"no tree":        `{"sha":"` + headSHA + `"}`,
+		"short hash":     `{"sha":"` + headSHA + `","tree":{"sha":"abc123"}}`,
+	} {
+		hub.json("/repos/acme/widget/git/commits/"+headSHA, http.StatusOK, body)
+		if got, err := c.CommitTree(context.Background(), installToken, "acme", "widget", headSHA); err == nil {
+			t.Errorf("%s: answered tree %q; want an error", name, got)
+		}
+	}
+	if _, err := c.CommitTree(context.Background(), installToken, "acme", "widget", " "); err == nil {
+		t.Error("a blank commit must be an error, not a request")
+	}
+}
+
 // GitHub answers a ref that names no commit with 422, not 404. The body is the
 // one it sends for a tag that does not exist yet.
 func TestIsMissingRefReadsGitHubsAnswerForARefWithNoCommit(t *testing.T) {

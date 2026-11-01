@@ -76,8 +76,9 @@ func TestApprovalGuidanceBoundsAndOwnership(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, read, maxWorkGuidanceMessages)
 	recordApprovalGuidance(write, actor.UserId, run, "Beyond the explicit context bound.")
-	_, err = b.ReadWorkGuidance(guidanceRunContext(ctx, run))
-	require.ErrorContains(t, err, "saved guidance exceeds its bounded context")
+	read, err = b.ReadWorkGuidance(guidanceRunContext(ctx, run))
+	require.NoError(t, err)
+	require.Len(t, read, maxWorkGuidanceMessages+1)
 }
 
 func TestStepOverrideKeepsItsPlaceBeforeLaterHumanCorrection(t *testing.T) {

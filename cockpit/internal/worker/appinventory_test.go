@@ -1,10 +1,14 @@
 package worker
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/apps"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/hardware"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/harness"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/tools"
 )
@@ -107,5 +111,49 @@ func TestRunnerInventory_NilReporterIsQuiet(t *testing.T) {
 	r := &Runner{}
 	if got := r.inventory(t.Context()); got != nil {
 		t.Errorf("inventory = %+v, want nil", got)
+	}
+}
+
+// What was measured reaches the wire, and nothing is sent when nothing was. The
+// engine reads absent as unknown and keeps the machine in routing, so a zero time
+// on the wire would be a claim nobody made.
+func TestAppsToProto_CarriesWhatWasMeasured(t *testing.T) {
+	checked := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	reset := time.Date(2026, 11, 4, 6, 52, 3, 0, time.UTC)
+	got := appsToProto([]apps.Info{
+		{Id: apps.IDCodex, Readiness: harness.ReadinessOutOfUsage, ReadinessCheckedAt: checked, UsageResetsAt: reset},
+		{Id: apps.IDClaudeCode},
+	})
+	if got[0].GetReadiness() != "out_of_usage" || !got[0].GetReadinessCheckedAt().AsTime().Equal(checked) || !got[0].GetUsageResetsAt().AsTime().Equal(reset) {
+		t.Fatalf("got %+v", got[0])
+	}
+	if got[1].GetReadiness() != "" || got[1].GetReadinessCheckedAt() != nil || got[1].GetUsageResetsAt() != nil {
+		t.Fatalf("silence became a statement: %+v", got[1])
+	}
+}
+
+// Consent is per cluster, and the check answers to all of them: an app any served
+// cluster allows is measured, and one none allows costs nothing.
+func TestAppInventories_MeasureOnlyWhatAServedClusterAllows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	body := "apps:\n  homes:\n    api.one.example:\n      allow: [claude-code]\n    api.two.example:\n      allow: []\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := tools.LoadPolicy(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventories := NewAppInventories(policy, &apps.Detector{})
+	inventories.For("api.two.example")
+	if inventories.allowedAnywhere(apps.IDClaudeCode) {
+		t.Fatal("this machine serves no cluster that allows it")
+	}
+	inventories.For("api.one.example")
+	if !inventories.allowedAnywhere(apps.IDClaudeCode) {
+		t.Fatal("a served cluster allows it")
+	}
+	if inventories.allowedAnywhere(apps.IDCodex) {
+		t.Fatal("no cluster allows Codex")
 	}
 }

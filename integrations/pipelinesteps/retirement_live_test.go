@@ -77,5 +77,37 @@ func TestRetirementAgainstLocalKubernetes(t *testing.T) {
 	if result := runner.Run(ctx, run); result.Status != pl.OutcomeCancelled {
 		t.Fatalf("late cancelled-run envelope: %+v", result)
 	}
-	t.Log("unresolved creation refused cleanup; late admission reconciled; both late attempt and run envelopes remained stopped")
+	// No POST ever lands for this attempt. Once its stop marker has stood for the
+	// window, cleanup finishes over the claim, on the marker's own timestamp as
+	// the API server stamped it, read through a metadata-only request, and with
+	// the guarded delete. The replica's clock moves; the API server's cannot.
+	abandoned := rtRun()
+	abandoned.RunID = ns + "-abandoned"
+	abandoned.RunDeadline = run.RunDeadline
+	spent := JobName(abandoned.RunID, abandoned.StepKey, abandoned.Attempt)
+	if _, err := kube.CreateSecret(ctx, BuildSecret(cfg, abandoned, spent, "fixture-only")); err != nil {
+		t.Fatal(err)
+	}
+	gone := &step{r: runner, run: abandoned, ctx: ctx, jobName: spent}
+	if held, err := gone.claimCreation(); err != nil || !held {
+		t.Fatalf("claim: %v %v", held, err)
+	}
+	if err := runner.Ack(ctx, AckRequest{JobName: spent}); err == nil {
+		t.Fatal("a claim was declared cleaned up the moment its attempt was stopped")
+	}
+	marker, err := kube.SecretMetadata(ctx, spent+retirementSuffix)
+	if err != nil || marker.CreationTimestamp.IsZero() {
+		t.Fatalf("the stop marker has no creation time to wait from: %+v %v", marker, err)
+	}
+	runner.now = func() time.Time { return marker.CreationTimestamp.Add(latePostWindow) }
+	if err := runner.Ack(ctx, AckRequest{JobName: spent}); err != nil {
+		t.Fatalf("cleanup did not finish past the window: %v", err)
+	}
+	if absent, err := runner.receiptResourcesAbsent(ctx, spent); err != nil || !absent {
+		t.Fatalf("cleanup: %v %v", absent, err)
+	}
+	if _, err := kube.SecretMetadata(ctx, spent+retirementSuffix); err != nil {
+		t.Fatal("stop marker did not survive the spent claim's cleanup", err)
+	}
+	t.Log("unresolved creation refused cleanup; late admission reconciled; both late attempt and run envelopes remained stopped; a spent claim cleaned up past its window")
 }

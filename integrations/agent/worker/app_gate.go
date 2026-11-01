@@ -217,6 +217,9 @@ func appMachineRefusal(w *workerservice.Worker, owner, appId string) string {
 		return "it is not " + strings.TrimSpace(owner) + "'s machine; an app session runs only on its owner's machines"
 	}
 	if !w.RunsApp(appId) {
+		if app, reported := w.App(appId); reported {
+			return app.NotRunnableReason()
+		}
 		return appId + " is not allowed and signed in"
 	}
 	return ""
