@@ -58,8 +58,13 @@ const ModelPullConcept = "v1:worker:modelPull"
 // decides on. A struct rather than the raw row so the decision is a function
 // of values and is testable without an engine, a database or a cluster.
 type modelPullMachine struct {
+	// RegistrationId is the id the caller asked with, which a client sends bare.
 	RegistrationId string
-	OwnerUserId    string
+	// RowId is the id the row is stored under. Whatever the engine wrote about
+	// this machine names it this way, so a comparison with a stored value starts
+	// here: a decision row's `fleet:<id>` surface is the fleetSharingLedger case.
+	RowId       string
+	OwnerUserId string
 	// IdentityId is the worker credential this registration is bound to (epic
 	// memql#5327, design D2). Only fleetRevokeMachine reads it, and it lives
 	// here rather than behind a lookup of its own because this struct is the
@@ -301,6 +306,7 @@ func (e *MemQLEngine) modelPullMachineFor(ctx context.Context, registrationId st
 		}
 		machine := modelPullMachine{
 			RegistrationId: registrationId,
+			RowId:          rowId,
 			OwnerUserId:    mapString(row, "ownerUserId"),
 			// The credential bound to this registration (epic memql#5327,
 			// design D2). It is on the shape already -- workerRegistrationFull

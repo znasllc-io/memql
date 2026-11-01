@@ -77,6 +77,14 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 	week := isoWeekOf(now)
 	since := startOfISOWeek(now)
 
+	// THE ROW'S OWN ID, NOT THE CALLER'S ARGUMENT. A fleet call writes `fleet:`
+	// plus the id its catalog read returned, which is the stored, canonical one,
+	// and the query compares for equality. A client asks with the bare id, and a
+	// surface built from that matched no row at all: every machine read as idle,
+	// with no error, to the person who lent it. The fold below compares the same
+	// value, so both have to start here.
+	machineSurface := FleetReferencePrefix + machine.RowId
+
 	// THE MACHINE'S OWN CALLS, not the fleet's. routerCallsInWindow is gated on
 	// `actor.isClusterOwner` because its caller is a maintenance sweep; running
 	// it here returns zero rows for every machine owner who is not also a
@@ -86,7 +94,7 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 	// proven belongs to the caller, so it cannot be pointed at anybody else's
 	// machine by passing a different string.
 	call, err := langparser.RenderCall(LedgerQuery, map[string]any{
-		"surface": FleetReferencePrefix + trimConceptPrefix(registrationId),
+		"surface": machineSurface,
 		"since":   since.Format(time.RFC3339),
 		"until":   now.Format(time.RFC3339),
 	})
@@ -142,9 +150,9 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 	// THE OWNER IS THE MACHINE'S, read off the row that proved it is the
 	// caller's -- the split (design G4) is "for you" versus "for anybody else",
 	// and "you" is whoever owns this machine.
-	entry := FoldLedger(trimConceptPrefix(registrationId), machine.OwnerUserId, week, calls)
-	// The machine id on the row is the CANONICAL one the caller asked with, so
-	// the page does not have to know that the fold matched on the bare form.
+	entry := FoldLedger(machine.RowId, machine.OwnerUserId, week, calls)
+	// The machine id on the row is the one the caller asked with, so a client
+	// that sent a bare id does not get the stored form back.
 	payload := entry.Row()
 	payload["machineId"] = registrationId
 	payload["readable"] = true
