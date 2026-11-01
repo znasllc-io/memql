@@ -38,14 +38,15 @@ func TestHonestRouteReply(t *testing.T) {
 		asked, stopped, unstopped []askRouteGoal
 		want                      string
 	}{
-		{"every target delivered keeps the model's reply", []AskRouteTarget{sent("A", routeQueued), sent("B", routeReceived), sent("C", routeAnswered), sent("D", routeNotApproved), sent("E", routeSaved)}, nil, nil, nil, model},
+		{"every target delivered keeps the model's reply", []AskRouteTarget{sent("A", routeQueued), sent("B", routeReceived), sent("C", routeAnswered), sent("D", routeNotApproved)}, nil, nil, nil, model},
+		{"saved guidance never claims resumed work", []AskRouteTarget{sent("E", routeSaved)}, nil, nil, nil, "Saved your message for E; the work has not resumed."},
 		{"nothing delivered to anyone keeps the model's reply", nil, nil, nil, nil, model},
 		{"one goal ended", []AskRouteTarget{sent("A", routeQueued), missed("B", routeNotReceived, routeReasonEnded)}, nil, nil, nil, "Sent to A. B already finished, so it didn't get this."},
 		{"a review", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonReview)}, nil, nil, nil, "A is waiting on a review that doesn't take messages. Open it to decide."},
 		{"the guidance limit", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonLimit)}, nil, nil, nil, "A can't take more messages."},
 		{"a refusal", []AskRouteTarget{missed("A", routeNotDelivered, routeReasonRefused)}, nil, nil, nil, "A couldn't take this message."},
-		{"every delivered status reads Sent", []AskRouteTarget{sent("A", routeAnswered), sent("B", routeNotApproved), sent("C", routeSaved), sent("D", routeReceived), missed("E", routeNotDelivered, routeReasonRefused)}, nil, nil, nil,
-			"Sent to A. Sent to B. Sent to C. Sent to D. E couldn't take this message."},
+		{"saved guidance stays distinct from delivery", []AskRouteTarget{sent("A", routeAnswered), sent("B", routeNotApproved), sent("C", routeSaved), sent("D", routeReceived), missed("E", routeNotDelivered, routeReasonRefused)}, nil, nil, nil,
+			"Sent to A. Sent to B. Saved your message for C; the work has not resumed. Sent to D. E couldn't take this message."},
 		// Stops that went as decided leave the model's line standing.
 		{"delivered, a stop asked about and a stop that went through", []AskRouteTarget{sent("A", routeQueued)}, []askRouteGoal{goal("B")}, []askRouteGoal{goal("C")}, nil, model},
 		// A failed delivery says every stop too: the question asked, a stop done.

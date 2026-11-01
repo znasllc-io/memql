@@ -41,6 +41,16 @@
         }
       }
     },
+    "/apis/kueue.x-k8s.io/v1beta2/workloadpriorityclasses": {
+      "get": {
+        "x-kubernetes-action": "list",
+        "x-kubernetes-group-version-kind": {
+          "group": "kueue.x-k8s.io",
+          "version": "v1beta2",
+          "kind": "WorkloadPriorityClass"
+        }
+      }
+    },
     "/apis/capacity.memql.io/v1alpha1/backgroundcapacitypolicies": {
       "get": {
         "x-kubernetes-action": "list",

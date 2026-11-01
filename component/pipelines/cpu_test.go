@@ -24,7 +24,6 @@ func TestCommandCPUIsCompiledAndBoundToTheWireContract(t *testing.T) {
 	for _, step := range []StepSpec{
 		{Name: "scan", Run: "scan", CPUMilli: -1},
 		{Name: "scan", Run: "scan", CPUMilli: 256001},
-		{Name: "scan", Run: "scan", CPUMilli: 4000, Placement: PlacementFleet, Platform: "linux/arm64"},
 		{Name: "scan", Run: "scan", CPUMilli: 4000, Execution: ExecutionNative, Platform: "darwin/arm64"},
 	} {
 		spec := &Spec{Image: "toolchain@sha256:test", Stages: []StageSpec{{Name: "checks", Steps: []StepSpec{step}}}}

@@ -315,6 +315,15 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 			"Stage %q has two steps named %q; a step name must be unique within its stage.", stage, step.Name)
 	}
 	scope := stage + "/" + step.Name
+	// The declaration contradicts itself: verification means the command only
+	// recomputes an answer, which is what repeatable says, and the step says it
+	// must not be repeated. Which of the two the author meant is theirs to settle,
+	// so neither is chosen for them. Asked before the verification contract below
+	// because it concerns the step's own words, not the image or effects, and the
+	// author fixes one mistake at a time either way.
+	if step.Verification && step.Repeatable != nil && !*step.Repeatable {
+		return Refuse(CodeStepInvalid, scope, "A verification step is repeatable; remove repeatable: false.")
+	}
 	if step.Verification {
 		if refusal := validateVerification(spec, step, scope); refusal != nil {
 			return refusal

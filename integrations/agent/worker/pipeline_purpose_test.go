@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -972,6 +973,11 @@ func TestTheDispatchingReplicaRereadsTheMachinesPipelinesConsent(t *testing.T) {
 	if got.GetErrorCode() != "pipelines_not_allowed" || !got.GetRefusedBeforeStart() || len(*ran) != 0 {
 		t.Fatalf("response = %+v dispatched = %d, want pipelines_not_allowed, refused before start, nothing run",
 			got, len(*ran))
+	}
+	// A failed step prints this sentence on a public check run, so it names the
+	// contract the gate checks, and no machine.
+	if want := "the machine does not advertise pipelines=allowed with pipeline action contract " + strconv.Itoa(PipelineStepContract) + " "; !strings.HasPrefix(got.GetErrorMessage(), want) {
+		t.Fatalf("message = %q, want it to begin %q", got.GetErrorMessage(), want)
 	}
 	// ...and through the sender's dispatcher: the refusal comes back as one.
 	res, err := h.dispatch.Dispatch(asPipelineAcrossTheMesh(t, h), ownersPipelineRequest(h))

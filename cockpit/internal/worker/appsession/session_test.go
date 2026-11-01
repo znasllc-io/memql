@@ -122,6 +122,15 @@ func argvValue(argv []string, flag string) string {
 // fakeApp installs a shell script on PATH under the app's binary name.
 func fakeApp(t *testing.T, binary, body string) string {
 	t.Helper()
+	if binary == "claude" {
+		body = `memql_test_config=""
+memql_test_previous=""
+for memql_test_arg in "$@"; do
+  if [ "$memql_test_previous" = "--mcp-config" ]; then memql_test_config="$memql_test_arg"; fi
+  memql_test_previous="$memql_test_arg"
+done
+` + body
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, binary)
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
@@ -701,13 +710,13 @@ func TestSession_ProducedFilesAndTranscriptArePushed(t *testing.T) {
 			}
 		}
 	}
-	if manifest.Version != 1 || manifest.TranscriptID == "" || len(manifest.Files) != 2 || len(manifest.Failures) != 0 {
+	if manifest.Version != 2 || manifest.TranscriptID == "" || len(manifest.Files) != 2 || len(manifest.Failures) != 0 {
 		t.Fatalf("incomplete durable retention receipt: %+v", manifest)
 	}
 }
 
 func TestSession_OutputOmissionIsDurableAndPreventsCleanup(t *testing.T) {
-	fakeApp(t, "claude", "i=0; while [ $i -lt 35 ]; do echo evidence > proof-$i.txt; i=$((i+1)); done\n"+quietClaude)
+	fakeApp(t, "claude", "echo evidence > proof.txt\ndd if=/dev/zero of=too-large.bin bs=1 count=1 seek=67108864 2>/dev/null\n"+quietClaude)
 	h := newRig(t)
 	end := h.start(t, nil)
 	if !strings.Contains(end.GetError(), "not retained") {
@@ -721,10 +730,10 @@ func TestSession_OutputOmissionIsDurableAndPreventsCleanup(t *testing.T) {
 			}
 		}
 	}
-	if len(manifest.Files) != maxPushFiles || len(manifest.Omitted) != 3 || len(manifest.Failures) == 0 {
+	if len(manifest.Files) != 1 || len(manifest.Omitted) != 1 || len(manifest.Failures) == 0 {
 		t.Fatalf("omission disappeared from durable receipt: %+v", manifest)
 	}
-	if _, err := os.Stat(filepath.Join(h.workspace, "proof-9.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(h.workspace, "too-large.bin")); err != nil {
 		t.Fatalf("unretained evidence removed: %v", err)
 	}
 }
@@ -735,7 +744,7 @@ func TestSession_OutputOmissionIsDurableAndPreventsCleanup(t *testing.T) {
 // pushed to the Library -- and the transcript says so, as it does for any
 // file left behind.
 func TestSession_AFileHoldingTheBearerIsNotPushed(t *testing.T) {
-	fakeApp(t, "claude", "cp .mcp.json leaked.json\necho fine > ok.txt\n"+quietClaude)
+	fakeApp(t, "claude", "cp \"$memql_test_config\" leaked.json\necho fine > ok.txt\n"+quietClaude)
 	h := newRig(t)
 	end := h.start(t, nil)
 	if end.GetExitCode() != 0 || end.GetError() != "" {
@@ -763,7 +772,7 @@ func TestSession_AFileHoldingTheBearerIsNotPushed(t *testing.T) {
 // the engine side and rendered in the portal, so a chunk carrying the
 // credential publishes it everywhere that record reaches.
 func TestSession_BearerNeverReachesAChunk(t *testing.T) {
-	fakeApp(t, "claude", "cat .mcp.json\ncat .mcp.json 1>&2\nexit 0\n")
+	fakeApp(t, "claude", "cat \"$memql_test_config\"\ncat \"$memql_test_config\" 1>&2\nexit 0\n")
 	h := newRig(t)
 	end := h.start(t, nil)
 
@@ -882,7 +891,7 @@ exit 0
 	if got := argvValue(argv, "--resume"); got != "app-earlier-run" {
 		t.Errorf("--resume = %q, want the ref the engine named; argv: %v", got, argv)
 	}
-	if got := argvValue(argv, "--mcp-config"); got != filepath.Join(h.workspace, ".mcp.json") {
+	if got := argvValue(argv, "--mcp-config"); !strings.HasPrefix(got, filepath.Join(h.workspace, sessionScaffoldDir)+string(os.PathSeparator)) {
 		t.Errorf("--mcp-config = %q, want the config this session wrote; argv: %v", got, argv)
 	}
 	if got := argvValue(argv, "--"); got != "do the thing" {
@@ -1017,7 +1026,11 @@ func TestSession_RenewRewritesTheConfigAndTheLibraryBearer(t *testing.T) {
 		Credential: next,
 	})
 
-	data, err := os.ReadFile(filepath.Join(h.workspace, ".mcp.json"))
+	paths, globErr := filepath.Glob(filepath.Join(h.workspace, sessionScaffoldDir, "mcp-*.json"))
+	if globErr != nil || len(paths) != 1 {
+		t.Fatalf("session config paths: %v %v", paths, globErr)
+	}
+	data, err := os.ReadFile(paths[0])
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
@@ -1076,7 +1089,7 @@ n=$(cat "$d/count" 2>/dev/null || echo 0)
 n=$((n+1))
 printf '%%s' "$n" > "$d/count"
 printf '%%s\n' "$@" > "$d/argv.$n"
-cat .mcp.json > "$d/config.$n" 2>/dev/null
+cat "$memql_test_config" > "$d/config.$n" 2>/dev/null
 if [ "$n" = "1" ]; then
   echo '{"type":"system","subtype":"init","session_id":"app-turn-1"}'
   i=0
@@ -2291,4 +2304,142 @@ func (t fixtureMCPTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 }
 func preflightFixtureClient(s *httptest.Server) *http.Client {
 	return &http.Client{Transport: fixtureMCPTransport{base: s.Client().Transport, target: s.URL}}
+}
+
+// recordingReadiness is the machine's tracker, as a session sees it.
+type recordingReadiness struct {
+	mu        sync.Mutex
+	started   []string
+	ended     []string
+	observed  []harness.ReadinessSignal
+	rechecked []string
+}
+
+func (r *recordingReadiness) SessionStarted(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.started = append(r.started, app)
+}
+
+func (r *recordingReadiness) SessionEnded(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = append(r.ended, app)
+}
+
+func (r *recordingReadiness) Observe(_ string, signal harness.ReadinessSignal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.observed = append(r.observed, signal)
+}
+
+func (r *recordingReadiness) Recheck(app string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rechecked = append(r.rechecked, app)
+}
+
+func (r *recordingReadiness) snapshot() (started, ended []string, observed []harness.ReadinessSignal) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.started...), append([]string(nil), r.ended...), append([]harness.ReadinessSignal(nil), r.observed...)
+}
+
+// A real turn is the best check there is, and the machine must not ping while one
+// runs: the session brackets itself and passes on what its turn said.
+func TestSession_TellsTheTrackerWhatItsTurnSaid(t *testing.T) {
+	fakeApp(t, "claude", `
+cat <<'CLAUDE_JSON'
+{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":0,"output_tokens":0},"modelUsage":{}}
+CLAUDE_JSON
+exit 1
+`)
+	h := newRig(t)
+	readiness := &recordingReadiness{}
+	h.manager.opts.Readiness = readiness
+	h.start(t, nil)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		started, ended, observed := readiness.snapshot()
+		if len(ended) == 1 {
+			if len(started) != 1 || started[0] != apps.IDClaudeCode {
+				t.Fatalf("started: %v", started)
+			}
+			if len(observed) != 1 || observed[0].State != harness.ReadinessSignedOut {
+				t.Fatalf("observed: %+v", observed)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the session never ended on the tracker: %v %v %+v", started, ended, observed)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The engine hands a step that has already done work to another app only on this
+// machine's word, so the word has to be exact: the app's own statement, and nothing
+// that merely looks like it. The turn may have done anything before it stopped.
+func TestSessionEndSaysWhenTheAppStoppedOnItsUsageOrLogin(t *testing.T) {
+	const initEvent = `{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}`
+	for name, tt := range map[string]struct {
+		stream string
+		want   string
+	}{
+		"a limit partway through": {
+			initEvent + "\n" +
+				`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1793487600,"rateLimitType":"seven_day","overageStatus":"rejected","isUsingOverage":false}}` + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"You've hit your weekly limit · resets Oct 31 at 4pm (America/Phoenix)","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"out_of_usage",
+		},
+		"a lapsed login partway through": {
+			initEvent + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"signed_out",
+		},
+		"any other failure": {
+			initEvent + "\n" +
+				`{"type":"result","subtype":"success","is_error":true,"result":"the model produced something the app could not parse","usage":{"input_tokens":120,"output_tokens":40}}`,
+			"",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeApp(t, "claude", "cat <<'CLAUDE_JSON'\n"+tt.stream+"\nCLAUDE_JSON\nexit 1\n")
+			h := newRig(t)
+			end := h.start(t, nil)
+			if end.GetError() == "" {
+				t.Fatal("the turn was meant to fail")
+			}
+			if got := end.GetStopReason(); got != tt.want {
+				t.Fatalf("stop_reason = %q, want %q (error %q)", got, tt.want, end.GetError())
+			}
+			h.settled(t)
+		})
+	}
+}
+
+// A takeover needs what the app left behind, so an output that did not reach the
+// Library means nothing may take over from this session. Its directory is kept.
+func TestSessionEndWithdrawsTheStopWhenOutputsDidNotReachTheLibrary(t *testing.T) {
+	fakeApp(t, "claude", `
+echo made > notes.md
+cat <<'CLAUDE_JSON'
+{"type":"system","subtype":"init","session_id":"s1","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed","usage":{"input_tokens":120,"output_tokens":40}}
+CLAUDE_JSON
+exit 1
+`)
+	h := newRig(t)
+	down := failingLibrary(t)
+	h.manager.opts.LibraryBase = down.URL
+	h.manager.opts.HTTPClient = preflightFixtureClient(h.library.server)
+	end := h.start(t, nil)
+	if !strings.Contains(end.GetError(), "pushing outputs to the Library failed") {
+		t.Fatalf("end error = %q, want the failed push", end.GetError())
+	}
+	if got := end.GetStopReason(); got != "" {
+		t.Fatalf("stop_reason = %q with outputs left behind", got)
+	}
+	h.settled(t)
 }

@@ -173,18 +173,8 @@ func getTestWindow(t *testing.T) time.Duration {
 	return time.Hour
 }
 
-// mouseClickAllowsAtCursor drives a workerComputer.mouse_click
-// through a DENYING fakeGate and returns the cursor the dispatcher
-// handed to AllowsAt. It confirms mouse_click goes through the
-// cursor-aware AllowsAt path (memql-cockpit#131) rather than plain
-// Allows -- that's what lets the strict-mode region exemption fire.
-//
-// Shared scaffolding for the per-build-tag variants
-// (memql-cockpit#171): the headless build asserts Known=false (its
-// cursorLocation stub), the computeruse build asserts the live-cursor path
-// (Known=true). The gate denies, so the per-action handler never
-// runs and no real input is ever driven; on the computeruse build
-// cursorLocation() only reads robotgo.Location().
+// mouseClickAllowsAtCursor records the consent argument without sending input.
+// Both builds must deny the legacy cursor-region exemption for explicit targets.
 func mouseClickAllowsAtCursor(t *testing.T) consent.CursorPoint {
 	t.Helper()
 	gate := &fakeGate{decision: consent.Decision{Allowed: false, Reason: "gated"}}
@@ -205,6 +195,6 @@ func mouseClickAllowsAtCursor(t *testing.T) consent.CursorPoint {
 	}
 	// AllowsAt sets lastCursor; returning it proves the dispatcher
 	// took the AllowsAt path. Each build-tag variant asserts the
-	// Known flag appropriate for its cursorLocation backing.
+	// Known=false contract for explicit target coordinates.
 	return gate.lastCursor
 }

@@ -97,10 +97,6 @@ const (
 	ActionMessage = "message"
 )
 
-// transcriptRel is where the full transcript accumulates during a run,
-// inside the session scaffolding so it is removed with it.
-const transcriptRel = ".memql-session/transcript.log"
-
 // maxQueuedFollowUps bounds the follow-ups waiting for a turn to end.
 //
 // The queue is fed by the network and drained by an app that takes
@@ -155,6 +151,15 @@ type Sender interface {
 	SendAppSessionEnd(end *memqlv1.AppSessionEnd) error
 }
 
+// SessionReadiness is what a session tells the machine's readiness tracker.
+type SessionReadiness interface {
+	SessionStarted(app string)
+	SessionEnded(app string)
+	Observe(app string, signal harness.ReadinessSignal)
+	// Recheck asks for a check at once, because a sign-in just finished.
+	Recheck(app string)
+}
+
 // Options configures a Manager.
 type Options struct {
 	Logger *slog.Logger
@@ -176,6 +181,12 @@ type Options struct {
 	// allowed, which is the default-deny posture the rest of the worker
 	// has.
 	Allowed func(appID string) bool
+	// Readiness hears about each session and what its turns said about the app,
+	// which stands in for a check (apps/readiness.go). Nil tells nobody.
+	Readiness SessionReadiness
+	// SignInLauncher overrides the supervisor a sign-in's processes come from.
+	// Tests set it; nil is CheckLauncher.
+	SignInLauncher harness.LaunchFunc
 	// Levels returns the machine owner's policy.yaml apps.levels entries
 	// for one app, and the levels those entries refuse, each with the
 	// sentence saying why (tools.Policy.AppLevels). The session lays the
@@ -247,6 +258,8 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+	// signIns are the sign-ins this manager is running, by id (signin.go).
+	signIns map[string]*liveSignIn
 }
 
 // NewManager builds a Manager and sweeps whatever a previous process
@@ -461,11 +474,17 @@ type session struct {
 	// last turn that reported a model, kept as a pair -- see recordTurn.
 	servedModel  string
 	servedEffort string
+	// stopReason is why the app stopped, when it said so: AppSessionEnd.stop_reason.
+	stopReason string
 }
 
 // run drives the whole session and is the only place End is sent.
 func (s *session) run(ctx context.Context) {
 	defer s.manager.forget(s.id)
+	if readiness := s.manager.opts.Readiness; readiness != nil {
+		readiness.SessionStarted(s.start.GetApp())
+		defer readiness.SessionEnded(s.start.GetApp())
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
 			// A panic here must still delete the MCP config and still
@@ -474,6 +493,7 @@ func (s *session) run(ctx context.Context) {
 			s.logger.Error("app session panicked", "panic", rec)
 			s.teardown()
 			s.keepWorkspace("the session panicked before its outputs were pushed")
+			s.withdrawStop()
 			s.sendEnd(-1, fmt.Sprintf("cockpit panic during session: %v", rec), nil)
 		}
 	}()
@@ -493,6 +513,7 @@ func (s *session) run(ctx context.Context) {
 	// app made.
 	if pushErr != nil {
 		s.keepWorkspace("its outputs could not all be pushed to the Library")
+		s.withdrawStop()
 	} else {
 		s.releaseWorkspace()
 	}
@@ -539,8 +560,12 @@ func (s *session) execute(ctx context.Context) (int, error) {
 	}
 	// The MCP configuration first: an app that starts without it reaches
 	// nothing over MCP and reports that as "MemQL's tools are broken".
+	resumeRef := ""
+	if s.start.GetKind() == KindAttach {
+		resumeRef = s.start.GetAppSessionRef()
+	}
 	mcp, err := writeMCPConfig(spec.ID, workspace, s.start.GetMcpEndpoint(),
-		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{Tools: tools, DenyPaths: s.denyPaths(), InferenceOnly: s.start.GetInferenceOnly()})
+		s.start.GetCredential(), s.id, s.manager.opts.StateDir, sessionMCPSettings{ResumeRef: resumeRef, Tools: tools, DenyPaths: s.denyPaths(), InferenceOnly: s.start.GetInferenceOnly()})
 	if err != nil {
 		return -1, err
 	}
@@ -908,6 +933,15 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 	for {
 		res, err := h.Turn(ctx, prompt, sink)
 		s.recordTurn(res)
+		if readiness := s.manager.opts.Readiness; readiness != nil && res.Readiness != nil {
+			readiness.Observe(s.start.GetApp(), *res.Readiness)
+		}
+		if err != nil {
+			s.recordStop(res)
+		}
+		if refErr := s.mcp.rememberProviderRef(res.AppSessionRef); refErr != nil {
+			return res.ExitCode, errors.Join(err, refErr)
+		}
 		// The app's REAL status, unnormalised. A harness whose process
 		// is still alive reports 0 for a protocol-level failure, and
 		// that is not a lie the engine acts on: it files a session with
@@ -935,6 +969,32 @@ func (s *session) runTurns(ctx context.Context, spec apps.Spec, workspace, resum
 		}
 		prompt = next
 	}
+}
+
+// recordStop keeps why a failed turn stopped, when the app itself said it was its
+// usage or its login. Those are about the app and not about the work, and the app has
+// finished its turn with no call in flight, which is what lets the engine hand the rest
+// of the step to another app. Only the app's own statement counts: the harness reads it
+// off the protocol (TurnResult.Readiness), and any other failure leaves this empty.
+func (s *session) recordStop(res harness.TurnResult) {
+	if res.Readiness == nil {
+		return
+	}
+	switch res.Readiness.State {
+	case harness.ReadinessOutOfUsage, harness.ReadinessSignedOut:
+		s.usageMu.Lock()
+		s.stopReason = res.Readiness.State
+		s.usageMu.Unlock()
+	}
+}
+
+// withdrawStop takes the reason back when this machine cannot vouch for what the app
+// left behind. A takeover carries on from it, so one whose outputs did not all reach
+// the Library is reported as an ordinary failure, and its directory is kept.
+func (s *session) withdrawStop() {
+	s.usageMu.Lock()
+	s.stopReason = ""
+	s.usageMu.Unlock()
 }
 
 // turnFailure reports what a turn's failure should end the session with.
@@ -1070,11 +1130,23 @@ func (s *session) pump(c *child, onStdout, onStderr func(string, []byte) error) 
 
 // runOpen hands the app to the human -- the open kind.
 func (s *session) runOpen(ctx context.Context, spec apps.Spec, workspace string) (int, error) {
+	root := filepath.Join(workspace, sessionScaffoldDir)
+	if err := os.MkdirAll(root, configDirMode); err != nil {
+		return -1, err
+	}
+	// Open sessions also overlap in a run workspace. Own their launcher and
+	// exit receipt together; cleanup must never consume another window's result.
+	dir, err := os.MkdirTemp(root, "open-")
+	if err != nil {
+		return -1, err
+	}
+	defer os.RemoveAll(dir)
+	exitFile := filepath.Join(dir, "exit")
 	openCommand := s.manager.opts.OpenCommand
 	if openCommand == nil {
 		openCommand = platformOpenCommand
 	}
-	c, note, err := launchOpen(ctx, spec, workspace, s.start.GetPrompt(), s.mcpEnv(), openCommand)
+	c, note, err := launchOpen(ctx, spec, workspace, s.start.GetPrompt(), s.mcpEnv(), s.mcpConfigPath(), exitFile, openCommand)
 	if err != nil {
 		// Immediately, with a reason, and with no fallback to headless:
 		// the user asked to drive it themselves.
@@ -1087,7 +1159,7 @@ func (s *session) runOpen(ctx context.Context, spec apps.Spec, workspace string)
 	_ = s.emitChunk(StreamStderr, []byte(note+"\n"))
 
 	readersDone := s.pump(c, s.emitChunk, s.emitChunk)
-	code := waitForOpen(ctx, c, filepath.Join(workspace, openSessionExitFile), readersDone)
+	code := waitForOpen(ctx, c, exitFile, readersDone)
 	// Usage on this path is normally unknown, and that is correct: a
 	// human-driven session does not report tokens back to the cockpit.
 	// The engine records it as billing "unknown" rather than as free.

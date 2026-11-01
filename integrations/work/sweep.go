@@ -261,16 +261,15 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 				if !due {
 					continue
 				}
-				if i.redispatchStale(writeCtx, run, runId, owner) {
+				if i.serveInferenceRecovery(writeCtx, run, runId, owner) {
 					i.log().Info("work: handed a run parked on a shut inference door back to the cluster",
 						"component", "work.sweep", "run", runId, "owner", owner)
 					res.Redispatched++
 					continue
 				}
-				// No dispatcher here (a bff replica running the sweep), or
-				// the claim lease is still held. Leaving it parked is right:
-				// the next pass tries again, and nothing about the run has
-				// changed.
+				// An agent claims this exact wait; another node reannounces
+				// it once overdue. A held claim or a fresh announcement leaves
+				// it parked until a later pass, with its history unchanged.
 				continue
 			}
 

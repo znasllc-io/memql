@@ -89,10 +89,12 @@ const (
 
 // Re-running only what failed (epic memql#5479, D13's "Re-run failed").
 const (
-	// CodePassedEarlier is a step a failed-only re-run carries over rather
-	// than runs: the attempt it re-runs passed it, with the same package
-	// slice. A skip, because it fails nothing -- and not a pass, because this
-	// attempt executed nothing and the journal does not say otherwise.
+	// CodePassedEarlier is a step this attempt did not run because it already
+	// passed: a failed-only re-run carries it from the attempt it re-runs, or the
+	// installed policy reuses another run's receipt, at this commit or for a
+	// release on this git tree. A skip, because it fails nothing -- and not a
+	// pass, because this attempt executed nothing and the journal does not say
+	// otherwise.
 	CodePassedEarlier = "pipeline_passed_earlier"
 	// CodeNothingToRerun refuses a failed-only re-run of a run that has no
 	// failed or cancelled step to run again: one that passed, or one refused

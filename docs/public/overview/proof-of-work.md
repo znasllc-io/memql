@@ -22,11 +22,19 @@ MemQL setup, including the harness, skills and models used for each role.
 | Software development | [App-session child-goal defect, issue 5817](https://github.com/znasllc-io/memql/issues/5817) | In progress; not a completed proof of work |
 | Document creation | Coming soon | No published case |
 | Research | Coming soon | No published case |
+| Other files and extended workflows | Planned | No published case |
 
 There is no completed live case published on this page yet. The software case
 will qualify when its regression, resulting change, checks and delivery are
 verified and linked. An edited file or an open issue alone does not establish
 that the requested job was completed.
+
+The suite covers multiple categories and goal lengths. A short request to make
+a PDF and an extended workflow use the same evidence contract, with different
+acceptance checks. The [case record and archive protocol](evaluation-case-records.md)
+defines their metadata, downloadable ZIPs and comparison rules. The planned
+public results website will expose these records, including failed and unfinished
+attempts; it has not been built or deployed.
 
 ## What a case must show
 

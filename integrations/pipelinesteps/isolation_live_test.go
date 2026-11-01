@@ -58,7 +58,7 @@ func isolationProofAgainstNetworkPolicy(t *testing.T, controls pipelineTestContr
 	prove := func(t *testing.T, wantIsolated, wantInconclusive bool) {
 		t.Helper()
 		r := NewRunner(cfg, kube, nil, nil, nil)
-		verdict, measured := r.probeIsolation(ctx)
+		verdict, measured := r.probeIsolation(ctx, nil)
 		t.Logf("isolated=%v inconclusive=%v: %s", verdict.Isolated, verdict.Inconclusive, verdict.Detail)
 		if !measured || verdict.Isolated != wantIsolated || verdict.Inconclusive != wantInconclusive {
 			t.Fatalf("isolation proof: %+v, measured=%v", verdict, measured)

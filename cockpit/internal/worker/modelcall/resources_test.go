@@ -91,7 +91,7 @@ func TestResourcesReclaimOnlyOwnedIdleModelsBeforeDifferentRuntime(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 	if _, exists := r.owned[resourceKey(old)]; exists {
 		t.Fatal("unloaded runner retained")
 	}
@@ -107,7 +107,7 @@ func TestResourcesWaitForHeadroomAndCancelWithoutLeakingGate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Millisecond)
 	defer cancel()
 	if release, err := r.acquire(ctx, info, http.DefaultClient, slog.Default()); err == nil {
-		release()
+		release.close()
 		t.Fatal("overcommitted memory")
 	}
 	available.Store(24 * gib)
@@ -115,7 +115,7 @@ func TestResourcesWaitForHeadroomAndCancelWithoutLeakingGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 }
 
 func TestResourcesDoNotUnloadWarmModel(t *testing.T) {
@@ -133,7 +133,7 @@ func TestResourcesDoNotUnloadWarmModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 }
 
 func TestResourcesRejectPressureUnknownProbeAndImpossiblePeak(t *testing.T) {
@@ -151,7 +151,7 @@ func TestResourcesRejectPressureUnknownProbeAndImpossiblePeak(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 			defer cancel()
 			if release, err := r.acquire(ctx, models.Info{ID: "model", PeakMemoryBytes: 16 * gib}, http.DefaultClient, slog.Default()); err == nil {
-				release()
+				release.close()
 				t.Fatal("unsafe admission")
 			}
 		})
@@ -231,7 +231,7 @@ func TestResourcesAdmitTheTwentyFourGigabytePickOnATwentyFourGigabyteCard(t *tes
 			if err != nil {
 				t.Fatalf("the class's own model was refused on the class's own card: %v", err)
 			}
-			release()
+			release.close()
 		})
 	}
 }
@@ -276,7 +276,7 @@ func TestResourcesRefuseAnImpossibleModelWithoutEvictingAnything(t *testing.T) {
 
 	release, err := r.acquire(context.Background(), models.Info{ID: "too-large", Kind: models.KindOllama, BaseURL: srv.URL, PeakMemoryBytes: 16 * gib}, srv.Client(), slog.Default())
 	if err == nil {
-		release()
+		release.close()
 		t.Fatal("a model larger than the machine was admitted")
 	}
 	var refused *memoryRefusal
@@ -310,7 +310,7 @@ func TestResourcesStopWaitingForHeadroomAndReleaseTheGate(t *testing.T) {
 	began := time.Now()
 	release, err := r.acquire(ctx, info, http.DefaultClient, slog.Default())
 	if err == nil {
-		release()
+		release.close()
 		t.Fatal("overcommitted memory")
 	}
 	if waited := time.Since(began); waited > 10*time.Second {
@@ -330,7 +330,7 @@ func TestResourcesStopWaitingForHeadroomAndReleaseTheGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 }
 
 // Memory that arrives during the wait is still taken: the ceiling bounds the
@@ -348,5 +348,5 @@ func TestResourcesAdmitWhenHeadroomArrivesDuringTheWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release()
+	release.close()
 }

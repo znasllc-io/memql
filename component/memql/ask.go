@@ -260,7 +260,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	// today's path untouched and the lock is never released for it.
 	statement := prompt
 	if fresh && askRouteEligible(prompt, turn.Attachments) {
-		if goals, listErr := e.activeAskGoals(ctx, transcript); listErr != nil || len(goals) > 0 {
+		if goals, listErr := e.routableAskGoals(ctx, transcript); listErr != nil || len(goals) > 0 {
 			// Routing makes a model call and calls work builtins: never under
 			// this lock, which is not reentrant.
 			release()

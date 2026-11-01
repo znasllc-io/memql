@@ -290,6 +290,11 @@ memory through the gate's reader (the Cockpit's `capacity.ReadMemory`):
   memory); on a card its free VRAM, and with several cards the one with the least
   free (they are never added together); otherwise `MemAvailable`. Under memory
   pressure the report offers zero, because the gate admits nothing then.
+- **Workspaces:** the gate keeps their whole budget, 3 GiB, out of what it spends.
+  The engine cannot see that, so the machine's report leaves it out too
+  (`modelcall.AdmissionMemory`). On a pool they share, it comes off the free figure.
+  A card holds none of them, so the question is the host's RAM: its reserve plus the
+  budget, and a host without that reads as pressure.
 - **Wanted** is `reserve + need - min(need, resident)`. The reserve is a sixteenth
   of the pool, between 1 and 4 GiB. A loaded model still keeps it, because the gate
   asks for it, so "already loaded" is not a free pass here.
@@ -305,13 +310,15 @@ The engine can therefore refuse where the gate would admit, when the catalog ask
 for more than the estimate does; that costs only the next machine. The reverse
 wastes a call, and `cockpit/internal/worker/modelcall/admission_agreement_test.go`
 holds it shut by running the real `AdmitFleetMachine` and the real `acquire` on the
-same figures for every Ollama model in the catalog. Four things can still disagree,
+same figures for every Ollama model in the catalog. Five things can still disagree,
 each costing one 30-second decline, because the engine cannot see them: a report up
 to two minutes old; an idle model someone loaded by hand, which the gate will not
 unload; a peak declared in the machine's `policy.yaml` above the catalog's figure,
-and the image sizes that scale it; and a machine under pressure with enough idle
-memory to cover the whole model, because unloading might end the pressure. A model
-the catalog states no need for is the gate's alone to judge.
+and the image sizes that scale it; a machine under pressure with enough idle memory
+to cover the whole model, because unloading might end the pressure; and a shared
+pool with less free than the workspace budget and an idle model, because a report
+cannot offer less than nothing, so the engine counts up to 3 GiB the gate will keep.
+A model the catalog states no need for is the gate's alone to judge.
 
 **Signals.** The cockpit reports `Capacity` on Register and every Heartbeat:
 the pool total and free, its kind (`unified`, `vram`, `system`) and each loaded

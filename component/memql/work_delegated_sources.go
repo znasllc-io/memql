@@ -105,16 +105,35 @@ func (e *MemQLEngine) delegatedSessionRow(ctx context.Context, sessionID string)
 // exchanges from this app session before a tool can create an approval. The app
 // transcript is never used as resumable state or as proof of completed effects.
 func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID string, initial []common.ChatMessage, tool string, args map[string]any) error {
-	if len(initial) == 0 {
-		return fmt.Errorf("%w: delegated turn context is unavailable", ErrWorkCheckpointRequired)
-	}
-	session, err := e.delegatedSessionRow(ctx, sessionID)
+	messages, err := e.WorkDelegatedOutcomeSource(ctx, sessionID, initial)
 	if err != nil {
 		return err
 	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	callID := "delegated-question-" + id.NewShortId()
+	messages = append(messages,
+		common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{{ID: callID, Name: tool, Arguments: string(raw)}}},
+		common.ChatMessage{Role: "tool", Name: tool, ToolCallId: callID, Content: common.UnexecutedWorkToolResult})
+	return e.SaveWorkContinuation(ctx, messages)
+}
+
+// WorkDelegatedOutcomeSource joins the native handover and server-observed
+// receipts. Neither an App transcript nor its final prose certifies effects.
+// The same bounded read serves question suspension and terminal-format recovery.
+func (e *MemQLEngine) WorkDelegatedOutcomeSource(ctx context.Context, sessionID string, initial []common.ChatMessage) ([]common.ChatMessage, error) {
+	if len(initial) == 0 {
+		return nil, fmt.Errorf("%w: delegated turn context is unavailable", ErrWorkCheckpointRequired)
+	}
+	session, err := e.delegatedSessionRow(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	started, valid := askTimestamp(session["startedAt"])
 	if !valid {
-		return fmt.Errorf("%w: delegated session start is unavailable", ErrWorkCheckpointRequired)
+		return nil, fmt.Errorf("%w: delegated session start is unavailable", ErrWorkCheckpointRequired)
 	}
 	run, _ := common.RunFromContext(ctx)
 	call, _ := parser.RenderCall("workDelegatedSourcesForOwnerRun", map[string]any{"runId": run.RunId})
@@ -123,7 +142,7 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 	for range 16 {
 		result, err := e.Execute(ContextWithCursor(ContextWithFreshRead(ctx), cursor), "query "+call)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, row := range MaterializeRows(result.OutputPayload()) {
 			if at, ok := askTimestamp(row["createdAt"]); ok && at.Before(started) {
@@ -135,19 +154,19 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 				continue
 			}
 			if BareShortId(stringArg(row, "stepKey")) != BareShortId(run.StepKey) || data["sourceOmitted"] == true {
-				return fmt.Errorf("%w: delegated source receipt is incomplete", ErrWorkCheckpointRequired)
+				return nil, fmt.Errorf("%w: delegated source receipt is incomplete", ErrWorkCheckpointRequired)
 			}
 			pair, err := decodeWorkContinuation(data)
 			if err != nil || len(pair) != 2 || pair[0].Role != "assistant" || len(pair[0].ToolCalls) != 1 || pair[1].Role != "tool" || pair[1].ToolCallId != pair[0].ToolCalls[0].ID {
-				return fmt.Errorf("%w: delegated source receipt is invalid", ErrWorkCheckpointRequired)
+				return nil, fmt.Errorf("%w: delegated source receipt is invalid", ErrWorkCheckpointRequired)
 			}
 			pair, err = delegatedFeedbackReference(run.RunId, stringArg(row, "id"), pair)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			bytes += len(pair[0].ToolCalls[0].Arguments) + len(pair[1].Content)
 			if bytes > 4*1024*1024 {
-				return fmt.Errorf("%w: delegated continuation exceeds its byte bound", ErrWorkCheckpointRequired)
+				return nil, fmt.Errorf("%w: delegated continuation exceeds its byte bound", ErrWorkCheckpointRequired)
 			}
 			exchanges = append(exchanges, pair)
 		}
@@ -161,7 +180,7 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 		}
 	}
 	if !complete {
-		return fmt.Errorf("%w: delegated continuation exceeds its scan bound", ErrWorkCheckpointRequired)
+		return nil, fmt.Errorf("%w: delegated continuation exceeds its scan bound", ErrWorkCheckpointRequired)
 	}
 	messages := append([]common.ChatMessage(nil), initial...)
 	// initial is the native context actually delegated, including its existing
@@ -171,15 +190,7 @@ func (e *MemQLEngine) PrepareDelegatedFeedback(ctx context.Context, sessionID st
 	for i := len(exchanges) - 1; i >= 0; i-- {
 		messages = append(messages, exchanges[i]...)
 	}
-	raw, err := json.Marshal(args)
-	if err != nil {
-		return err
-	}
-	callID := "delegated-question-" + id.NewShortId()
-	messages = append(messages,
-		common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{{ID: callID, Name: tool, Arguments: string(raw)}}},
-		common.ChatMessage{Role: "tool", Name: tool, ToolCallId: callID, Content: common.UnexecutedWorkToolResult})
-	return e.SaveWorkContinuation(ctx, messages)
+	return messages, nil
 }
 
 // Screenshots and document reads are already stored in the owner's public

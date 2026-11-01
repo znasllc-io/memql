@@ -16,12 +16,16 @@ import (
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/workbench"
 	"github.com/znasllc-io/memql/core/fleetmemory"
 )
 
 type memoryHeadroom struct {
 	Total, Available uint64
 	Pressure         bool
+	// DedicatedGPU separates device VRAM from RAM used by persistent workspaces.
+	// Unified-memory and CPU runtimes leave this false and share one budget.
+	DedicatedGPU bool
 }
 
 // hostResources coordinates local runtimes, not model names or modalities.
@@ -29,8 +33,9 @@ type memoryHeadroom struct {
 // idle Ollama runner and an on-demand MLX runner share the same unified pool.
 // The gate is shared by every cluster Manager and is held through cleanup.
 type hostResources struct {
-	gate  chan struct{}
-	probe func() (memoryHeadroom, error)
+	gate        chan struct{}
+	probe       func() (memoryHeadroom, error)
+	systemProbe func() (capacity.SystemHeadroom, error)
 	// Only models this worker actually invoked may be evicted. Unrelated
 	// applications' runners must not be stopped to make room for Fleet.
 	owned     map[string]models.Info
@@ -51,14 +56,101 @@ func readMemoryHeadroom() (memoryHeadroom, error) {
 	if err != nil {
 		return memoryHeadroom{}, err
 	}
-	return memoryHeadroom{Total: mem.Total, Available: mem.Available, Pressure: mem.Pressure}, nil
+	return headroomFrom(mem), nil
 }
+
+func headroomFrom(mem capacity.Memory) memoryHeadroom {
+	return memoryHeadroom{Total: mem.Total, Available: mem.Available, Pressure: mem.Pressure, DedicatedGPU: mem.Kind == capacity.KindVRAM}
+}
+
+// workbenchRAM is what admission budgets for workspaces: every hard-bounded
+// workspace, including a creation racing a reading. Charging the full caps may
+// count resident pages twice, but avoids granting usage credit to an unverified
+// Docker daemon or blocking a goal's model turn for the lifetime of its own
+// workspace. Empty future slots are covered too, so the short journal lock need not
+// span the runtime call.
+const workbenchRAM = uint64(workbench.Slots) * uint64(workbench.MemoryMiB) << 20
+
+// AdmissionMemory is what the capacity report offers: this machine's reading, less
+// what its gate keeps for workspaces. The engine cannot see that allowance, so a
+// report that still counted it would admit calls the gate then declines. It lives
+// here because workbench imports capacity, so capacity cannot ask.
+func AdmissionMemory(ctx context.Context) (capacity.Memory, error) {
+	return admissionMemory(ctx, capacity.ReadMemory, capacity.ReadSystemHeadroom)
+}
+
+// admissionMemory takes a reading to what the gate would spend of it. A shared pool
+// holds the workspaces, so they come off what it offers. A card does not: there the
+// allowance is a question about the host's RAM, which the report has no field for,
+// so a host that cannot keep it reads as pressure, which offers nothing.
+func admissionMemory(ctx context.Context, read func(context.Context) (capacity.Memory, error), readHost func() (capacity.SystemHeadroom, error)) (capacity.Memory, error) {
+	mem, err := read(ctx)
+	if err != nil {
+		return mem, err
+	}
+	if mem.Kind != capacity.KindVRAM {
+		mem.Available -= min(mem.Available, workbenchRAM)
+		return mem, nil
+	}
+	host, err := readHost()
+	if err != nil || host.Available > host.Total || !hostKeepsWorkbenchRAM(host) {
+		mem.Pressure = true
+	}
+	return mem, nil
+}
+
+// hostKeepsWorkbenchRAM is whether a machine whose models run on their own card
+// still has the RAM its workspaces are budgeted, with the reserve left over.
+func hostKeepsWorkbenchRAM(host capacity.SystemHeadroom) bool {
+	return !host.Pressure && host.Available >= fleetmemory.Reserve(host.Total)+workbenchRAM
+}
+
+// resourceReservation keeps the shared host locks until the caller returns.
+// Closing is deliberately separate from completion: an unknown runtime outcome
+// leaves the durable activity witness in place even after both locks close.
+type resourceReservation struct {
+	lease   *inferenceLease
+	release func()
+}
+
+// begin records the durable activity witness before the runtime is handed the
+// call, in force until until (inferenceFenceEnd).
+func (r *resourceReservation) begin(until time.Time) error {
+	if r.lease != nil {
+		return r.lease.beginActive(until)
+	}
+	return nil
+}
+
+// inferenceFenceEnd is when a runtime handed a call now can no longer be
+// working on it: the call's own deadline, past which its request is cut off,
+// or, for a context with none, capacity.InferenceFenceBound after now. A
+// cancelled or failed call's witness stays in force until then, because the
+// runtime may still be generating; after it the witness is absent
+// (capacity.CheckInferenceIdle). Every call the Manager runs has a deadline
+// (Start bounds it by its envelope's timeout), so the bound is for a caller
+// that brings none.
+func inferenceFenceEnd(ctx context.Context, now time.Time) time.Time {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline
+	}
+	return now.Add(capacity.InferenceFenceBound)
+}
+
+func (r *resourceReservation) complete() error {
+	if r.lease != nil {
+		return r.lease.completeActive()
+	}
+	return nil
+}
+
+func (r *resourceReservation) close() { r.release() }
 
 // NewHostLimiter is the production limiter. NewLimiter remains the pure
 // advertised concurrency limiter for embedders that supply their own budget.
 func NewHostLimiter() *Limiter {
 	l := NewLimiter()
-	l.resources = &hostResources{gate: make(chan struct{}, 1), probe: readMemoryHeadroom, owned: make(map[string]models.Info), poll: time.Second, leaseRoot: inferenceCapacityRoot}
+	l.resources = &hostResources{gate: make(chan struct{}, 1), probe: readMemoryHeadroom, systemProbe: capacity.ReadSystemHeadroom, owned: make(map[string]models.Info), poll: time.Second, leaseRoot: inferenceCapacityRoot}
 	return l
 }
 
@@ -134,7 +226,7 @@ func requestMemory(info models.Info, start *memqlv1.ModelCallStart) models.Info 
 	return info
 }
 
-func (r *hostResources) acquire(ctx context.Context, info models.Info, client *http.Client, logger *slog.Logger) (func(), error) {
+func (r *hostResources) acquire(ctx context.Context, info models.Info, client *http.Client, logger *slog.Logger) (*resourceReservation, error) {
 	// WHAT CAN NEVER FIT IS REFUSED FIRST: before it queues behind the gate, and
 	// before the reclaim below unloads an idle model for nothing. That idle model
 	// can be the one the caller's fallback is about to need.
@@ -192,6 +284,11 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			continue
 		}
 		c := &ollamaClient{baseURL: old.BaseURL, http: client}
+		if lease != nil {
+			if err := lease.beginActive(inferenceFenceEnd(ctx, time.Now())); err != nil {
+				return nil, err
+			}
+		}
 		resp, err := c.post(ctx, "/api/generate", map[string]any{"model": old.ID, "keep_alive": 0, "stream": false})
 		if err != nil {
 			return nil, fmt.Errorf("reclaim idle model %q: %w", old.ID, err)
@@ -205,6 +302,11 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		if err != nil || result.Error != "" || !result.Done {
 			return nil, fmt.Errorf("idle model %q did not confirm unloading", old.ID)
 		}
+		if lease != nil {
+			if err := lease.completeActive(); err != nil {
+				return nil, fmt.Errorf("record completed model unload: %w", err)
+			}
+		}
 		delete(r.owned, oldKey)
 		if err := save(); err != nil {
 			return nil, err
@@ -212,6 +314,10 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		logger.Info("released idle inference model", "model", old.ID)
 	}
 	wanted := workingSet(info)
+	var workbenches uint64
+	if lease != nil {
+		workbenches = workbenchRAM
+	}
 	var last string
 	wait := r.headroomWait
 	if wait <= 0 {
@@ -225,6 +331,11 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 		}
 		reserve := fleetmemory.Reserve(state.Total)
+		room := state.Available
+		if !state.DedicatedGPU {
+			reserve += workbenches
+			room -= min(room, workbenches)
+		}
 		resident := uint64(0)
 		if info.Kind == models.KindOllama {
 			resident, err = ollamaResident(ctx, client, info)
@@ -233,14 +344,26 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			}
 		}
 		additional := wanted - min(wanted, resident)
-		if !state.Pressure && state.Available >= fleetmemory.RoomWanted(wanted, resident, state.Total) {
+		hostReady := true
+		if state.DedicatedGPU && workbenches != 0 {
+			probe := r.systemProbe
+			if probe == nil {
+				probe = capacity.ReadSystemHeadroom
+			}
+			host, err := probe()
+			if err != nil || host.Total == 0 || host.Available > host.Total {
+				return nil, fmt.Errorf("cannot establish host RAM headroom for inference and workbenches")
+			}
+			hostReady = hostKeepsWorkbenchRAM(host)
+		}
+		if hostReady && !state.Pressure && room >= fleetmemory.RoomWanted(wanted, resident, state.Total) {
 			r.owned[key] = info
 			if err := save(); err != nil {
 				return nil, err
 			}
 			logger.Info("admitted local inference", "model", info.ID, "available_bytes", state.Available, "reserved_bytes", reserve, "estimated_peak_bytes", wanted, "resident_bytes", resident)
 			ok = true
-			return release, nil
+			return &resourceReservation{lease: lease, release: release}, nil
 		}
 		headroom := fmt.Sprintf("available %d, additional %d, reserve %d, pressure %t", state.Available, additional, reserve, state.Pressure)
 		if last == "" {

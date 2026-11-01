@@ -20,11 +20,12 @@ func TestDarwinMemoryProbeReadsActualKernelTypes(t *testing.T) {
 	}
 }
 
-// The capacity report must never offer more than the gate will find. On one Mac
+// The capacity report must never offer more than the gate will spend. On one Mac
 // at one instant the two used to read 31.0 GB and 21.3 GB: the report counted
 // anonymous inactive pages, which a new allocation only gets by compressing or
 // swapping someone else's memory, and the gate did not. So the engine kept sending
-// calls the gate then declined.
+// calls the gate then declined. The gate also keeps its workspace budget back, and
+// the report has to leave that out too.
 //
 // These are live counters, so the two readings are a moment apart and may differ
 // a little. The slack is far below the gap this test exists for. A Mac only runs
@@ -34,6 +35,7 @@ func TestDarwinTheCapacityReportOffersNoMoreThanTheGateFinds(t *testing.T) {
 	prober := &capacity.Prober{
 		OllamaBase: func() string { return localOllama },
 		HTTPClient: &http.Client{Transport: &fakeOllama{}},
+		Memory:     AdmissionMemory,
 	}
 	var report capacity.Report
 	var gate memoryHeadroom
@@ -46,9 +48,9 @@ func TestDarwinTheCapacityReportOffersNoMoreThanTheGateFinds(t *testing.T) {
 		if report, ok = prober.Probe(context.Background()); !ok {
 			t.Fatal("no report from this machine")
 		}
-		if report.MemoryFreeBytes <= gate.Available+slack {
+		if report.MemoryFreeBytes+min(workbenchRAM, gate.Available) <= gate.Available+slack {
 			return
 		}
 	}
-	t.Fatalf("the report offers %d and the gate finds %d", report.MemoryFreeBytes, gate.Available)
+	t.Fatalf("the report offers %d, and the gate finds %d and keeps %d of it", report.MemoryFreeBytes, gate.Available, workbenchRAM)
 }

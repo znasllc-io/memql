@@ -18,12 +18,20 @@ package router
 // already exposes (Code()); an untyped error is named by the category the
 // ledger already derives (CategorizeError). The full text stays on the row's
 // errorMessage, where it always was.
+//
+// A SECOND READER IS A PUBLIC ONE. The independent review's model call is
+// reported on a pipeline's check run, public on GitHub for a public repository,
+// and its error is raw runtime text there (a door that served from the owner's
+// machine can begin with the name that machine reported, its hostname). The
+// pipeline words that error with this function (app/pipeline_independent_review.go),
+// which is why the line can carry nothing but a code and the router's words.
 
 import (
 	"errors"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 )
 
@@ -43,6 +51,9 @@ var failureWords = map[string]string{
 	"kill_switch_unreadable":          "the computer-use switch of the person the call acts for could not be read",
 	"app_not_named_by_owner":          "the app was pinned by someone other than the person the call acts for",
 	memql.AppRefusalCode:              "the app could not answer",
+	memql.AppQuotaRefusalCode:         "the app's plan is out of usage",
+	memql.AppAuthRefusalCode:          "the app's login on that machine is missing or expired",
+	memql.AppStoppedMidWorkCode:       "the app stopped partway on its usage or login, and nothing could take over",
 	memql.AppVisionStagingRefusalCode: "the images could not be placed in the session workspace",
 	memql.RefusalCodeNoLocalModel:     "no machine could serve the model",
 	// A machine's own codes for a call it started and then failed (the
@@ -56,6 +67,11 @@ var failureWords = map[string]string{
 	"timeout":           "timed out",
 	"auth":              "the credentials were refused",
 	"upstream":          "the provider failed",
+
+	// The router's own refusals, in the words its error leads with
+	// (InferenceUnavailable.Error). Without them a refusal read as "other".
+	work.RefusalEveryDoorShut:  "no door to a model is open for this call",
+	work.RefusalCeilingReached: "a paid provider could have served this call and the cost ceiling is reached",
 }
 
 // FailureReason is the `considered` line for a source that failed when it was
@@ -76,6 +92,10 @@ func FailureReason(err error) string {
 // in front of it. Then the app door's sentinel, which every app failure
 // without a code of its own carries (a session that started and failed).
 // Last, the ledger's category of an untyped error.
+//
+// The router's own refusal is asked after the Code() holders: it keeps its code
+// in a field of that name, so it cannot also have the method, and answers
+// through the door report (work.DoorReporter) that DoorsFrom reads.
 func failureCode(err error) string {
 	var unavailable *memql.AppUnavailable
 	if errors.As(err, &unavailable) && unavailable.NoOwner {
@@ -84,6 +104,12 @@ func failureCode(err error) string {
 	var coded interface{ Code() string }
 	if errors.As(err, &coded) {
 		if code := strings.TrimSpace(coded.Code()); code != "" {
+			return code
+		}
+	}
+	var refusal work.DoorReporter
+	if errors.As(err, &refusal) {
+		if code := strings.TrimSpace(refusal.RefusalCode()); code != "" {
 			return code
 		}
 	}

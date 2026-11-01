@@ -2,8 +2,6 @@ package appsession
 
 import (
 	"bytes"
-	"io"
-	"os"
 	"sync"
 )
 
@@ -195,21 +193,4 @@ func (s *secretScan) Write(p []byte) (int, error) {
 		s.tail = joined
 	}
 	return len(p), nil
-}
-
-// holdsFile reports whether the file at path carries any credential.
-func (r *redactor) holdsFile(path string) (bool, error) {
-	scan := r.scanner()
-	if scan == nil {
-		return false, nil
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	if _, err := io.Copy(scan, f); err != nil {
-		return false, err
-	}
-	return scan.found, nil
 }

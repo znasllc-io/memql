@@ -99,7 +99,7 @@ func main() {
 	case "menu":
 		handleMenu(os.Args[2:])
 	case "worker":
-		worker.HandleCommand(os.Args[2:])
+		runWorkerCommand(os.Args[2:])
 	case "creds":
 		handleCredsCmd(os.Args[2:])
 	case "lint":

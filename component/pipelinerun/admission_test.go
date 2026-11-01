@@ -188,3 +188,93 @@ func TestClaimPassesTheTrainFact(t *testing.T) {
 		t.Errorf("IsTrainRun misreads the head branch")
 	}
 }
+
+func TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission.json")
+	runs, cloud := FileRunAdmission(path), FileCloudAdmission(path)
+	if FileCloudAdmission(" ") != nil {
+		t.Fatal("unset cloud admission must preserve existing installations")
+	}
+	for _, tc := range []struct {
+		name        string
+		decision    map[string]any
+		runs, cloud bool
+		invalid     bool
+	}{
+		{"legacy allow", map[string]any{"allowNewRuns": true}, true, true, false},
+		{"legacy hold", map[string]any{"allowNewRuns": false}, false, false, false},
+		{"cost hold", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": false}, true, false, false},
+		{"operator hold", map[string]any{"version": 2, "allowNewRuns": false, "allowCloud": true}, false, false, false},
+		{"allow both", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": true}, true, true, false},
+		{"missing cloud", map[string]any{"version": 2, "allowNewRuns": true}, false, false, true},
+		{"missing version", map[string]any{"allowNewRuns": true, "allowCloud": true}, false, false, true},
+		{"unknown version", map[string]any{"version": 3, "allowNewRuns": true, "allowCloud": true}, false, false, true},
+		{"null version", map[string]any{"version": nil, "allowNewRuns": true}, false, false, true},
+		{"unknown field", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": true, "bypass": true}, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.decision["validUntil"] = testNow.Add(time.Hour)
+			data, err := json.Marshal(tc.decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for name, gate := range map[string]func(time.Time) (bool, error){"runs": func(now time.Time) (bool, error) { return runs(now, false) }, "cloud": func(now time.Time) (bool, error) { return cloud(now, false) }} {
+				want := tc.runs
+				if name == "cloud" {
+					want = tc.cloud
+				}
+				got, err := gate(testNow)
+				if got != want || (err != nil) != tc.invalid {
+					t.Fatalf("%s: got %v/%v", name, got, err)
+				}
+				if got, err := gate(testNow.Add(time.Hour)); got || err == nil {
+					t.Fatalf("%s accepted expired decision", name)
+				}
+			}
+		})
+	}
+}
+
+// Release trains and Fleet/cloud placement came from independent branches.
+// A train allowance preserves legacy train execution under a new-run hold.
+// A separate v2 cloud spending hold still wins for both classes.
+func TestTrainAllowancePreservesIndependentCloudHold(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "admission.json")
+	runs, cloud := FileRunAdmission(path), FileCloudAdmission(path)
+	for _, tc := range []struct {
+		name                                       string
+		decision                                   map[string]any
+		ordinary, train, ordinarySpend, trainSpend bool
+	}{
+		{"legacy train allowance", map[string]any{"allowNewRuns": false, "allowTrainRuns": true}, false, true, false, true},
+		{"legacy all held", map[string]any{"allowNewRuns": false, "allowTrainRuns": false}, false, false, false, false},
+		{"train during ordinary run hold", map[string]any{"version": 2, "allowNewRuns": false, "allowTrainRuns": true, "allowCloud": true}, false, true, false, true},
+		{"train during spending hold", map[string]any{"version": 2, "allowNewRuns": true, "allowTrainRuns": true, "allowCloud": false}, true, true, false, false},
+		{"train only during spending hold", map[string]any{"version": 2, "allowNewRuns": false, "allowTrainRuns": true, "allowCloud": false}, false, true, false, false},
+		{"both allowances", map[string]any{"version": 2, "allowNewRuns": true, "allowTrainRuns": true, "allowCloud": true}, true, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.decision["validUntil"] = testNow.Add(time.Hour)
+			data, err := json.Marshal(tc.decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, check := range []struct{ train, want bool }{{false, tc.ordinary}, {true, tc.train}} {
+				if got, err := runs(testNow, check.train); got != check.want || err != nil {
+					t.Fatalf("run train=%v: got %v/%v, want %v", check.train, got, err, check.want)
+				}
+			}
+			for _, check := range []struct{ train, want bool }{{false, tc.ordinarySpend}, {true, tc.trainSpend}} {
+				if got, err := cloud(testNow, check.train); got != check.want || err != nil {
+					t.Fatalf("cloud train=%v: got %v/%v, want %v", check.train, got, err, check.want)
+				}
+			}
+		})
+	}
+}

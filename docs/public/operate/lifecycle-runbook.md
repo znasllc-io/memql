@@ -202,10 +202,12 @@ sequence of rows whose ids encode their order, so ordering is observable
 without a live LLM.
 
 The native `checks.build-clustere2e` step compiles and vets these test binaries
-for the default and agent build tags. That proves the fixtures build; it does
-not claim a live cross-replica pass. A live cluster test requires the configured
-cluster and its actual test output. Missing credentials, an unavailable cluster
-or a skipped test cannot qualify a deployment.
+for the default and agent build tags. It also runs `TestPipelinesSubstrate` with
+no cluster named, which runs that test's subtests that read no cluster and then
+skips. That proves the fixtures build and holds those subtests on every pull
+request; it does not claim a live cross-replica pass. A live cluster test
+requires the configured cluster and its actual test output. Missing credentials,
+an unavailable cluster or a skipped test cannot qualify a deployment.
 
 The separate native installer lifecycle fixtures run weekly or on demand on a
 consenting Linux Docker host. They own their disposable Docker/k3d resources

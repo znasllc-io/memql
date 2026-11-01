@@ -26,6 +26,22 @@ func TestBudgetApproval_CarriesTheNumbers(t *testing.T) {
 	}
 }
 
+func TestUnevaluatedProgressStopPreservesRefusalWithoutClaimingExhaustion(t *testing.T) {
+	a := ProgressFeedback("run-1", "draft", *UnevaluatedBreach("usage read unavailable"), t0, time.Hour)
+	StopProgressFeedback(&a)
+	if a.Subject["continuationAllowed"] != false || len(a.Options) != 1 || a.Options[0]["value"] != "abandon" {
+		t.Fatal("failed verification must not offer an unchecked continuation")
+	}
+	if a.Subject["ceiling"] != CeilingUnevaluated || a.Subject["reason"] != "usage read unavailable" || a.Subject["question"] != a.Question || a.ArtifactHash != ArtifactHash(a.Subject) {
+		t.Fatal("the immutable refusal must retain its cause and exact review hash")
+	}
+	b := ProgressFeedback("run-1", "draft", CeilingBreach{Ceiling: CeilingTokens}, t0, time.Hour)
+	StopProgressFeedback(&b)
+	if a.Question == b.Question {
+		t.Fatal("unknown admission is not demonstrated budget exhaustion")
+	}
+}
+
 func TestApprovalKinds(t *testing.T) {
 	ev := Evidence{Tier: "high", Reason: "r", RuleId: "x.y", Source: EvidenceSourceRules}
 	if got := SideEffectApproval("r", "s", "hash", ev, map[string]any{"command": "rm -rf /"}, t0, time.Hour); got.Kind != "sideEffect" || got.ArtifactHash != "hash" {

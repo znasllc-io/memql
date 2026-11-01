@@ -19,7 +19,9 @@ func TestCommandMemorySurvivesCompilationAndRejectsUnsupportedExecution(t *testi
 	}
 	spec.Stages[0].Steps[0].MemoryMiB = 6144
 	spec.Stages[0].Steps[0].Placement = PlacementFleet
+	spec.Stages[0].Steps[0].Execution = ExecutionNative
+	spec.Stages[0].Steps[0].Platform = "darwin/arm64"
 	if refusal := Validate(spec); refusal == nil {
-		t.Fatal("fleet memory silently ignored")
+		t.Fatal("native execution promised an unenforced container memory limit")
 	}
 }

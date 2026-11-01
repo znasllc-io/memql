@@ -8,7 +8,9 @@
 // The report and the machine's own gate read memory through one reader, ReadMemory,
 // and judge it with one sum (core/fleetmemory). A call the engine admits on this
 // report is therefore one the gate admits on the same figures, rather than a call
-// the machine declines once it arrives.
+// the machine declines once it arrives. What the gate keeps back for workspaces is
+// off the report before it is sent (modelcall.AdmissionMemory), because the engine
+// cannot see it.
 //
 // A report is sent on every heartbeat. When this machine cannot measure --
 // an operating system this package does not probe, a runtime that does not

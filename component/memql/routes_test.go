@@ -146,7 +146,7 @@ func TestRouteReadinessSummaries(t *testing.T) {
 
 	s = fleetOnly.summarize(apps)
 	require.False(t, s.Ready)
-	require.Equal(t, "No signed-in app on your machines", s.Reason)
+	require.Equal(t, "No app is ready on your machines", s.Reason)
 
 	appsNoEmbedder := routeReadiness{doors: inferenceDoors{AppEligible: true, RunnableApps: []string{"claude-code", "codex"}}}
 	s = appsNoEmbedder.summarize(apps)

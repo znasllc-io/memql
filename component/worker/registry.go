@@ -65,6 +65,7 @@ type Worker struct {
 	modelCallFn  ModelCallFunc
 	modelPullFn  ModelPullFunc
 	modelProbeFn ModelProbeFunc
+	appSignInFn  AppSignInFunc
 	cancelStream func()
 	// drainFn, when set, sends a Drain envelope with a stable reason then
 	// cancels the stream. Prefer it over raw cancelStream on voluntary
