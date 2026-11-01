@@ -102,7 +102,7 @@ carries no capability gate, as `libraryReadFile` carries none.
 | --- | --- | --- |
 | `files` | `[]object!`, each `{fileId string, label string}` | 1 to 8 entries; `fileId` required, `label` echoed back unchanged |
 | `patterns` | `[]string!` | 1 to 32 RE2 expressions of at most 256 bytes, each matched against one line without its line ending |
-| `maxBytes` | `int!` | 1,024 to 65,536: the excerpt bytes of all files together |
+| `maxBytes` | `int!` | At least 1,024 for each file and at most 65,536: the excerpt bytes of all files together |
 
 A malformed input refuses the whole call before anything is read.
 
@@ -127,9 +127,10 @@ comparing identifiers.
 - `totalBytes`, `totalLines`: what was read
 - `matchedLines`: lines that matched any pattern
 - `scanCapped`: the file is longer than the 64 MiB this reader reads
-- `unavailable`: set instead of the fields above when the file cannot be read,
-  with the sentence `libraryReadFile` gives ("file is unavailable", ...). One
-  unavailable file does not fail the call.
+- `unavailable`: set instead of the fields above when no attempt could read the
+  file, with the sentence `libraryReadFile` gives ("file is unavailable", ...).
+  One unavailable file does not fail the call. A storage failure that may clear
+  does fail it (the review follow-up below).
 
 ### One file's excerpt, within its share
 
@@ -164,6 +165,16 @@ matched against only its first 4 KiB, every call has a two-minute scan
 deadline (a file it stops is unavailable, "this file could not be excerpted in
 time"), and the version gate is released before a file's bytes are opened,
 since a version's bytes are never overwritten. A label is at most 200 bytes.
+
+**Review follow-up (2026-11-01).** A second review changed four things, each
+recorded with its evidence in the decision map
+(`docs/internal/ops/harness-decisions.md`, this design's entry). A storage failure
+that may clear fails the call so the failure path retries it, and only a refused
+key, an absent blob and the scan deadline stay per-file entries. CSI colour
+sequences are stripped for matching and from kept lines, because vitest 5 colours
+with no terminal; a file returned whole keeps its bytes. `maxBytes` must leave each
+file 1 KiB, because a smaller share could come back empty. Every entry answers with
+the bare `fileId`.
 
 ### One budget across files
 

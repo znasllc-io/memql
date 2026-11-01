@@ -125,3 +125,75 @@ func TestDownloadRejectsInvalidBudgets(t *testing.T) {
 		}
 	}
 }
+
+// IsBlobAbsent is the difference between one log reported as gone for good and
+// a read the failure path retries, so it reads what the service said through
+// the real SDK, and never the words around it: a 500's text can hold "404" or
+// "BlobNotFound" in a path or a request id.
+func TestIsBlobAbsentReadsTheServiceCodeNotTheText(t *testing.T) {
+	const stored = "https://blob.test/memql-library/library/404/BlobNotFound/step.log"
+	uploader := func(t *testing.T, respond downloadTransport) *AzureBlobUploader {
+		t.Helper()
+		client, err := azblob.NewClientWithNoCredential("https://blob.test", &azblob.ClientOptions{ClientOptions: policy.ClientOptions{
+			Transport: respond, Retry: policy.RetryOptions{MaxRetries: -1},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &AzureBlobUploader{client: client}
+	}
+	answering := func(status int, code string) downloadTransport {
+		return func(r *http.Request) (*http.Response, error) {
+			headers := http.Header{}
+			if code != "" {
+				headers.Set("x-ms-error-code", code)
+			}
+			return &http.Response{StatusCode: status, Status: strconv.Itoa(status), Header: headers, Body: io.NopCloser(strings.NewReader("RequestId:404 BlobNotFound")), Request: r}, nil
+		}
+	}
+	for name, tc := range map[string]struct {
+		respond downloadTransport
+		want    bool
+	}{
+		"the blob is not there": {answering(404, "BlobNotFound"), true},
+		"the container is not":  {answering(404, "ContainerNotFound"), false},
+		"a 404 with no code":    {answering(404, ""), false},
+		"storage is busy":       {answering(503, "ServerBusy"), false},
+		"storage failed":        {answering(500, "InternalError"), false},
+		"storage refuses":       {answering(403, "AuthorizationFailure"), false},
+		"the connection drops":  {func(*http.Request) (*http.Response, error) { return nil, errors.New("connection reset") }, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := uploader(t, tc.respond).DownloadStreamURL(context.Background(), stored)
+			if err == nil {
+				t.Fatal("the read succeeded")
+			}
+			if got := IsBlobAbsent(err); got != tc.want {
+				t.Fatalf("IsBlobAbsent(%v) = %v, want %v", err, got, tc.want)
+			}
+		})
+	}
+	t.Run("a retired stream", func(t *testing.T) {
+		_, err := uploader(t, func(r *http.Request) (*http.Response, error) {
+			headers := http.Header{"X-Ms-Meta-" + retiredStreamMetadata: {"marker"}}
+			return &http.Response{StatusCode: 200, Status: "200 OK", Header: headers, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		}).DownloadStreamURL(context.Background(), stored)
+		if !errors.Is(err, ErrBlobRetired) || !IsBlobAbsent(err) {
+			t.Fatalf("a tombstone answered %v, absent=%v", err, IsBlobAbsent(err))
+		}
+	})
+	t.Run("a stored value naming no object", func(t *testing.T) {
+		// The bare key a chunked upload's row stores: storage is never asked,
+		// so no retry can change the answer.
+		_, err := uploader(t, func(*http.Request) (*http.Response, error) {
+			t.Fatal("storage was asked for a bare key")
+			return nil, nil
+		}).DownloadStreamURL(context.Background(), "library/user-a/f-1/step.log")
+		if err == nil || !IsBlobAbsent(err) {
+			t.Fatalf("a bare key answered %v, absent=%v", err, IsBlobAbsent(err))
+		}
+	})
+	if IsBlobAbsent(nil) || IsBlobAbsent(context.DeadlineExceeded) {
+		t.Fatal("no failure, or a timeout, read as an absent blob")
+	}
+}

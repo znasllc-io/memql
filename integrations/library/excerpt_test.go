@@ -226,23 +226,166 @@ func TestExcerptStopsAtTheScanLimitAndSaysSo(t *testing.T) {
 	}
 }
 
+// vitest 5 colours its output with no terminal and no CI variable: it stops
+// only for NO_COLOR, TERM=dumb or FORCE_TTY=false, and a step's container sets
+// none. These lines are what it printed for a failing test in a Linux container
+// on Node 22, the toolchain's, with its output in a file.
+const (
+	vitestFailLine      = "\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m fail.test.js\x1b[2m > \x1b[22mboom"
+	vitestCrossLine     = "\x1b[31m   \x1b[31m×\x1b[31m boom\x1b[39m\x1b[32m 3\x1b[2mms\x1b[22m\x1b[39m"
+	vitestAssertionLine = "\x1b[31m\x1b[1mAssertionError\x1b[22m: expected 1 to be 2 // Object.is equality\x1b[39m"
+)
+
+func TestExcerptMatchesAColouredLineAndKeepsItWithoutItsColour(t *testing.T) {
+	input := lines(3000, func(i int) string {
+		switch i {
+		case 1500:
+			return vitestFailLine
+		case 1600:
+			return vitestCrossLine
+		case 1700:
+			return vitestAssertionLine
+		}
+		return fmt.Sprintf("\x1b[32m✓\x1b[39m src/app%d.test.ts \x1b[2m(1 test)\x1b[22m", i)
+	})
+	// The recipe's own patterns for these lines, each anchored.
+	ex := mustExcerpt(t, input, 8192, "^ *(FAIL|×|✗) ", "^AssertionError")
+	if ex.MatchedLines != 3 || ex.Complete || len(ex.Text) > 8192 {
+		t.Fatalf("matched=%d complete=%v len=%d", ex.MatchedLines, ex.Complete, len(ex.Text))
+	}
+	if strings.Contains(ex.Text, "\x1b") {
+		t.Fatalf("a colour code survived in a kept line:\n%q", ex.Text)
+	}
+	for _, want := range []string{" FAIL  fail.test.js > boom\n", "   × boom 3ms\n", "AssertionError: expected 1 to be 2 // Object.is equality\n", "✓ src/app3000.test.ts (1 test)\n"} {
+		if !strings.Contains(ex.Text, want) {
+			t.Errorf("missing %q in:\n%s", want, ex.Text)
+		}
+	}
+}
+
+// complete means the file itself, so the colour stays. Its lines are still
+// matched without it, and counted.
+func TestExcerptReturnsAColouredFileThatFitsWithItsBytes(t *testing.T) {
+	input := "ok\n" + vitestFailLine + "\n"
+	ex := mustExcerpt(t, input, 1024, "^ *FAIL ")
+	if ex.Text != input || !ex.Complete || ex.MatchedLines != 1 || ex.TotalBytes != int64(len(input)) {
+		t.Fatalf("a whole file was changed or its line missed: %+v", ex)
+	}
+}
+
+// A kept line is measured and cut without its colour: a line short of the limit
+// but for its codes is kept whole, and no code is cut in half.
+func TestExcerptMeasuresAColouredLineWithoutItsColour(t *testing.T) {
+	short := strings.Repeat("\x1b[31mx\x1b[39m", 1000) // 11 KB written, 1 KB of text
+	long := strings.Repeat("\x1b[31mxyz\x1b[39m", 900) // 2,700 bytes of text
+	huge := strings.Repeat("\x1b[31mxyz\x1b[39m", 8000)
+	input := lines(4000, func(i int) string {
+		switch i {
+		case 3998:
+			return short
+		case 3999:
+			return long
+		case 4000:
+			return huge
+		}
+		return "progress"
+	})
+	ex := mustExcerpt(t, input, 64<<10, "^FAIL")
+	got := strings.Split(strings.TrimSuffix(ex.Text, "\n"), "\n")
+	if strings.Contains(ex.Text, "\x1b") || len(got) < 3 {
+		t.Fatalf("a colour code survived, or lines went missing: %d lines", len(got))
+	}
+	last := got[len(got)-3:]
+	if last[0] != strings.Repeat("x", 1000) {
+		t.Errorf("a line short of the limit was changed: %.60q", last[0])
+	}
+	// The cut is at 2 KiB of text, and says how much of the rest it cut.
+	if want := strings.Repeat("xyz", 682) + "xy [... 652 bytes cut ...]"; last[1] != want {
+		t.Errorf("long line kept as %.40q ... %q", last[1], last[1][max(0, len(last[1])-40):])
+	}
+	if !strings.HasPrefix(last[2], strings.Repeat("xyz", 682)+"xy [... ") || !strings.HasSuffix(last[2], " bytes cut ...]") {
+		t.Errorf("a line past the hold kept as %.40q ... %q", last[2], last[2][max(0, len(last[2])-40):])
+	}
+}
+
+func TestStripExcerptCSI(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"no escape":                {"plain text", "plain text"},
+		"colour":                   {"\x1b[31mred\x1b[0m", "red"},
+		"256 colours":              {"\x1b[38;5;196mred\x1b[39m", "red"},
+		"colon parameters":         {"\x1b[38:2::1:2:3mrgb\x1b[m", "rgb"},
+		"erase line":               {"\x1b[2Kline", "line"},
+		"private mode":             {"\x1b[?25lhidden\x1b[?25h", "hidden"},
+		"intermediate byte":        {"a\x1b[1 qb", "ab"},
+		"keeps invalid UTF-8":      {"\xff\x1b[1m\xfe", "\xff\xfe"},
+		"not a control sequence":   {"a\x1b]0;title\x07b \x1bc", "a\x1b]0;title\x07b \x1bc"},
+		"an unfinished sequence":   {"text\x1b[3", "text\x1b[3"},
+		"a bracket with no escape": {"[31mtext", "[31mtext"},
+	} {
+		if got := string(stripExcerptCSI([]byte(tc.in))); got != tc.want {
+			t.Errorf("%s: %q became %q, want %q", name, tc.in, got, tc.want)
+		}
+	}
+}
+
+// An excerpt that comes back empty looks like an empty file, and windows may
+// take three quarters of a share, so at the floor what is left has to hold both
+// markers at their longest.
+func TestTheExcerptFloorLeavesRoomForItsMarkers(t *testing.T) {
+	markers := len(excerptScanMarker(excerptScanLimit)) + 1 + len(excerptGapMarker(excerptScanLimit-1, excerptScanLimit)) + 1
+	if left := excerptMinBytes / 4; left < markers {
+		t.Fatalf("the floor leaves %d bytes past the windows; the markers can take %d", left, markers)
+	}
+}
+
+func TestExcerptOfACappedFileAtTheFloorIsNotEmpty(t *testing.T) {
+	const limit = 1 << 20
+	for name, input := range map[string]string{
+		"every line matches":      lines(300000, func(int) string { return "FAIL" }),
+		"windows, then long ends": lines(60000, func(i int) string { return fmt.Sprintf("FAIL %s", strings.Repeat("x", i%300)) }),
+		"one line past the cap":   strings.Repeat("x", 2*limit),
+	} {
+		ex, err := excerptTextLimited(context.Background(), strings.NewReader(input), mustExcerptPatterns(t, "^FAIL"), excerptMinBytes, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ex.ScanCapped || len(ex.Text) > excerptMinBytes || !strings.HasSuffix(ex.Text, excerptScanMarker(limit)+"\n") {
+			t.Errorf("%s: capped=%v len=%d: %.200q", name, ex.ScanCapped, len(ex.Text), ex.Text)
+		}
+	}
+}
+
 func TestExcerptNeverExceedsItsShareAndKeepsLinesInOrder(t *testing.T) {
 	cut := regexp.MustCompile(` \[\.\.\. [0-9]+ bytes cut \.\.\.\]$`)
 	for seed := int64(1); seed <= 200; seed++ {
 		rng := rand.New(rand.NewSource(seed))
 		input := make([]string, 1+rng.Intn(3000))
+		written := make([]string, len(input)) // input as the file holds it: every other seed's is coloured
+		failures := 0
 		for i := range input {
 			if rng.Intn(40) == 0 {
 				input[i] = fmt.Sprintf("FAIL %d", i)
-				continue
+				failures++
+			} else {
+				input[i] = strings.Repeat(string(rune('a'+rng.Intn(26))), rng.Intn(3001))
 			}
-			input[i] = strings.Repeat(string(rune('a'+rng.Intn(26))), rng.Intn(3001))
+			written[i] = input[i]
+			if seed%2 == 0 {
+				written[i] = "\x1b[31m" + input[i] + "\x1b[39m"
+			}
 		}
-		share := 1024 + rng.Intn(65536-1024+1)
-		raw := strings.Join(input, "\n") + "\n"
+		// Every share the handler can hand out, the floor itself among them.
+		share := excerptMinBytes + rng.Intn(excerptMaxBytes-excerptMinBytes+1)
+		if seed%10 == 0 {
+			share = excerptMinBytes
+		}
+		raw := strings.Join(written, "\n") + "\n"
 		ex := mustExcerpt(t, raw, share, "^FAIL")
-		if len(ex.Text) > share || !utf8.ValidString(ex.Text) {
-			t.Fatalf("seed %d: len %d over share %d, or invalid UTF-8", seed, len(ex.Text), share)
+		if len(ex.Text) > share || !utf8.ValidString(ex.Text) || ex.Text == "" {
+			t.Fatalf("seed %d: len %d over share %d, invalid UTF-8, or empty", seed, len(ex.Text), share)
+		}
+		if ex.MatchedLines != failures {
+			t.Fatalf("seed %d: matched %d of %d failure lines", seed, ex.MatchedLines, failures)
 		}
 		if ex.Complete {
 			if ex.Text != raw {

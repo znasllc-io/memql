@@ -1221,16 +1221,17 @@ The evidence behind the change:
 The engine adds `libraryReadFileExcerpts`
 (`integrations/library/read_file_excerpts.go`, `excerpt.go`). It reads up to
 eight of the caller's text files, each on `libraryReadFile`'s path
-(`readableTextFile`), under one budget of at most 64 KiB, shared max-min fair in
-ascending stored size. Each excerpt keeps the first lines, the earliest lines
-matching the caller's RE2 patterns with three lines before and twelve after
-while the window budget lasts (`matchedLines` counts them all), and the end of
-the file, with every omitted range marked. The budget bounds the output,
-markers included. A line is held to 64 KiB, matched on its first 4 KiB and
-kept to 2 KiB, and at most 64 MiB is read. A file the caller cannot read, or
-whose bytes fail, is its own `unavailable` entry. A database or gate failure
-fails the call, so the failure path can retry it. The builtin masks nothing and
-grants nothing: `label` is only echoed back.
+(`readableTextFile`), under one budget of at most 64 KiB and at least 1 KiB a
+file, shared max-min fair in ascending stored size. Each excerpt keeps the first
+lines, the earliest lines matching the caller's RE2 patterns with three lines
+before and twelve after while the window budget lasts (`matchedLines` counts
+them all), and the end of the file, with every omitted range marked. The budget
+bounds the output, markers included. A line is held to 64 KiB, matched on its
+first 4 KiB and kept to 2 KiB, and at most 64 MiB is read. A file the caller
+cannot read is its own `unavailable` entry, and every entry answers with the
+bare `fileId`. A database or gate failure fails the call, so the failure path
+can retry it. The builtin masks nothing and grants nothing: `label` is only
+echoed back.
 
 Any signed-in caller can call the builtin with their own file and patterns, so
 its cost is bounded natively, not by the recipe:
@@ -1240,6 +1241,59 @@ its cost is bounded natively, not by the recipe:
 - the version gate covers the row reads only and is released before a file's
   bytes are opened. A version's bytes are never overwritten, so a scan does
   not hold a gate-pool connection.
+
+What a failed read of a file's bytes means (`excerptBytesFailed`, added
+2026-11-01). The recipe reads an `unavailable` entry as a log that is gone, and
+when every log has one it ends with a no-repair result and no retry. Before this
+change every open or read error was such an entry, logged nowhere, so a storage
+blip ended a diagnosis for good. An entry must be a fact no attempt changes, and
+only these are:
+- a stored key `openFileBytes` refuses;
+- a blob that is absent (`azureblob.IsBlobAbsent`): a retired log, the service's
+  `BlobNotFound`, or a stored value naming no object, such as a chunked upload's
+  bare key;
+- the scan's own deadline passing, judged by the scan's context and never by the
+  error, because storage's own timeout says the same words and may well pass.
+
+Every other open or read error fails the call in one fixed sentence, "document
+storage may be temporarily unavailable", and is logged with the file id, as the
+entries above are. `transient.unavailable` retries that sentence after 30 seconds
+(`workSpineRecovery`) inside the run's budget of three, and past it a person is
+asked. The tradeoff is that one log's blip costs the other logs' results, which
+the next attempt reads again; nothing is written, so repeating it is safe.
+
+Alternatives rejected:
+- The storage error's own text as the call's error. The symptom table reads the
+  words: a 500 matches no rule and would cost a classifier call, and a path or a
+  request id can hold a "403" or a "404".
+- `isBlobNotFound`'s text match to tell a missing blob. Its "404" matches the same
+  paths and request ids, and a read wrongly called absent is never tried again.
+  `IsBlobAbsent` reads the service's code.
+- A missing container as absent. Nothing retires a container, so that is a storage
+  incident someone can put right. A credential storage refuses takes the same path:
+  it is no blip, but the budget bounds it, and a person hearing about it beats a
+  result saying the log is gone.
+
+Colour codes (added 2026-11-01). vitest 5.0.5 colours its output with no terminal
+and no `CI` variable; it stops only for `NO_COLOR`, `TERM=dumb` or
+`FORCE_TTY=false`, and neither the step's Job nor the toolchain image sets one. The
+`os-checks` step's test command, run with only `PATH` and `HOME` set and its output
+in a file, printed 44 escape sequences in 14 lines, and `node:22-bookworm-slim`
+printed 100 in a 30-line failure. The capture keeps every byte. vitest's failure line opens
+with a code, so the recipe's `^ *(FAIL|×|✗) ` missed it. CSI sequences are now
+stripped before a line is matched and from every kept line, and a kept line is
+measured without them. A file returned whole keeps its bytes, because `complete`
+promises the file itself; its lines are still matched without colour.
+
+A floor per file (added 2026-11-01). `maxBytes` must leave each file 1 KiB. Eight
+files in 1 KiB gave shares of 128 bytes, and a share too small for its markers
+comes back empty: windows may take three quarters of it, and the markers take up to
+126 bytes. Measured empty up to 466 bytes on a capped file whose every line
+matches, and at 133 on one not capped. Refusing such a call was chosen over
+documenting the empty result, because an empty excerpt reads as an empty log and
+the recipe drops it silently, no caller asks for so little (the recipe asks 48 KiB
+for three), and the property test's range then covers every share the handler can
+hand out.
 
 The recipe reads the first three failed steps with logs, in `seq` order, as
 48 KiB of excerpts. It lists every failed step and the run's own
@@ -1272,12 +1326,17 @@ carries the builtin.
 Tests:
 - `TestExcerpt*` and `TestCompileExcerptPatternsRefusesBadInput`
   (`excerpt_test.go`) cover the algorithm. A seeded property test walks every
-  excerpt back to its file line by line.
+  excerpt back to its file line by line, over every share the handler can hand
+  out and, on every other seed, a coloured file. `TestTheExcerptFloorLeavesRoomForItsMarkers`
+  and `TestExcerptOfACappedFileAtTheFloorIsNotEmpty` hold the floor.
 - `TestReadFileExcerpts*` cover malformed input refused before any read, the
   budget split (including a wrong stored size), and a foreign file reported
-  without a fetch.
+  without a fetch. `TestReadFileExcerptsFailsTheCallWhenStorageFails` holds the
+  call's sentence to `work.ClassifyByRules`, `TerminalFailureCode` and `ActFor`.
+- `TestIsBlobAbsentReadsTheServiceCodeNotTheText` (`integrations/azureblob`) drives
+  `DownloadStreamURL` through the real SDK against each answer storage gives.
 - `ReadFileExcerptsAcrossEngines` in `TestDocumentRevisionWorkflow` is the
-  database-backed two-replica case.
+  database-backed two-replica case, malformed input and a storage failure included.
 - memql-znas's `check-delivery-policy.go` drives the recipe through
   `workflowhost.Run` and compiles every pattern.
 
@@ -1286,6 +1345,16 @@ Not verified here:
 - excerpt quality on real failing logs;
 - Retry on a question the old recipe raised. It reruns the failed step under
   the installed recipe and keeps the old run's prefix.
+- A storage failure retried on a live run. The tests stop at the rules table, and
+  a retry through the recipe depends on its read carrying no `on error continue`,
+  true of memql-znas on 2026-11-01.
+- Colour codes in a stored log read directly. No session can read one from a vitest
+  step: the evidence is the reproduction above, and the 40 failed-step tails on
+  GitHub held none, but none of them came from such a step.
+
+Known limitation: a log that fits its share reaches the recipe with its colour
+codes, escaped in the evidence, so it still counts more toward the 65,536-character
+backstop than its text does.
 
 ## A step that ran out of memory says so (2026-10-29)
 
