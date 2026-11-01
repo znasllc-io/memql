@@ -23,6 +23,8 @@ import {
   barFor,
   deliveryCaption,
   fleetAvailable,
+  fleetHostCommandsOff,
+  fleetNotOffered,
   fleetReason,
   movementOf,
   needsRemedy,
@@ -132,7 +134,7 @@ export function ConnectPage({ pkg, pipeline, flow, can, backLabel, onBack, onDon
     existing: flow.existing,
     // The pipeline's steps go to its owner's machines, and only the source's
     // owner connects one: the source's owner is whose fleet is asked about.
-    fleet: { known: machines.known, available: fleetAvailable(machines.rows, pkg.ownerUserId) },
+    fleet: { known: machines.known, available: fleetAvailable(machines.rows, pkg.ownerUserId), hostCommandsOff: fleetHostCommandsOff(machines.rows, pkg.ownerUserId) },
     answers: flow.answers,
     outcome: flow.outcome,
     reviewed: flow.reviewed,
@@ -380,7 +382,7 @@ function ComputeBody({ reading, problem, name, onChoose }: {
     return (
       <>
         {problem}
-        <Notice tone="warn" sentence={`${compute.needers.join("; ")}.`} next={needsRemedy(compute.needers)} />
+        <Notice tone="warn" sentence={`${compute.needers.join("; ")}.`} next={needsRemedy(compute.needers, compute.hostCommandsOff)} />
       </>
     );
   }
@@ -389,7 +391,7 @@ function ComputeBody({ reading, problem, name, onChoose }: {
     ? fleetReason(compute.needers)
     : offersFleet
       ? "No step needs a machine yet, so the cluster is suggested."
-      : "Your fleet is offered once one of your machines allows pipelines in its policy.yaml.";
+      : fleetNotOffered(compute.hostCommandsOff);
   return (
     <>
       {problem}

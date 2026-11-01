@@ -627,7 +627,7 @@ StreamLoop:
 				// The app already executed this step. Validate its terminal
 				// signal without launching another session that could replay it.
 				if isDelegatedWorkSession(provider) {
-					return nil, fmt.Errorf("invalid delegated work outcome: %w", outcomeErr)
+					return nil, delegatedOutcomeFailure(ctx, provider, messages, turnText, turnCalls, turnCtx, outcomeErr)
 				}
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
@@ -927,6 +927,14 @@ StreamLoop:
 			finalText = terminalEnvelope.Response
 		}
 		citations = terminalEnvelope.Citations
+	}
+	// A delegated App may complete without a local tool batch. Review recovery
+	// still needs this exact final source, rather than an absent or pre-call
+	// checkpoint. Persist it before returning the completed result for review.
+	if terminalErr == nil && finalText != "" {
+		if err := r.saveWorkProgress(ctx, messages); err != nil {
+			return nil, err
+		}
 	}
 
 	completion := "agent streaming: complete"

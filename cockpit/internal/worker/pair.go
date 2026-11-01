@@ -258,10 +258,13 @@ func runConfiguredWorker(clusterURL, token, name string, logger *slog.Logger) er
 			Models:     modelInventory,
 			Discoverer: discoverer,
 			Metrics:    metrics,
+
+			AppReadiness: appInventories.Readiness(),
 		})
 		if err != nil {
 			return err
 		}
+		appInventories.RunReadiness(ctx, workers.StateDir, logger)
 	} else {
 		cfg := Defaults()
 		cfg.ClusterURL = clusterURL
@@ -287,6 +290,7 @@ func runConfiguredWorker(clusterURL, token, name string, logger *slog.Logger) er
 		if err != nil {
 			return err
 		}
+		appInventories.RunReadiness(ctx, cfg.StateDir, logger)
 	}
 
 	sigCh := make(chan os.Signal, 1)

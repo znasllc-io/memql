@@ -209,3 +209,6 @@ func TestAnAppCallWithNoHandlerIsRefusedBeforeStart(t *testing.T) {
 		t.Fatalf("answer = %+v, want a not_configured refusal before start for app-2", resp)
 	}
 }
+
+func (*blockingForwardHandler) HandleForwardedAppSignIn(context.Context, *nodev1.AppSignInForwardRequest, func(*nodev1.NodeServerMessage) error) {
+}

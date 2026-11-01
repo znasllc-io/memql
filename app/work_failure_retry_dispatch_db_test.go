@@ -54,8 +54,9 @@ func TestWorkDBFailureRetryDispatchesOnceAndKeepsCompletedPrefix(t *testing.T) {
 	gates, err := database.NewGatePool(dbtest.DSN(), 0)
 	require.NoError(t, err)
 	defer gates.Close()
-	for _, recovery := range []bool{false, true} {
-		t.Run(fmt.Sprintf("missedEvent=%v", recovery), func(t *testing.T) {
+	for _, tc := range []struct{ recovery, format bool }{{}, {recovery: true}, {format: true}, {recovery: true, format: true}} {
+		recovery := tc.recovery
+		t.Run(fmt.Sprintf("missedEvent=%v/format=%v", recovery, tc.format), func(t *testing.T) {
 			key := id.NewShortId()
 			owner, runID, goalID, approval := key+"owner", key+"run", key+"goal", key+"approval"
 			person := auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
@@ -70,12 +71,20 @@ func TestWorkDBFailureRetryDispatchesOnceAndKeepsCompletedPrefix(t *testing.T) {
 			require.NoError(t, err)
 			now := time.Now().UTC()
 			stamp := now.Format(time.RFC3339Nano)
+			message := "fixture delivery unavailable"
+			if tc.format {
+				message = workstate.OutcomeRecoveryError(fmt.Errorf("saved result requires formatting")).Error()
+			}
 			write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic failed-run Retry", "origin": "user"})
 			write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": auto.Name, "templateFingerprint": auto.DefinitionFingerprint(id.New()), "status": "waiting", "mode": "live", "startedAt": stamp, "waitingOn": map[string]any{"kind": "approval", "subject": approval}})
 			write("createWorkStep", map[string]any{"stepId": runID + "-prefix", "runId": runID, "key": "prefix", "seq": 0, "stepType": "function", "status": "done", "attempt": 1, "version": 1, "startedAt": stamp, "result": map[string]any{"stepId": "prefix", "status": "completed", "value": "already-saved-file"}})
-			write("createWorkStep", map[string]any{"stepId": runID + "-deliver", "runId": runID, "key": "deliver", "seq": 1, "stepType": "function", "status": "failed", "attempt": 1, "version": 1, "startedAt": stamp, "errorMessage": "fixture delivery unavailable"})
+			write("createWorkStep", map[string]any{"stepId": runID + "-deliver", "runId": runID, "key": "deliver", "seq": 1, "stepType": "function", "status": "failed", "attempt": 1, "version": 1, "startedAt": stamp, "errorMessage": message})
 			write("updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"prefix", "deliver"}, "head": workstate.Head{"prefix": {Version: 1}, "deliver": {Version: 1}}.Object(), "spent": map[string]any{"retries": 2, "modelCalls": 4}})
-			question := workstate.FailureApproval(workstate.ApprovalKindFeedback, runID, "deliver", workstate.SymptomHuman, "fixture delivery unavailable", "Retry delivery?", workstate.Evidence{}, now, time.Hour)
+			if tc.format {
+				failure := message
+				write("updateWorkRun", map[string]any{"runId": runID, "errorMessage": failure, "rerun": map[string]any{"requestId": "original-execution", "stepKey": "deliver", "reason": "rerun", "versions": map[string]any{"deliver": 1}}})
+			}
+			question := workstate.FailureApproval(workstate.ApprovalKindFeedback, runID, "deliver", workstate.SymptomHuman, message, "Retry delivery?", workstate.Evidence{}, now, time.Hour)
 			write("createWorkApproval", map[string]any{"approvalId": approval, "runId": runID, "stepKey": "deliver", "kind": question.Kind, "subject": question.Subject, "artifactHash": question.ArtifactHash, "question": question.Question, "options": question.Options, "requestedAt": stamp, "expiresAt": now.Add(time.Hour).Format(time.RFC3339Nano)})
 			done := make(chan error, 4)
 			ran := &stepsRan{}
@@ -107,12 +116,27 @@ func TestWorkDBFailureRetryDispatchesOnceAndKeepsCompletedPrefix(t *testing.T) {
 				}
 			}
 			require.True(t, decided)
+			if tc.format && recovery {
+				write("updateWorkRun", map[string]any{"runId": runID, "status": "abandoned", "errorCode": "run_abandoned", "errorMessage": "dispatch never started"})
+				for _, capability := range peers[1].Capabilities() {
+					if capability.Name == "decideApproval" {
+						_, err := capability.Handler(person, map[string]any{"approvalId": approval, "decision": "answered", "answer": map[string]any{"value": workstate.FailureAnswerRetry}}, 0)
+						require.NoError(t, err)
+					}
+				}
+			}
 			j, err := automations.LoadRunJournal(memql.ContextWithFreshRead(person), reader, runID)
 			require.NoError(t, err)
 			require.Equal(t, "failed", j.StepStates["deliver"].Status)
 			require.Equal(t, approval, j.HumanResumeId)
 			require.NotNil(t, j.Rerun)
-			require.Equal(t, 2, j.Rerun.Versions["deliver"])
+			if tc.format {
+				require.Equal(t, "original-execution", j.Rerun.RequestId)
+				require.Equal(t, 1, j.Rerun.Versions["deliver"])
+				require.True(t, j.OutcomeRecovery)
+			} else {
+				require.Equal(t, 2, j.Rerun.Versions["deliver"])
+			}
 			event := events.Event{Payload: map[string]any{"id": runID, "payload": map[string]any{"status": "running", "goalId": goalID, "ownerUserId": owner, "automationName": auto.Name, "humanResumeId": approval, "rerun": map[string]any{"requestId": j.Rerun.RequestId}}}}
 			if recovery {
 				require.True(t, peers[0].DispatchRun(person, runID, owner), "the sweep must recover the unspent answer while the old run lease remains held")

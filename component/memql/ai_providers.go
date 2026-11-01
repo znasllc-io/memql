@@ -1573,6 +1573,7 @@ func (p *openAIProvider) Call(ctx context.Context, prompt string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("no choices returned")
 	}
@@ -1624,6 +1625,7 @@ func (p *openAIProvider) CallChat(ctx context.Context, messages []common.ChatMes
 	if err != nil {
 		return "", err
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("no choices returned")
 	}
@@ -1704,6 +1706,7 @@ func (p *openAIProvider) CallChatStructuredWithUsage(ctx context.Context, messag
 	if err != nil {
 		return "", common.ChatUsage{}, err
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	// Reported=true even when both counts are zero: the API SAID something,
 	// and "the provider reported zero" is a different fact from "the provider
 	// said nothing", which is the whole distinction this type exists for.
@@ -1791,6 +1794,7 @@ func (p *openAIProvider) CallChatWithTools(ctx context.Context, messages []commo
 	if err != nil {
 		return nil, err
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("no choices returned")
 	}
@@ -1849,6 +1853,7 @@ func (p *openAIProvider) CallVision(ctx context.Context, prompt string, images [
 	if err != nil {
 		return "", fmt.Errorf("vision api: %w", err)
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("vision api returned no choices")
 	}
@@ -1948,6 +1953,7 @@ func (p *openAIStreamProvider) CallChat(ctx context.Context, messages []common.C
 	if err != nil {
 		return "", err
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("no choices returned")
 	}
@@ -1992,6 +1998,7 @@ func (p *openAIStreamProvider) CallChatWithTools(ctx context.Context, messages [
 	if err != nil {
 		return nil, err
 	}
+	reportOpenAIUsage(ctx, resp.RawJSON())
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("no choices returned")
 	}
@@ -2144,6 +2151,7 @@ func (p *openAIStreamProvider) CallStream(ctx context.Context, prompt string) (<
 	// Next()/Err() instead. That is why the error arm below is inside the
 	// goroutine rather than beside the call -- a failed stream is delivered as
 	// a chunk carrying the error, exactly as a mid-stream failure was.
+	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, req)
 
 	chunks := make(chan StreamChunk, 100)
@@ -2154,6 +2162,7 @@ func (p *openAIStreamProvider) CallStream(ctx context.Context, prompt string) (<
 
 		for stream.Next() {
 			chunk := stream.Current()
+			reportOpenAIUsage(ctx, chunk.RawJSON())
 			if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 				chunks <- StreamChunk{Content: chunk.Choices[0].Delta.Content}
 			}
@@ -2197,6 +2206,7 @@ func (p *openAIStreamProvider) CallChatStream(ctx context.Context, messages []co
 		req.MaxCompletionTokens = openai.Int(int64(maxTokens))
 	}
 
+	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, req)
 
 	chunks := make(chan common.StreamChunk, 100)
@@ -2207,6 +2217,7 @@ func (p *openAIStreamProvider) CallChatStream(ctx context.Context, messages []co
 
 		for stream.Next() {
 			chunk := stream.Current()
+			reportOpenAIUsage(ctx, chunk.RawJSON())
 			if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 				chunks <- common.StreamChunk{Content: chunk.Choices[0].Delta.Content}
 			}
@@ -2263,6 +2274,7 @@ func (p *openAIStreamProvider) CallChatStreamWithTools(ctx context.Context, mess
 		req.MaxCompletionTokens = openai.Int(int64(maxTokens))
 	}
 
+	req.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 	stream := p.client.Chat.Completions.NewStreaming(ctx, req)
 
 	chunks := make(chan common.StreamToolChunk, 100)
@@ -2273,6 +2285,7 @@ func (p *openAIStreamProvider) CallChatStreamWithTools(ctx context.Context, mess
 
 		for stream.Next() {
 			current := stream.Current()
+			reportOpenAIUsage(ctx, current.RawJSON())
 			if len(current.Choices) == 0 {
 				continue
 			}
@@ -2373,6 +2386,7 @@ func (p *anthropicProvider) Call(ctx context.Context, prompt string) (any, error
 	if err != nil {
 		return nil, err
 	}
+	reportAnthropicUsage(ctx, resp.RawJSON())
 
 	text := extractAnthropicText(resp)
 	if text == "" {
@@ -2420,6 +2434,7 @@ func (p *anthropicProvider) CallChat(ctx context.Context, messages []common.Chat
 	if err != nil {
 		return "", err
 	}
+	reportAnthropicUsage(ctx, resp.RawJSON())
 
 	return extractAnthropicText(resp), nil
 }
@@ -2479,6 +2494,7 @@ func (p *anthropicProvider) CallChatWithTools(ctx context.Context, messages []co
 	if err != nil {
 		return nil, err
 	}
+	reportAnthropicUsage(ctx, resp.RawJSON())
 
 	result := &common.ToolCallingChatResult{
 		AssistantText: extractAnthropicText(resp),
@@ -2527,6 +2543,7 @@ func (p *anthropicProvider) CallVision(ctx context.Context, prompt string, image
 	if err != nil {
 		return "", fmt.Errorf("vision api: %w", err)
 	}
+	reportAnthropicUsage(ctx, resp.RawJSON())
 	return strings.TrimSpace(extractAnthropicText(resp)), nil
 }
 
@@ -2671,6 +2688,7 @@ func (p *anthropicStreamProvider) CallChat(ctx context.Context, messages []commo
 	if err != nil {
 		return "", err
 	}
+	reportAnthropicUsage(ctx, resp.RawJSON())
 	return extractAnthropicText(resp), nil
 }
 
@@ -2705,6 +2723,7 @@ func (p *anthropicStreamProvider) CallChatWithTools(ctx context.Context, message
 	if err != nil {
 		return nil, err
 	}
+	reportAnthropicUsage(ctx, resp.RawJSON())
 	result := &common.ToolCallingChatResult{
 		AssistantText: extractAnthropicText(resp),
 	}
@@ -2752,6 +2771,7 @@ func (p *anthropicStreamProvider) CallStream(ctx context.Context, prompt string)
 		)
 		for stream.Next() {
 			event := stream.Current()
+			reportAnthropicUsage(ctx, event.RawJSON())
 			switch event.Type {
 			case "message_start":
 				u := event.Message.Usage
@@ -2825,6 +2845,7 @@ func (p *anthropicStreamProvider) CallChatStream(ctx context.Context, messages [
 		defer close(chunks)
 		for stream.Next() {
 			event := stream.Current()
+			reportAnthropicUsage(ctx, event.RawJSON())
 			if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
 				chunks <- common.StreamChunk{Content: event.Delta.Text}
 			}
@@ -2923,6 +2944,7 @@ func (p *anthropicStreamProvider) CallChatStreamWithTools(ctx context.Context, m
 		// peeked event flows through the same handling as subsequent
 		// events.
 		processEvent := func(event anthropic.MessageStreamEventUnion) {
+			reportAnthropicUsage(ctx, event.RawJSON())
 			switch event.Type {
 			case "message_start":
 				u := event.Message.Usage

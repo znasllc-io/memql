@@ -11,8 +11,8 @@ func hasPipelineAttempt() (bool, error) { return false, nil }
 
 type pipelineReservation struct{ dirty bool }
 type pipelineAttemptRecord struct {
-	Execution, Container, DockerID, Workspace, Network string
-	Services                                           []string
+	Execution, Container, DockerID, DockerEndpoint, Workspace, Network string
+	Services                                                           []string
 }
 
 func acquirePipelineReservation() (*pipelineReservation, error) {

@@ -1,4 +1,5 @@
 import { stateWords } from "../../kit/ReadinessStates";
+import { hostCommandsOffWords } from "../deployables/pipelines/words";
 import type { Verdict } from "../../system/readinessFold";
 
 // Settings -> Pipelines, READ (epic memql#5479, design record D15).
@@ -129,10 +130,19 @@ function itemState(verdict: Verdict | null, known: boolean, done: number, of: nu
 // The fleet line
 // ---------------------------------------------------------------------------
 
-/** The fleet line under a cluster that can run steps. */
-export function fleetSentence(count: number): string {
+/**
+ * The fleet line under a cluster that can run steps.
+ *
+ * WHEN NO MACHINE ALLOWS PIPELINES AND HOST COMMANDS IS WHAT KEEPS ONE OUT, THE
+ * LINE SAYS SO and points at the switch (hostCommandsOffWords): that machine's
+ * policy allows pipelines, and the fix is a switch in Fleet. It is said only
+ * then. While another machine takes steps, a machine its owner switched off is a
+ * choice and not a problem, and a line restating it would be noise.
+ */
+export function fleetSentence(count: number, hostCommandsOff: readonly string[] = []): string {
   if (count === 0) {
-    return "None of your machines allows pipelines yet, so a step that needs one cannot run.";
+    const none = "None of your machines allows pipelines yet, so a step that needs one cannot run.";
+    return hostCommandsOff.length > 0 ? `${none} ${hostCommandsOffWords(hostCommandsOff)}` : none;
   }
   return count === 1 ? "1 of your machines allows pipelines." : `${count} of your machines allow pipelines.`;
 }

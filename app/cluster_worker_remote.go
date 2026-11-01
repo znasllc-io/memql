@@ -44,5 +44,8 @@ func (a *App) wireWorkerForwarding(identity *node.Identity, peers *node.PeerMana
 	// The store is the delegation-policy reader too: `app:*` on the planner
 	// follows the owner's appOrder, exactly as it does on the agent.
 	providers.SetAppInference(agentworker.NewRemoteAppInference(store, store, forward, identity.ID, a.Logger))
+	// Fleet's Sign in action lands here, on the bff the person's stream ends on, and
+	// the machine's stream ends on an agent.
+	a.engine.SetAppSignInRelay(agentworker.NewAppSignInRelay(forward, nil, a.Logger))
 	a.Logger.Info("remote fleet and app inference wired through the agent holding each machine", "node_id", identity.ID)
 }

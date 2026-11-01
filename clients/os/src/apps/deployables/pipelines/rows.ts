@@ -272,6 +272,28 @@ export interface StepWhere {
   workerId: string;
 }
 
+/**
+ * One ended attempt of a step, as the step's binding records it
+ * (`binding.attempts`, written by component/pipelinerun's attemptRecord).
+ *
+ * The engine keeps more per attempt (its class, node, job, times); these are the
+ * fields the run page reads. `code` is empty for the attempt that passed and for
+ * a failing exit that carried none, and `message` then holds the words that
+ * attempt ended with (the server's, masked): a code this build has no copy for
+ * is shown by its message, never by the code.
+ */
+export interface StepAttempt {
+  attempt: number;
+  code: string;
+  message: string;
+  /** "cluster", "fleet", or "" when the engine recorded no place. */
+  surface: "cluster" | "fleet" | "";
+  /** The registration the attempt ran on; the page maps it to the machine's name. */
+  workerId: string;
+  /** The attempt's own log, a Library file: each attempt writes its own. */
+  logFileId: string;
+}
+
 export interface StepRow {
   id: string;
   runId: string;
@@ -296,9 +318,43 @@ export interface StepRow {
   logFileId: string;
   artifactFileIds: string[];
   notes: RunNote[];
+  /**
+   * Every attempt that ended, in order: the step's `binding.attempts`. A step
+   * that reached the executor has at least one; the page tells the history only
+   * when there are two or more, or the step is still going (`shownAttempts`).
+   */
+  attempts: StepAttempt[];
 }
 
 const STEP_STATUSES: ReadonlySet<string> = new Set(["pending", "ready", "running", "waiting", "done", "failed", "skipped", "cancelled"]);
+
+/**
+ * A step's attempt history off its binding. An entry is kept only if it is an
+ * object with a whole attempt number of 1 or more, and one entry stands for an
+ * attempt (the first, were an attempt named twice); the engine writes records
+ * numbered 1, 2, 3 in order, so anything else was not written by it and is
+ * left out rather than guessed at. Each field is read for what it is and an
+ * untrusted one reads as empty. The result is in attempt order.
+ */
+export function attemptsFromBinding(binding: Row): StepAttempt[] {
+  const seen = new Set<number>();
+  const out: StepAttempt[] = [];
+  for (const entry of objectsOf(binding, "attempts")) {
+    const attempt = rowNumber(entry, "attempt");
+    if (!Number.isInteger(attempt) || attempt < 1 || seen.has(attempt)) continue;
+    seen.add(attempt);
+    const surface = rowString(entry, "surface");
+    out.push({
+      attempt,
+      code: rowString(entry, "code"),
+      message: rowString(entry, "message"),
+      surface: surface === "cluster" || surface === "fleet" ? surface : "",
+      workerId: rowString(entry, "workerId"),
+      logFileId: idTail(rowString(entry, "logFileId")),
+    });
+  }
+  return out.sort((a, b) => a.attempt - b.attempt);
+}
 
 export function stepFromRow(raw: Row): StepRow {
   const row = flatten(raw);
@@ -337,6 +393,7 @@ export function stepFromRow(raw: Row): StepRow {
     logFileId: idTail(rowString(row, "logFileId")),
     artifactFileIds: stringsOf(row, "artifactFileIds").map(idTail).filter((id) => id !== ""),
     notes: notesOf(objectsOf(metadata, "notes")),
+    attempts: attemptsFromBinding(binding),
   };
 }
 

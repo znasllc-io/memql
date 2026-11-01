@@ -8,7 +8,7 @@ import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
 import type { LiveVoiceSession } from "./liveVoiceSession";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ArrowUp, Mic, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines, Paperclip } from "lucide-react";
+import { ArrowUp, Mic, X, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines, Paperclip } from "lucide-react";
 import type { UploadProvider } from "../items/upload";
 import { AskAttachmentChips, AskSentAttachments } from "./AskAttachments";
 import { AskRoutingControls } from "./AskRoutingControls";
@@ -26,6 +26,7 @@ import { AskWorkQueue } from "./AskWorkQueue";
 import { AskActivityLog } from "./AskActivityLog";
 import { AskConversations } from "./AskConversations";
 import { AskMessage } from "./AskMessage";
+import { AskMessageRow } from "./AskMessageRow";
 import { FileDownloadLink } from "../items/FileDownloadLink";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
@@ -158,13 +159,19 @@ export function AskSurface({
   const [panel, setPanel] = useState<"conversation" | "activity" | "conversations">("conversation");
   const showActivity = panel === "activity";
   const showConversations = panel === "conversations";
-  useEffect(() => { setPanel("conversation"); }, [state.selectedId, state.discussion?.approval.id]);
-  const activityRef = useRef<HTMLButtonElement | null>(null);
+  const [activityTarget, setActivityTarget] = useState<{ turnId: string; messageKey: string } | null>(null);
+  const restoreMessageFocus = useRef<string | null>(null);
+  useEffect(() => {
+    setPanel("conversation");
+    setActivityTarget(null);
+    restoreMessageFocus.current = null;
+  }, [state.selectedId, state.discussion?.approval.id]);
   const conversationsRef = useRef<HTMLButtonElement | null>(null);
   const closePanel = useCallback(() => {
     setPanel("conversation");
-    (panel === "conversations" ? conversationsRef : activityRef).current?.focus();
-  }, [panel]);
+    if (panel === "conversations") conversationsRef.current?.focus();
+    else restoreMessageFocus.current = activityTarget?.messageKey ?? null;
+  }, [panel, activityTarget]);
   const returnToComposer = useRef(false);
   useEffect(() => {
     if (panel === "conversation" && returnToComposer.current) {
@@ -179,6 +186,8 @@ export function AskSurface({
   if (draftRevision.current.value !== draft) draftRevision.current = { value: draft, revision: draftRevision.current.revision + 1 };
   useEffect(() => () => { retryEdit.current++; }, [conversation]);
   const exchanges = state.turns;
+  const originalTurns = new Map(exchanges.map(turn => [turn.id, turn]));
+  const activityTurn = activityTarget ? originalTurns.get(activityTarget.turnId) : undefined;
   const busy = state.busy;
   const ready = availability.state === "ready";
   const nearBottom = useRef(true);
@@ -195,6 +204,14 @@ export function AskSurface({
     const el = logRef.current;
     if (el) el.scrollTop = nearBottom.current ? el.scrollHeight : conversationScroll.current;
   }, [panel, maximized]);
+  useLayoutEffect(() => {
+    if (panel !== "conversation" || !restoreMessageFocus.current) return;
+    const key = restoreMessageFocus.current;
+    restoreMessageFocus.current = null;
+    const button = [...(surfaceRef.current?.querySelectorAll<HTMLButtonElement>("[data-ask-message-menu]") ?? [])]
+      .find(item => item.dataset.askMessageMenu === key);
+    (button ?? inputRef.current)?.focus({ preventScroll: true });
+  }, [panel]);
   const micRef = useRef<HTMLButtonElement | null>(null);
   const reducedMotion = useReducedMotion();
 
@@ -346,6 +363,12 @@ export function AskSurface({
   const plain = !state.discussion && !state.discussionDraft && !state.discussionOpening;
   const note = voiceNote(voice?.state, settings, wired);
 
+  function openMessageActivity(turnId: string, messageKey: string) {
+    controls?.cancel();
+    setActivityTarget({ turnId, messageKey });
+    setPanel("activity");
+  }
+
   return (
     <div ref={surfaceRef} className="os-ask" data-os-ask={variant} onKeyDown={event => { if (event.key === "Escape" && panel !== "conversation") { event.stopPropagation(); closePanel(); } }}>
       <header className="os-window-bar os-ask-header">
@@ -354,7 +377,6 @@ export function AskSurface({
           <AddButton label="New conversation" style={{ minWidth: 28, minHeight: 28 }} disabled={busy || state.loading || state.voiceActive} onClick={() => { void conversation.createConversation(); setPanel("conversation"); returnToComposer.current = true; }} />
           </div><div className="os-window-control-group">
           <button ref={conversationsRef} type="button" className="os-icon-button" title={showConversations ? "Conversation" : "Conversations"} aria-label={showConversations ? "Conversation" : "Conversations"} onClick={() => { if (showConversations) { closePanel(); return; } controls?.cancel(); setPanel("conversations"); void conversation.refresh(); }}>{showConversations ? <MessageCircle size={14} /> : <MessagesSquare size={14} />}</button>
-          <button ref={activityRef} type="button" className="os-icon-button" title={showActivity ? "Conversation" : "Activity"} aria-label={showActivity ? "Conversation" : "Activity"} onClick={() => { if (showActivity) { closePanel(); return; } controls?.cancel(); setPanel("activity"); }}>{showActivity ? <MessageCircle size={14} /> : <Activity size={14} />}</button>
           </div>{onClose || onToggleMaximize ? <div className="os-window-control-group">
           {onToggleMaximize ? <button type="button" className="os-icon-button" title={maximized ? "Restore Ask" : "Maximize Ask"} aria-label={maximized ? "Restore Ask" : "Maximize Ask"} onClick={onToggleMaximize}>{maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button> : null}
           {onClose ? <button type="button" className="os-icon-button os-window-close" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={14} /></button> : null}</div> : null}
@@ -367,20 +389,20 @@ export function AskSurface({
         <p>Reopen this request before sending a discussion message.</p>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
       </section> : null}
-      {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
+      {showActivity ? <div className="os-ask-content"><AskActivityLog message turns={activityTurn ? [activityTurn] : []} onClose={closePanel} onStop={busy && activityTurn?.state === "streaming" ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
         <div className="os-ask-log" data-os-scroll-ignore ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
           {conversationFeed(exchanges).map(({ turn, completion, key, workState, responseAt, showAssistant }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
-            {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong>{turn.routed?.targets?.length ? <span>Guidance</span> : null}<time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p><AskSentAttachments attachments={turn.attachments} onOpenFile={onOpenFile} />{turn.routed?.targets?.map((target, index) => <p key={`${target.runId}:${index}`} className="os-caption os-ask-route-label">{`To ${targetTitle(target, exchanges)} · ${routeLabel(target.status)}`}</p>)}{turn.routed?.targets?.some(target => !target.approvalId) && state.selectedId ? <ProposeLesson conversationId={state.selectedId} turnId={turn.id} text={turn.prompt} /> : null}{turn.approvalId && state.discussion?.approval.id !== turn.approvalId ? <button type="button" className="os-ask-retry" onClick={() => { void conversation.discussApproval(turn.approvalId!); }}>View request</button> : null}</div></div> : null}
-            {showAssistant ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>{turn.advisor ? "Another agent" : "MemQL"}</strong>{turn.approvalId ? <span>Advice</span> : null}{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
+            {!completion ? <AskMessageRow messageKey={`${key}:user`} turn={originalTurns.get(turn.id)!} conversationId={state.selectedId} role="user" kind="request" text={turn.prompt} at={turn.startedAt} avatar={<AccountAvatar className="os-ask-avatar" />} onActivity={openMessageActivity}><div className="os-ask-byline"><strong>You</strong>{turn.routed?.targets?.length ? <span>Guidance</span> : null}<time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p><AskSentAttachments attachments={turn.attachments} onOpenFile={onOpenFile} />{turn.routed?.targets?.map((target, index) => <p key={`${target.runId}:${index}`} className="os-caption os-ask-route-label">{`To ${targetTitle(target, exchanges)} · ${routeLabel(target.status)}`}</p>)}{turn.routed?.targets?.some(target => !target.approvalId) && state.selectedId ? <ProposeLesson conversationId={state.selectedId} turnId={turn.id} text={turn.prompt} /> : null}{turn.approvalId && state.discussion?.approval.id !== turn.approvalId ? <button type="button" className="os-ask-retry" onClick={() => { void conversation.discussApproval(turn.approvalId!); }}>View request</button> : null}</AskMessageRow> : null}
+            {showAssistant ? <AskMessageRow messageKey={`${key}:assistant`} turn={originalTurns.get(turn.id)!} conversationId={state.selectedId} role="assistant" kind={!completion && turn.acknowledgement ? "acknowledgement" : "response"} text={[!completion ? routeReply(turn) : "", turn.answer, !completion ? turn.question?.text : "", turn.error ? askErrorSummary(turn.error) : ""].filter(Boolean).join("\n\n")} at={responseAt} avatar={<span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span>} onActivity={openMessageActivity}><div className="os-ask-byline"><strong>{turn.advisor ? "Another agent" : "MemQL"}</strong>{turn.approvalId ? <span>Advice</span> : null}{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : routeReply(turn) ? <p className="os-ask-route-reply">{routeReply(turn)}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} trailing={!turn.approvalId && (!completion || !turn.acknowledgement) && !isConversationalWait(turn) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : undefined} /> : null}
               {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
               {turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <span key={event.id} className="os-ask-file-actions"><FileDownloadLink fileId={event.arguments!.fileId as string} name={event.name || "file"} />{onOpenFile ? <> · <button type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open in Files</button></> : null}</span>)}
               {turn.state === "streaming" || isConversationalWait(turn) ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet && askFailure(turn.error).fleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
-            </div></div> : null}
+            </AskMessageRow> : null}
           </div>)}
         </div>
       </div>

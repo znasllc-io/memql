@@ -180,12 +180,21 @@ func (e *MemQLEngine) toolSecretArgNames(tool *Tool) (map[string]struct{}, bool)
 	if err != nil || fn == nil {
 		return nil, false
 	}
-	return secretArgNamesFromSchema(fn.ArgsSchema), true
+	names := secretArgNamesFromSchema(fn.ArgsSchema)
+	// Explicit tools can wrap native builtins, whose input contract lives
+	// outside ArgsSchema. Resolve the same declared and diagnostic privacy
+	// metadata before emitting either rejected values or the full args map.
+	if fn.BuiltinArgs != nil {
+		for _, field := range fn.BuiltinArgs.Fields {
+			collectSecretArgNames(field, names)
+		}
+	}
+	return names, true
 }
 
 // secretArgNamesFromSchema collects every args-field name carrying the Secret
-// flag, including nested-object and array-item fields (markSecretArgsFields
-// stamps those by name too).
+// or diagnostic Redact flag, including nested-object and array-item fields
+// (markSecretArgsFields stamps those by name too).
 func secretArgNamesFromSchema(schema *ArgsSchemaConfig) map[string]struct{} {
 	names := map[string]struct{}{}
 	if schema == nil {
@@ -201,7 +210,7 @@ func collectSecretArgNames(field *FunctionArgsField, out map[string]struct{}) {
 	if field == nil {
 		return
 	}
-	if field.Secret {
+	if field.Secret || field.Redact {
 		if n := strings.TrimSpace(field.Name); n != "" {
 			out[n] = struct{}{}
 		}

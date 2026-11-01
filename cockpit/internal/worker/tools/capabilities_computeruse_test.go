@@ -3,17 +3,12 @@
 package tools
 
 import (
+	"slices"
 	"sort"
 	"testing"
 )
 
-// TestComputeCapabilities_GUI pins the computeruse-build variant: the
-// descriptor advertises exactly the actions the router serves (the
-// computerActionHandlers table) -- including window_list /
-// window_focus since memql-cockpit#167 -- computerUseAvailable=true, and
-// the meta `capabilities` action stays out of the list. CI runs
-// headless so this only executes on local computeruse-tagged runs, but it
-// keeps the variant honest for anyone building -tags computeruse.
+// Capability discovery advertises supported actions, not legacy global helpers.
 func TestComputeCapabilities_GUI(t *testing.T) {
 	desc := computeCapabilities("darwin", func(string) string { return "" })
 	if !desc.ComputerUseAvailable {
@@ -25,10 +20,8 @@ func TestComputeCapabilities_GUI(t *testing.T) {
 	if !sort.StringsAreSorted(desc.Actions) {
 		t.Errorf("actions must be sorted for a stable wire shape; got %v", desc.Actions)
 	}
-	// The advertised list = the computer-use router table + the build-agnostic
-	// set (`wait`, memql-cockpit#166).
-	if want := len(computerActionHandlers) + len(buildAgnosticComputerActions); len(desc.Actions) != want {
-		t.Errorf("actions length %d must match router table + build-agnostic set (%d)", len(desc.Actions), want)
+	if want := 11; len(desc.Actions) != want {
+		t.Fatalf("supported macOS actions = %v", desc.Actions)
 	}
 	agnostic := make(map[string]bool, len(buildAgnosticComputerActions))
 	for _, a := range buildAgnosticComputerActions {
@@ -44,20 +37,32 @@ func TestComputeCapabilities_GUI(t *testing.T) {
 			t.Error(`"capabilities" must not be advertised in actions (it is build-agnostic and always available)`)
 		}
 	}
-	// window_list / window_focus shipped for real in
-	// memql-cockpit#167; wait / key_hold / mouse_down / mouse_up in
-	// memql-cockpit#166 -- the computeruse build must advertise them all.
-	for _, required := range []string{"window_list", "window_focus", "wait", "key_hold", "mouse_down", "mouse_up"} {
-		found := false
-		for _, a := range desc.Actions {
-			if a == required {
-				found = true
-				break
-			}
+	for _, required := range []string{"window_focus", "window_list", "wait", "screenshot", "key_type", "key_combo", "mouse_move", "mouse_click", "mouse_scroll"} {
+		if !slices.Contains(desc.Actions, required) {
+			t.Errorf("missing supported action %s", required)
 		}
-		if !found {
-			t.Errorf("%q must be advertised in actions; got %v", required, desc.Actions)
+	}
+	for _, disabled := range []string{"key_hold", "mouse_down", "mouse_up", "mouse_drag"} {
+		if slices.Contains(desc.Actions, disabled) {
+			t.Errorf("advertised disabled action %s", disabled)
 		}
+	}
+	if desc.ActionContracts["workerComputer.input_target"] != 1 || desc.ActionContracts["workerComputer.window_selection"] != 1 || desc.InputTargetPolicy["focusActivation"] != true {
+		t.Fatal("missing target contract", desc)
+	}
+	linux := computeCapabilities("linux", func(name string) string {
+		if name == "DISPLAY" {
+			return ":0"
+		}
+		return ""
+	})
+	for _, action := range linux.Actions {
+		if isComputerInputAction(action) || action == "window_focus" {
+			t.Errorf("Linux advertises unsupported input %s", action)
+		}
+	}
+	if len(linux.InputTargetPolicy["supportedInputActions"].([]string)) != 0 {
+		t.Fatal("Linux promises targeted backend")
 	}
 	// displayServer is quartz here, so the descriptor must carry a
 	// live display count of at least one (memql-cockpit#165).

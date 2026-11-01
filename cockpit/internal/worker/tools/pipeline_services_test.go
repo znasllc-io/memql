@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -50,6 +51,7 @@ func TestPipelineServiceFailureCleansEveryPlannedResource(t *testing.T) {
 			fakePipelineDocker(t, `printf '%s\n' "$*" >> `+shellLiteral(log)+`
 case "$1" in
 network) if [ "$2" = create ] && [ `+shellLiteral(failAt)+` = network ]; then exit 1; fi; exit 0;;
+info) echo daemon-id;;
 create) [ `+shellLiteral(failAt)+` != create ]; exit $?;;
 image) echo linux/arm64;;
 start) [ `+shellLiteral(failAt)+` != start ]; exit $?;;
@@ -59,7 +61,7 @@ logs) exit 0;;
 *) exit 9;;
 esac`)
 			reservation := testPipelineReservation(t)
-			run := &pipelineRun{reservation: reservation, dir: pipelineTestWorkspace(t), req: pipelineStepRequest{execution: "container", dockerID: "daemon-id", platform: "linux/arm64", image: containerTestDigest, services: []pipelineService{{name: "db", image: containerTestDigest, ready: "false"}, {name: "other", image: containerTestDigest}}}, mask: newSecretMasker(nil), emit: func(bool, []byte) {}}
+			run := &pipelineRun{reservation: reservation, dir: pipelineTestWorkspace(t), req: pipelineStepRequest{execution: "container", dockerID: "daemon-id", dockerEndpoint: "unix:///tmp/memql-pipeline-test.sock", platform: "linux/arm64", image: containerTestDigest, services: []pipelineService{{name: "db", image: containerTestDigest, ready: "false"}, {name: "other", image: containerTestDigest}}}, mask: newSecretMasker(nil), emit: func(bool, []byte) {}}
 			_, fail := run.containerCommand(context.Background())
 			if fail == nil {
 				t.Fatal("service failure became success")
@@ -88,7 +90,7 @@ esac`)
 
 func TestPipelineServiceRecoveryRejectsUnrelatedResourceNames(t *testing.T) {
 	name := "memql-step-" + strings.Repeat("a", 32)
-	record := pipelineAttemptRecord{Execution: "container", DockerID: "daemon", Container: name, Network: name + "-net", Services: []string{name + "-svc-0"}}
+	record := pipelineAttemptRecord{Execution: "container", DockerID: "daemon", DockerEndpoint: "unix:///tmp/memql-pipeline-test.sock", Container: name, Network: name + "-net", Services: []string{name + "-svc-0"}}
 	if !validPipelineAttempt(record) {
 		t.Fatal("valid record refused")
 	}
@@ -114,6 +116,8 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 	fx := newPipelineFixture(t)
 	allowLocalClones(t)
 	policy, root := pipelineTestPolicy(t, "")
+	pipelineHostMemory = capacity.ReadSystemHeadroom
+	pipelineHostCPUs = runtime.NumCPU
 	extra := map[string]any{"execution": "container", "platform": "linux/" + runtime.GOARCH, "image": image,
 		"services": map[string]any{"postgres": map[string]any{"image": image, "env": map[string]any{"POSTGRES_USER": "memql", "POSTGRES_PASSWORD": "fixture-password", "POSTGRES_DB": "memql"}, "ready": "pg_isready -h localhost -U memql"}},
 		"env":      map[string]any{"PGPASSWORD": "fixture-password"}, "secrets": map[string]any{"STEP_ONLY_SECRET": "must-never-reach-service"}}
@@ -155,7 +159,7 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 			cancel()
 			return
 		}
-		data, err = dockerOutput(context.Background(), "inspect", attempt.Services[0])
+		data, err = dockerOutput(withPipelineDockerEndpoint(context.Background(), attempt.DockerEndpoint), "inspect", attempt.Services[0])
 		if err != nil {
 			inspectionErr = err
 			cancel()
@@ -208,13 +212,14 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 	if !validPipelineAttempt(attempt) {
 		t.Fatal("did not inspect the running service")
 	}
+	dockerCtx := withPipelineDockerEndpoint(context.Background(), attempt.DockerEndpoint)
 	for _, name := range append(attempt.Services, attempt.Container) {
-		out, err := dockerOutput(context.Background(), "ps", "--all", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
+		out, err := dockerOutput(dockerCtx, "ps", "--all", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
 		if err != nil || strings.TrimSpace(string(out)) != "" {
 			t.Fatalf("container remains %s: %s %v", name, out, err)
 		}
 	}
-	out, err := dockerOutput(context.Background(), "network", "ls", "--filter", "name=^"+attempt.Network+"$", "--format", "{{.Name}}")
+	out, err := dockerOutput(dockerCtx, "network", "ls", "--filter", "name=^"+attempt.Network+"$", "--format", "{{.Name}}")
 	if err != nil || strings.TrimSpace(string(out)) != "" {
 		t.Fatalf("network remains: %s %v", out, err)
 	}
@@ -240,7 +245,7 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 		defer cancel()
 		_ = removePipelineAttempt(cleanup, attempt)
 	})
-	if _, err = dockerOutput(context.Background(), "network", "create", attempt.Network); err != nil {
+	if _, err = dockerOutput(dockerCtx, "network", "create", attempt.Network); err != nil {
 		t.Fatal(err)
 	}
 	for i, name := range append(attempt.Services, attempt.Container) {
@@ -248,10 +253,10 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 		if i == 0 {
 			network = attempt.Network
 		}
-		if _, err = dockerOutput(context.Background(), "create", "--name", name, "--network", network, "--entrypoint=/bin/sh", image, "-c", "sleep 300"); err != nil {
+		if _, err = dockerOutput(dockerCtx, "create", "--name", name, "--network", network, "--entrypoint=/bin/sh", image, "-c", "sleep 300"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = dockerOutput(context.Background(), "start", name); err != nil {
+		if _, err = dockerOutput(dockerCtx, "start", name); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -271,12 +276,12 @@ func TestPipelineServicesRealDocker(t *testing.T) {
 		t.Fatal("reconciled attempt retained capacity")
 	}
 	for _, name := range append(attempt.Services, attempt.Container) {
-		out, err := dockerOutput(context.Background(), "ps", "--all", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
+		out, err := dockerOutput(dockerCtx, "ps", "--all", "--filter", "name=^/"+name+"$", "--format", "{{.Names}}")
 		if err != nil || strings.TrimSpace(string(out)) != "" {
 			t.Fatalf("orphan remains %s: %s %v", name, out, err)
 		}
 	}
-	out, err = dockerOutput(context.Background(), "network", "ls", "--filter", "name=^"+attempt.Network+"$", "--format", "{{.Name}}")
+	out, err = dockerOutput(dockerCtx, "network", "ls", "--filter", "name=^"+attempt.Network+"$", "--format", "{{.Name}}")
 	if err != nil || strings.TrimSpace(string(out)) != "" {
 		t.Fatalf("orphan network remains: %s %v", out, err)
 	}

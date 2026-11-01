@@ -50,6 +50,17 @@ Turning an owner feature off cancels its active calls and blocks queued/new
 calls; turning it on allows fresh requests without replaying cancelled work.
 The local Cockpit policy and operation approvals still apply.
 
+**Commands and files** is the engine's Host commands (`headless`). With it off,
+the router skips the machine for pipeline steps, naming the setting. A machine
+switched off after it was picked refuses before anything is sent, with
+`worker_feature_disabled` (`worker_feature_unavailable` when the setting could
+not be read), on the replica holding its stream. Nothing ran, so the dispatch
+moves on: a pipeline step always, an agent's call under its owner's `fallback`.
+A call already running when the switch goes off is cancelled, and the
+dispatcher never re-picks it, because it may have run; a pipeline step's next
+attempt follows only for a `repeatable` step
+([Retries and failover](pipelines.md#retries-and-failover)).
+
 ### Choosing a computer in Ask
 
 Ask uses the fleet's shared registration records, including machines connected
@@ -584,6 +595,17 @@ expresses what the work NEEDS; the owner's policy decides where it lands. **A
 hallucinated machine id is therefore a failure mode this surface does not
 have** -- the worst a wrong label can do is empty the candidate set.
 
+**The one narrowing by machine is the engine's own, for pipeline steps.** A
+pipeline step's retry may be pinned to the machine its last attempt ran on, or
+exclude the machines the step has already tried
+([Retries and failover](pipelines.md#retries-and-failover)). The ids are the
+registrations earlier attempts reported, never a model's, and any other purpose
+that carries a pin or an exclusion is refused, `denied_pipeline_purpose`. Both
+only subtract from the plan the router built: a pinned machine that no longer
+allows pipelines, or whose owner turned Host commands off, keeps that reason,
+and a pinned dispatch that is refused is never moved to another machine. The
+retry's driver decides where the next attempt goes.
+
 `no_worker_available` then names every machine and why it was ruled out
 (`revoked` / `offline` / `missing capability <X>` / `labels do not satisfy
 <k=v>`), together with the requirement it filtered on and how many machines the
@@ -758,12 +780,18 @@ running it locally would fail in a way that blames the machine.
 
 **`refused_before_start` is the re-pick predicate**, and it is the one field on
 the wire that must never be guessed. True means the receiver is CERTAIN nothing
-executed -- it held no stream for the registration, or the machine was at its
-concurrency cap -- so the sender may try the next candidate: under
-`fallback=nextMatching` for an agent's call, and always for a pipeline step.
+executed -- it held no stream for the registration, the machine was at its
+concurrency cap, or its owner's Host commands setting refused the call at
+admission (`worker_feature_disabled`, or `worker_feature_unavailable` when the
+setting could not be read) -- so the sender may try the next candidate: under
+`fallback=nextMatching` for an agent's call, and always for a pipeline step
+that is not pinned to one machine.
 False means the dispatch reached the machine and the sender must **not**
 re-pick even on failure: an exec that lost its stream mid-run may have run, and
 running it elsewhere is a second side effect rather than a retry (design D5).
+Only a pipeline's driver may send such a step again, as a new attempt, and only
+when the step is `repeatable`
+([Retries and failover](pipelines.md#retries-and-failover)).
 
 **What the receiver re-checks, and what it deliberately does not.** The consent
 gates -- per-task approval, the kill switch, standing scope, the classifier --
@@ -799,16 +827,23 @@ landed where it did. It is rendered per machine in the activity list on
 | `policyId` | the `v1:worker:routingPolicy` row that decided. Empty when the owner has none and the default applied |
 | `strategy` | `firstFit` / `roundRobin` / `leastLoaded` / `labelMatch` |
 | `candidatesConsidered` | registration ids that survived the filter, IN THE ORDER the router would try them |
-| `rejected` | per machine, why it was NOT a candidate. Present even -- especially -- when the candidate list is empty |
-| `attempts` | 1 unless the dispatch moved past a refusal: under `fallback=nextMatching` for an agent's call, always for a pipeline step |
+| `rejected` | per machine, why it was NOT a candidate. Present even -- especially -- when the candidate list is empty. A pipeline step's dispatch adds "Host commands are off in Fleet settings", "not the machine this retry is pinned to" and "already tried in this step" |
+| `attempts` | 1 unless the dispatch moved past a refusal: under `fallback=nextMatching` for an agent's call, always for a pipeline step. A pipeline step's own retries are separate invocations, one per attempt |
 | `selectedBy` | `policy` / `reroute` / `only_candidate` |
-| `reroutedFrom` | `workbench` (the workbench answered `environment_mismatch`) or `worker:<registrationId>` (a candidate refused before starting) |
+| `reroutedFrom` | `workbench` (the workbench answered `environment_mismatch`) or `worker:<registrationId>` (a candidate refused before starting, or, for a pipeline step's retry, the last machine the step was tried on) |
 | `requireLabels` / `preferLabels` | the MERGED agent+policy requirement the candidates were filtered and ordered by |
 
 An **empty** `routing` object means "not recorded", never "chose nothing": rows
 written before the router existed carry none, and so does a path denied before
 anything was chosen. The `outcome` enum gained `rerouted` for a call that did
 not run on the machine first chosen.
+
+A reason or refusal that a pipeline step can quote into its check run names a
+machine only by the display name its owner chose, else `machine` and the first
+eight characters of its registration id (`pipelines.MachineWords`), never the
+name the machine reported, which is usually its hostname: the check run is
+public on GitHub for a public repository. Log lines and the screens only the
+owner sees keep the reported name.
 
 Superseded policy rows are deactivated rather than deleted, precisely because
 `routing.policyId` points at whichever row made the choice.
@@ -982,6 +1017,9 @@ memql worker unpair --cluster <home-id>
 | `no_worker_available`, and the message names each machine | Every machine was filtered out. The message says which and why: `revoked` / `offline` / `missing capability <X>` / `labels do not satisfy <k=v>` | Read the reason. `offline` at a machine you can see is on means `lastSeenAt` is older than 30s -- check the stream. `labels do not satisfy` means the merged agent+policy requirement excluded it (section 5.2) |
 | `worker_unreachable`                     | The machine is held by another agent replica (`connectedNodeId`) and this node has no forward wired | Wire the mesh. A single-replica cluster never hits this; in a mesh, both halves of `WorkerForward*` are wired on every agent replica (section 5.6) |
 | `worker_disconnected` on a forwarded call | The dispatch reached the far replica and the answer was lost. NOT re-picked, by design -- the call may have run | Check the far replica's logs for the call id before re-running anything with side effects |
+| `worker_feature_disabled` | The owner switched the feature off for this machine in Fleet settings (for a pipeline step, **Commands and files**), and the replica holding the stream refused before sending anything | Turn it back on in the machine's Fleet settings, or let the call land on another machine (section 1) |
+| `worker_feature_unavailable` | The replica holding the stream could not read the machine's Fleet settings, so it sent nothing | Usually passing; the call may land on the same machine again. If it persists, check that replica's database reads |
+| `denied_pipeline_purpose` | A dispatch broke the pipeline purpose's binding: an agent called `workerHost.pipeline_step`, a pipeline dispatch named an agent or another action, or a call that is not a pipeline step's carried a machine pin or exclusion (section 5.3) | A caller bug: pipeline steps are the engine's own, and only its retry may name machines |
 | Process killed mid-exec on Linux         | `RLIMIT_AS` (memory) or `RLIMIT_CPU` cap reached     | Bump `policy.shell.max_memory_mb` / `max_cpu_seconds`   |
 
 Note: registration rows persisted by pre-#1334 builds stay stale

@@ -252,8 +252,10 @@ func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.Execut
 
 	result, runErr := e.runner.Run(ctx, w, spec, progressBridge(progress))
 
-	if quota := appQuotaRefusal(result); quota != nil {
-		runErr = quota
+	if refusal := appPreWorkRefusal(result); refusal != nil {
+		runErr = refusal
+	} else if stop := appStoppedMidWork(result, appId); stop != nil {
+		runErr = stop
 	}
 
 	// The ledger row is written on EVERY outcome, failures included.
