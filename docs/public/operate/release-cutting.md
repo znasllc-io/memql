@@ -84,6 +84,9 @@ exact full run. Observation never starts another run or prepares a candidate.
 Once the build succeeds, **Prepare candidate** executes the captured product
 recipe to assemble its exact artifacts and publication destinations.
 
+A release run skips an artifact-free check when the run that tested the same
+source already passed it ([What a release reuses](#what-a-release-reuses)).
+
 Review and approve the candidate separately. Approval binds its source,
 artifacts and destinations; a successful build is not approval. **Publish
 release** then runs the profile's captured publication recipe under that exact
@@ -99,6 +102,67 @@ publication evidence; a build result alone is not a published release.
 The UI reads verified catalog state separately from build progress. An
 unavailable catalog is not reported as empty or successfully sealed. Installation
 selection remains in the installation workflow after publication.
+
+## What a release reuses
+
+A release repeats little of what already passed on its source. It compares git
+tree hashes, not commit ids: the merge commit of an up-to-date pull request has
+the pull request head's tree, and a merge-group run tested exactly the tree that
+landed. The driver reads each run's tree from GitHub before it reads the plan,
+and when that read fails the run neither offers nor takes reuse, so the release
+runs every step.
+
+The release skips a step, as `pipeline_passed_earlier`, only when all of this
+holds. Anything else runs the step.
+
+- The step declares `verification: true`: a digest-pinned cluster container with
+  no secrets, repository token or artifacts, and no run identity in its
+  environment ([Reusing verification evidence](pipelines.md#reusing-verification-evidence)).
+- Another successful run of the same pipeline, owner and repository executed it
+  on the same tree, and finished within the last 24 hours. A scheduled scan does
+  not count, nor does a run that was asked to stop.
+- The two steps have one definition: the engine revision, workflow, command,
+  image, services, shard and packages all match. The run's event, mode, version
+  and commit, and which stages come first in the plan, do not take part.
+- The source executed the step itself and reported no artifact. A pass that source
+  only carried from an earlier attempt does not count.
+- The installed `evidenceReuse` policy admits the source, and that source ran under
+  the same policy version. The engine's default admits nothing.
+
+**These always run in the release:**
+
+| Steps | Why |
+|---|---|
+| The images, `cockpit-release`, `release-files`, `build-tools` | Every artifact a candidate pins comes from the run it names |
+| Anything that declares artifacts or an image build, such as `os-checks`, `proving` and the editor lanes | The same rule. A report is an artifact |
+| `go-vulnerabilities`, `npm-vulnerabilities`, `sbom` | As above, and a scan is not a function of the tree: advisories change daily, and a release records findings where a pull request fails on them. The release keeps a report from its own day |
+| `go-checks`, `fuzz`, `mcp-conformance` | They do not declare verification. `go-checks` compares against the event's base |
+| `docker-integration`, `computeruse` | Native fleet steps, outside the verification contract |
+
+**A sharded step is reused whole.** Shard slices follow the timing table, which
+every successful full run moves, so a release takes the source's split when the
+source's shards hold exactly the packages the plan selected. Either every shard
+is covered or none is.
+
+A pull request usually runs `affected`, so it covers fewer packages than a full
+release, and its `go-tests` and `db-tests` qualify only when its selection went
+full. The `push` run of the release commit covers them. To get the most out of
+reuse, start the release after that run finishes. The release does not wait for it.
+
+A reused step has no log of its own in the release. Its log stays on the run it came
+from, under that run's artifact retention, which is usually shorter than a release's.
+
+**A candidate says where each receipt came from.** Assembly records
+`reusedFrom` on the evidence, and coverage proves it against the journal on every
+read ([release candidates](release-candidates.md#reused-steps)).
+
+**If a candidate is refused over a reuse.** Preparation names the step and the
+reason. A successful run is never replaced, so re-running it cannot help: turn
+reuse off for releases in the installed policy and cut the next version.
+
+Reuse needs an engine and sources from this release on: a run opened by an earlier
+engine has no tree hash. A release the engine upgrade separates from its source
+executes everything, because the engine revision is part of the definition.
 
 ## Recover an interrupted request
 
@@ -131,7 +195,10 @@ runs again every step that failed, was blocked or was cancelled, and every step
 that produces artifacts (one that declares `artifacts` or an image build, or
 whose earlier receipt named any), so each image and file the candidate pins
 comes from the attempt the candidate names. Every other passed step is carried
-as `pipeline_passed_earlier`.
+as `pipeline_passed_earlier`, and that includes what the attempt
+[reused](#what-a-release-reuses). A step that failed runs again rather than being
+reused, and so does a whole re-run's every step: a re-run is someone asking for
+the checks to run.
 
 The saved release adopts the re-run the next time it is read. The newer
 attempt must name the recorded one in its `rerunOf` chain, the recorded
@@ -141,8 +208,9 @@ operation until the attempt it names is the one re-run: re-run that attempt,
 not an older one or another check run's. Candidate preparation then proves
 each carried step against the attempt that executed it: the same release, the
 same step definition and packages, and an artifact-free success. It records
-the proof as `carriedFrom`. An unproven carry refuses the candidate, naming
-the step.
+the proof as `carriedFrom`. A step the attempt reused is proven against the run
+it came from, and its source goes in the manifest as `reusedFrom`. An unproven
+carry refuses the candidate, naming the step.
 
 A release whose first attempt was opened more than 24 hours before the re-run
 carries nothing: every step runs again, so vulnerability scans and the rest are

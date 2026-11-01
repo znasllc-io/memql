@@ -127,7 +127,7 @@ func TestAHostErrorCodeIsRefusedOrUnavailableNeverBoth(t *testing.T) {
 			t.Errorf("%s is both refused-before-running and unavailable", code)
 		}
 	}
-	for _, code := range []string{"worker_disconnected", "worker_unreachable", "no_workbench_peer", "forward_failed"} {
+	for _, code := range []string{"worker_disconnected", "worker_unreachable", "worker_feature_disabled", "worker_feature_unavailable", "no_workbench_peer", "forward_failed"} {
 		if !procedureTargetUnavailable[code] {
 			t.Errorf("%s says the target could not finish, and is not unavailable", code)
 		}

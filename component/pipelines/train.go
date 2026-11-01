@@ -42,6 +42,14 @@ const (
 	TrainBranchPrefix = "train/"
 )
 
+// IsTrainEvent classifies the trusted run identity used by both run admission
+// and cloud allocation. A repository's command/environment cannot choose it.
+// A writer may name a train/ branch; that repository write access is already
+// trusted by the release-train admission contract.
+func IsTrainEvent(event Event, headBranch string) bool {
+	return event == EventPullRequest && strings.HasPrefix(headBranch, TrainBranchPrefix)
+}
+
 // defaultTrainRebuilds is the cap on rebuilds in one departure when the
 // settings name none: two, the owner's figure (spec section 6, step 6).
 const defaultTrainRebuilds = 2

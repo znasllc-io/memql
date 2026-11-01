@@ -97,6 +97,11 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			LastSelectedAt:   rowTime(row, "lastSelectedAt"),
 			LastSeenAt:       rowTime(row, "lastSeenAt"),
 			RevokedAt:        rowTime(row, "revokedAt"),
+			// The SAME parser the holding replica admits a command with
+			// (ReadOwnerFeaturePolicy), so the router and that replica cannot
+			// disagree about what "off" is: a missing setting is on, and a
+			// malformed one is off.
+			HostCommandsOff: !workerservice.OwnerFeaturesFromRow(row["ownerFeatures"]).Headless,
 		})
 	}
 	return out, nil
@@ -259,21 +264,11 @@ func rowApps(row map[string]any, key string) []workerservice.AppInfo {
 		if !ok {
 			continue
 		}
-		id, _ := m["id"].(string)
-		if strings.TrimSpace(id) == "" {
+		app, valid := workerservice.AppInfoFromMap(m)
+		if !valid {
 			continue
 		}
-		version, _ := m["version"].(string)
-		subscription, _ := m["subscription"].(string)
-		signedIn, _ := m["signedIn"].(bool)
-		allowed, _ := m["allowed"].(bool)
-		out = append(out, workerservice.AppInfo{
-			Id:           strings.TrimSpace(id),
-			Version:      version,
-			SignedIn:     signedIn,
-			Subscription: workerservice.NormalizeSubscription(subscription),
-			Allowed:      allowed,
-		})
+		out = append(out, app)
 	}
 	if len(out) == 0 {
 		return nil

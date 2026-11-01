@@ -55,8 +55,6 @@ const (
 	// state directory.
 	ledgerDirName = "appsessions"
 
-	// codexHomeRel is the per-session CODEX_HOME, inside the workspace.
-	codexHomeRel = ".memql-session/codex"
 	// backupSuffix marks a file moved aside so a pre-existing one is not
 	// destroyed.
 	backupSuffix = ".memql-session-backup"
@@ -68,6 +66,8 @@ const (
 // arrives on the stream while the run is in flight, and cleanup can be
 // driven by either the run finishing or the stream dying.
 type sessionMCPSettings struct {
+	// ResumeRef selects retained provider state, never another session's bearer.
+	ResumeRef     string
 	InferenceOnly bool
 	Tools         []string
 	DenyPaths     []string
@@ -87,12 +87,15 @@ type mcpConfig struct {
 	configPath string
 	// backupPath is set when a pre-existing config was moved aside.
 	backupPath string
-	// created are directories this made, removed on cleanup if empty.
+	// created are private directories and auth links this made. Remove in
+	// reverse order; directories are removed only when empty.
 	created []string
 	// env are extra environment entries the child process needs.
 	env []string
 	// removed guards against a double cleanup racing itself.
 	removed bool
+	// releaseHome excludes simultaneous writers to one resumed conversation.
+	releaseHome func()
 }
 
 // Env returns the environment entries the app must run with. Empty for
@@ -184,45 +187,49 @@ func writeMCPConfig(app, workspace, endpoint, credential, sessionID, stateDir st
 	return m, nil
 }
 
-// layoutClaudeCode prepares a project-scoped .mcp.json in the workspace.
-//
-// If the workspace already has one -- an `open` or `attach` session can
-// point at a real project -- it is moved aside and restored on cleanup.
-// Overwriting it and then deleting ours would destroy a config the user
-// wrote, which is a worse outcome than anything this feature is worth.
+// Claude receives this exact path through --mcp-config. Keep each session's
+// bearer private even when sessions share a workspace; never move or overwrite
+// the person's project .mcp.json. Old crash ledgers still restore their backups.
 func (m *mcpConfig) layoutClaudeCode() error {
-	if err := os.MkdirAll(m.workspace, configDirMode); err != nil {
+	dir := filepath.Join(m.workspace, sessionScaffoldDir)
+	if err := os.MkdirAll(dir, configDirMode); err != nil {
 		return fmt.Errorf("mcp config: workspace: %w", err)
 	}
-	path := filepath.Join(m.workspace, ".mcp.json")
-	if _, err := os.Lstat(path); err == nil {
-		backup := path + backupSuffix
-		if err := os.Rename(path, backup); err != nil {
-			return fmt.Errorf("mcp config: preserve existing .mcp.json: %w", err)
-		}
-		m.backupPath = backup
+	f, err := os.CreateTemp(dir, "mcp-*.json")
+	if err != nil {
+		return fmt.Errorf("mcp config: session file: %w", err)
 	}
-	m.configPath = path
-	return nil
+	m.configPath = f.Name()
+	m.created = append(m.created, dir)
+	return f.Close()
 }
 
-// layoutCodex prepares a per-session CODEX_HOME inside the workspace.
+// layoutCodex prepares a conversation-scoped CODEX_HOME inside the workspace.
 //
 // Codex reads MCP servers from config.toml in its home directory, and its
 // home defaults to the USER PROFILE -- which is exactly the global write
 // this must not do. So the session gets its own home, pointed at by
-// CODEX_HOME, and it goes away with the session.
+// CODEX_HOME. Its credential is deleted at session end; provider state remains
+// for a later attach in this same workspace, identified by the returned ref.
 //
 // The user's auth.json is SYMLINKED rather than copied. A copy would put
 // a second, longer-lived credential on disk (the app's own, not this
 // session's) with no reason to; the link keeps the credential where it
 // already lives and where the user manages it.
 func (m *mcpConfig) layoutCodex() error {
-	home := filepath.Join(m.workspace, codexHomeRel)
-	if err := os.MkdirAll(home, configDirMode); err != nil {
+	dir := filepath.Join(m.workspace, sessionScaffoldDir)
+	if err := os.MkdirAll(dir, configDirMode); err != nil {
+		return fmt.Errorf("mcp config: session directory: %w", err)
+	}
+	// New conversations get private homes; attach reuses the indexed provider
+	// state under an exclusive lock, with a fresh credential for this session.
+	home, err := m.codexHome(dir)
+	if err != nil {
 		return fmt.Errorf("mcp config: codex home: %w", err)
 	}
-	m.created = append(m.created, home, filepath.Dir(home))
+	// Keep provider state and its lock inode. Only credentials and auth links
+	// belong to this session's cleanup ledger.
+	m.created = append(m.created, dir)
 	m.configPath = filepath.Join(home, "config.toml")
 	m.env = []string{"CODEX_HOME=" + home}
 
@@ -233,7 +240,9 @@ func (m *mcpConfig) layoutCodex() error {
 			// A failed link is not fatal: the app simply runs
 			// signed-out, which detection already reported and which the
 			// engine already refuses to route to.
-			_ = os.Symlink(auth, link)
+			if os.Symlink(auth, link) == nil {
+				m.created = append(m.created, link)
+			}
 		}
 	}
 	return nil
@@ -285,8 +294,8 @@ func (m *mcpConfig) Renew(credential string) error {
 	return writeFileAtomic(m.configPath, body, configFileMode)
 }
 
-// Remove deletes everything this session wrote and clears its ledger
-// entry. Safe to call repeatedly and from several exit paths at once --
+// Remove deletes this session's credentials and clears its ledger entry;
+// provider conversation state remains for attach. Safe to call repeatedly --
 // which it will be, because the run finishing and the stream dying are
 // independent events and either one must be sufficient.
 func (m *mcpConfig) Remove() {
@@ -316,6 +325,10 @@ func (m *mcpConfig) Remove() {
 	}
 	if m.ledger != "" {
 		_ = os.Remove(m.ledger)
+	}
+	if m.releaseHome != nil {
+		m.releaseHome()
+		m.releaseHome = nil
 	}
 }
 

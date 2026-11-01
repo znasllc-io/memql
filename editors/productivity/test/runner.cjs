@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { createHostProfile } = require("../../../scripts/vscode/host-profile.cjs");
+const { downloadVSCode, exitCodeFor } = require("../../../scripts/vscode/download.cjs");
 const esbuild = require("esbuild");
 const cp = require("node:child_process");
 async function main() {
@@ -17,7 +18,6 @@ async function main() {
       platform: "browser", format: "cjs", target: "es2022", external: ["vscode"] });
     if (process.argv.includes("--desktop")) {
       const { runTests } = require(path.join(core, "node_modules/@vscode/test-electron"));
-      const { downloadVSCode } = require("../../../scripts/vscode/download.cjs");
       const version = process.env.MEMQL_VSCODE_VERSION || "stable";
       let executable = process.env.MEMQL_VSCODE_EXECUTABLE || await downloadVSCode({ version });
       if (process.platform === "darwin" && !fs.existsSync(executable)) {
@@ -52,4 +52,4 @@ async function main() {
     profile.dispose();
   }
 }
-main().catch(error => { console.error(error); process.exit(1); });
+main().catch(error => { console.error(error); process.exit(exitCodeFor(error)); });

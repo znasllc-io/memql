@@ -182,7 +182,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Dispatch a workbenchHost.<action> call to the per-run workbench workspace. Lazily provisions the workspace on first call; subsequent calls in the same Plan see persisted files.",
 			Handler:     i.handleDispatchHost,
 			ArgsSchema: map[string]string{
-				"action":  "string (required) -- exec / fs_read / fs_write / fs_list / fs_stat / fs_export / http_fetch",
+				"action":  "string (required) -- exec / fs_read / fs_write / fs_list / fs_stat / fs_export / http_fetch / workspace_recover",
 				"args":    "object (required) -- per-action args",
 				"runId":   "string (required) -- v1:work:run.id; keys the workspace",
 				"agentId": "string (optional) -- calling agent id (audit only)",

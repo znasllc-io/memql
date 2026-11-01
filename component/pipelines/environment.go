@@ -34,7 +34,12 @@ func (r StepRequest) Environment() map[string]string {
 		env["MEMQL_SHARD"] = strconv.Itoa(r.Step.Shard.Index) + "/" + strconv.Itoa(r.Step.Shard.Count)
 	}
 	if r.Step.Verification {
-		for _, key := range []string{"MEMQL_RUN_ID", "MEMQL_WORK_RUN_ID", "MEMQL_BASE_SHA", "MEMQL_MODE", "MEMQL_EVENT", "MEMQL_VERSION"} {
+		// A verification receipt stands for other runs of the same inputs. A
+		// release reuses one across commits with one tree, so the commit goes
+		// with the event and the run: a command that could read which commit it
+		// is on could pass on one and fail on the other. The clone still checks
+		// out r.SHA.
+		for _, key := range []string{"MEMQL_RUN_ID", "MEMQL_WORK_RUN_ID", "MEMQL_SHA", "MEMQL_BASE_SHA", "MEMQL_MODE", "MEMQL_EVENT", "MEMQL_VERSION"} {
 			delete(env, key)
 		}
 		env["MEMQL_VERIFICATION"] = "true"

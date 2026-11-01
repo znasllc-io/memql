@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,7 +47,7 @@ esac`)
 			if limit == 0 {
 				limit = 2048
 			}
-			for _, expected := range []string{fmt.Sprintf("--memory=%dm\n", limit), fmt.Sprintf("--memory-swap=%dm\n", limit), "--cpus=2\n", "--cap-drop=ALL\n"} {
+			for _, expected := range []string{fmt.Sprintf("--memory=%dm\n", limit), fmt.Sprintf("--memory-swap=%dm\n", limit), "--cpus=2.000\n", "--cap-drop=ALL\n"} {
 				if !strings.Contains(string(args), expected) {
 					t.Errorf("missing %q in Docker arguments: %s", expected, args)
 				}
@@ -134,8 +135,13 @@ func TestContainerScriptKeepsValuesOutOfTheHostShell(t *testing.T) {
 
 func fakePipelineDocker(t *testing.T, body string) string {
 	t.Helper()
+	previousResources := pipelineDockerResources
+	pipelineDockerResources = func(context.Context) (dockerResourceHeadroom, error) {
+		return dockerResourceHeadroom{ID: "daemon-id", CPUs: 32, Total: 64 << 30, Used: 1 << 30}, nil
+	}
+	t.Cleanup(func() { pipelineDockerResources = previousResources })
 	path := filepath.Join(t.TempDir(), "docker")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nmain() {\n"+body+"\n}\nmain \"$@\"\n"), 0700); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nunset DOCKER_HOST DOCKER_CONTEXT\nif [ \"$1\" = context ]; then printf '\"unix:///tmp/memql-pipeline-test.sock\"\\n'; exit 0; fi\nif [ \"$1\" = --host ]; then shift 2; fi\nmain() {\n"+body+"\n}\nif [ \"$1\" = info ] && [ \"$3\" = '{{.ID}}' ]; then reply=$(main \"$@\"); result=$?; [ \"$result\" -eq 0 ] || exit \"$result\"; printf '%s\\n' \"$reply\" | sed -n '1p'; else main \"$@\"; fi\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	previous := dockerBinary
@@ -169,6 +175,7 @@ func TestPipelineDockerClientExitIsNotAReceipt(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			fakePipelineDocker(t, `case "$1" in
+info) echo daemon-id;;
 create) exit 0;;
 image) echo linux/arm64;;
 start) cat >/dev/null; exit 0;;
@@ -176,7 +183,7 @@ inspect) printf '%s' `+shellLiteral(scenario.state)+`;;
 rm|ps) `+scenario.cleanup+`;;
 esac`)
 			reservation := testPipelineReservation(t)
-			run := &pipelineRun{reservation: reservation, dir: pipelineTestWorkspace(t), req: pipelineStepRequest{execution: "container", dockerID: "daemon-id", platform: "linux/arm64", image: containerTestDigest, command: "exit 0"}, mask: newSecretMasker(nil), emit: func(bool, []byte) {}}
+			run := &pipelineRun{reservation: reservation, dir: pipelineTestWorkspace(t), req: pipelineStepRequest{execution: "container", dockerID: "daemon-id", dockerEndpoint: "unix:///tmp/memql-pipeline-test.sock", platform: "linux/arm64", image: containerTestDigest, command: "exit 0"}, mask: newSecretMasker(nil), emit: func(bool, []byte) {}}
 			_, fail := run.containerCommand(context.Background())
 			if fail == nil || fail.GetErrorCode() != scenario.code {
 				t.Fatalf("failure: %v", fail)
@@ -196,6 +203,8 @@ func TestPipelineContainerRealDocker(t *testing.T) {
 	fx := newPipelineFixture(t)
 	allowLocalClones(t)
 	policy, root := pipelineTestPolicy(t, "")
+	pipelineHostMemory = capacity.ReadSystemHeadroom
+	pipelineHostCPUs = runtime.NumCPU
 	t.Setenv("MEMQL_CONTAINER_HOST_ONLY", "must-not-enter-container")
 	t.Setenv(workerTokenVariable, "worker-secret-must-not-enter-container")
 	extra := map[string]any{"execution": "container", "platform": "linux/" + runtime.GOARCH, "image": image,
@@ -238,18 +247,18 @@ func TestPipelineContainerRealDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	orphan := "memql-step-" + hex.EncodeToString(nonce[:])
-	if err = reservation.begin(pipelineAttemptRecord{Execution: "container", DockerID: req.dockerID, Container: orphan, Workspace: interruptedDir}); err != nil {
+	if err = reservation.begin(pipelineAttemptRecord{Execution: "container", DockerID: req.dockerID, DockerEndpoint: req.dockerEndpoint, Container: orphan, Workspace: interruptedDir}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = dockerOutput(context.Background(), "create", "--name", orphan, "--network=none", "--entrypoint=/bin/sh", image, "-c", "sleep 300"); err != nil {
+	if _, err = dockerOutput(withPipelineDockerEndpoint(context.Background(), req.dockerEndpoint), "create", "--name", orphan, "--network=none", "--entrypoint=/bin/sh", image, "-c", "sleep 300"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = removePipelineContainer(ctx, orphan)
+		_ = removePipelineContainer(withPipelineDockerEndpoint(ctx, req.dockerEndpoint), orphan)
 	})
-	if _, err = dockerOutput(context.Background(), "start", orphan); err != nil {
+	if _, err = dockerOutput(withPipelineDockerEndpoint(context.Background(), req.dockerEndpoint), "start", orphan); err != nil {
 		t.Fatal(err)
 	}
 	reservation.close()
@@ -291,7 +300,7 @@ func TestPipelineContainerRealDocker(t *testing.T) {
 			if len(line) != 64 {
 				continue
 			}
-			cmd := exec.Command("docker", "ps", "--all", "--filter", "id="+line, "--format", "{{.ID}}")
+			cmd := exec.Command("docker", "--host", req.dockerEndpoint, "ps", "--all", "--filter", "id="+line, "--format", "{{.ID}}")
 			out, err := cmd.Output()
 			if err != nil || strings.TrimSpace(string(out)) != "" {
 				t.Fatalf("container survived: %q %v", out, err)

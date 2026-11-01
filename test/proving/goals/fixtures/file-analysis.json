@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "files": {
+    "orders.csv": "order_id,item,quantity,unit_price\nA1,Notebook,2,4.50\nA2,Pen,10,1.20\nA2,Pen,10,1.20\nA3,Folder,3,2.00\nA4,Notebook,,4.50\n",
+    "brief.txt": "Create an XLSX workbook with raw input, cleaned data, formulas and a small chart. A2 is an exact duplicate. Missing quantity is unknown. Preserve raw input and explain exclusions. Also create a five-slide presentation explaining the result. No publication.\n",
+    "NOTES.txt": "Unrelated operator notes: preserve exactly.\n",
+    ".memql-evaluation.json": "{\"schemaVersion\": 1, \"fixtureVersion\": \"1.0.0\", \"fixturePurpose\": \"planned cross-category evaluation; not a live result\"}\n"
+  }
+}

@@ -181,6 +181,13 @@ Skipping step 1 does not fail loudly. The drain simply waits, the upgrade sits
 at "in progress" for as long as you let it, and the cluster is in a half-upgraded
 state the whole time.
 
+**Kubernetes 1.36 needs an engine newer than 0.31.9.** A 1.36 node refuses the
+read those engines use to collect a pipeline step's artifacts, so every step with
+a required artifact fails `pipeline_artifact_unavailable` and the stages after it
+do not run. Move the engine first. A control plane at 1.36 is not enough to trigger
+it: a pod on a 1.35 kubelet still reads, so it starts when the pool running the
+steps moves. See [Artifacts](pipelines-substrate.md#artifacts).
+
 ## What is NOT zero-downtime today, stated plainly
 
 **The database.** A default instance runs **one** CNPG instance. A Postgres

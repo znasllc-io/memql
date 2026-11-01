@@ -32,6 +32,32 @@
 // The one credential it ever sees is a short-lived clone token, which only the
 // clone container can read (TestTheCloneTokenReachesOnlyTheCloneContainer).
 //
+// # Attempts
+//
+// The seam's driver retries a step that failed for a transient reason, and the
+// executor is what makes each attempt safe to retry. Two things are the
+// executor's, not the driver's, because only it knows whether a dispatch reached
+// a machine and what the machine or the Job answered:
+//
+//   - every attempt that did not succeed leaves with a class
+//     (pl.AttemptClass): the command did not start, asked to be run again,
+//     may have run with an unknown outcome, or failed for good. The rules are
+//     attempt_class.go (a Job's answer, and what both surfaces read the same)
+//     and attempt_class_fleet.go (a machine's, which also needs the dispatcher's
+//     own verdict). A code nobody classified is final, so an unexpected answer is
+//     never retried.
+//   - an attempt arrives with its place already chosen (pl.AttemptPlacement) and
+//     goes exactly there: a fleet attempt never spills to the cluster inside that
+//     attempt, a cluster attempt never asks a machine, and neither reaches a
+//     place the step's manifest placement or the installation's policy does not
+//     allow (refusePlacement). A step's first attempt has no placement and goes
+//     where its manifest put it, a pool step's fleet-then-cloud preference
+//     included.
+//
+// What the next place is, how long to wait before it, and when to stop are the
+// driver's decisions (spec section 5), because only the driver holds the journal
+// of the attempts so far; nothing in this package retries a step.
+//
 // # The pure half
 //
 // The configuration, the derived names, the forward payloads, the Kubernetes

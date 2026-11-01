@@ -722,7 +722,8 @@ orphan reconciliation. Focused race tests, the serial Cockpit suite and its
 GitHub checks pass. Engine manifest/dispatch wiring now preserves execution, placement and platform
 through the compiled plan, cross-replica dispatch and Kubernetes node selector.
 Native steps use binary-reported OS/architecture. Fleet workers must advertise
-exact action contract 2, checked again on the live connection. Host requirements
+the exact pipeline action contract (`PipelineStepContract`, 5 since the
+fleet-first work), checked again on the live connection. Host requirements
 do not pass through a container boundary; ordinary fleet containers declare
 placement separately. A native Docker requirement receives a live daemon probe.
 The OS connect preview carries fleet placement even without host needs and
@@ -871,7 +872,11 @@ deletes instead of erasing creation claims with collection deletion.
 
 Markers survive Job garbage collection. Resolved markers expire after the maximum
 supported run lifetime plus resource retention; unresolved creation evidence stays
-for reconciliation. The cross-node protocol is Step V4, receipt Ack V3 and Cancel
+for reconciliation. (Corrected October 30: nothing was ever built to reconcile it,
+so a run whose POST a cancel interrupted never concluded. The evidence now stays
+for `latePostWindow` from the stop marker; see the
+[harness decision map](../ops/harness-decisions.md#a-stopped-attempt-stops-waiting-for-a-job-post-that-can-no-longer-land-2026-10-30).)
+The cross-node protocol is Step V4, receipt Ack V3 and Cancel
 V2, so an older replica cannot claim these guarantees. Local Kubernetes testing
 exercised late admission, confirmed resource absence, and delayed original
 envelopes after both attempt and run retirement. Recovery and cancellation passed

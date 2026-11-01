@@ -87,3 +87,22 @@ it("restores a saved stop and clears it only after the cluster confirms stopping
   await act(async () => { expect(await result.current.decide("stop", "answered", { value: "abandon" }, undefined, true)).toBe(true); });
   expect(result.current.approvalResumes.stop).toBeUndefined();
 });
+
+it.each(["ready", "cancelled", "different-answer", "different-failure", "running"])("reporting recovery restores only an unchanged abandoned answer: %s", async (mode) => {
+  const conn = fakeConnection(); h.connection = conn;
+  Object.assign(conn.query, {
+    workApprovalForOwner: vi.fn(async () => rowsResult([approvalRow({ id: "format", runId: "run", kind: "feedback", decision: "answered", answer: { value: "retry" }, subject: { errorMessage: mode === "different-failure" ? "unrelated failure" : "work_outcome_recovery_v1: retained result" } })])),
+    workRunForOwner: vi.fn(async () => rowsResult([runRow({ id: "run", status: mode === "running" ? "running" : "abandoned", errorCode: "run_abandoned", humanResumeId: mode === "different-answer" ? "new-answer" : "format", cancelRequested: mode === "cancelled" })])),
+  });
+  const { result } = renderHook(() => useDecideApproval());
+  await act(async () => { await result.current.readApprovalResume("format"); });
+  expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  if (mode !== "ready") {
+    expect(result.current.approvalResumes.format).toBeUndefined();
+    return;
+  }
+  expect(result.current.approvalResumes.format).toMatchObject({ outcomeRecovery: true, feedbackAnswer: { value: "retry" } });
+  conn.query.decideApproval.mockResolvedValue(builtinReply("decideApproval", [{ approvalId: "format", runId: "run", decision: "answered", runResumed: true }]));
+  await act(async () => { await result.current.decide("format", "answered", result.current.approvalResumes.format!.feedbackAnswer, undefined, true); });
+  expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "format", decision: "answered", answer: { value: "retry" } });
+});

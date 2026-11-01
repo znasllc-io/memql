@@ -35,10 +35,13 @@ type FleetOptions struct {
 	// AppsFor builds the app inventory one home reports. PER HOME, because
 	// app consent is per cluster (policy.yaml apps.homes): the same app is
 	// allowed for one cluster and blocked for another. Nil reports no apps.
-	AppsFor    func(homeID string) AppInventory
-	Models     ModelInventory
-	Discoverer *models.Discoverer
-	Metrics    *Metrics
+	AppsFor func(homeID string) AppInventory
+	// AppReadiness is the machine's one readiness tracker, which every home's
+	// sessions report to. Nil tells nobody.
+	AppReadiness appsession.SessionReadiness
+	Models       ModelInventory
+	Discoverer   *models.Discoverer
+	Metrics      *Metrics
 	// Limiter is the machine's model concurrency ceiling, shared by every
 	// home (memql-cockpit#432). Nil builds one for this fleet.
 	Limiter *modelcall.Limiter
@@ -62,6 +65,7 @@ type Fleet struct {
 	workerPaths []string
 	toolsFor    func(homeID string) ToolDispatcher
 	appsFor     func(homeID string) AppInventory
+	appReady    appsession.SessionReadiness
 	modelsInv   ModelInventory
 	discoverer  *models.Discoverer
 	metrics     *Metrics
@@ -102,6 +106,7 @@ func NewFleet(opts FleetOptions) (*Fleet, error) {
 		workerPaths: opts.WorkerPaths,
 		toolsFor:    opts.ToolsFor,
 		appsFor:     opts.AppsFor,
+		appReady:    opts.AppReadiness,
 		modelsInv:   opts.Models,
 		discoverer:  opts.Discoverer,
 		metrics:     opts.Metrics,
@@ -321,6 +326,7 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 		// reason: a nil policy denies nothing beyond the worker's own.
 		WorkerPaths: f.workerPaths,
 		DenyPaths:   f.policy.DenyPaths,
+		Readiness:   f.appReady,
 	})
 	// Per-home Calls so a disconnect on home A does not StopAll
 	// generations serving home B on the shared GPU -- over one Limiter,

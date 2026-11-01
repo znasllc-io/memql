@@ -199,7 +199,7 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 // Nonhuman recovery must still reach the existing due-wait admission after
 // installing the human-readiness preparer in the actual app dispatcher.
 func TestWorkDBHumanDispatchPreservesScheduledRecovery(t *testing.T) {
-	engine := workTemplateDBEngine(t)
+	engine, db := workTemplateDBEngineAndDB(t)
 	now := time.Now().UTC()
 	since := now.Add(-time.Minute).Format(time.RFC3339Nano)
 	for _, kind := range []string{"retry", "inference", "scheduler answer"} {
@@ -211,7 +211,19 @@ func TestWorkDBHumanDispatchPreservesScheduledRecovery(t *testing.T) {
 				waiting["kind"] = "approval"
 				waiting["approvalKind"] = "inferenceUnavailable"
 			}
-			templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkRun", map[string]any{"runId": key, "automationName": "fixture", "templateFingerprint": "fixture", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "status": "waiting", "mode": "live", "waitingOn": waiting})
+			run := map[string]any{"runId": key, "automationName": "fixture", "templateFingerprint": "fixture", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "status": "waiting", "mode": "live", "waitingOn": waiting}
+			// A scheduler's journal has no goal: that is what keeps an answer on
+			// it out of the human-resume path, and what this case holds.
+			if kind != "scheduler answer" {
+				templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkGoal", map[string]any{"goalId": key + "goal", "statement": "Synthetic scheduled recovery", "origin": "user"})
+				run["goalId"] = key + "goal"
+			}
+			templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "createWorkRun", run)
+			// Startup recovery scans all owners. Retire every fixture even if
+			// an assertion fails, rather than leaving another test eligible work.
+			t.Cleanup(func() {
+				templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "updateWorkRun", map[string]any{"runId": key, "status": "cancelled", "cancelRequested": true})
+			})
 			req := work.DispatchRequest{RunId: key, Status: "waiting", Recovery: true, RetryWait: since}
 			if kind == "scheduler answer" {
 				templateMutation(t, engine, auth.ContextWithInternalOrigin(ctx), "updateWorkRun", map[string]any{"runId": key, "status": "running", "humanResumeId": key + "approval"})
@@ -219,6 +231,23 @@ func TestWorkDBHumanDispatchPreservesScheduledRecovery(t *testing.T) {
 				req.Status, req.RetryWait = "running", ""
 			}
 			d := &workRunDispatcher{app: &App{engine: engine, Logger: engine.Logger}}
+			if kind == "inference" {
+				// Let the installed timer construct its exact wait identity from
+				// the fresh owned row; RetryWait only names failure backoff.
+				admitted := make(chan work.DispatchRequest, 1)
+				peer := work.New(engine, engine.Logger, func() *bun.DB { return db })
+				peer.SetDispatcher(&humanReadyDispatcher{workRunDispatcher: d, admitted: admitted})
+				peer.SetRunClaimer(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, engine.Logger).StrictClaimer())
+				peer.HandleRunEvent(events.Event{Payload: map[string]any{"id": key, "payload": map[string]any{"status": "waiting", "ownerUserId": key + "owner", "goalId": key + "goal", "automationName": "fixture", "waitingOn": waiting}}})
+				select {
+				case req = <-admitted:
+					if req.InferenceWait == "" || req.RetryWait != "" || memql.BareShortId(req.GoalId) != key+"goal" {
+						t.Fatalf("inference recovery lost its owned wait identity: %+v", req)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("due inference wait was not dispatched")
+				}
+			}
 			got, ok := d.PrepareDispatch(ctx, req)
 			if !ok || !reflect.DeepEqual(got, req) {
 				t.Fatalf("ordinary recovery changed: %+v, %v", got, ok)

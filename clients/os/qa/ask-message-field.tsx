@@ -21,7 +21,7 @@ const appsReady = scene === "apps" || scene === "workbench";
 const routes = routeOptionsFrom({ routes: [
   { id: "auto", name: "Auto", kind: "auto", scope: "cluster", ready: true },
   { id: "local", name: "Local", kind: "local", scope: "cluster", ready: true },
-  { id: "apps", name: "Apps", kind: "apps", scope: "cluster", ready: appsReady, reason: appsReady ? "" : "No signed-in app on your machines" },
+  { id: "apps", name: "Apps", kind: "apps", scope: "cluster", ready: appsReady, reason: appsReady ? "" : "No app is ready on your machines" },
   { id: "r1", name: "Emergency", kind: "custom", scope: "personal", ready: true },
   { id: "r2", name: "Out of credits", kind: "custom", scope: "personal", ready: scene !== "not-ready", reason: "No local model reachable" },
 ] });

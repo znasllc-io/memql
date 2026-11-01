@@ -373,4 +373,16 @@ func TestCandidateWorkflowChoosesAllowedPlannedSkips(t *testing.T) {
 		}
 		cleanupCandidate(t, db, record.ID)
 	})
+	// So does a pass reused from the run that tested the same tree, on the proof
+	// candidate_reused.go attaches, and only on it.
+	t.Run("pipeline_passed_earlier with a proven reuse", func(t *testing.T) {
+		p, c, _, evidence := candidatePreparationFixture(t, db)
+		evidence.skips = []candidateSkippedStep{{Component: "engine", WorkRunID: c.Evidence[0].WorkRunID, StepKey: "test.full", Code: pl.CodePassedEarlier,
+			ReusedFrom: &pl.ReleaseReusedFrom{PipelineRunID: "pull", WorkRunID: "pull-work", Attempt: 1, Event: "pull_request", Commit: strings.Repeat("9", 40), TreeHash: strings.Repeat("7", 40), ReceiptDigest: "sha256:" + strings.Repeat("a", 64)}}}
+		record, err := p.prepare(ownerCtx(), c)
+		if err != nil || record.State != "ready" {
+			t.Fatal("a proven reuse did not qualify", err)
+		}
+		cleanupCandidate(t, db, record.ID)
+	})
 }

@@ -17,6 +17,7 @@ func TestRunSummaryDBExcludesExecutionPayloads(t *testing.T) {
 	})
 	a.write(t, "updateWorkRun", map[string]any{
 		"runId": runID, "status": "failed", "errorMessage": "Connection interrupted",
+		"humanResumeId":  "v1:work:approval:saved-reporting-answer",
 		"classification": map[string]any{"workTitle": "Presidential history"},
 		"outcome":        map[string]any{"draft": document},
 		"head":           map[string]any{"repair": map[string]any{"version": 1}},
@@ -45,6 +46,9 @@ func TestRunSummaryDBExcludesExecutionPayloads(t *testing.T) {
 		}
 		if rowMap(row, "conversation")["id"] != "conversation-one" {
 			t.Fatalf("summary lost Ask conversation: %s", encoded)
+		}
+		if row["humanResumeId"] != "v1:work:approval:saved-reporting-answer" {
+			t.Fatalf("summary lost the saved answer needed for explicit recovery: %s", encoded)
 		}
 		if other := a.query(t, a.owner+"-stranger", q); len(other) != 0 {
 			t.Fatalf("%s exposed another owner's run", q)

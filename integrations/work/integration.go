@@ -137,7 +137,7 @@ type Integration struct {
 	// to the projection read in recovery_heads.go.
 	runningRuns func(ctx context.Context, owner string) ([]map[string]any, error)
 
-	// armedRetries is the `retry` waits this replica has a timer armed for,
+	// armedRetries is the automatic retry/inference waits this replica has timers for,
 	// keyed by run and wait (failure_waits.go, armRetry): every sighting of a
 	// wait's event -- the park, and each nudge the sweep makes -- would
 	// otherwise arm another timer for the same attempt.
@@ -381,6 +381,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"runId":  "string (required) -- the run to replay",
 				"policy": "string -- strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it",
 			},
+		},
+		{
+			Name:        "continueRun",
+			Description: "Continue an open, unaccepted goal from its exact finished result and the owner's feedback; preserve completed work, usage and permissions.",
+			Handler:     i.handleContinueRun,
+			ArgsSchema:  map[string]string{"runId": "string (required)", "runVersion": "string (required)", "requestId": "string (required)", "feedback": "string (required)"},
 		},
 		// INTERVENTION AND FEEDBACK (epic memql#5414). Each handler lives in
 		// its own file (rerun.go, branch.go, head.go, feedback.go,
@@ -695,14 +701,12 @@ type ApprovalSeed struct {
 
 // RunBudget reports the ceilings a run inherits from its goal.
 //
-// WHY THE CEILINGS AND NOT THE SPEND. v1:work:run.spent is written by exactly
-// one thing today -- component/workjournal stamps wallClockMs when a run
-// closes -- so its tokens, cost and modelCalls are absent on every live run.
-// A cumulative check against them would compare a real ceiling to a zero that
-// means "nobody measured", conclude there is budget left, and never block:
-// the same fail-open shape this method exists to close, moved one layer down.
-// So the caller supplies what it has actually spent, which for a compile is a
-// number it counted itself.
+// WHY THE CEILINGS AND NOT THE SPEND. Run closure and budget pauses persist
+// accounting snapshots, including PauseReplanForBudget, but a live run's row
+// can lag answered calls and reserved provider attempts. A missing field is
+// unknown usage, never zero. Callers must reconcile the native usage receipts
+// at admission rather than treating this allowance projection as spend or as
+// permission to infer. The run's durable renewals apply on every serving role.
 //
 // Read under the OWNER's borrowed authority, like every other read here: the
 // goal is owner-tiered, and an unstamped read answers zero rows and no error,

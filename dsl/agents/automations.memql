@@ -42,6 +42,14 @@ automation agentWorkSkillContext {
  return builtin agentSelectWorkSkills(text: args.text, limit: 3, minimumScore: 1, maxBytes: 8000)
 }
 
+/// Repair only a completed delegated turn's reporting protocol. Native storage
+/// binds the saved source and caps this at one inference-only attempt.
+@template
+automation agentWorkOutcomeRecovery {
+ args { attempts int! }
+ return args.attempts == 0
+}
+
 /// Pure recovery decisions run inside the existing execution scope and do not
 /// create another run, statement journal, model call or independent permission.
 @template

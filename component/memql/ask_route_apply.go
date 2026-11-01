@@ -81,7 +81,7 @@ func (e *MemQLEngine) routeAskTurn(ctx context.Context, conversationID, turnID, 
 		return askRouteOutcome{}, fmt.Errorf("the accepted conversation turn is unavailable")
 	}
 	earlier := transcript.Turns[:index]
-	goals, err := e.activeAskGoals(ctx, askTranscript{Turns: earlier})
+	goals, err := e.routableAskGoals(ctx, askTranscript{Turns: earlier})
 	if err != nil {
 		return skipAskRoute(ctx, prompt, routeSkippedUnavailable, routeUnavailableReason(err), emit)
 	}
@@ -153,7 +153,9 @@ func (e *MemQLEngine) applyAskRoute(ctx context.Context, conversationID, turnID,
 	for _, update := range decision.Updates {
 		updated = append(updated, update.Goal)
 	}
+	continued, updated := e.deliverContinuationTargets(ctx, conversationID, turnID, updated, text)
 	answered, rest := e.deliverApprovalTargets(ctx, updated, text)
+	answered = append(continued, answered...)
 	hold, err := e.holdAskConversation(ctx, conversationID, "write")
 	if err != nil {
 		return askRouteOutcome{}, err
@@ -333,7 +335,7 @@ func honestRouteReply(modelReply string, targets []AskRouteTarget, asked, stoppe
 	honest := len(unstopped) == 0
 	sentences := make([]string, 0, len(targets)+len(asked)+len(stopped)+len(unstopped))
 	for _, target := range targets {
-		honest = honest && routeDelivered(target.Status)
+		honest = honest && routeDelivered(target.Status) && target.Reason != routeReasonContinued && target.Status != routeSaved
 		sentences = append(sentences, routeTargetSentence(target))
 	}
 	if honest {
@@ -354,6 +356,10 @@ func honestRouteReply(modelReply string, targets []AskRouteTarget, asked, stoppe
 // routeTargetSentence is what the honest reply says of one goal.
 func routeTargetSentence(target AskRouteTarget) string {
 	switch {
+	case target.Reason == routeReasonContinued:
+		return "Continuation requested for " + routeGoalName(target.Title, false) + "."
+	case target.Status == routeSaved:
+		return "Saved your message for " + routeGoalName(target.Title, false) + "; the work has not resumed."
 	case routeDelivered(target.Status):
 		return "Sent to " + routeGoalName(target.Title, false) + "."
 	case target.Status == routeNotReceived:

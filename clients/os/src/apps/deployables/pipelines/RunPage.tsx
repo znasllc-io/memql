@@ -20,12 +20,12 @@ import { useRunFiles, useRunSteps } from "./feeds";
 import { useExpiredRunFiles } from "./expiry";
 import { runGithubUrl } from "./github";
 import { fetchLogTail, type LogTail } from "./logTail";
-import { artifactDisplayName, isFinished, runFailureOf, type PipelineRow, type RunFileRow, type RunRow, type StepRow } from "./rows";
+import { artifactDisplayName, isFinished, runFailureOf, type PipelineRow, type RunFileRow, type RunRow, type StepAttempt, type StepRow } from "./rows";
 import { newerAttemptOf, runById } from "./runs";
 import { Mark } from "./Mark";
 import { StopsAcross } from "./StopsAcross";
 import { openStopFor, shardsOf, stopsForRun, type RunStop } from "./stops";
-import { attemptWords, branchWords, durationWords, modeWord, runTitle, shortSha, stepLabel, stepMark, stepWord, triggerWords, whenWords, whereWords } from "./words";
+import { attemptCountWords, attemptSentence, attemptWords, branchWords, durationWords, isAccountedBelow, joinWords, modeWord, runTitle, shortSha, shownAttempts, stepLabel, stepMark, stepWord, triggerWords, whenWords, whereWords } from "./words";
 import "./pipelines.css";
 
 // THE RUN PAGE, layout A (design record D13; issue memql#5500): the
@@ -39,8 +39,10 @@ import "./pipelines.css";
 //                   them, a refusal, or the run's own reason for failing when
 //                   no step reported one (its workflow erred after every
 //                   stage passed), read off the run row
-//   the open stop   its steps: where each ran and for how long; a failed one
-//                   with its last lines and the way to the whole log; a
+//   the open stop   its steps: where each ran and for how long; one that took
+//                   more than one attempt with the attempts under it, each by
+//                   the machine's name, why it ended and its own log; a failed
+//                   one with its last lines and the way to the whole log; a
 //                   skipped one with its reason in words
 //   artifacts       what the steps saved, each a file in the Library
 //   the bar         the state, then the legal acts: Open on GitHub, Re-run,
@@ -302,22 +304,62 @@ function StageSteps({ stop, files, expired, machineName, onOpenFile }: {
         const word = stepWord(step);
         const log = step.logFileId !== "" ? files.get(step.logFileId) ?? null : null;
         const skipped = step.status === "skipped";
+        const attempts = shownAttempts(step);
         return (
           <li key={step.key} className="pipeline-step" data-status={step.status}>
             <RecordRow
               icon={<Mark state={stepMark(step)} />}
               name={label}
-              secondary={skipped ? (step.reason || word) : where}
+              secondary={skipped ? (step.reason || word) : joinWords(where, attemptCountWords(step))}
               state={word}
               tone={step.status === "failed" ? "warn" : step.status === "done" || step.status === "running" || step.errorCode === "pipeline_passed_earlier" ? "accent" : "muted"}
               stateExtra={step.durationMs > 0 && !skipped ? <span className="pipeline-step-took">{durationWords(step.durationMs)}</span> : null}
               dim={step.status === "pending" || step.status === "ready" || step.status === "waiting"}
             />
+            {attempts.length > 0 ? <StepAttempts step={step} label={label} attempts={attempts} files={files} machineName={machineName} onOpenFile={onOpenFile} /> : null}
             {step.status === "failed" || (step.status === "cancelled" && step.errorMessage !== "") ? (
               <FailedStep step={step} log={log} onOpenFile={onOpenFile} />
             ) : null}
             {step.notes.map((note) => <ProblemNotice key={note.code} problem={{ code: note.code, message: note.message }} tone="warn" />)}
             {expired.has(step.logFileId) ? <Caption>Log expired.</Caption> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * A step's attempts, under its row and above any failure it led to: one line
+ * each -- which attempt, where it ran by the machine's name, how it ended -- and
+ * the way to that attempt's own log.
+ *
+ * THE STEP'S EXISTING DETAIL, NOT A NEW DEVICE: it sits in the column a failed
+ * step's account does, in the same small type, with the same quiet link. The
+ * account below it (the failure's notice, last lines and "Open the full log")
+ * is about the step's LAST attempt, so that attempt's line says only how the
+ * step ended and offers no second link to the same file (`isAccountedBelow`);
+ * the earlier attempts each say their own. A log the Library does not hold
+ * offers no link (expiry is said once, on the step).
+ */
+function StepAttempts({ step, label, attempts, files, machineName, onOpenFile }: {
+  step: StepRow;
+  label: string;
+  attempts: readonly StepAttempt[];
+  files: ReadonlyMap<string, RunFileRow>;
+  machineName: (workerId: string) => string;
+  onOpenFile: ((artifactId: string) => void) | null;
+}) {
+  return (
+    <ul className="pipeline-attempts" aria-label={`Attempts of ${label}`}>
+      {attempts.map((attempt) => {
+        const log = attempt.logFileId !== "" && !isAccountedBelow(step, attempt) ? files.get(attempt.logFileId) ?? null : null;
+        return (
+          <li key={attempt.attempt} className="pipeline-attempt">
+            <span>{attemptSentence(step, attempt, machineName)}</span>
+            {log !== null && onOpenFile ? (
+              <button type="button" className="os-link" aria-label={`Open the log of attempt ${attempt.attempt}`} onClick={() => onOpenFile(log.artifactId)}>Open the log</button>
+            ) : null}
           </li>
         );
       })}

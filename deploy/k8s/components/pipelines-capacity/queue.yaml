@@ -31,7 +31,12 @@ metadata:
   annotations:
     memql.io/capacity-change: ""
 spec:
-  queueingStrategy: BestEffortFIFO
+  # Accumulate room for the oldest Job of the highest class. Backfilling each free
+  # slot with whatever fits starved 40 GiB database steps behind a continuous stream
+  # of 20 GiB checks. Strict order is by class first, so a lower class could wait out
+  # its whole run ceiling; deadline-priority.yaml is what moves it forward, and that
+  # means nothing here without this: a backfilling queue admits around a promoted Job.
+  queueingStrategy: StrictFIFO
   namespaceSelector:
     matchLabels:
       kubernetes.io/metadata.name: memql-pipelines
