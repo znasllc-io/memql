@@ -17,7 +17,8 @@ The shared-capacity implementation requires
 enforced container CPU/memory bounds and shared host admission. The controller
 requires that exact action contract; a registration label or a version string
 does not replace it. Contract 4 workers and controllers must be upgraded in a
-coordinated idle window before Fleet intake resumes. Cockpit source now lives
+coordinated idle window before Fleet intake resumes. Cockpit 0.22.0 is the first
+contract 5 version; 0.21.1 is the last contract 4 release. Cockpit source now lives
 in this repository's `cockpit/` module; its release artifacts remain separate.
 
 Deploy the capability before enabling manifest `placement: pool`, selecting an

@@ -3223,9 +3223,9 @@ The contract-5 Cockpit release is cut while production still runs the old
 engine, because its macOS steps need today's machines. The engine change leaves
 `cockpit/VERSION` as it is: the contract-5 Cockpit release bumps it in its own
 release PR, as memql#6372 did, because the version belongs to the release, and
-eligibility keys on the contract number, not the version. The 0.21.1 it reads was
+eligibility keys on the contract number, not the version. The 0.21.1 it read was
 stamped by memql#6384 for the last contract-4 release, so that number never names
-a contract-5 Cockpit: a release cut from this code needs the bump first. The manifest change
+a contract-5 Cockpit; 0.22.0 is the first version that does. The manifest change
 cannot move a `verification: true` step: reusable verification requires
 `placement: cluster` (`component/pipelines/verification.go`). Twenty steps
 carry it, the Go and database tests and the node builds and tests among them,
