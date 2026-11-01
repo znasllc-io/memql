@@ -15,6 +15,8 @@ type candidateEvidenceReader struct {
 	engine interface {
 		Execute(context.Context, string) (*memql.ExecuteResult, error)
 	}
+	// pass keeps the rows one proof has read (forOnePass). Nil reads every time.
+	pass map[string]map[string]any
 }
 
 // read uses existing owner-scoped reads without escalating origin or changing

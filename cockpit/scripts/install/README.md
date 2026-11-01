@@ -79,8 +79,10 @@ Fleet's Mac/Linux installers and `cockpit/install.sh` share `release-version.py`
 They read every page of the MemQL release catalog and select the highest stable
 `cockpit/vX.Y.Z` version. Engine tags, drafts and prereleases do not qualify;
 publication order cannot make an older maintenance release become latest.
-A failed or incomplete catalog refuses installation instead of choosing from
-partial results. Explicit version pins bypass discovery. A checkout uses its
+A next-page link must stay in that catalog: the same host and path, or GitHub's
+`/repositories/<id>/releases` name for it, which it uses once a catalog passes
+100 releases. A failed or incomplete catalog refuses installation instead of
+choosing from partial results. Explicit version pins bypass discovery. A checkout uses its
 own helper; a piped entry point fetches it from the same raw source base, never
 from the operator's current directory or a leftover temporary helper.
 

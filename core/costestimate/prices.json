@@ -1,0 +1,313 @@
+[
+  {
+    "id": "openai:gpt-6-astra:standard:2026-10-22",
+    "vendor": "openai",
+    "model": "gpt-6-astra",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://developers.openai.com/api/docs/pricing",
+      "https://developers.openai.com/api/docs/models/gpt-6-astra"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 10,
+    "outputPerMillion": 50,
+    "cacheReadPerMillion": 1,
+    "cacheWriteShortPerMillion": 12.5,
+    "cacheWriteLongPerMillion": 25,
+    "cacheDurations": [
+      "30m",
+      "12h"
+    ],
+    "longContextAbove": 272000,
+    "longInputMultiplier": 2,
+    "longOutputMultiplier": 1.5
+  },
+  {
+    "id": "anthropic:claude-opus-5-5:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-opus-5-5",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 4,
+    "outputPerMillion": 20,
+    "cacheReadPerMillion": 0.2,
+    "cacheWriteShortPerMillion": 5.0,
+    "cacheWriteLongPerMillion": 8,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-sonnet-5-5:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 2,
+    "outputPerMillion": 10,
+    "cacheReadPerMillion": 0.1,
+    "cacheWriteShortPerMillion": 2.5,
+    "cacheWriteLongPerMillion": 4,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-opus-5:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-opus-5",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 5,
+    "outputPerMillion": 25,
+    "cacheReadPerMillion": 0.5,
+    "cacheWriteShortPerMillion": 6.25,
+    "cacheWriteLongPerMillion": 10,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-opus-4-8:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-opus-4-8",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 5,
+    "outputPerMillion": 25,
+    "cacheReadPerMillion": 0.5,
+    "cacheWriteShortPerMillion": 6.25,
+    "cacheWriteLongPerMillion": 10,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-opus-4-7:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-opus-4-7",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 5,
+    "outputPerMillion": 25,
+    "cacheReadPerMillion": 0.5,
+    "cacheWriteShortPerMillion": 6.25,
+    "cacheWriteLongPerMillion": 10,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-opus-4-6:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-opus-4-6",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 5,
+    "outputPerMillion": 25,
+    "cacheReadPerMillion": 0.5,
+    "cacheWriteShortPerMillion": 6.25,
+    "cacheWriteLongPerMillion": 10,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-sonnet-5:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-sonnet-5",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 2,
+    "outputPerMillion": 10,
+    "cacheReadPerMillion": 0.2,
+    "cacheWriteShortPerMillion": 2.5,
+    "cacheWriteLongPerMillion": 4,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-fable-5-1:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-fable-5-1",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 10,
+    "outputPerMillion": 50,
+    "cacheReadPerMillion": 0.25,
+    "cacheWriteShortPerMillion": 12.5,
+    "cacheWriteLongPerMillion": 20,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-mythos-5-1:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-mythos-5-1",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 10,
+    "outputPerMillion": 50,
+    "cacheReadPerMillion": 0.25,
+    "cacheWriteShortPerMillion": 12.5,
+    "cacheWriteLongPerMillion": 20,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ]
+  },
+  {
+    "id": "anthropic:claude-haiku-5-5:standard:2026-10-22",
+    "vendor": "anthropic",
+    "model": "claude-haiku-5-5",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://platform.claude.com/docs/en/about-claude/pricing",
+      "https://platform.claude.com/docs/en/models/overview"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 0.1,
+    "outputPerMillion": 0.5,
+    "cacheReadPerMillion": 0.01,
+    "cacheWriteShortPerMillion": 0.125,
+    "cacheWriteLongPerMillion": 0.2,
+    "cacheDurations": [
+      "5m",
+      "1h"
+    ],
+    "longContextAbove": 100000,
+    "longInputMultiplier": 5,
+    "longOutputMultiplier": 5
+  },
+  {
+    "id": "openai:gpt-6.1-sol:standard:2026-10-22",
+    "vendor": "openai",
+    "model": "gpt-6.1-sol",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://developers.openai.com/api/docs/pricing",
+      "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 2,
+    "outputPerMillion": 10,
+    "cacheReadPerMillion": 0.1,
+    "cacheWriteShortPerMillion": 2.5,
+    "cacheWriteLongPerMillion": 5,
+    "cacheDurations": [
+      "30m",
+      "12h"
+    ],
+    "longContextAbove": 272000,
+    "longInputMultiplier": 2,
+    "longOutputMultiplier": 1.5
+  },
+  {
+    "id": "openai:gpt-6-luna:standard:2026-10-22",
+    "vendor": "openai",
+    "model": "gpt-6-luna",
+    "currency": "USD",
+    "sourceUrls": [
+      "https://developers.openai.com/api/docs/pricing",
+      "https://developers.openai.com/api/docs/models/gpt-6-luna"
+    ],
+    "checkedAt": "2026-10-22T19:34:27Z",
+    "refreshAfter": "2026-10-29T19:34:27Z",
+    "effectiveFrom": null,
+    "effectiveDateReason": "Official page did not establish when this rate took effect; checkedAt is the observation date.",
+    "inputPerMillion": 0.1,
+    "outputPerMillion": 0.5,
+    "cacheReadPerMillion": 0.01,
+    "cacheWriteShortPerMillion": 0.125,
+    "cacheWriteLongPerMillion": 0.25,
+    "cacheDurations": [
+      "30m",
+      "12h"
+    ],
+    "longContextAbove": 272000,
+    "longInputMultiplier": 2,
+    "longOutputMultiplier": 1.5
+  }
+]

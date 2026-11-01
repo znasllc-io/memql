@@ -1,4 +1,4 @@
-import { computerUseStatus, type MachineRow } from "../rows";
+import { computerUseStatus, type MachineApp, type MachineRow } from "../rows";
 import { isWorkerOnline } from "../online";
 import { machineModelsFrom } from "./models";
 
@@ -20,8 +20,19 @@ export function machineFeatureStates(machine: MachineRow, now: Date): MachineFea
   ];
 }
 
-export function machineAppAvailability(machine: MachineRow, runnable: boolean, now: Date): string {
+/** Where one app on one machine stands, in the words every Fleet surface uses. Ready is what
+ * the machine measured. Only a Cockpit that predates the checks reads Not checked, and it is
+ * the one case still used without an answer (the engine's AppInfo.Runnable). */
+export function appStatus(machine: MachineRow, app: MachineApp | undefined, now: Date): string {
+  if (machine.revokedAt) return "Machine removed";
   if (machine.ownerFeatures?.apps === false) return "Disabled in Settings";
-  if (machine.revokedAt || !isWorkerOnline(machine, now)) return "Machine offline";
-  return runnable ? "Ready" : "Needs attention";
+  if (!isWorkerOnline(machine, now)) return "Machine offline";
+  if (!machine.appsReported) return "Not reported";
+  if (!app) return "Not installed";
+  if (!app.allowed) return "Permission needed";
+  if (!app.signedIn) return "Sign-in needed";
+  if (app.readiness === "out_of_usage") return "Out of usage";
+  if (app.readiness === "ready") return "Ready";
+  if (app.readiness === "") return "Not checked";
+  return app.checkedAt ? "Could not check" : "Checking";
 }

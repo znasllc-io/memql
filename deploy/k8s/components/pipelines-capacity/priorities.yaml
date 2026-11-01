@@ -1,0 +1,27 @@
+# The classes `memql pipeline-deadline-priority` promotes a waiting step to. These
+# are Workload priorities, not Pod priorities; ClusterQueue preemption stays Never.
+#
+# Only these three are the component's. The classes a step STARTS at are an
+# installation's own (MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES), and every one of them
+# must rank below 350: a pass cannot read a class's value, so a Job started above
+# these would be relabelled down to them. Unmapped events start at 0.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: memql-pipeline-expiring
+value: 400
+description: A waiting step whose run is near its ceiling, a quarter of it left by default. Set only by pipeline-deadline-priority, never by an event.
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: memql-pipeline-boosted
+value: 375
+description: A waiting step of a run the owner named in pipeline-deadline-priority's --boost-run list. Below expiring, so deadline safety stays first.
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: memql-pipeline-aged
+value: 350
+description: A waiting step whose run has used half its ceiling by default, so old runs finish first. Set only by pipeline-deadline-priority, never by an event.

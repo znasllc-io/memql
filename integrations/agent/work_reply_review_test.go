@@ -11,13 +11,27 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
 type replyReviewEngine struct {
 	workPromptEngine
-	calls int
-	fail  bool
+	calls        int
+	fail         bool
+	restoreErr   error
+	saveReplyErr error
+}
+
+func (e *replyReviewEngine) RestoreWorkContinuation(_ context.Context, _ []common.ChatMessage) ([]common.ChatMessage, error) {
+	return append([]common.ChatMessage(nil), e.savedContinuation...), e.restoreErr
+}
+
+func (e *replyReviewEngine) SaveWorkReplyReview(ctx context.Context, binding memql.WorkReplyReviewBinding, value json.RawMessage) error {
+	if e.saveReplyErr != nil {
+		return e.saveReplyErr
+	}
+	return e.workPromptEngine.SaveWorkReplyReview(ctx, binding, value)
 }
 
 func (e *replyReviewEngine) Execute(ctx context.Context, query string) (any, error) {
@@ -41,6 +55,7 @@ func TestOwnedAnswerWaitsForEvidenceReviewBeforeDelivery(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "reviewed", true: "failed"}[fail], func(t *testing.T) {
 			engine := &replyReviewEngine{fail: fail}
+			engine.savedContinuation = []common.ChatMessage{{Role: "user", Content: "Explain the observed status."}}
 			r := newTestReplier(engine)
 			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
 			sink := &captureSink{}
@@ -76,6 +91,135 @@ type evidenceRepairEngine struct {
 	workPromptEngine
 	reviews  int
 	failSave bool
+}
+
+type restartReplyReviewEngine struct{ replyReviewEngine }
+
+func (e *restartReplyReviewEngine) RestoreWorkContinuation(_ context.Context, _ []common.ChatMessage) ([]common.ChatMessage, error) {
+	return append([]common.ChatMessage(nil), e.savedContinuation...), nil
+}
+
+func TestReplyReviewRestartDoesNotRepeatCompletedProduction(t *testing.T) {
+	e := &restartReplyReviewEngine{replyReviewEngine: replyReviewEngine{fail: true}}
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", StepKey: "finish", OwnerUserId: "owner"})
+	productions, effects := 0, 0
+	produce := func(_ context.Context, held *replyReviewSink) (*TurnResult, error) {
+		productions++
+		effects++
+		e.savedContinuation = []common.ChatMessage{
+			{Role: "system", Content: "Current instructions"},
+			{Role: "user", Content: "Save the requested file once."},
+			{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "save", Name: "saveFile", Arguments: `{}`}}},
+			{Role: "tool", ToolCallId: "save", Name: "saveFile", Content: `{"fileId":"saved-file","verified":true}`},
+		}
+		held.ToolCall("answer", RespondToUserToolName, `{"status":"complete","response":"Saved the requested file."}`)
+		return &TurnResult{FinalText: "Saved the requested file."}, nil
+	}
+	firstSink := &captureSink{}
+	_, err := newTestReplier(e).runReviewedWork(ctx, firstSink, produce)
+	require.ErrorContains(t, err, "review unavailable")
+	require.Empty(t, firstSink.texts, "an unchecked draft must remain private")
+	e.fail = false
+	secondSink := &captureSink{}
+	result, err := newTestReplier(e).runReviewedWork(ctx, secondSink, produce)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, e.calls, "the failed review is retried on the new replier")
+	require.Equal(t, 1, productions, "resuming review must not rerun the completed operational App")
+	require.Equal(t, 1, effects, "the completed effect must not be replayed")
+	require.Equal(t, []string{result.FinalText}, secondSink.texts)
+	require.Equal(t, []string{RespondToUserToolName}, secondSink.toolCalls, "terminal delivery resumes with the saved result")
+	// Delivery and the workflow journal are separate commits. If delivery was
+	// uncertain, another entry may review/deliver again but cannot replay effects.
+	_, err = newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
+	require.NoError(t, err)
+	require.Equal(t, 1, productions)
+	require.Equal(t, 3, e.calls)
+}
+
+func TestReplyReviewCheckpointFailureStopsBeforeReview(t *testing.T) {
+	e := &replyReviewEngine{saveReplyErr: errors.New("store unavailable")}
+	e.savedContinuation = []common.ChatMessage{{Role: "user", Content: "Complete work"}}
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+	sink := &captureSink{}
+	_, err := newTestReplier(e).runReviewedWork(ctx, sink, func(context.Context, *replyReviewSink) (*TurnResult, error) {
+		return &TurnResult{FinalText: "Completed"}, nil
+	})
+	require.ErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+	require.Zero(t, e.calls)
+	require.Empty(t, sink.texts)
+}
+
+func TestReplyReviewRestartPreservesNewerProgress(t *testing.T) {
+	for _, change := range []string{"watermark", "receipts", "guidance", "helper", "helper-guidance", "proof", "missing", "corrupt", "cancelled"} {
+		t.Run(change, func(t *testing.T) {
+			e := &replyReviewEngine{fail: true}
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", StepKey: "finish", OwnerUserId: "owner"})
+			original := []common.ChatMessage{{Role: "system", Content: "Instructions"}, {Role: "user", Content: "Save once"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "saved", Name: "saveFile", Arguments: `{}`}}}, {Role: "tool", ToolCallId: "saved", Name: "saveFile", Content: `{"saved":true}`}}
+			e.savedContinuation = append([]common.ChatMessage(nil), original...)
+			productions := 0
+			produce := func(context.Context, *replyReviewSink) (*TurnResult, error) {
+				productions++
+				return &TurnResult{FinalText: "Saved once"}, nil
+			}
+			_, err := newTestReplier(e).runReviewedWork(ctx, &captureSink{}, produce)
+			require.ErrorContains(t, err, "review unavailable")
+			e.fail = false
+			expectProduce, wantError := false, false
+			switch change {
+			case "watermark":
+				state := workRecoveryState{Version: 1, DiscoveryRounds: 4, RepeatedRounds: 3, ReviewActive: true, StalledAfterReview: 2, ReviewedLimit: 10, GuidanceIDs: []string{"current-guidance"}, GuidanceCursor: memql.WorkGuidanceCursor{Count: 2, Hash: strings.Repeat("a", 64)}}
+				raw, err := json.Marshal(state)
+				require.NoError(t, err)
+				e.savedContinuation = append(e.savedContinuation, common.ChatMessage{Role: "system", Name: workRecoveryMarker, Content: string(raw)})
+			case "receipts":
+				e.savedContinuation = append(e.savedContinuation, common.ChatMessage{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "new", Name: "readStatus", Arguments: `{}`}}}, common.ChatMessage{Role: "tool", ToolCallId: "new", Content: `{"ready":true}`})
+				expectProduce = true
+			case "guidance":
+				e.replyCheckpoint.Binding.Guidance = "new-direction"
+				expectProduce = true
+			case "helper", "helper-guidance":
+				e.savedContinuation = []common.ChatMessage{{Role: "system", Content: "Helper recovery checkpoint"}, {Role: "user", Content: "Review sources"}}
+				if change == "helper-guidance" {
+					e.replyCheckpoint.Binding.Guidance = "new-direction"
+					wantError = true
+				}
+			case "proof":
+				e.restoreErr = errors.New("exact answered checkpoint changed")
+				wantError = true
+			case "missing":
+				e.savedContinuation = nil
+				wantError = true
+			case "corrupt":
+				e.replyCheckpoint.Pending = json.RawMessage(`{"version":1}`)
+				wantError = true
+			case "cancelled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+				wantError = true
+			}
+			latest := append([]common.ChatMessage(nil), e.savedContinuation...)
+			sink := &captureSink{}
+			_, err = newTestReplier(e).runReviewedWork(ctx, sink, produce)
+			if wantError {
+				require.Error(t, err)
+				require.Empty(t, sink.texts)
+			} else {
+				require.NoError(t, err)
+			}
+			wantProductions := 1
+			if expectProduce {
+				wantProductions++
+			}
+			if len(latest) == 0 {
+				require.Empty(t, e.savedContinuation)
+			} else {
+				require.Equal(t, latest, e.savedContinuation, "review retry must not overwrite newer receipts or recovery state")
+			}
+			require.Equal(t, wantProductions, productions)
+		})
+	}
 }
 
 func (e *evidenceRepairEngine) RestoreWorkContinuation(_ context.Context, _ []common.ChatMessage) ([]common.ChatMessage, error) {
@@ -179,7 +323,7 @@ func TestEvidenceCompletionReachesBothProviderBoundariesAfterRestore(t *testing.
 			require.Equal(t, "work_evidence_completion", last.Name)
 			require.Contains(t, last.Content, "not a new user request")
 			require.Contains(t, last.Content, "Resolve item A's identifier")
-			require.Contains(t, last.Content, "authorized tool before")
+			require.Contains(t, last.Content, "already-authorized operation")
 			require.True(t, recoveryGuidance(last).IsZero(), "runtime correction must not rearm human authorization")
 		})
 	}

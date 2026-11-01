@@ -199,12 +199,14 @@ it("does not restore stale eligibility from a read started before guidance was r
 });
 
 it("opens discussion in place when the same conversation was showing its activity", async () => {
-  const { transport, session } = setup(); await session.select("original"); session.setDraft("My unfinished plan"); mount(session, transport);
-  fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice()]); await session.select("original"); session.setDraft("My unfinished plan"); mount(session, transport);
+  fireEvent.click(screen.getAllByRole("button", { name: "Message actions" })[0]!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "View activity" }));
   expect(screen.queryByRole("button", { name: "Ask another agent" })).toBeNull();
   await act(async () => session.discussApproval("approval"));
   expect(screen.getByRole("button", { name: "Ask another agent" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Activity" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Message activity" })).toBeNull();
+  expect(screen.getAllByRole("button", { name: "Message actions" }).length).toBeGreaterThan(0);
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement).value).toBe("My unfinished plan"); session.dispose();
 });
 

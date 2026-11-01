@@ -107,9 +107,42 @@ func (a *App) wireWorkRunDispatcher() {
 		a.eventBus.Subscribe(topic, work.HandleRunEvent,
 			events.WithSubscriberName("work:run-dispatch"))
 	}
+	// Rebuild timers only after this node's dependencies and subscriptions are
+	// ready. An old cron leader in a rolling deployment cannot reannounce waits
+	// written before this agent started. This is native timer rehydration, not a
+	// new workflow or permission: the ordinary claimed resume still gates work.
+	a.eventBus.Subscribe(events.TopicSystemStartup, func(ev events.Event) {
+		node, _ := ev.Payload["node"].(map[string]any)
+		if a.startupNodeID() == "" || node["id"] != a.startupNodeID() {
+			return
+		}
+		go a.restoreInferenceWaits(work)
+	}, events.WithSubscriberName("work:restore-inference-waits"))
 
 	a.Logger.Info("work run dispatch wired: this node executes compiled runs",
 		"component", "work.dispatch")
+}
+
+// The recovery projection can still be catching up at startup. Retry its
+// readiness within one bounded operation; do not weaken that check or block
+// node readiness. On exhaustion, report the failure and leave the unchanged
+// waits to their events or the normal sweep. No provider call runs in this scope.
+func (a *App) restoreInferenceWaits(work *workspine.Integration) {
+	ctx, cancel := context.WithTimeout(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	defer cancel()
+	for {
+		count, err := work.RestoreInferenceWaits(ctx)
+		if err == nil {
+			a.Logger.Info("work: restored inference wait timers after agent startup", "component", "work.inference", "considered", count)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			a.Logger.Warn("work: inference wait startup recovery did not become ready; waits remain saved", "component", "work.inference", "error", err)
+			return
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // Dispatch executes one claimed run.

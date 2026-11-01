@@ -71,6 +71,22 @@ func (s *session) launcher() harness.LaunchFunc {
 	}
 }
 
+// CheckLauncher is the supervisor for a process no session owns: a readiness check.
+// Each one is short and stopped by its harness when its context ends, so it needs
+// no session to register on, and it gets the same process group and escalation.
+func CheckLauncher() harness.LaunchFunc {
+	return func(ctx context.Context, dir string, argv []string, env []string, stdin bool) (harness.Process, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		c, err := startChildStdin(dir, argv, env, stdin)
+		if err != nil {
+			return nil, err
+		}
+		return &supervisedProcess{c: c}, nil
+	}
+}
+
 // supervisedProcess presents one supervised child as a harness.Process.
 //
 // It adds no behaviour of its own -- no reaping, no signalling, no grace

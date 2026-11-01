@@ -4,6 +4,8 @@ package pipelinesteps
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -17,10 +19,46 @@ import (
 // awaiting connection may wait and re-route. A transport error, policy
 // withdrawal or uncertain execution returns immediately. Each re-route repeats
 // current routing, consent and receiving-replica checks.
+//
+// HOW LONG IT WAITS depends on whose decision the wait is.
+//
+//   - A fleet step's first attempt waits until its run's ceiling: nothing else
+//     can run the step, and the ceiling bounds everything.
+//   - A pool step's FIRST attempt waits fleetWaitSeconds while the policy allows
+//     cloud, then gives the cluster the chance (the Codex preference deadline,
+//     kept whole inside that one attempt). Without the cloud it waits for a busy
+//     or offline machine until its run's ceiling, but not when the owner has no
+//     machine that could take it at all (noMachineToWaitFor).
+//   - An attempt the DRIVER placed on the fleet waits run.MaxWaitSeconds when it
+//     is positive, and then answers nothing ran, not tried here again
+//     (waitRanOut). The driver chose the wait (chooseNext's pinned and failover)
+//     and it chooses the cloud, so the pool preference deadline does not apply
+//     to a placed attempt: applying it as well would cut the wait short with the
+//     wrong answer. Zero is no bound beyond the ceiling, as for a fleet step's
+//     first attempt.
+//
+// A refusal that is not capacity ends the attempt at once, nothing ran, on
+// every route: a pool step's first attempt included, because the driver can
+// route around the machine that refused (TestAPoolStepOverAMachinesCapsReachesTheCluster).
+//
+// None of these waits ever cancels or shortens a command that has started: a
+// wait is for admission, and a started command is bounded by its own timeout.
 func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRequest, run *StepRun, token string, capture *Capture, chunk func(*nodev1.WorkerForwardStream)) (worker.Result, *pl.StepResult, error) {
 	deadline, deadlineErr := time.Parse(time.RFC3339Nano, run.RunDeadline)
 	ownTimeout := run.TimeoutSeconds
 	tokenAt := f.now()
+	// A pool step's PREFERENCE (fleetWaitSeconds, then the cloud) is a first
+	// attempt's. An attempt the driver placed on the fleet is bounded by its own
+	// wait instead (waitEnds), and takes a refusal as nothing ran.
+	pool := req.Step.Placement == pl.PlacementPool && !placedOnFleet(req)
+	preferenceEnds := tokenAt
+	if pool && req.ComputePlacement != nil {
+		preferenceEnds = tokenAt.Add(time.Duration(req.ComputePlacement.FleetWaitSeconds) * time.Second)
+	}
+	var waitEnds time.Time
+	if run.MaxWaitSeconds > 0 {
+		waitEnds = tokenAt.Add(time.Duration(run.MaxWaitSeconds) * time.Second)
+	}
 	delay := f.capacityRetry
 	if delay <= 0 {
 		delay = 5 * time.Second
@@ -45,6 +83,10 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 				run.DeadlineCode = pl.CodeRunCeiling
 			}
 		}
+		if queued && pool && req.ComputePlacement != nil && req.ComputePlacement.CloudFallback && !f.now().Before(preferenceEnds) {
+			res := refusedResult(pl.CodeNoMachineForNeed, "Fleet preference wait elapsed after confirmed pre-start capacity refusal. No Fleet command was started.")
+			return worker.Result{}, &res, nil
+		}
 		// A long queue must not hand a new worker a stale installation token.
 		// Keep every minted token masked, including an older queued refusal.
 		if queued && run.InstallationID != 0 && f.now().Sub(tokenAt) >= tokenRefreshAge {
@@ -56,8 +98,48 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			capture.AddSecrets(secretValues(*run, token)...)
 		}
 		result, err := f.dispatchStep(ctx, req, *run, token, chunk)
-		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate || !fleetMayWait(result) {
+		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate {
 			return result, nil, err
+		}
+		if pool {
+			if ctx.Err() != nil {
+				res := stoppedResult(ctx)
+				return worker.Result{}, &res, nil
+			}
+			if deadlineErr == nil && !f.now().Before(deadline) {
+				res := failedResult(pl.CodeRunCeiling, "The run reached its ceiling while waiting for fleet capacity. No command was started.")
+				return worker.Result{}, &res, nil
+			}
+			if !fleetPoolCapacityRefusal(result) {
+				// VERIFIED, NOT CAPACITY: the dispatcher's own verdict that nothing
+				// started (RefusedBeforeStart, and not the engine's gate, which was
+				// answered above), for a reason no wait for capacity changes (the
+				// machine's own policy or container caps, Host commands off,
+				// pipelines no longer allowed). It is answered as a placed attempt's
+				// is: classify makes it a refusal naming the machine, nothing ran,
+				// and the attempt ends. The driver then tries that machine again or
+				// another, and the cluster where the policy allows (cloudFallback
+				// covers a failed fleet as well as a full one). It does not go on to
+				// the cloud inside this attempt (fleetPreferenceRanOut, runPool).
+				return result, nil, nil
+			}
+			if noMachineToWaitFor(req, result) {
+				return result, nil, nil
+			}
+			if req.ComputePlacement != nil && req.ComputePlacement.CloudFallback && !f.now().Before(preferenceEnds) {
+				res := refusedResult(pl.CodeNoMachineForNeed, "Fleet preference wait elapsed after confirmed pre-start capacity refusal. No Fleet command was started.")
+				return worker.Result{}, &res, nil
+			}
+		} else if !fleetMayWait(result) {
+			return result, nil, nil
+		}
+		// The wait the driver allowed has run out. Checked here, after a refusal
+		// that WOULD have waited, so a refusal that never could (a machine that is
+		// not a candidate at all) is answered at once and the budget is only ever
+		// spent on a wait that could have ended differently.
+		if !waitEnds.IsZero() && !f.now().Before(waitEnds) {
+			res := waitRanOut(run, result)
+			return worker.Result{}, &res, nil
 		}
 		if deadlineErr != nil {
 			res := failedResult(pl.CodeExecutorError, "Fleet capacity is unavailable and the run has no readable ceiling; no unbounded wait or replacement command was started.")
@@ -83,6 +165,16 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 		wait := delay
 		if remaining := deadline.Sub(f.now()); remaining < wait {
 			wait = remaining
+		}
+		if pool && req.ComputePlacement != nil && req.ComputePlacement.CloudFallback {
+			if remaining := preferenceEnds.Sub(f.now()); remaining < wait {
+				wait = remaining
+			}
+		}
+		if !waitEnds.IsZero() {
+			if remaining := waitEnds.Sub(f.now()); remaining < wait {
+				wait = remaining
+			}
 		}
 		if wait < 0 {
 			wait = 0
@@ -113,4 +205,70 @@ func fleetMayWait(result worker.Result) bool {
 	default:
 		return false
 	}
+}
+
+// The pool deadline applies only between positively refused dispatch attempts.
+// It never cancels a worker that has started, or converts uncertainty/authority
+// failure into permission to run a second copy elsewhere.
+func fleetPoolCapacityRefusal(r worker.Result) bool {
+	switch r.ErrorCode {
+	case "pipeline_capacity_busy", "pipeline_capacity_fenced", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "worker_disconnected", "worker_unreachable", "no_worker_available":
+		return true
+	default:
+		return false
+	}
+}
+
+// noMachineToWaitFor is the one capacity answer a pool step's first attempt
+// does not wait out when its policy allows no cloud: the dispatcher found no
+// candidate at all and no eligible machine offline (no_worker_available
+// without WaitForConnection), so no machine of the owner's could take the step
+// as things stand -- none allows pipeline steps, offers its needs, or runs the
+// current action contract. Waiting for one until the run's ceiling held the
+// stage's slot for up to the whole ceiling for a machine nobody was bringing;
+// the owner chose to end the attempt at once instead (2026-10-29), as a fleet
+// step's does (fleetMayWait). It ends nothing ran, naming no machine, and the
+// driver's retry order routes once more after its first delay and then ends
+// the step. A busy machine, an offline one and a fenced one are still waited
+// for. With the cloud allowed, the installation's Fleet preference still waits
+// fleetWaitSeconds for a machine to appear before the cluster takes the step.
+//
+// Regression test: TestANoCloudPoolStepWithNoMachineAtAllEndsAtOnce.
+func noMachineToWaitFor(req pl.StepRequest, r worker.Result) bool {
+	cloud := req.ComputePlacement != nil && req.ComputePlacement.CloudFallback
+	return !cloud && r.ErrorCode == "no_worker_available" && !r.WaitForConnection
+}
+
+// placedOnFleet says the driver placed this attempt on the fleet by name
+// (pl.AttemptPlacement), as opposed to the step's own placement, which is how a
+// step's first attempt goes.
+func placedOnFleet(req pl.StepRequest) bool {
+	return req.Placement != nil && req.Placement.Surface == pl.PlacementFleet
+}
+
+// waitRanOut is the answer of a placed attempt whose wait for the owner's
+// machines ran out while they stayed busy or disconnected: a refusal, because
+// no command was started on any machine.
+//
+// NOTHING RAN, and NOT TRIED HERE AGAIN. Nothing started, so another attempt
+// cannot run the command twice. And the machine it names is not tried again
+// because the wait the driver granted for it is spent: a same-machine retry
+// that pins it again would wait as long and end the same way, so the driver
+// moves on at once to another machine, and from there to the cluster where the
+// policy allows (spec section 5, rules 2 and 3). The class is set here, where
+// it is decided, because it cannot be read from the result: the result looks
+// like the refusal a pool step's preference deadline makes, which is nothing
+// ran and IS retried on the same machine.
+//
+// The sentence names the code the dispatcher last answered with and the wait,
+// never the machine's own words, which can quote the step's credentials and are
+// not masked here. The machine the dispatcher last named, if it named one, is
+// kept: it is where the step was last looked for.
+func waitRanOut(run *StepRun, last worker.Result) pl.StepResult {
+	res := refusedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
+		"The wait of %s that the driver allowed for the owner's machines ran out while none could take the step (last answer: %s). "+
+			"No command was started.", time.Duration(run.MaxWaitSeconds)*time.Second, last.ErrorCode))
+	res.Where = pl.Where{Surface: surfaceFleet, WorkerID: last.WorkerId, MachineName: last.MachineName, NodeID: last.NodeId, MachineLabels: maps.Clone(last.Labels)}
+	res.AttemptClass, res.NotRetriedHere = pl.AttemptNothingRan, true
+	return res
 }

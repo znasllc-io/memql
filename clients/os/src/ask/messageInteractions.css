@@ -1,0 +1,32 @@
+/* The same quiet wash as Fleet Details' copyable fact rows. */
+.os-ask-message {
+  position: relative;
+  padding: 8px;
+  margin: -8px;
+}
+.os-ask-message:is(:hover, :focus-within, [data-menu-open]) {
+  background: color-mix(in srgb, var(--os-hover) 50%, transparent);
+}
+.os-ask-message-body { min-width: 0; }
+.os-ask-message .os-ask-byline {
+  min-height: 28px;
+  padding-inline-end: 40px;
+  flex-wrap: wrap;
+}
+.os-ask-message-more {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
+  opacity: 0;
+}
+.os-ask-message:is(:hover, :focus-within, [data-menu-open]) .os-ask-message-more,
+.os-ask-message-more[data-copied] { opacity: 1; }
+.os-ask-message-more[data-copied] { color: var(--os-accent); }
+.os-ask-message .os-ask-copy-error { grid-column: 2 / -1; font-size: var(--os-text-xs); }
+@media (hover: none), (pointer: coarse) {
+  .os-ask-message-more { opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .os-ask-message { transition: background var(--os-duration-fast) var(--os-ease); }
+  .os-ask-message-more { transition: opacity var(--os-duration-fast) var(--os-ease); }
+}

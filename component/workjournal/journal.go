@@ -42,11 +42,16 @@
 // it runs (Run.Heartbeat), and hands to another replica's driver when the
 // first goes silent (Journal.Reopen). Its triggeredBy (Work.TriggeredBy) is
 // what tells integrations/work that the run is not its to dispatch, sweep or
-// re-run.
+// re-run. A step the driver retries journals each attempt as a version of the
+// step's one row (Run.StepAttempt), and the outcome of an attempt that another
+// follows without ending the step (Step.Retrying); StepAttempt says why. The
+// design record is docs/superpowers/specs/2026-10-28-pipeline-fleet-first-retries-failover-design.md,
+// section 3.
 //
 // Writes return errors so an execution driver can require durable evidence.
-// Step refuses to return a handle when its intent did not land. Receipt and
-// close errors must be checked before advancing or publishing success.
+// Step and StepAttempt refuse to return a handle when their intent did not
+// land. Receipt, retry-outcome (Retrying) and close errors must be checked
+// before advancing or publishing success.
 // Nil receivers remain safe for optional observability callers; they are not
 // proof that a write happened. A driver must require a journal at admission.
 package workjournal
@@ -472,7 +477,9 @@ func workIDs(template, goalKey, runKey string) (goalID, runID string) {
 // row id, seq, type and kind the running intent writes later, so that intent
 // is a new version of this row rather than a second row beside it. A pending
 // step has not started, so it carries no startedAt. A key declared twice is
-// queued once: both declarations name one row.
+// queued once: both declarations name one row. It is attempt 1 of that row, and
+// idempotencyKey spells its key so the pending version and the first intent
+// cannot disagree about it.
 func (r *Run) queue(ctx context.Context) error {
 	ctx = auth.ContextWithUserActor(ctx, r.owner)
 	queued := map[string]bool{}
@@ -493,7 +500,7 @@ func (r *Run) queue(ctx context.Context) error {
 			stringListArg("dependsOn", decl.DependsOn),
 			arg("status", "pending"),
 			intArg("attempt", 1),
-			arg("idempotencyKey", r.runID+":"+s.Key+":1"),
+			arg("idempotencyKey", idempotencyKey(r.runID, s.Key, 1)),
 		)); err != nil {
 			return fmt.Errorf("workjournal: queue step %s: %w", s.Key, err)
 		}
@@ -576,9 +583,82 @@ type Step struct {
 // "function" written over an "exec" would be a lie on every version after.
 // A declaration naming none of the three writes the intent exactly as every
 // pass before pipelines did.
+//
+// It is the FIRST attempt, StepAttempt(ctx, key, 1, nil), and writes what it
+// wrote before attempts were journaled, byte for byte
+// (TestStepAttemptsAttemptOneIsExactlyWhatStepAlwaysWrote). A step whose caller
+// does not retry it -- the Library pass, and the pipeline steps the driver runs
+// itself (notify, report, repository change) -- stays on this call; only a
+// driver that retries names an attempt.
 func (r *Run) Step(ctx context.Context, key string) (*Step, error) {
+	return r.StepAttempt(ctx, key, 1, nil)
+}
+
+// stepRunning is the status of a step that has begun and not ended. An
+// attempt's intent writes it, and so does the outcome of an attempt that
+// another follows (Retrying): one spelling, because the second must never read
+// as anything but the first.
+const stepRunning = "running"
+
+// StepAttempt writes the `running` version of a step for one ATTEMPT of it: its
+// intent, durable before the attempt starts. Attempt 1 is Step. A replica that
+// takes the run over reads the row's `attempt` to learn which attempt was in
+// flight instead of guessing, and `idempotencyKey` (runId:key:attempt) is the
+// key that attempt's side effects run under, so attempt 2 is never confused with
+// a repeat of attempt 1.
+//
+// AN ATTEMPT IS A VERSION OF THE STEP'S ONE ROW, never a row of its own. The
+// row id is derived from the run and the key alone (deriveID), so attempt 2
+// lands on the id the queued pending version and attempt 1 already wrote, and
+// `attempt` counts up in place, as the step concept documents ("incremented on
+// each retry of the same key"). A row per attempt would leave several rows under
+// one step key, which the pipelines driver's resume refuses as a duplicate, and
+// would stop the run's rows adding up to its declared step order. Nothing is
+// lost by writing in place: storage is append-only, so every intent and outcome
+// stays a readable version, and the driver keeps the compact history of the
+// earlier attempts in the binding.
+//
+// binding is what the caller wants the row's `binding` to hold from this
+// version on, passed through unchanged: this package reads none of it (the
+// pipelines driver keeps its attempt records there, under `attempts`). The
+// read-merge is SHALLOW and `binding` is not a @mergeFields object, so a binding
+// REPLACES the stored one whole -- pass the complete value, and know that none
+// leaves the previous binding in place. A nil or empty binding writes no
+// argument at all, which is how attempt 1 has always been written.
+//
+// The rest of the version is this attempt's own. startedAt is when THIS attempt
+// starts, and the handle returned measures a receipt's duration from it (when
+// the runner reports none), so the receipt that ends the step times the attempt
+// that ended it and not the waits between attempts. No receipt field of an
+// earlier attempt (result, errorCode, errorMessage, finishedAt, durationMs) is
+// on the row for this merge to carry forward, because an attempt that another
+// follows is recorded with Retrying and never with a receipt (Done, Failed,
+// Finish): a step with attempts left must not read as ended.
+//
+// The concept numbers attempts from 1, so a 0 or a negative one is a counting
+// error in the caller; it is refused and nothing is written. Like every intent,
+// a failed write is returned and no handle with it: a driver that cannot record
+// an attempt must not start it.
+//
+// KNOWN LIMIT. The count is the caller's: nothing here reads the row to check
+// that attempt follows the stored one, so a caller that counted wrongly writes a
+// version with the wrong number and nothing notices. Only the driver holding the
+// run's lease writes its steps, and the write guard fences any other
+// (TestStepAttemptsAreFencedByTheWriteGuard); that, not a check here, is what
+// keeps the number honest.
+//
+// WHAT IS TESTED HERE is the call this renders -- attempt_test.go, from
+// TestStepAttemptsAreVersionsOfOneRow (the fields, the one row id, the binding as
+// given, attempt 0 refused) to TestStepAttemptsAttemptOneIsExactlyWhatStepAlwaysWrote
+// (Step's rendering, pinned byte for byte). That the engine merges the call as
+// described above (one row, binding replaced whole) is the engine's, and is not
+// asserted by a test in this package.
+func (r *Run) StepAttempt(ctx context.Context, key string, attempt int, binding map[string]any) (*Step, error) {
 	if r == nil || r.j == nil {
 		return nil, fmt.Errorf("workjournal: cannot record a step without a journal")
+	}
+	if attempt < 1 {
+		return nil, fmt.Errorf("workjournal: step %q: an attempt is numbered from 1, not %d", key, attempt)
 	}
 	seq, decl := r.decl(key)
 	started := r.j.now().UTC()
@@ -592,15 +672,71 @@ func (r *Run) Step(ctx context.Context, key string) (*Step, error) {
 		arg("kind", decl.kind()),
 		objectArg("call", decl.Call),
 		stringListArg("dependsOn", decl.DependsOn),
-		arg("status", "running"),
-		intArg("attempt", 1),
-		arg("idempotencyKey", r.runID+":"+key+":1"),
+		arg("status", stepRunning),
+		intArg("attempt", attempt),
+		arg("idempotencyKey", idempotencyKey(r.runID, key, attempt)),
 		arg("startedAt", started.Format(time.RFC3339)),
+		objectArg("binding", binding),
 	))
 	if err != nil {
 		return nil, err
 	}
 	return &Step{run: r, id: stepID, key: key, started: started}, nil
+}
+
+// idempotencyKey is the key the side effects of one attempt of a step run
+// under: runId:key:attempt, the form the step concept documents. One spelling
+// for the queued row and every attempt's intent.
+func idempotencyKey(runID, key string, attempt int) string {
+	return fmt.Sprintf("%s:%s:%d", runID, key, attempt)
+}
+
+// Retrying writes the outcome of an attempt that ANOTHER ATTEMPT FOLLOWS, and it
+// does not end the step: the status stays `running` and the binding carries what
+// the caller records about the attempt (the pipelines driver adds the attempt's
+// record to `attempts` and says when the next may start). It writes nothing
+// else -- no finishedAt, durationMs, errorCode, errorMessage or result, which
+// belong to the receipt that ends the step and would make a step with attempts
+// left read as ended. A nil or empty binding writes the status alone.
+//
+// WHY `running` AND NOT `failed`. A failed step is FINAL to everything that
+// reads the row. The stage workflow and the check run treat it as the step's
+// verdict (the design record, section 3); pipelinerun's WorkStep.Finished is
+// true for done, failed, skipped and cancelled; and a replica that takes the run
+// over keeps a finished step's receipt and never sends the step again. The
+// attempt that just failed has not ended the step, and a row that said `failed`
+// for the length of the wait -- or for as long as a driver that died in the wait
+// leaves it -- would end a step the run still means to retry. So the version
+// between two attempts reads as what the step is: running, with its history in
+// the binding. The status is named rather than left to the merge so that this
+// version states it for itself.
+//
+// The binding REPLACES the stored one whole (see StepAttempt), so it is the
+// complete history so far. The outcome is recorded before the next attempt
+// starts, and a driver must check the error and stop for recovery when it
+// fails: without the record the row still says attempt N is in flight, and a
+// replica taking the run over would send attempt N again instead of continuing
+// at N+1.
+//
+// KNOWN LIMIT. The write names the status without reading the row's current
+// one -- the merge has no precondition and the engine does not refuse a step
+// leaving a finished status -- so a Retrying that landed after something else
+// finished the step would reopen it. This relies on the driver driving each step
+// from one place at a time, and on the write guard refusing a driver that lost
+// the run. Only the guard is tested here
+// (TestStepAttemptsAreFencedByTheWriteGuard); no test in this package covers a
+// competing writer.
+//
+// A nil step writes nothing and returns nil, like Finish.
+func (s *Step) Retrying(ctx context.Context, binding map[string]any) error {
+	if s == nil || s.run == nil || s.run.j == nil {
+		return nil
+	}
+	return s.run.j.exec(auth.ContextWithUserActor(ctx, s.run.owner), call("mutation updateWorkStep",
+		arg("stepId", s.id),
+		arg("status", stepRunning),
+		objectArg("binding", binding),
+	))
 }
 
 // Done writes the receipt.

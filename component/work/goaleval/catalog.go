@@ -23,15 +23,18 @@ type Catalog struct {
 }
 
 type Scenario struct {
-	ID          string      `json:"id"`
-	Version     string      `json:"version"`
-	Title       string      `json:"title"`
-	Domain      string      `json:"domain"`
-	Goal        string      `json:"goal"`
-	Fixture     Fixture     `json:"fixture"`
-	Constraints []string    `json:"constraints"`
-	Injections  []Injection `json:"injections"`
-	Criteria    []Criterion `json:"criteria"`
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Title   string `json:"title"`
+	Domain  string `json:"domain"`
+	// PlannedLength is declared before execution, never inferred from elapsed time.
+	// Omission preserves fingerprints of the original controlled corpus.
+	PlannedLength string      `json:"plannedLength,omitempty"`
+	Goal          string      `json:"goal"`
+	Fixture       Fixture     `json:"fixture"`
+	Constraints   []string    `json:"constraints"`
+	Injections    []Injection `json:"injections"`
+	Criteria      []Criterion `json:"criteria"`
 }
 
 type Fixture struct {
@@ -141,6 +144,9 @@ func (c Catalog) Validate() error {
 			return fmt.Errorf("invalid or duplicate scenario %q", s.ID)
 		}
 		seen[s.ID] = true
+		if s.PlannedLength != "" && s.PlannedLength != "short" && s.PlannedLength != "medium" && s.PlannedLength != "long" {
+			return fmt.Errorf("%s has invalid planned length", s.ID)
+		}
 		f := s.Fixture
 		if !identifier.MatchString(f.ID) || !version.MatchString(f.Version) || (f.Kind != "local" && f.Kind != "github") || len(f.Files) == 0 {
 			return fmt.Errorf("%s needs an isolated, versioned fixture", s.ID)

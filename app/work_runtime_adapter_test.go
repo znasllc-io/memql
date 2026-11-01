@@ -20,6 +20,9 @@ import (
 func TestAgentRuntimeAdapterPreservesTheEnginesOwnershipBarrier(t *testing.T) {
 	var runtime agent.WorkRuntime = &CognitionEngineAdapter{Engine: &memql.MemQLEngine{}}
 	ctx := common.ContextWithRun(context.Background(), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "section"})
+	if _, err := runtime.ReadWorkReplanSources(ctx); err == nil || !strings.Contains(err.Error(), "owned work") {
+		t.Fatalf("adapter lost replan source ownership gate: %v", err)
+	}
 	if _, err := runtime.ReadWorkGuidance(ctx); err == nil || !strings.Contains(err.Error(), "owned work") {
 		t.Fatalf("adapter lost human guidance ownership gate: %v", err)
 	}

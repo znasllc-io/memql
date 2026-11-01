@@ -78,13 +78,13 @@ describe("the routes list", () => {
       modes: [
         ...shippedRouteModes(),
         mine(),
-        routeModeRow({ id: "r4", name: "Emergency", ready: false, reason: "No signed-in app on your machines", jobs: routeJobs(["app:codex"], ["app:codex"], ["app:codex"]) }),
+        routeModeRow({ id: "r4", name: "Emergency", ready: false, reason: "No app is ready on your machines", jobs: routeJobs(["app:codex"], ["app:codex"], ["app:codex"]) }),
       ],
     });
     await renderRouting("owner");
     const names = (list: HTMLElement) => within(list).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
     expect(names(screen.getByRole("list", { name: "Built-in routes" }))).toEqual(["Open Auto, Ready", "Open Local, Ready", "Open Apps, Ready"]);
-    expect(names(screen.getByRole("list", { name: "Your routes" }))).toEqual(["Open Emergency, No signed-in app on your machines", "Open Out of credits, Ready"]);
+    expect(names(screen.getByRole("list", { name: "Your routes" }))).toEqual(["Open Emergency, No app is ready on your machines", "Open Out of credits, Ready"]);
     expect(screen.getByRole("button", { name: "New route" })).toBeTruthy();
   });
 

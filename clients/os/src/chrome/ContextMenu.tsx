@@ -85,6 +85,7 @@ export function ContextMenu({
   label,
   entries,
   onClose,
+  anchor,
 }: {
   /**
    * RAW VIEWPORT COORDINATES -- `event.clientX`, passed straight through.
@@ -99,6 +100,8 @@ export function ContextMenu({
   label: string;
   entries: MenuEntry[];
   onClose: () => void;
+  /** A button that toggles this menu handles its own press, not an outside click. */
+  anchor?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState<MenuBox | null>(null);
@@ -136,11 +139,11 @@ export function ContextMenu({
     // `window` in the capture phase and tests containment against the
     // PORTALLED node, which is the same node either way.
     const onPointer = (event: PointerEvent) => {
-      if (!el?.contains(event.target as Node)) onClose();
+      if (!el?.contains(event.target as Node) && !anchor?.contains(event.target as Node)) onClose();
     };
     window.addEventListener("pointerdown", onPointer, true);
     return () => window.removeEventListener("pointerdown", onPointer, true);
-  }, [onClose]);
+  }, [onClose, anchor]);
 
   function onKeyDown(event: React.KeyboardEvent) {
     const el = ref.current;

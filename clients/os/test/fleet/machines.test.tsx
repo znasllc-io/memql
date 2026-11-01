@@ -304,7 +304,7 @@ describe("the machines directory", () => {
           id: "v1:worker:registration:apps",
           displayName: "Apps box",
           apps: [
-            { id: "claude-code", allowed: true, signedIn: true, subscription: "present" },
+            { id: "claude-code", allowed: true, signedIn: true, subscription: "present", readiness: "ready" },
             { id: "codex", allowed: false, signedIn: true, subscription: "none" },
           ],
         }),
@@ -315,7 +315,7 @@ describe("the machines directory", () => {
 
     expect(screen.getByText("Ready")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Codex/ })).toBeNull();
-    expect(screen.getByText("Not allowed · Signed in")).toBeTruthy();
+    expect(screen.getByText("Permission needed")).toBeTruthy();
   });
 
   it("folds a live update into the list without losing the projection", async () => {

@@ -57,7 +57,18 @@ var computerActionHandlers = map[string]func(map[string]any) (*memqlv1.Success, 
 // required and probed at startup -- see worker.PermissionStatus
 // and `memql worker setup` for the operator wizard.
 func (d *Dispatcher) dispatchComputer(ctx context.Context, action string, args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
-	_ = ctx
+	if desktopRuntimeDisabled.Load() {
+		return nil, failure("desktop_unavailable", "The desktop runtime did not initialize. Desktop actions are disabled for this worker process; host and inference services remain available.")
+	}
+	if isComputerInputAction(action) || action == "window_focus" {
+		return desktopInputGuard.input(ctx, action, args)
+	}
+	if action == "screenshot" {
+		return desktopInputGuard.screenshot(ctx, args, guiScreenshot)
+	}
+	if action == "window_list" {
+		return desktopInputGuard.windowList(ctx, args, listWindows)
+	}
 	if handler, ok := computerActionHandlers[action]; ok {
 		return handler(args)
 	}
@@ -102,7 +113,7 @@ func guiScreenshot(args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
 	displayID := argInt(args, "display", 0)
 
 	var img image.Image
-	var logicalW, logicalH int
+	var logicalW, logicalH, originX, originY int
 	if displayID == 0 {
 		// Primary display: RobotGo's native capture path (physical
 		// pixels on Retina/HiDPI hosts), unchanged from the
@@ -132,6 +143,7 @@ func guiScreenshot(args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
 				return nil, failure("screenshot_failed", err.Error())
 			}
 			logicalW, logicalH = w, h
+			originX, originY = x, y
 		} else {
 			if err := robotgo.SaveCapture(tmpPath); err != nil {
 				return nil, failure("screenshot_failed", err.Error())
@@ -181,6 +193,7 @@ func guiScreenshot(args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
 		}
 		img = captured
 		logicalW, logicalH = w, h
+		originX, originY = x, y
 	}
 
 	capturedW, capturedH := img.Bounds().Dx(), img.Bounds().Dy()
@@ -203,17 +216,19 @@ func guiScreenshot(args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
 		preview += fmt.Sprintf(" display=%d", displayID)
 	}
 	payload := map[string]any{
-		"format":        format,
-		"display":       displayID,
-		"width":         emittedW,
-		"height":        emittedH,
-		"sourceWidth":   capturedW,
-		"sourceHeight":  capturedH,
-		"scale":         scale,
-		"logicalWidth":  logicalW,
-		"logicalHeight": logicalH,
-		"bytesBase64":   encoded,
-		"sizeBytes":     len(raw),
+		"format":         format,
+		"display":        displayID,
+		"width":          emittedW,
+		"height":         emittedH,
+		"sourceWidth":    capturedW,
+		"sourceHeight":   capturedH,
+		"scale":          scale,
+		"logicalWidth":   logicalW,
+		"logicalOriginX": originX,
+		"logicalOriginY": originY,
+		"logicalHeight":  logicalH,
+		"bytesBase64":    encoded,
+		"sizeBytes":      len(raw),
 	}
 	if region != nil {
 		payload["region"] = map[string]any{

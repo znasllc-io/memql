@@ -1,5 +1,5 @@
 import { usePageScroll } from "../../kit/pageNavigation";
-import { machineAppAvailability } from "./machines/features";
+import { appStatus } from "./machines/features";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { AddButton } from "../../kit/AddButton";
@@ -239,7 +239,7 @@ export function MachineEquipment({ machine, now, onInspect, viewerId = "" }: { m
         </dl>
       </div>
       <section className="fleet-equipment-bank" aria-label="App equipment"><div className="fleet-bank-heading"><Terminal size={16} aria-hidden /><h5>Installed apps</h5><span>{machine.apps.length}</span><IconButton label="Inspect apps" onClick={() => onInspect("apps")}><ArrowUpRight size={16} aria-hidden /></IconButton></div>
-        <ul>{machine.apps.map(app => <li key={app.id}><div className="fleet-equipment-slot"><span><strong>{app.label}</strong><small>{machineAppAvailability(machine, app.runnable, now)}</small></span></div></li>)}</ul>
+        <ul>{machine.apps.map(app => <li key={app.id}><div className="fleet-equipment-slot"><span><strong>{app.label}</strong><small>{appStatus(machine, app, now)}</small></span></div></li>)}</ul>
         {machine.apps.length === 0 ? <EmptyState icon={Terminal} title="No installed apps">Apps reported by this machine will appear here.</EmptyState> : null}
       </section>
     </div>

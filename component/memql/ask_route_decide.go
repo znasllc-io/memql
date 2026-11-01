@@ -294,6 +294,9 @@ func askRouteData(message string, turns []AskTurn, goals []askRouteGoal, pending
 // was already sent.
 func askRouteGoalData(goal askRouteGoal) map[string]any {
 	state, waitingOn := askRouteGoalState(goal.Run, goal.Approval)
+	if goal.ContinueVersion != "" {
+		state, waitingOn = "results ready; goal open for feedback", ""
+	}
 	shown := map[string]any{
 		"handle":  goal.Handle,
 		"title":   askRouteClip(goal.Title, askRouteTitleRunes),
