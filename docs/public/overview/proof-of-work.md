@@ -147,6 +147,17 @@ A successful tool transport alone does not prove a passing command. Recovery
 requires a recorded behavioral test failure followed by a passing test in the
 same saved history; independent reruns cannot fill in missing execution evidence.
 
+An oracle can also fail to run at all. When its own `go test` reports no exit
+status, because it could not start or because a five-minute watchdog or a signal
+ended it, that says nothing about the work. Its verdict is unverified rather than
+a failure, and a failure another run reported still stands. No further test run
+starts, and the case ends as an observer error instead of a result: nothing is
+published or scored, the matrix stops so the next case spends no model calls on a
+machine that cannot check it, and the oracle outputs stay in the case's evidence
+directory. Re-run the case once the machine has CPU to spare. The watchdog only
+detects a stuck toolchain. A test keeps its own 20-second limit, and a test that
+exceeds it is a failure.
+
 Training receives the completed result through an owner-scoped publication
 operation. MemQL checks ownership and every reported model-call identity;
 artifact verdicts are attributed to the external harness, which inspected the
