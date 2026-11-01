@@ -208,7 +208,11 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 		}
 		lastErr = err
 		if outcome != ForwardRefusedBeforeStart {
-			return memqlengine.FleetCallResult{}, err
+			// This machine took the call, so the decision row names it beside
+			// the failure. The degraded check counts only rows that name a
+			// machine, and one that fails every call would otherwise stay
+			// first in the order (memql#6414).
+			return placedOn(cand, req.ActingUserId), err
 		}
 		f.logger.Debug("fleet inference: candidate refused before start, trying the next",
 			"model", req.ModelId, "machine", cand.RegistrationId, "error", err)
@@ -553,14 +557,20 @@ func deltaSink(onDelta func(string), onActivity func()) func(uint64, string, boo
 	}
 }
 
-func resultFromEnd(cand Candidate, actingUserId string, end *memqlv1.ModelCallEnd) memqlengine.FleetCallResult {
-	res := memqlengine.FleetCallResult{
+// placedOn names the machine a call went to, for the decision row. It is all a
+// failed call's result carries.
+func placedOn(cand Candidate, actingUserId string) memqlengine.FleetCallResult {
+	return memqlengine.FleetCallResult{
 		ExecutionSurface: FleetSurfacePrefix + cand.RegistrationId,
 		MachineLabel:     cand.Label(),
 		// WHOSE HARDWARE, and only when it is not the caller's (epic
 		// memql#5327, design D15). See machineOwnerAttribution.
 		MachineOwnerUserId: machineOwnerAttribution(cand, actingUserId),
 	}
+}
+
+func resultFromEnd(cand Candidate, actingUserId string, end *memqlv1.ModelCallEnd) memqlengine.FleetCallResult {
+	res := placedOn(cand, actingUserId)
 	if end == nil {
 		return res
 	}

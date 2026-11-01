@@ -483,6 +483,7 @@ the tokens, cost and latency the row already carried, a decision carries:
 | `minContextTokens` | the context floor this resolution was made against |
 | `callerKind` | what KIND of caller made the call: `user`, `system`, `connector`, `anonymous` or `unattributed` |
 | `cacheKind` | which CACHE answered, when one did: `exact` or `semantic`. Absent means a provider answered |
+| `executionSurface` | which machine took the call, as `fleet:<registrationId>`, whether it served it or failed it. `outcome` says which, and a failed call counts against that machine in [fleet capacity](#fleet-capacity). A machine that refused before starting ran nothing, so it is neither named nor counted |
 
 **`session` is a fourth door, not a flag on `app`.** `app` means a subscription app
 answered this TURN; `session` means one was handed the whole STEP and drove its own

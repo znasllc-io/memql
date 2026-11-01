@@ -348,8 +348,9 @@ type fleetCallEvidence struct {
 }
 
 // FoldFleetHealth builds the index from decision rows, newest first, as
-// routerCallsForSignals returns them. Only calls a fleet machine served count,
-// named by `executionSurface` (`fleet:<registrationId>`).
+// routerCallsForSignals returns them. Only calls a fleet machine took count,
+// named by `executionSurface` (`fleet:<registrationId>`), which a call it failed
+// carries as well as one it served. `outcome` tells them apart.
 func FoldFleetHealth(rows []map[string]any, now time.Time) FleetHealthIndex {
 	x := FleetHealthIndex{machines: map[string]*fleetMachineEvidence{}}
 	for _, row := range rows {
@@ -373,19 +374,26 @@ func FoldFleetHealth(rows []map[string]any, now time.Time) FleetHealthIndex {
 			x.machines[key] = m
 		}
 		m.all = append(m.all, ev)
-		if len(m.recent) < fleetHealthRecent && now.Sub(parseFleetTime(rowCreatedAt(row))) <= fleetHealthWindow {
+		if len(m.recent) < fleetHealthRecent && now.Sub(rowCreatedAt(row)) <= fleetHealthWindow {
 			m.recent = append(m.recent, ev)
 		}
 	}
 	return x
 }
 
-func rowCreatedAt(row map[string]any) string {
-	if s, ok := row["createdAt"].(string); ok {
-		return s
+// rowCreatedAt reads when a decision was made. The engine hands back a stored
+// row's createdAt as a time.Time, and a row that crossed JSON carries a string.
+// A row with neither reads as infinitely old, which is no evidence at all.
+func rowCreatedAt(row map[string]any) time.Time {
+	for _, key := range []string{"createdAt", "row.createdAt"} {
+		switch at := row[key].(type) {
+		case time.Time:
+			return at
+		case string:
+			return parseFleetTime(at)
+		}
 	}
-	s, _ := row["row.createdAt"].(string)
-	return s
+	return time.Time{}
 }
 
 func bareRegistrationId(id string) string {

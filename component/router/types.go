@@ -217,7 +217,8 @@ type CallRecord struct {
 	ServedEffort string
 	// ExecutionSurface names where the call ran: empty for MemQL's
 	// own provider calls, "cockpit-app:<appId>" for one made by a
-	// local app on a user's machine.
+	// local app on a user's machine, "fleet:<registrationId>" for one
+	// a fleet machine took, whether it served it or failed it.
 	ExecutionSurface string
 }
 

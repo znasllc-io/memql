@@ -85,6 +85,9 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 	// The surface is derived from a registration id the check above has already
 	// proven belongs to the caller, so it cannot be pointed at anybody else's
 	// machine by passing a different string.
+	//
+	// A row names its machine however the call ended. The query returns only the
+	// calls the machine served, so a call it failed never reaches this fold.
 	call, err := langparser.RenderCall(LedgerQuery, map[string]any{
 		"surface": FleetReferencePrefix + trimConceptPrefix(registrationId),
 		"since":   since.Format(time.RFC3339),

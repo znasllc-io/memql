@@ -360,8 +360,9 @@ type FleetCallResult struct {
 	// answered in prose.
 	ToolCalls []common.ToolCall
 	Usage     FleetUsage
-	// ExecutionSurface names the machine that served the call, in the
-	// `fleet:<registrationId>` form the ledger stores (memql#4681).
+	// ExecutionSurface names the machine the call went to, in the
+	// `fleet:<registrationId>` form the ledger stores (memql#4681): the machine
+	// that served it, or that took it and failed it.
 	ExecutionSurface string
 	// MachineLabel is the human-readable name for a card or a log line.
 	MachineLabel string
@@ -428,7 +429,9 @@ type FleetInference interface {
 	// never for "everything". FleetCatalogReader's contract, which this is.
 	Catalog(ctx context.Context, actingUserId string) ([]FleetModel, error)
 	// Call runs one model call, streaming through req.OnDelta when set.
-	// ErrFleetUnavailable when no eligible machine could serve it.
+	// ErrFleetUnavailable when no eligible machine could serve it. When a machine
+	// took the call and failed it, the result beside the error names that machine
+	// and carries nothing else, so the decision row can say where it failed.
 	Call(ctx context.Context, req FleetCallRequest) (FleetCallResult, error)
 	// ModelPreference returns the owner's explicit ordered model list from
 	// their routing policy, or nil when they have none -- which is most
@@ -1036,6 +1039,10 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 	if f == nil {
 		return FleetCallResult{}, fmt.Errorf("%w: this node has no fleet inference installed", ErrFleetUnavailable)
 	}
+	// The bookkeeping describes THIS call. One that returns before reaching a
+	// machine must not leave the previous call's machine for the decision row
+	// to name, or its failure is charged to hardware that never saw it.
+	p.noteMachine(FleetCallResult{})
 	req.ModelId = p.modelId
 	if registrationId := common.FleetRegistrationFromContext(ctx); registrationId != "" {
 		req.RegistrationId = registrationId
@@ -1078,16 +1085,21 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 		return FleetCallResult{}, err
 	}
 
+	// Kept whether the machine answered or failed: a failure names its machine
+	// the same way an answer does (FleetInference.Call).
 	res, err := f.Call(ctx, req)
-	if err != nil {
-		return res, err
-	}
+	p.noteMachine(res)
+	return res, err
+}
+
+// noteMachine keeps what the decision row reads back about the machine a call
+// reached. The zero result means it reached none.
+func (p *fleetProvider) noteMachine(res FleetCallResult) {
 	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
 	p.lastSurface = res.ExecutionSurface
 	p.lastMachineOwner = res.MachineOwnerUserId
 	p.lastUsage = res.Usage
-	p.lastMu.Unlock()
-	return res, nil
 }
 
 // resolveSelector picks the concrete model a `fleet:strongest` or
