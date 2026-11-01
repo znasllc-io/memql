@@ -32,10 +32,16 @@ class NativeGoPlatformTest(unittest.TestCase):
             try:
                 if stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
                     return
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
+                # Reaped between the check and the read; the next check returns.
                 pass
             time.sleep(0.02)
         self.fail("toolchain descendant is still running")
+
+    def test_a_process_that_exits_during_the_stat_read_counts_as_stopped(self):
+        with patch.object(os, "kill", side_effect=[None, ProcessLookupError()]), \
+                patch.object(Path, "read_text", side_effect=ProcessLookupError(3, "No such process")):
+            self.assert_stopped(12345)
 
     def prepare(self, outputs):
         with patch.object(PLATFORM, "read_platform", side_effect=outputs) as read, \
