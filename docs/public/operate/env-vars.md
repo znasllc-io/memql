@@ -517,10 +517,29 @@ window. The down migration refuses that downgrade. Before activation, schemas
 remain inline, but other release changes still need their own rollback checks.
 
 A migration runs only after acquiring the shared migration lock. A competing
-replica defers and retries later. If a connection or context deadline expires,
-the server may still be executing the migration: the runner retains the lock
-and reports the failure instead of starting overlapping attempts. An ordinary
-SQL error acknowledged by PostgreSQL releases the lock for retry.
+replica defers and retries later. If a connection or context deadline cuts off
+a statement inside a migration, the server may still be executing it: the runner
+retains the lock and reports the failure instead of starting overlapping
+attempts. An ordinary SQL error acknowledged by PostgreSQL releases the lock for
+retry.
+
+Two interruptions release the lock instead, because nothing can overlap. An
+attempt that ends between migrations records what finished and has not started
+what follows. An index build that outlives its attempt keeps running
+server-side, but its backend holds the table's build lock until it exits, and
+the next attempt takes that lock before anything else and then judges the index
+from the catalog. Both end with `deferred to the next migration attempt`. The
+migrations after them wait their turn, so a rollout carrying large index builds
+advances one index at a time, over as many attempts as each build takes.
+
+**A retained lock stops everything behind it while the cluster keeps serving.**
+No later migration or post-migration hook runs, every pod stays Ready, and the
+only other symptom is reads timing out on indexes that were never built. A node
+killed mid-attempt leaves the same row behind. A lock row that has outlasted any
+attempt (twice the migration timeout, at least five minutes) is logged at ERROR
+naming the next migration waiting, and
+`memql_database_migration_lock_held_seconds` reads how long the node has seen
+that row. Neither releases anything, because the row names no holder to check.
 
 To recover a retained lock, first suspend migration attempts on every writer.
 Inspect `pg_stat_activity` using the identity node's `application_name`; wait

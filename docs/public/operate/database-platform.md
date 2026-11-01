@@ -136,6 +136,7 @@ noticed:
 | `MemqlDatabaseVolumeFillingUp` / `AlmostFull` | < 20% / < 10% free | Postgres **stops** rather than degrades when a volume fills |
 | `MemqlDatabaseReplicaLagging` | > 5m behind, 10m | your failover target is worse than you think |
 | `MemqlDatabaseReplicaNotStreaming` | in recovery with the WAL receiver down, 10m | not lagging — not replicating. Lag would read flat, so the rule above cannot see it |
+| `MemqlMigrationLockStuck` | a migrating node has found the same row in `bun_migration_locks` for 15m | no later migration or post-migration hook runs while every pod stays Ready ([recovery](env-vars.md#database-tuning)) |
 
 A stalled archiver becomes a full WAL volume within hours: WAL is *retained*
 rather than recycled while archiving is broken. Fix the archiver before resizing.

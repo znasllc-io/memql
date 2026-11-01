@@ -855,13 +855,13 @@ index, one chunk per transaction, and **that is not free on a large table**:
   the serving statement limit fails.
 - **All three share one migration deadline**
   (`MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS`, 30 s by default). A build that
-  outlives it carries on server-side and the runner **retains its lock**, by design,
-  which is a failed rollout until somebody recovers it
-  ([how](env-vars.md#database-tuning)).
+  outlives it carries on server-side and the attempt defers, so the next attempt
+  waits for it and carries on, and the rollout finishes without help
+  ([how](env-vars.md#database-tuning)). Whatever migrations follow wait until it does.
 
-On a table where three passes will not fit the deadline, build them first, in a
-session of your own with no client deadline, one statement to a query, and let the
-migration verify them:
+To choose when those pauses happen rather than leaving it to the rollout, build
+them first, in a session of your own with no client deadline, one statement to a
+query, and let the migration verify them:
 
 ```sql
 CREATE INDEX memory_nodes_access_tokenhash_lookup_idx ON "MemoryNodes"

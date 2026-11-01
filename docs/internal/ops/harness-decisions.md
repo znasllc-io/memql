@@ -1755,8 +1755,85 @@ version, except the two partial ones, which hold a slice. The owner lookup
 index now serves only the owner reads the walk does not take; dropping it is a
 later migration, once the walk has served production.
 
-**Not verified, and not fixed.** Nothing here ran against production; it takes
-effect in the engine release after 0.31.7. A page of the owner's feed still
+**What production got (corrected 2026-11-01).** The buffer counts above come
+from a migrated test database. Production never had three of these indexes, so
+for days its reads ran as if this section's fixes had not shipped. Read on
+2026-11-01 on 0.31.11: of the run indexes, only `goal_lookup` and `owner_lookup`
+existed, and both identity replicas had logged `failed to acquire migration lock`
+(SQLSTATE 23505) every 30 seconds, about 930 times each, since they started
+eight hours earlier. Against 1,305,390 run versions, the owner feed fell back to
+the owner lookup and read 339,637 versions at 1.6 million buffers in 72 seconds,
+and neither the revision read nor the corpus read finished in 120. A fixture
+cannot see this: `TestPayload*AreTheMigrated*` inspect a database the test
+migrated. A read index is a claim about production only once its migration is in
+production's ledger, so check that before reporting a read as bounded.
+
+**Why the migrations stopped.** The runner keeps bun's lock when a migration ends
+on a context or transport error, so that nothing overlaps a statement that may
+still be running, and nothing ever releases it. The first migration the October 30
+rollout (0.31.9) had to run was this section's goal index, a scan of every chunk
+under an attempt deadline of 180 seconds, which the installation had raised after
+the same thing happened on September 26. The index is complete and the next
+one's never started, so the lock stayed behind while later migrations, this
+section's other three indexes and the site-access indexes among them, and every
+post-migration hook waited behind it, with every pod Ready. That this build is what
+stranded it is inferred from that order: the pods from that rollout are gone, so
+no log says whether the deadline or a replaced pod ended the attempt. Both take the
+same path.
+
+**Chosen path.** Three changes, each with its own reason:
+
+- **An index build defers** (`deferInterruptedIndexWork`,
+  `component/database/latest_row_index.go`). The runner's rule exists to stop
+  overlap, and for a build the build lock already does: the orphan's backend holds
+  it until it exits, and the next attempt takes it first and judges the index from
+  the catalog. So every context or transport failure in an ensure ends the attempt
+  with `ErrMigrationDeferred` and the lock is released. A chain advances one index
+  at a time. Later migrations cannot start early, because bun runs them in order
+  and this one reaches the ledger only once an attempt has seen its index complete.
+  Hooks cannot run, because a deferred attempt records an error.
+- **An attempt ending between migrations defers** (`migrationsForAttempt`,
+  `component/database/database.go`). bun runs its ledger statements and every Up
+  under one context, so a deadline landing just after an Up returned made the
+  ledger insert refuse, which reads exactly like a statement cut off in flight, and
+  the lock stayed with nothing running. That is how September 26 stranded it. Each
+  Up now runs under the attempt and bun's own statements get five seconds past it.
+- **A lock that stays says so** (`reportMigrationLockRefusal`). bun inserts a new
+  row for each attempt and an attempt is bounded, so one row id seen for longer than
+  twice the deadline, and at least five minutes, is no attempt. That logs an ERROR
+  naming the next migration waiting and sets
+  `memql_database_migration_lock_held_seconds`; `MemqlMigrationLockStuck` alerts on
+  it. Deferrals dropped from ERROR to WARN so the ERROR means something.
+
+**Rejected.** A longer deadline: it was the answer on September 26, it did not hold
+past a larger table, and the startup probe bounds it. Releasing a stale lock
+automatically: the row names no holder and the migration pool's `application_name`
+is the node's own, shared with its request pool, so the catalog cannot establish
+that the holder stopped. That is the runbook's to do until a holder has an identity.
+Booting a check of the read registries against the catalog: reads would be no
+faster for it, and the stuck lock is what needed reporting.
+
+**What is still retained.** A plain statement inside a migration cut off on a
+deadline or a lost connection keeps the lock, because nothing knows what an
+arbitrary migration left running
+(`TestMigrationReadTimeoutRetainsLockWhileBackendRuns`). A pod killed mid-attempt
+leaves its row. Both are now reported rather than silent.
+
+**Regression evidence.** In `component/database/migration_lock_db_test.go`,
+`TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock` holds a real build past two
+attempts and pins the released lock, no second build, nothing in the ledger and no
+hooks until the orphan finishes. `TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock`
+covers a build started by hand, `TestAnAttemptEndingBetweenMigrationsRecordsWhatFinishedAndReleasesTheLock`
+the gap, by deadline and by cancellation, and `TestALockThatOutlastsAnyAttemptIsReportedAsStuck`
+the report. All need `MEMQL_REQUIRE_DB=1`.
+
+**Not verified, and not fixed.** The runner's changes take effect in the engine
+release after 0.31.11, and clearing the row already stranded in production stays an
+operator's act under the
+[runbook](../../public/operate/env-vars.md#database-tuning). Whether the revision
+and corpus reads are good enough once their indexes exist has not been measured on
+production's data. `MemqlMigrationLockStuck` reaches nobody on production yet: that
+cluster has no prometheus-operator. A page of the owner's feed still
 visits each version of the runs on it, so a page costs its runs times their
 versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
 (the procedure reuse sweep) stays on the owner lookup: its status term can

@@ -33,6 +33,7 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -238,6 +239,22 @@ var (
 		Help:      "EVERY NODE TYPE exports this series, but only the node that ran the nightly retention sweep (the cron leader, or an owner calling logsSweep by hand) ever moves it; the rest export a constant 0. Log lines the sweep wrote into the archive container as logs/<day>/<nodeType>.ndjson.gz before deleting them. On a cluster with an archive container a non-zero daily step is the sweep working; a FLAT ZERO on every node for more than a day means the sweep is not running or is refusing, and the store grows past its retention. On a cluster with NO archive container the sweep refuses by design and this stays at 0.",
 	})
 
+	// migrationLockHeldSeconds is how long the migrating node has found one row
+	// in bun's lock table in its way. It answers from a source the app registers
+	// (RegisterMigrationLockHeldSource) because component/database sits below
+	// this module's dependents and carries no metrics of its own.
+	migrationLockHeldSeconds = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "migration_lock_held_seconds",
+		Help:      "Only a node that migrates (identity, as deployed) ever moves this series; the rest export a constant 0. How long this node has found the SAME row in bun's migration lock table in the way of its attempts. Each attempt inserts a new row and is bounded by its deadline, so a brief non-zero is a sibling replica migrating. A value past a few attempt deadlines is a stranded lock: no migration or post-migration hook runs on this cluster until an operator verifies the holder has stopped and releases it (docs/public/operate/env-vars.md, Database tuning), while every pod stays Ready and reads run without whatever indexes the blocked migrations were to build.",
+	}, func() float64 {
+		if source := migrationLockHeldSource.Load(); source != nil {
+			return (*source)().Seconds()
+		}
+		return 0
+	})
+
 	logsDeletedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: "logs",
@@ -265,6 +282,7 @@ func init() {
 		siteTrafficWritten,
 		siteTrafficDropped,
 		aiFederationExchanges,
+		migrationLockHeldSeconds,
 		logsWrittenTotal,
 		logsDroppedTotal,
 		logsArchivedTotal,
@@ -756,6 +774,29 @@ func LogsDeleted(n int64) {
 		return
 	}
 	logsDeletedTotal.Add(float64(n))
+}
+
+// migrationLockHeldSource answers migrationLockHeldSeconds.
+var migrationLockHeldSource atomic.Pointer[func() time.Duration]
+
+// RegisterMigrationLockHeldSource wires the database's reading of how long one
+// lock row has stood into the /metrics scrape. A nil fn unregisters (tests). It
+// is called on every scrape, so it must read no database.
+func RegisterMigrationLockHeldSource(fn func() time.Duration) {
+	if fn == nil {
+		migrationLockHeldSource.Store(nil)
+		return
+	}
+	migrationLockHeldSource.Store(&fn)
+}
+
+// MigrationLockHeldSecondsValue returns the current reading, for tests.
+func MigrationLockHeldSecondsValue() float64 {
+	var m dto.Metric
+	if err := migrationLockHeldSeconds.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetGauge().GetValue()
 }
 
 // LogsWrittenValue returns the current count, for tests.

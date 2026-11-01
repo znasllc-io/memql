@@ -185,3 +185,24 @@ spec:
               though it reports the configured number of instances. Frequently a
               restore loop: check the instance's logs and whether it can reach
               both the primary and the object store.
+
+        # Not the database's health but the schema's, and the same property as
+        # everything above: the cluster serves while it is true. A stranded
+        # migration lock stops every later migration and post-migration hook,
+        # and the only other symptom is reads that were promised an index
+        # timing out. It is here because production sat in it for days.
+        - alert: MemqlMigrationLockStuck
+          expr: |
+            max by (namespace) (memql_database_migration_lock_held_seconds) > 900
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "MemQL migrations are stopped behind a held lock ({{ $labels.namespace }})"
+            description: >
+              A migrating node has found the same row in bun_migration_locks for
+              over 15 minutes, longer than any attempt lasts. No migration runs
+              until an operator verifies the holder has stopped and releases it:
+              docs/public/operate/env-vars.md, Database tuning. Identity's ERROR
+              log names the next migration waiting.
