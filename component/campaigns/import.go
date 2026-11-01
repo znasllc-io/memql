@@ -533,9 +533,13 @@ func (w *Worker) readBlobUpTo(ctx context.Context, blobURL, owner string, maxByt
 // the container-relative key, once the key is known to be under the row
 // owner's own Library prefix.
 func (w *Worker) blobTarget(ctx context.Context, blobURL, owner string) (blobReader, string, string, error) {
-	key := blobStorageKey(blobURL)
+	reader, container, err := w.objectStore(ctx)
+	if err != nil {
+		return nil, "", "", err
+	}
+	key := blobStorageKey(blobURL, container)
 	if key == "" {
-		return nil, "", "", errors.New("the file row records no storage location")
+		return nil, "", "", errors.New("the file row records no storage location in this cluster's Library")
 	}
 	// The row is the caller's; the KEY must be its owner's too. This reads the
 	// key with the node's credential, so a row naming somebody else's object
@@ -544,10 +548,6 @@ func (w *Worker) blobTarget(ctx context.Context, blobURL, owner string) (blobRea
 	// read.
 	if err := librarykey.CheckKey(key, owner); err != nil {
 		return nil, "", "", errors.New("the file is not stored in its owner's Library")
-	}
-	reader, container, err := w.objectStore(ctx)
-	if err != nil {
-		return nil, "", "", err
 	}
 	return reader, container, key, nil
 }
@@ -578,13 +578,21 @@ func defaultBlobReader(ctx context.Context) (blobReader, string, error) {
 	return uploader, container, nil
 }
 
-// blobStorageKey normalizes v1:library:file.blobUrl into the
-// container-relative key. The field is documented as a STORAGE PATH
-// ("library/{userId}/{fileId}/{name}") rather than a fetchable URL, so the
-// only normalization is the two prefixes a caller might reasonably have
-// stored.
-func blobStorageKey(blobURL string) string {
+// blobStorageKey normalizes v1:library:file.blobUrl into the key it names inside
+// container, or "" when it names none there. An ordinary upload's row stores the
+// storage client's URL and a folder-sync file's a bare key, so this reads both
+// through the Library's shared parser, one decoding pass included, as
+// component/sitepublish's storageKey does: the ownership check then judges exactly
+// the key that is read. A URL in another container is refused, never reduced to
+// its object, which would read a different file from the one the row names. The
+// legacy leading-slash and blob:// spellings stay supported.
+func blobStorageKey(blobURL, container string) string {
 	key := strings.TrimSpace(blobURL)
 	key = strings.TrimPrefix(key, "blob://")
-	return strings.TrimPrefix(key, "/")
+	key = strings.TrimPrefix(key, "/")
+	gotContainer, object, ok := librarykey.Split(key)
+	if !ok || (gotContainer != "" && gotContainer != container) {
+		return ""
+	}
+	return object
 }

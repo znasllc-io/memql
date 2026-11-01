@@ -118,6 +118,71 @@ func TestImportRefusesAFileWhoseKeyIsNotItsOwners(t *testing.T) {
 	}
 }
 
+// An ordinary upload's row stores the storage client's URL, and a folder-sync
+// file's a bare key. Each is the owner's own file, and the import reads the one
+// object it names. The fixtures above only ever store the bare form, which is how a
+// reader that refused every URL looked correct for as long as it did.
+func TestImportReadsAFileHoweverItsRowNamesTheKey(t *testing.T) {
+	const key = "library/" + testOwner + "/file-1/list.csv"
+	for name, stored := range map[string]string{
+		"the cloud URL":     "https://acct.blob.core.windows.net/memql/" + key,
+		"the Azurite URL":   "http://azurite:10000/devstoreaccount1/memql/" + key,
+		"a bare key":        key,
+		"a leading slash":   "/" + key,
+		"the blob:// form":  "blob://" + key,
+		"space around it":   "  https://acct.blob.core.windows.net/memql/" + key + "\n",
+		"an escaped object": "https://acct.blob.core.windows.net/memql/library/" + testOwner + "/file-1/list%2Ecsv",
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := &fakeEngine{}
+			w := importWorker(t, engine, "email\na@example.test")
+			engine.libraryFiles["file-1"]["blobUrl"] = stored
+			var asked []string
+			w.newBlobReader = func(context.Context) (blobReader, string, error) {
+				return askedBlobs{asked: &asked}, "memql", nil
+			}
+			if got := runImport(t, w, importCtx()); got["added"] != float64(1) {
+				t.Fatalf("counts = %+v, want one added", got)
+			}
+			if len(asked) != 1 || asked[0] != key {
+				t.Fatalf("storage was asked for %q, want only %q", asked, key)
+			}
+		})
+	}
+}
+
+// Reading a URL does not widen what is read: only the row owner's own key, and only
+// in the Library's own container. A foreign container is never reduced to its
+// object, which would read a different file from the one the row names.
+func TestImportRefusesAURLThatIsNotTheOwnersLibrary(t *testing.T) {
+	for name, stored := range map[string]string{
+		"another container":   "https://acct.blob.core.windows.net/logs-archive/library/" + testOwner + "/file-1/list.csv",
+		"another owner":       "https://acct.blob.core.windows.net/memql/library/someone-else/file-9/list.csv",
+		"an encoded climb":    "https://acct.blob.core.windows.net/memql/library/" + testOwner + "/%2E%2E/someone-else/file-9/list.csv",
+		"no object":           "https://acct.blob.core.windows.net/memql",
+		"a local placeholder": "local://library/" + testOwner + "/file-1/list.csv",
+		"no location":         "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := &fakeEngine{}
+			w := importWorker(t, engine, "email\na@example.test")
+			engine.libraryFiles["file-1"]["blobUrl"] = stored
+			var asked []string
+			w.newBlobReader = func(context.Context) (blobReader, string, error) {
+				return askedBlobs{asked: &asked}, "memql", nil
+			}
+			if _, err := w.handleImportRecipients(importCtx(), map[string]any{
+				"audienceId": testAudience, "artifactId": testArtifact,
+			}, 0); err == nil {
+				t.Fatal("the file was imported")
+			}
+			if len(asked) != 0 {
+				t.Fatalf("storage was asked for %q before the refusal", asked)
+			}
+		})
+	}
+}
+
 func importCtx() context.Context {
 	return auth.ContextWithUserActor(context.Background(), testOwner)
 }
