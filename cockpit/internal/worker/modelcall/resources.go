@@ -195,6 +195,16 @@ func workingSet(info models.Info) uint64 {
 	return fleetmemory.WorkingSet(info.ModelBytes)
 }
 
+// memoryReserve is what admission leaves free on a pool: room for the operating
+// system and, where the pool is also the host's memory, for every workspace.
+func memoryReserve(pool memoryHeadroom, workbenches uint64) uint64 {
+	reserve := fleetmemory.Reserve(pool.Total)
+	if !pool.DedicatedGPU {
+		reserve += workbenches
+	}
+	return reserve
+}
+
 func saturatedMultiply(a, b uint64) uint64 {
 	if b != 0 && a > math.MaxUint64/b {
 		return math.MaxUint64
@@ -227,6 +237,10 @@ func requestMemory(info models.Info, start *memqlv1.ModelCallStart) models.Info 
 }
 
 func (r *hostResources) acquire(ctx context.Context, info models.Info, client *http.Client, logger *slog.Logger) (*resourceReservation, error) {
+	var workbenches uint64
+	if r.leaseRoot != nil {
+		workbenches = workbenchRAM
+	}
 	// WHAT CAN NEVER FIT IS REFUSED FIRST: before it queues behind the gate, and
 	// before the reclaim below unloads an idle model for nothing. That idle model
 	// can be the one the caller's fallback is about to need.
@@ -234,7 +248,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 	if err != nil {
 		return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 	}
-	if !fleetmemory.CanFit(workingSet(info), pool.Total) {
+	if !fleetmemory.CanFit(workingSet(info), pool.Total, memoryReserve(pool, workbenches)) {
 		return nil, &memoryRefusal{detail: fmt.Sprintf("model %q needs more memory than this machine can safely offer", info.ID)}
 	}
 	select {
@@ -314,10 +328,6 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		logger.Info("released idle inference model", "model", old.ID)
 	}
 	wanted := workingSet(info)
-	var workbenches uint64
-	if lease != nil {
-		workbenches = workbenchRAM
-	}
 	var last string
 	wait := r.headroomWait
 	if wait <= 0 {
@@ -330,12 +340,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		if err != nil {
 			return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 		}
-		reserve := fleetmemory.Reserve(state.Total)
-		room := state.Available
-		if !state.DedicatedGPU {
-			reserve += workbenches
-			room -= min(room, workbenches)
-		}
+		reserve := memoryReserve(state, workbenches)
 		resident := uint64(0)
 		if info.Kind == models.KindOllama {
 			resident, err = ollamaResident(ctx, client, info)
@@ -356,7 +361,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			}
 			hostReady = hostKeepsWorkbenchRAM(host)
 		}
-		if hostReady && !state.Pressure && room >= fleetmemory.RoomWanted(wanted, resident, state.Total) {
+		if hostReady && !state.Pressure && state.Available >= fleetmemory.RoomWanted(wanted, resident, reserve) {
 			r.owned[key] = info
 			if err := save(); err != nil {
 				return nil, err
@@ -365,7 +370,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			ok = true
 			return &resourceReservation{lease: lease, release: release}, nil
 		}
-		headroom := fmt.Sprintf("available %d, additional %d, reserve %d, pressure %t", state.Available, additional, reserve, state.Pressure)
+		headroom := fmt.Sprintf("available %d, additional %d, reserve %d, pressure %t, host ready %t", state.Available, additional, reserve, state.Pressure, hostReady)
 		if last == "" {
 			last = fmt.Sprintf("model %q is waiting for memory headroom (%s)", info.ID, headroom)
 			logger.Info(last)

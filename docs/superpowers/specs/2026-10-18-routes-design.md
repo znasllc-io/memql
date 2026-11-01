@@ -304,7 +304,9 @@ memory through the gate's reader (the Cockpit's `capacity.ReadMemory`):
   catalog's `sizeBytes`, plus the same for the window the call would ask this
   machine to allocate.
 - **Never fits:** a need that leaves no reserve on the whole pool is refused by both,
-  loaded or not.
+  loaded or not. The gate's reserve here includes the workspace budget, which the
+  engine cannot see. On real figures the engine refuses such a need anyway, because
+  what is loaded and what is free cannot add up to more than the pool.
 
 The engine can therefore refuse where the gate would admit, when the catalog asks
 for more than the estimate does; that costs only the next machine. The reverse

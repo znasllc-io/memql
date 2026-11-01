@@ -249,6 +249,7 @@ type fleetMemoryVerdict struct {
 // unload it.
 func (c FleetCapacity) memoryVerdict(model string, need uint64) fleetMemoryVerdict {
 	total := c.MemoryTotalBytes
+	reserve := fleetmemory.Reserve(total)
 	idle := c.ReclaimableBytes()
 	var resident uint64
 	if m, loaded := c.LoadedModel(model); loaded {
@@ -257,12 +258,12 @@ func (c FleetCapacity) memoryVerdict(model string, need uint64) fleetMemoryVerdi
 			idle -= m.SizeBytes
 		}
 	}
-	if !fleetmemory.CanFit(need, total) {
+	if !fleetmemory.CanFit(need, total, reserve) {
 		// Never admitted, however much of it is loaded, and the figure that says so
 		// is the whole model's.
-		return fleetMemoryVerdict{want: fleetmemory.RoomWanted(need, 0, total), idle: idle}
+		return fleetMemoryVerdict{want: fleetmemory.RoomWanted(need, 0, reserve), idle: idle}
 	}
-	want := fleetmemory.RoomWanted(need, resident, total)
+	want := fleetmemory.RoomWanted(need, resident, reserve)
 	return fleetMemoryVerdict{fits: c.MemoryFreeBytes+idle >= want, want: want, idle: idle}
 }
 

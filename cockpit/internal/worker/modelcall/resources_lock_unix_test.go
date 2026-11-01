@@ -180,9 +180,12 @@ func TestUnconfirmedOwnedModelUnloadRetainsInferenceActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	lease.close()
+	// The first read only refuses what can never fit. A second would be admission.
 	var reads atomic.Int32
 	resources := resourcesForTest(func() (memoryHeadroom, error) {
-		reads.Add(1)
+		if reads.Add(1) > 1 {
+			t.Error("unconfirmed unload reached memory admission")
+		}
 		return memoryHeadroom{Total: 64 * gib, Available: 40 * gib}, nil
 	})
 	resources.leaseRoot = func() (string, error) { return root, nil }
@@ -190,11 +193,6 @@ func TestUnconfirmedOwnedModelUnloadRetainsInferenceActivity(t *testing.T) {
 	if err == nil {
 		reservation.close()
 		t.Fatal("unconfirmed unload admitted another runtime")
-	}
-	// The one reading before the reclaim refuses what can never fit. A second would
-	// be memory admission.
-	if n := reads.Load(); n != 1 {
-		t.Fatalf("unconfirmed unload reached memory admission: %d readings", n)
 	}
 	if !errors.Is(capacity.CheckInferenceIdle(root), capacity.ErrInferenceUnreconciled) {
 		t.Fatal("unconfirmed unload released shared capacity")

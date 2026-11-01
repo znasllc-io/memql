@@ -63,37 +63,40 @@ func TestReserve(t *testing.T) {
 func TestCanFit(t *testing.T) {
 	const card = uint64(25_651_314_688) // Its reserve is 1,603,207,168.
 	for _, tc := range []struct {
-		name        string
-		need, total uint64
-		want        bool
+		name                 string
+		need, total, reserve uint64
+		want                 bool
 	}{
-		{"fits with the reserve left over", 19_959_606_173, card, true},
-		{"fits leaving exactly the reserve", 24_048_107_520, card, true},
-		{"one byte over cuts into the reserve", 24_048_107_521, card, false},
-		{"larger than the pool", card + 1, card, false},
-		{"a pool smaller than its own reserve fits nothing", 0, gib / 2, false},
-		{"a need of nothing fits a pool that keeps its reserve", 0, card, true},
+		{"fits with the reserve left over", 19_959_606_173, card, Reserve(card), true},
+		{"fits leaving exactly the reserve", 24_048_107_520, card, Reserve(card), true},
+		{"one byte over cuts into the reserve", 24_048_107_521, card, Reserve(card), false},
+		{"larger than the pool", card + 1, card, Reserve(card), false},
+		{"the largest need is refused rather than wrapped", math.MaxUint64, card, Reserve(card), false},
+		{"a pool smaller than its own reserve fits nothing", 0, gib / 2, Reserve(gib / 2), false},
+		{"a need of nothing fits a pool that keeps its reserve", 0, card, Reserve(card), true},
+		{"a larger reserve rules out what the pool's own would not", 12*gib + gib/2, 16 * gib, 4 * gib, false},
+		{"the same need fits with the pool's own", 12*gib + gib/2, 16 * gib, Reserve(16 * gib), true},
 	} {
-		if got := CanFit(tc.need, tc.total); got != tc.want {
-			t.Errorf("%s: CanFit(%d, %d) = %v, want %v", tc.name, tc.need, tc.total, got, tc.want)
+		if got := CanFit(tc.need, tc.total, tc.reserve); got != tc.want {
+			t.Errorf("%s: CanFit(%d, %d, %d) = %v, want %v", tc.name, tc.need, tc.total, tc.reserve, got, tc.want)
 		}
 	}
 }
 
 func TestRoomWanted(t *testing.T) {
 	for _, tc := range []struct {
-		name                  string
-		need, resident, total uint64
-		want                  uint64
+		name                    string
+		need, resident, reserve uint64
+		want                    uint64
 	}{
-		{"a cold model needs all of itself and the reserve", 20 * gib, 0, 64 * gib, 24 * gib},
-		{"a warm model covering its need asks for the reserve alone", 20 * gib, 21 * gib, 64 * gib, 4 * gib},
-		{"a warm model short of its need asks for the rest as well", 20 * gib, 18 * gib, 64 * gib, 6 * gib},
-		{"the reserve is the pool's, not the model's", 20 * gib, 0, 32 * gib, 22 * gib},
-		{"the largest figures saturate rather than wrap", math.MaxUint64, 0, 64 * gib, math.MaxUint64},
+		{"a cold model needs all of itself and the reserve", 20 * gib, 0, 4 * gib, 24 * gib},
+		{"a warm model covering its need asks for the reserve alone", 20 * gib, 21 * gib, 4 * gib, 4 * gib},
+		{"a warm model short of its need asks for the rest as well", 20 * gib, 18 * gib, 4 * gib, 6 * gib},
+		{"the reserve is the caller's to state", 20 * gib, 0, 7 * gib, 27 * gib},
+		{"the largest figures saturate rather than wrap", math.MaxUint64, 0, 4 * gib, math.MaxUint64},
 	} {
-		if got := RoomWanted(tc.need, tc.resident, tc.total); got != tc.want {
-			t.Errorf("%s: RoomWanted(%d, %d, %d) = %d, want %d", tc.name, tc.need, tc.resident, tc.total, got, tc.want)
+		if got := RoomWanted(tc.need, tc.resident, tc.reserve); got != tc.want {
+			t.Errorf("%s: RoomWanted(%d, %d, %d) = %d, want %d", tc.name, tc.need, tc.resident, tc.reserve, got, tc.want)
 		}
 	}
 }

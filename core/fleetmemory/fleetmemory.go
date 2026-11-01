@@ -59,10 +59,12 @@ func Reserve(total uint64) uint64 {
 	return min(4*gib, max(gib, total/16))
 }
 
-// CanFit reports whether a need could ever be admitted on a pool of this size,
-// however free the pool is. What cannot is refused before anything is done for it.
-func CanFit(need, total uint64) bool {
-	return need <= total && Reserve(total) <= total-need
+// CanFit reports whether a need could ever be admitted on a pool of this size with
+// this reserve left free, however free the pool is. What cannot is refused before
+// anything is done for it. The reserve is Reserve, plus anything else the caller
+// keeps back.
+func CanFit(need, total, reserve uint64) bool {
+	return need <= total && reserve <= total-need
 }
 
 // RoomWanted is the free memory a call needs: what it still has to load, with the
@@ -71,8 +73,8 @@ func CanFit(need, total uint64) bool {
 // A warm model still keeps the reserve. A call that allocates nothing could run
 // without it, and letting it would serve some warm calls that are declined today,
 // but that is a change to what machines admit, not a detail of this sum.
-func RoomWanted(need, resident, total uint64) uint64 {
-	return saturatingAdd(Reserve(total), need-min(need, resident))
+func RoomWanted(need, resident, reserve uint64) uint64 {
+	return saturatingAdd(reserve, need-min(need, resident))
 }
 
 func saturatingAdd(a, b uint64) uint64 {
