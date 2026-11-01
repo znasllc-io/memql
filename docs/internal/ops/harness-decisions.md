@@ -1773,13 +1773,22 @@ on a context or transport error, so that nothing overlaps a statement that may
 still be running, and nothing ever releases it. The first migration the October 30
 rollout (0.31.9) had to run was this section's goal index, a scan of every chunk
 under an attempt deadline of 180 seconds, which the installation had raised after
-the same thing happened on September 26. The index is complete and the next
-one's never started, so the lock stayed behind while later migrations, this
-section's other three indexes and the site-access indexes among them, and every
-post-migration hook waited behind it, with every pod Ready. That this build is what
-stranded it is inferred from that order: the pods from that rollout are gone, so
-no log says whether the deadline or a replaced pod ended the attempt. Both take the
-same path.
+the same thing happened on September 26. Production's files date it: the root index
+was created at 04:36:19 and its chunk copies were still being written at 04:39:39,
+past the deadline. The 15,625 attempts refused since, at four a minute, date the
+lock row to the same moment, and the ledger stops at the migration before it. The
+build finished and the lock stayed, with this section's other three indexes, every
+later migration and every post-migration hook behind it and every pod Ready. The
+pods from that rollout are gone, so no log says whether the deadline or a replaced
+pod ended the attempt. Both take the same path.
+
+**What a build costs there.** The same file times measure it. A pass that reads run
+payloads took over 3 minutes 20 seconds across 3.6 GB of heap: 7, 138, 36 and 18
+seconds for the four largest finished chunks, which is 2,400 to 14,000 run versions
+a second. The site-access passes, built by hand on October 31, read no run payload
+and took about 20 seconds each. Writes wait only while the newest chunk is scanned,
+so a build's pause is that chunk's run versions at those rates, and it is shortest
+just after a new chunk begins.
 
 **Chosen path.** Three changes, each with its own reason:
 
@@ -1830,7 +1839,9 @@ the report. All need `MEMQL_REQUIRE_DB=1`.
 **Not verified, and not fixed.** The runner's changes take effect in the engine
 release after 0.31.11, and clearing the row already stranded in production stays an
 operator's act under the
-[runbook](../../public/operate/env-vars.md#database-tuning). Whether the revision
+[runbook](../../public/operate/env-vars.md#database-tuning). Building the remaining
+indexes by hand and then clearing the row was tried end to end on v0.31.11's code
+and TimescaleDB 2.29.1, with no rebuild, but not on production. Whether the revision
 and corpus reads are good enough once their indexes exist has not been measured on
 production's data. `MemqlMigrationLockStuck` reaches nobody on production yet: that
 cluster has no prometheus-operator. A page of the owner's feed still

@@ -861,7 +861,8 @@ index, one chunk per transaction, and **that is not free on a large table**:
 
 To choose when those pauses happen rather than leaving it to the rollout, build
 them first, in a session of your own with no client deadline, one statement to a
-query, and let the migration verify them:
+query, and let the migration verify them. Just after a new chunk begins, the newest
+chunk is nearly empty and the pause is at its shortest:
 
 ```sql
 CREATE INDEX memory_nodes_access_tokenhash_lookup_idx ON "MemoryNodes"
