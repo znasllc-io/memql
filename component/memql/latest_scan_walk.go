@@ -30,12 +30,41 @@ import (
 // Measured on 3,000 runs of 20 versions: 4,152 buffers for a page of 50,
 // where the lookup took 97,252.
 //
-// The newer-version probe is a LATERAL subquery with LIMIT 1 rather than NOT
-// EXISTS. TimescaleDB excludes chunks for the LATERAL form at run time, and
-// it probed every chunk's index for the NOT EXISTS form (10,145 buffers for
-// the same page). The filter runs above an OFFSET 0 fence. Below it, the
-// planner would evaluate the payload filter on every version the walk
-// passes, a TOAST read each, instead of on the latest ones it keeps.
+// THE QUERY'S SHAPE IS WHAT MAKES THE PLANNER WALK (2026-11-01). The index being
+// there does not. On production's ten chunks at random_page_cost 4, the first
+// shape of this query, a LEFT JOIN LATERAL probe under an OFFSET 0 fence with the
+// LIMIT outside it, read the owner's whole range and sorted it: 343,250 versions,
+// 1.6 million buffers and 29.6 seconds against an eight-second limit, with this
+// index built. Local tests never saw it, because they planned at the
+// timescaledb-ha default of 1.1 over three chunks. Three parts of the shape decide
+// the plan, each measured there on the same page:
+//
+//   - The LIMIT is inside the walk. An ORDER BY above a subquery makes PostgreSQL
+//     plan that subquery for full retrieval, so a LIMIT outside it stops the rows
+//     and not the plan. Dropping the outer ORDER BY does not help either, because
+//     the outer filter's estimate leaves the planner expecting one row, and it
+//     still sorted (1.6 million buffers).
+//   - The probe is NOT EXISTS, not `found IS NULL` over a left join. The planner
+//     puts the latter at 0.5% of the range, 33 rows for a page of 50, so it sees
+//     nothing for a LIMIT to stop early, and with the LIMIT inside it still planned
+//     the sort. A subplan is estimated at 50%, and the walk becomes the cheap way
+//     to a page.
+//   - OFFSET 0 inside the EXISTS keeps it a subplan. Without it PostgreSQL makes
+//     an anti join, which probes every chunk for every version (226,883 buffers);
+//     a subplan's bound lets TimescaleDB exclude all but the newer chunks at run
+//     time (35,436 buffers, 87 ms).
+//
+// A window near the row estimate outruns all this: production still walked at
+// 1,000 rows and sorted at 5,000, the widening loop's ceiling. Such a read costs
+// what it did before, and a page is far below it.
+//
+// THE LIMIT CANNOT SHORTEN A PAGE. executeCombinedFilterQuery reads a short scan
+// as exhaustion, so a row rejected above the fence after this LIMIT would end the
+// feed early. Nothing above it can reject one: the keyset is the same predicate
+// the walk starts from, and decidedByTerm, which admits a read here, says the
+// filter is true for every row carrying the term. The LIMIT is also the fence that
+// keeps that filter out of the walk, where it would read the payload of every
+// version passed, a TOAST read each, instead of the latest ones kept.
 //
 // WHEN IT IS TAKEN, AND WHY SO NARROWLY. Only when the term decides the read:
 // with the term and the concept assumed, the filter is true for every row
@@ -59,9 +88,11 @@ import (
 // deep page; 4,431 in this form).
 //
 // TestWorkRunReadsDoNotScanTheOwnersHistory pins the pages, their cursors and
-// their cost on the real SQL; TestLatestScanWalkTakesOnlyReadsItsTermDecides
-// pins when the walk is taken.
-func (e *MemQLEngine) latestScanWalk(ctx context.Context, expr ExpressionNode, timestamp *time.Time, sorter *compiledSort) *bun.RawQuery {
+// their cost and that nothing sorts, at production's planner settings;
+// TestLatestScanWalkTakesOnlyReadsItsTermDecides pins when the walk is taken. The
+// result is a builder because the window in executeCombinedFilterQuery can widen
+// and re-scan.
+func (e *MemQLEngine) latestScanWalk(ctx context.Context, expr ExpressionNode, timestamp *time.Time, sorter *compiledSort) func(limit int) *bun.RawQuery {
 	if !newestFirst(sorter) {
 		return nil
 	}
@@ -82,14 +113,8 @@ func (e *MemQLEngine) latestScanWalk(ctx context.Context, expr ExpressionNode, t
 		return nil
 	}
 
-	newer := ""
 	where := ""
-	args := []any{concept}
-	if timestamp != nil {
-		newer = ` AND later."createdAt" <= ?`
-		args = append(args, timestamp.UTC())
-	}
-	args = append(args, concept, driver.term.field, driver.term.values[0])
+	args := []any{concept, driver.term.field, driver.term.values[0]}
 	if timestamp != nil {
 		where += ` AND w."createdAt" <= ?`
 		args = append(args, timestamp.UTC())
@@ -98,12 +123,26 @@ func (e *MemQLEngine) latestScanWalk(ctx context.Context, expr ExpressionNode, t
 		where += ` AND w."createdAt" <= ? AND (w."createdAt" < ? OR w.id > ?)`
 		args = append(args, keyset.createdAt, keyset.createdAt, keyset.id)
 	}
-	return e.database().NewRaw(`SELECT w.* FROM "MemoryNodes" AS w
-LEFT JOIN LATERAL (SELECT 1 AS found FROM "MemoryNodes" AS later
-  WHERE later.concept = ? AND later.id = w.id AND later."createdAt" > w."createdAt"`+newer+` LIMIT 1) AS latest_walk ON true
-WHERE w.concept = ? AND (w.payload->>?) = ? AND latest_walk.found IS NULL`+where+`
+	newer := ""
+	args = append(args, concept)
+	if timestamp != nil {
+		newer = ` AND later."createdAt" <= ?`
+		args = append(args, timestamp.UTC())
+	}
+	return func(limit int) *bun.RawQuery {
+		page := "OFFSET 0"
+		pageArgs := args[:len(args):len(args)]
+		if limit > 0 {
+			page = "LIMIT ?"
+			pageArgs = append(pageArgs, limit)
+		}
+		return e.database().NewRaw(`SELECT w.* FROM "MemoryNodes" AS w
+WHERE w.concept = ? AND (w.payload->>?) = ?`+where+`
+  AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" AS later
+    WHERE later.concept = ? AND later.id = w.id AND later."createdAt" > w."createdAt"`+newer+` LIMIT 1 OFFSET 0)
 ORDER BY w."createdAt" DESC, w.id ASC
-OFFSET 0`, args...)
+`+page, pageArgs...)
+	}
 }
 
 // newestFirst reports whether sorter pages newest first and nothing else:

@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func latestScanWalkSQL(t *testing.T, ctx context.Context, expr ExpressionNode, a
 	if walk == nil {
 		return ""
 	}
-	return walk.String()
+	return walk(50).String()
 }
 
 // THE WALK IS TAKEN ONLY FOR A READ ITS TERM DECIDES, NEWEST FIRST
@@ -73,8 +74,9 @@ func TestLatestScanWalkTakesOnlyReadsItsTermDecides(t *testing.T) {
 				return
 			}
 			require.Contains(t, walk, `(w.payload->>'ownerUserId') = 'v1:identity:user:owner'`)
-			require.Contains(t, walk, `latest_walk.found IS NULL`, "a version is kept only when no newer one exists")
-			require.Contains(t, walk, `ORDER BY w."createdAt" DESC, w.id ASC`+"\nOFFSET 0", "the walk keeps the page order behind its fence")
+			require.Contains(t, walk, `AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" AS later`, "a version is kept only when no newer one exists")
+			require.Contains(t, walk, `LIMIT 1 OFFSET 0)`, "the probe stays a subplan, so chunks are excluded at run time")
+			require.Contains(t, walk, `ORDER BY w."createdAt" DESC, w.id ASC`+"\nLIMIT 50", "the page's limit rides inside the walk, or the planner sorts the range")
 		})
 	}
 
@@ -83,6 +85,23 @@ func TestLatestScanWalkTakesOnlyReadsItsTermDecides(t *testing.T) {
 		walk := latestScanWalkSQL(t, writer, feed, &asOf, nil)
 		require.Contains(t, walk, `later."createdAt" <= '2026-03-01 00:00:00+00:00'`)
 		require.Contains(t, walk, `w."createdAt" <= '2026-03-01 00:00:00+00:00'`)
+	})
+	t.Run("a read with no limit still fences the filter out of the walk", func(t *testing.T) {
+		e := &MemQLEngine{db: bun.NewDB(sql.OpenDB(pgdriver.NewConnector()), pgdialect.New())}
+		walk := e.latestScanWalk(writer, feed, nil, nil)
+		require.NotNil(t, walk)
+		require.Contains(t, walk(0).String(), `ORDER BY w."createdAt" DESC, w.id ASC`+"\nOFFSET 0")
+	})
+	t.Run("a widened window does not disturb the arguments", func(t *testing.T) {
+		at := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+		e := &MemQLEngine{db: bun.NewDB(sql.OpenDB(pgdriver.NewConnector()), pgdialect.New())}
+		walk := e.latestScanWalk(contextWithKeyset(writer, keysetPosition{createdAt: at, id: "v1:work:run:r"}), feed, &at, nil)
+		require.NotNil(t, walk)
+		first := walk(50).String()
+		wide := walk(200).String()
+		require.Contains(t, first, "\nLIMIT 50")
+		require.Contains(t, wide, "\nLIMIT 200")
+		require.Equal(t, strings.Replace(first, "LIMIT 50", "LIMIT 200", 1), wide, "only the limit differs between attempts")
 	})
 	t.Run("a cursor starts the walk where the index can begin", func(t *testing.T) {
 		at := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
