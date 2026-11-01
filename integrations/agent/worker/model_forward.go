@@ -331,7 +331,8 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 		return
 	}
 
-	// FROM HERE ON, NOTHING IS RE-PICKABLE.
+	// FROM HERE ON, NOTHING IS RE-PICKABLE, unless the machine itself says it
+	// handed the call to no runtime (ModelCallNeverRan).
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -366,6 +367,8 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 			resp.ErrorCode = failed.Code()
 		}
 		resp.ErrorMessage = waitErr.Error()
+		// The one failure that crossed to the machine and still ran nothing.
+		resp.RefusedBeforeStart = workerservice.ModelCallNeverRan(waitErr)
 		if end.GetFinishReason() == "" {
 			end.FinishReason = workerservice.ModelFinishError
 		}

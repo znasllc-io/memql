@@ -3323,8 +3323,9 @@ type ModelForwardResponse struct {
 	// spends tokens rather than repeating a side effect -- but it is not free,
 	// and "the same generation twice" is exactly what the loop caps and the
 	// identical-request breaker (memql#4680) exist to notice. So the rule stands
-	// unchanged: true only when the receiver is CERTAIN nothing reached the
-	// machine.
+	// unchanged: true only when the receiver is CERTAIN nothing ran. Either nothing
+	// reached the machine, or the machine itself said it handed the call to no
+	// runtime (component/worker's ModelCallNeverRan).
 	RefusedBeforeStart bool `protobuf:"varint,6,opt,name=refused_before_start,json=refusedBeforeStart,proto3" json:"refused_before_start,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache

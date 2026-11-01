@@ -468,11 +468,16 @@ stream that is already open. Both kinds: `chat` and `embedding`.
   cluster knows it is alive, for up to its own idle ceiling (90 seconds by
   default) — as long as a call queued inside the runtime could have waited
   — and only then ends with `model_concurrency_exceeded`.
+- **Memory is checked last, and declining runs nothing.** A model that can
+  never fit this machine is refused at once, before anything is unloaded. One
+  that could fit waits up to 30 seconds for room. Either way it ends with
+  `insufficient_memory` having reached no runtime, and the engine offers the
+  call to the next machine holding the model.
 
 A refusal names its own fix: `model_not_offered`,
 `model_concurrency_exceeded`, `schema_unsupported`, `unsupported_kind`,
-`duplicate_request`, `runtime_error`, `cancelled`, `timeout`,
-`worker_stopped`.
+`duplicate_request`, `insufficient_memory`, `runtime_error`, `cancelled`,
+`timeout`, `worker_stopped`.
 
 ---
 

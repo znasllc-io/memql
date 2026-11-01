@@ -412,6 +412,13 @@ does not report is admitted on its slots alone. `fleetCapacity` returns what
 each of your machines can take on: slots in use, memory, loaded models, recent
 latency and tokens per second, and whether it is degraded.
 
+The machine has the last word. Its cockpit checks its own memory before handing
+the call to a runtime, and a machine that cannot take the call ends it with
+`insufficient_memory` having run nothing. The call then goes to the next machine
+holding the model, and when there is none, to the route's next source. No other
+failure moves a call to another machine: one a runtime was handed may have
+generated, and running it again would be the same generation twice.
+
 ## Explicit API choices and automatic Ask routing
 
 Ask uses the cluster's routing policies automatically for each step. It has no

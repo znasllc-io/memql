@@ -701,8 +701,9 @@ message ModelForwardResponse {
   // spends tokens rather than repeating a side effect -- but it is not free,
   // and "the same generation twice" is exactly what the loop caps and the
   // identical-request breaker (memql#4680) exist to notice. So the rule stands
-  // unchanged: true only when the receiver is CERTAIN nothing reached the
-  // machine.
+  // unchanged: true only when the receiver is CERTAIN nothing ran. Either nothing
+  // reached the machine, or the machine itself said it handed the call to no
+  // runtime (component/worker's ModelCallNeverRan).
   bool refused_before_start = 6;
 }
 

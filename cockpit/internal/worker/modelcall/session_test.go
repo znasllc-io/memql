@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -828,5 +829,45 @@ func TestChatForwardsContextFromWorkerEnvelopeToOllama(t *testing.T) {
 				t.Errorf("absent context became %v", got)
 			}
 		})
+	}
+}
+
+// A machine that declines a call for memory says so under a code of its own,
+// because the engine moves on to another machine for this code and for no other
+// failure. It used to read runtime_error, which is a claim about a runtime that
+// never saw the call, and it sent operators to read that runtime's logs.
+func TestAMemoryRefusalNamesItselfAndNeverReachesTheRuntime(t *testing.T) {
+	var reached atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	limiter := NewLimiter()
+	limiter.resources = resourcesForTest(func() (memoryHeadroom, error) {
+		return memoryHeadroom{Total: 8 * gib, Available: 7 * gib}, nil
+	})
+	info := ollamaModel(srv.URL, "too-large", models.Attributes{MaxConcurrent: 1})
+	info.PeakMemoryBytes = 16 * gib
+	m := NewManager(Options{Inventory: inventoryWith(info), Limiter: limiter})
+
+	rec := newRecorder()
+	m.Start(context.Background(), rec, start("r1", "too-large", KindChat))
+	select {
+	case <-rec.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the refusal never arrived")
+	}
+	if rec.end.GetErrorCode() != "insufficient_memory" {
+		t.Fatalf("code = %q, want insufficient_memory (error: %s)", rec.end.GetErrorCode(), rec.end.GetError())
+	}
+	if rec.end.GetFinishReason() != FinishError {
+		t.Fatalf("finish = %q", rec.end.GetFinishReason())
+	}
+	if !strings.Contains(rec.end.GetError(), "too-large") {
+		t.Fatalf("the refusal does not name the model: %q", rec.end.GetError())
+	}
+	if n := reached.Load(); n != 0 {
+		t.Fatalf("the runtime was called %d time(s)", n)
 	}
 }

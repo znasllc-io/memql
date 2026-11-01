@@ -1,6 +1,9 @@
 package worker
 
-import "regexp"
+import (
+	"errors"
+	"regexp"
+)
 
 // modelcall_failed.go -- a model call a machine STARTED and then failed, with
 // the machine's own stable code.
@@ -59,3 +62,21 @@ func (e *ModelCallFailed) Code() string {
 }
 
 var stableModelCallCode = regexp.MustCompile(`^[a-z][a-z_]{0,39}$`)
+
+// ModelCallCodeInsufficientMemory is a machine declining a call for memory
+// (the Cockpit's modelcall.CodeInsufficientMemory).
+const ModelCallCodeInsufficientMemory = "insufficient_memory"
+
+// ModelCallNeverRan reports a machine stating that it handed this call to no
+// runtime, so the call may be offered to another machine.
+//
+// refused_before_start must never be guessed (node.proto), and this is not a
+// guess: the machine sends this one code from its admission gate and from nowhere
+// a runtime could have been reached. It is deliberately not a list of codes that
+// look safe. Any other code, a code this engine does not know, and an error that
+// is not a machine's all read as a call that may have run, which is the safe
+// reading: another machine is not tried.
+func ModelCallNeverRan(err error) bool {
+	var failed *ModelCallFailed
+	return errors.As(err, &failed) && failed.ErrorCode == ModelCallCodeInsufficientMemory
+}
