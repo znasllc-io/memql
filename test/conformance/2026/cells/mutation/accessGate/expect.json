@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@accessGate on a mutation takes keyword arguments"
+    },
+    {
+      "file": "without-a-deployable.memql",
+      "verdict": "refuse_load",
+      "message": "@accessGate requires both deployable= and gate= (deployable= is missing)"
+    },
+    {
+      "file": "with-requires-rank.memql",
+      "verdict": "refuse_load",
+      "message": "carries both @accessGate and @requiresRank",
+      "note": "@requiresCapability is refused the same way; @serverOnly is covered by the query cell."
+    }
+  ]
+}

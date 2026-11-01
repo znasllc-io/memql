@@ -8421,6 +8421,194 @@ func ShopifyqlBuild(args ShopifyqlArgs) string {
 	return b.String()
 }
 
+// SiteAccessCodeCreate -- Mint an access code for one gate of a deployable (design record 2026-10-29-deployable-access-codes).
+// THE CODE COMES BACK ONCE. It is in this reply and, if the operator copies it, wherever they put it; only its SHA-256 is stored, so nothing can ever read it back -- not an operator, not a support session, not a backup. A lost code is regenerated, never recovered.
+// EVERY GATE RUNS BEFORE ANYTHING IS MINTED, in the order a person would ask them: is there a deployable I can see, does it have an owner and a package deployable for a gate to be declared on (a system-owned site is exempt from the whole axis, as it is from preview), is the gate one that deployable declares, and are the label, the subject and the expiry inside their bounds. A refusal at any of them has written nothing and minted nothing.
+// THE ROW IS THE SITE'S, not the operator's: the integration writes as the site's owner and copies the site's organization onto the code, so the people who manage the deployable see every code minted against it, and the person who asked is recorded as the one who changed it.
+// Returns {codeId, code, expiresAt}.
+type SiteAccessCodeCreateArgs struct {
+	// The deployable the code opens a part of.
+	SiteId string
+	// The operator's name for the code, 1 to 80 characters. Never sent to a visitor.
+	Label string
+	// Which gate the code opens: one the deployable declares with @accessGate. siteAccessGates lists them.
+	Gate string
+	// Optional scope within the gate, at most 120 characters, stamped on the accessSubject argument of every gated construct that declares one. Empty for a gate that is not scoped to anyone.
+	Subject string
+	// When the code stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every code expires; there is no 'never'.
+	ExpiresAt string
+}
+
+// SiteAccessCodeCreate calls the engine builtin siteAccessCodeCreate.
+func (qc *QueryClient) SiteAccessCodeCreate(ctx context.Context, args SiteAccessCodeCreateArgs) (*Result, error) {
+	call := SiteAccessCodeCreateBuild(args)
+	return qc.executeNamed(ctx, "siteAccessCodeCreate", call)
+}
+
+func SiteAccessCodeCreateBuild(args SiteAccessCodeCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessCodeCreate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gate: ")
+	b.WriteString(quoteMemQL(args.Gate))
+	if args.Subject != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subject: ")
+		b.WriteString(quoteMemQL(args.Subject))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessCodeRegenerate -- Replace a code's secret, keeping everything else (design record 2026-10-29-deployable-access-codes).
+// THIS IS HOW A CODE IS REVOKED AND REPLACED IN ONE ACT. The id, label, gate and subject survive, so rows a product stamped with the id stay attached; the secret is replaced and the generation moves on, which ends every session opened under the old one at the next request. The previous code stops working and anyone using it is taken out now.
+// THE EXPIRY IS KEPT unless a new one is given, and an EXPIRED code cannot simply be regenerated into a code that is expired too: it needs a new expiry, which is what `expiresAt` is for here. Same reply shape as minting, and the same rule about the plain code appearing once.
+// A REMOVED CODE IS NOT REGENERATED. Removal is final: the refusal says to add a new code, and that is why nothing ever needs to clear `revokedAt`.
+// Returns {codeId, code, expiresAt}.
+type SiteAccessCodeRegenerateArgs struct {
+	// The access code to regenerate.
+	CodeId string
+	// A new expiry (RFC 3339), inside the same bounds as minting. Omit to keep the current one.
+	ExpiresAt string
+}
+
+// SiteAccessCodeRegenerate calls the engine builtin siteAccessCodeRegenerate.
+func (qc *QueryClient) SiteAccessCodeRegenerate(ctx context.Context, args SiteAccessCodeRegenerateArgs) (*Result, error) {
+	call := SiteAccessCodeRegenerateBuild(args)
+	return qc.executeNamed(ctx, "siteAccessCodeRegenerate", call)
+}
+
+func SiteAccessCodeRegenerateBuild(args SiteAccessCodeRegenerateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessCodeRegenerate(")
+	b.WriteString("codeId: ")
+	b.WriteString(quoteMemQL(args.CodeId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessCodeRemove -- End a code (design record 2026-10-29-deployable-access-codes).
+// A SOFT END, AND A BUILTIN RATHER THAN A PLAIN MUTATION so that it reaches the audit log with the other three acts. The row stays as the record that the code existed; every session opened with it stops being honoured at the next request. Removing a removed code is harmless.
+// Returns {codeId}.
+type SiteAccessCodeRemoveArgs struct {
+	// The access code to end.
+	CodeId string
+}
+
+// SiteAccessCodeRemove calls the engine builtin siteAccessCodeRemove.
+func (qc *QueryClient) SiteAccessCodeRemove(ctx context.Context, args SiteAccessCodeRemoveArgs) (*Result, error) {
+	call := SiteAccessCodeRemoveBuild(args)
+	return qc.executeNamed(ctx, "siteAccessCodeRemove", call)
+}
+
+func SiteAccessCodeRemoveBuild(args SiteAccessCodeRemoveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessCodeRemove(")
+	b.WriteString("codeId: ")
+	b.WriteString(quoteMemQL(args.CodeId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessCodeSetExpiry -- Move a code's expiry without changing the code (design record 2026-10-29-deployable-access-codes).
+// IT TAKES EFFECT ON THE NEXT REQUEST, shortened or extended, because validity is read from the row every time. An extended expiry REVIVES an expired code: nobody has to be handed a new one. Shortening reaches a session that is already open.
+// Returns {codeId, expiresAt}.
+type SiteAccessCodeSetExpiryArgs struct {
+	// The access code to re-time.
+	CodeId string
+	// The new expiry (RFC 3339), inside the same bounds as minting.
+	ExpiresAt string
+}
+
+// SiteAccessCodeSetExpiry calls the engine builtin siteAccessCodeSetExpiry.
+func (qc *QueryClient) SiteAccessCodeSetExpiry(ctx context.Context, args SiteAccessCodeSetExpiryArgs) (*Result, error) {
+	call := SiteAccessCodeSetExpiryBuild(args)
+	return qc.executeNamed(ctx, "siteAccessCodeSetExpiry", call)
+}
+
+func SiteAccessCodeSetExpiryBuild(args SiteAccessCodeSetExpiryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessCodeSetExpiry(")
+	b.WriteString("codeId: ")
+	b.WriteString(quoteMemQL(args.CodeId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessCodesForSite -- The access codes of a deployable, for the Access codes panel (design record 2026-10-29-deployable-access-codes).
+// IT IS A BUILTIN, NOT A QUERY, because the shared organization gate judges builtins and mutations and never a query: a client-callable list would let a person who held the part in one organization read the labels, hints and expiries of a site in another whose row tier admitted them. As a builtin it is judged against the site's organization exactly as minting is, and the handler reads the rows through siteAccessCodeRowsForSite -- a @serverOnly query -- with internal origin stamped and the caller's actor left untouched, so the tier still decides every row.
+// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed and when it was last opened. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the code: the handler fills it from the newest session of the code's CURRENT generation (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this decides neither.
+// Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.
+type SiteAccessCodesForSiteArgs struct {
+	// The deployable to list the codes of.
+	SiteId string
+}
+
+// SiteAccessCodesForSite calls the engine builtin siteAccessCodesForSite.
+func (qc *QueryClient) SiteAccessCodesForSite(ctx context.Context, args SiteAccessCodesForSiteArgs) (*Result, error) {
+	call := SiteAccessCodesForSiteBuild(args)
+	return qc.executeNamed(ctx, "siteAccessCodesForSite", call)
+}
+
+func SiteAccessCodesForSiteBuild(args SiteAccessCodesForSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessCodesForSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessGates -- The gates a deployable declares, for the Access codes panel's Add form (design record 2026-10-29-deployable-access-codes).
+// IT EXISTS SO THE FORM CAN OFFER ONLY WHAT WILL WORK. A gate is declared in DSL, with @accessGate, on constructs of the deployable's own package; whether a deployable has any, and whether a gate's constructs read `accessSubject` (so the form should ask for a subject at all), are facts about a loaded registry that no browser can know. An empty answer is the panel's cue to explain that an app opens a gate with @accessGate and to leave Add absent.
+// IT DECIDES NOTHING: minting re-checks the gate against the same registry, because a check only one caller runs is not a check.
+// One row per gate: {gate, usesSubject, constructs}.
+type SiteAccessGatesArgs struct {
+	// The deployable to list the gates of.
+	SiteId string
+}
+
+// SiteAccessGates calls the engine builtin siteAccessGates.
+func (qc *QueryClient) SiteAccessGates(ctx context.Context, args SiteAccessGatesArgs) (*Result, error) {
+	call := SiteAccessGatesBuild(args)
+	return qc.executeNamed(ctx, "siteAccessGates", call)
+}
+
+func SiteAccessGatesBuild(args SiteAccessGatesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessGates(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SiteArchive -- Archive one of the caller's standalone deployables (epic memql#4794, D10). Refuses unless the site is already OFFLINE (disabled) -- archiving is the end of a lifecycle, not a shortcut past taking it offline -- and unless confirmHostname matches the site's NAME: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404), stays listed behind the Archived filter, and STILL HOLDS ITS NAME -- siteDelete is the rung that releases it. A source's app is never archived; it is deactivated (packageDeactivateDeployable). Returns {siteId, hostname, status}. Refusals carry stable codes.
 type SiteArchiveArgs struct {
 	// The v1:platform:site row to archive.

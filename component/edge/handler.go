@@ -73,6 +73,10 @@ type Handler struct {
 	// first use, because a lazy build on a public, unauthenticated path is a
 	// data race with a public trigger.
 	shopperRate *shopperBucket
+	// accessRate holds the budgets in front of the access surface (access.go).
+	// Built once here for the reason shopperRate is: a lazy build on a public,
+	// unauthenticated path is a data race with a public trigger.
+	accessRate *accessLimits
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -94,6 +98,7 @@ func NewHandler(opts Options) *Handler {
 		previews:       newPreviewCache(),
 		hashCache:      newBundleCache(cspHashCacheBytes),
 		shopperRate:    newShopperBucket(shopperRatePerMinute()),
+		accessRate:     newAccessLimits(),
 	}
 }
 
@@ -294,6 +299,25 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 	if strings.HasPrefix(r.URL.Path, shopperFormPrefix) ||
 		strings.HasPrefix(r.URL.Path, shopperReadPrefix) {
 		h.serveShopperSurface(w, r, site)
+		return pathClassProxy
+	}
+
+	// THE ACCESS SURFACE (deployable access codes), beside the shopper's and for
+	// the same reason: it shares the /_memql/ marker, so left to fall through
+	// it would be forwarded as an ordinary API call or, with apiProxy off,
+	// answered 404 -- either way with no stamp, no rate limit and no size cap.
+	//
+	// BELOW the status switch and the preview substitution, which is what makes
+	// "a site taken offline while a visitor is inside" free: a disabled site
+	// has already been answered 503 and a draft or archived one 404 before
+	// this line, preview aside, with nothing forwarded for the bff to decide.
+	//
+	// THE CONDITION IS THE FOUR PAIRS, not the /_memql/access prefix. A prefix
+	// would make /_memql/access/x and /_memql/accessories this surface's, and
+	// they are the generic proxy's to answer exactly as they were before it
+	// existed. See access.go.
+	if _, ok := accessRouteFor(r.Method, r.URL.Path); ok {
+		h.serveAccessSurface(w, r, site)
 		return pathClassProxy
 	}
 

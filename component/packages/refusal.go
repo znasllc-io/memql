@@ -103,6 +103,25 @@ const (
 	// gates strict boot runs. Carries the construct-level errors boot would
 	// print.
 	CodeDslRefusesBoot = "dsl_refuses_boot"
+	// CodeDslAccessGateForeignDeployable (design record 2026-10-29, D5): a
+	// construct is gated with @accessGate naming a deployable this package's
+	// manifest does not declare. A site opens a gate only for the deployable
+	// name its own package gave it, so the construct could only ever answer 404
+	// -- and a name that happens to match another product's deployable would be
+	// a gate cut into somebody else's app. Scoped to the construct's file, and
+	// fatal.
+	CodeDslAccessGateForeignDeployable = "dsl_access_gate_foreign_deployable"
+	// CodeDslAccessGateForeignDomain: the same rule's other half. A gated
+	// construct belongs to a package through the DSL domain of the concept it
+	// reads or writes, and a site opens it only when its package ships that
+	// domain (package.dslDomains). This one is bound to a concept of a domain
+	// the package does not ship -- an engine concept, or another package's -- so
+	// it could only ever answer 404. Scoped to the construct's file, and fatal.
+	//
+	// ITS OWN CODE rather than the deployable's, because the repair is a
+	// different line: there it is the deployable= an author typed, here it is
+	// which concept the construct is bound to.
+	CodeDslAccessGateForeignDomain = "dsl_access_gate_foreign_domain"
 
 	// -- source form (D1) --
 

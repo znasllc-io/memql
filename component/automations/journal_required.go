@@ -83,3 +83,13 @@ func (e *Executor) requireRunJournal(ctx context.Context, a *Automation, j *work
 	copy.required = r
 	return ctx, &copy, stop, r.failure()
 }
+
+// prepareDeployerFleetContract refuses @usesDeployerFleet where it cannot mean
+// anything safe. A before-write hook runs inside somebody's write, which must not
+// wait on a person's laptop (docs/superpowers/specs/2026-10-31-deployer-fleet-design.md, D12).
+func prepareDeployerFleetContract(a *Automation) error {
+	if a.UsesDeployerFleet && a.BeforeWrite != nil {
+		return fmt.Errorf("automation %s: @usesDeployerFleet cannot be used on a before-write hook", a.Name)
+	}
+	return nil
+}

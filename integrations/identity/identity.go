@@ -103,7 +103,8 @@ func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name: "transferRowOwnership",
-			Description: "Reassign every row one principal owns to another, optionally narrowed to " +
+			Description: "Reassign every row one principal owns to another, except a deployable's " +
+				"access codes and their sessions, optionally narrowed to " +
 				"one concept or one row. Cluster-owner only; audited on v1:identity:auditEvent. " +
 				"This is what makes rank-strict writes survivable: with peer rows read-only at " +
 				"every rung, an offboarded principal's rows are otherwise unwritable forever.",

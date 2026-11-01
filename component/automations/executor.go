@@ -583,6 +583,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// This allows automations to execute mutations without user authentication
 	ctx = contextWithSystemActor(ctx, automation.Name)
 
+	// Each automation decides for itself: this sets what it declared, or clears what
+	// a caller's run declared (component/memql/deployer_fleet.go, D11).
+	ctx = memql.ContextWithDeployerFleet(ctx, automation.UsesDeployerFleet, automation.Domain)
+
 	// Stamp Automation provenance on every row this run writes. The
 	// engine reads this off ctx and stores it on the row intrinsic
 	// (see component/provenance). Trigger = the event topic that

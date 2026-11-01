@@ -1,0 +1,18 @@
+/// Record a ticket under the code that opened the gate. accessCodeId is
+/// reserved, so the access handler stamps it and a caller cannot choose it;
+/// title is the caller's, and untrusted.
+@accessGate(deployable="client-desk", gate="dashboard")
+@actor
+mutation ticket recordTicketAccessGate {
+  args {
+    accessCodeId string!
+    title        string!
+  }
+  insert {
+    accept { title }
+    stamp {
+      accessCodeId: args.accessCodeId
+      ownerUserId:  actor.userId
+    }
+  }
+}

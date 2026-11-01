@@ -974,6 +974,17 @@ const (
 	// record docs/superpowers/specs/2026-09-21-shopper-form-extension-design.md.
 	AttrShopperFormExtension = "shopperFormExtension"
 
+	// AttrAccessGate marks a query or a mutation as something a site's access
+	// code can reach: the gate it belongs to, on the deployable it belongs to
+	// (@accessGate(deployable="client-desk", gate="dashboard")).
+	//
+	// It OPENS NO ENDPOINT. There is one engine-owned route family on a hosted
+	// site's own origin, and a visitor reaches nothing without a live session
+	// minted from a code an operator created; this only says which constructs a
+	// gate reaches. See the design record
+	// docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md.
+	AttrAccessGate = "accessGate"
+
 	// @noUnset("a", "b") declares the named payload fields ONE-WAY: a
 	// write may set them, and may change one non-empty value to another,
 	// but may never take a stored non-empty value back to empty. On the

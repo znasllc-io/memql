@@ -1,0 +1,10 @@
+/// The deployable named as a bare string rather than as deployable= and gate=.
+@accessGate("client-desk")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

@@ -7,12 +7,19 @@ import { usePaneActive } from "../paneActivity";
  *
  * The behaviour is the kit's `Dialog`, promoted from here on its second use
  * (epic memql#5414); this keeps Deployables' look and its pane activity. */
-export function DetailDialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function DetailDialog({ title, onClose, busy = false, children }: {
+  title: string;
+  onClose: () => void;
+  /** Its contents hold something that would be lost with it: Close and Escape wait. */
+  busy?: boolean;
+  children: ReactNode;
+}) {
   const active = usePaneActive();
   return (
     <Dialog
       title={title}
       onDismiss={onClose}
+      busy={busy}
       active={active}
       className="deployable-dialog"
       bodyClassName="deployable-dialog-body"

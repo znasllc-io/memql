@@ -1,0 +1,19 @@
+/// A gate on a construct with a rank floor. A visitor's call runs under the
+/// site owner's borrowed authority, a synthetic writer-role stand-in, so the
+/// floor would be judged against a role the author did not mean.
+@accessGate(deployable="client-desk", gate="dashboard")
+@requiresRank("admin")
+@actor
+mutation ticket recordTicketAccessGate {
+  args {
+    accessCodeId string!
+    title        string!
+  }
+  insert {
+    accept { title }
+    stamp {
+      accessCodeId: args.accessCodeId
+      ownerUserId:  actor.userId
+    }
+  }
+}

@@ -93,6 +93,17 @@ package memql
 // decision they are making. It is one sync.Map load behind a string
 // concatenation, on the hot path of every write in the installation; keeping it
 // that cheap is why the tier stores its marker where it does.
+//
+// A SECOND CLASS OF CONCEPT is withheld on the same argument, though it is not
+// staged: the ones no client reads (clientUnreadableConcepts, site_access_guards.go
+// -- the access codes and their sessions). The event this would publish flattens
+// the whole stored row into its envelope and retains it again under "payload", the
+// bus has no authorization hook, and an authored automation or an email rule can
+// trigger on the concept and have its run journal copy the row into a row a cluster
+// owner reads. The read clause refuses a client every read of those rows; this
+// refuses the bus the same, and for both emit sites at once. Cache invalidation is
+// not behind this function and is unaffected (see the comment at its call site in
+// executeWrite).
 func (e *MemQLEngine) withholdGraphWriteEvent(conceptName string) bool {
-	return e.conceptDataIsStaged(conceptName)
+	return conceptIsClientUnreadable(conceptName) || e.conceptDataIsStaged(conceptName)
 }

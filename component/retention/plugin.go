@@ -17,6 +17,10 @@ import (
 // Use the instance's existing archive destination; no per-node policy copy.
 const archiveContainerEnv = "MEMQL_AZURE_BLOB_CONTAINER"
 
+// maintenanceAutomation is the maintenance principal the pass runs as: the one the
+// hourly automation of the same name already runs under.
+const maintenanceAutomation = "retireDeclaredConceptVersions"
+
 type Integration struct {
 	context   memql.PluginContext
 	archive   Archive
@@ -54,6 +58,23 @@ func (i *Integration) sweep(ctx context.Context, args map[string]any, _ int) ([]
 	if i.context.BunDB == nil {
 		return nil, fmt.Errorf("concept retention database unavailable")
 	}
+	// THE PASS RUNS AS THE CLUSTER, WHOEVER ASKED. Each row is admitted before it is
+	// archived or deleted (AdmitSourceRow, the gate a read passes), and some concepts
+	// are unreadable to a client by any path -- the access codes and their sessions
+	// (clientUnreadableConcepts, component/memql) -- so a person at client origin,
+	// however senior, would have the first expired session of those refuse the whole
+	// batch, and the documented manual run would fail where the hourly one succeeds.
+	// The cluster-owner check above is what makes this elevation safe: only a caller
+	// who could already ask for the pass gets it, it is the same pass the hourly
+	// automation runs, and it reads nothing back to the caller beyond the report.
+	maintenance := auth.MaintenanceActor(maintenanceAutomation)
+	if maintenance == nil {
+		return nil, fmt.Errorf("concept retention has no maintenance principal")
+	}
+	if actor.UserId != maintenance.UserId && i.context.Logger != nil {
+		i.context.Logger.Info("concept retention sweep run by a person, as the maintenance principal", "caller", actor.UserId, "dryRun", dry)
+	}
+	ctx = auth.ContextWithAccess(ctx, maintenance)
 	s := Sweeper{DB: i.context.BunDB(), Concepts: i.context.Concepts, Admit: i.context.AdmitSourceRow, Invalidate: i.context.InvalidateConcept, Archive: i.archive, Container: i.container}
 	report, err := s.Run(ctx, dry)
 	if err != nil {

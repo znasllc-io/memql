@@ -274,6 +274,14 @@ var appPartGrants = map[string][]Role{
 	// names a v1:shopify:store row, so it carries `store` like every other act
 	// that does.
 	"app:deployables/preview": {RoleOwner, RoleDeveloper},
+	// Minting, regenerating, re-timing and removing a deployable's access
+	// codes (deployable access codes, design record 2026-10-29). Owner and
+	// developer, and a part of its own rather than a borrowed one for the
+	// reason `store` and `domains` are: it is a different consequence.
+	// Publishing changes what the public is served; a code lets a named
+	// visitor into part of a site the public cannot see, and ends them, and a
+	// person may be trusted to deploy without being trusted to do that.
+	"app:deployables/access": {RoleOwner, RoleDeveloper},
 	// Attaching the Shopify store a storefront fronts (memql#5541). Owner
 	// alone until v1:shopify:store took a read floor at developer (Connect
 	// Shopify, D3): before it, a developer holding the part would have been

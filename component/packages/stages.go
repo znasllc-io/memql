@@ -303,7 +303,7 @@ type Roller interface {
 // every DSL-consuming node, so performing one for a deploy that changed no DSL
 // would make an SPA-only redeploy the most disruptive thing a person can do --
 // the exact opposite of what D6 promises.
-func (d *Deps) stageAndRoll(ctx context.Context, snapshot *SourceSnapshot, rep *Report, out *DeployOutcome) (string, bool, error) {
+func (d *Deps) stageAndRoll(ctx context.Context, snapshot *SourceSnapshot, rep *Report, out *DeployOutcome, packageId, actorUserId string) (string, bool, error) {
 	if d.Stager == nil {
 		return "", false, refuse(CodeSourceUnreadable,
 			"this package ships DSL and this cluster has no DSL staging surface configured")
@@ -346,6 +346,9 @@ func (d *Deps) stageAndRoll(ctx context.Context, snapshot *SourceSnapshot, rep *
 	}
 
 	if err := d.Store.advance(ctx, out.DeploymentId, StatusRolling); err != nil {
+		return "", false, err
+	}
+	if err := d.recordDslDeployerBeforeStaging(ctx, packageId, actorUserId, declaresFleetWorkflows(rep)); err != nil {
 		return "", false, err
 	}
 	// THE POINTER FLIP COMES FIRST, THEN THE ROLL. A roll against an

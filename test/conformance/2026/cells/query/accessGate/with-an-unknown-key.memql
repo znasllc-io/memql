@@ -1,0 +1,10 @@
+/// The gate misspelled as gates=.
+@accessGate(deployable="client-desk", gates="dashboard")
+@actor
+query ticket openTicketsAccessGate {
+  args {
+    accessCodeId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId
+  paginate 20
+}

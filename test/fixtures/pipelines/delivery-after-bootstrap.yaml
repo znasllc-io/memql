@@ -105,6 +105,7 @@ pipeline:
       - integrations/release
       - integrations/shopify
       - integrations/email
+      - integrations/siteaccess
       - integrations/sitepreview
       - integrations/work
       - integrations/workbench
