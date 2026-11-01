@@ -13,8 +13,10 @@ package memql
 // The planner has already asked whether the machine is online. Admission then
 // asks three questions, each answered by a sentence in `considered`:
 //
-//  1. Memory. The model is already loaded, or the pool has room to load it
-//     with headroom. A machine that cannot load the model is ruled out.
+//  1. Memory. The pool has room for what the call still has to load, with the
+//     machine's reserve left free. This is the sum the machine's own gate runs
+//     (core/fleetmemory), so a machine admitted here is not one that declines
+//     the call once it arrives. A machine without room is ruled out.
 //  2. A free slot. Fewer calls are running than the ceiling the machine
 //     declared for the model.
 //  3. Not degraded. Its recent calls have not mostly failed, and it has not
@@ -43,6 +45,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/fleetmemory"
 )
 
 // The memory pool kinds a cockpit reports.
@@ -77,8 +80,9 @@ const (
 // reported it. The zero value is "not reported".
 type FleetCapacity struct {
 	MemoryTotalBytes uint64
-	// MemoryFreeBytes is what a NEW model could take now without swapping.
-	// Memory held by an idle loaded model is not in it; see ReclaimableBytes.
+	// MemoryFreeBytes is what a NEW model could take now without swapping, read
+	// as the machine's own gate reads it, and zero under memory pressure. Memory
+	// held by an idle loaded model is not in it; see ReclaimableBytes.
 	MemoryFreeBytes uint64
 	MemoryKind      string
 	Loaded          []FleetLoadedModel
@@ -129,8 +133,13 @@ func (c FleetCapacity) LoadedModel(model string) (FleetLoadedModel, bool) {
 	return FleetLoadedModel{}, false
 }
 
-// ReclaimableBytes is what idle loaded models hold. The runtime unloads an idle
+// ReclaimableBytes is what idle loaded models hold. The machine unloads an idle
 // model to make room for another, so this memory is available to a new load.
+//
+// KNOWN GAP: its gate unloads only models its own worker loaded, and the report
+// does not say which those are. A model someone loaded by hand counts here until
+// its keep-alive runs out, and a call admitted on it is declined after the gate's
+// 30-second wait and moves on.
 func (c FleetCapacity) ReclaimableBytes() uint64 {
 	var total uint64
 	for _, m := range c.Loaded {
@@ -226,11 +235,35 @@ func normalizeFleetModelId(id string) string {
 	return strings.TrimSuffix(id, ":latest")
 }
 
-// FleetMemoryHeadroom is what admission keeps free beyond a model's own need:
-// ten percent of it, and never less than a gigabyte, so the runtime's context
-// buffers and the machine's own work are not squeezed out by the load.
-func FleetMemoryHeadroom(need uint64) uint64 {
-	return max(need/10, 1<<30)
+// fleetMemoryVerdict is the memory question answered for one model on one machine.
+type fleetMemoryVerdict struct {
+	fits bool
+	// want is the room the machine needs, and idle the part of its room that idle
+	// models other than this one hold.
+	want, idle uint64
+}
+
+// memoryVerdict runs the machine's own sum on the machine's own report. Room is
+// what is free plus what idle models hold, because the machine unloads those
+// first; a model's own memory is not room for itself, since a call to it does not
+// unload it.
+func (c FleetCapacity) memoryVerdict(model string, need uint64) fleetMemoryVerdict {
+	total := c.MemoryTotalBytes
+	idle := c.ReclaimableBytes()
+	var resident uint64
+	if m, loaded := c.LoadedModel(model); loaded {
+		resident = m.SizeBytes
+		if m.ActiveCalls <= 0 {
+			idle -= m.SizeBytes
+		}
+	}
+	if !fleetmemory.CanFit(need, total) {
+		// Never admitted, however much of it is loaded, and the figure that says so
+		// is the whole model's.
+		return fleetMemoryVerdict{want: fleetmemory.RoomWanted(need, 0, total), idle: idle}
+	}
+	want := fleetmemory.RoomWanted(need, resident, total)
+	return fleetMemoryVerdict{fits: c.MemoryFreeBytes+idle >= want, want: want, idle: idle}
 }
 
 // The kinds of admission verdict.
@@ -249,8 +282,10 @@ type FleetAdmissionInput struct {
 	MaxConcurrent   uint32
 	Capacity        FleetCapacity
 	MemoryNeedBytes uint64
-	Health          FleetMachineHealth
-	Now             time.Time
+	// ContextTokens is the window the call would ask this machine to allocate.
+	ContextTokens int64
+	Health        FleetMachineHealth
+	Now           time.Time
 }
 
 // FleetAdmission is the verdict. The zero value admits.
@@ -266,17 +301,14 @@ type FleetAdmission struct {
 // AdmitFleetMachine decides whether one machine may take one model call.
 func AdmitFleetMachine(in FleetAdmissionInput) FleetAdmission {
 	if in.Capacity.Fresh(in.Now) && in.MemoryNeedBytes > 0 {
-		if _, loaded := in.Capacity.LoadedModel(in.ModelId); !loaded {
-			want := in.MemoryNeedBytes + FleetMemoryHeadroom(in.MemoryNeedBytes)
-			idle := in.Capacity.ReclaimableBytes()
-			if room := in.Capacity.MemoryFreeBytes + idle; room < want {
-				have := formatFleetGB(in.Capacity.MemoryFreeBytes) + " free"
-				if idle > 0 {
-					have += ", " + formatFleetGB(idle) + " more held by idle models"
-				}
-				return FleetAdmission{Refused: true, Kind: FleetAdmitMemory, Reason: fmt.Sprintf(
-					"not enough free memory to load %s (needs %s with headroom, %s)", in.ModelId, formatFleetGB(want), have)}
+		verdict := in.Capacity.memoryVerdict(in.ModelId, fleetmemory.ForContext(in.MemoryNeedBytes, in.ContextTokens))
+		if !verdict.fits {
+			have := formatFleetGB(in.Capacity.MemoryFreeBytes) + " free"
+			if verdict.idle > 0 {
+				have += ", " + formatFleetGB(verdict.idle) + " more held by idle models"
 			}
+			return FleetAdmission{Refused: true, Kind: FleetAdmitMemory, Reason: fmt.Sprintf(
+				"not enough free memory to load %s (needs %s with headroom, %s)", in.ModelId, formatFleetGB(verdict.want), have)}
 		}
 	}
 	if in.MaxConcurrent > 0 && in.ActiveCount >= int(in.MaxConcurrent) {
@@ -485,15 +517,23 @@ func ReadFleetMemoryNeeds(ctx context.Context, exec routeExecutor) (map[string]u
 	return FleetMemoryNeeds(catalogProfilesFromRows(modelPullRows(res.OutputPayload()))), nil
 }
 
-// FleetMemoryNeeds indexes catalog profiles by model.
+// FleetMemoryNeeds indexes catalog profiles by model. A model's need is the larger
+// of what the catalog states and what the machine's gate will estimate from the
+// file: the catalog is the reviewed figure, but below the gate's it would admit a
+// machine that then declines. A machine's real file may be a little off the
+// catalog's rounded size, which only matters when it is larger, by that little.
 func FleetMemoryNeeds(profiles []CatalogProfile) map[string]uint64 {
 	out := map[string]uint64{}
 	for _, p := range profiles {
 		if p.MemoryNeedBytes <= 0 {
 			continue
 		}
+		need := uint64(p.MemoryNeedBytes)
+		if p.SizeBytes > 0 {
+			need = max(need, fleetmemory.WorkingSet(uint64(p.SizeBytes)))
+		}
 		key := normalizeFleetModelId(p.ModelId)
-		out[key] = max(out[key], uint64(p.MemoryNeedBytes))
+		out[key] = max(out[key], need)
 	}
 	return out
 }
@@ -570,6 +610,15 @@ func FleetCapacityMachines(models []FleetModel, health FleetHealthIndex, now tim
 			}
 			if need := MemoryNeedFor(needs, o.id); need > 0 {
 				item["needBytes"] = need
+				// Admission's own verdict at the working context, so a page saying why
+				// a machine cannot take a model repeats it rather than working out a
+				// sum of its own that can drift from this one. Absent without a fresh
+				// report: unknown is not "does not fit".
+				if o.mm.Capacity.Fresh(now) {
+					verdict := o.mm.Capacity.memoryVerdict(o.id, need)
+					item["roomBytes"] = verdict.want
+					item["fits"] = verdict.fits
+				}
 			}
 			if o.mm.Capacity.Fresh(now) {
 				_, loaded := o.mm.Capacity.LoadedModel(o.id)

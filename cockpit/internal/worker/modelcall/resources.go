@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
+	"github.com/znasllc-io/memql/core/fleetmemory"
 )
-
-const gib = uint64(1 << 30)
 
 type memoryHeadroom struct {
 	Total, Available uint64
@@ -39,6 +39,19 @@ type hostResources struct {
 	// headroomWait is how long a call waits for memory; zero is
 	// defaultHeadroomWait.
 	headroomWait time.Duration
+}
+
+// readMemoryHeadroom reads the machine through the reader the capacity report uses,
+// so the engine and this gate judge one figure. The bound is for nvidia-smi: the
+// wait around this call has its own ceiling, and a hung tool must not outlast it.
+func readMemoryHeadroom() (memoryHeadroom, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	mem, err := capacity.ReadMemory(ctx)
+	if err != nil {
+		return memoryHeadroom{}, err
+	}
+	return memoryHeadroom{Total: mem.Total, Available: mem.Available, Pressure: mem.Pressure}, nil
 }
 
 // NewHostLimiter is the production limiter. NewLimiter remains the pure
@@ -78,33 +91,16 @@ type memoryRefusal struct{ detail string }
 
 func (e *memoryRefusal) Error() string { return e.detail }
 
-// workingSet is a conservative admission estimate, never reported as usage.
-// Declared peaks include temporary buffers. Ollama's actual file size gets an
-// eighth of itself, and at least 2 GiB, of context/compute headroom: the figure
-// that reproduces the catalog's residency at a 32K working context
-// (dsl/models/seeds.memql), which is what the engine admits on and what a machine
-// class is chosen by. A larger allowance refuses the catalog's own pick on the
-// class it is picked for: 25% plus 2 GiB put the 24 GB class's 27B past every
-// 24 GB card, permanently. Runtime resident bytes can raise this estimate.
-// Unknown runtimes still get exclusive admission and pressure protection, but
-// must declare a peak to protect a cold load in advance.
+// workingSet is what a call to this model is judged on. Declared peaks include
+// temporary buffers; otherwise Ollama's actual file size gets the estimate the
+// engine also uses (fleetmemory.WorkingSet). Runtime resident bytes can raise this
+// estimate. Unknown runtimes still get exclusive admission and pressure protection,
+// but must declare a peak to protect a cold load in advance.
 func workingSet(info models.Info) uint64 {
 	if info.PeakMemoryBytes != 0 {
 		return info.PeakMemoryBytes
 	}
-	if info.ModelBytes == 0 {
-		return 0
-	}
-	headroom := max(info.ModelBytes/8, 2*gib)
-	if info.ModelBytes > math.MaxUint64-headroom {
-		return math.MaxUint64
-	}
-	return info.ModelBytes + headroom
-}
-
-// memoryReserve is what admission leaves free on a pool of this size.
-func memoryReserve(total uint64) uint64 {
-	return min(4*gib, max(gib, total/16))
+	return fleetmemory.WorkingSet(info.ModelBytes)
 }
 
 func saturatedMultiply(a, b uint64) uint64 {
@@ -132,15 +128,7 @@ func requestMemory(info models.Info, start *memqlv1.ModelCallStart) models.Info 
 		peak = saturatedMultiply(peak, max(uint64(1), factor))
 		peak = saturatedMultiply(peak, uint64(max(1, payload.Image.Count)))
 	} else if info.Kind == models.KindOllama && info.PeakMemoryBytes == 0 {
-		contextTokens := start.GetParams().GetContextTokens()
-		if contextTokens > 32768 {
-			extra := saturatedMultiply(uint64((contextTokens-1)/32768), 2*gib)
-			if extra > math.MaxUint64-peak {
-				peak = math.MaxUint64
-			} else {
-				peak += extra
-			}
-		}
+		peak = fleetmemory.ForContext(peak, start.GetParams().GetContextTokens())
 	}
 	info.PeakMemoryBytes = peak
 	return info
@@ -154,7 +142,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 	if err != nil {
 		return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 	}
-	if peak := workingSet(info); peak > pool.Total || memoryReserve(pool.Total) > pool.Total-peak {
+	if !fleetmemory.CanFit(workingSet(info), pool.Total) {
 		return nil, &memoryRefusal{detail: fmt.Sprintf("model %q needs more memory than this machine can safely offer", info.ID)}
 	}
 	select {
@@ -236,7 +224,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		if err != nil {
 			return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 		}
-		reserve := memoryReserve(state.Total)
+		reserve := fleetmemory.Reserve(state.Total)
 		resident := uint64(0)
 		if info.Kind == models.KindOllama {
 			resident, err = ollamaResident(ctx, client, info)
@@ -245,7 +233,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			}
 		}
 		additional := wanted - min(wanted, resident)
-		if !state.Pressure && state.Available >= reserve && state.Available-reserve >= additional {
+		if !state.Pressure && state.Available >= fleetmemory.RoomWanted(wanted, resident, state.Total) {
 			r.owned[key] = info
 			if err := save(); err != nil {
 				return nil, err

@@ -18,6 +18,10 @@ available-memory measurement. This coordinates workers for one OS user, not
 unrelated applications or other OS users; those are accounted for by live
 headroom and pressure.
 
+The capacity report the engine chooses a machine from reads memory the same way and
+is judged by the same sum (`core/fleetmemory`), so a call the engine sends is one
+this admission takes on the same figures.
+
 On macOS, admission counts free, purgeable and pageable file-backed memory, and
 refuses warning/critical pressure. It keeps 1–4 GiB of additional headroom for the
 OS. Ollama's reported weight bytes receive an allowance of an eighth of themselves,

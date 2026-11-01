@@ -891,13 +891,15 @@ func (x *Register) GetCapacity() *Capacity {
 type Capacity struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The pool models load into: unified memory on Apple Silicon, the card's
-	// VRAM on a discrete GPU, system memory on a CPU-only machine.
+	// VRAM on a discrete GPU (the card with the least free, when there are
+	// several), system memory on a CPU-only machine.
 	MemoryTotalBytes uint64 `protobuf:"varint,1,opt,name=memory_total_bytes,json=memoryTotalBytes,proto3" json:"memory_total_bytes,omitempty"`
-	// What a NEW model could take from that pool now without swapping: on
-	// unified memory the smaller of the memory the OS reports available and
-	// the GPU's wired limit less what loaded models hold. Memory held by an
-	// IDLE loaded model is not counted here; it is on LoadedModel, so the
-	// engine can count it as reclaimable.
+	// What a NEW model could take from that pool now without swapping: the figure
+	// the machine's own memory gate finds, so the engine judges what the gate will.
+	// Zero under memory pressure, when the gate admits nothing. On unified memory
+	// it is also held to the GPU's wired limit less what loaded models hold. Memory
+	// held by an IDLE loaded model is not counted here; it is on LoadedModel, so
+	// the engine can count it as reclaimable.
 	MemoryFreeBytes uint64 `protobuf:"varint,2,opt,name=memory_free_bytes,json=memoryFreeBytes,proto3" json:"memory_free_bytes,omitempty"`
 	// "unified" | "vram" | "system". Any other word is stored as empty.
 	MemoryKind string `protobuf:"bytes,3,opt,name=memory_kind,json=memoryKind,proto3" json:"memory_kind,omitempty"`

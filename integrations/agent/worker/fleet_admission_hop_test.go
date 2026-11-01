@@ -77,7 +77,7 @@ func TestAdmissionIsDecidedFromTheRowOnAReplicaWithoutTheStream(t *testing.T) {
 
 	// The next report says the model is loaded: the same planner, still holding
 	// no stream, now admits it and the call crosses to the agent that does.
-	planner.candidates[0].Capacity = reportedCapacity(now, 1*gb, memqlengine.FleetLoadedModel{Model: model, SizeBytes: 20 * gb})
+	planner.candidates[0].Capacity = reportedCapacity(now, 2*gb, memqlengine.FleetLoadedModel{Model: model, SizeBytes: 20 * gb})
 	if _, err := fleet.Call(ctx, request); err != nil || calls != 1 || link.target != "agent-with-stream" {
 		t.Fatalf("a machine holding the model was not reached across the hop: err=%v calls=%d target=%q", err, calls, link.target)
 	}

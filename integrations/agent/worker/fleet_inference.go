@@ -185,7 +185,7 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 	// Capacity, under every route: a machine that cannot load the model now is
 	// ruled out with its reason, and a full or degraded one goes behind every
 	// machine that passes (fleet_admission.go).
-	plan = f.admit(ctx, plan, req.ModelId)
+	plan = f.admit(ctx, plan, req)
 	if len(plan.Candidates) == 0 {
 		return memqlengine.FleetCallResult{}, &memqlengine.FleetUnavailable{
 			ModelId:    req.ModelId,

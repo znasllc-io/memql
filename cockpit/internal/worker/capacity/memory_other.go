@@ -2,8 +2,13 @@
 
 package capacity
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
-// probeMemory measures nothing on a platform this package does not probe, so
+// ReadMemory measures nothing on a platform this package does not probe, so
 // the machine sends no report and is admitted on its slots alone.
-func probeMemory(context.Context) (Memory, bool) { return Memory{}, false }
+func ReadMemory(context.Context) (Memory, error) {
+	return Memory{}, errors.New("local inference memory admission is unsupported on this platform")
+}

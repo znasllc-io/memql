@@ -7,6 +7,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
 // contextStartForCandidate separates the exact routing requirement from the
@@ -19,12 +20,43 @@ import (
 // bucket nor its cap may reduce that floor. Copy the envelope so before-start
 // fallback can allocate independently for its next candidate.
 func contextStartForCandidate(req memqlengine.FleetCallRequest, cand Candidate, start *memqlv1.ModelCallStart) (*memqlv1.ModelCallStart, error) {
-	if req.ContextTokens <= 0 || (start.Kind != memqlengine.FleetKindChat && start.Kind != memqlengine.FleetKindVision) {
+	if !allocatesContext(req, start.Kind) {
 		return start, nil
 	}
+	window, err := allocatedContextWindow(req, cand)
+	if err != nil {
+		return nil, err
+	}
+	allocated := proto.Clone(start).(*memqlv1.ModelCallStart)
+	allocated.Params.ContextTokens = int64(window) // buildStart always supplies params
+	return allocated, nil
+}
+
+// contextTokensForCandidate is the window this call would ask this machine for,
+// which is the figure the machine's memory gate charges for. Admission weighs the
+// same one before any machine is tried. A machine that cannot allocate the window
+// is refused before start whatever this says, so the call's own figure stands.
+func contextTokensForCandidate(req memqlengine.FleetCallRequest, cand Candidate) int64 {
+	kind := req.Kind
+	if kind == "" {
+		kind = workerservice.ModelCallKindChat
+	}
+	if allocatesContext(req, kind) {
+		if window, err := allocatedContextWindow(req, cand); err == nil {
+			return int64(window)
+		}
+	}
+	return int64(req.ContextTokens)
+}
+
+func allocatesContext(req memqlengine.FleetCallRequest, kind string) bool {
+	return req.ContextTokens > 0 && (kind == memqlengine.FleetKindChat || kind == memqlengine.FleetKindVision)
+}
+
+func allocatedContextWindow(req memqlengine.FleetCallRequest, cand Candidate) (int, error) {
 	attrs, ok := cand.ModelAttributesFor(req.ModelId)
 	if !ok || attrs.ContextWindow < req.ContextTokens {
-		return nil, fmt.Errorf("machine %s cannot allocate required context %d (advertised %d)", cand.Label(), req.ContextTokens, attrs.ContextWindow)
+		return 0, fmt.Errorf("machine %s cannot allocate required context %d (advertised %d)", cand.Label(), req.ContextTokens, attrs.ContextWindow)
 	}
 	window := 1
 	for window < req.ContextTokens {
@@ -38,7 +70,5 @@ func contextStartForCandidate(req memqlengine.FleetCallRequest, cand Candidate, 
 	}
 	// No universal 32K floor: curated models budget different working windows,
 	// and custom/small-machine models need only the next bucket above the call.
-	allocated := proto.Clone(start).(*memqlv1.ModelCallStart)
-	allocated.Params.ContextTokens = int64(window) // buildStart always supplies params
-	return allocated, nil
+	return window, nil
 }

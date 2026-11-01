@@ -63,7 +63,7 @@ func TestAdmissionPrefersAMachineWithAFreeSlot(t *testing.T) {
 	plan := f.admit(context.Background(), RoutePlan{Candidates: []Candidate{
 		admissionCandidate("busy", 1, 1, memqlengine.FleetCapacity{}),
 		admissionCandidate("free", 0, 1, memqlengine.FleetCapacity{}),
-	}}, "qwen3.8:27b")
+	}}, memqlengine.FleetCallRequest{ModelId: "qwen3.8:27b"})
 	if len(plan.Candidates) != 1 || plan.Candidates[0].RegistrationId != "free" {
 		t.Fatalf("candidates %v, want only the machine with a free slot", plan.Candidates)
 	}
@@ -80,23 +80,23 @@ func TestAdmissionKeepsFullMachinesWhenNoneIsFree(t *testing.T) {
 	plan := f.admit(context.Background(), RoutePlan{Candidates: []Candidate{
 		admissionCandidate("a", 2, 2, memqlengine.FleetCapacity{}),
 		admissionCandidate("b", 1, 1, memqlengine.FleetCapacity{}),
-	}}, "m")
+	}}, memqlengine.FleetCallRequest{ModelId: "m"})
 	if len(plan.Candidates) != 2 || len(plan.Rejected) != 0 {
 		t.Fatalf("candidates %v rejected %v, want both full machines kept", plan.Candidates, plan.Rejected)
 	}
 }
 
 // A machine without room for the model is ruled out with the figures; one
-// that already holds the model is admitted whatever it has free.
+// that already holds the model needs only the reserve free (2 GiB of 32).
 func TestAdmissionRulesOutAMachineWithoutMemory(t *testing.T) {
 	now := time.Now()
 	store := &capacityStore{needs: memqlengine.FleetMemoryNeeds([]memqlengine.CatalogProfile{{ModelId: "qwen3.8:27b", MemoryNeedBytes: int64(20 * gb)}})}
 	f := admissionUnderTest(store, now)
 	plan := f.admit(context.Background(), RoutePlan{Candidates: []Candidate{
 		admissionCandidate("small", 0, 2, reportedCapacity(now, 9*gb)),
-		admissionCandidate("holds-it", 0, 2, reportedCapacity(now, 1*gb, memqlengine.FleetLoadedModel{Model: "qwen3.8:27b", SizeBytes: 20 * gb, ActiveCalls: 1})),
+		admissionCandidate("holds-it", 0, 2, reportedCapacity(now, 2*gb, memqlengine.FleetLoadedModel{Model: "qwen3.8:27b", SizeBytes: 20 * gb, ActiveCalls: 1})),
 		admissionCandidate("silent", 0, 2, memqlengine.FleetCapacity{}),
-	}}, "qwen3.8:27b")
+	}}, memqlengine.FleetCallRequest{ModelId: "qwen3.8:27b"})
 	var kept []string
 	for _, c := range plan.Candidates {
 		kept = append(kept, c.RegistrationId)
@@ -111,12 +111,54 @@ func TestAdmissionRulesOutAMachineWithoutMemory(t *testing.T) {
 
 	// The only machine has no room: the plan is empty, so the call is refused
 	// naming the reason rather than sent to swap.
-	plan = f.admit(context.Background(), RoutePlan{Candidates: []Candidate{admissionCandidate("small", 0, 2, reportedCapacity(now, 9*gb))}}, "qwen3.8:27b")
+	plan = f.admit(context.Background(), RoutePlan{Candidates: []Candidate{admissionCandidate("small", 0, 2, reportedCapacity(now, 9*gb))}}, memqlengine.FleetCallRequest{ModelId: "qwen3.8:27b"})
 	if len(plan.Candidates) != 0 || plan.Rejected["small"] != want {
 		t.Fatalf("candidates %v rejected %v", plan.Candidates, plan.Rejected)
 	}
 	if store.reads != 1 {
 		t.Fatalf("the catalog was read %d times for two plans, want once", store.reads)
+	}
+}
+
+// Memory is judged at the window the machine would be asked to allocate, which is
+// the next power of two above what the call needs. The machine's gate charges
+// for that window, so judging the call's own figure would admit a call it then
+// declines. 32 GiB keeps a 2 GiB reserve: 20 GiB at 32K wants 22 free, and a
+// 64K window another 2.
+func TestAdmissionJudgesTheWindowTheMachineWouldBeAskedFor(t *testing.T) {
+	const model = "qwen3.8:27b"
+	now := time.Now()
+	store := &capacityStore{needs: memqlengine.FleetMemoryNeeds([]memqlengine.CatalogProfile{{ModelId: model, MemoryNeedBytes: int64(20 * gb)}})}
+	f := admissionUnderTest(store, now)
+	for _, tc := range []struct {
+		name     string
+		free     uint64
+		request  memqlengine.FleetCallRequest
+		rejected string
+	}{
+		{name: "a call that fits the baseline window", free: 22 * gb, request: memqlengine.FleetCallRequest{ModelId: model, ContextTokens: 32000}},
+		{
+			name:     "a call a little over it is asked for the whole next window",
+			free:     23 * gb,
+			request:  memqlengine.FleetCallRequest{ModelId: model, ContextTokens: 33000},
+			rejected: "not enough free memory to load qwen3.8:27b (needs 24 GB with headroom, 23 GB free)",
+		},
+		{
+			name:     "65537 tokens are charged as the 128K window a chat allocates",
+			free:     26 * gb,
+			request:  memqlengine.FleetCallRequest{ModelId: model, ContextTokens: 65537},
+			rejected: "not enough free memory to load qwen3.8:27b (needs 28 GB with headroom, 26 GB free)",
+		},
+		{name: "an embedding call allocates no window, so it is charged its own figure", free: 26 * gb, request: memqlengine.FleetCallRequest{ModelId: model, Kind: memqlengine.FleetKindEmbedding, ContextTokens: 65537}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := admissionCandidate("machine", 0, 2, reportedCapacity(now, tc.free))
+			machine.Labels = map[string]string{workerservice.ModelLabel(model): (ModelAttributes{ContextWindow: 262144}).String()}
+			plan := f.admit(context.Background(), RoutePlan{Candidates: []Candidate{machine}}, tc.request)
+			if got := plan.Rejected["machine"]; got != tc.rejected {
+				t.Fatalf("rejected %q, want %q", got, tc.rejected)
+			}
+		})
 	}
 }
 
@@ -127,7 +169,7 @@ func TestAdmissionWithoutSignalsAdmitsOnSlots(t *testing.T) {
 	f := admissionUnderTest(&plainStore{}, now)
 	plan := f.admit(context.Background(), RoutePlan{Candidates: []Candidate{
 		admissionCandidate("a", 0, 1, reportedCapacity(now, 1*gb)),
-	}}, "qwen3.8:27b")
+	}}, memqlengine.FleetCallRequest{ModelId: "qwen3.8:27b"})
 	if len(plan.Candidates) != 1 {
 		t.Fatalf("candidates %v rejected %v, want the machine admitted", plan.Candidates, plan.Rejected)
 	}
@@ -146,11 +188,11 @@ func TestAdmissionSetsADegradedMachineAside(t *testing.T) {
 	plan := f.admit(context.Background(), RoutePlan{Candidates: []Candidate{
 		admissionCandidate("flaky", 0, 2, memqlengine.FleetCapacity{}),
 		admissionCandidate("steady", 0, 2, memqlengine.FleetCapacity{}),
-	}}, "m")
+	}}, memqlengine.FleetCallRequest{ModelId: "m"})
 	if len(plan.Candidates) != 1 || plan.Candidates[0].RegistrationId != "steady" || plan.Rejected["flaky"] != "degraded: 5 of its last 5 calls failed" {
 		t.Fatalf("candidates %v rejected %v", plan.Candidates, plan.Rejected)
 	}
-	plan = f.admit(context.Background(), RoutePlan{Candidates: []Candidate{admissionCandidate("flaky", 0, 2, memqlengine.FleetCapacity{})}}, "m")
+	plan = f.admit(context.Background(), RoutePlan{Candidates: []Candidate{admissionCandidate("flaky", 0, 2, memqlengine.FleetCapacity{})}}, memqlengine.FleetCallRequest{ModelId: "m"})
 	if len(plan.Candidates) != 1 {
 		t.Fatal("a degraded machine that is the only one was dropped; its fleet could never recover")
 	}
