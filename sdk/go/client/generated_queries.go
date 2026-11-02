@@ -6945,6 +6945,31 @@ func PipelineChannelsForOwnerBuild(args PipelineChannelsForOwnerArgs) string {
 	return "query pipelineChannelsForOwner()"
 }
 
+// PipelineDeploymentsForOwner -- The caller's deployments, newest first, optionally narrowed to one pipeline.
+//
+// Bound concept: v1:pipelines:deployment (machine-readable: BoundConcepts["pipelineDeploymentsForOwner"] in generated_concepts.go).
+type PipelineDeploymentsForOwnerArgs struct {
+	// The pipeline to narrow to. Absent lists every pipeline's deployments.
+	PipelineId string
+}
+
+// PipelineDeploymentsForOwner calls the engine query pipelineDeploymentsForOwner.
+func (qc *QueryClient) PipelineDeploymentsForOwner(ctx context.Context, args PipelineDeploymentsForOwnerArgs) (*Result, error) {
+	call := PipelineDeploymentsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineDeploymentsForOwner", call)
+}
+
+func PipelineDeploymentsForOwnerBuild(args PipelineDeploymentsForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineDeploymentsForOwner(")
+	if args.PipelineId != "" {
+		b.WriteString("pipelineId: ")
+		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelineForOwner -- One of the caller's pipelines by id.
 //
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineForOwner"] in generated_concepts.go).
@@ -7028,6 +7053,31 @@ func (qc *QueryClient) PipelineRunsForOwner(ctx context.Context, args PipelineRu
 func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	var b strings.Builder
 	b.WriteString("query pipelineRunsForOwner(")
+	if args.PipelineId != "" {
+		b.WriteString("pipelineId: ")
+		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelineStandingForOwner -- The caller's standing rows: which repositories publish and deploy by themselves.
+//
+// Bound concept: v1:pipelines:standing (machine-readable: BoundConcepts["pipelineStandingForOwner"] in generated_concepts.go).
+type PipelineStandingForOwnerArgs struct {
+	// The pipeline to narrow to. Absent lists every pipeline's row.
+	PipelineId string
+}
+
+// PipelineStandingForOwner calls the engine query pipelineStandingForOwner.
+func (qc *QueryClient) PipelineStandingForOwner(ctx context.Context, args PipelineStandingForOwnerArgs) (*Result, error) {
+	call := PipelineStandingForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineStandingForOwner", call)
+}
+
+func PipelineStandingForOwnerBuild(args PipelineStandingForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineStandingForOwner(")
 	if args.PipelineId != "" {
 		b.WriteString("pipelineId: ")
 		b.WriteString(quoteMemQL(args.PipelineId))

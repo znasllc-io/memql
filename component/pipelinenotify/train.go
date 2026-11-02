@@ -45,12 +45,24 @@ const (
 	// TrainRetrying says a release from main is re-running its failed steps
 	// once. It asks nothing: if they pass, the message that follows says so.
 	TrainRetrying TrainEvent = "retrying"
+	// TrainPublished says a release from main is published.
+	TrainPublished TrainEvent = "published"
+	// The rest are a deployment's (design record 2026-11-02, section 7), which has a
+	// version and no branch.
+	DeployWaiting    TrainEvent = "deploy_waiting"
+	DeployCancelled  TrainEvent = "deploy_cancelled"
+	DeployStarted    TrainEvent = "deploy_started"
+	DeployDeployed   TrainEvent = "deployed"
+	DeployUnmerged   TrainEvent = "deployed_unmerged"
+	DeployRolledBack TrainEvent = "rolled_back"
+	DeployStopped    TrainEvent = "deploy_stopped"
 )
 
 // ActionNeeded reports whether the event asks something of the owner.
 func (e TrainEvent) ActionNeeded() bool {
 	switch e {
-	case TrainHeld, TrainAwaitingApproval, TrainReminder, TrainAdmissionHeld, TrainStalled:
+	case TrainHeld, TrainAwaitingApproval, TrainReminder, TrainAdmissionHeld, TrainStalled,
+		DeployWaiting, DeployCancelled, DeployUnmerged, DeployRolledBack, DeployStopped:
 		return true
 	}
 	return false
@@ -123,7 +135,9 @@ func TrainDiscordMessage(m TrainMessage) ([]byte, error) {
 	if hasPR {
 		train = markdownLink(branch, markdownDestination(prURL), discordFieldValueMax)
 	}
-	embed.Fields = append(embed.Fields, discordField{Name: "Train", Value: train})
+	if branch != "" {
+		embed.Fields = append(embed.Fields, discordField{Name: "Train", Value: train})
+	}
 	if v := escapeDiscord(oneLineText(m.Version)); v != "" {
 		embed.Fields = append(embed.Fields, discordField{Name: "Version", Value: fitRunes(v, discordFieldValueMax)})
 	}
@@ -184,6 +198,11 @@ type trainWords struct {
 	color                       int
 }
 
+const (
+	trainTodoDeploy = "Open Pipelines > Releases to deploy it, or leave it and the next release carries it."
+	trainTodoResume = "Automatic deploys are paused, because what caused this is still on main. Fix it, then press Resume in Pipelines > Releases."
+)
+
 const trainTodoHeldFromMain = "Push the fix to this release's branch, or re-run its run, and it goes on by itself. Close its pull request to cancel the release."
 
 const (
@@ -200,6 +219,25 @@ func trainCopy(m TrainMessage, branch string) (trainWords, error) {
 			return s
 		}
 		return fallback
+	}
+	version := "v" + strings.TrimPrefix(escapeDiscord(oneLineText(m.Version)), "v")
+	switch m.Event {
+	case TrainPublished:
+		return trainWords{headline: "Released " + version, description: or(reason, "The release is published."), color: trainColorLanded}, nil
+	case DeployStarted:
+		return trainWords{headline: "Deploying " + version, description: or(reason, "The pin passed its checks. Production is being updated."), color: trainColorDeparted}, nil
+	case DeployWaiting:
+		return trainWords{headline: "ACTION NEEDED: " + version + " waits for your Deploy button", description: or(reason, "This release needs you before it deploys."), todo: trainTodoDeploy, color: trainColorAction}, nil
+	case DeployCancelled:
+		return trainWords{headline: "ACTION NEEDED: " + version + " did not deploy", description: or(reason, "Production was not touched."), todo: trainTodoDeploy, color: trainColorAction}, nil
+	case DeployDeployed:
+		return trainWords{headline: "PASSED: " + version + " is deployed", description: or(reason, "Production is on this version and its checks passed."), color: trainColorLanded}, nil
+	case DeployUnmerged:
+		return trainWords{headline: "ACTION NEEDED: " + version + " is deployed, and main does not have its pin", description: or(reason, "Merge its pull request."), todo: trainTodoDeploy, color: trainColorAction}, nil
+	case DeployRolledBack:
+		return trainWords{headline: "ACTION NEEDED: " + version + " was rolled back", description: or(reason, "Production is back on what ran before."), todo: trainTodoResume, color: trainColorDropped}, nil
+	case DeployStopped:
+		return trainWords{headline: "ACTION NEEDED: " + version + " stopped partway", description: or(reason, "Production may be on either version."), todo: trainTodoResume, color: trainColorDropped}, nil
 	}
 	if m.FromMain {
 		switch m.Event {

@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"errors"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -66,6 +67,65 @@ const (
 // setting landing, and nothing asked a model (spec D9).
 const TrainAutomaticApprover = "policy:landing-automatic"
 
+// TrainReleaseRequest is a landed train asking the release integration for the next
+// step of publishing its commit. Authority is the owner's standing grant: a ceiling,
+// never a credential, which the callee rebuilds against the owner's current stored
+// role on every call (design record 2026-11-02-nightly-release-from-main-design.md, D9).
+type TrainReleaseRequest struct {
+	Profile, PipelineID, Repository, SHA, Version, IntentID, OwnerUserID string
+	Authority                                                            map[string]any
+	// Observe reads where the release stands and adopts a person's re-run, and starts
+	// no effect: what a held train asks.
+	Observe bool
+}
+
+// TrainReleaseStatus is where a train's release stands after one step.
+type TrainReleaseStatus struct {
+	IntentID, Phase, RunID, CandidateID, ApprovalID, ApprovedBy string
+	CatalogDigest, Tag, ReasonCode, Reason                      string
+	// Published: the release is sealed in the catalog.
+	Published bool
+	// BuildFailed: the release run failed, and a re-run of its failed steps can be adopted.
+	BuildFailed bool
+	// Stop: nothing here can go on; a person must look.
+	Stop bool
+	// PublishStarted: this call started publishing, which goes on past the call.
+	PublishStarted bool
+}
+
+// ErrDeployBusy says an Application has another operation in progress.
+var ErrDeployBusy = errors.New("pipelines: the Application has another operation in progress")
+
+// DeployPinRequest asks for one release's pin on the installation's repository. Its
+// RequestID is what makes it safe to ask twice.
+type DeployPinRequest struct {
+	RequestID, CandidateID, CatalogDigest, ExpectedBase, OwnerUserID string
+	Authority                                                        map[string]any
+}
+
+// DeployPin is that pin: a commit on its own branch, with its pull request.
+type DeployPin struct {
+	ProposalID, PullRequestURL, Commit string
+	PullRequest                        int
+}
+
+// DeployRelease is one release in the catalog, as a deploy names it.
+type DeployRelease struct {
+	Version, Tag, SHA, CandidateID, CatalogDigest string
+}
+
+// DeployRequest names one sync of one Application.
+type DeployRequest struct {
+	Namespace, Name, UID, RequestID, Revision string
+}
+
+// DeployApplicationFacts report one Application and the sync that read them.
+type DeployApplicationFacts struct {
+	UID, Revision, Phase, Message, Health string
+	Mine, Pending, Succeeded, Partial     bool
+	Healthy, Settled                      bool
+}
+
 // defaultTrainRebuilds is the cap on rebuilds in one departure when the
 // settings name none: two, the owner's figure (spec section 6, step 6).
 const defaultTrainRebuilds = 2
@@ -83,6 +143,13 @@ type TrainSettings struct {
 	Source string
 	// Landing is TrainLandingAutomatic, or empty for the owner's approval.
 	Landing string
+	// ReleaseProfile names the release profile a landed train publishes under.
+	// Empty: a landed train stops at landed. It allows nothing by itself: the
+	// owner's standing row is what lets a train publish (section 6).
+	ReleaseProfile string
+	// Deployment says where a published release goes; nil for nowhere. The same
+	// holds: the owner's standing row is what lets it go there by itself.
+	Deployment *TrainDeployment
 }
 
 // FromMain reports a train that carries main as it stands, with no pull
@@ -92,11 +159,27 @@ func (s TrainSettings) FromMain() bool { return s.Source == TrainSourceMain }
 // LandsAutomatically reports a train that lands as soon as its run passes.
 func (s TrainSettings) LandsAutomatically() bool { return s.Landing == TrainLandingAutomatic }
 
+// TrainDeployment is one installation a repository's releases deploy to: its
+// repository, the ArgoCD Applications in the order they sync, the manifest stages
+// that verify a rollout from outside the cluster, and when an automatic deploy may
+// start.
+type TrainDeployment struct {
+	Repository   string
+	Applications []string
+	Namespace    string
+	VerifyStages []string
+	// WindowStart and WindowEnd are "HH:MM" in the train's TimeZone. They may
+	// cross midnight. Both empty: no automatic deploy can start.
+	WindowStart, WindowEnd string
+}
+
 var (
-	trainDepartureRe  = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
-	trainDiscordIDRe  = regexp.MustCompile(`^[0-9]{17,20}$`)
-	trainRepositoryRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
-	trainVersionRe    = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	trainDepartureRe   = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+	trainDiscordIDRe   = regexp.MustCompile(`^[0-9]{17,20}$`)
+	trainRepositoryRe  = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	trainVersionRe     = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	trainProfileRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	trainApplicationRe = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$`)
 )
 
 // ParseTrainSettings reads TrainSettingsVariable. An empty value is no trains
@@ -121,6 +204,17 @@ func ParseTrainSettings(raw string) (map[string]TrainSettings, error) {
 			MaxRebuilds        int      `json:"maxRebuilds"`
 			Source             string   `json:"source"`
 			Landing            string   `json:"landing"`
+			ReleaseProfile     string   `json:"releaseProfile"`
+			Deployment         *struct {
+				Repository   string   `json:"repository"`
+				Applications []string `json:"applications"`
+				Namespace    string   `json:"namespace"`
+				VerifyStages []string `json:"verifyStages"`
+				Window       *struct {
+					Start string `json:"start"`
+					End   string `json:"end"`
+				} `json:"window"`
+			} `json:"deployment"`
 		} `json:"repositories"`
 	}
 	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
@@ -181,6 +275,58 @@ func ParseTrainSettings(raw string) (map[string]TrainSettings, error) {
 		if landing == TrainLandingAutomatic && source != TrainSourceMain {
 			return nil, fmt.Errorf("%s: %s: landing %s requires source %s; pull requests on board land by the owner's approval", TrainSettingsVariable, repo, TrainLandingAutomatic, TrainSourceMain)
 		}
+		profile := strings.TrimSpace(e.ReleaseProfile)
+		if profile != "" && !trainProfileRe.MatchString(profile) {
+			return nil, fmt.Errorf("%s: %s: releaseProfile %q is not a release profile name", TrainSettingsVariable, repo, e.ReleaseProfile)
+		}
+		if profile != "" && landing != TrainLandingAutomatic {
+			return nil, fmt.Errorf("%s: %s: releaseProfile requires landing %s; a release follows a train that landed by itself", TrainSettingsVariable, repo, TrainLandingAutomatic)
+		}
+		var deployment *TrainDeployment
+		if e.Deployment != nil {
+			if profile == "" {
+				return nil, fmt.Errorf("%s: %s: deployment requires releaseProfile; a deploy follows a published release", TrainSettingsVariable, repo)
+			}
+			deployment = &TrainDeployment{
+				Repository:   strings.ToLower(strings.TrimSpace(e.Deployment.Repository)),
+				Applications: append([]string(nil), e.Deployment.Applications...),
+				Namespace:    strings.TrimSpace(e.Deployment.Namespace),
+				VerifyStages: append([]string(nil), e.Deployment.VerifyStages...),
+			}
+			if !trainRepositoryRe.MatchString(deployment.Repository) {
+				return nil, fmt.Errorf("%s: %s: deployment.repository %q must be owner/name", TrainSettingsVariable, repo, e.Deployment.Repository)
+			}
+			if len(deployment.Applications) == 0 || len(deployment.Applications) > 8 {
+				return nil, fmt.Errorf("%s: %s: deployment.applications must name one to eight ArgoCD Applications, in sync order", TrainSettingsVariable, repo)
+			}
+			seen := map[string]bool{}
+			for _, app := range deployment.Applications {
+				if !trainApplicationRe.MatchString(app) || seen[app] {
+					return nil, fmt.Errorf("%s: %s: deployment.applications entry %q is not a distinct Application name", TrainSettingsVariable, repo, app)
+				}
+				seen[app] = true
+			}
+			if deployment.Namespace == "" {
+				deployment.Namespace = "argocd"
+			}
+			if !trainApplicationRe.MatchString(deployment.Namespace) {
+				return nil, fmt.Errorf("%s: %s: deployment.namespace %q is not a namespace name", TrainSettingsVariable, repo, e.Deployment.Namespace)
+			}
+			if len(deployment.VerifyStages) == 0 || len(deployment.VerifyStages) > 8 {
+				return nil, fmt.Errorf("%s: %s: deployment.verifyStages must name one to eight stages of %s's manifest", TrainSettingsVariable, repo, deployment.Repository)
+			}
+			for _, stage := range deployment.VerifyStages {
+				if strings.TrimSpace(stage) == "" {
+					return nil, fmt.Errorf("%s: %s: deployment.verifyStages holds an empty name", TrainSettingsVariable, repo)
+				}
+			}
+			if w := e.Deployment.Window; w != nil {
+				if !trainDepartureRe.MatchString(w.Start) || !trainDepartureRe.MatchString(w.End) || w.Start == w.End {
+					return nil, fmt.Errorf("%s: %s: deployment.window needs a different HH:MM start and end", TrainSettingsVariable, repo)
+				}
+				deployment.WindowStart, deployment.WindowEnd = w.Start, w.End
+			}
+		}
 		out[repo] = TrainSettings{
 			Repository:         repo,
 			Enabled:            e.Enabled,
@@ -191,6 +337,8 @@ func ParseTrainSettings(raw string) (map[string]TrainSettings, error) {
 			MaxRebuilds:        rebuilds,
 			Source:             source,
 			Landing:            landing,
+			ReleaseProfile:     profile,
+			Deployment:         deployment,
 		}
 	}
 	return out, nil

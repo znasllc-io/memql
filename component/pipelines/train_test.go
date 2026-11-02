@@ -256,3 +256,35 @@ func numbersOf(cs []TrainCandidate) []int {
 	}
 	return out
 }
+
+func TestParseTrainDeploymentSettings(t *testing.T) {
+	base := func(extra string) string {
+		return `{"repositories":{"znasllc-io/memql":{"enabled":true,"departures":["21:00"],"timeZone":"America/Los_Angeles","channel":"c","source":"main","landing":"automatic"` + extra + `}}}`
+	}
+	settings, err := ParseTrainSettings(base(`,"releaseProfile":"engine","deployment":{"repository":"ZnasLLC-io/memql-znas","applications":["memql","znas-cloud"],"verifyStages":["deployment"],"window":{"start":"00:00","end":"07:00"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := settings["znasllc-io/memql"]
+	if s.ReleaseProfile != "engine" || s.Deployment == nil || s.Deployment.Repository != "znasllc-io/memql-znas" || s.Deployment.Namespace != "argocd" {
+		t.Fatalf("settings = %+v, deployment %+v", s, s.Deployment)
+	}
+	for _, tc := range []struct{ name, extra, want string }{
+		{"a profile that is not a name", `,"releaseProfile":"../x"`, "releaseProfile"},
+		{"a deployment with no profile", `,"deployment":{"repository":"a/b","applications":["x"],"verifyStages":["d"]}`, "requires releaseProfile"},
+		{"no applications", `,"releaseProfile":"engine","deployment":{"repository":"a/b","applications":[],"verifyStages":["d"]}`, "applications"},
+		{"the same application twice", `,"releaseProfile":"engine","deployment":{"repository":"a/b","applications":["x","x"],"verifyStages":["d"]}`, "distinct"},
+		{"no verification", `,"releaseProfile":"engine","deployment":{"repository":"a/b","applications":["x"],"verifyStages":[]}`, "verifyStages"},
+		{"a window of nothing", `,"releaseProfile":"engine","deployment":{"repository":"a/b","applications":["x"],"verifyStages":["d"],"window":{"start":"01:00","end":"01:00"}}`, "window"},
+		{"a window that is not a time", `,"releaseProfile":"engine","deployment":{"repository":"a/b","applications":["x"],"verifyStages":["d"],"window":{"start":"25:00","end":"01:00"}}`, "window"},
+		{"a key the parser does not know", `,"deployment":{"repository":"a/b","applications":["x"],"verifyStages":["d"],"prune":true}`, "unknown field"},
+	} {
+		if _, err := ParseTrainSettings(base(tc.extra)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want it to mention %q", tc.name, err, tc.want)
+		}
+	}
+	raw := `{"repositories":{"znasllc-io/memql":{"enabled":true,"departures":["21:00"],"timeZone":"UTC","channel":"c","releaseProfile":"engine"}}}`
+	if _, err := ParseTrainSettings(raw); err == nil || !strings.Contains(err.Error(), "landing") {
+		t.Errorf("a release without automatic landing was accepted: %v", err)
+	}
+}

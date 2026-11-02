@@ -260,7 +260,8 @@ func TestCompareCommitsReadsSubjectsAndTotal(t *testing.T) {
 
 func TestAddEmptyCommitKeepsTheTreeAndNeverForces(t *testing.T) {
 	hub := newHub().
-		json("/repos/acme/widget/commits/refs/heads/train-build/2026-11-02-1", http.StatusOK, `{"sha":"head1","commit":{"tree":{"sha":"tree1"}}}`).
+		json("/repos/acme/widget/git/ref/heads/train-build/2026-11-02-1", http.StatusOK, `{"object":{"sha":"head1"}}`).
+		json("/repos/acme/widget/git/commits/head1", http.StatusOK, `{"tree":{"sha":"tree1"}}`).
 		json("/repos/acme/widget/git/commits", http.StatusCreated, `{"sha":"new1"}`).
 		json("/repos/acme/widget/git/refs/heads/train-build/2026-11-02-1", http.StatusOK, `{}`)
 	sha, err := trainTestClient(t, hub).AddEmptyCommit(context.Background(), "tok", "acme", "widget", "train-build/2026-11-02-1", "chore: release")
@@ -271,12 +272,12 @@ func TestAddEmptyCommitKeepsTheTreeAndNeverForces(t *testing.T) {
 		t.Errorf("sha = %q", sha)
 	}
 	reqs := hub.seen()
-	if len(reqs) != 3 {
-		t.Fatalf("made %d requests, want 3", len(reqs))
+	if len(reqs) != 4 {
+		t.Fatalf("made %d requests, want 4", len(reqs))
 	}
 	var made, moved map[string]any
-	_ = json.Unmarshal([]byte(hub.bodies[reqs[1]]), &made)
-	_ = json.Unmarshal([]byte(hub.bodies[reqs[2]]), &moved)
+	_ = json.Unmarshal([]byte(hub.bodies[reqs[2]]), &made)
+	_ = json.Unmarshal([]byte(hub.bodies[reqs[3]]), &moved)
 	if made["tree"] != "tree1" || made["message"] != "chore: release" {
 		t.Errorf("commit body = %v", made)
 	}

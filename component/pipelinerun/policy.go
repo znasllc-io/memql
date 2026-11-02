@@ -173,13 +173,6 @@ func policyModeForEvent(ctx context.Context, snapshot *workflowhost.Snapshot, p 
 	if o.Event == pipelines.EventMergeGroup && mode != string(pipelines.ModeFull) {
 		return "", fmt.Errorf("merge-group validation requires full coverage")
 	}
-	// A train's check stands for the whole release: a train from main differs
-	// from main by one VERSION line, so the affected mode a policy gives a pull
-	// request would test nothing. A policy that declines the run still declines
-	// it (design record 2026-11-02-nightly-release-from-main-design.md, D4).
-	if mode != "" && pipelines.IsTrainEvent(o.Event, o.Branch) {
-		return pipelines.ModeFull, nil
-	}
 	return pipelines.Mode(mode), nil
 }
 

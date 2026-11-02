@@ -72,6 +72,15 @@ type trainRemote struct {
 	// that moved does; mergeAttempts counts the calls.
 	refuseMerges  bool
 	mergeAttempts int
+	// mergeRefusals makes GitHub refuse this many merges with 405, as it does a merge
+	// that caught main moving.
+	mergeRefusals int
+	// otherFiles answers CompareFiles for a head nothing else names.
+	otherFiles []string
+	// dirs answers DirectoryFiles, keyed ref then path; readied counts the drafts made
+	// ready.
+	dirs    map[string]map[string][]string
+	readied []int
 }
 
 // BranchHead answers a branch this fake moved, and otherwise what the run
@@ -317,7 +326,10 @@ func (r *trainRemote) CompareFiles(ctx context.Context, token, repository, base,
 			return append([]string(nil), r.prFiles[n]...), true, nil
 		}
 	}
-	return nil, true, nil
+	if base == head {
+		return nil, true, nil
+	}
+	return append([]string(nil), r.otherFiles...), true, nil
 }
 
 func (r *trainRemote) CompareCommits(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedCommit, int, error) {
@@ -370,6 +382,10 @@ func (r *trainRemote) MergePullRequest(ctx context.Context, token, repository st
 	if r.refuseMerges {
 		return "", &githubapp.StatusError{Status: http.StatusConflict, Endpoint: "/merge"}
 	}
+	if r.mergeRefusals > 0 {
+		r.mergeRefusals--
+		return "", &githubapp.StatusError{Status: http.StatusMethodNotAllowed, Endpoint: "/merge"}
+	}
 	pr := r.trainPRs[number]
 	if pr != nil && pr.open && r.raceMerge {
 		r.raceMerge = false
@@ -415,7 +431,22 @@ func (r *trainRemote) PullRequestState(ctx context.Context, token, repository st
 	if pr.open {
 		state = "open"
 	}
-	return githubapp.PullRequestObservation{Number: number, State: state, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
+	return githubapp.PullRequestObservation{Number: number, State: state, HeadRef: pr.head, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
+}
+
+func (r *trainRemote) DirectoryFiles(ctx context.Context, token, repository, ref, path string) ([]string, error) {
+	watchGitHubCall(r.t, ctx, "DirectoryFiles")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.dirs[ref][path]), nil
+}
+
+func (r *trainRemote) MarkPullRequestReady(ctx context.Context, token, repository string, number int) error {
+	watchGitHubCall(r.t, ctx, "MarkPullRequestReady")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.readied = append(r.readied, number)
+	return nil
 }
 
 func (r *trainRemote) OwnerLogin(ctx context.Context, credential, user, repository string) (string, error) {

@@ -41,6 +41,8 @@ type trainGitHub interface {
 	AddPullRequestLabels(ctx context.Context, token, repository string, number int, labels []string) error
 	PullRequestState(ctx context.Context, token, repository string, number int) (githubapp.PullRequestObservation, error)
 	OwnerLogin(ctx context.Context, credential, user, repository string) (string, error)
+	DirectoryFiles(ctx context.Context, token, repository, ref, path string) ([]string, error)
+	MarkPullRequestReady(ctx context.Context, token, repository string, number int) error
 }
 
 var errNoTrainGitHub = errors.New("pipelines: this node's GitHub port cannot build release trains")
@@ -51,6 +53,22 @@ func trainPort(d Deps) (trainGitHub, error) {
 		return nil, errNoTrainGitHub
 	}
 	return gh, nil
+}
+
+func (g *packagesGitHub) DirectoryFiles(ctx context.Context, token, repository, ref, path string) ([]string, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return nil, err
+	}
+	return c.DirectoryFiles(ctx, token, owner, name, ref, path)
+}
+
+func (g *packagesGitHub) MarkPullRequestReady(ctx context.Context, token, repository string, number int) error {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return err
+	}
+	return c.MarkPullRequestReady(ctx, token, owner, name, number)
 }
 
 func (g *packagesGitHub) TrainPullRequests(ctx context.Context, token, repository, base string) ([]githubapp.TrainPullRequest, error) {

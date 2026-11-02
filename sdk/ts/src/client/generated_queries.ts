@@ -6909,6 +6909,29 @@ QueryClient.prototype.pipelineChannelsForOwner = function (this: QueryClient, ar
   return this.executeNamed("pipelineChannelsForOwner", buildPipelineChannelsForOwner(args), opts);
 };
 
+/** The caller's deployments, newest first, optionally narrowed to one pipeline. */
+// Bound concept: v1:pipelines:deployment (machine-readable: BoundConcepts["pipelineDeploymentsForOwner"] in generated_concepts.ts).
+export interface PipelineDeploymentsForOwnerArgs {
+  /** The pipeline to narrow to. Absent lists every pipeline's deployments. */
+  pipelineId?: string;
+}
+
+export function buildPipelineDeploymentsForOwner(args: PipelineDeploymentsForOwnerArgs): string {
+  const parts: string[] = [];
+  if (args.pipelineId !== undefined) parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "query pipelineDeploymentsForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineDeploymentsForOwner(args: PipelineDeploymentsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineDeploymentsForOwner = function (this: QueryClient, args: PipelineDeploymentsForOwnerArgs = {} as PipelineDeploymentsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineDeploymentsForOwner", buildPipelineDeploymentsForOwner(args), opts);
+};
+
 /** One of the caller's pipelines by id. */
 // Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineForOwner"] in generated_concepts.ts).
 export interface PipelineForOwnerArgs {
@@ -6996,6 +7019,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: PipelineRunsForOwnerArgs = {} as PipelineRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
+};
+
+/** The caller's standing rows: which repositories publish and deploy by themselves. */
+// Bound concept: v1:pipelines:standing (machine-readable: BoundConcepts["pipelineStandingForOwner"] in generated_concepts.ts).
+export interface PipelineStandingForOwnerArgs {
+  /** The pipeline to narrow to. Absent lists every pipeline's row. */
+  pipelineId?: string;
+}
+
+export function buildPipelineStandingForOwner(args: PipelineStandingForOwnerArgs): string {
+  const parts: string[] = [];
+  if (args.pipelineId !== undefined) parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "query pipelineStandingForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineStandingForOwner(args: PipelineStandingForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineStandingForOwner = function (this: QueryClient, args: PipelineStandingForOwnerArgs = {} as PipelineStandingForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineStandingForOwner", buildPipelineStandingForOwner(args), opts);
 };
 
 /** The caller's release trains, most recently departed first, optionally narrowed to one pipeline. */

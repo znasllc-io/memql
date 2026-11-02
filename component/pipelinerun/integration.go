@@ -61,6 +61,10 @@ type Deps struct {
 	OpenMaintenanceGoal func(context.Context, MaintenanceRequest) (string, error)
 	Store               Store
 	GitHub              GitHub
+	// TrainReleaser and DeployEffects let a train go on past landing. Nil on a node
+	// wired with neither, and then it stops at landed (design record 2026-11-02).
+	TrainReleaser TrainReleaser
+	DeployEffects DeployEffects
 	Gate                Gate
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.

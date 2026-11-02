@@ -148,7 +148,10 @@ func (i *Integration) TrainTick(ctx context.Context) (TrainTickResult, error) {
 			trainLog(d).Warn("pipelines: a train step failed; the next tick tries again", "repository", repo, "error", err.Error())
 			res.Notes = append(res.Notes, repo+": "+err.Error())
 			i.noteTrainStall(ctx, d, s, p, err)
-		} else {
+		} else if acted {
+			// A tick that only waited out another's build lease says nothing about
+			// whether the step works: a build that fails on every lease must still
+			// reach the owner.
 			i.trainStalls.cleared(p.ID)
 		}
 		if departed {
@@ -156,6 +159,10 @@ func (i *Integration) TrainTick(ctx context.Context) (TrainTickResult, error) {
 		}
 		if acted {
 			res.Advanced++
+		}
+		if err := i.advanceDeployment(ctx, d, s, p); err != nil {
+			trainLog(d).Warn("pipelines: a deployment step failed; the next tick tries again", "repository", repo, "error", err.Error())
+			res.Notes = append(res.Notes, repo+": "+err.Error())
 		}
 	}
 	return res, nil
@@ -200,6 +207,16 @@ func (i *Integration) advanceTrain(ctx context.Context, d Deps, s pipelines.Trai
 	}
 	now := d.Now().UTC()
 	if cur == nil || cur.Finished() {
+		// A deploy restarts agent, which kills running CI, so nothing leaves under one.
+		if s.Deployment != nil {
+			dep, err := d.Store.LatestDeployment(memql.ContextWithFreshRead(ctx), p.ID)
+			if err != nil {
+				return false, false, err
+			}
+			if dep != nil && dep.Moving() {
+				return false, false, nil
+			}
+		}
 		t, ok, err := i.departScheduled(ctx, d, s, p, cur, now)
 		if err != nil || !ok {
 			return false, false, err
@@ -224,6 +241,8 @@ func (i *Integration) advanceTrain(ctx context.Context, d Deps, s pipelines.Trai
 		return true, false, i.awaitApproval(ctx, d, s, p, *cur, now)
 	case TrainLanding:
 		return true, false, i.land(ctx, d, s, p, *cur)
+	case TrainReleasing:
+		return true, false, i.advanceRelease(ctx, d, s, p, *cur, now)
 	}
 	return false, false, nil
 }
@@ -673,6 +692,9 @@ func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSetting
 // train, a pull request on board labelled train:hold rebuilds it without that
 // one, and a moved main rebuilds it (train_land.go).
 func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train) error {
+	if t.Landed() {
+		return i.observeHeldRelease(ctx, d, s, p, t)
+	}
 	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err

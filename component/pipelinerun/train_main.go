@@ -24,23 +24,60 @@ const (
 	// trainMainCommitsListed bounds the commits a train's pull request names, and
 	// how many a held train looks through for a place to start.
 	trainMainCommitsListed = 50
-	// trainLastLandedWindow is how far back a train looks for the last release. A
-	// landed train older than this reads as none: the next train releases main.
-	trainLastLandedWindow = 90 * 24 * time.Hour
+	// trainLandRetry is how long a train from main keeps asking GitHub to merge it
+	// when GitHub refuses. Main may move under it (D5), and GitHub answers a merge
+	// caught by that with 405 "Base branch was modified. Try again": a moment's race,
+	// not a reason to stop the night.
+	trainLandRetry = 5 * time.Minute
 )
 
-// lastLandedTrain is the newest train that landed, or nil.
-func lastLandedTrain(ctx context.Context, d Deps, p Pipeline) (*Train, error) {
-	trains, err := d.Store.TrainsSince(memql.ContextWithFreshRead(ctx), p.ID, d.Now().Add(-trainLastLandedWindow))
+// trainRunsWhole reports the run of a train from main, whose check stands for the
+// whole release: it differs from main by one VERSION line, so the affected mode a
+// policy gives a pull request would test nothing (design record
+// 2026-11-02-nightly-release-from-main-design.md, D4). A train of pull requests keeps
+// what the policy gives it: its triage reads a failure against its cars. Settings that
+// cannot be read change nothing here: such a train is not moving either.
+func trainRunsWhole(ctx context.Context, d Deps, o Opening, repository string) bool {
+	if !pipelines.IsTrainEvent(o.Event, o.Branch) || d.SystemVariable == nil {
+		return false
+	}
+	raw, err := d.SystemVariable(ctx, pipelines.TrainSettingsVariable)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	for n := range trains {
-		if trains[n].State == TrainLanded && trains[n].LandedSHA != "" {
-			return &trains[n], nil
+	settings, err := pipelines.ParseTrainSettings(raw)
+	if err != nil {
+		return false
+	}
+	return settings[normalizeRepository(repository)].FromMain()
+}
+
+// sinceLastRelease is where the last release's history stops: the commit it tested,
+// not the merge that landed it. A commit pushed while that run ran is an ancestor of
+// the merge and in no release (D5), so it must read as new.
+func sinceLastRelease(last *Train) string {
+	if last.HeadSHA != "" {
+		return last.HeadSHA
+	}
+	return last.LandedSHA
+}
+
+// commitsSinceLastRelease lists what main has that the last release did not test,
+// leaving out the merge that landed that release, which says nothing to a reader.
+func commitsSinceLastRelease(ctx context.Context, gh trainGitHub, token string, p Pipeline, last *Train, head string) ([]githubapp.ComparedCommit, int, error) {
+	commits, total, err := gh.CompareCommits(ctx, token, p.Repository, sinceLastRelease(last), head)
+	if err != nil {
+		return nil, 0, err
+	}
+	kept := make([]githubapp.ComparedCommit, 0, len(commits))
+	for _, c := range commits {
+		if c.SHA == last.LandedSHA {
+			total--
+			continue
 		}
+		kept = append(kept, c)
 	}
-	return nil, nil
+	return kept, total, nil
 }
 
 // buildFromMain makes the train branch from main's head and the version, and
@@ -56,12 +93,21 @@ func (i *Integration) buildFromMain(ctx context.Context, d Deps, s pipelines.Tra
 	if err != nil {
 		return err
 	}
-	last, err := lastLandedTrain(ctx, d, p)
+	last, err := d.Store.LastLandedTrain(memql.ContextWithFreshRead(ctx), p.ID)
 	if err != nil {
 		return err
 	}
-	if last != nil && last.LandedSHA == base {
-		return i.cancelBuild(ctx, d, s, gh, token, p, t, base, nil, "Nothing new on "+p.DefaultBranch+" since the last release.")
+	// A cancelled train that landed is a release that failed after landing and was
+	// replaced: the person starting this one wants it tried again, so nothing being
+	// new is no reason to stop.
+	if last != nil && last.State != TrainCancelled {
+		files, complete, err := gh.CompareFiles(ctx, token, p.Repository, sinceLastRelease(last), base)
+		if err != nil {
+			return err
+		}
+		if complete && len(files) == 0 {
+			return i.cancelBuild(ctx, d, s, gh, token, p, t, base, nil, "Nothing new on "+p.DefaultBranch+" since the last release.")
+		}
 	}
 
 	scratch := pipelines.TrainScratchBranch(t.Branch)
@@ -86,7 +132,7 @@ func (i *Integration) buildFromMain(ctx context.Context, d Deps, s pipelines.Tra
 	if last != nil {
 		// The list is for the reader. A comparison GitHub would not give is no
 		// reason to stop a release.
-		if commits, total, err = gh.CompareCommits(ctx, token, p.Repository, last.LandedSHA, base); err != nil {
+		if commits, total, err = commitsSinceLastRelease(ctx, gh, token, p, last, base); err != nil {
 			trainLog(d).Warn("pipelines: a train's commits were not listed", "repository", p.Repository, "branch", t.Branch, "error", err.Error())
 			commits, total = nil, 0
 		}
@@ -251,14 +297,14 @@ func (i *Integration) trainSuspects(ctx context.Context, d Deps, p Pipeline, t T
 	if err != nil {
 		return note(err)
 	}
-	last, err := lastLandedTrain(ctx, d, p)
+	last, err := d.Store.LastLandedTrain(memql.ContextWithFreshRead(ctx), p.ID)
 	if err != nil {
 		return note(err)
 	}
 	if last == nil {
 		return nil
 	}
-	commits, total, err := gh.CompareCommits(ctx, token, p.Repository, last.LandedSHA, t.BaseSHA)
+	commits, total, err := commitsSinceLastRelease(ctx, gh, token, p, last, t.BaseSHA)
 	if err != nil {
 		return note(err)
 	}

@@ -148,6 +148,13 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "selection",
 			"The pipeline DSL could not select stages for this run: %v.", err)
 	}
+	if len(run.OnlyStages) > 0 {
+		narrowed, err := pipelines.NarrowStages(stageSelection, run.OnlyStages)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "selection", "%v", err)
+		}
+		stageSelection = narrowed
+	}
 
 	var changed []string
 	changedKnown := false

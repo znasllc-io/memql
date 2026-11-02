@@ -218,30 +218,27 @@ func TestDeliveryPolicyRedeliveryUsesSavedPolicyWhenReplicaCannotLoadIt(t *testi
 // A train's check stands for the whole release (spec
 // 2026-11-02-nightly-release-from-main-design.md, D4): a train from main differs
 // from main by one VERSION line, so the policy's affected mode would test nothing.
-func TestATrainRunIsFullWhateverThePolicyAnswers(t *testing.T) {
-	snapshot, err := capturePipelinePolicy(context.Background(), Deps{}, testPipeline(DeliveryWebhook), prOpening())
-	if err != nil {
-		t.Fatal(err)
+func TestOnlyATrainFromMainRunsWhole(t *testing.T) {
+	settings := func(extra string) string {
+		return `{"repositories":{"acme/widget":{"enabled":true,"departures":["09:00"],"timeZone":"UTC","channel":"c"` + extra + `}}}`
 	}
 	for _, tc := range []struct {
-		name, branch string
-		want         pipelines.Mode
+		name     string
+		settings string
+		opening  Opening
+		want     bool
 	}{
-		{"a train", "train/2026-11-02-1", pipelines.ModeFull},
-		{"an ordinary pull request", "fix/badge", pipelines.ModeAffected},
+		{"a train from main", settings(`,"source":"main"`), Opening{Event: pipelines.EventPullRequest, Branch: "train/2026-11-02-1"}, true},
+		{"a train of pull requests keeps what the policy gives it", settings(""), Opening{Event: pipelines.EventPullRequest, Branch: "train/2026-11-02-1"}, false},
+		{"another pull request", settings(`,"source":"main"`), Opening{Event: pipelines.EventPullRequest, Branch: "fix/badge"}, false},
+		{"a push named like a train", settings(`,"source":"main"`), Opening{Event: pipelines.EventPush, Branch: "train/2026-11-02-1"}, false},
+		{"settings that do not parse", `{"repositories":`, Opening{Event: pipelines.EventPullRequest, Branch: "train/2026-11-02-1"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mode, err := policyModeForEvent(context.Background(), snapshot, testPipeline(DeliveryWebhook),
-				Opening{Event: pipelines.EventPullRequest, Branch: tc.branch, PullRequest: 7})
-			if err != nil || mode != tc.want {
-				t.Fatalf("mode = %q, %v; want %q", mode, err, tc.want)
+			d := Deps{SystemVariable: func(context.Context, string) (string, error) { return tc.settings, nil }}
+			if got := trainRunsWhole(context.Background(), d, tc.opening, "Acme/Widget"); got != tc.want {
+				t.Fatalf("trainRunsWhole = %v, want %v", got, tc.want)
 			}
 		})
-	}
-	// Only a pull request is a train: a push named like one keeps its own mode.
-	mode, err := policyModeForEvent(context.Background(), snapshot, testPipeline(DeliveryWebhook),
-		Opening{Event: pipelines.EventPush, Branch: "train/2026-11-02-1"})
-	if err != nil || mode != pipelines.ModeFull {
-		t.Fatalf("a push's mode = %q, %v", mode, err)
 	}
 }

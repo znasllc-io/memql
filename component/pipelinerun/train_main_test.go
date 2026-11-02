@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,6 +17,8 @@ func newMainTrainHarness(t *testing.T, extra string) *trainHarness {
 	t.Helper()
 	th := newTrainHarness(t)
 	th.settings = strings.Replace(trainSettingsJSON, `"enabled":true`, `"enabled":true,"source":"main"`+extra, 1)
+	// Main differs from the last release unless a test says otherwise.
+	th.remote.otherFiles = []string{"changed.go"}
 	return th
 }
 
@@ -305,9 +308,14 @@ func TestARefusedMergeHoldsATrainFromMainAndDoesNotRetryEveryMinute(t *testing.T
 	th.remote.mu.Lock()
 	th.remote.refuseMerges = true
 	th.remote.mu.Unlock()
+	// A refusal can be a moment's race with main, so it asks again for a while.
+	if got := th.next(t); got.State != TrainLanding {
+		t.Fatalf("after the first refusal: %+v", got)
+	}
+	th.clock = th.clock.Add(trainLandRetry)
 	got := th.next(t)
 	if got.State != TrainHeld || !strings.Contains(got.HeldReason, "would not merge") {
-		t.Fatalf("after the refusal: %+v", got)
+		t.Fatalf("after the refusals: %+v", got)
 	}
 	th.remote.mu.Lock()
 	attempts := th.remote.mergeAttempts
@@ -623,5 +631,123 @@ func TestAHeldReleaseRemindsAtTheNextDeparture(t *testing.T) {
 	th.next(t)
 	if n := remindersOf(); n != 1 {
 		t.Errorf("%d reminders after another tick, want still 1", n)
+	}
+}
+
+// The last release tagged the commit it tested, so a commit pushed during that run is
+// an ancestor of the merge that landed it and in no release. It must read as new, and
+// a merge that added nothing must not.
+func TestNothingNewCountsFromTheTestedCommitNotTheMerge(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files []string
+		want  string
+	}{
+		{"the merge added nothing", []string{}, TrainCancelled},
+		{"a commit landed during the last run", []string{"pushed-meanwhile.go"}, TrainRunning},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newMainTrainHarness(t, "")
+			th.landedEarlier(t, baseSHA, "0.31.4")
+			if err := th.store.UpdateTrain(context.Background(), th.p.OwnerUserID, "landed-yesterday", TrainPatch{HeadSHA: ptr("tested")}); err != nil {
+				t.Fatal(err)
+			}
+			th.remote.shaFiles[baseSHA] = tc.files
+			th.tick(t)
+			if tr := th.train(t); tr.State != tc.want {
+				t.Fatalf("state = %s (%s), want %s", tr.State, tr.HeldReason, tc.want)
+			}
+		})
+	}
+}
+
+// A release that failed after landing and was replaced has landed, and its head is
+// where main is. The person who started a new one wants it tried again.
+func TestAReplacedReleaseIsNotNothingNew(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	th.landedEarlier(t, baseSHA, "0.31.4")
+	if err := th.store.UpdateTrain(context.Background(), th.p.OwnerUserID, "landed-yesterday", TrainPatch{State: ptr(TrainCancelled)}); err != nil {
+		t.Fatal(err)
+	}
+	th.remote.otherFiles = nil
+	th.tick(t)
+	if tr := th.train(t); tr.State != TrainRunning || tr.Version != "0.31.5" {
+		t.Fatalf("after a replaced release: %s (%s), version %s", tr.State, tr.HeldReason, tr.Version)
+	}
+}
+
+// GitHub answers 405 "Base branch was modified" to a merge that caught main moving,
+// and main moving is the ordinary case for a train from main.
+func TestALandingAsksAgainWhenGitHubRefusesAMoment(t *testing.T) {
+	th := newMainTrainHarness(t, `,"landing":"automatic"`)
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionSuccess)
+	th.remote.mergeRefusals = 2
+	th.tick(t)
+	if got := th.train(t); got.State != TrainLanding || got.HeldReason != "" {
+		t.Fatalf("after one refusal: %s (%s)", got.State, got.HeldReason)
+	}
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainLanding {
+		t.Fatalf("after two refusals: %s (%s)", got.State, got.HeldReason)
+	}
+	th.clock = th.clock.Add(time.Minute)
+	th.tick(t)
+	if got := th.train(t); got.State != TrainLanded {
+		t.Fatalf("once GitHub took it: %s (%s)", got.State, got.HeldReason)
+	}
+}
+
+func TestALandingHoldsWhenGitHubKeepsRefusing(t *testing.T) {
+	th := newMainTrainHarness(t, `,"landing":"automatic"`)
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionSuccess)
+	th.remote.mergeRefusals = 1000
+	th.tick(t)
+	th.clock = th.clock.Add(trainLandRetry + time.Second)
+	th.tick(t)
+	got := th.train(t)
+	if got.State != TrainHeld || !strings.Contains(got.HeldReason, "would not merge") {
+		t.Fatalf("after %s of refusals: %s (%s)", trainLandRetry, got.State, got.HeldReason)
+	}
+}
+
+// A push while it lands is why GitHub refuses, and that head has a run of its own.
+func TestALandingFollowsAPushInsteadOfAsking(t *testing.T) {
+	th := newMainTrainHarness(t, `,"landing":"automatic"`)
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionSuccess)
+	th.remote.mergeRefusals = 1
+	th.pushToBranch(tr.Branch, "fix1")
+	th.tick(t)
+	if got := th.train(t); got.State != TrainRunning || got.HeadSHA != "fix1" {
+		t.Fatalf("after a push during landing: %s at %s", got.State, got.HeadSHA)
+	}
+}
+
+// A build that fails on every lease spends the ticks between them waiting. Those say
+// nothing about whether it works, so they must not start the stall clock again.
+func TestABuildFailingOnEveryLeaseStillReachesTheOwner(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	th.tick(t)
+	if got := th.train(t); got.State == TrainBuilding {
+		t.Skip("this harness builds on the first tick")
+	}
+	th.remote.tokenErr = errors.New("the connection lost the repository")
+	if err := th.store.UpdateTrain(context.Background(), th.p.OwnerUserID, th.train(t).ID, TrainPatch{State: ptr(TrainBuilding), UpdatedAt: ptr(th.clock)}); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		th.clock = th.clock.Add(trainBuildLease + time.Second)
+		th.tick(t)
+		th.clock = th.clock.Add(time.Minute)
+		th.tick(t)
+	}
+	if got := strings.Join(th.messages(), "\n"); !strings.Contains(got, "stuck") {
+		t.Errorf("a build that failed for %s never told the owner: %s", 3*trainBuildLease, got)
 	}
 }

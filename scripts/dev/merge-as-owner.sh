@@ -123,7 +123,7 @@ function parse_arguments() {
 function report_policy() {
     log_step "Ruleset policy on ${REPO}"
 
-    local rs
+    local rs=""
     # The list form omits the rules and the bypass, and a repository may hold more
     # than one active ruleset: a no-bypass one forbids force pushes beside the one
     # that names the required checks, so the first active one proves nothing.

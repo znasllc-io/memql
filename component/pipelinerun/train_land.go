@@ -118,6 +118,16 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 		if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 			return err
 		}
+		if s.FromMain() {
+			// A person's push is why GitHub refused: that head has its own run.
+			if moved, err := i.followTrainHead(ctx, d, s, p, t, token); moved || err != nil {
+				return err
+			}
+			if d.Now().UTC().Sub(t.UpdatedAt) < trainLandRetry {
+				trainLog(d).Info("pipelines: GitHub refused a train's merge; the next tick asks again", "repository", p.Repository, "branch", t.Branch, "status", status)
+				return nil
+			}
+		}
 		return i.hold(ctx, d, s, p, t, fmt.Sprintf("GitHub would not merge the approved train (%d). Its head or main moved, or a rule refused it.", status), nil, "")
 	}
 	return i.recordLanded(ctx, d, s, p, t, gh, token, sha)
@@ -148,7 +158,13 @@ func (i *Integration) settleClosedTrain(ctx context.Context, d Deps, s pipelines
 // comment on each pull request on board naming the commit that boarded and
 // the merge commit, the branch deleted, and the landed message.
 func (i *Integration) recordLanded(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token, mergeSHA string) error {
-	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainLanded), LandedSHA: ptr(mergeSHA)})
+	state := TrainLanded
+	if releases, err := i.trainReleasesItself(ctx, d, s, p); err != nil {
+		return err
+	} else if releases {
+		state = TrainReleasing
+	}
+	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(state), LandedSHA: ptr(mergeSHA), HeldReason: ptr("")})
 	if err != nil || !ok {
 		return err
 	}
@@ -388,6 +404,44 @@ func (i *Integration) handleTrainExpress(ctx context.Context, args map[string]an
 		"pullRequest": t.PullRequest,
 		"onBoard":     boarded,
 	}), nil
+}
+
+// handleTrainStatus reads what the caller's repositories do by themselves.
+func (i *Integration) handleTrainStatus(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	rows, err := i.TrainStatus(handlerContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"repositories": rows}), nil
+}
+
+// handleTrainStanding sets the owner's standing word.
+func (i *Integration) handleTrainStanding(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	release, _ := args["release"].(bool)
+	deploy, _ := args["deploy"].(bool)
+	st, err := i.SetStanding(handlerContext(ctx), stringArg(args, "repository"), release, deploy)
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"repository": st.Repository, "release": st.Release, "deploy": st.Deploy, "setAt": formatTime(st.SetAt)}), nil
+}
+
+// handleDeployRelease is the owner's Deploy button.
+func (i *Integration) handleDeployRelease(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	dep, err := i.DeployRelease(handlerContext(ctx), stringArg(args, "repository"), stringArg(args, "version"))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"deploymentId": dep.ID, "version": dep.Version, "state": dep.State}), nil
+}
+
+// handleDeploymentResume lets automatic deploys go on.
+func (i *Integration) handleDeploymentResume(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	dep, err := i.ResumeDeployments(handlerContext(ctx), stringArg(args, "repository"))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"deploymentId": dep.ID, "version": dep.Version, "state": dep.State}), nil
 }
 
 // intListArg reads a list of whole numbers: the engine hands a JSON number

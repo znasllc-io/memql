@@ -96,6 +96,39 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "trainStatus",
+			Description: "What each of the caller's repositories does by itself (design record 2026-11-02): the settings that apply, the owner's standing word, and whether automatic deploys are paused. Reads only.",
+			Handler:     i.handleTrainStatus,
+			ArgsSchema:  map[string]string{},
+		},
+		{
+			Name:        "trainStanding",
+			Description: "The owner's standing word for one repository: whether a landed train publishes itself, and whether a published release deploys itself inside its window. Only the pipeline's owner in the owner role may give it; it records the authority they hold as a ceiling, never a credential, and refuses what the settings cannot do.",
+			Handler:     i.handleTrainStanding,
+			ArgsSchema: map[string]string{
+				"repository": "string (required) -- owner/name, configured in MEMQL_PIPELINES_TRAINS",
+				"release":    "bool (required) -- a landed train publishes itself",
+				"deploy":     "bool (required) -- a published release deploys itself inside its window",
+			},
+		},
+		{
+			Name:        "deployRelease",
+			Description: "The owner's Deploy button: put a published release on the installation, ignoring the window and acknowledging what makes it wait. A failure rolls back unless the release changes tables or data. The pipeline's owner only.",
+			Handler:     i.handleDeployRelease,
+			ArgsSchema: map[string]string{
+				"repository": "string (required) -- owner/name, configured in MEMQL_PIPELINES_TRAINS",
+				"version":    "string -- the version to deploy; absent is the newest published",
+			},
+		},
+		{
+			Name:        "deploymentResume",
+			Description: "Let automatic deploys go on after one went back. The pipeline's owner only.",
+			Handler:     i.handleDeploymentResume,
+			ArgsSchema: map[string]string{
+				"repository": "string (required) -- owner/name, configured in MEMQL_PIPELINES_TRAINS",
+			},
+		},
+		{
 			Name:        "connect",
 			Description: "Connect a pipeline to one of the caller's sources (D12, D14): prove the grant reaches the repository by minting a token through it, read memql-package.yaml at the default branch's head, refuse a source with no pipeline block (pipeline_not_declared) or one that does not validate, and create or reconnect the source's one pipeline. Answers {pipelineId, repository, delivery, compute, schedule, stages}.",
 			Handler:     i.handleConnect,

@@ -51,6 +51,7 @@ shape run pipelineRunFull {
   trigger
   rerunOf
   rerunFailedOnly
+  onlyStages
   deliveryId
   inboundRequestId
   pullRequest
@@ -120,8 +121,103 @@ shape train pipelineTrainFull {
   approvedSha
   landedSha
   heldReason
+  releaseIntentId
+  releaseRunId
+  releaseRetried
+  releaseCandidateId
+  releaseApprovalId
+  releaseApprovedBy
+  releaseCatalogDigest
+  publishAttempts
   notified
   departedAt
+  updatedAt
+}
+
+/// Every standing field: what the coordinator reads. Only it sees authority.
+@row
+shape standing pipelineStandingFull {
+  row.id
+  ownerUserId
+  accountId
+  pipelineId
+  repository
+  release
+  deploy
+  authority
+  setAt
+}
+
+/// What a person reads of a standing row. Never the authority.
+@row
+shape standing pipelineStandingView {
+  row.id
+  pipelineId
+  repository
+  release
+  deploy
+  setAt
+}
+
+/// Every deployment field: what the coordinator reads.
+@row
+shape deployment pipelineDeploymentFull {
+  row.id
+  ownerUserId
+  accountId
+  pipelineId
+  repository
+  version
+  tag
+  sha
+  candidateId
+  catalogDigest
+  trainId
+  trigger
+  requestedBy
+  authority
+  guards
+  acknowledged
+  state
+  installRepository
+  proposalId
+  pullRequest
+  pullRequestUrl
+  baseSha
+  pinSha
+  landedSha
+  applications
+  step
+  runId
+  reason
+  resumedBy
+  resumedAt
+  notified
+  stateSince
+  requestedAt
+  updatedAt
+}
+
+/// What a person reads of a deployment. Never the authority.
+@row
+shape deployment pipelineDeploymentView {
+  row.id
+  pipelineId
+  repository
+  version
+  tag
+  trigger
+  requestedBy
+  guards
+  acknowledged
+  state
+  installRepository
+  pullRequestUrl
+  pinSha
+  runId
+  reason
+  resumedAt
+  requestedAt
   updatedAt
 }
 

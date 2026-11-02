@@ -53,7 +53,10 @@ type Opening struct {
 	RerunOf string
 	// FailedOnly is a person's "Re-run failed": the new attempt runs only
 	// what RerunOf did not pass.
-	FailedOnly       bool
+	FailedOnly bool
+	// Stages limits the run to these manifest stages. A native caller's alone: a
+	// deploy's verification must not start what else a manual run would.
+	Stages           []string
 	DeliveryID       string
 	InboundRequestID string
 	// beforeCreate is a native caller's final local source/lease fence. It
@@ -171,6 +174,9 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		}
 		if mode == "" {
 			mode = m
+			if trainRunsWhole(ctx, d, o, p.Repository) {
+				mode = pipelines.ModeFull
+			}
 		}
 	}
 	if mode != pipelines.ModeFull && mode != pipelines.ModeAffected {
@@ -342,6 +348,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			// Only a re-run can carry anything over: an attempt a delivery
 			// or the poll opened has nothing before it to carry from.
 			RerunFailedOnly:  o.FailedOnly && o.isRerun(),
+			OnlyStages:       append([]string(nil), o.Stages...),
 			DeliveryID:       strings.TrimSpace(o.DeliveryID),
 			InboundRequestID: bareID(o.InboundRequestID),
 			PullRequest:      o.PullRequest,

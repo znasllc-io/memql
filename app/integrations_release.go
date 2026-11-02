@@ -5,7 +5,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/integrations/argocd"
 	"github.com/znasllc-io/memql/integrations/release"
 )
 
@@ -22,6 +25,21 @@ func (a *App) wireReleaseCandidates(uploader server.FileUploader, bucket string)
 	if pipelines := a.lookupPipelinesIntegration(); pipelines != nil {
 		if err := provider.ConfigureReleaseBuilds(pipelines); err != nil {
 			a.Logger.Error("release build host could not be configured", "error", err)
+		}
+		// A train goes on past landing, and a release onto the installation, only when
+		// the owner's standing row says so. This only makes the door exist.
+		pipelines.Configure(func(d *pipelinerun.Deps) {
+			d.TrainReleaser = provider
+			d.DeployEffects = provider
+		})
+	}
+	if deploycontrol.InClusterAvailable() {
+		if api, err := deploycontrol.NewClusterAPI(); err != nil {
+			a.Logger.Warn("this node cannot deploy: its cluster API is unavailable", "error", err)
+		} else if client, err := argocd.New(api); err != nil {
+			a.Logger.Warn("this node cannot deploy: its ArgoCD client is unavailable", "error", err)
+		} else if err := provider.ConfigureDeployCluster(client); err != nil {
+			a.Logger.Warn("this node cannot deploy", "error", err)
 		}
 	}
 	if err := provider.ConfigureInstallationHealth(a.installationMigrationHealth); err != nil {

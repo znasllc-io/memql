@@ -234,7 +234,10 @@ type Run struct {
 	// RerunFailedOnly: this attempt runs only what RerunOf did not pass
 	// (epic memql#5479); the driver carries the rest over as skipped
 	// pipeline_passed_earlier.
-	RerunFailedOnly  bool
+	RerunFailedOnly bool
+	// OnlyStages limits the run to these manifest stages: a deploy's verification,
+	// which must not start everything else a manual run would.
+	OnlyStages       []string
 	DeliveryID       string
 	InboundRequestID string
 	PullRequest      int
@@ -640,6 +643,8 @@ const (
 	TrainAwaitingApproval = "awaiting_approval"
 	TrainLanding          = "landing"
 	TrainLanded           = "landed"
+	TrainReleasing        = "releasing"
+	TrainPublished        = "published"
 	TrainHeld             = "held"
 	TrainCancelled        = "cancelled"
 )
@@ -672,14 +677,24 @@ type Train struct {
 	ApprovedSHA      string
 	LandedSHA        string
 	HeldReason       string
+	// What a landed train is publishing (design record 2026-11-02, section 6).
+	ReleaseIntentID, ReleaseRunID, ReleaseCandidateID, ReleaseApprovalID string
+	ReleaseApprovedBy, ReleaseCatalogDigest                              string
+	ReleaseRetried                                                       bool
+	PublishAttempts                                                      int
 	// Notified holds the <event>@<headSha> keys of the messages already sent.
 	Notified   []string
 	DepartedAt time.Time
 	UpdatedAt  time.Time
 }
 
-// Finished reports whether the train is history: landed or cancelled.
-func (t Train) Finished() bool { return t.State == TrainLanded || t.State == TrainCancelled }
+// Finished reports whether the train is history: landed, published or cancelled.
+func (t Train) Finished() bool {
+	return t.State == TrainLanded || t.State == TrainPublished || t.State == TrainCancelled
+}
+
+// Landed reports a train whose head reached the default branch, whatever came next.
+func (t Train) Landed() bool { return t.LandedSHA != "" }
 
 // TrainCar is one pull request on a train, at the commit it boarded with;
 // Reason says why it was dropped, for a dropped car.
@@ -691,11 +706,110 @@ type TrainCar struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// TrainStanding is the owner's standing word for one pipeline (spec D9): what its
+// trains and releases may do with nobody pressing anything, and the authority they do
+// it under.
+type TrainStanding struct {
+	ID, OwnerUserID, AccountID, PipelineID, Repository string
+	Release, Deploy                                    bool
+	Authority                                          map[string]any
+	SetAt                                              time.Time
+}
+
+// The states of a deployment.
+const (
+	DeploymentWaiting           = "waiting"
+	DeploymentPinning           = "pinning"
+	DeploymentSyncing           = "syncing"
+	DeploymentVerifying         = "verifying"
+	DeploymentLanding           = "landing"
+	DeploymentDeployed          = "deployed"
+	DeploymentRollingBack       = "rolling_back"
+	DeploymentVerifyingRollback = "verifying_rollback"
+	DeploymentRolledBack        = "rolled_back"
+	DeploymentStopped           = "stopped"
+	DeploymentCancelled         = "cancelled"
+)
+
+// The two ways a deployment starts.
+const (
+	DeploymentTriggerAutomatic = "automatic"
+	DeploymentTriggerButton    = "button"
+)
+
+// Deployment is one v1:pipelines:deployment row: one attempt to put one published
+// release on the installation.
+type Deployment struct {
+	ID, OwnerUserID, AccountID, PipelineID, Repository string
+	Version, Tag, SHA, CandidateID, CatalogDigest      string
+	TrainID, Trigger, RequestedBy                      string
+	Authority                                          map[string]any
+	Guards                                             []pipelines.DeployGuard
+	Acknowledged                                       bool
+	State, InstallRepository, ProposalID               string
+	PullRequest                                        int
+	PullRequestURL, BaseSHA, PinSHA, LandedSHA         string
+	Applications                                       []DeploymentApplication
+	Step                                               int
+	RunID, Reason, ResumedBy                           string
+	ResumedAt                                          time.Time
+	Notified                                           []string
+	StateSince, RequestedAt, UpdatedAt                 time.Time
+}
+
+// DeploymentApplication is one ArgoCD Application in a deployment: its identity, the
+// commit it ran before, and the sync in flight. StartedAt counts that sync's deadline.
+type DeploymentApplication struct {
+	Name      string    `json:"name"`
+	UID       string    `json:"uid,omitempty"`
+	Previous  string    `json:"previous,omitempty"`
+	Request   string    `json:"request,omitempty"`
+	Rollback  string    `json:"rollback,omitempty"`
+	StartedAt time.Time `json:"startedAt,omitzero"`
+}
+
+// Finished reports a deployment that has nothing more to do by itself.
+func (d Deployment) Finished() bool {
+	switch d.State {
+	case DeploymentDeployed, DeploymentRolledBack, DeploymentStopped, DeploymentCancelled:
+		return true
+	}
+	return false
+}
+
+// Moving reports a deployment that is changing, or may change, what production runs,
+// which restarts agent and kills running CI, so no train departs under it.
+func (d Deployment) Moving() bool { return !d.Finished() && d.State != DeploymentWaiting }
+
+// PausesAutomatic reports a deployment that went wrong and has not been resumed: the
+// bad change is still on main, so the next release would carry it again.
+func (d Deployment) PausesAutomatic() bool {
+	return (d.State == DeploymentRolledBack || d.State == DeploymentStopped) && d.ResumedAt.IsZero()
+}
+
+// DeploymentPatch is the fields one deployment step writes. A nil field is not written.
+type DeploymentPatch struct {
+	State, RequestedBy, Trigger, ProposalID, PullRequestURL *string
+	BaseSHA, PinSHA, LandedSHA, RunID, Reason, ResumedBy    *string
+	Guards                                                  *[]pipelines.DeployGuard
+	Acknowledged                                            *bool
+	Authority                                               *map[string]any
+	PullRequest, Step                                       *int
+	Applications                                            *[]DeploymentApplication
+	ResumedAt, StateSince, UpdatedAt                        *time.Time
+	Notified                                                *[]string
+}
+
 // TrainPatch is the fields one train transition writes. A nil field is not
 // written: updatePipelineTrain is a read-merge with no defaults.
 type TrainPatch struct {
 	State, Version, BaseSHA, HeadSHA, PullRequestURL, RunID *string
 	ApprovedBy, ApprovedSHA, LandedSHA, HeldReason          *string
+	ReleaseIntentID, ReleaseRunID, ReleaseCandidateID       *string
+	ReleaseApprovalID, ReleaseApprovedBy                    *string
+	ReleaseCatalogDigest                                    *string
+	ReleaseRetried                                          *bool
+	PublishAttempts                                         *int
 	OnBoard, Dropped                                        *[]TrainCar
 	LeftOff                                                 *[]pipelines.TrainSkip
 	PullRequest, Rebuilds                                   *int

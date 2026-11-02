@@ -29,6 +29,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/integrations/argocd"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -64,6 +65,7 @@ type Integration struct {
 	installation        atomic.Pointer[installation.Preparer]
 	installationHealth  atomic.Pointer[installationHealthBinding]
 	installationOverlay atomic.Pointer[overlayBinding]
+	deployCluster       atomic.Pointer[argocd.Client]
 	releaseBuild        atomic.Pointer[releaseBuildBinding]
 }
 

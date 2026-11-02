@@ -270,24 +270,34 @@ func (c *Client) AddEmptyCommit(ctx context.Context, bearer, owner, repo, branch
 	if err := checkBranchName(branch); err != nil {
 		return "", err
 	}
-	var head struct {
-		SHA    string `json:"sha"`
-		Commit struct {
-			Tree struct {
-				SHA string `json:"sha"`
-			} `json:"tree"`
-		} `json:"commit"`
+	// The git endpoints, not /commits: that one answers with every file's patch,
+	// which for a large head does not fit a default read (largeBody).
+	var ref struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
 	}
-	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/commits/"+escapePath("refs/heads/"+branch), bearer, &head); err != nil {
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/git/ref/heads/"+branch, bearer, &ref); err != nil {
 		return "", err
 	}
-	if head.SHA == "" || head.Commit.Tree.SHA == "" {
-		return "", errors.New("github: the branch's head names no commit or tree")
+	if ref.Object.SHA == "" {
+		return "", errors.New("github: the branch's head names no commit")
+	}
+	var head struct {
+		Tree struct {
+			SHA string `json:"sha"`
+		} `json:"tree"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/git/commits/"+ref.Object.SHA, bearer, &head); err != nil {
+		return "", err
+	}
+	if head.Tree.SHA == "" {
+		return "", errors.New("github: the branch's head names no tree")
 	}
 	var made struct {
 		SHA string `json:"sha"`
 	}
-	in := map[string]any{"message": message, "tree": head.Commit.Tree.SHA, "parents": []string{head.SHA}}
+	in := map[string]any{"message": message, "tree": head.Tree.SHA, "parents": []string{ref.Object.SHA}}
 	if _, err := c.callJSON(ctx, http.MethodPost, repoEndpoint(owner, repo)+"/git/commits", bearer, in, &made); err != nil {
 		return "", err
 	}
@@ -443,4 +453,58 @@ func escapeFilePath(p string) string {
 		parts[i] = url.PathEscape(s)
 	}
 	return strings.Join(parts, "/")
+}
+
+// DirectoryFiles lists the files directly in one directory at a ref: what is there,
+// read directly rather than from a comparison, which stops listing at 300 files. GitHub
+// answers at most 1000 entries for a directory, so one that long is refused rather than
+// read as complete.
+func (c *Client) DirectoryFiles(ctx context.Context, bearer, owner, repo, ref, path string) ([]string, error) {
+	var entries []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	endpoint := repoEndpoint(owner, repo) + "/contents/" + escapePath(path) + "?ref=" + url.QueryEscape(ref)
+	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &entries, largeBody); err != nil {
+		return nil, err
+	}
+	if len(entries) >= 1000 {
+		return nil, errors.New("github: the directory holds more files than one listing shows")
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Type == "file" {
+			names = append(names, entry.Name)
+		}
+	}
+	return names, nil
+}
+
+// MarkPullRequestReady takes a draft out of draft, which GitHub requires before it
+// merges one. A pull request that is not a draft is left alone.
+func (c *Client) MarkPullRequestReady(ctx context.Context, bearer, owner, repo string, number int) error {
+	var pr struct {
+		NodeID string `json:"node_id"`
+		Draft  bool   `json:"draft"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/pulls/"+strconv.Itoa(number), bearer, &pr); err != nil {
+		return err
+	}
+	if !pr.Draft {
+		return nil
+	}
+	if pr.NodeID == "" {
+		return errors.New("github: the pull request names no node id")
+	}
+	var result struct {
+		Errors []json.RawMessage `json:"errors"`
+	}
+	in := map[string]any{"query": queueReadyMutation, "variables": map[string]any{"input": map[string]any{"pullRequestId": pr.NodeID}}}
+	if _, err := c.callJSON(ctx, http.MethodPost, "/graphql", bearer, in, &result); err != nil {
+		return err
+	}
+	if len(result.Errors) != 0 {
+		return errors.New("github: the pull request could not be marked ready")
+	}
+	return nil
 }

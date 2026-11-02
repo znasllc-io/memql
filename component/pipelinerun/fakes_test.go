@@ -48,6 +48,9 @@ type memStore struct {
 	runs       map[string]Run
 	deliveries map[string]InboundDelivery
 
+	standings   map[string]TrainStanding
+	deployments map[string]Deployment
+
 	// channels is the notify stage's destinations (D16) by bare id, and
 	// channelOrder the order they were created in -- the DSL reads the newest
 	// of two rows sharing a name. files is the Library's files by bare id.
@@ -177,6 +180,144 @@ func (s *memStore) LatestTrain(ctx context.Context, pipelineID string) (*Train, 
 	return latest, nil
 }
 
+// Standing is pipelineStandingForPipeline's row.
+func (s *memStore) Standing(_ context.Context, pipelineID string) (*TrainStanding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.standings[bareID(pipelineID)]
+	if !ok {
+		return nil, nil
+	}
+	return &st, nil
+}
+
+// SetStanding is setPipelineStanding: an upsert, with the owner stamped.
+func (s *memStore) SetStanding(_ context.Context, owner string, st TrainStanding) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.standings == nil {
+		s.standings = map[string]TrainStanding{}
+	}
+	st.OwnerUserID = owner
+	s.standings[bareID(st.PipelineID)] = st
+	return nil
+}
+
+// LatestDeployment is pipelineDeploymentsForPipeline's first row.
+func (s *memStore) LatestDeployment(_ context.Context, pipelineID string) (*Deployment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest *Deployment
+	for _, dep := range s.deployments {
+		if dep.PipelineID != bareID(pipelineID) {
+			continue
+		}
+		if latest == nil || dep.RequestedAt.After(latest.RequestedAt) {
+			copy := cloneDeployment(dep)
+			latest = &copy
+		}
+	}
+	return latest, nil
+}
+
+// CreateDeployment is createPipelineDeployment: @createOnly("state"), so a second
+// create on the same id leaves its state alone.
+func (s *memStore) CreateDeployment(_ context.Context, owner string, dep Deployment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deployments == nil {
+		s.deployments = map[string]Deployment{}
+	}
+	dep.OwnerUserID = owner
+	if prior, ok := s.deployments[dep.ID]; ok {
+		dep.State = prior.State
+	}
+	s.deployments[dep.ID] = cloneDeployment(dep)
+	return nil
+}
+
+// UpdateDeployment is updatePipelineDeployment: the named fields of a row that exists.
+func (s *memStore) UpdateDeployment(_ context.Context, _ string, id string, patch DeploymentPatch) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dep, ok := s.deployments[id]
+	if !ok {
+		return fmt.Errorf("no deployment %q", id)
+	}
+	set := func(field *string, value *string) {
+		if value != nil {
+			*field = *value
+		}
+	}
+	set(&dep.State, patch.State)
+	set(&dep.RequestedBy, patch.RequestedBy)
+	set(&dep.Trigger, patch.Trigger)
+	set(&dep.ProposalID, patch.ProposalID)
+	set(&dep.PullRequestURL, patch.PullRequestURL)
+	set(&dep.BaseSHA, patch.BaseSHA)
+	set(&dep.PinSHA, patch.PinSHA)
+	set(&dep.LandedSHA, patch.LandedSHA)
+	set(&dep.RunID, patch.RunID)
+	set(&dep.Reason, patch.Reason)
+	set(&dep.ResumedBy, patch.ResumedBy)
+	if patch.Guards != nil {
+		dep.Guards = slices.Clone(*patch.Guards)
+	}
+	if patch.Acknowledged != nil {
+		dep.Acknowledged = *patch.Acknowledged
+	}
+	if patch.Authority != nil {
+		dep.Authority = *patch.Authority
+	}
+	if patch.PullRequest != nil {
+		dep.PullRequest = *patch.PullRequest
+	}
+	if patch.Step != nil {
+		dep.Step = *patch.Step
+	}
+	if patch.Applications != nil {
+		dep.Applications = slices.Clone(*patch.Applications)
+	}
+	if patch.ResumedAt != nil {
+		dep.ResumedAt = *patch.ResumedAt
+	}
+	if patch.StateSince != nil {
+		dep.StateSince = *patch.StateSince
+	}
+	if patch.UpdatedAt != nil {
+		dep.UpdatedAt = *patch.UpdatedAt
+	}
+	if patch.Notified != nil {
+		dep.Notified = slices.Clone(*patch.Notified)
+	}
+	s.deployments[id] = cloneDeployment(dep)
+	return nil
+}
+
+func cloneDeployment(dep Deployment) Deployment {
+	dep.Guards = slices.Clone(dep.Guards)
+	dep.Applications = slices.Clone(dep.Applications)
+	dep.Notified = slices.Clone(dep.Notified)
+	return dep
+}
+
+// LastLandedTrain is pipelineLastLandedTrain's first row.
+func (s *memStore) LastLandedTrain(_ context.Context, pipelineID string) (*Train, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest *Train
+	for _, t := range s.trains {
+		if t.PipelineID != bareID(pipelineID) || t.LandedSHA == "" {
+			continue
+		}
+		if latest == nil || t.DepartedAt.After(latest.DepartedAt) {
+			copy := cloneTrain(t)
+			latest = &copy
+		}
+	}
+	return latest, nil
+}
+
 // TrainsSince is the pipeline's trains that departed at or after since.
 func (s *memStore) TrainsSince(_ context.Context, pipelineID string, since time.Time) ([]Train, error) {
 	s.mu.Lock()
@@ -241,6 +382,18 @@ func (s *memStore) UpdateTrain(_ context.Context, owner, trainID string, patch T
 	setS(&t.ApprovedSHA, patch.ApprovedSHA)
 	setS(&t.LandedSHA, patch.LandedSHA)
 	setS(&t.HeldReason, patch.HeldReason)
+	setS(&t.ReleaseIntentID, patch.ReleaseIntentID)
+	setS(&t.ReleaseRunID, patch.ReleaseRunID)
+	setS(&t.ReleaseCandidateID, patch.ReleaseCandidateID)
+	setS(&t.ReleaseApprovalID, patch.ReleaseApprovalID)
+	setS(&t.ReleaseApprovedBy, patch.ReleaseApprovedBy)
+	setS(&t.ReleaseCatalogDigest, patch.ReleaseCatalogDigest)
+	if patch.ReleaseRetried != nil {
+		t.ReleaseRetried = *patch.ReleaseRetried
+	}
+	if patch.PublishAttempts != nil {
+		t.PublishAttempts = *patch.PublishAttempts
+	}
 	if patch.OnBoard != nil {
 		t.OnBoard = slices.Clone(*patch.OnBoard)
 	}

@@ -1,6 +1,7 @@
 package pipelinerun
 
 import (
+	"slices"
 	"context"
 	"encoding/json"
 	"errors"
@@ -271,7 +272,7 @@ func rerunOf(r Run, deliveryID string, failedOnly bool) Opening {
 	return Opening{
 		Event: r.Event, Mode: r.Mode, SHA: r.SHA, BaseSHA: r.BaseSHA, Branch: r.HeadBranch,
 		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version, ReleaseTag: r.ReleaseTag,
-		ScheduleSlot: scheduleSlot, Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly, InboundRequestID: r.InboundRequestID,
+		Stages: slices.Clone(r.OnlyStages), ScheduleSlot: scheduleSlot, Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly, InboundRequestID: r.InboundRequestID,
 	}
 }
 
