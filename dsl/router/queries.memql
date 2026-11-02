@@ -121,7 +121,8 @@ query call routerDecisionsRecent {
 @serverOnly
 query call routerCallsOnMachine {
   args {
-    /// The execution surface, as `fleet:<registrationId>`.
+    /// The execution surface as a fleet call writes it: `fleet:` plus the registration row's
+    /// canonical id. This compares for equality, so a bare id here finds nothing, with no error.
     surface  string!
     /// Inclusive lower bound, RFC3339.
     since    string!

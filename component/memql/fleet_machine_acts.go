@@ -200,6 +200,7 @@ func (e *MemQLEngine) machineToRevoke(ctx context.Context, registrationId string
 		}
 		return modelPullMachine{
 			RegistrationId:  registrationId,
+			RowId:           rowId,
 			OwnerUserId:     mapString(row, "ownerUserId"),
 			IdentityId:      mapString(row, "identityId"),
 			DisplayName:     mapString(row, "displayName"),
