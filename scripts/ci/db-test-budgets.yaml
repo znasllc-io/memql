@@ -25,14 +25,22 @@ classes: |
   # All 809 Work cases pass in 176.217s on the bounded AKS runner.
   # Give this whole package headroom over the old 180s alarm; keep
   # its operation deadlines, uncached native pass and isolated DB.
-  db      work      integrations/work  300s     serial    1
+  # By 2026-11-02 the median was 245s and the worst pass 278s of 300s, from 154s
+  # and 184s on 10-16..20. Keep the same 1.7 times the worst pass.
+  db      work      integrations/work  480s     serial    1
   # Revision workflows exercise two engines and must not compete with other DB suites.
-  db      library   integrations/library 180s   serial    1
+  # Flat at a median near 135s since 10-16, but its worst pass reached 179.9s of
+  # 180s, and 150.5s on 11-02. Give it the 300s the release class has.
+  db      library   integrations/library 300s   serial    1
   # The release suite passes in 154s on a laptop. With the same-tree reuse cases
   # it exhausted the 180s alarm on the bounded AKS runner while a new test was
   # only 3s old. Give the whole package headroom; keep every test and its
   # operation deadlines.
   db      release   integrations/release 300s   serial    1
+  # The installation suite went from a median of 37s on 10-16..20 to 141s on
+  # 11-02, with a worst pass of 162s of the default class's 180s. Give it its own
+  # 300s, as the release class has; keep every test and its operation deadlines.
+  db      installation integrations/installation 300s serial 1
   # Campaigns now covers 498 cases, including independent two-engine hops.
   # Keep each lock/write deadline assertion; give the full suite its own budget.
   db      campaigns component/campaigns 600s     serial,uncached 1
