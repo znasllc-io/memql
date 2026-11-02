@@ -502,9 +502,10 @@ export class LiveCollection<T = Row> {
     if (event.payloadOmitted || (this.spec.rereadEveryEvent && reread)) {
       // The `granted` tier cannot be decided against one row at fan-out, so
       // the engine sent the identity and left the decision to a read
-      // (memql#4309). A REFUSED read drops the event silently: the caller was
-      // not entitled to the row, and announcing that one changed would leak
-      // exactly what the gate withheld.
+      // (memql#4309). A row too large to broadcast, written on another node,
+      // arrives the same way. A REFUSED read drops the event silently: the
+      // caller was not entitled to the row, and announcing that one changed
+      // would leak exactly what the gate withheld.
       if (!reread) return;
       this.requestReread(id);
       return;

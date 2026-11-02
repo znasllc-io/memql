@@ -347,6 +347,11 @@ the read refuses, drop the event.** The SDKs surface the flag as
 is safe but useless -- you get a row whose fields are absent, so a consumer
 degrades to rendering nothing rather than to leaking anything.
 
+The same notification arrives for a row of **any** tier that is too large to
+broadcast and was written on another node
+([A row too large to broadcast](../operate/mesh-event-delivery.md#a-row-too-large-to-broadcast)),
+so a live view that re-reads on `payload_omitted` handles both.
+
 **Non-graph kinds are owner/admin-only** (memql#4311). `TELEMETRY`, `MESSAGE`,
 `AI_STREAM` and `ALL` carry node-level events with no row owner to authorize
 against, and `ALL` (`#`) carries every graph topic besides. A caller below

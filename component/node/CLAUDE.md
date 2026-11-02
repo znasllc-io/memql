@@ -60,6 +60,7 @@ component/node/
 ├── eventbridge.go         # EventBridge -- bridges local events.Bus across nodes
 ├── eventbridge_bus.go     # EventBridge channel-based publish path
 ├── eventbridge_fastpath.go # Mesh push fast-path over the delivery substrate
+├── eventbridge_thin.go    # A row too large to broadcast leaves without its largest fields
 ├── routing.go             # Event routing rules (block/forward/broadcast)
 ├── routing_automation_run.go # Routing rules for automation-run events
 ├── dedup.go               # Dedup window for distributed events; remembers the
@@ -260,6 +261,18 @@ right on every node keeps its own floor -- the readiness recompute loop's retry
 and safety net, held by
 `TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers`
 (`readiness_mesh_hop_test.go`).
+
+**A row event may not weigh more than 128 KiB on the wire**
+(`eventbridge_thin.go`, the 2026-11-01 incident). Each replica decodes about
+seven copies of every broadcast, so a large row costs every replica at once: a
+308 KB value in a step's journal row was about 100 MiB of allocation per event
+per replica, and a handful of runs took two nodes down. Over the limit, the copy on the mesh
+drops its largest fields and carries `events.PayloadOmittedFieldsKey`. The store
+and the writer's own bus keep the whole row; a live view gets an id-only
+notification and re-reads; an automation does not fire on the copy, because its
+claim key hashes the payload and it would run twice. **Read a field off a remote
+graph event only if it is small, or re-read the row.** `Event.PayloadThinned()`
+says which you hold.
 
 **Every node reports what it hears.** The bridge's counters feed
 `memql_mesh_events_total{outcome}` and `memql_mesh_copies_total{transport,

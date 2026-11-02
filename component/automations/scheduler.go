@@ -614,6 +614,21 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 	pattern := automation.Trigger.Event
 
 	unsub := s.eventBus.Subscribe(pattern, func(event events.Event) {
+		// A THINNED COPY NEVER FIRES. It is a row too large to broadcast, heard
+		// without its largest fields (component/node/eventbridge_thin.go), and
+		// the node that wrote the row fires from the whole event. Firing here
+		// as well would run twice, not race: the cluster guard's claim key
+		// hashes the event's payload (chainEventData), and the two copies'
+		// payloads differ, so neither claim would see the other. It would also
+		// bind an arg the copy left out as if the row had no value for it.
+		if event.PayloadThinned() {
+			s.logDebug("event trigger: a thinned copy does not fire; the node that wrote the row does",
+				"automation", a.Name,
+				"topic", event.Topic,
+			)
+			return
+		}
+
 		// Fire-time args validation (event-payload-binding ADR Decision 2,
 		// memql#2363). When the automation declares an `args { }` contract,
 		// bind + validate event.payload BEFORE the @filter and before any

@@ -3308,6 +3308,10 @@ type EventNotification struct {
 	// Dropping such an event silently instead would make a future granted
 	// concept's live feed die without a trace. A client that ignores this
 	// flag sees an event whose payload carries only those four keys.
+	//
+	// A row too large to broadcast arrives the same way, whatever its tier: the
+	// node that heard it holds only a thinned copy, and the read answers the row
+	// whole (component/node/eventbridge_thin.go).
 	PayloadOmitted bool `protobuf:"varint,5,opt,name=payload_omitted,json=payloadOmitted,proto3" json:"payload_omitted,omitempty"`
 	// seq numbers EVERY EventNotification the server writes on THIS stream,
 	// monotonically, starting at 1 (memql#4536). It is PER-STREAM rather than

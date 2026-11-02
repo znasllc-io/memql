@@ -3663,6 +3663,34 @@ runs the real plan validator and proves the new resume point follows completed
 work. These are fixtures with the real database/plan validator; live rollout and
 completion-disposition verification are reported separately.
 
+## A step's journaled value and what crosses the mesh (2026-11-01)
+
+A statement's bound value is journaled whole, because a resume rebinds it and
+refuses (`ErrResumeResultMissing`) when a non-read statement recorded none. So a
+step row can be large, and a byte cap on the journal is the wrong place to bound
+it. The row stays whole; what is bounded is the copy of its event on the mesh
+(`component/node/eventbridge_thin.go`).
+
+- **Trigger:** a broadcast row event over 128 KiB on the wire. A step that binds a
+  308 KB answer reaches it, because the row holds the value twice (`result` and
+  `value`) and the event holds the row twice.
+- **Chosen path:** the mesh copy drops its largest fields and marks them. The
+  writer's own bus delivers the whole event; a live view elsewhere gets an id-only
+  notification and re-reads the step; Go subscribers keep the small fields they
+  decide on.
+- **Alternatives:** capping `result` and `value` in the journal breaks resume;
+  dropping the second copy of the value (`result` beside `value`) saves a factor
+  of two and leaves the multiplication; a smaller mesh fan-out is a redesign.
+- **Survives a retry or a replica change:** everything, since the store is
+  untouched. The driving replica, a resume and a re-run read rows, not events.
+- **Automations:** a thinned copy never fires one, since the claim key hashes the
+  payload and the two copies would both run. The writer's node fires it.
+- **Unverified:** the cost was measured on the real decode path and the behaviour
+  is held by `component/node/mesh_oversized_row_test.go` over real streams; no
+  production run has been observed with this change. Known limit: an automation
+  loaded only on node types that did not write the row does not fire for a row
+  this large, and the bridge's warning names every such row.
+
 ## Current-step operation completion and retained partial effects
 
 An execution previously could finish after an honest answer said its requested

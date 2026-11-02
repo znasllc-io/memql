@@ -640,8 +640,9 @@ export interface EventPayload {
   // payloadOmitted marks an ID-ONLY notification (memql#4309). The row's
   // concept declares the `granted` row-authz tier, which cannot be decided
   // against a single row in isolation, so the engine sends the identity
-  // and nothing else. Absent (rather than false) on every ordinary event,
-  // because protojson omits a false bool.
+  // and nothing else. A row too large to broadcast, written on another node,
+  // arrives the same way whatever its tier. Absent (rather than false) on
+  // every ordinary event, because protojson omits a false bool.
   payloadOmitted?: boolean;
   // seq numbers every notification on THIS stream, from 1 (memql#4536).
   // A uint64 on the wire, so protojson renders it as a STRING; the bridge

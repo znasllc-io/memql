@@ -60,6 +60,45 @@ cache TTL, and the worker dialer's thirty-second ticker.
   one, and no node relays a copy that has already travelled sixteen. In a
   healthy cluster no copy ever reaches that limit.
 
+## A row too large to broadcast
+
+A broadcast is not one message. Each replica relays a first sighting to its
+other peers, so in a mesh of sixteen each one hears about seven copies of every
+event and decodes them all before it can drop the repeats. A row event carries
+the row twice (flat, and under `payload`), and an update publishes two events
+(`created` and `updated`). The cost of writing a large row therefore lands on
+every replica at the same moment, whatever that replica does for a living.
+
+So a row event on a broadcast rule that would weigh more than **128 KiB** on the
+wire leaves without its largest fields, flat and nested alike, and carries
+`payloadOmittedFields`, which names them. Only the copy on the mesh changes:
+
+- **The stored row is whole**, and so is the event on the bus of the node that
+  wrote it. A read of the row returns every field, anywhere in the cluster.
+- **A live view gets an id-only notification** (`payload_omitted`) from any node
+  that heard a thinned copy, and reads the row again, exactly as for a `granted`
+  row. See [Events](../concepts/events.md).
+- **An automation does not fire on a thinned copy.** The node that wrote the row
+  fires it from the whole event. Firing on both would run it twice, since the
+  claim that keeps a fire to one replica is keyed on the event's payload.
+- **Everything else keeps the small fields it decides on** (ids, status, owner).
+  The largest fields go first, and a row's identity always travels.
+
+**A known limit:** an automation loaded only on node types that did not write the
+row does not fire for a row this large. Every row it could affect is named by the
+warning below.
+
+When this happens the node that wrote the row logs, at most every ten seconds,
+`mesh: a row too large to broadcast went out without its largest fields`, naming
+the row, its size and the fields left out, and counts
+`memql_mesh_events_total{outcome="thinned"}`. A concept that shows up here is
+carrying something that does not belong in a row a cluster broadcasts.
+
+Only row events on a broadcast rule are thinned. A non-graph topic has no row to
+read instead, and a targeted rule reaches one node type with nothing to multiply
+it. The limit is `meshMaxEventBytes` in `component/node/eventbridge_thin.go`,
+where the reasoning and the measurements are.
+
 ## During a rolling update
 
 The mesh wire changed in this release: `EventForward.ttl` is retired and
@@ -81,7 +120,7 @@ Written by every node type and scraped from each node's `/metrics`:
 
 | Series | Labels | Meaning |
 |---|---|---|
-| `memql_mesh_events_total` | `outcome`: `originated`, `heard`, `relayed`, `duplicate`, `hop_limited` | Events at this node. `heard` is a first sighting delivered by a peer and published here |
+| `memql_mesh_events_total` | `outcome`: `originated`, `heard`, `relayed`, `duplicate`, `hop_limited`, `thinned` | Events at this node. `heard` is a first sighting delivered by a peer and published here |
 | `memql_mesh_copies_total` | `transport`: `dialed`, `accepted`; `result`: `sent`, `dropped` | Copies this node put on a stream, by who opened the stream and whether the stream took it |
 
 **Alert on `heard`.** A mesh node whose `heard` rate is flat zero while its
@@ -89,7 +128,9 @@ peers' is not is an island: it runs, it is healthy, and it hears nothing the
 rest of the cluster does. Identity reads zero by design, so leave it out of
 the alert. `duplicate` is normal and grows with the number of links.
 `hop_limited` should stay at zero, and any sustained `dropped` rate means a
-peer is not reading its stream fast enough and is missing events.
+peer is not reading its stream fast enough and is missing events. `thinned`
+counts rows too large to broadcast whole, on the node that wrote them; see
+[A row too large to broadcast](#a-row-too-large-to-broadcast).
 
 ### The node's own row
 
