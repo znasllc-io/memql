@@ -2,6 +2,7 @@ package goalfixture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -70,11 +71,52 @@ func putFile(root, name string, b []byte) error {
 	return os.WriteFile(p, b, 0600)
 }
 
+// A fixture command's watchdogs. Each detects a stuck command; neither is a
+// spending limit or the time the work under test gets. They are vars so a test
+// can watch one fire.
+var (
+	// commandBound covers git and the like, which need milliseconds of CPU.
+	commandBound = 60 * time.Second
+
+	// goTestBound covers one oracle `go test`, compile and link included, so what
+	// it needs moves with the machine's load. The ordinary minute read a busy
+	// machine as broken work: train memql#6406's component/proving took 142 s
+	// against its usual 7 s and failed. Measured 2026-11-01 in golang:1.27-bookworm
+	// with CI's GOGC=50 and GOMEMLIMIT=512MiB on an arm64 host, one run costs 15
+	// CPU-seconds on a cold GOCACHE (76 s at --cpus=0.2) and 0.2 on a warm one (1 s).
+	//
+	// Widening it costs a hung test nothing: -timeout=20s ends one, and `go test`
+	// kills a binary that ignores that at 1m20s and reports FAIL (measured: 85 s).
+	// Only a wedged toolchain reaches this bound. Five minutes stays under the
+	// go-tests step's -timeout=600s per package, so a stall ends in the oracle's
+	// own answer instead of the package's panic, and well inside a case's
+	// wallClockMinutes.
+	//
+	// Compiling ahead with `go test -c` was the alternative. It separates compile
+	// from test, which -timeout already does, and it protects only a cold compile:
+	// CI's own `go test` has warmed the shared GOCACHE before this one runs, so
+	// whatever stalled the train was not compile volume. That train's oracle output
+	// was lost, so what did stall it is unverified; a bound on the whole command
+	// holds whichever phase stalls. A kill is still possible, and
+	// ErrOracleDidNotFinish says what one means.
+	goTestBound = 5 * time.Minute
+)
+
+// errUnfinished marks a command that reported no exit status of its own: it
+// could not start, or its watchdog, the case's deadline or a signal ended it.
+// What it was asked to check is still unknown.
+var errUnfinished = errors.New("did not finish")
+
 // Command is bounded and returns the real exit status. A failed command's
 // output is evidence, not a successful test result. Toolchain/network settings
 // prevent Go from acquiring dependencies or another compiler for a fixture.
 func Command(ctx context.Context, dir, name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	return commandWithin(ctx, commandBound, dir, name, args...)
+}
+
+func commandWithin(ctx context.Context, bound time.Duration, dir, name string, args ...string) (string, error) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -84,6 +126,10 @@ func Command(ctx context.Context, dir, name string, args ...string) (string, err
 	cmd.Stdout, cmd.Stderr = &output, &output
 	err := cmd.Run()
 	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() < 0 {
+			return output.String(), fmt.Errorf("%s %w after %s: %w", name, errUnfinished, time.Since(start).Round(time.Second), err)
+		}
 		return output.String(), fmt.Errorf("%s failed: %w", name, err)
 	}
 	return output.String(), nil

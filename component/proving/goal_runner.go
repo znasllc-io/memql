@@ -263,6 +263,8 @@ func (g *GoalRunner) runCase(ctx context.Context, s goaleval.Scenario, setup goa
 				return nil, fmt.Errorf("verify needs one observed terminal or parked run")
 			}
 			var err error
+			// goalfixture.ErrOracleDidNotFinish returns here: this attempt becomes
+			// an observer error, its evidence stays on disk and nothing is scored.
 			result.Assertions, err = workspace.Verify(ctx, s)
 			if err != nil {
 				return nil, err
