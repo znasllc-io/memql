@@ -107,6 +107,7 @@ func TestSeedMaterializer_CarrierOverlaySkillRowsResolve(t *testing.T) {
 
 	// Mount the carrier-style overlay the SAME way the bff carrier does.
 	memqldsl.RegisterTree(domain, carrierSkillOverlay(slug))
+	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	db := reconcileTestDB(t)
 	ctx := context.Background()
@@ -255,6 +256,7 @@ func TestSeedMaterializer_StaleCarrierSkillRowHeals(t *testing.T) {
 	rowId := conceptAgentsSkill + ":" + slug
 
 	memqldsl.RegisterTree(domain, staleCarrierSkillOverlay(slug))
+	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	db := reconcileTestDB(t)
 	ctx := context.Background()

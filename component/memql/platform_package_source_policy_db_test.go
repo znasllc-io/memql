@@ -85,7 +85,7 @@ func TestPackageSourceClaimIsSerializedAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 	second.Logger = first.Logger
-	if err := second.Init(memorynodes.DefaultRegistry()); err != nil {
+	if err := bootPrivateEngine(second, memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
 	suffix := uniqueSuffix("source-race")

@@ -16,7 +16,7 @@ func TestAppSelectionDBOwnerSettingsAndReplicaRotation(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("app-selection")
 	owner := "v1:identity:user:" + key
 	registration := WorkerRegistrationConcept + ":" + key
@@ -98,7 +98,7 @@ func TestAppQuotaDBSurvivesReplicasAndExplicitRecovery(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("app-quota")
 	owner := "v1:identity:user:" + key
 	registration := WorkerRegistrationConcept + ":" + key
@@ -160,7 +160,7 @@ func TestAppAuthRefusalDBBlocksOneMachineAcrossReplicas(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("app-auth")
 	owner := "v1:identity:user:" + key
 	black := WorkerRegistrationConcept + ":" + key + "-black"
@@ -221,7 +221,7 @@ func TestAppSelectionDBReadsReadinessOffTheRow(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("app-readiness")
 	owner := "v1:identity:user:" + key
 	registration := WorkerRegistrationConcept + ":" + key
@@ -385,7 +385,7 @@ func TestAppSelectionDBPrefersTheMachineHoldingTheWork(t *testing.T) {
 	_, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("app-prefer")
 	owner := "v1:identity:user:" + key
 	machineA, machineB := WorkerRegistrationConcept+":"+key+"-a", WorkerRegistrationConcept+":"+key+"-b"
@@ -436,7 +436,7 @@ func TestAppWorkJournalDBReadsWhatAnotherReplicaWrote(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("app-journal")
 	owner := "v1:identity:user:" + key
 	runId := "v1:work:run:" + key

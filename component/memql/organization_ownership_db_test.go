@@ -193,7 +193,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		t.Fatal(err)
 	}
 	receiver.Logger = engine.Logger
-	if err := receiver.Init(memorynodes.DefaultRegistry()); err != nil {
+	if err := bootPrivateEngine(receiver, memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
 	// The receiving replica has no originating request state. Its verified

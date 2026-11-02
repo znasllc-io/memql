@@ -1253,6 +1253,32 @@ func resolveAuthValueSourced(envKey string) (string, ProviderAuthSource, bool) {
 	return "", AuthSourceUnresolved, false
 }
 
+// rememberAuthValues is resolveAuthValueSourced for one pass over the providers:
+// each placeholder is resolved once and the answer kept for the pass.
+//
+// A vendor's providers all @extends one base, so they carry the same few
+// placeholders, and each resolution is up to four queries (two names, two
+// tiers). On the embedded tree that was 224 queries per load for 8 distinct
+// placeholders, repeated on every boot and every ReloadAIProviders. A
+// rotation arriving mid-pass now reaches the next load rather than the second
+// half of this one, which is the better answer: one load, one credential.
+func rememberAuthValues() func(envKey string) (string, ProviderAuthSource, bool) {
+	type answer struct {
+		value  string
+		source ProviderAuthSource
+		ok     bool
+	}
+	answers := map[string]answer{}
+	return func(envKey string) (string, ProviderAuthSource, bool) {
+		a, seen := answers[envKey]
+		if !seen {
+			a.value, a.source, a.ok = resolveAuthValueSourced(envKey)
+			answers[envKey] = a
+		}
+		return a.value, a.source, a.ok
+	}
+}
+
 // resolveAuthPlaceholders walks a provider's auth map and substitutes
 // any "${VAR_NAME}" placeholders with concrete values. Resolution
 // order:
@@ -1277,6 +1303,12 @@ func resolveAuthValueSourced(envKey string) (string, ProviderAuthSource, bool) {
 // If all three layers miss, the provider fails to load with a message
 // telling the operator how to seed it.
 func resolveAuthPlaceholders(values map[string]string) (map[string]string, error) {
+	return resolveAuthPlaceholdersWith(values, resolveAuthValueSourced)
+}
+
+// resolveAuthPlaceholdersWith is resolveAuthPlaceholders over a given lookup, so
+// a load can answer a placeholder its providers share once (rememberAuthValues).
+func resolveAuthPlaceholdersWith(values map[string]string, lookup func(envKey string) (string, ProviderAuthSource, bool)) (map[string]string, error) {
 	if len(values) == 0 {
 		return nil, fmt.Errorf("auth configuration is required")
 	}
@@ -1296,7 +1328,7 @@ func resolveAuthPlaceholders(values map[string]string) (map[string]string, error
 			// discarded here and kept by the status projection
 			// (providerAuthStatus), which is the only caller that needs it.
 			candidates := authConceptLookupNames(envKey)
-			if v, _, ok := resolveAuthValueSourced(envKey); ok {
+			if v, _, ok := lookup(envKey); ok {
 				resolved[key] = v
 				continue
 			}

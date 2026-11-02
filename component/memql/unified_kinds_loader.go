@@ -242,6 +242,7 @@ func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderR
 	total := 0
 	available := 0
 	var unavailable []unavailableProvider
+	authValues := rememberAuthValues()
 	for _, p := range all {
 		if p.cfg.Base {
 			if !p.cfg.Disabled {
@@ -275,7 +276,7 @@ func registerParsedProvidersWithClients(logger *slog.Logger, registry *ProviderR
 			total++
 			continue
 		}
-		resolvedAuth, authErr := resolveAuthPlaceholders(entry.Config.Auth)
+		resolvedAuth, authErr := resolveAuthPlaceholdersWith(entry.Config.Auth, authValues)
 		if authErr != nil {
 			entry.err = authErr
 			unavailable = append(unavailable, unavailableProvider{

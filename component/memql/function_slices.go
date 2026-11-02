@@ -295,6 +295,16 @@ func ExtractAutomationSlices(source string) []FunctionSlice {
 // Uses list the full-file parser would. Returns an empty string when
 // the source has no use declarations.
 func extractUseDeclarations(source string) string {
+	return useDeclarationTexts.get(source, "", func() []string { return []string{scanUseDeclarations(source)} })[0]
+}
+
+// useDeclarationTexts memoizes extractUseDeclarations, a pure function of source,
+// for the reason declarationSlices does: one load asks about every file of the
+// tree more than once, and the scan was about a tenth of the CPU of a boot.
+var useDeclarationTexts = &sourceMemo[string]{maxBytes: 64 << 20}
+
+// scanUseDeclarations is extractUseDeclarations without the memo.
+func scanUseDeclarations(source string) string {
 	matches := useBlockRE.FindAllString(source, -1)
 	if len(matches) == 0 {
 		return ""

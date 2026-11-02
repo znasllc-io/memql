@@ -45,11 +45,12 @@ import (
 // like skill_catalog_reconcile_db_test.go.
 
 // readMergeTestEngine boots a PRIVATE engine for the calling test: its own
-// bun.DB pool, its own LoadUnifiedConcepts + New + Init, closed with the
-// test. At ~2.1s per boot this is the expensive path, and since memql#4075 it
-// exists for exactly one class of caller -- a test that MUTATES engine-level
-// state, so that a stock shared engine would either not serve it or not
-// survive it:
+// bun.DB pool, its own LoadUnifiedConcepts + New, and its own copy of the one
+// load of the tree (bootPrivateEngine, stock_boot_copy_test.go), closed with the
+// test. It exists for two classes of caller. One is a test about replicas, which
+// asks for two engines so that nothing crosses between them except the database.
+// The other, since memql#4075, is a test that MUTATES engine-level state, so that
+// a stock shared engine would either not serve it or not survive it:
 //
 //   - fixture DSL domains mounted into the GLOBAL tree via
 //     memqldsl.RegisterTree, which an engine only sees when it boots AFTER
@@ -83,7 +84,9 @@ import (
 // 300s budget (memql#3257) and then its 600s one (memql#4074). 83 of those
 // sites now borrow; the 20 in the files above keep booting here. The concerns
 // are engine-MUTATING (private, this helper) vs engine-BORROWING (shared),
-// and the split is enforced here at the seam.
+// and the split is enforced here at the seam. Since the copy a private engine
+// costs about a tenth of what those call sites paid, which is what lets a replica
+// test have two. Borrowing is still cheaper: no pool, no concept reload.
 //
 // A borrower that LAYERS per-test state through a public setter must restore
 // the boot state (nil) in a t.Cleanup so no later borrower inherits it --
@@ -134,7 +137,7 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	t.Cleanup(func() { _ = gate.Close() })
 	eng.SetAskCoordinationPool(func() *sql.DB { return gate })
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(registry))
+	require.NoError(t, bootPrivateEngine(eng, registry))
 
 	// A non-empty actor is required by the mutation executor's
 	// mutationActor helper; mirror status_writer's system attribution.

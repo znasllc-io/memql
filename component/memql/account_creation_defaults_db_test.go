@@ -27,7 +27,7 @@ func TestAccountCreationDefaultsPersistAcrossReplicas(t *testing.T) {
 		t.Fatal(err)
 	}
 	receiver.Logger = engine.Logger
-	if err := receiver.Init(memorynodes.DefaultRegistry()); err != nil {
+	if err := bootPrivateEngine(receiver, memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
 	// This receiver holds no browser session or originating request state.

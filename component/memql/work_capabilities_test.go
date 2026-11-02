@@ -115,7 +115,7 @@ func TestSavedFileContentAndImageOperationsAreInTheRealCapabilityShortlist(t *te
 	// Discovery needs the shipped catalog and caller authority, not stored rows.
 	e := newQuietEngine(t)
 	t.Cleanup(e.cache.close)
-	require.NoError(t, e.Init(loadedConceptRegistry(t)))
+	require.NoError(t, bootPrivateEngine(e, loadedConceptRegistry(t)))
 	for _, name := range []string{"fleetEnergySettings", "routerSetApiKey", "platform.sourceCredentialCreate", "integrations.integrationConfigure"} {
 		private, ok := e.lookupBuiltinFunction(name)
 		require.True(t, ok, name)

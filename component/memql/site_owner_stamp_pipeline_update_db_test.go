@@ -50,7 +50,7 @@ func TestDeveloperSiteSurvivesThePipelineAndGoesLive_DB(t *testing.T) {
 	eng, err := New(db)
 	require.NoError(t, err)
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(concept.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(eng, concept.DefaultRegistry()))
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	developer := "v1:identity:user:e2e-dev-" + suffix
