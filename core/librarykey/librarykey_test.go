@@ -25,7 +25,7 @@ func TestCheckAdmitsEveryShapeTheWritersStore(t *testing.T) {
 		{"a prepared image", cloudBase + "library/u-1/f-1/" + strings.Repeat("ab", 32) + "/cat.png", "u-1"},
 		{"an escaped name", cloudBase + "library/u-1/f-1/space%20name%252F.md", "u-1"},
 		{"Azurite, account in the path", azuriteBase + "library/u-1/f-1/notes.md", "u-1"},
-		{"a bare key (chunked upload, or no storage configured)", "library/u-1/f-1/notes.md", "u-1"},
+		{"a bare key (folder sync, an older chunked upload, or bytes that never landed)", "library/u-1/f-1/notes.md", "u-1"},
 		// Not every writer cleans a name (skills capture keeps a script's own),
 		// and nothing after the owner can leave the owner's prefix unless it is
 		// a relative segment.

@@ -23,7 +23,8 @@ content request. The specific failure repaired here has all of these facts:
 - Upload log: `storage destination belongs to another user`.
 - File row: `status=failed`, a failure reason saying bytes were not stored,
   and `blobUrl` containing the intended `library/...` key instead of a URL.
-- Content log: `not an azure blob URL (no downloadable object)`.
+- Content log: storage's `BlobNotFound`. An engine from before the storage client
+  opened bare keys logged `not an azure blob URL (no downloadable object)`.
 
 The storage capacity gate compared a bare caller ID with a canonical
 `v1:identity:user:<id>` path owner. Those spellings refer to the same person.

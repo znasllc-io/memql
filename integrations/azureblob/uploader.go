@@ -20,6 +20,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/znasllc-io/memql/core/librarykey"
 )
 
 // maxDownloadBytes caps a single blob read so an oversized object can't
@@ -38,6 +39,10 @@ type Uploader interface {
 type AzureBlobUploader struct {
 	client      *azblob.Client
 	meterWrites bool
+	// libraryContainer is the installation's one configured container
+	// (MEMQL_AZURE_BLOB_CONTAINER), which is where a bare Library key lives.
+	// Blank means this client opens no bare key: see splitStoredURL.
+	libraryContainer string
 }
 
 // New creates an AzureBlobUploader from the connection string in
@@ -53,7 +58,7 @@ func New(_ context.Context) (*AzureBlobUploader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create azure blob client: %w", err)
 	}
-	return &AzureBlobUploader{client: client, meterWrites: true}, nil
+	return &AzureBlobUploader{client: client, meterWrites: true, libraryContainer: ContainerFromEnv()}, nil
 }
 
 // Upload stores data in the given container under objectName and returns the
@@ -115,7 +120,19 @@ func (u *AzureBlobUploader) upload(ctx context.Context, container, objectName st
 		}
 	}
 
-	return storedBlobURL(u.client.ServiceClient().NewContainerClient(container).NewBlockBlobClient(objectName).URL())
+	return u.StoredURL(container, objectName)
+}
+
+// StoredURL is the reference a row stores for an object in this account: the
+// value Upload answers for it, with nothing of the connection in it. The chunked
+// routes ask for it, so a file's row reads the same whichever route carried its
+// bytes.
+func (u *AzureBlobUploader) StoredURL(container, objectName string) (string, error) {
+	bc, err := u.blockClient(container, objectName)
+	if err != nil {
+		return "", err
+	}
+	return storedBlobURL(bc.URL())
 }
 
 // Downloader reads blob bytes back from a stored blob URL. The attachment
@@ -125,8 +142,8 @@ type Downloader interface {
 	DownloadURL(ctx context.Context, blobURL string) ([]byte, error)
 }
 
-// DownloadURL parses (container, object) out of a stored Azure blob URL and
-// fetches the bytes. Returns an error for a URL with no Azure object (the
+// DownloadURL resolves a stored reference to (container, object) (splitStoredURL)
+// and fetches the bytes. Returns an error for a value naming no object (the
 // local:// dev placeholder / legacy gs://) so the caller can 404 it.
 func (u *AzureBlobUploader) DownloadURL(ctx context.Context, blobURL string) ([]byte, error) {
 	return u.DownloadURLWithLimit(ctx, blobURL, maxDownloadBytes)
@@ -142,8 +159,21 @@ func (u *AzureBlobUploader) DownloadURLWithLimit(ctx context.Context, blobURL st
 	return u.DownloadWithLimit(ctx, container, objectName, maxBytes)
 }
 
-// splitStoredURL turns a stored blob URL back into (container, object). It
-// first strips THIS client's service base URL, which works for BOTH the
+// splitStoredURL turns a stored blob reference back into (container, object).
+//
+// A BARE LIBRARY KEY, library/{owner}/..., is opened as written in this
+// installation's container. A row holds one when folder sync wrote it, when the
+// chunked routes wrote it before they stored the URL, or when a one-shot upload's
+// bytes never landed (storage then answers BlobNotFound, which is the truth). It
+// comes first because it is not a URL: parsing one would cut a file name at its
+// `?` or `#` and decode its `%`. librarykey.Split decides what is bare, so this
+// read and the check that vouched for the key cannot disagree about the object,
+// and the key can reach no other container, which is why Check has none to compare
+// for it. Nothing else bare is opened, so a value outside the Library's layout
+// still names no object here. There is no migration to run: this is the only thing
+// a stored row needs.
+//
+// A URL first strips THIS client's service base URL, which works for BOTH the
 // production `https://<acct>.blob.core.windows.net/<container>/<object>` form
 // AND the Azurite `http://<host>:10000/<account>/<container>/<object>`
 // account-in-path form (the production-shaped ParseBlobObject can't parse the
@@ -151,6 +181,12 @@ func (u *AzureBlobUploader) DownloadURLWithLimit(ctx context.Context, blobURL st
 // back to ParseBlobObject for URLs minted by a different client/base.
 func (u *AzureBlobUploader) splitStoredURL(blobURL string) (string, string, bool) {
 	blobURL = strings.TrimSpace(blobURL)
+	if container, object, ok := librarykey.Split(blobURL); ok && container == "" {
+		if u == nil || u.client == nil || u.libraryContainer == "" || !strings.HasPrefix(object, librarykey.Prefix+"/") {
+			return "", "", false
+		}
+		return u.libraryContainer, object, true
+	}
 	if u != nil && u.client != nil {
 		base, baseErr := url.Parse(u.client.URL())
 		stored, storedErr := url.Parse(blobURL)

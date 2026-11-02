@@ -38,10 +38,12 @@
 //     account is the first path segment.
 //
 // The path is decoded exactly once, as the client decodes it, so an encoded
-// `..` or `/` is judged as the segment it becomes. A bare key with no scheme
-// (the chunked upload's row, or a node with no storage configured) is judged
-// as written: the URL readers cannot open one, and the readers that open a key
-// inside the Library's container judge exactly that key (CheckKey).
+// `..` or `/` is judged as the segment it becomes. A bare key with no scheme (a
+// folder-sync file's row, a chunked upload's from before that route stored the
+// URL, or a one-shot upload whose bytes never landed) is judged as written, and
+// is opened as written: the client's URL reads resolve it inside the Library's
+// own container, and the readers that take a key open it there too (CheckKey). So
+// it has no container for Check to compare: there is only one it can reach.
 // integrations/azureblob's librarykey cross-check holds the two parsers
 // together.
 //

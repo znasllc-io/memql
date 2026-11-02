@@ -57,6 +57,22 @@ content route answers 404, as for any file the caller cannot see. A row written
 before the mutation was `@serverOnly` therefore cannot hand over somebody
 else's bytes.
 
+**A row names its bytes one of two ways, and every reader opens both.** Uploads
+store the storage client's URL. Folder sync stores the bare key,
+`library/{owner}/{fileId}/{name}`, and so did the chunked routes before they
+stored the URL, so such rows exist and none needs rewriting. The storage client
+opens a bare key as written in the installation's one container
+(`MEMQL_AZURE_BLOB_CONTAINER`), and the check above judges exactly that key. A
+bare key names no container of its own, so changing that setting strands those
+files until their objects move with it.
+
+The clients read one fact from the shape: a `failed` file with no URL is an
+upload whose bytes never landed. A one-shot upload storage refused keeps its
+intended key on the row for diagnosis. Files and the editor say the upload did
+not finish and offer no download, and the content route answers 404 because
+storage has nothing there. A failed analysis leaves the URL in place, so that
+file stays readable.
+
 **The MemQL copy is independent and durable** (memql#4781, design D12). A file
 uploaded from a machine survives that machine's deletion of the original and
 survives the machine disconnecting; archiving in MemQL never touches the
@@ -129,6 +145,13 @@ Three properties are load-bearing:
 `sha256` on a chunked file is stamped by the ANALYSIS pass, which streams
 the committed blob once -- the handler never held the whole file. Until the
 pass runs, the field is absent: "not measured", never "no hash".
+
+**A file uploaded before the routes stored the URL reads back like any other,
+and its analysis is not redone.** The pass could not open its blob then, so it
+marked the file `ready` with no hash, no summary and no extracted text. Nothing
+runs the pass on such a file again, because that spends model calls nobody asked
+for: its hash stays absent and its text stays out of search until a new version
+is uploaded.
 
 ### Exporting -- `GET /artifacts/{id}/content`
 

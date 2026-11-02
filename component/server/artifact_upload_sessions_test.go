@@ -104,11 +104,21 @@ type fakeBlocks struct {
 	mu      sync.Mutex
 	staged  map[string]map[string][]byte
 	commits [][]string // ordered id lists, one per CommitBlockList call
+	urlErr  error      // what StoredURL answers, when set
 }
 
 func newFakeBlocks() *fakeBlocks { return &fakeBlocks{staged: map[string]map[string][]byte{}} }
 
 func blocksKey(container, object string) string { return container + "/" + object }
+
+const fakeBlocksBase = "https://example.blob.core.windows.net/"
+
+func (b *fakeBlocks) StoredURL(container, object string) (string, error) {
+	if b.urlErr != nil {
+		return "", b.urlErr
+	}
+	return fakeBlocksBase + blocksKey(container, object), nil
+}
 
 func (b *fakeBlocks) StageBlock(_ context.Context, container, object, blockID string, chunk []byte) error {
 	b.mu.Lock()
@@ -469,8 +479,15 @@ func TestUploadCompleteVerifiesCommitsAndCreatesTheRow(t *testing.T) {
 		p.UploadedFromWorkerName != "MacBook-Pro" || p.UploadedFromPath != "" {
 		t.Errorf("file row params lost session facts: %+v", p)
 	}
-	if p.BlobUrl == "" || !strings.Contains(p.BlobUrl, p.FileId) {
-		t.Errorf("BlobUrl %q does not carry the session's blob path", p.BlobUrl)
+	// The URL the one-shot route would store for the same object, never the bare
+	// key: both clients read a `failed` file with no URL as bytes that never landed,
+	// and this file's analysis can fail with its bytes safely stored.
+	session, err := sessions.ByID(auth.ContextWithUserActor(t.Context(), "user-a"), out.UploadId)
+	if err != nil || session == nil {
+		t.Fatalf("read the session back: %+v %v", session, err)
+	}
+	if want := fakeBlocksBase + "b/" + session.BlobPath; p.BlobUrl != want || !strings.Contains(p.BlobUrl, p.FileId) {
+		t.Errorf("BlobUrl = %q, want the committed object's URL %q", p.BlobUrl, want)
 	}
 
 	// Labels went through the same builtin as everything else.
@@ -503,6 +520,34 @@ func TestUploadCompleteVerifiesCommitsAndCreatesTheRow(t *testing.T) {
 	}
 	if blocks.commitCount() != 1 || len(store.snapshotCreated()) != 1 {
 		t.Fatalf("re-complete re-ran the commit or the row write")
+	}
+}
+
+// A commit empties the uncommitted inventory, so an object storage will not name
+// has to stop the upload BEFORE it: with every chunk still staged, the client's
+// retry completes. After the commit there would be nothing left to retry with.
+func TestUploadCompleteNamesItsBlobBeforeCommitting(t *testing.T) {
+	store := newFakeLibraryStore()
+	sessions := newFakeSessionStore()
+	blocks := newFakeBlocks()
+	blocks.urlErr = fmt.Errorf("the account has no such container")
+	h := sessionsHandler(store, sessions, blocks, 4, nil)
+
+	out := openSession(t, h, "user-a", map[string]any{"name": "b.bin", "size": 4, "mimeType": "video/mp4"})
+	putChunk(t, h, "user-a", out.UploadId, 1, []byte("aaaa"))
+
+	rec := doJSON(t, h, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("complete = %d, want 502; body: %s", rec.Code, rec.Body.String())
+	}
+	if blocks.commitCount() != 0 || len(store.snapshotCreated()) != 0 || sessions.statusOf(out.UploadId) != "open" {
+		t.Fatalf("a refused complete left %d commits, %d rows, session %q; want nothing done and the session open",
+			blocks.commitCount(), len(store.snapshotCreated()), sessions.statusOf(out.UploadId))
+	}
+
+	blocks.urlErr = nil
+	if rec := doJSON(t, h, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil); rec.Code != http.StatusCreated {
+		t.Fatalf("the retry = %d, want 201; body: %s", rec.Code, rec.Body.String())
 	}
 }
 
