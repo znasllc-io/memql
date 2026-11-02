@@ -33,6 +33,8 @@ export function releaseFixture(initial = "ready") {
     releasePublishBuild: QueryClient.prototype.releasePublishBuild,
     executeNamed: async name => { if (name === "releaseBuilds") return releaseResult({ intents: [] }); throw new Error(`Unexpected release operation: ${name}`); },
     pipelinesForOwner: async () => new Result({ data: [] } as never),
+    pipelineTrainsForOwner: async () => new Result({ data: [] } as never),
+    pipelinesTrainExpress: async () => new Result({ data: [] } as never),
     pipelineForOwner: async () => new Result({ data: [] } as never),
     pipelineRunForOwner: async () => new Result({ data: [] } as never),
     releaseCandidates: async (args) => { state.calls.push({ kind: "list", args }); if (state.failedRead) throw new Error("Release journal unavailable"); return releaseResult({ candidates: state.empty ? [] : [{ candidateId: releaseId, state: state.record.state, components: state.record.manifest.components, createdAt: "2026-10-06T18:00:00Z", evidenceCount: 1 }] }); },
