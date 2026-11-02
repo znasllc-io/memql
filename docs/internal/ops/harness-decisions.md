@@ -1836,15 +1836,27 @@ covers a build started by hand, `TestAnAttemptEndingBetweenMigrationsRecordsWhat
 the gap, by deadline and by cancellation, and `TestALockThatOutlastsAnyAttemptIsReportedAsStuck`
 the report. All need `MEMQL_REQUIRE_DB=1`.
 
+**How production recovered (2026-11-01 and 11-02).** Neither step needed a release.
+At the owner's word the three missing indexes were built by hand, one at a time,
+while the row kept the engine out. The builds came first because clearing the row
+first would have started the next build under the same deadline. Each took about
+3 minutes 40 seconds, and 16 writes failed across three pauses of 15 to 18 seconds
+as each pass reached the newest chunk. The revision read then took 4.5 ms and the
+corpus read 7.6 ms, cold. Row 623 was deleted by id on November 2 at 00:31:45 UTC,
+after a script holding the row had re-checked that no build or DDL was running and
+that every index was usable. At the next tick an identity replica recorded all five
+waiting migrations in a quarter of a second, and both replicas ran the
+post-migration hook. Nothing was rebuilt: the index files kept their sizes. The
+refusals stopped, and no statement timed out in the minutes after.
+
 **Not verified, and not fixed.** The runner's changes take effect in the engine
-release after 0.31.11, and clearing the row already stranded in production stays an
-operator's act under the
-[runbook](../../public/operate/env-vars.md#database-tuning). Building the remaining
-indexes by hand and then clearing the row was tried end to end on v0.31.11's code
-and TimescaleDB 2.29.1, with no rebuild, but not on production. Whether the revision
-and corpus reads are good enough once their indexes exist has not been measured on
-production's data. `MemqlMigrationLockStuck` reaches nobody on production yet: that
-cluster has no prometheus-operator. A page of the owner's feed still
+release after 0.31.11 and have not run on production, so until then a build past the
+deadline can strand the lock again.
+[The runbook](../../public/operate/env-vars.md#database-tuning) covers a lock left
+behind. `MemqlMigrationLockStuck` reaches nobody on production yet: that cluster has
+no prometheus-operator.
+
+A page of the owner's feed still
 visits each version of the runs on it, so a page costs its runs times their
 versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
 (the procedure reuse sweep) stays on the owner lookup: its status term can
