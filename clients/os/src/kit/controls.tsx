@@ -1135,10 +1135,12 @@ export function Panel({ children, label }: { children: ReactNode; label?: string
   );
 }
 
-export function Head({ title, meta, children, breadcrumbs, back, navigation = true, navigationKey }: {
+export function Head({ title, meta, note, children, breadcrumbs, back, navigation = true, navigationKey }: {
   title: string;
   /** A quiet fact beside the title -- a count, a scope note. Muted, tabular. */
   meta?: ReactNode;
+  /** What stopped arriving, on the title's line: a `HeadNote`. */
+  note?: ReactNode;
   children?: ReactNode;
   breadcrumbs?: readonly Breadcrumb[];
   back?: { label: string; onSelect: () => void };
@@ -1158,6 +1160,7 @@ export function Head({ title, meta, children, breadcrumbs, back, navigation = tr
     <div ref={root} className="os-head">
       <h3 className="os-settings-title">{title}</h3>
       {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
+      {note}
       {children ? <div className="os-head-actions">{children}</div> : null}
     </div>
   );
@@ -1171,12 +1174,32 @@ export function Head({ title, meta, children, breadcrumbs, back, navigation = tr
     <div ref={root} className="os-head">
       <h3 className="os-settings-title">{title}</h3>
       {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
+      {note}
       {children || destination?.onSelect ? <div className="os-head-actions">
         {destination?.onSelect ? <IconButton label={`Back to ${destination.label}`} onClick={destination.onSelect}><ArrowLeft size={16} aria-hidden /></IconButton> : null}
         {children}
       </div> : null}
     </div>
   </>;
+}
+
+/**
+ * Something behind the page stopped arriving, said on its heading's line.
+ *
+ * NOT A `Notice`, because this comes on its own, whatever the person is doing. A
+ * Notice takes a line of the page, so when a connection dropped every Fleet page
+ * moved 70 px under the pointer, and back when it returned. Here it takes only the
+ * room the line has left and cuts off its own end, sentence first, so the line keeps
+ * its height, and a heading that sticks keeps it in view.
+ */
+export function HeadNote({ sentence, next, detail }: {
+  sentence: string;
+  /** What is true now, as on a `Notice`. */
+  next?: string;
+  /** The server's reason, on hover: DESIGN.md keeps transport errors off the page. */
+  detail?: string;
+}) {
+  return <span className="os-head-note" role="status" title={detail || [sentence, next].filter(Boolean).join(" ")}><span>{sentence}</span>{next ? <> <span>{next}</span></> : null}</span>;
 }
 
 /**

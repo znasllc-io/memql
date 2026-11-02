@@ -66,6 +66,7 @@ export {
   Field,
   FormRow,
   Head,
+  HeadNote,
   Input,
   Notice,
   Panel,

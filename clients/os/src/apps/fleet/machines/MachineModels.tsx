@@ -1,12 +1,12 @@
 import { useGraphRevision } from "../../../live/useGraphRevision";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { ArrowUpRight, Box, Pencil } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
 import { feedIsBehind } from "../../../live/useLiveCollection";
-import { EmptyState, Fact, Facts, Head, Notice, Refine, Select, useNow } from "../../../kit";
+import { EmptyState, Fact, Facts, Head, HeadNote, Notice, Refine, Select, useNow } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { ActionBar } from "../../../kit/ActionBar";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
@@ -30,7 +30,7 @@ import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, s
 import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
 import "./machineModels.css";
 
-export function MachineModels({ machine, navigation, feedNotice }: { machine: MachineRow; standalone?: boolean; navigation?: Omit<PageTrail, "title">; feedNotice?: ReactNode }) {
+export function MachineModels({ machine, navigation }: { machine: MachineRow; standalone?: boolean; navigation?: Omit<PageTrail, "title"> }) {
   const { access } = useSession();
   const connection = useOsConnection();
   const now = useNow();
@@ -138,12 +138,11 @@ export function MachineModels({ machine, navigation, feedNotice }: { machine: Ma
   const arrivals = <>
     {reading.error ? <Notice tone="error" sentence="The catalog could not be read." next={editorOpen ? "The changes here are kept, and you can save them once it reads again." : "Your installed models are still shown below."} detail={reading.error} /> : null}
     {error && !editing ? <Notice tone="error" sentence="That change could not be completed." detail={error} /> : null}
-    {feedNotice}
-    {downloads.feedError ? <Notice tone="warn" sentence="Download updates are interrupted." detail={downloads.feedError} /> : null}
     {downloads.live ? <LivePull pull={downloads.live} /> : installerDownload ? <SetupLiveDownload stage={installerDownload} /> : null}
   </>;
   return <div className="fleet-machine-details fleet-models">
     <Head navigationKey={`models:${machine.id}:${selected ?? (catalogOpen ? "catalog" : "installed")}`} title={title} meta={selected ? undefined : catalogOpen ? shown.length : installed.length}
+      note={downloads.feedError ? <HeadNote sentence="Download updates are interrupted." next="Showing the last known state." detail={downloads.feedError} /> : null}
       breadcrumbs={breadcrumbs} back={selected ? { label: catalogOpen ? "Catalog" : "Models", onSelect: back } : catalogOpen ? { label: "Models", onSelect: toModels } : navigation?.back}>
       {catalogOpen && !selected ? <Refine label="Refine model catalog" search={search} onSearch={setSearch} placeholder="Find a model">
         <Select id="model-purpose-filter" label="Task" value={purpose} onChange={setPurpose}><option value="">All tasks</option>{MODEL_PURPOSES.map(([id,label]) => <option key={id} value={id}>{label}</option>)}</Select>

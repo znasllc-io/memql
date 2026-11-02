@@ -1,3 +1,5 @@
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {act, cleanup, fireEvent, render, screen, within, waitFor} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 const h=vi.hoisted(()=>({connection:null as any}));
@@ -13,7 +15,8 @@ beforeEach(()=>{installSeededAccess('owner');h.connection=fakeConnection();});
 // A machine is opened from the LIST: the section no longer selects the first one
 // on sight, and there is no dropdown to pick another from.
 const openMachine=async(name:string)=>fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^Open ${name}`)}));
-function fleet(){return render(withSession(<MachinesProvider><FleetApp sectionId="machines" navigate={vi.fn()} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></MachinesProvider>));}
+const CSS=readFileSync(join(__dirname,'..','..','src','styles','index.css'),'utf8');
+function fleet(section='machines'){return render(withSession(<MachinesProvider><FleetApp sectionId={section} navigate={vi.fn()} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></MachinesProvider>));}
 
 function sharedMachine() {
  const row=machineRow({id:'a',displayName:'Alpha',sharing:{mode:'people',userIds:['ana'],groupIds:[]}});
@@ -38,27 +41,61 @@ it('updates the owner and shared call breakdown in Equipment from the existing m
  expect(within(screen.getByRole('navigation',{name:'Machine views'})).getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
 });
 
-// A DROPPED CONNECTION draws this notice above every Fleet page. Above an open model
-// setup it moved the whole editor 70 px with nothing scrolled, so a click aimed at
-// Save setup landed on a task card; the same drop is what fails the page's reads.
-it('keeps the machine feed notice under an open model setup, and above every other page',async()=>{
+// A DROPPED CONNECTION draws this on every Fleet page, whatever the person is doing.
+// As a block above the page it moved everything 69.5 px down with nothing scrolled
+// (measured at 1000x640) and back up when the feed returned, so a click landed on
+// whatever had stood above its aim. On the heading's own line it moves nothing, which
+// the sticky header keeps in view. jsdom lays nothing out, so this holds the two halves:
+// the note is on that line, and the stylesheet gives it only the room left over.
+function droppable(seed:Parameters<typeof fakeConnection>[0]){
  const statusListeners=new Set<(change:{status:string})=>void>();
- const setup={id:'a',revision:'before',choices:{conversation:'chat'},usableBytes:24e9,diskFreeBytes:100e9,catalog:[{modelId:'chat',runtime:'ollama',installed:true,purposes:['conversation'],memoryBytes:16e9}]};
- h.connection=Object.assign(fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha',labels:{'model:chat':'tools=1'}})],fleetModelSetup:[setup]}),{onStatusChange:(listener:(change:{status:string})=>void)=>{statusListeners.add(listener);return()=>statusListeners.delete(listener);}});
- fleet();await openMachine('Alpha');
+ h.connection=Object.assign(fakeConnection(seed),{onStatusChange:(listener:(change:{status:string})=>void)=>{statusListeners.add(listener);return()=>statusListeners.delete(listener);}});
+ return ()=>act(async()=>{statusListeners.forEach(listener=>listener({status:'disconnected'}));});
+}
+const setupFixture={id:'a',revision:'before',choices:{conversation:'chat'},usableBytes:24e9,diskFreeBytes:100e9,catalog:[{modelId:'chat',runtime:'ollama',installed:true,purposes:['conversation'],memoryBytes:16e9}]};
+it('says the machine feed is behind on the heading line of the list and of every machine page',async()=>{
+ const drop=droppable({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha',labels:{'model:chat':'tools=1'}})],fleetModelSetup:[setupFixture]});
+ fleet();
+ await screen.findByRole('button',{name:/^Open Alpha/});
+ await drop();
+ const onTheLine=()=>{
+  expect(screen.getByText('Machine updates are interrupted.').closest('.fleet-workspace-header > .os-head')).toBeTruthy();
+  expect(screen.getByText('Showing the last known state.')).toBeTruthy();
+  expect(document.querySelector('.fleet-workspace > .os-notice')).toBeNull();
+ };
+ onTheLine();
+ await openMachine('Alpha');
  const tabs=screen.getByRole('navigation',{name:'Machine views'});
- const follows=(first:Element,then:Element)=>!!(first.compareDocumentPosition(then)&Node.DOCUMENT_POSITION_FOLLOWING);
- fireEvent.click(within(tabs).getByRole('button',{name:'Models'}));
+ for(const view of ['Details','Apps','Activity','Settings','Equipment','Models']){fireEvent.click(within(tabs).getByRole('button',{name:view}));onTheLine();}
  fireEvent.click(await screen.findByRole('button',{name:'Change model setup'}));
- await act(async()=>{statusListeners.forEach(listener=>listener({status:'disconnected'}));});
- const editor=screen.getByLabelText('Model setup editor');
- // Once on the page, and after the whole editor.
- expect(follows(editor,screen.getByText('Machine updates are interrupted.'))).toBe(true);
- fireEvent.click(screen.getByRole('button',{name:'Done'}));
- const installed=screen.getByRole('region',{name:'Installed'});
- expect(follows(screen.getByText('Machine updates are interrupted.'),installed)).toBe(true);
- fireEvent.click(within(tabs).getByRole('button',{name:'Details'}));
- expect(follows(screen.getByText('Machine updates are interrupted.'),screen.getByRole('region',{name:'System'}))).toBe(true);
+ onTheLine();
+ expect(CSS).toContain('.os-head-note { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;');
+});
+it('keeps trying to read a machine feed that is behind',async()=>{
+ vi.useFakeTimers();
+ try{
+  const drop=droppable({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});
+  fleet();
+  await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+  const reads=h.connection.query.myWorkersWithStatus.mock.calls.length;
+  await act(async()=>{await vi.advanceTimersByTimeAsync(30_000);});
+  expect(h.connection.query.myWorkersWithStatus.mock.calls.length).toBe(reads);
+  await drop();
+  await act(async()=>{await vi.advanceTimersByTimeAsync(15_000);});
+  expect(h.connection.query.myWorkersWithStatus.mock.calls.length).toBeGreaterThan(reads);
+ }finally{vi.useRealTimers();}
+});
+it('says the machine feed is behind on the heading line of the overview',async()=>{
+ const drop=droppable({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});
+ fleet('overview');
+ const breakdown=await screen.findByRole('region',{name:'Machine availability'});
+ await drop();
+ expect(screen.getByText('Machine updates are interrupted.').closest('.os-overview > .os-head')).toBeTruthy();
+ expect(document.querySelector('.os-overview > .os-notice')).toBeNull();
+ // What it withdraws keeps its room: the map under it slid 84 px up (measured at 1000x640).
+ expect(document.querySelector('.os-overview-breakdown')).toBe(breakdown);
+ expect(breakdown.hasAttribute('data-withheld')).toBe(true);
+ expect(CSS).toContain('.os-overview-breakdown[data-withheld] { visibility: hidden; }');
 });
 
 it('puts reported facts on Details after Equipment and keeps Settings to what the owner sets',async()=>{

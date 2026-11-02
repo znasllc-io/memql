@@ -4,7 +4,7 @@ import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { feedIsBehind } from "../../../live/useLiveCollection";
 import { AutoRefresh } from "../FleetControls";
 
-import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatMoment } from "../../../kit";
+import { EmptyState, Chip, Fact, Facts, Head, HeadNote, Notice, Panel, Subhead, formatMoment } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
 import { figureText } from "../../../kit/measure";
 import {
@@ -62,7 +62,8 @@ export function SessionPage({
 
   return (
     <div className="os-fleet os-fleet-session" data-os-page-context={JSON.stringify({ page: "App session", sessionId, app: session?.app, status: session?.status })}>
-      <Head navigationKey={`session:${sessionId}`} title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
+      <Head navigationKey={`session:${sessionId}`} title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}
+        note={state === "disconnected" ? <HeadNote sentence="Session updates are interrupted." next="Showing the last known state." /> : null}>
         <AutoRefresh enabled={feedIsBehind(state, error)} busy={loading} onRefresh={reread} />
       </Head>
 
@@ -76,8 +77,6 @@ export function SessionPage({
       )}
 
       {loading && session === null ? <ContentSkeleton kind="detail" label="Loading this run" /> : null}
-
-      {state === "disconnected" ? <Notice tone="warn" sentence="Session updates are interrupted." next="Showing the last known state." /> : null}
 
       {state === "live" && session === null && error === "" ? (
         <EmptyState title="Session no longer available">It may have been removed since the list was last updated.</EmptyState>

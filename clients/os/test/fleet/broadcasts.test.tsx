@@ -9,6 +9,7 @@ const { fakeConnection, withSession, machineRow, modelPullRow, appSessionRow, ro
 const { MachinesProvider, useMachines } = await import("../../src/live/machines");
 const { AppSessionsProvider, useAppSessions, useAppSessionDetail, APP_SESSION_CONCEPT } = await import("../../src/apps/fleet/apps/useAppSessions");
 const { RecentActivity } = await import("../../src/apps/fleet/machines/RecentActivity");
+const { SessionPage } = await import("../../src/apps/fleet/apps/SessionPage");
 const { formatMoment } = await import("../../src/kit/format");
 const { RoutingPolicyProvider, useRoutingPolicy } = await import("../../src/apps/fleet/routing/useRoutingPolicy");
 const { useModelPulls } = await import("../../src/apps/fleet/machines/useModelPulls");
@@ -74,7 +75,9 @@ describe("Fleet broadcast connections", () => {
       connection.query.appSessionsForUser.mockRejectedValueOnce(new Error("Stream unavailable"));
       const view = render(withSession(<RecentActivity machineId="machine" onActivity={vi.fn()} onOpenActivity={vi.fn()} />, { userId: "me" }));
       await act(async () => {});
-      expect(screen.getByText("Activity updates are interrupted.")).toBeTruthy();
+      // On the heading's line: above the rows it moved them down, under the pointer.
+      expect(screen.getByText("Activity updates are interrupted.").closest(".fleet-bank-heading")).toBeTruthy();
+      expect(document.querySelector(".fleet-recent-activity > .os-notice")).toBeNull();
       expect(screen.queryByText("No activity yet")).toBeNull();
       connection.query.appSessionsForUser.mockResolvedValue(rowsResult([session("1")]));
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
@@ -84,6 +87,16 @@ describe("Fleet broadcast connections", () => {
       expect(connection.query.appSessionsForUser).toHaveBeenCalledTimes(2);
       view.unmount();
     } finally { vi.useRealTimers(); }
+  });
+
+  it("says a run's feed is behind on the heading's line", async () => {
+    const statusListeners = new Set<(change: { status: string }) => void>();
+    h.connection = Object.assign(fakeConnection({ appSessionById: [session("1")] }), { onStatusChange: (listener: (change: { status: string }) => void) => { statusListeners.add(listener); return () => statusListeners.delete(listener); } });
+    render(withSession(<SessionPage sessionId="1" onBack={vi.fn()} />, { userId: "me" }));
+    await act(async () => {});
+    await act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); });
+    expect(screen.getByText("Session updates are interrupted.").closest(".os-fleet-session > .os-head")).toBeTruthy();
+    expect(document.querySelector(".os-fleet-session > .os-notice")).toBeNull();
   });
 
   it("recovers missed machine events after reconnect and stops connection listeners on unmount", async () => {

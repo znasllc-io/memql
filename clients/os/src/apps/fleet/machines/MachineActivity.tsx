@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { AutoRefresh, EmptyState, Fact, Facts, Head, Notice, RecordList, RecordListSkeleton, RecordRow, useNow } from "../../../kit";
+import { AutoRefresh, EmptyState, Fact, Facts, Head, HeadNote, Notice, RecordList, RecordListSkeleton, RecordRow, useNow } from "../../../kit";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import { flatten } from "../../../kit/rows";
 import { PageHelp } from "../../../kit/pageHelp";
@@ -94,12 +94,12 @@ export function MachineActivity({ workerId, navigation, openId, onOpened }: { wo
   const back = () => setSelected(null);
   return <div className="fleet-machine-activity">
     <Head navigationKey={`activity:${workerId}:${item?.id ?? "list"}`} title={item ? item.label : "Activity"} meta={!item && !loading && !behind ? items.length : undefined}
+      note={behind ? <HeadNote sentence="Activity updates are interrupted." next="Showing the last available records." detail={error || undefined} /> : null}
       breadcrumbs={[...(navigation?.breadcrumbs ?? []), { label: "Activity", ...(item ? { onSelect: back } : {}) }, ...(item ? [{ label: item.label }] : [])]}
       back={item ? { label: "Activity", onSelect: back } : navigation?.back}>
       <PageHelp title="Activity"><p>Model calls, app sessions and tool calls for this machine. Queued and active work appears first; completed work follows. Updates arrive automatically.</p><p>Older model calls, tool calls and app sessions remain available. Queue and running transitions are recorded from this update onward. Copy a detail using its copy icon.</p></PageHelp>
       <AutoRefresh enabled={behind} busy={loading} onRefresh={refresh} />
     </Head>
-    {behind ? <Notice tone="warn" sentence="Activity updates are interrupted." next="Showing the last available records." detail={error || undefined} /> : null}
     {item ? <ActivityDetails item={item} /> : <>
       {loading && !items.length ? <RecordListSkeleton label="Loading activity" /> : null}
       {!loading && !behind && !items.length ? <EmptyState title="No activity yet">Work assigned to this machine will appear here.</EmptyState> : null}

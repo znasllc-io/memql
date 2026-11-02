@@ -23,14 +23,16 @@ export interface OverviewMetric {
 }
 
 /** App summaries share a layout; each app supplies its own measured facts. */
-export function Overview({ metrics, scope, children, actions }: {
+export function Overview({ metrics, scope, note, children, actions }: {
   metrics: readonly OverviewMetric[];
   scope?: string;
+  /** What stopped arriving, on the title's line: a `HeadNote`. */
+  note?: ReactNode;
   children: ReactNode;
   actions?: ReactNode;
 }) {
   return <section className="os-overview os-app-stack" aria-label="Overview" data-os-page-context={JSON.stringify({ page: "Overview", scope })}>
-    <Head title="Overview" meta={scope}>{actions}</Head>
+    <Head title="Overview" meta={scope} note={note}>{actions}</Head>
     <dl className="os-overview-metrics" aria-label="Overview statistics">
       {metrics.map(metric => <div key={metric.label} data-overview-metric={metric.label}>
         <dt>{metric.label}</dt><dd>{metric.loading ? <InlineSkeleton label={`Loading ${metric.label.toLowerCase()}`} /> : <Measure figure={metric.figure} format={metric.format} />}</dd>
@@ -50,11 +52,16 @@ export function Overview({ metrics, scope, children, actions }: {
 export interface OverviewSegment { label: string; count: number; tone?: "good" | "warn" | "quiet" | "unknown" }
 
 /** A current distribution, never a fabricated activity history. */
-export function OverviewBreakdown({ title, segments }: { title: string; segments: readonly OverviewSegment[] }) {
+export function OverviewBreakdown({ title, segments, withheld = false }: {
+  title: string;
+  segments: readonly OverviewSegment[];
+  /** Not to be read as current: nothing shows, but the room stays, so what stands below holds still. */
+  withheld?: boolean;
+}) {
   const visible = segments.filter(s => s.count > 0);
   const total = visible.reduce((sum, s) => sum + s.count, 0);
   if (!total) return null;
-  return <section className="os-overview-breakdown" aria-label={title}>
+  return <section className="os-overview-breakdown" aria-label={title} data-withheld={withheld || undefined}>
     <h4>{title}</h4>
     <div className="os-overview-distribution" aria-hidden>{visible.map(s => <span key={s.label} data-tone={s.tone ?? "quiet"} style={{ flex: s.count }} />)}</div>
     <ul>{visible.map(s => <li key={s.label} data-tone={s.tone ?? "quiet"}><span aria-hidden />{s.label}<strong>{s.count}</strong></li>)}</ul>

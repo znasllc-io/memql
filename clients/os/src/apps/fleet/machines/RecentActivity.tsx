@@ -1,5 +1,5 @@
 import { ArrowUpRight, History } from "lucide-react";
-import { AutoRefresh, EmptyState, Notice, RecordList, RecordListSkeleton, Subhead } from "../../../kit";
+import { AutoRefresh, EmptyState, HeadNote, RecordList, RecordListSkeleton, Subhead } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { PageHelp } from "../../../kit/pageHelp";
 import { ActivityRow, useMachineActivity } from "./MachineActivity";
@@ -18,12 +18,12 @@ export function RecentActivity({ machineId, onActivity, onOpenActivity }: {
     <div className="fleet-bank-heading">
       <Subhead meta={loading || behind ? undefined : recent.length}>Recent activity</Subhead>
       <PageHelp title="Recent activity"><p>The latest five entries from this machine’s Activity: model calls, tool calls and app sessions, with queued and running work first. Updates arrive automatically. Open an entry to see its details in Activity, or use the arrow to see all of it.</p></PageHelp>
+      {behind ? <HeadNote sentence="Activity updates are interrupted." next="Showing the last available records." detail={error || undefined} /> : null}
       <span className="fleet-heading-actions">
         <AutoRefresh busy={loading} enabled={behind} onRefresh={refresh} />
         <IconButton label="All activity" onClick={onActivity}><ArrowUpRight size={16} aria-hidden /></IconButton>
       </span>
     </div>
-    {behind ? <Notice tone="warn" sentence="Activity updates are interrupted." next="Showing the last available records." detail={error || undefined} /> : null}
     {loading && !recent.length ? <RecordListSkeleton label="Loading recent activity" rows={3} />
       : recent.length ? <RecordList as="ul" label="Recent activity">{recent.map(item => <ActivityRow key={item.id} item={item} onOpen={() => onOpenActivity(item.id)} />)}</RecordList>
       : behind ? null : <EmptyState icon={History} title="No activity yet">Work assigned to this machine will appear here.</EmptyState>}

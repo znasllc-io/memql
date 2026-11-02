@@ -4,12 +4,12 @@ import { LocalTabs } from "../../kit/LocalTabs";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { AddButton } from "../../kit/AddButton";
 import { RecordList, RecordRow, listCount } from "../../kit/RecordRow";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { ArrowUpRight, ChevronRight, Cpu, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
-import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatFreshness, useNow } from "../../kit";
+import { Button, EmptyState, Refine, Head, HeadNote, ProvenanceDot, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
 import { PageHelp } from "../../kit/pageHelp";
 import type { PageTrail } from "../../kit/pageNavigation";
@@ -93,7 +93,6 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
   const retained = machine && !visited.some(item => item.machineId === machine.id && item.view === selection.view) ? [...visited, { machineId: machine.id, view: selection.view }] : visited;
   const scrollRoot = usePageScroll(`${selection.machineId}:${selection.view}`);
   const behind = feedState === "degraded" || feedState === "disconnected";
-  const feedNotice = behind ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last known state." detail={snapshot?.error || undefined}><AutoRefresh onRefresh={reload} /></Notice> : null;
   return (<>
     {flow.active ? <AddMachinePage flow={flow} onLeave={machineId => { if (machineId) select({ machineId, view: "equipment" }); }} /> : null}
     <div ref={scrollRoot} className="fleet-home" data-machine-view={selection.view} hidden={flow.active}>
@@ -112,7 +111,8 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
         breadcrumbs={machine ? [{ label: "Machines", onSelect: toList }, { label: machineName(machine) }, { label: VIEW_NAMES.equipment }] : undefined}
         back={machine ? { label: "Machines", onSelect: toList } : undefined}
         navigation={selection.view === "equipment" || !machine}
-        meta={machine ? undefined : listCount(snapshot, shown.length)}>
+        meta={machine ? undefined : listCount(snapshot, shown.length)}
+        note={behind ? <HeadNote sentence="Machine updates are interrupted." next="Showing the last known state." detail={snapshot?.error || undefined} /> : null}>
         {/* ON THE LIST the search narrows the rows beneath it (DESIGN.md rule 2:
             a filter is a question asked of the content). Inside a machine it
             keeps its results, which are the quick way across to another.
@@ -126,8 +126,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
       </Head>
       {machine ? <LocalTabs label="Machine views" value={selection.view} onChange={view => select({ machineId: machine.id, view })} options={(Object.keys(VIEW_NAMES) as MachineView[]).map(view => [view, VIEW_NAMES[view]] as const)}  /> : null}
       </div>
-      {/* The Models page places this itself: here it would push an open setup editor down. */}
-      {machine && selection.view === "models" ? null : feedNotice}
+      <AutoRefresh enabled={behind} onRefresh={reload} />
       <div className="fleet-workspace-body" data-has-machines={machines.length > 0 || undefined}>
         <main className="fleet-equipment-area" aria-label="Machine workspace">
           {!settled && machines.length === 0 && !snapshot?.error ? <RecordListSkeleton label="Loading machines" rows={3} />
@@ -143,7 +142,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}
                   </Head> : null}
-                  <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved} feedNotice={shown && item.view === "models" ? feedNotice : null}
+                  <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved}
                     openActivity={item.view === "activity" && activityOpen?.machineId === item.machineId ? activityOpen.id : undefined} onActivityOpened={() => setActivityOpen(null)}
                     modelNavigation={{ breadcrumbs: [{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }], back: { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) } }} />
                 </div>}
@@ -248,12 +247,12 @@ export function MachineEquipment({ machine, now, onInspect, viewerId = "" }: { m
   </ActivityTarget>;
 }
 
-function ScopedMachineDetail({ machine, now, view, onRemoved, modelNavigation, feedNotice, openActivity, onActivityOpened }: { machine: MachineRow; now: Date; view: Exclude<MachineView, "equipment">; onRemoved: (id: string) => void; modelNavigation: Omit<PageTrail, "title">; feedNotice: ReactNode; openActivity?: string; onActivityOpened: () => void }) {
+function ScopedMachineDetail({ machine, now, view, onRemoved, modelNavigation, openActivity, onActivityOpened }: { machine: MachineRow; now: Date; view: Exclude<MachineView, "equipment">; onRemoved: (id: string) => void; modelNavigation: Omit<PageTrail, "title">; openActivity?: string; onActivityOpened: () => void }) {
   const writes = useMachineWrites();
   const revoke = async (id: string, reason: string) => {
     const ok = await writes.revoke(id, reason);
     if (ok) onRemoved(id);
     return ok;
   };
-  return <MachineDetail machine={machine} writes={{ ...writes, revoke }} now={now} view={view} modelNavigation={modelNavigation} feedNotice={feedNotice} openActivity={openActivity} onActivityOpened={onActivityOpened} />;
+  return <MachineDetail machine={machine} writes={{ ...writes, revoke }} now={now} view={view} modelNavigation={modelNavigation} openActivity={openActivity} onActivityOpened={onActivityOpened} />;
 }

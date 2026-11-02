@@ -43,7 +43,9 @@ it("does not label an expired unresolved call as still running", async () => {
 it("keeps partial records visible when another feed fails", async () => {
  const c = fakeConnection({ appSessionsForUser: [appSessionRow({ id: "s", ownerUserId: "me", workerId: "machine", app: "codex", status: "ended" })] }); c.query.machineActivity.mockRejectedValue(new Error("Read unavailable")); h.connection = c;
  render(withSession(<MachineActivity workerId="machine" />, { userId: "me" }));
- await screen.findByText("Activity updates are interrupted."); expect(await screen.findByText("Codex")).toBeTruthy(); expect(screen.queryByText("No activity yet")).toBeNull();
+ const note = await screen.findByText("Activity updates are interrupted."); expect(await screen.findByText("Codex")).toBeTruthy(); expect(screen.queryByText("No activity yet")).toBeNull();
+ // On the heading's line: above the list it moved every row down, under the pointer.
+ expect(note.closest(".fleet-machine-activity > .os-head")).toBeTruthy(); expect(document.querySelector(".fleet-machine-activity > .os-notice")).toBeNull();
 });
 it("preserves earlier model history without duplicating calls covered by lifecycle receipts", async () => {
  mount({ firstMachineActivity: [activity({ status: "succeeded" })], myModelCallsOnMachine: [

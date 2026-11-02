@@ -450,12 +450,11 @@ describe("a read that fails while a setup is edited", () => {
  });
 });
 
-// WHAT ARRIVES ON ITS OWN STANDS UNDER THE ROW. A failed read, a dropped feed, a
-// download and a setup changed elsewhere each stood above the board, so with nothing
-// scrolled the whole editor moved down and a click aimed at Save setup landed on a
-// task card. jsdom lays nothing out, so this holds the order (measured in a browser
-// at 1512x1100: the row at y 866.5 moved 67 px for the read and 82 px for a download;
-// now none of them move it).
+// WHAT ARRIVES ON ITS OWN STANDS UNDER THE ROW. A failed read, a download and a setup
+// changed elsewhere each stood above the board, so with nothing scrolled the whole
+// editor moved down and a click aimed at Save setup landed on a task card. jsdom lays
+// nothing out, so this holds the order (measured in a browser at 1512x1100: the row at
+// y 866.5 moved 67 px for the read and 82 px for a download; now none of them move it).
 describe("what arrives on its own while a setup is edited", () => {
  const labels = {"model:chat":"tools=1", "model:small":"tools=1"};
  const statusListeners = new Set<(change: { status: string }) => void>();
@@ -468,13 +467,13 @@ describe("what arrives on its own while a setup is edited", () => {
  type Connection = Awaited<ReturnType<typeof opened>>;
  const graphEvent = (connection: Connection) => act(async () => { connection.subscriptions.emit("v1:worker:registration", machineRow({ id: "laptop", ownerUserId: OWNER, labels }), "NODE_UPDATED"); await Promise.resolve(); });
  const failedRead = (connection: Connection) => { connection.query.fleetModelSetup.mockRejectedValueOnce(new Error("stream closed")); return graphEvent(connection); };
+ const download = (connection: Connection) => act(async () => { connection.subscriptions.emit(MODEL_PULL_CONCEPT, modelPullRow({ id: "pull-1", ownerUserId: OWNER, workerId: "laptop", model: "small", status: "running" }), "NODE_CREATED"); });
  const aboveTheBoard = () => { const above: string[] = []; for (let sibling = screen.getByLabelText("Model setup editor").previousElementSibling; sibling; sibling = sibling.previousElementSibling) above.push(sibling.className); return above; };
  const follows = (first: Element, then: Element) => !!(first.compareDocumentPosition(then) & Node.DOCUMENT_POSITION_FOLLOWING);
 
  it.each<[string, (connection: Connection) => Promise<unknown>, () => Promise<HTMLElement>]>([
   ["a failed read", failedRead, () => screen.findByText("The catalog could not be read.")],
-  ["a dropped feed", () => act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); }), () => screen.findByText("Download updates are interrupted.")],
-  ["a download", connection => act(async () => { connection.subscriptions.emit(MODEL_PULL_CONCEPT, modelPullRow({ id: "pull-1", ownerUserId: OWNER, workerId: "laptop", model: "small", status: "running" }), "NODE_CREATED"); }), () => screen.findByRole("status", {name:"Pulling small"})],
+  ["a download", download, () => screen.findByRole("status", {name:"Pulling small"})],
   ["a setup changed elsewhere", connection => { connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [{ ...setupFixture, revision: "after" }])); return graphEvent(connection); }, () => screen.findByText("This setup changed elsewhere.")],
  ])("%s stands under the action row, with nothing new above the board", async (_arrival, arrive, find) => {
   const connection = await opened();
@@ -484,6 +483,16 @@ describe("what arrives on its own while a setup is edited", () => {
   expect(aboveTheBoard()).toEqual(before);
   expect(follows(screen.getByRole("button", {name:"Discard changes"}), arrival)).toBe(true);
   expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+ });
+
+ it("a dropped feed says so on the heading's line, with nothing new above or under the board", async () => {
+  await opened();
+  const before = aboveTheBoard();
+  await act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); });
+  const note = await screen.findByText("Download updates are interrupted.");
+  expect(note.closest(".fleet-models > .os-head")).toBeTruthy();
+  expect(aboveTheBoard()).toEqual(before);
+  expect(screen.getByLabelText("Model setup editor").nextElementSibling?.children).toHaveLength(0);
  });
 
  // Scrolled to the end of the page the row stands at the fold, and without this room
@@ -497,7 +506,7 @@ describe("what arrives on its own while a setup is edited", () => {
   const room = screen.getByLabelText("Model setup editor").nextElementSibling!;
   expect(room.children).toHaveLength(0);
   expect(parseFloat(getComputedStyle(room).minHeight)).toBeGreaterThan(0);
-  await act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); });
+  await download(connection);
   await failedRead(connection);
   await screen.findByText("The catalog could not be read.");
   expect(room.firstElementChild?.textContent).toContain("The catalog could not be read.");
@@ -511,7 +520,7 @@ describe("what arrives on its own while a setup is edited", () => {
   onTestFinished(() => laidOut.mockRestore());
   const connection = await opened();
   const room = screen.getByLabelText("Model setup editor").nextElementSibling as HTMLElement;
-  await act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); });
+  await download(connection);
   await failedRead(connection);
   await screen.findByText("The catalog could not be read.");
   expect(room.children).toHaveLength(2);

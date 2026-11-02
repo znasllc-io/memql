@@ -3,7 +3,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Monitor } from "lucide-react";
 import { useSession } from "../../../chrome/access";
-import { EmptyState, Notice, useNow } from "../../../kit";
+import { EmptyState, HeadNote, useNow } from "../../../kit";
 import { Overview, OverviewBreakdown } from "../../../kit/Overview";
 import { MapCanvas } from "../../../kit/MapCanvas";
 import { MapHeading } from "../../../kit/MapHeading";
@@ -25,17 +25,16 @@ export function FleetOverview({ onOpenMachine }: { onOpenMachine: (id: string) =
   const online = machines.filter(m => isWorkerOnline(m, now));
   const count = (n: number) => fresh ? figureOf(n) : absent(snapshot?.error ? "failed" : "unread");
   const behind = feedState === "degraded" || feedState === "disconnected";
-  return <Overview scope={config.domain || "This cluster"} metrics={[
+  return <Overview scope={config.domain || "This cluster"} note={behind || snapshot?.error ? <HeadNote sentence="Machine updates are interrupted." next="Showing the last reported connections. Reconnecting automatically." /> : null} metrics={[
     { label: "Machines", figure: count(machines.length) },
     { label: "Online", figure: count(online.length) },
     { label: "Active calls", figure: count(online.reduce((sum, m) => sum + Math.max(0, m.activeCount), 0)) },
     { label: "Reported apps", figure: count(machines.reduce((sum, m) => sum + m.apps.length, 0)) },
   ]}>
-    {behind || snapshot?.error ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last reported connections. Reconnecting automatically." /> : null}
-    {fresh ? <OverviewBreakdown title="Machine availability" segments={[
+    <OverviewBreakdown title="Machine availability" withheld={!fresh} segments={[
       { label: "Online", count: online.length, tone: "good" },
       { label: "Offline", count: machines.length - online.length, tone: "quiet" },
-    ]} /> : null}
+    ]} />
     {!machines.length && !fresh && !snapshot?.error ? <ContentSkeleton kind="map" label="Loading fleet connections" /> : !machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : "Machines unavailable"}>{fresh ? "Add a machine from Machines to see its connection here." : "Reconnect to read this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
   </Overview>;
 }
