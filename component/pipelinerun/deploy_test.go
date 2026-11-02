@@ -743,6 +743,10 @@ func TestEachGuard(t *testing.T) {
 			if len(dep.Guards) != 1 || dep.Guards[0].Code != tc.code {
 				t.Fatalf("guards = %+v", dep.Guards)
 			}
+			// The button alone is not enough here, and the owner is told before pressing it.
+			if tc.code == pipelines.DeployGuardContract && !strings.Contains(dep.Guards[0].Detail, "COMPATIBILITY.md") {
+				t.Errorf("a contract's guard does not say what it needs: %q", dep.Guards[0].Detail)
+			}
 		})
 	}
 }

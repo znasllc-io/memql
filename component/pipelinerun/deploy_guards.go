@@ -105,7 +105,7 @@ func (i *Integration) deployGuards(ctx context.Context, gh trainGitHub, token st
 	}
 	if len(contracts) > 0 {
 		guards = append(guards, pipelines.DeployGuard{Code: pipelines.DeployGuardContract,
-			Detail: "It changes what machines must accept: " + strings.Join(contracts, "; ") + "."})
+			Detail: "It changes what machines must accept: " + strings.Join(contracts, "; ") + ". Machines and engine must move together, in the order COMPATIBILITY.md gives. Pressing Deploy alone goes back, because no machine could verify the rollout."})
 	}
 	for _, file := range files {
 		if file.Path != pipelines.ManifestPath {

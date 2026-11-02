@@ -254,7 +254,9 @@ the next one must simply carry on.
      asks of one index migration it did not need to, and that costs one press;
    - any other engine code changes a table (`CREATE TABLE` in `embedder_tables.go`, say), because not all of
      them are made by a migration;
-   - a worker action contract changes, on the engine's side or a machine's;
+   - a worker action contract changes, on the engine's side or a machine's. The match is exact, so this one needs
+     more than the button: machines and engine move together in the order `COMPATIBILITY.md` gives, and a rollout
+     cannot be verified on a machine on the other contract, so a press without that order goes back;
    - a pipeline step is removed (D10);
    - or it cannot tell: GitHub stopped listing at 300 files, or gave no patch for more files than it will read
      whole. GitHub drops patches part way through a large comparison (18 of 181 files between two real
@@ -334,7 +336,11 @@ No step here is taken by landing the code.
 2. The owner adds the required checks (`MemQL / memql`, `MemQL / znas`, `MemQL / memql-project`, from the
    app `memql-for-znas-llc`). Until then a release refuses: it cannot verify its source.
 3. Release the engine and deploy it, the usual way. `memql-znas`'s DSL and the Role that lets the engine
-   sync its two Applications ship with it.
+   sync its two Applications ship with it. **This has to wait for Cockpit 0.22.0:** any engine from current
+   `main` requires worker contract 5 for pipeline steps, an exact match, and every machine is on contract 4.
+   The order is `COMPATIBILITY.md`'s: publish Cockpit 0.22.0, hold new runs, release and pin the engine, upgrade
+   the machines, release the hold. It comes from that contract, not from this work: landing here changes nothing
+   about it.
 4. Set `source: main`, then `departures: ["21:00"]`. Watch one night. This is stage 1, with the owner's
    approval still in place.
 5. Set `landing: automatic` and `releaseProfile`. The owner turns on **Publish by itself**. Watch one night.

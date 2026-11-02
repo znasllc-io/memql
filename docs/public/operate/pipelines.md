@@ -746,8 +746,10 @@ The engine must be allowed to `get` and `patch` those Applications, and
   migration that does anything but add an index, other code that changes a table, a changed
   worker action contract, or a removed pipeline step. So does one it cannot read all of, past
   300 changed files. When in doubt it asks, because a wrong "wait" costs one press. Discord says
-  which, and **Deploy newest release** goes ahead with them acknowledged. A newer release carries a
-  waiting one, and its own guards read from the same place, so nothing slips past.
+  which, and **Deploy newest release** goes ahead with them acknowledged. A changed contract needs more
+  than the button: machines and engine move together, in the order `COMPATIBILITY.md` gives, and a rollout
+  cannot be verified on a machine on the other contract. A newer release carries a waiting one, and its own
+  guards read from the same place, so nothing slips past.
 - **The pin goes on a branch.** Its pull request's check must pass, with one re-run. A failure
   here touches nothing, and says so.
 - **Each Application syncs at the pin's exact commit**, in order, with prune off and nothing
