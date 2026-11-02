@@ -806,3 +806,67 @@ func TestTwoTicksAtOnceStartOneSync(t *testing.T) {
 		t.Errorf("syncs = %v", h.effects.syncs)
 	}
 }
+
+// A step that fails on every tick must not log forever: a deploy that never finishes
+// keeps every later train from leaving, with nobody told.
+func TestAStepThatKeepsFailingEnds(t *testing.T) {
+	t.Run("before anything moved", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.toSyncing(t)
+		h.effects.mu.Lock()
+		h.effects.apps = map[string]*fakeApplication{}
+		h.effects.mu.Unlock()
+		h.step(t)
+		h.clock = h.clock.Add(deployStuckAfter)
+		dep := h.step(t)
+		if dep.State != DeploymentCancelled || len(h.effects.syncs) != 0 || !strings.Contains(dep.Reason, "could not go on") {
+			t.Fatalf("state %s, syncs %v, reason %q", dep.State, h.effects.syncs, dep.Reason)
+		}
+		if dep.PausesAutomatic() {
+			t.Error("a deploy that moved nothing paused automatic deploys")
+		}
+	})
+	t.Run("while it could not read what to go back to", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.toSyncing(t)
+		h.step(t)
+		h.step(t)
+		h.step(t)
+		h.effects.finishSync("memql", "Failed", false)
+		h.stepUntil(t, DeploymentRollingBack)
+		h.effects.mu.Lock()
+		h.effects.apps = map[string]*fakeApplication{}
+		h.effects.mu.Unlock()
+		h.step(t)
+		h.clock = h.clock.Add(deployStuckAfter)
+		dep := h.step(t)
+		if dep.State != DeploymentStopped || !strings.Contains(dep.Reason, "could not finish going back") {
+			t.Fatalf("state %s, reason %q", dep.State, dep.Reason)
+		}
+		if text := strings.Join(h.messages(), "\n"); !strings.Contains(text, "stopped partway") {
+			t.Errorf("nobody was told: %s", text)
+		}
+	})
+	t.Run("while it could not merge what is already running", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.effects.autoSucceed = true
+		h.toSyncing(t)
+		h.stepUntil(t, DeploymentVerifying)
+		for range 3 {
+			if dep := h.step(t); dep.RunID != "" {
+				break
+			}
+		}
+		h.concludeVerification(t, ConclusionSuccess)
+		h.stepUntil(t, DeploymentLanding)
+		h.remote.mu.Lock()
+		delete(h.remote.trainPRs, 900)
+		h.remote.mu.Unlock()
+		h.step(t)
+		h.clock = h.clock.Add(deployStuckAfter)
+		dep := h.step(t)
+		if dep.State != DeploymentDeployed || !strings.Contains(dep.Reason, "could not be merged") {
+			t.Fatalf("state %s, reason %q", dep.State, dep.Reason)
+		}
+	})
+}

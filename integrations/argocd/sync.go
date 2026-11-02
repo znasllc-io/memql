@@ -212,6 +212,14 @@ func syncFacts(obj map[string]any, request string) SyncFacts {
 	result := object(state, "syncResult")
 	if facts.Phase == "Succeeded" {
 		facts.Revision = stringAt(result, "revision")
+	} else {
+		// An operation that failed or still runs says nothing of what ran before it.
+		// History holds each full sync that succeeded, oldest first.
+		history, _ := status["history"].([]any)
+		if len(history) > 0 {
+			last, _ := history[len(history)-1].(map[string]any)
+			facts.Revision = stringAt(last, "revision")
+		}
 	}
 	if request == "" {
 		return facts

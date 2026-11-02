@@ -43,6 +43,8 @@ const (
 	deployVerifyDeadline = time.Hour
 	// deployLandDeadline bounds asking GitHub to merge a verified pin.
 	deployLandDeadline = 30 * time.Minute
+	// deployStuckAfter is how long a step may fail on every tick before it gives up.
+	deployStuckAfter = 45 * time.Minute
 	// deployPublishedWindow is how far back a deploy looks for a published release.
 	deployPublishedWindow = 30 * 24 * time.Hour
 	// deployApprover is who an automatic deploy says asked for it.
@@ -157,9 +159,43 @@ func (i *Integration) advanceDeployment(ctx context.Context, d Deps, s pipelines
 		return err
 	}
 	if cur != nil && !cur.Finished() {
-		return i.stepDeployment(ctx, d, s, p, *cur)
+		err := i.stepDeployment(ctx, d, s, p, *cur)
+		if err != nil && d.Now().UTC().Sub(cur.StateSince) > deployStuckAfter {
+			return i.giveUpStep(ctx, d, s, p, *cur, err)
+		}
+		return err
 	}
 	return i.startAutomaticDeployment(ctx, d, s, p, cur)
+}
+
+// giveUpStep ends a step whose every tick has failed for deployStuckAfter: a lost
+// GitHub connection, a Role that was never applied. Each state's own deadlines cover
+// what it waits for, and this covers what it could not even ask, because a deploy that
+// only logs would keep every later train from leaving, with nobody told.
+func (i *Integration) giveUpStep(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, dep Deployment, stepErr error) error {
+	why := oneLine(stepErr.Error())
+	switch dep.State {
+	case DeploymentWaiting, DeploymentPinning:
+		return i.abandonPin(ctx, d, s, p, dep, "The deploy could not go on: "+why)
+	case DeploymentSyncing:
+		// Nothing has moved until an Application has a request on it.
+		if !slices.ContainsFunc(dep.Applications, func(app DeploymentApplication) bool { return app.Request != "" }) {
+			return i.abandonPin(ctx, d, s, p, dep, "The deploy could not go on: "+why)
+		}
+		return i.beginRollback(ctx, d, s, p, dep, "The deploy could not go on: "+why)
+	case DeploymentVerifying:
+		return i.beginRollback(ctx, d, s, p, dep, "The rollout could not be verified: "+why)
+	case DeploymentLanding:
+		reason := fmt.Sprintf("Production runs %s, but its pin could not be merged: %s. Merge its pull request, or the next sync goes back.", dep.Tag, why)
+		updated, ok, err := i.move(ctx, d, dep, DeploymentDeployed, DeploymentPatch{Reason: ptr(reason)})
+		if err != nil || !ok {
+			return err
+		}
+		return i.notifyDeployment(ctx, d, s, p, updated, pipelinenotify.DeployUnmerged, reason)
+	case DeploymentRollingBack, DeploymentVerifyingRollback:
+		return i.stopDeployment(ctx, d, s, p, dep, "It could not finish going back: "+why+". "+dep.Reason)
+	}
+	return stepErr
 }
 
 // startAutomaticDeployment records a waiting deployment for a newly published release.
@@ -212,6 +248,11 @@ func (i *Integration) prepareDeployment(ctx context.Context, d Deps, s pipelines
 	installed, err := installedVersion(ctx, in)
 	if err != nil {
 		return nil, err
+	}
+	// Asked every tick while a release someone deployed another way is the newest, so
+	// the one cheap read goes first. Every catalog read verifies a signature.
+	if version != "" && trigger == DeploymentTriggerAutomatic && !pipelines.VersionAfter(version, installed) {
+		return nil, nil
 	}
 	release, err := d.DeployEffects.NewestRelease(ctx, p.OwnerUserID, authority, s.ReleaseProfile, version)
 	if err != nil {

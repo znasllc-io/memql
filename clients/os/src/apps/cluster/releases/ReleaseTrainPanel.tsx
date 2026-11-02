@@ -167,6 +167,18 @@ export function ReleaseTrainPanel({ query, connected, visible = true }: { query:
               ? <Button disabled={busy} onClick={() => setAsk({ kind: "deploy", repository: status.repository, installRepository: status.installRepository })}>Deploy newest release</Button>
               : null}
           </div> : null}
+          {asking?.kind === "replace" ? <Notice tone="warn" sentence={`This cancels ${asking.branch}, closes its pull request and deletes its branch, then starts a new release from main.`}>
+            <InPlaceAsk className="os-refresh-row">
+              <Button tone="danger" onClick={() => void start(asking.repository)}>Replace it</Button>
+              <Button onClick={() => setAsk(null)}>Keep it</Button>
+            </InPlaceAsk>
+          </Notice> : null}
+          {asking?.kind === "deploy" ? <Notice tone="warn" sentence={`This puts the newest published release on ${asking.installRepository} now, whatever the hour and whatever makes it wait. A failure goes back to what ran before, unless the release changes tables or data, when it stops and asks you.`}>
+            <InPlaceAsk className="os-refresh-row">
+              <Button tone="danger" onClick={() => void deployNow(asking.repository)}>Deploy it</Button>
+              <Button onClick={() => setAsk(null)}>Not now</Button>
+            </InPlaceAsk>
+          </Notice> : null}
           {deployment && deployState ? <>
             <RecordRow name="Production" secondary={[deployment.version ? `v${deployment.version}` : "", status.installRepository].filter(Boolean).join(" · ")} state={deployState.word} tone={deployState.tone} />
             {deployment.reason ? <Caption>{deployment.reason}</Caption> : null}
@@ -183,18 +195,6 @@ export function ReleaseTrainPanel({ query, connected, visible = true }: { query:
               <Switch checked={status.deploy} disabled={busy || !status.release || !status.windowStart} onChange={next => changeStanding(status, status.release, next)}>{status.deploy ? "On" : "Off"}</Switch>
             </SettingRow> : null}
           </> : null}
-          {asking?.kind === "replace" ? <Notice tone="warn" sentence={`This cancels ${asking.branch}, closes its pull request and deletes its branch, then starts a new release from main.`}>
-            <InPlaceAsk className="os-refresh-row">
-              <Button tone="danger" onClick={() => void start(asking.repository)}>Replace it</Button>
-              <Button onClick={() => setAsk(null)}>Keep it</Button>
-            </InPlaceAsk>
-          </Notice> : null}
-          {asking?.kind === "deploy" ? <Notice tone="warn" sentence={`This puts the newest published release on ${asking.installRepository} now, whatever the hour and whatever makes it wait. A failure goes back to what ran before, unless the release changes tables or data, when it stops and asks you.`}>
-            <InPlaceAsk className="os-refresh-row">
-              <Button tone="danger" onClick={() => void deployNow(asking.repository)}>Deploy it</Button>
-              <Button onClick={() => setAsk(null)}>Not now</Button>
-            </InPlaceAsk>
-          </Notice> : null}
           {asking?.kind === "standing" ? <Notice tone="warn" sentence={asking.deploy
             ? "With this on, code pushed to main reaches production overnight with nobody reading it, if its tests pass. A release that changes tables, a machine's contract or a pipeline step still waits for you."
             : "With this on, code pushed to main is tagged and published overnight with nobody reading it, if its tests pass."}>

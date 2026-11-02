@@ -281,3 +281,25 @@ func TestTerminateSyncStopsOnlyWhatRuns(t *testing.T) {
 		t.Errorf("merges = %v", api.merges)
 	}
 }
+
+// A failed sync says nothing of what ran before it, and that is what a deploy goes back to.
+func TestReadApplicationFallsBackOnHistoryAfterAFailedSync(t *testing.T) {
+	api, client, _ := syncFixture(t)
+	status := object(api.obj, "status")
+	object(status, "operationState")["phase"] = "Failed"
+	status["history"] = []any{
+		map[string]any{"revision": "4444444444444444444444444444444444444444"},
+		map[string]any{"revision": previousRevision},
+	}
+	_, facts, err := client.ReadApplication(context.Background(), "argocd", "memql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts.Revision != previousRevision {
+		t.Errorf("revision = %q", facts.Revision)
+	}
+	delete(status, "history")
+	if _, facts, err = client.ReadApplication(context.Background(), "argocd", "memql"); err != nil || facts.Revision != "" {
+		t.Errorf("with no history: %q, %v", facts.Revision, err)
+	}
+}
