@@ -118,6 +118,26 @@ func TestTheAbandonedSentenceSaysWhatTheStageCanHaveChanged(t *testing.T) {
 	}
 }
 
+// A silent heartbeat is all the sweep has. On 2026-11-02 it wrote "this cluster
+// lost the node" about a run a dropped websocket had cancelled, on a node that
+// was fine and kept running, and the record cannot be corrected.
+func TestTheAbandonedSentenceDoesNotClaimANodeWasLost(t *testing.T) {
+	last := time.Date(2026, 9, 3, 11, 50, 0, 0, time.UTC)
+	for _, status := range []string{StatusAnalyzing, StatusBuilding, StatusStagingDsl, StatusRolling, StatusPublishing} {
+		t.Run(status, func(t *testing.T) {
+			got := abandonedMessage(map[string]any{"status": status, "nodeId": "bff-4"}, last)
+			if !strings.Contains(got, "stopped reporting progress") {
+				t.Errorf("the sentence must say what was observed: %s", got)
+			}
+			for _, claim := range []string{"lost", "node", "failed", "crashed"} {
+				if strings.Contains(strings.ToLower(got), claim) {
+					t.Errorf("the sweep cannot know %q: %s", claim, got)
+				}
+			}
+		})
+	}
+}
+
 func TestARowWithNoTimestampAtAllIsLeftAlone(t *testing.T) {
 	// Sweeping on an absent timestamp would close every row written before
 	// heartbeats existed the moment this shipped -- including one somebody is

@@ -911,10 +911,10 @@ repetitions of what the app already had.
   OTHER way, into the PACKAGE fingerprint -- it is a field somebody else can
   flip, and the consequence is that pushes start deploying themselves.
 
-- **`abandoned` IS NOT A FLAVOUR OF FAILED.** A run whose node the cluster lost
-  gets its own terminal status, its own word in the timeline ("lost", never
-  "failed"), and copy saying nothing failed and nothing was published. The
-  natural reading of a stopped deploy is that it broke; this one did not, and
+- **`abandoned` IS NOT A FLAVOUR OF FAILED.** A run that stopped reporting
+  progress gets its own terminal status, its own word in the timeline ("lost",
+  never "failed"), and copy saying nothing failed, without saying a node was lost,
+  which the sweep cannot know. The natural reading of a stopped deploy is that it broke; this one did not, and
   the surface's job is to say so before somebody debugs a build script that is
   fine. Two readings came out of a BROWSER rather than jsdom, which renders the
   same DOM and asserts nothing about either: a lost run was appearing under

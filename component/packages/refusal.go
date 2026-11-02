@@ -397,8 +397,8 @@ const (
 	// machine considered and why each was ruled out (task memql#4904).
 	CodeNoWorkerAvailable = "no_worker_available"
 
-	// CodeDeploymentAbandoned: the sweep closed a run whose node stopped
-	// answering (epic memql#4900, task memql#4902). Catalogued beside the
+	// CodeDeploymentAbandoned: the sweep closed a run whose heartbeat stopped
+	// (epic memql#4900, task memql#4902). Catalogued beside the
 	// build codes because a person meets it in the same place, and stated as
 	// its own because it is the one refusal in this catalogue that is about
 	// the CLUSTER rather than about the package: nothing was wrong with the

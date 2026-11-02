@@ -102,11 +102,11 @@ automation pollPackageUpstreams {
   poll := builtin packagePollUpstream()
 }
 
-/// Close the runs whose nodes are gone (epic memql#4900, task memql#4902).
+/// Close the runs that stopped reporting progress (epic memql#4900, task memql#4902).
 ///
 /// EVERY TWO MINUTES, which is the cadence the threshold is a multiple of: a run heartbeats every
-/// fifteen seconds, a stranded one is noticed within a couple of minutes of its node going away, and
-/// the OS's rail stops claiming a deploy is building when nothing is.
+/// fifteen seconds, a stranded one is noticed within a couple of minutes of its last beat, and the
+/// OS's rail stops claiming a deploy is building when nothing is.
 ///
 /// Scheduled, so it runs on the CRON LEADER only (component/automations.CronLeader) -- one replica
 /// closing each stranded row once, with no advisory lock of its own to get wrong. It is also a

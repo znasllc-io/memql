@@ -254,7 +254,8 @@ describe("an abandoned run", () => {
 
   it("has copy that says nothing failed", () => {
     const copy = copyFor("deployment_abandoned");
-    expect(copy?.title).toContain("lost the node");
+    expect(copy?.title).toContain("stopped reporting progress");
+    expect(copy?.title).not.toContain("node");
     expect(copy?.next).toContain("nothing failed");
     expect(copy?.next).toContain("Retry");
   });

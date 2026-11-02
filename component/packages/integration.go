@@ -210,7 +210,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "sweepAbandoned",
-			Description: "Close every run whose node stopped saying it was alive (epic memql#4900, task memql#4902). A run whose heartbeatAt is older than MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS is closed with the terminal status 'abandoned' and a typed error naming the node that was running it and when it was last heard; a run that is merely slow is untouched. NEVER writes 'failed': nothing failed that this sweep can name, and the error says what the stage the run reached can have changed. Returns {checked, abandoned}.",
+			Description: "Close every run that stopped saying it was alive (epic memql#4900, task memql#4902). A run whose heartbeatAt is older than MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS is closed with the terminal status 'abandoned' and a typed error naming the node that was running it and when it was last heard; a run that is merely slow is untouched. NEVER writes 'failed' or claims a lost node: this sweep can name neither, and the error says what the stage the run reached can have changed. Returns {checked, abandoned}.",
 			Handler:     i.handleSweepAbandoned,
 			ArgsSchema:  map[string]string{},
 		},

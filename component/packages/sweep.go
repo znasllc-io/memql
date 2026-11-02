@@ -31,11 +31,17 @@ import (
 // WHY `abandoned` AND NOT `failed`
 // ===========================================================================
 // `failed` is a verdict, and this sweep has no evidence for one. It does not
-// know whether the build was about to succeed; it knows the node stopped
-// answering. Writing `failed` would put a claim about somebody's package into
-// an append-only record that cannot be corrected -- and it would be the wrong
-// claim in the most common case, which is a rolling restart landing on the
-// replica that happened to be deploying.
+// know whether the build was about to succeed; it knows the heartbeat stopped.
+// Writing `failed` would put a claim about somebody's package into an
+// append-only record that cannot be corrected -- and it would be the wrong claim
+// in the most common case, which is a rolling restart landing on the replica
+// that happened to be deploying.
+//
+// AND NOT "THE NODE WAS LOST", for the same reason. A rolling restart is one way
+// a heartbeat stops. A stage stuck past the run's budget is another, and so is a
+// node that cannot reach the database for a while, and in both the node is fine.
+// This sentence once said a node was lost about a run a dropped websocket had
+// cancelled, on a node that went on working (2026-11-02).
 //
 // So the status says what is known, and the error says the rest: which node
 // was running it, and when it was last heard from.
@@ -222,7 +228,7 @@ func SweepAbandoned(ctx context.Context, d *Deps) (SweepResult, error) {
 		if !abandoned {
 			continue
 		}
-		d.log().Info("packages: closed a deployment whose node stopped answering",
+		d.log().Info("packages: closed a deployment that stopped reporting progress",
 			"component", "packages.sweep", "deployment", id,
 			"lastHeartbeat", last.UTC().Format(time.RFC3339),
 			"node", rowString(row, "nodeId"))
@@ -266,9 +272,9 @@ func lastHeartbeat(row map[string]any) (time.Time, bool) {
 // abandonedMessage is the sentence the OS renders verbatim on the rail.
 //
 // It says the three things a person needs and nothing it cannot know: that the
-// cluster lost the node, what the stage it reached can have changed, and when
-// the run was last heard from. It does NOT say the deploy failed, because the
-// sweep does not know that.
+// run stopped reporting, what the stage it reached can have changed, and when
+// it was last heard from. It does NOT say the deploy failed or that its node was
+// lost, because the sweep knows neither.
 //
 // THE STAGE DECIDES THE MIDDLE CLAUSE. Everything before the roll changes nothing
 // a visitor can see, so the strong sentence is true there. A run lost at
@@ -290,7 +296,7 @@ func abandonedMessage(row map[string]any, last time.Time) string {
 		changed = "the DSL it carried may already be live, and some sites may already be serving the new version"
 	}
 	return fmt.Sprintf(
-		"this cluster lost the node that was running this deploy%s; %s. It was last heard from at %s. Retry starts a fresh run from the same source.",
+		"this deploy stopped reporting progress%s, and this cluster cannot say why; %s. It was last heard from at %s. Retry starts a fresh run from the same source.",
 		where, changed, last.UTC().Format(time.RFC3339))
 }
 

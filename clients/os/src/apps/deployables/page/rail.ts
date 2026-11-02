@@ -329,11 +329,11 @@ const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned" | "ca
   // epic memql#4937: a person's own stop. Terminal, and NOT a flavour of
   // `failed` -- nothing broke, and a stop is honoured only before the roll, so
   // nothing was published and every site is still serving what it was serving.
-  // The distinction from `abandoned` is who decided: that is a loss this cluster
+  // The distinction from `abandoned` is who decided: that is a silence this cluster
   // OBSERVED, `cancelled` is a choice somebody MADE, and a surface that collapsed
   // the two would tell a person their own click was a fault.
   cancelled: "cancelled",
-  // memql#4900: a run whose node stopped saying it was alive. Terminal, and
+  // memql#4900: a run that stopped saying it was alive. Terminal, and
   // deliberately NOT a flavour of `failed` -- nothing failed that this cluster
   // can name. The MARK is the same, because the run did stop where it stopped;
   // the SENTENCE is what differs, and it comes from the row's own error naming

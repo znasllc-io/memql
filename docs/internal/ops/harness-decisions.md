@@ -1289,7 +1289,7 @@ detaches transport cancellation under a budget derived from the plan (thirty
 minutes, plus each selected build's and asset's own), and retains durable Cancel,
 heartbeat and bounded terminal bookkeeping. Cancel, parking and the abandoned sweep
 re-read under the same gate, so none can act on a row another replica just claimed.
-A call without `background` stays on its request and keeps its earlier behaviour.
+A call without `background` stayed on its request until 2026-11-02, below.
 
 This is not a persistent job executor. Process loss, including a package's own DSL
 restarting the bff running it, still abandons the attempt. A durable continuation
@@ -1310,10 +1310,52 @@ Regression coverage: `TestBackgroundConfirmationSurvivesClientAndHonorsReplicaCa
 `TestConfirmationCancelRechecksAfterClaimOnAnotherReplica`,
 `TestConfirmationRefusesCancelledAndForeignSavedRuns`,
 `TestConfirmationSweepRechecksLatestClaimAndStillAbandonsLostRunner`,
-`TestCancelledSynchronousDeploymentStillRecordsBoundedTerminalOutcome` and
+`TestACallerLeavingAnUnconfirmedRunStillRecordsABoundedOutcome` and
 `TestTheAbandonedSentenceSaysWhatTheStageCanHaveChanged`. The claim tests run
 against a real database with a faked pipeline. A live browser disconnect and a real
 self-roll on a cluster have not been exercised.
+
+### Every confirmation detaches, and the sweep stops naming a lost node (2026-11-02)
+
+The same failure reached production again at 17:51Z on `0.31.11`, which predates
+the background confirmation above: `ping failed`, then `the hop to the workbench
+node failed: context canceled`, then a close and an audit that could not be written
+on the dead context. The sweep marked the row `abandoned` at 17:54Z saying "this
+cluster lost the node that was running this deploy". The node was fine, and the
+same deploy succeeded when pressed again at 17:59:57Z.
+
+Background confirmation only covers a call that asks for it, and a confirmation
+that named no parked run, a Go SDK call and a tab from before it was built still ran
+on their stream. The context comes straight from there: `streamSession.
+handleExecuteQuery` derives it from the stream's, and a client's cancel message ends
+it too. So `Deploy` now detaches every run with `confirm: true`, through the same
+`startConfirmed` the background path uses. A synchronous caller still gets the run's
+outcome if it stays, and gets its own context's error if it goes first, while the
+run goes on. An unconfirmed call stays on its request, because nobody has agreed to
+anything yet.
+
+What the caller's lifetime bounded, a budget now bounds: the saved report's when
+there is one, otherwise a budget that covers every app the source last declared and
+never fewer than eight, since the run has no report until it writes one. The heartbeat
+lives and ends on that same context, so a stage stuck past the budget cannot keep a
+row alive, and the sweep can close it.
+
+`abandonedMessage` now says the run stopped reporting progress, as
+`integrations/work/sweep.go` already does. No liveness check backs a stronger claim:
+a heartbeat stops for a restart, a stuck stage or a database a node cannot reach, and
+the row cannot be corrected afterwards.
+
+Regression coverage: `TestACallerLeavingMidBuildLeavesTheConfirmedDeployRunning`,
+`TestCancelStillStopsAConfirmedDeploy`,
+`TestAConfirmedDeployThatFailsAfterItsCallerLeftClosesItsOwnRow`,
+`TestAConfirmedDeployKeepsItsHeartbeatAfterItsCallerLeft`,
+`TestAStageStuckPastTheBudgetStopsTheHeartbeat`,
+`TestSynchronousConfirmationSurvivesItsCallerAndTheSweep`,
+`TestConfirmedRunThatFailsAfterItsCallerLeftClosesWithTheRealError` and
+`TestTheAbandonedSentenceDoesNotClaimANodeWasLost`. The two whose names begin
+`TestSynchronousConfirmation` and `TestConfirmedRun` use real rows and two replicas.
+The websocket itself is in none of them: they cancel the context it would have
+cancelled, and no live browser disconnect has been exercised.
 
 ## Repository requests in owned Work (source candidate, 2026-10-25)
 

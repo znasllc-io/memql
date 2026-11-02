@@ -456,15 +456,25 @@ Cancel stays available while the attempt can still be stopped. Two confirmations
 cannot both start one attempt, and confirming a run that is no longer
 `awaiting_confirm` refuses.
 
-Without `background: true`, a confirmation stays on its request, and losing that
-connection can cancel the build. Its row still records how it ended.
+Without `background: true`, the call waits for the run and answers with its
+outcome. A confirmed run still does not belong to that connection: if the caller
+goes first, the call ends and the run goes on to its normal end, with its row
+carrying the result. That includes `confirm: true` with no parked run. Cancel is
+how a confirmed run is stopped. Only a call that has not confirmed anything stays
+on its request, and if that connection closes, its row records how it ended.
 
-### If the node running a deploy is lost
+A run that fails closes its own row with its real error, whoever is still
+connected. Every confirmed run has a time budget instead of its caller's lifetime:
+thirty minutes, plus each build's and asset's own, from the saved report when
+there is one.
+
+### If a run stops reporting progress
 
 A deploy runs on one node, and this is not a persistent executor. A package whose
 DSL changed restarts the bff running the deploy, so a run can be lost to its own
-roll. The sweep then closes the run `abandoned`, and its sentence says what the
-stage it reached can have changed:
+roll. The sweep then closes the run `abandoned`. All it knows is that the run's
+heartbeat stopped, so its sentence says that and not that a node was lost, and it
+says what the stage the run reached can have changed:
 
 | Stage it reached | What it can have changed |
 |---|---|
@@ -824,7 +834,7 @@ somebody's laptop is a computer-use act and a deploy has no approved plan to
 hang that consent on. The first target that needs a Mac brings that decision
 with it.
 
-## When a node is lost mid-deploy
+## When a run stops reporting mid-deploy
 
 A deploy is one call on one node. Until epic memql#4900 a node lost mid-run left
 its row at a non-terminal status forever, and the surface said "building" for as
@@ -835,12 +845,13 @@ A running pipeline now writes `heartbeatAt` every
 whose heartbeat is older than `MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS` with the
 terminal status **`abandoned`**.
 
-- **Never `failed`.** The sweep does not know whether the build was about to
-  succeed; it knows the node stopped answering. The error it stamps names the
-  node, when it was last heard from, and
-  [what the stage it reached can have changed](#if-the-node-running-a-deploy-is-lost).
+- **Never `failed`, and never a lost node.** The sweep does not know whether the
+  build was about to succeed, or whether the node is still up; it knows the
+  heartbeat stopped. The error it stamps names the node, when it was last heard
+  from, and
+  [what the stage it reached can have changed](#if-a-run-stops-reporting-progress).
 - **The threshold is six heartbeats, not two.** A run that misses one had a slow
-  moment. Six in a row is a node that is gone. The threshold is clamped up to
+  moment. Six in a row is a run that has stopped. The threshold is clamped up to
   three heartbeats if configured below that, because a cluster that sweeps its
   own healthy deploys presents as a broken build surface rather than as a
   setting.

@@ -238,9 +238,11 @@ const COPY: Record<string, RefusalCopy> = {
     next: "",
   },
   deployment_abandoned: {
-    title: "This cluster lost the node that was running it",
+    title: "This deploy stopped reporting progress",
     // Said plainly, because the natural reading of a stopped deploy is that
-    // it broke -- and this one did not.
+    // it broke -- and nothing says it did. Nothing says its node was lost either:
+    // a silent heartbeat is all the sweep has, and it has written that about a
+    // node that was fine.
     // "the same source" rather than "a fresh run", because that is what the
     // button next to this actually does: Retry deploys the bytes THIS run had
     // already fetched, so it deploys what this run was deploying rather than

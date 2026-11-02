@@ -62,8 +62,8 @@ const (
 	StatusRefused    = "refused"
 	StatusFailed     = "failed"
 	// StatusAbandoned is the sweep's (epic memql#4900, task memql#4902): a run
-	// whose node stopped saying it was alive. Terminal, and deliberately NOT a
-	// flavour of failed -- see sweep.go.
+	// that stopped saying it was alive. Terminal, and deliberately NOT a flavour
+	// of failed -- see sweep.go.
 	StatusAbandoned = "abandoned"
 	// StatusCancelled is a PERSON's stop (epic memql#4937, D3). Terminal, and
 	// deliberately not a flavour of failed -- nothing broke, and a stop is
@@ -71,7 +71,7 @@ const (
 	// and every site is still serving what it was serving.
 	//
 	// The distinction between these two terminal words is WHO DECIDED:
-	// abandoned is a loss this cluster OBSERVED, cancelled is a choice
+	// abandoned is a silence this cluster OBSERVED, cancelled is a choice
 	// somebody MADE. Collapsing them would report a person's own click back to
 	// them as a fault.
 	StatusCancelled = "cancelled"
@@ -380,12 +380,40 @@ func (o *DeployOutcome) recordBuiltOn(on BuiltOn) {
 // re-running a completed stage re-reads the same inputs and reaches the same
 // answer, and re-running a TERMINAL row is refused by the append-only guard
 // rather than by anything here.
+//
+// ===========================================================================
+// A CONFIRMED RUN IS THE CLUSTER'S, AND THE CALL ONLY WAITS FOR IT
+// ===========================================================================
+// ctx is a stream's context when a person's browser made this call, so a missed
+// websocket ping cancels it. That was the run's context until 2026-11-02, and it
+// stopped builds that were going fine. Once somebody has said yes, the caller
+// going away ends the wait and nothing else; startConfirmed says what the run
+// keeps. Cancel is how a confirmed run is stopped (CancellableStage).
+//
+// An UNCONFIRMED run stays on ctx. Nobody has agreed to anything, it parks in
+// moments, and StartAnalysis is there for a caller that wants it to outlive them.
 func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
 	pkg, out, prepared, err := prepareDeployment(ctx, d, req)
 	if err != nil {
 		return nil, err
 	}
-	return executeDeployment(ctx, d, prepared, pkg, out)
+	if !prepared.Confirmed {
+		return executeDeployment(ctx, d, prepared, pkg, out)
+	}
+	accepted := *out
+	finished := startConfirmed(ctx, d, prepared, pkg, out)
+	select {
+	case run := <-finished:
+		return run.out, run.err
+	case <-ctx.Done():
+		// A copy, because the run goes on writing `out`. A caller with a deadline
+		// reads this; it names the run to go and look at, and the error says the
+		// run's result is not what it is holding.
+		d.log().Info("packages: the caller stopped waiting for a confirmed run, which goes on",
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, accepted.DeploymentId),
+			"deployment", accepted.DeploymentId, "err", ctx.Err())
+		return &accepted, ctx.Err()
+	}
 }
 
 // StartAnalysis persists the run before returning its ID. Its lifetime is the
@@ -549,10 +577,11 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 	})
 	runErr := runDeploy(runCtx, d, req, pkg, out, &cancelled)
 	stopHeartbeat()
-	// Closing the row must survive a caller that has gone. A synchronous
-	// confirmation's stream can close mid-run, and writing the terminal status
-	// under its dead context left the row for the sweep to call lost. This
-	// detaches bookkeeping only: runDeploy has returned and its heartbeat stopped.
+	// Closing the row must survive whatever ended the run. A confirmed run's
+	// budget can have run out, and an unconfirmed call stays on a stream that can
+	// close; writing the terminal status under that dead context left the row for
+	// the sweep, with the real error gone. This detaches bookkeeping only:
+	// runDeploy has returned and its heartbeat stopped.
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer finishCancel()
 	if runErr == nil && out.AwaitingConfirm {

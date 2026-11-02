@@ -3,6 +3,7 @@ package packages
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"reflect"
@@ -102,6 +103,8 @@ type confirmationBuildHop struct {
 	request chan workbench.BuildRequest
 	release chan struct{}
 	calls   atomic.Int32
+	// failWith, when set, is what the build answers once released.
+	failWith string
 }
 
 func (b *confirmationBuildHop) RunBuild(ctx context.Context, req workbench.BuildRequest, _ string) workbench.BuildResult {
@@ -112,6 +115,9 @@ func (b *confirmationBuildHop) RunBuild(ctx context.Context, req workbench.Build
 	case <-ctx.Done():
 		return workbench.BuildResult{OK: false, LogTail: "cancelled fixture build"}
 	case <-b.release:
+		if b.failWith != "" {
+			return workbench.BuildResult{OK: false, ErrorMessage: b.failWith}
+		}
 		return workbench.BuildResult{OK: true, NodeId: "other-workbench-replica", Output: workbench.BuildBytes{Inline: builtTarGz(map[string]string{"dist/index.html": "confirmed snapshot"})}, FileCount: 1}
 	}
 }
@@ -215,6 +221,144 @@ func TestBackgroundConfirmationSurvivesClientAndHonorsReplicaCancel(t *testing.T
 				t.Fatal("accepted build did not publish exactly once")
 			}
 		})
+	}
+}
+
+// awaitHeartbeatAfter waits for the row to show a beat later than `after`.
+func awaitHeartbeatAfter(t *testing.T, f *confirmationFixture, after time.Time) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		row, err := f.deps[1].Store.deploymentById(memql.ContextWithFreshRead(f.ctx), f.run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if last, ok := lastHeartbeat(row); ok && last.After(after) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no heartbeat after %s: %+v", after.Format(time.RFC3339), row)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// A confirmation that stays on the wire, which is the Go SDK's and an OS tab's
+// from before background confirmation, with real rows and two replicas. The
+// caller goes mid-build, and the run's beats go on. The sweep on the other
+// replica judges them from a full threshold after the caller left, when a
+// heartbeat that had died with the caller would be stale.
+func TestSynchronousConfirmationSurvivesItsCallerAndTheSweep(t *testing.T) {
+	t.Setenv(HeartbeatIntervalEnv, "1")
+	for _, cancelRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelRun=%v", cancelRun), func(t *testing.T) {
+			f := newConfirmationFixture(t)
+			b := &confirmationBuildHop{entered: make(chan context.Context, 2), request: make(chan workbench.BuildRequest, 2), release: make(chan struct{})}
+			for _, d := range f.deps {
+				d.Builder = NewWorkbenchBuilder(b, discardLogger())
+			}
+			requestCtx, leave := context.WithCancel(f.ctx)
+			defer leave()
+			args := f.args()
+			delete(args, "background")
+			returned := make(chan error, 1)
+			go func() {
+				_, err := f.integration(0).handleDeploy(requestCtx, args, 0)
+				returned <- err
+			}()
+			running := awaitConfirmationHop(t, b.entered)
+			<-b.request
+			leftAt := time.Now()
+			leave()
+			select {
+			case err := <-returned:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("the caller that left is told so: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the call kept its caller after it left")
+			}
+			if running.Err() != nil {
+				t.Fatalf("the caller leaving reached the workbench: %v", running.Err())
+			}
+			if actorFromContext(running).UserId != actorFromContext(f.ctx).UserId {
+				t.Fatal("detaching lost the caller's authority")
+			}
+
+			awaitHeartbeatAfter(t, f, leftAt.Add(time.Second))
+			f.deps[1].Now = func() time.Time { return leftAt.Add(AbandonedAfter()) }
+			res, err := SweepAbandoned(f.ctx, f.deps[1])
+			if err != nil || res.Abandoned != 0 {
+				t.Fatalf("the sweep closed a run that was still reporting: %+v %v", res, err)
+			}
+			row, err := f.deps[1].Store.deploymentById(memql.ContextWithFreshRead(f.ctx), f.run)
+			if err != nil || rowString(row, "status") != StatusBuilding {
+				t.Fatalf("the run must still be building: %+v %v", row, err)
+			}
+
+			want := StatusSucceeded
+			if cancelRun {
+				want = StatusCancelled
+				if _, err := f.integration(1).handleCancelDeployment(f.ctx, map[string]any{"packageId": f.pkg, "deploymentId": f.run}, 0); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				close(b.release)
+			}
+			if event := awaitAnalysis(t, f.audit); event.Status != want {
+				t.Fatalf("outcome=%+v want=%s", event, want)
+			}
+			row, err = f.deps[1].Store.deploymentById(memql.ContextWithFreshRead(f.ctx), f.run)
+			if err != nil || rowString(row, "status") != want {
+				t.Fatalf("durable result: %+v %v", row, err)
+			}
+			if published := len(f.h.publisher.published); (want == StatusSucceeded) != (published == 1) {
+				t.Fatalf("%s published %d sites", want, published)
+			}
+		})
+	}
+}
+
+// A failure after the caller has gone reaches the row as what it was, against the
+// real concept and its append-only guard, so the sweep finds nothing to close.
+func TestConfirmedRunThatFailsAfterItsCallerLeftClosesWithTheRealError(t *testing.T) {
+	t.Setenv(HeartbeatIntervalEnv, "1")
+	f := newConfirmationFixture(t)
+	b := &confirmationBuildHop{entered: make(chan context.Context, 2), request: make(chan workbench.BuildRequest, 2), release: make(chan struct{}), failWith: "npm ci exited 1"}
+	for _, d := range f.deps {
+		d.Builder = NewWorkbenchBuilder(b, discardLogger())
+	}
+	requestCtx, leave := context.WithCancel(f.ctx)
+	defer leave()
+	args := f.args()
+	delete(args, "background")
+	returned := make(chan error, 1)
+	go func() {
+		_, err := f.integration(0).handleDeploy(requestCtx, args, 0)
+		returned <- err
+	}()
+	awaitConfirmationHop(t, b.entered)
+	<-b.request
+	leave()
+	if err := <-returned; !errors.Is(err, context.Canceled) {
+		t.Fatalf("the caller that left is told so: %v", err)
+	}
+	close(b.release)
+	if event := awaitAnalysis(t, f.audit); event.Status != StatusRefused || event.FailureReason != CodeDeployableBuildFailed {
+		t.Fatalf("outcome=%+v", event)
+	}
+	row, err := f.deps[1].Store.deploymentById(memql.ContextWithFreshRead(f.ctx), f.run)
+	if err != nil || rowString(row, "status") != StatusRefused {
+		t.Fatalf("the row must be closed by the run: %+v %v", row, err)
+	}
+	problem, _ := row["error"].(map[string]any)
+	if message, _ := problem["message"].(string); !strings.Contains(message, "npm ci exited 1") || strings.Contains(message, "context canceled") {
+		t.Fatalf("the row must carry the build's own error: %+v", row["error"])
+	}
+	// Past the threshold on the sweep's clock, the row is terminal and not a candidate.
+	f.deps[1].Now = func() time.Time { return time.Now().Add(2 * AbandonedAfter()) }
+	if res, err := SweepAbandoned(f.ctx, f.deps[1]); err != nil || res.Abandoned != 0 {
+		t.Fatalf("the sweep touched a run that closed itself: %+v %v", res, err)
 	}
 }
 

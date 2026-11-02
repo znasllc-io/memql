@@ -9,15 +9,8 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// StartConfirmation accepts one parked attempt before returning, so closing the
-// browser no longer cancels a build somebody confirmed. The caller's authority
-// stays on the context; only its transport cancellation is detached. Builds
-// keep their existing per-build deadlines.
-//
-// This is not a persistent executor. If the process running the attempt dies,
-// including when a package's own DSL restarts that node, the sweep closes the
-// row `abandoned` and a person retries it (sweep.go). Nothing here replays a
-// build or continues on another replica.
+// StartConfirmation accepts one parked attempt and answers before anything is
+// built, leaving the live row to carry progress and the result.
 func StartConfirmation(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
 	if !req.Confirmed || req.Automatic || strings.TrimSpace(req.DeploymentId) == "" {
 		return nil, fmt.Errorf("background confirmation requires a parked deployment ID and confirm:true")
@@ -27,12 +20,43 @@ func StartConfirmation(ctx context.Context, d *Deps, req DeployRequest) (*Deploy
 		return nil, err
 	}
 	accepted := *out
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), prepared.confirmationTimeout)
+	startConfirmed(ctx, d, prepared, pkg, out)
+	return &accepted, nil
+}
+
+// confirmedRun is what a confirmed attempt ended with.
+type confirmedRun struct {
+	out *DeployOutcome
+	err error
+}
+
+// startConfirmed runs one confirmed attempt for as long as the attempt takes, so
+// closing the browser does not cancel a build somebody confirmed. It keeps the
+// caller's authority and drops only its lifetime: what reaches the row is the
+// caller's actor, and the run's heartbeat, Cancel and terminal write all live on
+// the detached context. Builds keep their existing per-build deadlines.
+//
+// A budget replaces the caller's lifetime as the outer bound. The heartbeat ends
+// with it, so the sweep can close the row of a stage that ignores its own
+// deadline, even while that stage stays stuck.
+//
+// This is not a persistent executor. If the process running the attempt dies,
+// including when a package's own DSL restarts that node, the sweep closes the
+// row `abandoned` and a person retries it (sweep.go). Nothing here replays a
+// build or continues on another replica.
+func startConfirmed(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]any, out *DeployOutcome) <-chan confirmedRun {
+	budget := req.confirmationTimeout
+	if budget <= 0 {
+		budget = confirmationTimeoutWithoutReport(pkg)
+	}
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+	finished := make(chan confirmedRun, 1)
 	go func() {
 		defer cancel()
-		_, _ = executeDeployment(runCtx, d, prepared, pkg, out)
+		ended, err := executeDeployment(runCtx, d, req, pkg, out)
+		finished <- confirmedRun{out: ended, err: err}
 	}()
-	return &accepted, nil
+	return finished
 }
 
 // Both synchronous and background confirmations take the existing database
@@ -59,17 +83,19 @@ func prepareConfirmation(ctx context.Context, d *Deps, req DeployRequest, requir
 			return refuse(CodeDeploymentCancelled, "This deployment was stopped before confirmation.")
 		}
 		// A background confirmation must accept exactly the report the person
-		// reviewed. A synchronous one (the Go SDK's) stays on its request and
-		// re-analyses as it always did, so it asks for neither.
-		if requireSnapshot {
-			report := reportFromRow(row)
-			if report == nil || !report.OK {
-				return refuse(CodeSnapshotUnavailable, "This deployment has no saved analysis report. Analyze the source again.")
-			}
+		// reviewed. A synchronous one (the Go SDK's) waits for its run and
+		// re-analyses as it always did, so it requires neither.
+		report := reportFromRow(row)
+		if requireSnapshot && (report == nil || !report.OK) {
+			return refuse(CodeSnapshotUnavailable, "This deployment has no saved analysis report. Analyze the source again.")
+		}
+		if report != nil {
 			req.confirmationTimeout, err = confirmationTimeout(report, req.Placements)
 			if err != nil {
 				return err
 			}
+		}
+		if requireSnapshot {
 			pkg, err = d.Store.packageById(ctx, req.PackageId)
 			if err != nil {
 				return err
@@ -154,4 +180,19 @@ func confirmationTimeout(report *Report, placements map[string]Placement) (time.
 		}
 	}
 	return budget, nil
+}
+
+// unreportedConfirmationBuilds is how many builds a confirmation with no saved
+// report is budgeted for at the least.
+const unreportedConfirmationBuilds = 8
+
+// confirmationTimeoutWithoutReport bounds a confirmation nothing was analysed
+// for: a call confirming in one step has no report until its own run writes one,
+// and the run's deadline has to be set before that. So it takes the budget of
+// every app the source last declared, with room for a source never analysed or
+// grown since. Too long costs only how long a stage that ignores its own deadline
+// can hold the run; too short would fail a build that was going fine.
+func confirmationTimeoutWithoutReport(pkg map[string]any) time.Duration {
+	builds := max(len(declaredNames(pkg)), unreportedConfirmationBuilds)
+	return 30*time.Minute + time.Duration(builds)*(time.Duration(BuildTimeoutSeconds())*time.Second+time.Minute)
 }
