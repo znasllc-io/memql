@@ -65,7 +65,7 @@ type Deps struct {
 	// wired with neither, and then it stops at landed (design record 2026-11-02).
 	TrainReleaser TrainReleaser
 	DeployEffects DeployEffects
-	Gate                Gate
+	Gate          Gate
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies

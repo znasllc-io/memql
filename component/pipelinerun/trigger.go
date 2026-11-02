@@ -1,11 +1,11 @@
 package pipelinerun
 
 import (
-	"slices"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
