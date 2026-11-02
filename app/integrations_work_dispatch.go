@@ -103,6 +103,7 @@ func (a *App) wireWorkRunDispatcher() {
 	for _, topic := range []string{
 		"graph.node.created.v1:work:run",
 		"graph.node.updated.v1:work:run",
+		events.TopicWorkRunRecovery,
 	} {
 		a.eventBus.Subscribe(topic, work.HandleRunEvent,
 			events.WithSubscriberName("work:run-dispatch"))

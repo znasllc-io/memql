@@ -27,6 +27,12 @@ package work
 //	      -> exactly one wins the claim
 //	        -> that one executes the automation onto the run row
 //
+// A run whose owner chose Apps narrows who competes: an agent holding none of
+// that owner's eligible machine streams yields before the claim, because a
+// whole-step App session cannot move once a replica has admitted it
+// (PrepareDispatch in app/work_app_dispatch.go). Auto and policy chains can fall
+// back to another source, so they keep this shape unchanged.
+//
 // Two alternatives were weighed and are worse:
 //
 //   - **The compiler dispatches directly.** Simplest to write, and wrong by
@@ -111,13 +117,19 @@ type Dispatcher interface {
 // DispatchRequest is everything the executor side needs, read off the run row
 // once so the seam does no graph reads of its own.
 type DispatchRequest struct {
-	// Recovery is set by the sweep or a freshly rechecked automatic wait.
-	Recovery       bool
-	RunId          string
-	GoalId         string
-	OwnerUserId    string
-	AutomationName string
-	Variables      map[string]any
+	// Recovery is set by the sweep, a freshly rechecked automatic wait, or an
+	// exact stale-state recovery hint; never by an ordinary graph event.
+	Recovery bool
+	// AppPlacement is set only after the execution seam reads the owned journal.
+	// RecoverySnapshot binds a recovery hint to the exact stale run state.
+	AppPlacement     bool
+	AppRouteHint     bool
+	RecoverySnapshot string
+	RunId            string
+	GoalId           string
+	OwnerUserId      string
+	AutomationName   string
+	Variables        map[string]any
 
 	// Status is what the event said the run was. It is a HINT, not a fact:
 	// the seam re-reads the row under the journal's actor and refuses if it
@@ -308,6 +320,10 @@ func (i *Integration) runClaimerRef() RunClaimer {
 // the failure `journalSkipsAutomation` exists to prevent on the automation
 // side.
 func (i *Integration) HandleRunEvent(ev events.Event) {
+	if ev.Topic == events.TopicWorkRunRecovery {
+		i.handleAppRecovery(ev)
+		return
+	}
 	req, ok := runEventFields(ev)
 	if !ok {
 		return
@@ -465,7 +481,14 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	// on the automation name instead would let one run of a template block
 	// every other run of the same template.
 	key, ttl := runClaimKey(req)
-	if !claimer.ClaimWithTTL(ctx, runClaimName, key, ttl) {
+	if req.AppPlacement {
+		// A peer may have been offered this stale run while the sweep was
+		// deciding to abandon it. Fresh admission and the claim share the
+		// sweep's decision gate; the actual execution still rechecks its journal.
+		if !i.claimAppRun(ctx, req, claimer, key, ttl) {
+			return false
+		}
+	} else if !claimer.ClaimWithTTL(ctx, runClaimName, key, ttl) {
 		return false
 	}
 
@@ -581,6 +604,7 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 	}
 	req.TriggeredBy, _ = payload["triggeredBy"].(string)
 	req.HumanResumeId, _ = payload["humanResumeId"].(string)
+	req.AppRouteHint = appOwnedRun(payload)
 	return req, true
 }
 
