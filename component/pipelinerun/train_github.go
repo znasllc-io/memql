@@ -34,6 +34,8 @@ type trainGitHub interface {
 	EditPullRequestBody(ctx context.Context, token, repository string, number int, body string) error
 	PullRequestReviews(ctx context.Context, token, repository string, number int) ([]githubapp.PullRequestReview, error)
 	CompareFiles(ctx context.Context, token, repository, base, head string) ([]string, bool, error)
+	CompareCommits(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedCommit, int, error)
+	AddEmptyCommit(ctx context.Context, token, repository, branch, message string) (string, error)
 	MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error)
 	CommentOnPullRequest(ctx context.Context, token, repository string, number int, body string) error
 	AddPullRequestLabels(ctx context.Context, token, repository string, number int, labels []string) error
@@ -148,6 +150,22 @@ func (g *packagesGitHub) CompareFiles(ctx context.Context, token, repository, ba
 		return nil, false, err
 	}
 	return c.Compare(ctx, token, owner, name, base, head)
+}
+
+func (g *packagesGitHub) CompareCommits(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedCommit, int, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return nil, 0, err
+	}
+	return c.CompareCommits(ctx, token, owner, name, base, head)
+}
+
+func (g *packagesGitHub) AddEmptyCommit(ctx context.Context, token, repository, branch, message string) (string, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return "", err
+	}
+	return c.AddEmptyCommit(ctx, token, owner, name, branch, message)
 }
 
 func (g *packagesGitHub) MergePullRequest(ctx context.Context, token, repository string, number int, headSHA string) (string, error) {

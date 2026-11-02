@@ -63,6 +63,11 @@ type trainRemote struct {
 	// tokenErr fails every token mint: the owner's connection lost the
 	// repository, say.
 	tokenErr error
+	// commitsBetween answers CompareCommits, keyed "base...head"; a commit's
+	// files are in shaFiles.
+	commitsBetween map[string][]githubapp.ComparedCommit
+	// commitTotals overrides how many commits a comparison says there are.
+	commitTotals map[string]int
 }
 
 const trainAppID = 4822538
@@ -296,6 +301,32 @@ func (r *trainRemote) CompareFiles(ctx context.Context, token, repository, base,
 		}
 	}
 	return nil, true, nil
+}
+
+func (r *trainRemote) CompareCommits(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedCommit, int, error) {
+	watchGitHubCall(r.t, ctx, "CompareCommits")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := base + "..." + head
+	commits := append([]githubapp.ComparedCommit(nil), r.commitsBetween[key]...)
+	total := len(commits)
+	if n, ok := r.commitTotals[key]; ok {
+		total = n
+	}
+	return commits, total, nil
+}
+
+// AddEmptyCommit moves branch to a new commit holding what the old one did.
+func (r *trainRemote) AddEmptyCommit(ctx context.Context, token, repository, branch, message string) (string, error) {
+	watchGitHubCall(r.t, ctx, "AddEmptyCommit")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sha := r.nextSHA("e")
+	if old, ok := r.files[r.branches[branch]]; ok {
+		r.files[sha] = old
+	}
+	r.setBranch(branch, sha)
+	return sha, nil
 }
 
 // Tree serves headTree at any commit when a test set one: the train's head

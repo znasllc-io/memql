@@ -214,3 +214,34 @@ func TestDeliveryPolicyRedeliveryUsesSavedPolicyWhenReplicaCannotLoadIt(t *testi
 		t.Fatalf("redelivery rebound its policy or duplicated a check: %s %v", result.Run.ID, err)
 	}
 }
+
+// A train's check stands for the whole release (spec
+// 2026-11-02-nightly-release-from-main-design.md, D4): a train from main differs
+// from main by one VERSION line, so the policy's affected mode would test nothing.
+func TestATrainRunIsFullWhateverThePolicyAnswers(t *testing.T) {
+	snapshot, err := capturePipelinePolicy(context.Background(), Deps{}, testPipeline(DeliveryWebhook), prOpening())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, branch string
+		want         pipelines.Mode
+	}{
+		{"a train", "train/2026-11-02-1", pipelines.ModeFull},
+		{"an ordinary pull request", "fix/badge", pipelines.ModeAffected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mode, err := policyModeForEvent(context.Background(), snapshot, testPipeline(DeliveryWebhook),
+				Opening{Event: pipelines.EventPullRequest, Branch: tc.branch, PullRequest: 7})
+			if err != nil || mode != tc.want {
+				t.Fatalf("mode = %q, %v; want %q", mode, err, tc.want)
+			}
+		})
+	}
+	// Only a pull request is a train: a push named like one keeps its own mode.
+	mode, err := policyModeForEvent(context.Background(), snapshot, testPipeline(DeliveryWebhook),
+		Opening{Event: pipelines.EventPush, Branch: "train/2026-11-02-1"})
+	if err != nil || mode != pipelines.ModeFull {
+		t.Fatalf("a push's mode = %q, %v", mode, err)
+	}
+}

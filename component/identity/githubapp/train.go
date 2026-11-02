@@ -218,6 +218,88 @@ func (c *Client) PutBranchFile(ctx context.Context, bearer, owner, repo, branch,
 	return out.Commit.SHA, nil
 }
 
+// ComparedCommit is one commit between two heads: its full id, its message's
+// first line, and its first parent, which is what it changed against even when
+// it is a merge.
+type ComparedCommit struct {
+	SHA, Subject, Parent string
+}
+
+// CompareCommits lists the commits base..head, oldest first, up to the page
+// GitHub gives, and total, how many there are in all: a long gap lists fewer
+// than total, and the caller says so.
+func (c *Client) CompareCommits(ctx context.Context, bearer, owner, repo, base, head string) (commits []ComparedCommit, total int, err error) {
+	var out struct {
+		TotalCommits int `json:"total_commits"`
+		Commits      []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+			Parents []struct {
+				SHA string `json:"sha"`
+			} `json:"parents"`
+		} `json:"commits"`
+	}
+	endpoint := repoEndpoint(owner, repo) + "/compare/" + escapePath(base) + "..." + escapePath(head) + "?per_page=100"
+	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &out, largeBody); err != nil {
+		return nil, 0, err
+	}
+	commits = make([]ComparedCommit, 0, len(out.Commits))
+	for _, k := range out.Commits {
+		cc := ComparedCommit{SHA: k.SHA, Subject: strings.TrimSpace(firstMessageLine(k.Commit.Message))}
+		if len(k.Parents) > 0 {
+			cc.Parent = k.Parents[0].SHA
+		}
+		commits = append(commits, cc)
+	}
+	return commits, out.TotalCommits, nil
+}
+
+func firstMessageLine(message string) string {
+	line, _, _ := strings.Cut(message, "\n")
+	return line
+}
+
+// AddEmptyCommit puts a commit that changes nothing on top of branch and
+// answers its id. A train from main needs a commit of its own, or GitHub has
+// nothing to open a pull request for, and when its version needs no bump there
+// is no file to change. The ref moves without force: losing a race fails here
+// rather than discarding what won it.
+func (c *Client) AddEmptyCommit(ctx context.Context, bearer, owner, repo, branch, message string) (string, error) {
+	if err := checkBranchName(branch); err != nil {
+		return "", err
+	}
+	var head struct {
+		SHA    string `json:"sha"`
+		Commit struct {
+			Tree struct {
+				SHA string `json:"sha"`
+			} `json:"tree"`
+		} `json:"commit"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/commits/"+escapePath("refs/heads/"+branch), bearer, &head); err != nil {
+		return "", err
+	}
+	if head.SHA == "" || head.Commit.Tree.SHA == "" {
+		return "", errors.New("github: the branch's head names no commit or tree")
+	}
+	var made struct {
+		SHA string `json:"sha"`
+	}
+	in := map[string]any{"message": message, "tree": head.Commit.Tree.SHA, "parents": []string{head.SHA}}
+	if _, err := c.callJSON(ctx, http.MethodPost, repoEndpoint(owner, repo)+"/git/commits", bearer, in, &made); err != nil {
+		return "", err
+	}
+	if made.SHA == "" {
+		return "", errors.New("github: the new commit has no id")
+	}
+	if _, err := c.callJSON(ctx, http.MethodPatch, repoEndpoint(owner, repo)+"/git/refs/heads/"+branch, bearer, map[string]any{"sha": made.SHA, "force": false}, nil); err != nil {
+		return "", err
+	}
+	return made.SHA, nil
+}
+
 // CreatePullRequest opens a ready pull request (never a draft: a train
 // pull request is ready for the owner the moment its run passes) and returns
 // its number and page.
