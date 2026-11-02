@@ -17,10 +17,10 @@ func applyProcessGroup(cmd *exec.Cmd) {
 
 // signalGroup signals the child's whole process group.
 //
-// The negative pid is the point: kill(-pgid) reaches every descendant.
-// It falls back to the direct process if the group is already gone,
-// which happens when the child exited between the decision and the
-// signal.
+// Setpgid makes the spawned PID the group ID. Keep that original identity:
+// looking it up after Wait reaps the leader fails even when descendants still
+// hold its stdin or run tools. A failed prompt transfer can reach this path
+// after the leader exits, so signal the group before the direct-process fallback.
 func signalGroup(cmd *exec.Cmd, hard bool) {
 	if cmd == nil || cmd.Process == nil {
 		return
@@ -29,11 +29,8 @@ func signalGroup(cmd *exec.Cmd, hard bool) {
 	if hard {
 		sig = syscall.SIGKILL
 	}
-	pid := cmd.Process.Pid
-	if pgid, err := syscall.Getpgid(pid); err == nil && pgid > 0 {
-		if err := syscall.Kill(-pgid, sig); err == nil {
-			return
-		}
+	if err := syscall.Kill(-cmd.Process.Pid, sig); err == nil {
+		return
 	}
 	_ = cmd.Process.Signal(sig)
 }
