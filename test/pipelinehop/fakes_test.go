@@ -126,7 +126,7 @@ type fakeRepo struct {
 	commitFiles map[string]map[string][]byte
 	trainPRs    map[int]*fakeTrainPR
 	nextPR      int
-	files             fstest.MapFS
+	files       fstest.MapFS
 }
 
 // checkWrite is one check-run write, as GitHub received it.

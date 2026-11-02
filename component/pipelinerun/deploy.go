@@ -507,8 +507,14 @@ func (i *Integration) verification(ctx context.Context, d Deps, s pipelines.Trai
 		}
 		run := opened.Run
 		// A person's run of this commit, or an earlier verification of it, answered
-		// instead: it says nothing about this rollout.
-		if !run.QueuedAt.After(dep.StateSince) || !slices.Equal(run.OnlyStages, s.Deployment.VerifyStages) {
+		// instead: it says nothing about this rollout. One still running is left to
+		// finish, because a commit runs one attempt at a time. A row's time is kept to
+		// the second, so a run opened in the same second as this state began is this
+		// state's own.
+		if run.QueuedAt.Before(dep.StateSince.Truncate(time.Second)) || !slices.Equal(run.OnlyStages, s.Deployment.VerifyStages) {
+			if !run.Finished() {
+				return Run{}, false, nil
+			}
 			again := rerunOf(run, "", false)
 			again.Stages = s.Deployment.VerifyStages
 			reopened, err := i.open(ctx, d, in.p, again)
