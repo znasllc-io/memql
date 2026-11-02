@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -231,4 +232,92 @@ func TestInstallationOverlayNativeFactsRefuseForeignOrAlteredEvidence(t *testing
 	require.Zero(t, h.refs)
 	require.Zero(t, h.prs)
 	require.Zero(t, h.writes)
+}
+
+// A deploy makes its pin with no receiving installation: this cluster published the
+// release, so the signed catalog is its source, and the same native emitter writes the
+// same files under the same fences.
+func TestADeployPinComesFromTheCatalogWithNoReceiver(t *testing.T) {
+	s, h, _, _ := overlayNativeJournalFixture(t)
+	i := s.integration
+	i.installation.Store(nil)
+	role := &atomic.Value{}
+	role.Store(string(auth.RoleOwner))
+	i.store.engine = &buildIdentityEngine{i.store.engine, role}
+	authority := map[string]any{"credentialClass": auth.ForwardedClassUser, "roleCeiling": string(auth.RoleOwner)}
+	tick := auth.ContextWithInternalOrigin(context.Background())
+	// The native recipe an instance binds: this one's text is the product's own.
+	cfg := s.configuration
+	cfg.ProposalWorkflow, cfg.ObservationWorkflow = "fixtureNativeProposal", "fixtureProposalObservation"
+	configBytes, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	variables := i.resolver.systemVariable
+	i.resolver.systemVariable = func(ctx context.Context, name string) (string, error) {
+		if name == InstallationOverlayVariable {
+			return string(configBytes), nil
+		}
+		return variables(ctx, name)
+	}
+	i.profileSource = func(kind, name string) (string, error) {
+		switch {
+		case kind == "automation" && name == "fixtureNativeProposal":
+			return `@template
+automation fixtureNativeProposal {
+ builtin releaseOverlayRead()
+ facts := builtin releaseOverlayNativeEvidence()
+ selected := facts.companions.first()
+ builtin releaseOverlayBindPublication(candidateId: selected.candidateId, catalogDigest: selected.catalogDigest)
+ builtin releaseOverlayBuild()
+ builtin releaseOverlayReserve()
+ builtin releaseOverlayPropose()
+}`, nil
+		case kind == "automation" && name == "fixtureProposalObservation":
+			return `@template
+automation fixtureProposalObservation {
+ builtin releaseOverlayObserve()
+}`, nil
+		}
+		return "", errors.New("no such construct")
+	}
+	r := pl.DeployPinRequest{
+		RequestID: "deploy-1", CandidateID: s.request.CandidateID, CatalogDigest: s.request.CatalogDigest,
+		ExpectedBase: s.request.ExpectedBaseRevision, OwnerUserID: s.owner, Authority: authority,
+	}
+	pin, err := i.ProposeDeployPin(tick, r)
+	require.NoError(t, err)
+	require.Positive(t, pin.PullRequest)
+	require.Regexp(t, `^[a-f0-9]{40}$`, pin.Commit)
+	require.NotEmpty(t, pin.ProposalID)
+	require.Equal(t, 1, h.refs)
+	require.Equal(t, 1, h.prs)
+	for path := range h.expectedCreates {
+		require.Contains(t, h.afterFiles, path)
+	}
+
+	// Asked again, as a tick does that lost the reply: the same pin, no second one.
+	again, err := i.ProposeDeployPin(tick, r)
+	require.NoError(t, err)
+	require.Equal(t, pin, again)
+
+	// Asked with a changed input, it refuses rather than reuse the request.
+	changed := r
+	changed.CatalogDigest = "sha256:" + strings.Repeat("0", 64)
+	_, err = i.ProposeDeployPin(tick, changed)
+	require.Error(t, err)
+
+	// The person's door keeps its receiver.
+	_, err = i.handleInstallationPropose(ownerCtx(), map[string]any{"installationId": s.request.InstallationID, "requestId": "person-1", "candidateId": r.CandidateID, "catalogDigest": r.CatalogDigest, "expectedBaseRevision": r.ExpectedBase}, 1)
+	require.ErrorContains(t, err, "not configured")
+
+	// Without the owner's role, internal origin, or their word, it does nothing.
+	role.Store(string(auth.RoleAdmin))
+	_, err = i.ProposeDeployPin(tick, pl.DeployPinRequest{RequestID: "deploy-2", CandidateID: r.CandidateID, CatalogDigest: r.CatalogDigest, ExpectedBase: r.ExpectedBase, OwnerUserID: s.owner, Authority: authority})
+	require.Error(t, err)
+	role.Store(string(auth.RoleOwner))
+	_, err = i.ProposeDeployPin(ownerCtx(), r)
+	require.ErrorContains(t, err, "internal origin")
+	noWord := r
+	noWord.Authority = nil
+	_, err = i.ProposeDeployPin(tick, noWord)
+	require.ErrorContains(t, err, "standing authority")
 }

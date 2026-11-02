@@ -170,7 +170,7 @@ func (i *Integration) proposeOverlay(ctx context.Context, cfg overlayConfigurati
 		s.record = &prior.Record
 		s.snapshot = prior.Record.Snapshot
 	} else {
-		s.snapshot, err = workflowhost.CaptureEntries(cfg.ProposalWorkflow, overlayContract, []string{cfg.ObservationWorkflow}, nil, s.operations())
+		s.snapshot, err = workflowhost.CaptureEntries(cfg.ProposalWorkflow, overlayContract, []string{cfg.ObservationWorkflow}, i.profileSource, s.operations())
 		if err != nil {
 			return none, err
 		}
