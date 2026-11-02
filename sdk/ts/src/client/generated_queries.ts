@@ -6910,7 +6910,7 @@ QueryClient.prototype.pipelineChannelsForOwner = function (this: QueryClient, ar
 };
 
 /** The caller's deployments, newest first, optionally narrowed to one pipeline. */
-// Bound concept: v1:pipelines:deployment (machine-readable: BoundConcepts["pipelineDeploymentsForOwner"] in generated_concepts.ts).
+// Bound concept: v1:pipelines:pipelineDeployment (machine-readable: BoundConcepts["pipelineDeploymentsForOwner"] in generated_concepts.ts).
 export interface PipelineDeploymentsForOwnerArgs {
   /** The pipeline to narrow to. Absent lists every pipeline's deployments. */
   pipelineId?: string;

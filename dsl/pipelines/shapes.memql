@@ -161,7 +161,7 @@ shape standing pipelineStandingView {
 
 /// Every deployment field: what the coordinator reads.
 @row
-shape deployment pipelineDeploymentFull {
+shape pipelineDeployment pipelineDeploymentFull {
   row.id
   ownerUserId
   accountId
@@ -200,7 +200,7 @@ shape deployment pipelineDeploymentFull {
 
 /// What a person reads of a deployment. Never the authority.
 @row
-shape deployment pipelineDeploymentView {
+shape pipelineDeployment pipelineDeploymentView {
   row.id
   pipelineId
   repository

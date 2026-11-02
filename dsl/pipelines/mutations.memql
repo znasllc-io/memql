@@ -315,7 +315,9 @@ mutation train updatePipelineTrain {
 
 /// The owner's standing word (D9). @serverOnly: pipelinesTrainStanding checks the caller is the pipeline's
 /// owner and holds the owner role, and captures their authority, before this write. A client-written row
-/// would skip both and hand the coordinator an owner's authority it was never given.
+/// would skip both and hand the coordinator an owner's authority it was never given. Scoping to actor.userId
+/// is not the fix: the row is the caller's own, and what must hold is the role they have and the authority
+/// captured from it, which no filter on the row can see.
 @serverOnly
 @actor
 mutation standing setPipelineStanding {
@@ -342,11 +344,12 @@ mutation standing setPipelineStanding {
 /// on an existing deployment's id must not put a finished one back to waiting.
 ///
 /// @serverOnly: a deployment moves production. A client-written row could claim a release the owner never
-/// chose, or authority they never gave.
+/// chose, or authority they never gave. Scoping to actor.userId would attribute that claim correctly and
+/// refuse nothing, because the owner's own session is what must go through pipelinesDeployRelease's checks.
 @createOnly("state")
 @serverOnly
 @actor
-mutation deployment createPipelineDeployment {
+mutation pipelineDeployment createPipelineDeployment {
   args {
     deploymentId  string!
     pipelineId    string!
@@ -381,9 +384,10 @@ mutation deployment createPipelineDeployment {
 }
 
 /// Advance a deployment. A read-merge with no defaults: the coordinator writes only what a step changes.
-/// @serverOnly for the reason createPipelineDeployment is.
+/// @serverOnly for the reason createPipelineDeployment is: scoping to actor.userId would let an owner's
+/// session mark its own failed deployment deployed, and only the coordinator knows what a step did.
 @serverOnly
-mutation deployment updatePipelineDeployment {
+mutation pipelineDeployment updatePipelineDeployment {
   args {
     deploymentId  string!
     state         string

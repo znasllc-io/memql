@@ -1922,6 +1922,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineChannel"}:      true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineChannel"}:      true,
+		// The nightly release (2026-11-02). The coordinator reads these on a tick,
+		// under no person, and the standing and deployment rows carry an owner's
+		// authority, so a caller scope cannot express either; the owner's own reads
+		// are the ...ForOwner queries, whose shapes leave the authority out.
+		{Path: "pipelines/queries.memql", Name: "pipelineLastLandedTrain"}:        true,
+		{Path: "pipelines/queries.memql", Name: "pipelineStandingForPipeline"}:    true,
+		{Path: "pipelines/queries.memql", Name: "pipelineDeploymentsForPipeline"}: true,
+		{Path: "pipelines/mutations.memql", Name: "setPipelineStanding"}:          true,
+		{Path: "pipelines/mutations.memql", Name: "createPipelineDeployment"}:     true,
+		{Path: "pipelines/mutations.memql", Name: "updatePipelineDeployment"}:     true,
 	}
 	for k := range want {
 		if !set[k] {

@@ -6947,7 +6947,7 @@ func PipelineChannelsForOwnerBuild(args PipelineChannelsForOwnerArgs) string {
 
 // PipelineDeploymentsForOwner -- The caller's deployments, newest first, optionally narrowed to one pipeline.
 //
-// Bound concept: v1:pipelines:deployment (machine-readable: BoundConcepts["pipelineDeploymentsForOwner"] in generated_concepts.go).
+// Bound concept: v1:pipelines:pipelineDeployment (machine-readable: BoundConcepts["pipelineDeploymentsForOwner"] in generated_concepts.go).
 type PipelineDeploymentsForOwnerArgs struct {
 	// The pipeline to narrow to. Absent lists every pipeline's deployments.
 	PipelineId string

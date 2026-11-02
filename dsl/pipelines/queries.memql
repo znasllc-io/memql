@@ -198,7 +198,8 @@ query train pipelineTrainsForPipeline {
 
 /// One pipeline's newest train that reached the default branch, whatever came next: where the next
 /// release from main counts from. Its own query, because the list above holds twenty rows and every quiet
-/// night adds a cancelled one.
+/// night adds a cancelled one. @serverOnly because the coordinator reads it on a tick, under no person, so
+/// there is no actor.userId to scope to; a person reads pipelineTrainsForOwner.
 @serverOnly
 @actor
 query train pipelineLastLandedTrain {
@@ -228,7 +229,9 @@ query train pipelineTrainsForOwner {
   shape     pipelineTrainFull
 }
 
-/// One pipeline's standing row, for the coordinator. Carries the authority, so it is server-only.
+/// One pipeline's standing row, for the coordinator. Carries the authority, so it is server-only: scoping to
+/// actor.userId would still hand the owner's session its captured authority, and a tick has no actor.userId
+/// to scope to. A person reads pipelineStandingForOwner, whose shape leaves the authority out.
 @serverOnly
 @actor
 query standing pipelineStandingForPipeline {
@@ -255,9 +258,11 @@ query standing pipelineStandingForOwner {
 }
 
 /// One pipeline's deployments, newest first, for the coordinator: the newest row is the current one.
+/// @serverOnly because a tick reads it under no person, so there is no actor.userId to scope to, and its shape
+/// carries the authority a deployment acts under. A person reads pipelineDeploymentsForOwner.
 @serverOnly
 @actor
-query deployment pipelineDeploymentsForPipeline {
+query pipelineDeployment pipelineDeploymentsForPipeline {
   args {
     pipelineId  string!
   }
@@ -270,7 +275,7 @@ query deployment pipelineDeploymentsForPipeline {
 
 /// The caller's deployments, newest first, optionally narrowed to one pipeline.
 @actor
-query deployment pipelineDeploymentsForOwner {
+query pipelineDeployment pipelineDeploymentsForOwner {
   args {
     /// The pipeline to narrow to. Absent lists every pipeline's deployments.
     pipelineId  string

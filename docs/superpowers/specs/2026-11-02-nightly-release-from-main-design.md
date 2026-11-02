@@ -236,7 +236,7 @@ Internal origin only, and not a builtin: neither a request nor a model can reach
 ## 7. Stage 3: deploying and rolling back by themselves
 
 Production has no native installation receiver (`integrations/installation`), so a deploy is what
-a person does today, made safe to run unattended. A deploy is its own row, `v1:pipelines:deployment`,
+a person does today, made safe to run unattended. A deploy is its own row, `v1:pipelines:pipelineDeployment`,
 because it must not fight a train for the newest-train slot, and because the button can deploy a
 release cut by hand. Each tick takes one step from a fresh read and ends in a compare-and-swap. That
 matters more here than anywhere: syncing the mesh restarts the agent replica running the tick, and

@@ -3987,7 +3987,56 @@
       }
     },
     {
-      "concept": "v1:pipelines:deployment",
+      "concept": "v1:pipelines:pipeline",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "channelIds",
+        "compute",
+        "connectedAt",
+        "credentialId",
+        "defaultBranch",
+        "delivery",
+        "heads",
+        "installationId",
+        "name",
+        "ownerUserId",
+        "packageId",
+        "repository",
+        "secretNames",
+        "status",
+        "timings",
+        "timingsRunId",
+        "timingsUpdatedAt"
+      ],
+      "required": [
+        "credentialId",
+        "delivery",
+        "installationId",
+        "name",
+        "packageId",
+        "repository",
+        "status"
+      ],
+      "enums": {
+        "compute": [
+          "cluster",
+          "cluster_and_fleet"
+        ],
+        "delivery": [
+          "poll",
+          "webhook"
+        ],
+        "status": [
+          "active",
+          "disconnected",
+          "qualification",
+          "qualification_revoked"
+        ]
+      }
+    },
+    {
+      "concept": "v1:pipelines:pipelineDeployment",
       "file": "pipelines/concepts.memql",
       "fields": [
         "accountId",
@@ -4049,55 +4098,6 @@
         "trigger": [
           "automatic",
           "button"
-        ]
-      }
-    },
-    {
-      "concept": "v1:pipelines:pipeline",
-      "file": "pipelines/concepts.memql",
-      "fields": [
-        "accountId",
-        "channelIds",
-        "compute",
-        "connectedAt",
-        "credentialId",
-        "defaultBranch",
-        "delivery",
-        "heads",
-        "installationId",
-        "name",
-        "ownerUserId",
-        "packageId",
-        "repository",
-        "secretNames",
-        "status",
-        "timings",
-        "timingsRunId",
-        "timingsUpdatedAt"
-      ],
-      "required": [
-        "credentialId",
-        "delivery",
-        "installationId",
-        "name",
-        "packageId",
-        "repository",
-        "status"
-      ],
-      "enums": {
-        "compute": [
-          "cluster",
-          "cluster_and_fleet"
-        ],
-        "delivery": [
-          "poll",
-          "webhook"
-        ],
-        "status": [
-          "active",
-          "disconnected",
-          "qualification",
-          "qualification_revoked"
         ]
       }
     },

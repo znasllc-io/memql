@@ -4,7 +4,7 @@
 
 **Goal:** a train from `main` that lands goes on, when the owner has allowed it, to a published release and a deployed, verified production, and a failed deploy restores what ran before.
 
-**Architecture:** the train row carries the release (`releasing`, `published`) one step per tick, through a seam to `integrations/release`, under the owner's standing grant. A deploy is its own row, `v1:pipelines:deployment`, with its own step per tick: pin on a branch, sync each ArgoCD Application at that exact commit, verify from outside, then merge the pin. Failure syncs each Application back to the commit it ran before. Nothing here runs until the owner presses a switch.
+**Architecture:** the train row carries the release (`releasing`, `published`) one step per tick, through a seam to `integrations/release`, under the owner's standing grant. A deploy is its own row, `v1:pipelines:pipelineDeployment`, with its own step per tick: pin on a branch, sync each ArgoCD Application at that exact commit, verify from outside, then merge the pin. Failure syncs each Application back to the commit it ran before. Nothing here runs until the owner presses a switch.
 
 **Spec:** `docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md`, sections 6 and 7, which this plan changes (below).
 

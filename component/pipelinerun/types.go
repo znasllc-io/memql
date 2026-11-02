@@ -737,7 +737,7 @@ const (
 	DeploymentTriggerButton    = "button"
 )
 
-// Deployment is one v1:pipelines:deployment row: one attempt to put one published
+// Deployment is one v1:pipelines:pipelineDeployment row: one attempt to put one published
 // release on the installation.
 type Deployment struct {
 	ID, OwnerUserID, AccountID, PipelineID, Repository string

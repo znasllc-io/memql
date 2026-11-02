@@ -12,7 +12,7 @@ function row(fields: Record<string, unknown>) {
 }
 
 function deployment(fields: Record<string, unknown>) {
-  return { id: String(fields.id ?? "d1"), concept: "v1:pipelines:deployment", payload: { repository: "acme/shop", version: "0.31.5", state: "deployed", ...fields } };
+  return { id: String(fields.id ?? "d1"), concept: "v1:pipelines:pipelineDeployment", payload: { repository: "acme/shop", version: "0.31.5", state: "deployed", ...fields } };
 }
 
 const fromMain = { repository: "acme/shop", fromMain: true, canRelease: false, canDeploy: false, release: false, deploy: false, paused: false };

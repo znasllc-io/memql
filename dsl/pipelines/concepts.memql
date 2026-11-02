@@ -184,6 +184,7 @@ concept train {
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
   @relationship(type="references", as="testedBy", field="runId", target=run, direction="outgoing")
+  @relationship(type="references", as="releasedBy", field="releaseRunId", target=run, direction="outgoing")
 }
 
 /// The owner's standing word that a repository's trains may publish, and its published releases may
@@ -218,7 +219,7 @@ concept standing {
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="version", secondary="repository", tertiary="state", status="state")
-concept deployment {
+concept pipelineDeployment {
   ownerUserId     string  @serverSet  @description("v1:identity:user.id of the pipeline's owner.")
   accountId       string  @description("Copied from the pipeline, so the deployment is readable by exactly the people its pipeline is.")
   pipelineId      string!  @description("The v1:pipelines:pipeline of the repository the release came from.")
@@ -257,6 +258,7 @@ concept deployment {
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
   @relationship(type="references", as="verifiedBy", field="runId", target=run, direction="outgoing")
+  @relationship(type="references", as="publishedBy", field="trainId", target=train, direction="outgoing")
 }
 
 /// Where a notify stage delivers (D16): a Discord webhook or an email list, named by a manifest
