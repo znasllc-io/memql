@@ -132,6 +132,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # pin, and scripts/identity/build_css_test.go fails when it does not. The
 # script uses a pre-fetched copy only at its pin and downloads the pin over
 # any other (with retries), so a missed bump downloads it again in every build.
+# A cold local build received only 94.5MB of the 112MB release before the 600s
+# cutoff; each retry starts over. Allow 20 minutes per attempt for a slow link,
+# while retaining the connection and stalled-transfer limits below.
 ARG TAILWIND_VERSION=v4.1.11
 RUN set -e; \
     case "$(uname -m)" in \
@@ -140,7 +143,7 @@ RUN set -e; \
         *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; \
     esac; \
     mkdir -p bin/tools; \
-    curl -sSL --fail --connect-timeout 30 --speed-limit 1024 --speed-time 30 --max-time 600 \
+    curl -sSL --fail --connect-timeout 30 --speed-limit 1024 --speed-time 30 --max-time 1200 \
         --retry 5 --retry-all-errors --retry-delay 2 \
         -o "bin/tools/tailwindcss-${platform}" \
         "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-${platform}"; \

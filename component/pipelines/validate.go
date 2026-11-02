@@ -2,6 +2,7 @@ package pipelines
 
 import (
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/url"
 	"path"
@@ -170,6 +171,22 @@ func validateSelect(sel *Select) *Refusal {
 	if len(sel.Full) > 0 {
 		if _, err := PathSet(sel.Full); err != nil {
 			return Refuse(CodeSelectInvalid, "select/full", "select.full cannot be read: %v.", err)
+		}
+	}
+	if len(sel.TestInputs) > 0 {
+		if sel.Go != SelectImportGraph {
+			return Refuse(CodeSelectInvalid, "select/testInputs", "select.testInputs requires select.go: import-graph.")
+		}
+		// Unlike the legacy bucket matcher, this declaration must name
+		// normalized repository paths even when its pattern would match none.
+		for _, glob := range sel.TestInputs {
+			body := strings.TrimPrefix(glob, "!")
+			if body == "." || !fs.ValidPath(body) {
+				return Refuse(CodeSelectInvalid, "select/testInputs", "select.testInputs names %q; use repository-relative glob paths without empty, dot or parent segments.", glob)
+			}
+		}
+		if _, err := PathSet(sel.TestInputs); err != nil {
+			return Refuse(CodeSelectInvalid, "select/testInputs", "select.testInputs cannot be read: %v.", err)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(sel.Buckets)) {

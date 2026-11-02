@@ -195,7 +195,10 @@ export async function deployPackage(
   const result = await query.packageDeploy({
     packageId,
     confirm: opts.confirm,
-    ...(!opts.confirm ? { background: true } : {}),
+    // Analysis and a saved confirmation both return the accepted run. The live
+    // row, not this browser request's lifetime, owns progress and the result, so
+    // closing the window no longer cancels a build somebody confirmed.
+    ...(!opts.confirm || opts.deploymentId ? { background: true } : {}),
     ...(Object.keys(placements).length > 0 ? { placements } : {}),
     // CONFIRMING A PARKED RUN NAMES IT (memql#4954). Without this every call
     // minted a run -- the confirmation included -- so the answered gate stayed

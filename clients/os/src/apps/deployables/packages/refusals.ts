@@ -247,7 +247,10 @@ const COPY: Record<string, RefusalCopy> = {
     // whatever the branch has moved to since. The first draft said "a fresh
     // run" and contradicted its own control, which a browser caught by
     // putting the two side by side.
-    next: "Nothing was published and nothing failed: every site is still serving what it was serving. Retry runs it again from the same source it had already fetched.",
+    // Not "nothing was published": a run lost at the roll or while publishing
+    // may already have changed what is live. The row's own sentence, drawn just
+    // above this, says what its stage can have changed.
+    next: "Your source did not cause this, and nothing failed that this cluster can name. Retry runs it again from the same source it had already fetched.",
   },
   snapshot_unavailable: {
     title: "There is nothing stored to retry from",

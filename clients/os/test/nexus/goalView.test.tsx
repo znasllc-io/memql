@@ -15,7 +15,7 @@ const { GoalView } = await import("../../src/apps/nexus/GoalView");
 const { goalFromRow } = await import("../../src/apps/nexus/rows");
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
-const { approvalRow, fakeConnection, goalRow, rowsResult, runRow, stepRow, withSession } = await import(
+const { approvalRow, builtinReply, fakeConnection, goalRow, runRow, stepRow, withSession } = await import(
   "./harness"
 );
 
@@ -249,6 +249,54 @@ describe("one selection, shared by the map and the rail", () => {
   });
 });
 
+describe("reading a selected action", () => {
+  it.each([
+    { position: "above", top: 60, expectedScroll: 460 },
+    { position: "below", top: 430, expectedScroll: 554 },
+    { position: "visible", top: 180, expectedScroll: 500 },
+  ])("reveals a heading $position the body without moving focus or following live updates", ({ top, expectedScroll }) => {
+    const rawGoal = goalRow({ id: "g1" });
+    const props = {
+      goal: goalFromRow(rawGoal), goalRow: rawGoal,
+      runRows: [runRow({ id: "r1", goalId: "g1", status: "running" })],
+      stepRows: [...CHAIN, stepRow({ id: "s4", key: "final", seq: 3, runId: "r1", callName: "workReviewReply" })],
+      artifactRows: [], approvalRows: [], openRunId: "r1",
+      onPickRun: vi.fn(), onBack: vi.fn(), onOpenRun: vi.fn(), onOpenApproval: vi.fn(),
+      cancel: { busy: false, error: "", reset: vi.fn(), cancel: vi.fn(async () => true) },
+      derive: { busy: false, error: "", reset: vi.fn(), derivedRunId: "", replay: vi.fn(async () => "") },
+    };
+    const draw = (stepsState: LiveState) => withSession(<GoalView {...props} stepsState={stepsState} />);
+    const view = render(draw("live"));
+    const body = view.container.querySelector<HTMLElement>(".os-nexus-goalview-body")!;
+    const outer = view.container.querySelector<HTMLElement>(".os-nexus-goalview")!;
+    const bodyRect = vi.spyOn(body, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 600, 300));
+    const headingRect = vi.spyOn(HTMLHeadingElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, top, 200, 24));
+    try {
+      body.scrollTop = 500;
+      outer.scrollTop = 30;
+      const action = screen.getByRole("button", { name: /^Final,/ });
+      action.focus();
+      fireEvent.click(action);
+      expect(within(screen.getByRole("region", { name: "Selected action" })).getByRole("heading", { name: "Final" })).toBeTruthy();
+      expect(body.scrollTop).toBe(expectedScroll);
+      expect(outer.scrollTop).toBe(30);
+      expect(document.activeElement).toBe(action);
+      body.scrollTop = 250;
+      view.rerender(draw("degraded"));
+      expect(body.scrollTop).toBe(250);
+      expect(document.activeElement).toBe(action);
+      fireEvent.click(action);
+      expect(screen.queryByRole("region", { name: "Selected action" })).toBeNull();
+      expect(body.scrollTop).toBe(250);
+      expect(props.cancel.cancel).not.toHaveBeenCalled();
+      expect(props.derive.replay).not.toHaveBeenCalled();
+    } finally {
+      bodyRect.mockRestore();
+      headingRect.mockRestore();
+    }
+  });
+});
+
 describe("density: a finished stretch folds and says how much it stands for", () => {
   it("folds, and opens again when the fold is clicked", async () => {
     const long: Row[] = [];
@@ -461,56 +509,105 @@ describe("the acts legal from the run's state", () => {
     expect(within(bar).getByText("Replay")).toBeTruthy();
   });
 
-  it("will not close a goal until the goal's own words are typed", async () => {
-    const conn = seeded();
+  it("keeps all terminal lifecycle actions in the footer and Rewind beside the time controls", async () => {
+    const conn = seeded({ runs: [runRow({ id: "r1", goalId: "g1", status: "succeeded" })], steps: CHAIN.map(step => ({ ...step, status: "done" })) });
     mount(conn);
     await openGoal();
-    expect(screen.queryByText("Close this goal")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Read, Done" }));
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    expect(within(bar).getAllByRole("button")).toHaveLength(3);
+    expect(within(bar).getByRole("button", { name: /^Branch from read:/ })).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: /^Replay this run/ })).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: "Close goal" })).toBeTruthy();
+    expect(within(bar).queryByRole("button", { name: /^Rewind/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Rewind/ }));
+    expect(screen.getByLabelText("Scrub through what happened")).toBeTruthy();
+    expect(conn.query.replayRun).not.toHaveBeenCalled();
     expect(conn.query.cancelGoal).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText(/^Type the goal's own words to close it/), {
-      target: { value: "Reconcile last month's ledger against the bank export" },
-    });
-    await readTheBar();
-    fireEvent.click(screen.getByText("Close this goal"));
-    expect(conn.query.cancelGoal).toHaveBeenCalled();
   });
 
-  it("closes a multiline goal from its single-line words and preserves pending refusal and retry", async () => {
-    const statement = "Reconcile the ledger.\n\nReport\tall differences.";
-    const words = "Reconcile the ledger. Report all differences.";
+  it("keeps a long request available and lets the person cancel a brief close confirmation", async () => {
+    const statement = "Please reconcile the qualification evidence and keep every source receipt available for a later review.\n\nDo not change permissions or repeat the deployment.";
     const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement })] });
+    mount(conn, { id: "long-request", payload: { goalId: "g1" } });
+    const heading = await screen.findByRole("heading", { name: /Please reconcile.*…/ });
+    expect(heading.textContent!.length).toBeLessThanOrEqual(81);
+    const request = screen.getByText("Request").closest("details")!;
+    fireEvent.click(within(request).getByText("Request"));
+    expect(request.textContent).toContain(statement);
+    fireEvent.click(screen.getByRole("button", { name: "Close goal" }));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Keep open" }));
+    expect(conn.query.cancelGoal).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close goal" }));
+  });
+
+  it("dismisses only the open close confirmation with Escape and restores its trigger", async () => {
+    const conn = seeded();
+    const escaped = vi.fn();
+    h.connection = conn;
+    render(<div onKeyDown={escaped}>{withSession(<NexusApp sectionId="goals" navigate={vi.fn()} askContext={vi.fn()} consumeIntent={vi.fn()} store={memoryStore()} />)}</div>);
+    await openGoal();
+    const close = screen.getByRole("button", { name: "Close goal" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(escaped).toHaveBeenCalledTimes(1);
+    escaped.mockClear();
+    fireEvent.click(close);
+    await readTheBar();
+    const keep = screen.getByRole("button", { name: "Keep open" });
+    keep.focus();
+    fireEvent.keyDown(keep, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Keep open" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Confirm closing this goal/ })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close goal" }));
+    expect(escaped).not.toHaveBeenCalled();
+    expect(conn.query.cancelGoal).not.toHaveBeenCalled();
+  });
+
+  it("preserves pending and refused closing without asking for the request text", async () => {
+    const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement: "Reconcile the ledger.\n\nReport all differences." })] });
     let refuse!: (error: Error) => void;
     conn.query.cancelGoal.mockImplementationOnce(() => new Promise((_, reject) => { refuse = reject; }));
     mount(conn, { id: "multiline-close", payload: { goalId: "g1" } });
-    const input = await screen.findByLabelText(/^Type the goal's own words to close it/) as HTMLInputElement;
-    expect(input.type).toBe("text");
-    fireEvent.change(input, { target: { value: "  Reconcile  the ledger.  Report all differences.  " } });
+    fireEvent.click(await screen.findByRole("button", { name: "Close goal" }));
     await readTheBar();
-    fireEvent.click(screen.getByText("Close this goal"));
+    fireEvent.click(screen.getByRole("button", { name: /Confirm closing this goal/ }));
     expect(conn.query.cancelGoal).toHaveBeenCalledExactlyOnceWith({ goalId: "g1", reason: "Closed from MemQL OS" });
-    const pending = screen.getByRole("button", { name: /^Close this goal and ask every run/ }) as HTMLButtonElement;
+    const pending = screen.getByRole("button", { name: /Confirm closing this goal/ }) as HTMLButtonElement;
     expect(pending.disabled).toBe(true);
-    expect(pending.getAttribute("aria-busy")).toBe("true");
+    fireEvent.keyDown(pending, { key: "Escape" });
+    expect(screen.getByRole("button", { name: /Confirm closing this goal/ })).toBe(pending);
     fireEvent.click(pending);
     expect(conn.query.cancelGoal).toHaveBeenCalledTimes(1);
     await act(async () => refuse(new Error("The cluster refused this request.")));
-    expect(screen.getByText("The goal was not closed.")).toBeTruthy();
+    expect(screen.getByText("Closing the goal needs attention.")).toBeTruthy();
     expect(screen.getByText("The cluster refused this request.")).toBeTruthy();
-    expect(input.value).toBe("  Reconcile  the ledger.  Report all differences.  ");
-    for (const mismatch of ["   ", "Reconcile the ledger.", words.toLowerCase(), words.replace("differences.", "differences")]) {
-      fireEvent.change(input, { target: { value: mismatch } });
-      expect(screen.queryByText("Close this goal")).toBeNull();
-    }
-    expect(conn.query.cancelGoal).toHaveBeenCalledTimes(1);
-    fireEvent.change(input, { target: { value: words } });
-    conn.query.cancelGoal.mockResolvedValueOnce(rowsResult([]));
+    conn.query.cancelGoal.mockResolvedValueOnce(builtinReply("cancelGoal", [{ goalId: "g1", goalClosed: true, runsAsked: 1 }]));
     await readTheBar();
-    fireEvent.click(screen.getByText("Close this goal"));
+    fireEvent.click(screen.getByRole("button", { name: /Confirm closing this goal/ }));
     await act(async () => {});
     expect(conn.query.cancelGoal).toHaveBeenCalledTimes(2);
-    expect(input.value).toBe("");
-    expect(screen.queryByText("Close this goal")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Confirm closing this goal/ })).toBeNull();
   });
+
+  it.each([
+    [{ goalId: "g1", goalClosed: false, runsAsked: 1 }, "Some runs may have been asked to stop, but the goal did not close. Check its current state."],
+    [{ goalId: "g1", goalClosed: true, runsAsked: 1, runsRefused: ["r2"] }, "The goal closed, but some runs could not be asked to stop. Check their current activity."],
+    [{ goalId: "other", goalClosed: true }, "The cluster did not confirm whether this goal closed. Check its current state before trying again."],
+  ] as const)("does not turn a partial or unrelated close receipt into success", async (reply, message) => {
+    const conn = seeded();
+    conn.query.cancelGoal.mockResolvedValueOnce(builtinReply("cancelGoal", [reply]));
+    mount(conn);
+    await openGoal();
+    fireEvent.click(screen.getByRole("button", { name: "Close goal" }));
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: /Confirm closing this goal/ }));
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(conn.query.cancelGoal).toHaveBeenCalledTimes(1);
+  });
+
 });
 
 describe("the receipt", () => {

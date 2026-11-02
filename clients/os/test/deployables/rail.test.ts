@@ -641,10 +641,9 @@ describe("terminal statuses", () => {
 // serving what it was serving."
 //
 // The sentence refutes the mark it was rendered as. `abandoned` and
-// `cancelled` are the two terminal statuses where the engine GUARANTEES the
-// run published nothing and failed at nothing -- one is a loss the cluster
-// observed, the other a person's own stop. Neither decides anything about the
-// deployable, so neither belongs on a stop that describes it.
+// `cancelled` are the two terminal statuses that reach no verdict -- one is a
+// loss the cluster observed, the other a person's own stop. Neither decides
+// anything about the deployable, so neither belongs on a stop that describes it.
 //
 // It landed on What-it-is because the run died PARKED, `stoppedAt` was
 // `awaiting_confirm`, and RUN_STOP maps that to `whatItIs` -- so the death of

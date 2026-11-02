@@ -270,7 +270,12 @@ and crosses; a tool-needing STEP (the session door, below) does not -- it runs
 as a session subrun on the replica whose delegate opens it. On a node that does
 not hold the stream, a tool turn therefore passes an app Source over with
 "a step handover opens its session on the agent holding the machine's stream"
-and takes the next Source in the Route. System work with no acting user never
+and takes the next Source in the Route. A goal whose owner chose Apps avoids
+that pass-over at dispatch: an agent holding no eligible stream leaves the run
+to the agent that does
+([choosing the execution replica](../ai/work-context-and-recovery.md#choosing-the-execution-replica-for-apps)).
+Auto and a Route with other Sources keep ordinary arbitration, so a tool turn
+there can still pass an app over. System work with no acting user never
 gets an app door on any node: a session's credential names a person. The
 inference-status row (`appEligible`, `runnableApps`) asks the chat door's
 question, so a replica that can forward to the laptop reports the app door

@@ -40,7 +40,9 @@ func resolveRevision(t *testing.T, repo string) string {
 	if err := os.WriteFile(script, []byte(src[:cut]+"\nresolve_target_revision '"+repo+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("bash", script).Output()
+	// Source the extracted function fragment; it intentionally does not run
+	// the capability's main or emit a capability result.
+	out, err := exec.Command("bash", "-c", `source "$1"`, "bash", script).Output()
 	if err != nil {
 		t.Fatalf("harness failed: %v", err)
 	}

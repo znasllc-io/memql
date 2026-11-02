@@ -187,10 +187,10 @@ func (r *recorder) joined(stream string) string {
 }
 
 // fakeClaude writes a fake `claude` that appends its own argv to a log,
-// one record per invocation, and then runs body.
+// one record per invocation, consumes the finite stdin prompt, then runs body.
 //
 // The argv is asserted from the log rather than from a seam in the
-// client because the argv is the whole contract with the app: a flag
+// client because argv carries the options contract with the app: a flag
 // this client believes it passed and does not is invisible to any
 // assertion made on this side of the fork.
 func fakeClaude(t *testing.T, body string) (binary, argvLog string) {
@@ -198,7 +198,7 @@ func fakeClaude(t *testing.T, body string) (binary, argvLog string) {
 	argvLog = filepath.Join(t.TempDir(), "argv.log")
 	script := "#!/bin/sh\n" +
 		"{ echo '--turn--'; printf '%s\\n' \"$@\"; } >> '" + argvLog + "'\n" +
-		body
+		"cat > '" + argvLog + ".stdin'\n" + body
 	return fakeBinary(t, "claude", script), argvLog
 }
 
@@ -326,8 +326,14 @@ func TestClaudeHeadlessFirstTurnCarriesNoResume(t *testing.T) {
 	if hasArg(argv, "--json-schema") {
 		t.Errorf("a schema nobody asked for changes what the app says: %v", argv)
 	}
-	if len(argv) < 2 || argv[len(argv)-2] != "--" || argv[len(argv)-1] != "say pong" {
-		t.Errorf("the prompt must be the only thing after --, got %v", argv)
+	if argv[len(argv)-1] != "--" || hasArg(argv, "say pong") {
+		t.Errorf("argv must contain options only, got %v", argv)
+	}
+	if got := argValue(t, argv, "--input-format"); got != "text" {
+		t.Errorf("input format = %q, want text", got)
+	}
+	if got, err := os.ReadFile(log + ".stdin"); err != nil || string(got) != "say pong" {
+		t.Fatalf("prompt bytes changed or EOF missing: %q, %v", got, err)
 	}
 
 	if res.Text != "pong" {
@@ -342,10 +348,8 @@ func TestClaudeHeadlessFirstTurnCarriesNoResume(t *testing.T) {
 }
 
 // TestClaudeHeadlessPromptSurvivesTheVariadicMCPFlag pins the trap that
-// makes claudeArgv's ordering load-bearing: --mcp-config is variadic and
-// swallows a following positional, and a prompt that begins with a dash
-// is read as an unknown option. Both fail as a wrong answer, not an
-// error the operator can trace back here.
+// previously put the prompt into the CLI option parser. Text stdin keeps
+// option-looking bytes entirely outside argv, including after variadic flags.
 func TestClaudeHeadlessPromptSurvivesTheVariadicMCPFlag(t *testing.T) {
 	bin, log := fakeClaude(t, prints(claudePongTurn))
 	h := startClaude(t, claudeSpec(t, bin))
@@ -366,8 +370,11 @@ func TestClaudeHeadlessPromptSurvivesTheVariadicMCPFlag(t *testing.T) {
 	if sep < 0 {
 		t.Fatalf("no -- separator in %v", argv)
 	}
-	if got := argv[sep+1:]; len(got) != 1 || got[0] != prompt {
-		t.Fatalf("after -- want exactly the prompt, got %v", got)
+	if got := argv[sep+1:]; len(got) != 0 {
+		t.Fatalf("after -- want no positional prompt, got %v", got)
+	}
+	if got, err := os.ReadFile(log + ".stdin"); err != nil || string(got) != prompt {
+		t.Fatalf("stdin prompt changed: %q, %v", got, err)
 	}
 	for _, a := range argv[:sep] {
 		if a == prompt {

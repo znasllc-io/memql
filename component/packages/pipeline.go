@@ -66,9 +66,9 @@ const (
 	// flavour of failed -- see sweep.go.
 	StatusAbandoned = "abandoned"
 	// StatusCancelled is a PERSON's stop (epic memql#4937, D3). Terminal, and
-	// deliberately not a flavour of failed for the same reason StatusAbandoned
-	// is not -- nothing broke, nothing was published, and the D6 order
-	// guarantees every site is still serving what it was serving.
+	// deliberately not a flavour of failed -- nothing broke, and a stop is
+	// honoured only before the roll (CancellableStage), so nothing was published
+	// and every site is still serving what it was serving.
 	//
 	// The distinction between these two terminal words is WHO DECIDED:
 	// abandoned is a loss this cluster OBSERVED, cancelled is a choice
@@ -230,9 +230,12 @@ func (d *Deps) log() *slog.Logger {
 
 // DeployRequest is one deploy or redeploy.
 type DeployRequest struct {
-	PackageId    string
-	DeploymentId string
-	Actor        Actor
+	// Derived from the saved report by native background confirmation only.
+	// Not accepted from a client and never substituted for per-build limits.
+	confirmationTimeout time.Duration
+	PackageId           string
+	DeploymentId        string
+	Actor               Actor
 	// Confirmed is D12's always-present gate. A run arriving unconfirmed
 	// parks at awaiting_confirm with the report on the row and returns; the
 	// OS renders the report and calls again with Confirmed set. A REDEPLOY
@@ -357,11 +360,13 @@ func (o *DeployOutcome) recordBuiltOn(on BuiltOn) {
 // none to test.
 //
 // What that costs, stated rather than discovered: a node lost mid-deploy
-// strands its row at a non-terminal status. Nothing is inconsistent -- the D6
-// order guarantees every site is still serving what it was, because the run
-// died before `publish` or after it finished -- but the row does not advance
-// again on its own. The recovery is the one the append-only rule already
-// prescribes everywhere else: start a new attempt, which opens a new row.
+// strands its row at a non-terminal status, and the row does not advance again
+// on its own. What it left depends on the stage: before `rolling` every site is
+// still serving what it was; at `rolling` the DSL pointer may have moved, and a
+// package's own DSL can restart the bff running this very call; at `publishing`
+// the run can stop between two sites. The recovery is the one the append-only
+// rule already prescribes everywhere else: start a new attempt, which opens a
+// new row and skips the roll when the pointer already matches (stageAndRoll).
 //
 // What IS cross-node is the READ, and it is not optional: every row written
 // here is read in an OS window some other node is serving, which is what the
@@ -404,6 +409,13 @@ func StartAnalysis(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutc
 }
 
 func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
+	if req.Confirmed && strings.TrimSpace(req.DeploymentId) != "" {
+		return prepareConfirmation(ctx, d, req, false)
+	}
+	return prepareDeploymentUnclaimed(ctx, d, req)
+}
+
+func prepareDeploymentUnclaimed(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
 	// THE PLACEMENTS ARE READ BEFORE ANYTHING IS OPENED. An unknown target is a
 	// request this pipeline cannot honour in either direction -- reading it as
 	// the serving version would put in front of the public a build somebody
@@ -537,11 +549,14 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 	})
 	runErr := runDeploy(runCtx, d, req, pkg, out, &cancelled)
 	stopHeartbeat()
+	// Closing the row must survive a caller that has gone. A synchronous
+	// confirmation's stream can close mid-run, and writing the terminal status
+	// under its dead context left the row for the sweep to call lost. This
+	// detaches bookkeeping only: runDeploy has returned and its heartbeat stopped.
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer finishCancel()
 	if runErr == nil && out.AwaitingConfirm {
-		if asked, err := d.Store.cancelRequestedFor(ctx, deploymentId); err == nil && asked {
-			out.AwaitingConfirm = false
-			runErr = refuse(CodeDeploymentCancelled, "You stopped this analysis. Nothing was built or published.")
-		}
+		runErr = finishParking(finishCtx, d, req, out)
 	}
 
 	if err := runErr; err != nil {
@@ -561,8 +576,8 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 		}
 		out.Status = status
 		out.Problem = problem
-		d.closeRun(ctx, deploymentId, out, problem)
-		d.audit(ctx, req, out, err)
+		d.closeRun(finishCtx, deploymentId, out, problem)
+		d.audit(finishCtx, req, out, err)
 		return out, err
 	}
 
@@ -571,13 +586,13 @@ func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[
 		// deliberately NOT closed: a terminal row accepts no further writes,
 		// so closing here would make the person's confirmation land on a row
 		// nothing could advance.
-		d.audit(ctx, req, out, nil)
+		d.audit(finishCtx, req, out, nil)
 		return out, nil
 	}
 
 	out.Status = StatusSucceeded
-	d.closeRun(ctx, deploymentId, out, nil)
-	d.audit(ctx, req, out, nil)
+	d.closeRun(finishCtx, deploymentId, out, nil)
+	d.audit(finishCtx, req, out, nil)
 	return out, nil
 }
 
@@ -768,12 +783,12 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 				out.AwaitingConfirm = true
 				out.Status = StatusAwaitingConfirm
 				out.ConfirmReason = why
-				return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+				return nil
 			}
 		} else {
 			out.AwaitingConfirm = true
 			out.Status = StatusAwaitingConfirm
-			return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+			return nil
 		}
 	}
 

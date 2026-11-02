@@ -18,7 +18,7 @@ import (
 // re-offers the durable answer through wakeSettledHumanWait; this cannot depend
 // on the cron leader having an executing dispatcher. Agent recovery may still
 // claim that same answer if the settling executor itself dies.
-func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.DispatchRequest) (work.DispatchRequest, bool) {
+func (d *workRunDispatcher) prepareHumanDispatch(ctx context.Context, req work.DispatchRequest) (work.DispatchRequest, bool) {
 	if !req.Recovery && req.HumanResumeId == "" {
 		return req, true
 	}
@@ -110,7 +110,8 @@ func (d *workRunDispatcher) wakeSettledHumanWait(ctx context.Context, req work.D
 			"status": journal.Status, "automationName": journal.AutomationName,
 			"goalId": journal.GoalId, "ownerUserId": journal.OwnerUserId,
 			"triggeredBy": journal.TriggeredBy, "humanResumeId": journal.HumanResumeId,
-			"rerun": map[string]any{"requestId": req.RerunRequestId},
+			"routing": journal.Routing.Map(),
+			"rerun":   map[string]any{"requestId": req.RerunRequestId},
 		},
 	}})
 }
