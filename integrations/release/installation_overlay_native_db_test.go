@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // The producer and reader are different engines over a disposable database.
@@ -280,11 +281,15 @@ automation fixtureProposalObservation {
 		return "", errors.New("no such construct")
 	}
 	r := pl.DeployPinRequest{
-		RequestID: "deploy-1", CandidateID: s.request.CandidateID, CatalogDigest: s.request.CatalogDigest,
+		RequestID: "deploy-" + id.NewShortId(), CandidateID: s.request.CandidateID, CatalogDigest: s.request.CatalogDigest,
 		ExpectedBase: s.request.ExpectedBaseRevision, OwnerUserID: s.owner, Authority: authority,
 	}
 	pin, err := i.ProposeDeployPin(tick, r)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, e := s.db.Exec(`DELETE FROM release_installation_proposals WHERE proposal_id=$1`, pin.ProposalID)
+		require.NoError(t, e)
+	})
 	require.Positive(t, pin.PullRequest)
 	require.Regexp(t, `^[a-f0-9]{40}$`, pin.Commit)
 	require.NotEmpty(t, pin.ProposalID)
@@ -311,7 +316,7 @@ automation fixtureProposalObservation {
 
 	// Without the owner's role, internal origin, or their word, it does nothing.
 	role.Store(string(auth.RoleAdmin))
-	_, err = i.ProposeDeployPin(tick, pl.DeployPinRequest{RequestID: "deploy-2", CandidateID: r.CandidateID, CatalogDigest: r.CatalogDigest, ExpectedBase: r.ExpectedBase, OwnerUserID: s.owner, Authority: authority})
+	_, err = i.ProposeDeployPin(tick, pl.DeployPinRequest{RequestID: "deploy-" + id.NewShortId(), CandidateID: r.CandidateID, CatalogDigest: r.CatalogDigest, ExpectedBase: r.ExpectedBase, OwnerUserID: s.owner, Authority: authority})
 	require.Error(t, err)
 	role.Store(string(auth.RoleOwner))
 	_, err = i.ProposeDeployPin(ownerCtx(), r)
