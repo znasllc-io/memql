@@ -370,7 +370,7 @@ func TestGrantEnforcementIsHonouredAcrossNodes(t *testing.T) {
 		t.Fatalf("second engine: %v", err)
 	}
 	engB.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := engB.Init(concept.DefaultRegistry()); err != nil {
+	if err := bootPrivateEngine(engB, concept.DefaultRegistry()); err != nil {
 		t.Fatalf("second engine Init: %v", err)
 	}
 	engB.InstallGrantResolution()

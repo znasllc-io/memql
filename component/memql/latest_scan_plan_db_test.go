@@ -78,7 +78,7 @@ func TestLatestScanPlanBoundsPayloadReadsAcrossTimescaleChunks(t *testing.T) {
 	require.NoError(t, err)
 	eng, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, eng.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(eng, memorynodes.DefaultRegistry()))
 	hook := &latestPlanCapture{}
 	db.AddQueryHook(hook)
 	readCtx := context.WithValue(clusterOwnerCtx("latest-plan-owner"), latestPlanCaptureKey{}, true)

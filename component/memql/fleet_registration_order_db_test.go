@@ -19,7 +19,7 @@ func TestFleetRegistrationOrderSurvivesHeartbeatVersionsAcrossReplicas(t *testin
 	writer, db, _ := sharedReadMergeEngine(t)
 	reader, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, reader.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(reader, memorynodes.DefaultRegistry()))
 	f := shareDirFixture{t: t, eng: writer, db: db, prefix: uniqueSuffix("fleet-order")}
 	owner := f.person("owner", true)
 	other := f.person("other", true)

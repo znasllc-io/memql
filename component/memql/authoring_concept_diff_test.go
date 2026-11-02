@@ -725,7 +725,7 @@ func conceptDiffDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 		t.Fatalf("new engine: %v", err)
 	}
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(memoryNodes.DefaultRegistry()); err != nil {
+	if err := bootPrivateEngine(eng, memoryNodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine init: %v", err)
 	}
 	ctx := auth.ContextWithUserActor(context.Background(), "owner-1")

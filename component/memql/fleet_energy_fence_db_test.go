@@ -68,7 +68,7 @@ func TestEnergyProfileDBFencesPreparedDecisions(t *testing.T) {
 	peer, err := New(db)
 	require.NoError(t, err)
 	t.Cleanup(peer.cache.close)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	for _, mode := range []string{"first-create", "save", "research-location", "research-consent"} {
 		t.Run(mode, func(t *testing.T) {
 			f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("energy-fence")}

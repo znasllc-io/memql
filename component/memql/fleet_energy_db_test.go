@@ -22,7 +22,7 @@ func TestEnergyProfileDBPrivacyRevisionAndResearch(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, strings.Repeat("ab", 32))
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("energy")}
 	owner := f.person("owner", true)
 	other := f.person("other", true)

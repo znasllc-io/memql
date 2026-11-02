@@ -49,7 +49,7 @@ func livenessEngines(t *testing.T) (*MemQLEngine, *MemQLEngine, *bun.DB, *bun.DB
 	engine := func(db *bun.DB) *MemQLEngine {
 		e, err := New(db)
 		require.NoError(t, err)
-		require.NoError(t, e.Init(memorynodes.DefaultRegistry()))
+		require.NoError(t, bootPrivateEngine(e, memorynodes.DefaultRegistry()))
 		return e
 	}
 	return engine(db), engine(other), db, other, clusterOwnerCtx("liveness-owner")

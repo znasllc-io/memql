@@ -134,7 +134,7 @@ func freshAccountEngine(t *testing.T, db *bun.DB) *MemQLEngine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := receiver.Init(memorynodes.DefaultRegistry()); err != nil {
+	if err := bootPrivateEngine(receiver, memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
 	return receiver

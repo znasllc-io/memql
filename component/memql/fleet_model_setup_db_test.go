@@ -16,7 +16,7 @@ func TestModelSetupDBAdmissionAndCrossReplicaRevision(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	peer, err := New(db)
 	require.NoError(t, err)
-	require.NoError(t, peer.Init(memorynodes.DefaultRegistry()))
+	require.NoError(t, bootPrivateEngine(peer, memorynodes.DefaultRegistry()))
 	key := uniqueSuffix("model-setup")
 	owner := "v1:identity:user:" + key
 	registration := WorkerRegistrationConcept + ":" + key
