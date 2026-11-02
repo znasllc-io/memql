@@ -68,6 +68,23 @@ type trainRemote struct {
 	commitsBetween map[string][]githubapp.ComparedCommit
 	// commitTotals overrides how many commits a comparison says there are.
 	commitTotals map[string]int
+	// refuseMerges makes GitHub refuse every merge, as a conflict with a main
+	// that moved does; mergeAttempts counts the calls.
+	refuseMerges  bool
+	mergeAttempts int
+}
+
+// BranchHead answers a branch this fake moved, and otherwise what the run
+// driver's fake knows: main, in these tests.
+func (r *trainRemote) BranchHead(ctx context.Context, token, repository, branch string) (string, string, error) {
+	r.mu.Lock()
+	sha, ok := r.branches[branch]
+	r.mu.Unlock()
+	if ok {
+		watchGitHubCall(r.t, ctx, "BranchHead")
+		return sha, "", nil
+	}
+	return r.fakeGitHub.BranchHead(ctx, token, repository, branch)
 }
 
 const trainAppID = 4822538
@@ -349,6 +366,10 @@ func (r *trainRemote) MergePullRequest(ctx context.Context, token, repository st
 	watchGitHubCall(r.t, ctx, "MergePullRequest")
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.mergeAttempts++
+	if r.refuseMerges {
+		return "", &githubapp.StatusError{Status: http.StatusConflict, Endpoint: "/merge"}
+	}
 	pr := r.trainPRs[number]
 	if pr != nil && pr.open && r.raceMerge {
 		r.raceMerge = false

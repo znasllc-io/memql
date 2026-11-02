@@ -186,3 +186,53 @@ func TestTrainReachOf(t *testing.T) {
 		})
 	}
 }
+
+func TestMainTrainTriageRerunsAnyFailureOnceThenHolds(t *testing.T) {
+	for name, step := range map[string]TrainFailedStep{
+		"an ordinary exit": {Key: "tests.go-unit#1"},
+		"a timeout":        {Key: "tests.go-unit#1", ErrorCode: CodeStepTimeout},
+	} {
+		t.Run(name, func(t *testing.T) {
+			first := TriageMainTrainFailure([]TrainFailedStep{step}, false)
+			if first.Action != "retry" || !strings.Contains(first.Reason, step.Key) {
+				t.Errorf("first failure = %+v", first)
+			}
+			second := TriageMainTrainFailure([]TrainFailedStep{step}, true)
+			if second.Action != "hold" || !strings.Contains(second.Reason, step.Key) {
+				t.Errorf("second failure = %+v", second)
+			}
+		})
+	}
+}
+
+func TestSuspectCommitsAreThoseThatReachTheFailedPackages(t *testing.T) {
+	g, err := ScanGoTree(fstest.MapFS{
+		"go.mod":               {Data: []byte("module github.com/acme/shop\n\ngo 1.26\n")},
+		"core/num/num.go":      {Data: []byte("package num\n")},
+		"component/memql/x.go": {Data: []byte("package memql\n\nimport _ \"github.com/acme/shop/core/num\"\n")},
+		"component/other/o.go": {Data: []byte("package other\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := []TrainFailedStep{{Key: "tests.go-unit#1", Packages: []string{"github.com/acme/shop/component/memql"}}}
+	commits := []TrainCommit{
+		{SHA: "reaches", Subject: "change num", Files: []string{"core/num/num.go"}, Complete: true},
+		{SHA: "misses", Subject: "change other", Files: []string{"component/other/o.go"}, Complete: true},
+		{SHA: "unbounded", Subject: "bump a module", Files: []string{"go.mod"}, Complete: true},
+		{SHA: "empty", Subject: "a merge with no change", Complete: true},
+	}
+	var got []string
+	for _, c := range SuspectCommits(g, commits, failed, nil) {
+		got = append(got, c.SHA)
+	}
+	if strings.Join(got, ",") != "reaches,unbounded" {
+		t.Errorf("suspects = %v, want reaches and unbounded", got)
+	}
+	if s := SuspectCommits(nil, commits, failed, nil); len(s) != 0 {
+		t.Errorf("with no graph nothing can be told, got %v", s)
+	}
+	if s := SuspectCommits(g, commits, []TrainFailedStep{{Key: "checks.lint"}}, nil); len(s) != 0 {
+		t.Errorf("a failed step naming no package suspects nobody, got %v", s)
+	}
+}

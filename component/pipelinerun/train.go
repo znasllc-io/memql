@@ -292,6 +292,9 @@ func (i *Integration) departScheduled(ctx context.Context, d Deps, s pipelines.T
 // request, then records the train running. t is a building train this tick
 // owns.
 func (i *Integration) build(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train) error {
+	if s.FromMain() {
+		return i.buildFromMain(ctx, d, s, p, t)
+	}
 	gh, token, appID, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return err
@@ -508,6 +511,9 @@ func (i *Integration) observeRun(ctx context.Context, d Deps, s pipelines.TrainS
 	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 		return err
 	}
+	if moved, err := i.followTrainHead(ctx, d, s, p, t, token); moved || err != nil {
+		return err
+	}
 	runs, err := d.Store.RunsForPipelineSHA(memql.ContextWithFreshRead(ctx), p.ID, t.HeadSHA)
 	if err != nil {
 		return err
@@ -537,6 +543,9 @@ func (i *Integration) observeRun(ctx context.Context, d Deps, s pipelines.TrainS
 		return nil
 	}
 	if run.Conclusion == ConclusionSuccess {
+		if s.LandsAutomatically() {
+			return i.landAutomatically(ctx, d, s, p, t, run.ID)
+		}
 		updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainAwaitingApproval), RunID: ptr(run.ID)})
 		if err != nil || !ok {
 			return err
@@ -574,6 +583,9 @@ func (i *Integration) triage(ctx context.Context, d Deps, s pipelines.TrainSetti
 			reason += ": " + oneLine(why)
 		}
 		return i.hold(ctx, d, s, p, t, reason+". Re-run it to go on, or close the train pull request to cancel the train.", nil, run.ID)
+	}
+	if s.FromMain() {
+		return i.triageMain(ctx, d, s, p, t, run, failed, keys)
 	}
 	gh, token, _, err := trainAccess(ctx, d, p)
 	if err != nil {
@@ -638,7 +650,7 @@ func (i *Integration) dropAndRebuild(ctx context.Context, d Deps, s pipelines.Tr
 // hold stops the train for the owner. runID, when set, is the run the train
 // is held on: the message links it, and a newer attempt at the same head
 // resumes the train (observeHeld).
-func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, reason string, failed []string, runID string) error {
+func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, reason string, failed []string, runID string, also ...func(*pipelinenotify.TrainMessage)) error {
 	patch := TrainPatch{State: ptr(TrainHeld), HeldReason: ptr(reason)}
 	if runID != "" {
 		patch.RunID = ptr(runID)
@@ -647,7 +659,12 @@ func (i *Integration) hold(ctx context.Context, d Deps, s pipelines.TrainSetting
 	if err != nil || !ok {
 		return err
 	}
-	return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainHeld, reason, func(m *pipelinenotify.TrainMessage) { m.Failed = failed })
+	return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainHeld, reason, func(m *pipelinenotify.TrainMessage) {
+		m.Failed = failed
+		for _, edit := range also {
+			edit(m)
+		}
+	})
 }
 
 // observeHeld waits for the owner: a closed train pull request cancels the
@@ -659,6 +676,9 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 		return err
 	}
 	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
+		return err
+	}
+	if moved, err := i.followTrainHead(ctx, d, s, p, t, token); moved || err != nil {
 		return err
 	}
 	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
@@ -691,6 +711,11 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 // from the train's base, and reports whether it did. Approving the train as
 // it stands would land a pull request its author withdrew.
 func (i *Integration) rebuildIfAsked(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token string) (bool, error) {
+	if s.FromMain() {
+		// Nothing asks: there are no pull requests on board, and main moves all
+		// day. A rebuild would discard a person's fix on the train's branch.
+		return false, nil
+	}
 	prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
 	if err != nil {
 		return false, err
@@ -767,7 +792,7 @@ func (i *Integration) notifyTrain(ctx context.Context, d Deps, s pipelines.Train
 	}
 	m := pipelinenotify.TrainMessage{
 		Event: event, Repository: p.Repository, Branch: t.Branch, Version: t.Version, PullRequestURL: t.PullRequestURL,
-		OSOrigin: origin, Reason: reason, MentionUserID: s.OwnerDiscordUserID, At: d.Now().UTC(),
+		OSOrigin: origin, Reason: reason, MentionUserID: s.OwnerDiscordUserID, At: d.Now().UTC(), FromMain: s.FromMain(),
 	}
 	if t.RunID != "" && origin != "" {
 		m.RunPageURL = pipelines.RunPageURL(origin, bareID(t.RunID))
@@ -814,6 +839,21 @@ func trainAccess(ctx context.Context, d Deps, p Pipeline) (trainGitHub, string, 
 // so every pull request is unbounded and the train holds unless it carries
 // only one.
 func trainReach(ctx context.Context, d Deps, gh trainGitHub, token string, p Pipeline, t Train) (map[int]pipelines.TrainReach, error) {
+	graph, fullGlobs := trainGraph(ctx, d, token, p, t)
+	out := make(map[int]pipelines.TrainReach, len(t.OnBoard))
+	for _, car := range t.OnBoard {
+		files, complete, err := gh.CompareFiles(ctx, token, p.Repository, t.BaseSHA, car.SHA)
+		if err != nil {
+			return nil, err
+		}
+		out[car.Number] = pipelines.TrainReachOf(graph, files, complete, fullGlobs)
+	}
+	return out, nil
+}
+
+// trainGraph reads the import graph and the full-selection globs at the train's
+// head. A tree that cannot be read answers no graph, which bounds nothing.
+func trainGraph(ctx context.Context, d Deps, token string, p Pipeline, t Train) (*pipelines.Graph, []string) {
 	var graph *pipelines.Graph
 	var fullGlobs []string
 	if tree, err := d.GitHub.Tree(ctx, token, p.Repository, t.HeadSHA, keepForRun, maxTreeBytes); err == nil {
@@ -826,15 +866,7 @@ func trainReach(ctx context.Context, d Deps, gh trainGitHub, token string, p Pip
 	} else {
 		trainLog(d).Warn("pipelines: the train head's tree was not read; every pull request on board is a suspect", "repository", p.Repository, "branch", t.Branch, "error", err.Error())
 	}
-	out := make(map[int]pipelines.TrainReach, len(t.OnBoard))
-	for _, car := range t.OnBoard {
-		files, complete, err := gh.CompareFiles(ctx, token, p.Repository, t.BaseSHA, car.SHA)
-		if err != nil {
-			return nil, err
-		}
-		out[car.Number] = pipelines.TrainReachOf(graph, files, complete, fullGlobs)
-	}
-	return out, nil
+	return graph, fullGlobs
 }
 
 // mainFailedSteps are the steps main's newest completed push run failed, with

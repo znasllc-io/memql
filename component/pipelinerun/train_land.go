@@ -34,6 +34,13 @@ func (i *Integration) awaitApproval(ctx context.Context, d Deps, s pipelines.Tra
 	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 		return err
 	}
+	if moved, err := i.followTrainHead(ctx, d, s, p, t, token); moved || err != nil {
+		return err
+	}
+	if s.LandsAutomatically() {
+		// The owner turned this on while the train was waiting for them.
+		return i.landAutomatically(ctx, d, s, p, t, t.RunID)
+	}
 	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
 	if err != nil || rebuilt {
 		return err
@@ -82,16 +89,22 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 		return err
 	}
-	head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
-	if err != nil {
-		return err
-	}
-	if head != t.BaseSHA {
-		updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1), ApprovedBy: ptr(""), ApprovedSHA: ptr("")})
-		if err != nil || !ok {
+	// A train from main releases the commit its run tested, and main moving under
+	// it is the ordinary case: GitHub merges it into main's tip, and what was pushed
+	// since goes out in the next release (design record
+	// 2026-11-02-nightly-release-from-main-design.md, D5).
+	if !s.FromMain() {
+		head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
+		if err != nil {
 			return err
 		}
-		return i.build(ctx, d, s, p, updated)
+		if head != t.BaseSHA {
+			updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1), ApprovedBy: ptr(""), ApprovedSHA: ptr("")})
+			if err != nil || !ok {
+				return err
+			}
+			return i.build(ctx, d, s, p, updated)
+		}
 	}
 	sha, err := gh.MergePullRequest(ctx, token, p.Repository, t.PullRequest, t.HeadSHA)
 	if err != nil {
@@ -151,6 +164,12 @@ func (i *Integration) recordLanded(ctx context.Context, d Deps, s pipelines.Trai
 	reason := "Landed " + trainCount(len(t.OnBoard)) + " on main."
 	if mergeSHA != "" {
 		reason = fmt.Sprintf("Landed %s on main as %s.", trainCount(len(t.OnBoard)), shortCommit(mergeSHA))
+	}
+	if s.FromMain() {
+		reason = fmt.Sprintf("Landed %s at %s as %s.", p.DefaultBranch, shortCommit(t.BaseSHA), shortCommit(mergeSHA))
+		if t.Retried {
+			reason += " It passed on its re-run, so the steps named earlier look flaky."
+		}
 	}
 	return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainLanded, reason, nil)
 }
