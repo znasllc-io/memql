@@ -2,8 +2,12 @@ package memql
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
+
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // ai_provider_auth_lookup_test.go -- memql#4338.
@@ -143,6 +147,65 @@ func TestUnresolvedAuthErrorNamesTheCandidates(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("candidate list %q does not name %q, so the unresolved-auth error cannot "+
 				"tell an operator which names were searched", joined, want)
+		}
+	}
+}
+
+// TestAProviderLoadResolvesEachPlaceholderOnce pins the read count of one load.
+// Each resolution is up to four queries, and a vendor's providers share their
+// placeholders, so a load that asked per provider made 224 queries for 8
+// placeholders.
+func TestAProviderLoadResolvesEachPlaceholderOnce(t *testing.T) {
+	prevSecret, prevVar := systemSecretResolver, systemVariableResolver
+	t.Cleanup(func() { systemSecretResolver, systemVariableResolver = prevSecret, prevVar })
+	asked := map[string]int{}
+	systemSecretResolver = func(_ context.Context, name string) (string, error) {
+		asked[name]++
+		return "", nil
+	}
+	systemVariableResolver = nil
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	registry, err := loadAIProviders(logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadUnifiedProvidersFromTree(memqldsl.Tree(), true, logger, registry); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) == 0 {
+		t.Fatal("no placeholder reached the resolver, so this proves nothing")
+	}
+	for name, times := range asked {
+		if times != 1 {
+			t.Errorf("one load asked for %q %d times", name, times)
+		}
+	}
+}
+
+// TestRememberAuthValuesAnswersAsTheChainDoes covers what the memo must not
+// change: the value, the tier that answered, and a miss staying a miss, which an
+// optional placeholder depends on.
+func TestRememberAuthValuesAnswersAsTheChainDoes(t *testing.T) {
+	prevSecret, prevVar := systemSecretResolver, systemVariableResolver
+	t.Cleanup(func() { systemSecretResolver, systemVariableResolver = prevSecret, prevVar })
+	systemSecretResolver = func(_ context.Context, name string) (string, error) {
+		if name == "MEMQL_AUTH_MEMO_SEEDED" {
+			return "seeded", nil
+		}
+		return "", nil
+	}
+	systemVariableResolver = nil
+
+	lookup := rememberAuthValues()
+	for range 2 {
+		value, source, ok := lookup("MEMQL_AUTH_MEMO_SEEDED")
+		if !ok || value != "seeded" || source != AuthSourceGlobalSecret {
+			t.Fatalf("seeded placeholder: %q %q %v", value, source, ok)
+		}
+		value, source, ok = lookup("MEMQL_AUTH_MEMO_UNSEEDED")
+		if ok || value != "" || source != AuthSourceUnresolved {
+			t.Fatalf("missing placeholder: %q %q %v", value, source, ok)
 		}
 	}
 }

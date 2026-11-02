@@ -253,6 +253,12 @@ type ActorMemberRef struct {
 // validator and the sense diagnostic (#2625) so the two cannot drift
 // in what they consider a read.
 func ActorMemberRefs(source string) []ActorMemberRef {
+	// Most constructs never read the actor, and this runs on every construct of
+	// every load. Stripping only blanks text, so a read in the stripped source is
+	// the same bytes in this one: without them there is nothing to find.
+	if !strings.Contains(source, "actor.") {
+		return nil
+	}
 	stripped := stripCommentsAndStrings(source)
 	var out []ActorMemberRef
 	for _, m := range actorMemberPattern.FindAllStringSubmatchIndex(stripped, -1) {
