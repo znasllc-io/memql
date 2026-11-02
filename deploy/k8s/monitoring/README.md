@@ -41,6 +41,11 @@ Alert rules (prometheus-operator CRDs):
   - **MemqlDatabaseReplicaNotStreaming** -- in recovery with the WAL receiver
     down. Not lagging, NOT REPLICATING; lag reads flat, so the rule above
     cannot catch it.
+  - **MemqlMigrationLockStuck** -- a migrating node has found the same row in
+    `bun_migration_locks` for 15m (`memql_database_migration_lock_held_seconds`).
+    Every later migration and post-migration hook is stopped behind it while the
+    cluster keeps serving; the runbook is
+    [Database tuning](../../../docs/public/operate/env-vars.md#database-tuning).
 
 **There is deliberately NO backup-age alert here, and that is a finding rather
 than a gap.** The three metrics that would carry one --

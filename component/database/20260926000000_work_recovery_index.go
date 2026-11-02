@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -82,7 +83,8 @@ func ensureWorkRecoveryIndex(ctx context.Context, db *bun.DB, logger *slog.Logge
 	return ensureNamedWorkIndex(ctx, db, logger, table, workRecoveryIndexName, `("createdAt", id)`, workRecoveryPredicate, workRecoveryIndexMatches)
 }
 
-func ensureNamedWorkIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, name, keys, predicate string, matches func(indexFacts) bool) error {
+func ensureNamedWorkIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, name, keys, predicate string, matches func(indexFacts) bool) (err error) {
+	defer func() { err = deferInterruptedIndexWork(err) }()
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -110,7 +112,8 @@ func ensureNamedWorkIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, 
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("work index %s on %s: waited for index builds still running (%s): %w",
+				name, table, strings.Join(builds, "; "), ctx.Err())
 		case <-time.After(latestRowIndexPollMax):
 		}
 	}

@@ -128,6 +128,25 @@ import (
 // by POLLING pg_try_advisory_lock, because a blocking pg_advisory_lock is
 // itself a statement the read deadline cuts off, leaving one more orphan
 // waiting in the queue.
+//
+// ===========================================================================
+// A BUILD THAT OUTLIVES THE ATTEMPT DEFERS; IT DOES NOT KEEP THE RUNNER'S LOCK
+// ===========================================================================
+// That wait is bounded by the attempt, and a build over a large table can outlive
+// any attempt. The runner keeps bun's lock when a migration ends on a context or
+// transport error, so that nothing overlaps a statement that may still be
+// running, and nothing ever released it: the September 26 rollout stranded it
+// until an operator noticed, and the October 30 rollout left it stranded for days
+// with every later migration behind it, the index it was building long finished.
+//
+// Overlap is what the build lock already rules out, so an ensure answers for
+// itself (deferInterruptedIndexWork): the attempt ends with
+// ErrMigrationDeferred, the runner releases its lock, and the next attempt waits
+// its turn here and re-inspects. Migrations after this one cannot start early,
+// because bun runs them in order and this one is not in the ledger until an
+// attempt has seen its index complete; and hooks cannot run, because a deferred
+// attempt records an error. A chain of builds therefore advances one index per
+// orphan, each over as many attempts as its build takes.
 
 // latestRowIndexKey is the key the latest-row read needs, in order: equality on
 // concept, then the DISTINCT ON column, then the version order.
@@ -463,7 +482,8 @@ func (r *latestRowIndexReport) fill(st latestRowIndexState, d latestRowIndexDeci
 // rather than ever reporting success over an index it has not seen complete.
 //
 // Idempotent, and cheap when there is nothing to do: one inspection.
-func ensureLatestRowIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, index string) (latestRowIndexReport, error) {
+func ensureLatestRowIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, index string) (_ latestRowIndexReport, err error) {
+	defer func() { err = deferInterruptedIndexWork(err) }()
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -527,6 +547,21 @@ func ensureLatestRowIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, 
 		"hypertable", report.Hypertable, "chunks", report.Chunks,
 		"duration", report.Duration.Round(time.Millisecond).String())
 	return report, nil
+}
+
+// deferInterruptedIndexWork answers for an index ensure that a context or
+// transport failure, which the runner must otherwise treat as a statement that
+// may still be running, leaves nothing to overlap: every statement of an ensure
+// runs on the session holding the build lock, so a DROP or a build still going
+// holds it until its backend exits, and everything else the session sends only
+// reads the catalog or sets a session variable. See the header. The cause is
+// flattened into the message so the error stops being one the runner retains
+// its lock for, and the holder it names is still there to read.
+func deferInterruptedIndexWork(err error) error {
+	if err == nil || !migrationMayStillBeRunning(err) {
+		return err
+	}
+	return fmt.Errorf("%v: %w", err, ErrMigrationDeferred)
 }
 
 // latestRowIndexLockKey is the session advisory-lock key for one table's

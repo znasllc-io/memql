@@ -480,6 +480,9 @@ func TestEnsureLatestRowIndexWaitsForTheBuildLock(t *testing.T) {
 	if !strings.Contains(err.Error(), fmt.Sprintf("backend %d", holderPid)) {
 		t.Fatalf("the error does not name the backend holding the lock (%d): %v", holderPid, err)
 	}
+	if !errors.Is(err, database.ErrMigrationDeferred) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("running out of time waiting for the build lock is a deferral, not an uncertain outcome: %v", err)
+	}
 	if o := readOracle(t, db, tbl, tbl.index); o.rootDef != "" {
 		t.Fatalf("something was built while the lock was held elsewhere: %s", o.rootDef)
 	}
