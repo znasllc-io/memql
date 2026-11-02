@@ -1280,16 +1280,40 @@ operator's 8 top-level / 30 offline cases passed, including the actual SDK/proto
 boundary. That proof does not establish a successful live deployment or DSL
 loading on every consumer.
 
-The isolated correction is a **candidate, not released behavior**. It claims
-the existing parked row under the package's database gate before acknowledging
-background confirmation; concurrent synchronous confirmation shares that gate.
-Repository confirmation requires the saved report and snapshot and refuses a
-redirect to another attempt. Execution keeps the caller's authority, detaches
-transport cancellation under a plan-derived time budget, and retains durable
-Cancel, heartbeat and bounded terminal bookkeeping. Cancel and abandonment
-checks re-read under the same gate. This is not a persistent job executor:
-process loss, including during the DSL restart, can still abandon the attempt
-before publication. No automatic continuation or effect replay is promised.
+MemQL OS now confirms a parked attempt in the background. The server claims the
+existing parked row under the package's database gate before acknowledging;
+concurrent synchronous confirmation shares that gate. Background confirmation
+requires the saved report and, for a repository source, the saved snapshot, and
+refuses a redirect to another attempt. Execution keeps the caller's authority,
+detaches transport cancellation under a budget derived from the plan (thirty
+minutes, plus each selected build's and asset's own), and retains durable Cancel,
+heartbeat and bounded terminal bookkeeping. Cancel, parking and the abandoned sweep
+re-read under the same gate, so none can act on a row another replica just claimed.
+A call without `background` stays on its request and keeps its earlier behaviour.
+
+This is not a persistent job executor. Process loss, including a package's own DSL
+restarting the bff running it, still abandons the attempt. A durable continuation
+across that restart was reviewed separately and is not part of this path. Retry is
+the recovery: it re-analyses the same snapshot and skips the roll when the active
+pointer already matches, so a run lost to its own roll finishes on the next attempt.
+Auto-deploy does not retry an abandoned run (`retryableAutoInfrastructureFailure`),
+so an unattended one waits for a person.
+
+`abandonedMessage` used to say "nothing was published" of every lost run. That is
+true only before `rolling`, so the sentence now follows the stage the run reached.
+Known limit: a run lost between writing the pointer and asking for the roll leaves
+the nodes on the old tree, and a Retry sees the pointer match and skips the roll.
+Those nodes pick up the new DSL at their next restart.
+
+Regression coverage: `TestBackgroundConfirmationSurvivesClientAndHonorsReplicaCancel`,
+`TestConfirmationClaimExcludesConcurrentReplicas`,
+`TestConfirmationCancelRechecksAfterClaimOnAnotherReplica`,
+`TestConfirmationRefusesCancelledAndForeignSavedRuns`,
+`TestConfirmationSweepRechecksLatestClaimAndStillAbandonsLostRunner`,
+`TestCancelledSynchronousDeploymentStillRecordsBoundedTerminalOutcome` and
+`TestTheAbandonedSentenceSaysWhatTheStageCanHaveChanged`. The claim tests run
+against a real database with a faked pipeline. A live browser disconnect and a real
+self-roll on a cluster have not been exercised.
 
 ## Repository requests in owned Work (source candidate, 2026-10-25)
 

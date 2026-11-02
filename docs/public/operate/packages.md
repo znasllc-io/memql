@@ -446,25 +446,40 @@ choose. Reading a run is unchanged: the tier still decides who sees it.
 
 ### If the connection closes after confirmation
 
-In `0.31.2`, background Analyze can finish after the browser disconnects, but
-confirmation still runs under the confirming request. A saved review gate does
-not make that execution independent of the connection. Losing the browser
-stream can cancel the build; its last visible stage may remain until the
-heartbeat sweep records `abandoned`.
+Confirming a parked attempt from MemQL OS runs in the background. `packageDeploy`
+with `background: true`, `confirm: true` and the parked `deploymentId` claims the
+attempt under the package's database gate, checks its saved report and source
+snapshot, and answers with the accepted run before anything is built. An
+acknowledgement is acceptance, not completion: read the deployment row for
+progress and the result. Closing the browser does not cancel accepted work, and
+Cancel stays available while the attempt can still be stopped. Two confirmations
+cannot both start one attempt, and confirming a run that is no longer
+`awaiting_confirm` refuses.
 
-Read the exact deployment attempt before acting again. A closed stream does
-not establish whether anything was published. Never resend confirmation while
-its outcome is unknown, or confirm an attempt that is no longer
-`awaiting_confirm`.
+Without `background: true`, a confirmation stays on its request, and losing that
+connection can cancel the build. Its row still records how it ended.
 
-For a reviewed operational recovery on this version, an operator can use the
-normal authenticated Go SDK over native gRPC to confirm a newly analyzed,
-parked attempt. Retain its source revision, snapshot, report and site choices,
-check them immediately before the single call, and keep a durable record that
-prevents replay after a lost reply. This uses the existing owner checks; it
-adds no permissions. Native gRPC avoids the browser connection dependency, but
-still requires checking the final deployment, serving sites and restarted DSL
-consumers. It does not make node loss recover automatically.
+### If the node running a deploy is lost
+
+A deploy runs on one node, and this is not a persistent executor. A package whose
+DSL changed restarts the bff running the deploy, so a run can be lost to its own
+roll. The sweep then closes the run `abandoned`, and its sentence says what the
+stage it reached can have changed:
+
+| Stage it reached | What it can have changed |
+|---|---|
+| Before `rolling` | Nothing. Every site is still serving what it was serving |
+| `rolling` | The DSL it carried may already be live. No site was published |
+| `publishing` | The DSL it carried may already be live, and some sites may already be serving the new version |
+
+Read the exact deployment attempt before acting again. **Retry** runs the same
+source again, and skips the roll when the active pointer already matches, so a
+run lost to its own roll finishes on the next attempt. Auto-deploy does not retry
+an abandoned run, so one lost this way waits for a person.
+
+One narrow case stays unhandled: a run lost between writing the pointer and asking
+for the roll leaves the nodes on the old tree, and a Retry sees the pointer match
+and skips the roll. Those nodes pick up the new DSL at their next restart.
 
 ## Private sources
 
@@ -822,8 +837,8 @@ terminal status **`abandoned`**.
 
 - **Never `failed`.** The sweep does not know whether the build was about to
   succeed; it knows the node stopped answering. The error it stamps names the
-  node and when it was last heard from, and the OS says "this cluster lost the
-  node that was running it; nothing was published".
+  node, when it was last heard from, and
+  [what the stage it reached can have changed](#if-the-node-running-a-deploy-is-lost).
 - **The threshold is six heartbeats, not two.** A run that misses one had a slow
   moment. Six in a row is a node that is gone. The threshold is clamped up to
   three heartbeats if configured below that, because a cluster that sweeps its

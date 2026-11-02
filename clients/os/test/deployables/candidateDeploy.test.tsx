@@ -419,7 +419,7 @@ describe("the gate on a live deployable's page", () => {
     await readTheBar();
     await click(barAct("Deploy"));
     expect(connection.callsNamed("packageDeploy")).toEqual([
-      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
+      'builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
     ]);
   });
 
@@ -432,7 +432,7 @@ describe("the gate on a live deployable's page", () => {
     await readTheBar();
     await click(barAct("Deploy as candidate"));
     expect(connection.callsNamed("packageDeploy")).toEqual([
-      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "candidate"}}, deploymentId: "dep-parked")',
+      'builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: true, placements: {web: {target: "candidate"}}, deploymentId: "dep-parked")',
     ]);
   });
 
@@ -462,7 +462,7 @@ describe("the gate on a live deployable's page", () => {
     await readTheBar();
     await click(barAct("Deploy"));
     expect(connection.callsNamed("packageDeploy")).toEqual([
-      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
+      'builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
     ]);
   });
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // sweep.go is the abandoned-run half of epic memql#4900 (task memql#4902).
@@ -16,10 +17,10 @@ import (
 // THE COST THE PIPELINE ALREADY NAMED, NOW PAID
 // ===========================================================================
 // pipeline.go states it plainly: the whole run is one call on one node, and a
-// node lost mid-deploy strands its row at a non-terminal status. Nothing is
-// inconsistent -- the D6 order guarantees every site is still serving what it
-// was serving -- but the row does not advance again on its own, and the person
-// watching sees a rail that says "building" forever.
+// node lost mid-deploy strands its row at a non-terminal status. What the run
+// left behind depends on the stage it reached (abandonedMessage), but the row
+// does not advance again on its own, and the person watching sees a rail that
+// says "building" forever.
 //
 // Two pieces close it. A HEARTBEAT the running pipeline writes on a fixed
 // cadence, and a SWEEP that closes a row whose heartbeat stopped. The sweep is
@@ -192,22 +193,33 @@ func SweepAbandoned(ctx context.Context, d *Deps) (SweepResult, error) {
 		if last.After(cutoff) {
 			continue
 		}
-		problem := &Problem{
-			Code:    CodeDeploymentAbandoned,
-			Message: abandonedMessage(row, last),
-			Fatal:   true,
+		// The initial list is only a candidate set. Confirmation may have
+		// claimed this row since that read; recheck under its shared gate.
+		abandoned := false
+		err := d.Store.withDeploymentOpeningGate(ctx, rowString(row, "packageId"), func(ctx context.Context) error {
+			latest, err := d.Store.deploymentById(memql.ContextWithFreshRead(ctx), id)
+			if err != nil {
+				return err
+			}
+			if latest == nil || !sameShortId(rowString(latest, "packageId"), rowString(row, "packageId")) || IsTerminal(rowString(latest, "status")) || rowString(latest, "status") == StatusAwaitingConfirm {
+				return nil
+			}
+			freshLast, ok := lastHeartbeat(latest)
+			if !ok || freshLast.After(cutoff) {
+				return nil
+			}
+			problem := &Problem{Code: CodeDeploymentAbandoned, Message: abandonedMessage(latest, freshLast), Fatal: true}
+			if err := d.Store.abandonDeployment(ctx, id, rowString(latest, "status"), problem, d.now()); err != nil {
+				return err
+			}
+			row, last, abandoned = latest, freshLast, true
+			return nil
+		})
+		if err != nil {
+			d.log().Warn("packages: could not close an abandoned deployment", "component", "packages.sweep", "deployment", id, "err", err)
+			continue
 		}
-		// THE STAGE THE RUN HAD REACHED, kept before the status that carries
-		// it is overwritten. Closing the row is what destroys this fact, and
-		// without it the timeline draws a run that died mid-build as having
-		// stopped at Analyze -- understating what it achieved and sending
-		// somebody to look in the wrong place.
-		if err := d.Store.abandonDeployment(ctx, id, rowString(row, "status"), problem, d.now()); err != nil {
-			// One row that will not close must not stop the rest: the next
-			// pass tries it again, and every other stranded run in the
-			// cluster still deserves closing now.
-			d.log().Warn("packages: could not close an abandoned deployment",
-				"component", "packages.sweep", "deployment", id, "err", err)
+		if !abandoned {
 			continue
 		}
 		d.log().Info("packages: closed a deployment whose node stopped answering",
@@ -254,18 +266,32 @@ func lastHeartbeat(row map[string]any) (time.Time, bool) {
 // abandonedMessage is the sentence the OS renders verbatim on the rail.
 //
 // It says the three things a person needs and nothing it cannot know: that the
-// cluster lost the node, that nothing was published, and when the run was last
-// heard from. It does NOT say the deploy failed, because the sweep does not
-// know that.
+// cluster lost the node, what the stage it reached can have changed, and when
+// the run was last heard from. It does NOT say the deploy failed, because the
+// sweep does not know that.
+//
+// THE STAGE DECIDES THE MIDDLE CLAUSE. Everything before the roll changes nothing
+// a visitor can see, so the strong sentence is true there. A run lost at
+// `rolling` may already have moved the DSL pointer, and a package's own DSL
+// restarting the bff that runs it is the usual way to lose one there. A run lost
+// at `publishing` can stop between two sites. Saying "nothing was published" of
+// those would send somebody to the wrong conclusion about what is live.
 func abandonedMessage(row map[string]any, last time.Time) string {
 	node := rowString(row, "nodeId")
 	where := ""
 	if node != "" {
 		where = fmt.Sprintf(" (%s)", node)
 	}
+	changed := "nothing was published, and every site is still serving what it was serving"
+	switch rowString(row, "status") {
+	case StatusRolling:
+		changed = "no site was published, but the DSL it carried may already be live"
+	case StatusPublishing:
+		changed = "the DSL it carried may already be live, and some sites may already be serving the new version"
+	}
 	return fmt.Sprintf(
-		"this cluster lost the node that was running this deploy%s; nothing was published, and every site is still serving what it was serving. It was last heard from at %s. Retry starts a fresh run from the same source.",
-		where, last.UTC().Format(time.RFC3339))
+		"this cluster lost the node that was running this deploy%s; %s. It was last heard from at %s. Retry starts a fresh run from the same source.",
+		where, changed, last.UTC().Format(time.RFC3339))
 }
 
 // selfNodeId names this replica, for the row and the log line.

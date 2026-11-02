@@ -402,7 +402,8 @@ const (
 	// build codes because a person meets it in the same place, and stated as
 	// its own because it is the one refusal in this catalogue that is about
 	// the CLUSTER rather than about the package: nothing was wrong with the
-	// source, nothing was published, and the repair is Retry.
+	// source, and the repair is Retry. What the run had already changed depends
+	// on the stage it reached, and its sentence says (abandonedMessage).
 	CodeDeploymentAbandoned = "deployment_abandoned"
 
 	// CodeDeployableSkipped: an app a person chose to leave out of this run

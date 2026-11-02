@@ -88,6 +88,36 @@ func TestTheAbandonedSentenceNamesTheNodeAndWhenItWasHeard(t *testing.T) {
 	}
 }
 
+// A run lost at the roll or while publishing may already have changed what is
+// live, and a package's own DSL restarting the bff that runs it is how one gets
+// lost there. "Nothing was published" would be false of it.
+func TestTheAbandonedSentenceSaysWhatTheStageCanHaveChanged(t *testing.T) {
+	last := time.Date(2026, 9, 3, 11, 50, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		status string
+		want   string
+		absent string
+	}{
+		{StatusAnalyzing, "nothing was published", "may already"},
+		{StatusBuilding, "nothing was published", "may already"},
+		{StatusStagingDsl, "nothing was published", "may already"},
+		{StatusRolling, "the DSL it carried may already be live", "nothing was published"},
+		{StatusPublishing, "some sites may already be serving the new version", "nothing was published"},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			got := abandonedMessage(map[string]any{"status": tc.status, "nodeId": "bff-4"}, last)
+			if !strings.Contains(got, tc.want) || strings.Contains(got, tc.absent) {
+				t.Fatalf("want %q and no %q: %s", tc.want, tc.absent, got)
+			}
+			for _, always := range []string{"bff-4", last.Format(time.RFC3339), "Retry"} {
+				if !strings.Contains(got, always) {
+					t.Errorf("the sentence must carry %q: %s", always, got)
+				}
+			}
+		})
+	}
+}
+
 func TestARowWithNoTimestampAtAllIsLeftAlone(t *testing.T) {
 	// Sweeping on an absent timestamp would close every row written before
 	// heartbeats existed the moment this shipped -- including one somebody is

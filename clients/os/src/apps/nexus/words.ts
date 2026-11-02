@@ -102,9 +102,8 @@ export function runWithoutStepsSummary(run: { status: string; errorCode?: string
  * What that state MEANS, in one clause -- the ActionBar's `detail` slot.
  *
  * "Lost" is the one that has to say more than its word: the natural reading of
- * a stopped run is that it broke, and this one did not. Nothing failed and
- * nothing was published, exactly as the deploy timeline says of its own
- * abandoned runs.
+ * a stopped run is that it broke, and this one did not. Nothing failed, exactly
+ * as the deploy timeline says of its own abandoned runs.
  */
 export function runStatusDetail(status: string): string {
   switch (status) {
