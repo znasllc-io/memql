@@ -5,11 +5,22 @@ classes: |
   # lane  class     trees               timeout  mode      shards
   go      root      .                   300s     uncached  1
   go      default   -                   600s     -         3
+  # component/memql on the bounded AKS runner, read from each step's `ok` line
+  # in the log store: median 534s on 2026-10-16..20, 765s on 10-26..31, and 852s
+  # from 11-01 18:00Z, when 4 of 13 runs exhausted the 900s alarm. A tree's
+  # slower runs reach about 7% over its median. The 3223 tests common to 10-20
+  # and 11-02 take the same time on both trees side by side; the 335 added since
+  # cost the rest, at about 25s a day. Expect this alarm again near a 1120s
+  # median.
   # The full engine shard passed in 582s on the bounded AKS runner, then
   # exhausted its 600s package alarm while a new test was only 1s old.
   # Allow aggregate suite headroom; retain every test, its operation
   # deadlines, the isolated database and the same execution resources.
-  db      memql     component/memql     900s     serial    2
+  # The consolidated tree passed every other shard, then twice exhausted the 900s
+  # package alarm while a new test was 0s and 3s old; the same shard took 838s
+  # on the tree before it. Give the suite headroom; keep every test and its
+  # operation deadlines.
+  db      memql     component/memql     1200s    serial    2
   db      packages  component/packages  300s     -         1
   # All 809 Work cases pass in 176.217s on the bounded AKS runner.
   # Give this whole package headroom over the old 180s alarm; keep
