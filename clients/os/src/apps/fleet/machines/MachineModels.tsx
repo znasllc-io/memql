@@ -97,7 +97,11 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   };
   const save = () => {
     if (!draft || !capacity.fits) return;
-    void commit("fleetSetModelSetup", () => connection!.query.fleetSetModelSetup({ registrationId: machine.id, revision, choices: draft }), "saved");
+    void commit("fleetSetModelSetup", async () => {
+      const receipt = (await connection!.query.fleetSetModelSetup({ registrationId: machine.id, revision, choices: draft })).rows()[0];
+      const written = receipt ? flatten(receipt)["revision"] : "";
+      if (typeof written !== "string" || written === "") throw new Error("The cluster did not confirm the save. Your choices may not be in place.");
+    }, "saved");
   };
   const returnToAutomatic = () => {
     void commit("fleetClearModelSetup", async () => {

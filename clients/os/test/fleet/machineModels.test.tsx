@@ -324,6 +324,7 @@ describe("model setup choices", () => {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
   await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
   expect(connection.query.fleetSetModelSetup).toHaveBeenCalledWith({registrationId:"laptop", revision:"before", choices:{conversation:"small", tools:"chat"}});
+  expect(screen.getByText("Model setup saved.")).toBeTruthy();
  });
  it("prevents an over-capacity save and excludes unknown memory profiles", async () => {
   const connection = await mount({"model:chat":"tools=1", "model:large":"ctx=32768"}, {setup:setupFixture});
@@ -363,7 +364,7 @@ describe("model setup choices", () => {
  it("holds choices and prevents a second write while saving", async () => {
   const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
   let finish!: () => void;
-  connection.query.fleetSetModelSetup.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  connection.query.fleetSetModelSetup.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(builtinReply("fleetSetModelSetup", [{ id: "laptop", revision: "after" }])); }));
   fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
   await chooseTask("Conversation", "small");
   fireEvent.click(screen.getByRole("button", {name:"Save setup"}));
@@ -373,6 +374,35 @@ describe("model setup choices", () => {
   expect((screen.getByRole("button", {name:"Select chat"}) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => finish());
   expect(screen.getByText("Model setup saved.")).toBeTruthy();
+ });
+ // A REPLY IS NOT A RECEIPT. The engine answers a save with one row carrying the
+ // revision it wrote, so a reply without one says nothing about the machine's row.
+ it.each<[string, Row[]]>([
+  ["no row", []],
+  ["a row with no revision", [{ id: "laptop" }]],
+  ["a row with an empty revision", [{ id: "laptop", revision: "" }]],
+  ["a revision that is not a string", [{ id: "laptop", revision: 7 }]],
+ ])("does not report a save nobody confirmed: %s", async (_reply, rows) => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  connection.query.fleetSetModelSetup.mockResolvedValueOnce(builtinReply("fleetSetModelSetup", rows));
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(screen.getByText(/did not confirm/)).toBeTruthy();
+  expect(screen.queryByText("Model setup saved.")).toBeNull();
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+ });
+ it("saves the same draft again after a reply nobody confirmed", async () => {
+  const connection = await mount({"model:chat":"tools=1", "model:small":"tools=1"}, {setup:setupFixture});
+  connection.query.fleetSetModelSetup.mockResolvedValueOnce(builtinReply("fleetSetModelSetup", []));
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(connection.query.fleetSetModelSetup).toHaveBeenCalledTimes(2);
+  expect(connection.query.fleetSetModelSetup).toHaveBeenLastCalledWith({registrationId:"laptop", revision:"before", choices:{conversation:"small", tools:"chat"}});
+  expect(screen.getByText("Model setup saved.")).toBeTruthy();
+  expect(screen.queryByText(/did not confirm/)).toBeNull();
  });
 });
 

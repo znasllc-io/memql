@@ -376,8 +376,8 @@ export function fakeConnection(seed: Partial<Record<FleetRead, Row[]>> = {}, mor
     fleetRecommended: builtin("fleetRecommended"),
     fleetModelSetup: builtin("fleetModelSetup"),
     activeEmbedderBinding: async () => rowsResult(seed.activeEmbedderBinding ?? []),
-    fleetSetModelSetup: builtin("fleetSetModelSetup"),
-    // The engine's receipt, so a test of the happy path needs no seed of its own.
+    // The engine's receipts, so a test of the happy path needs no seed of its own.
+    fleetSetModelSetup: async () => builtinReply("fleetSetModelSetup", [{ id: "laptop", revision: "after" }]),
     fleetClearModelSetup: async () => builtinReply("fleetClearModelSetup", [{ id: "laptop", revision: "", automatic: true }]),
     measurementsForMachine: read("measurementsForMachine"),
     // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
