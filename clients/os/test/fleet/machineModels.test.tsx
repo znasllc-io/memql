@@ -30,10 +30,10 @@ const OWNER = "v1:identity:user:me";
 
 async function mount(
   labels: Record<string, string>,
-  opts: { owner?: string; viewer?: string; pulls?: Row[]; setup?: Row; revokedAt?: string } = {},
+  opts: { owner?: string; viewer?: string; pulls?: Row[]; setup?: Row; revokedAt?: string; onStatusChange?: unknown } = {},
 ) {
   const connection = fakeConnection({ modelPullsForWorker: opts.pulls ?? [], fleetModelSetup: [opts.setup ?? { id:"laptop",revision:"",choices:{},usableBytes:48e9,diskFreeBytes:100e9,catalog:[{modelId:"hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M",runtime:"ollama",purposes:["conversation"],memoryBytes:40e9,sizeBytes:39e9,installed:false,blocked:"",installBlocked:"",recommended:true}] }] });
-  h.connection = connection;
+  h.connection = opts.onStatusChange ? Object.assign(connection, { onStatusChange: opts.onStatusChange }) : connection;
   const machine = machineFromRow(
     machineRow({ id: "laptop", ownerUserId: opts.owner ?? OWNER, labels, ...(opts.revokedAt ? { revokedAt: opts.revokedAt } : {}) }),
   );
@@ -447,6 +447,92 @@ describe("a read that fails while a setup is edited", () => {
   expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
   expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
   expect(connection.query.fleetClearModelSetup).not.toHaveBeenCalled();
+ });
+});
+
+// WHAT ARRIVES ON ITS OWN STANDS UNDER THE ROW. A failed read, a dropped feed, a
+// download and a setup changed elsewhere each stood above the board, so with nothing
+// scrolled the whole editor moved down and a click aimed at Save setup landed on a
+// task card. jsdom lays nothing out, so this holds the order (measured in a browser
+// at 1512x1100: the row at y 866.5 moved 67 px for the read and 82 px for a download;
+// now none of them move it).
+describe("what arrives on its own while a setup is edited", () => {
+ const labels = {"model:chat":"tools=1", "model:small":"tools=1"};
+ const statusListeners = new Set<(change: { status: string }) => void>();
+ const opened = async () => {
+  const connection = await mount(labels, {setup:setupFixture, onStatusChange: (listener: (change: { status: string }) => void) => { statusListeners.add(listener); return () => statusListeners.delete(listener); }});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  return connection;
+ };
+ type Connection = Awaited<ReturnType<typeof opened>>;
+ const graphEvent = (connection: Connection) => act(async () => { connection.subscriptions.emit("v1:worker:registration", machineRow({ id: "laptop", ownerUserId: OWNER, labels }), "NODE_UPDATED"); await Promise.resolve(); });
+ const failedRead = (connection: Connection) => { connection.query.fleetModelSetup.mockRejectedValueOnce(new Error("stream closed")); return graphEvent(connection); };
+ const aboveTheBoard = () => { const above: string[] = []; for (let sibling = screen.getByLabelText("Model setup editor").previousElementSibling; sibling; sibling = sibling.previousElementSibling) above.push(sibling.className); return above; };
+ const follows = (first: Element, then: Element) => !!(first.compareDocumentPosition(then) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+ it.each<[string, (connection: Connection) => Promise<unknown>, () => Promise<HTMLElement>]>([
+  ["a failed read", failedRead, () => screen.findByText("The catalog could not be read.")],
+  ["a dropped feed", () => act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); }), () => screen.findByText("Download updates are interrupted.")],
+  ["a download", connection => act(async () => { connection.subscriptions.emit(MODEL_PULL_CONCEPT, modelPullRow({ id: "pull-1", ownerUserId: OWNER, workerId: "laptop", model: "small", status: "running" }), "NODE_CREATED"); }), () => screen.findByRole("status", {name:"Pulling small"})],
+  ["a setup changed elsewhere", connection => { connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [{ ...setupFixture, revision: "after" }])); return graphEvent(connection); }, () => screen.findByText("This setup changed elsewhere.")],
+ ])("%s stands under the action row, with nothing new above the board", async (_arrival, arrive, find) => {
+  const connection = await opened();
+  const before = aboveTheBoard();
+  await arrive(connection);
+  const arrival = await find();
+  expect(aboveTheBoard()).toEqual(before);
+  expect(follows(screen.getByRole("button", {name:"Discard changes"}), arrival)).toBe(true);
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+ });
+
+ // Scrolled to the end of the page the row stands at the fold, and without this room
+ // only a sliver of the notice showed (8 px at 1512x681): Save setup gone, no reason in
+ // view. The first thing under the row says why Save setup left.
+ it("keeps room under the row for the notice that says why Save setup left", async () => {
+  const sheet = document.head.appendChild(document.createElement("style"));
+  sheet.textContent = readFileSync(join(__dirname, "..", "..", "src", "apps", "fleet", "machines", "machineModels.css"), "utf8");
+  onTestFinished(() => sheet.remove());
+  const connection = await opened();
+  const room = screen.getByLabelText("Model setup editor").nextElementSibling!;
+  expect(room.children).toHaveLength(0);
+  expect(parseFloat(getComputedStyle(room).minHeight)).toBeGreaterThan(0);
+  await act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); });
+  await failedRead(connection);
+  await screen.findByText("The catalog could not be read.");
+  expect(room.firstElementChild?.textContent).toContain("The catalog could not be read.");
+ });
+
+ // Going away must not shorten the page either. Scrolled down to read a stack of them,
+ // the browser pulled the row 79 px down as one left (measured at 1512x681), with a
+ // task card under a pointer aimed at Save setup, which comes back at that very moment.
+ it("keeps the height the notices reached after they have gone", async () => {
+  const laidOut = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) { return Math.max(parseFloat(this.style.minHeight) || 0, this.children.length * 80); });
+  onTestFinished(() => laidOut.mockRestore());
+  const connection = await opened();
+  const room = screen.getByLabelText("Model setup editor").nextElementSibling as HTMLElement;
+  await act(async () => { statusListeners.forEach(listener => listener({ status: "disconnected" })); });
+  await failedRead(connection);
+  await screen.findByText("The catalog could not be read.");
+  expect(room.children).toHaveLength(2);
+  expect(room.style.minHeight).toBe("160px");
+  await graphEvent(connection);
+  await waitFor(() => expect(screen.queryByText("The catalog could not be read.")).toBeNull(), { timeout: 3000 });
+  expect(room.children).toHaveLength(1);
+  expect(room.style.minHeight).toBe("160px");
+ });
+
+ it("says what a failed read means for the draft, and what it means once the editor is closed", async () => {
+  const connection = await opened();
+  await failedRead(connection);
+  await screen.findByText("The catalog could not be read.");
+  // Nothing stands below it here, so the overview's sentence would be untrue.
+  expect(screen.queryByText("Your installed models are still shown below.")).toBeNull();
+  expect(screen.getByText("The changes here are kept, and you can save them once it reads again.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", {name:"Discard changes"}));
+  const notice = screen.getByText("Your installed models are still shown below.");
+  expect(follows(notice, screen.getByRole("region", {name:"Installed"}))).toBe(true);
+  expect(screen.queryByText("The changes here are kept, and you can save them once it reads again.")).toBeNull();
  });
 });
 

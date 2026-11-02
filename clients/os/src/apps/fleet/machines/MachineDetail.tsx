@@ -3,7 +3,7 @@ import { useSession } from "../../../chrome/access";
 import { localCockpitInstall } from "../addMachine/localInstall";
 import { PageHelp } from "../../../kit/pageHelp";
 import type { PageTrail } from "../../../kit/pageNavigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { MachineActivity } from "./MachineActivity";
 import { Button, Caption, CopyField, Notice, Panel, Switch } from "../../../kit";
@@ -38,6 +38,7 @@ export function MachineDetail({
   now,
   view = "all",
   modelNavigation,
+  feedNotice,
   openActivity,
   onActivityOpened,
 }: {
@@ -46,6 +47,8 @@ export function MachineDetail({
   now: Date;
   view?: "all" | "details" | "settings" | "models" | "apps" | "activity";
   modelNavigation?: Omit<PageTrail, "title">;
+  /** The machine feed's notice, where the Models page places it. */
+  feedNotice?: ReactNode;
   /** An Activity entry to open, from Equipment's Recent activity. */
   openActivity?: string;
   onActivityOpened?: () => void;
@@ -102,7 +105,7 @@ export function MachineDetail({
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} standalone={view === "models"} navigation={modelNavigation} /> : null}
+      {view === "all" || view === "models" ? <ModelsGroup key={machine.id} machine={machine} standalone={view === "models"} navigation={modelNavigation} feedNotice={feedNotice} /> : null}
 
       {view === "all" || view === "activity" ? <MachineActivity key={machine.id} workerId={machine.id} navigation={modelNavigation} openId={openActivity} onOpened={onActivityOpened} /> : null}
 

@@ -368,6 +368,10 @@ and bound-memory-search checks on every assignment path. The editor replaces
 the Models overview while open and preserves a refused draft. Save setup and
 Discard changes use one plain, right-aligned page action row outside the board;
 there is no nested lifecycle footer or “Choose your setup” status bar.
+An act withdrawn from that row leaves its room empty, so the others stay where
+they stood. What arrives on its own while the editor is open (a failed read, an
+interrupted feed, a download, a setup changed elsewhere) stands under the row,
+never above the board, so nothing moves under a pointer aimed at it.
 While a saved setup stands, Return to automatic comes first in that row. It asks
 in place, naming the machine and what changes, and removes the saved choices.
 Use suggested only fills the draft, so saving it keeps a saved setup's limits;

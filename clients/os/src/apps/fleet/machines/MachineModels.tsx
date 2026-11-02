@@ -1,5 +1,5 @@
 import { useGraphRevision } from "../../../live/useGraphRevision";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { ArrowUpRight, Box, Pencil } from "lucide-react";
 import { useSession } from "../../../chrome/access";
@@ -30,7 +30,7 @@ import { MODEL_PURPOSES, modelSetupFromRow, safeModelSource, sameModelChoices, s
 import { ModelAssignmentBoard } from "./ModelAssignmentBoard";
 import "./machineModels.css";
 
-export function MachineModels({ machine, navigation }: { machine: MachineRow; standalone?: boolean; navigation?: Omit<PageTrail, "title"> }) {
+export function MachineModels({ machine, navigation, feedNotice }: { machine: MachineRow; standalone?: boolean; navigation?: Omit<PageTrail, "title">; feedNotice?: ReactNode }) {
   const { access } = useSession();
   const connection = useOsConnection();
   const now = useNow();
@@ -62,6 +62,11 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
   const [search, setSearch] = useState("");
   const [purpose, setPurpose] = useState("");
   const [availability, setAvailability] = useState("all");
+  // The room under the action row keeps the height it reaches while the editor is open.
+  // Scrolled down to read a stack of notices, the page shortening as one leaves would
+  // pull the board down, just as Save setup comes back.
+  const arrivalsRoom = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { const room = arrivalsRoom.current; if (room?.offsetHeight) room.style.minHeight = `${room.offsetHeight}px`; });
   const choices = draft ?? view?.choices ?? {};
   // AN AUTOMATIC SETUP SAVES NO CHOICES, yet MemQL still loads a model for each
   // task: the picks the engine suggests, which Edit starts from. Measuring the
@@ -126,6 +131,17 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
     ...(catalogOpen ? [{ label: "Catalog", onSelect: selected ? back : undefined }] : []),
     ...(selected ? [{ label: selected }] : []),
   ];
+  const editorOpen = !selected && !catalogOpen && editing && !!editView;
+  // WHAT ARRIVES ON ITS OWN, whatever the person is doing. Above an open editor it
+  // pushes the board down under the pointer, and a click aimed at Save setup lands on
+  // a task card, so there all of it stands under the action row.
+  const arrivals = <>
+    {reading.error ? <Notice tone="error" sentence="The catalog could not be read." next={editorOpen ? "The changes here are kept, and you can save them once it reads again." : "Your installed models are still shown below."} detail={reading.error} /> : null}
+    {error && !editing ? <Notice tone="error" sentence="That change could not be completed." detail={error} /> : null}
+    {feedNotice}
+    {downloads.feedError ? <Notice tone="warn" sentence="Download updates are interrupted." detail={downloads.feedError} /> : null}
+    {downloads.live ? <LivePull pull={downloads.live} /> : installerDownload ? <SetupLiveDownload stage={installerDownload} /> : null}
+  </>;
   return <div className="fleet-machine-details fleet-models">
     <Head navigationKey={`models:${machine.id}:${selected ?? (catalogOpen ? "catalog" : "installed")}`} title={title} meta={selected ? undefined : catalogOpen ? shown.length : installed.length}
       breadcrumbs={breadcrumbs} back={selected ? { label: catalogOpen ? "Catalog" : "Models", onSelect: back } : catalogOpen ? { label: "Models", onSelect: toModels } : navigation?.back}>
@@ -144,10 +160,7 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
       <p>Use suggested fills in MemQL’s picks as your own choices, so saving them keeps a saved setup’s limits. Return to automatic removes your choices and those limits.</p>
       <p>Catalog research can review primary sources weekly using a local model. It starts off and must be enabled separately. It cannot install models or change your choices.</p>
     </PageHelp>
-    {reading.error ? <Notice tone="error" sentence="The catalog could not be read." next="Your installed models are still shown below." detail={reading.error} /> : null}
-    {error && !editing ? <Notice tone="error" sentence="That change could not be completed." detail={error} /> : null}
-    {downloads.feedError ? <Notice tone="warn" sentence="Download updates are interrupted." detail={downloads.feedError} /> : null}
-    {downloads.live ? <LivePull pull={downloads.live} /> : installerDownload ? <SetupLiveDownload stage={installerDownload} /> : null}
+    {editorOpen ? null : arrivals}
     {selected ? <>
       <MachineDetailsSection title="Overview"><Facts>
         <Fact label="Available for" value={purposes || "Not reported"} />
@@ -171,11 +184,14 @@ export function MachineModels({ machine, navigation }: { machine: MachineRow; st
         onOpen={() => setSelected(m.modelId)}>{m.blocked || (m.memoryBytes ? `${formatBytes(m.memoryBytes)} memory` : "Memory not verified")}</RecordRow>)}</RecordList>
         : <EmptyState icon={Box} title="No matching models">Try another task or clear the filter.</EmptyState>}
     </> : editing && editView ? <>
-      {staleDraft ? <Notice tone="warn" sentence="This setup changed elsewhere." next="Discard changes to load the latest setup before editing again." /> : null}
       <ModelAssignmentBoard view={editView} choices={draft} onChange={setDraft} saving={saving} saveError={error}
         canSave={canChange && (dirty || !revision)} onSave={save}
         returnToAutomatic={canChange && revision ? { machine: machineName(machine), onConfirm: returnToAutomatic } : undefined}
         onDiscard={() => { if (!saving) { setDraft(null); setEditBase(null); setError(""); } }} />
+      <div ref={arrivalsRoom} className="fleet-assignment-arrivals">
+        {staleDraft ? <Notice tone="warn" sentence="This setup changed elsewhere." next="Discard changes to load the latest setup before editing again." /> : null}
+        {arrivals}
+      </div>
     </> : <>
       {own && !view && (reading.state === "reading" || reading.state === "unread") ? <RecordListSkeleton label="Loading model setup" /> : null}
       {view ? <>

@@ -38,6 +38,29 @@ it('updates the owner and shared call breakdown in Equipment from the existing m
  expect(within(screen.getByRole('navigation',{name:'Machine views'})).getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
 });
 
+// A DROPPED CONNECTION draws this notice above every Fleet page. Above an open model
+// setup it moved the whole editor 70 px with nothing scrolled, so a click aimed at
+// Save setup landed on a task card; the same drop is what fails the page's reads.
+it('keeps the machine feed notice under an open model setup, and above every other page',async()=>{
+ const statusListeners=new Set<(change:{status:string})=>void>();
+ const setup={id:'a',revision:'before',choices:{conversation:'chat'},usableBytes:24e9,diskFreeBytes:100e9,catalog:[{modelId:'chat',runtime:'ollama',installed:true,purposes:['conversation'],memoryBytes:16e9}]};
+ h.connection=Object.assign(fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha',labels:{'model:chat':'tools=1'}})],fleetModelSetup:[setup]}),{onStatusChange:(listener:(change:{status:string})=>void)=>{statusListeners.add(listener);return()=>statusListeners.delete(listener);}});
+ fleet();await openMachine('Alpha');
+ const tabs=screen.getByRole('navigation',{name:'Machine views'});
+ const follows=(first:Element,then:Element)=>!!(first.compareDocumentPosition(then)&Node.DOCUMENT_POSITION_FOLLOWING);
+ fireEvent.click(within(tabs).getByRole('button',{name:'Models'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Change model setup'}));
+ await act(async()=>{statusListeners.forEach(listener=>listener({status:'disconnected'}));});
+ const editor=screen.getByLabelText('Model setup editor');
+ // Once on the page, and after the whole editor.
+ expect(follows(editor,screen.getByText('Machine updates are interrupted.'))).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'Done'}));
+ const installed=screen.getByRole('region',{name:'Installed'});
+ expect(follows(screen.getByText('Machine updates are interrupted.'),installed)).toBe(true);
+ fireEvent.click(within(tabs).getByRole('button',{name:'Details'}));
+ expect(follows(screen.getByText('Machine updates are interrupted.'),screen.getByRole('region',{name:'System'}))).toBe(true);
+});
+
 it('puts reported facts on Details after Equipment and keeps Settings to what the owner sets',async()=>{
  sharedMachine();fleet();await openMachine('Alpha');
  const tabs=screen.getByRole('navigation',{name:'Machine views'});

@@ -18,6 +18,7 @@
 .fleet-models-catalog-intro small { display: block; color: var(--os-muted); margin-top: 5px; font-size: var(--os-text-xs); }
 .fleet-models .os-card-track .fleet-equipment-slot { border-color: var(--os-line); }
 .fleet-models .os-button { gap: 7px; }
+.fleet-models > .os-notice, .fleet-models > .os-fleet-pull { margin-bottom: 12px; }
 .fleet-assignment-editor { container-type: inline-size; container-name: model-assignment; }
 .fleet-assignment-suggest { margin-left: auto; }
 .fleet-assignment-capacity { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--os-line); }
@@ -56,6 +57,9 @@
 .fleet-assignment-hint { margin-top: 14px; }
 .fleet-assignment-actions { margin-top: 28px; gap: 20px; }
 .fleet-assignment-act-room { visibility: hidden; }
+/* Room for one notice, whether or not one is there: scrolled to the end of the page it
+   comes into view without anything moving. MachineModels keeps whatever height it reaches. */
+.fleet-assignment-arrivals { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; min-height: 68px; margin-top: 20px; }
 .fleet-assignment-return { margin-top: 28px; }
 .fleet-assignment-editor button:disabled { cursor: wait; }
 @container model-assignment (max-width: 650px) {
