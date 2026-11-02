@@ -79,7 +79,7 @@ type IntegrationProvider interface {
 }
 ```
 
-Capabilities are registered with the engine -- either through the plug-in path (`memql.RegisterPlugin` at `init()`; preferred and used by core integrations like database, auth, identity, email, embedding, files, azureblob) or through explicit `app/` wiring for complex node-type-scoped ones (cognition, agent, stt). Either way they become callable as builtin functions from the DSL. Return `nil` from `Capabilities()` for integrations with no DSL-callable functions.
+Capabilities are registered with the engine -- either through the plug-in path (`memql.RegisterPlugin` at `init()`; preferred and used by core integrations like database, auth, identity, email, embedding, files) or through explicit `app/` wiring for complex node-type-scoped ones (cognition, agent, stt). Either way they become callable as builtin functions from the DSL. Return `nil` from `Capabilities()` for integrations with no DSL-callable functions.
 
 ### Channel-Based Dispatch
 
@@ -133,7 +133,7 @@ integrations/
 ├── auth/              # resolveUser, checkPermission
 ├── avatardirect/      # Direct/Guide avatar -- startSession, stopSession, engageVendor
 ├── avatarvendor/      # CGO-free Anam/Simli avatar-vendor REST + dispatch core (shared by voice-agent + direct/Guide avatar)
-├── azureblob/         # storage.upload (Azure Blob) -- registers as plug-in "storage"
+├── azureblob/         # The shared Azure Blob client; plug-in "storage", no DSL capability
 ├── chat/              # recentChat -- the row-gated recent-utterance repack
 ├── cognition/         # Routing+conductor, Polyphon scoring, client-tool relay -- scoreUtterance, trackPresence
 ├── dailyspace/        # Per-user daily-space lifecycle -- ensureForCaller, ensureForUser, rolloverAllUsers
@@ -260,7 +260,7 @@ Env:
 | `auth/` | `resolveUser`, `checkPermission`. JWT verification itself stays in `component/identity/verifier/` + `component/auth/` |
 | `database/` | `healthCheck`, `stats`. The connection is a core component; this exposes management ops |
 | `fileprocessor/` | `files.extractText` -- PDF / DOCX / images (via VisionAIProvider) / text |
-| `azureblob/` | `storage.upload` -- returns the blob URL (registers under the name `storage`) |
+| `azureblob/` | **None, deliberately.** The shared Azure Blob client: each reader and writer of blob storage builds its own instance and composes its object names server-side. It registers as `storage` only so the `storage` readiness module has a host (`hostedBy: integrations: [storage]`). A capability here would act with the node's storage credential for whoever called it, so a new writer gets its own narrow path rather than a general upload |
 | `shopify/` | **The connector** (memql#4389) -- see the section below. `ensureSubscriptions`, `runComplianceJobs`, `fetchProduct`, `shopifyql`, `storeHealth`, and the four `commerce*` analytics tools; the five contract verbs over 65 generated concepts. The plug-in always registers so the capabilities exist; each no-ops with no store row rather than failing |
 
 ---

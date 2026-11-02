@@ -35,10 +35,12 @@ the initial filing (`folderId`), the upload provenance trio
 (`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`) and
 the version pair (`versionNumber` / `versionUploadedAt`, epic memql#4806).
 
-The bytes go to blob storage under `library/{userId}/{fileId}/{name}` through
-`integration.storage.upload` -- Azure Blob in the cloud, Azurite locally. Every
-version after the first lands under `library/{userId}/{fileId}/{key}/{name}`
-with a fresh key per upload, so no upload can ever write over another's bytes.
+The bytes go to blob storage under `library/{userId}/{fileId}/{name}`, a path
+the bff composes: the owner's id from the authenticated caller, a fresh file
+id, and the uploaded name with its directory parts stripped -- Azure Blob in
+the cloud, Azurite locally. Every version after the first lands under
+`library/{userId}/{fileId}/{key}/{name}` with a fresh key per upload, so no
+upload can ever write over another's bytes.
 
 **`sha256` is a dedup hint and never an access key.** Knowing a file's hash
 grants nothing; every read re-resolves ownership.

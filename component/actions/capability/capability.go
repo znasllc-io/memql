@@ -137,7 +137,6 @@ var integrationClass = map[string]string{
 	"telephony.searchNumbers":          ClassRead,
 
 	// --- write: mutates external/auxiliary state ---
-	"storage.upload":                    ClassWrite,
 	"library.editDocument":              ClassWrite,
 	"library.editDocumentAsAssistant":   ClassWrite,
 	"library.restoreDocumentVersion":    ClassWrite,
