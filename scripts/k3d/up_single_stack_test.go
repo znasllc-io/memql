@@ -60,7 +60,9 @@ function kubectl() {
 	}
 	log := filepath.Join(root, "calls.log")
 
-	cmd := exec.Command("bash", script)
+	// Source this function-level harness rather than presenting the truncated
+	// program as a complete capability whose result is missing.
+	cmd := exec.Command("bash", "-c", `source "$1"`, "bash", script)
 	cmd.Env = append(os.Environ(), "STUB_LOG="+log, "STUB_LISTING="+listing)
 	b, err := cmd.CombinedOutput()
 	var exitErr *exec.ExitError

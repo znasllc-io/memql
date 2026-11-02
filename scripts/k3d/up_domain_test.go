@@ -84,7 +84,10 @@ func upEmit(t *testing.T, domain, registry, tag, call string) string {
 	if err := os.WriteFile(script, []byte(harness), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("bash", script).CombinedOutput()
+	// This is a function fragment, not a complete capability invocation. Source
+	// it so the runtime does not mistake its intentionally absent main/result
+	// for a capability that ended without reporting whether it succeeded.
+	out, err := exec.Command("bash", "-c", `source "$1"`, "bash", script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("harness failed: %v\n%s", err, out)
 	}
