@@ -38,8 +38,13 @@ import (
 // The two store-reading rules are covered at the rules layer and, against real
 // rows, by test/clustere2e/storefront_preview_test.go.
 
-// previewGuardDelta is one write, as executeWrite hands it to the guard: the
-// DELTA plus the facts about the prior row that a mutation body cannot see.
+// previewGuardDelta is one write: what the guard is handed, and the facts about
+// the prior row that a mutation body cannot see.
+//
+// executeWrite hands the guard the MERGED row. payload here carries only the
+// fields a case is about, which is the delta unless inheritedCandidate says
+// otherwise. platform_site_preview_guard_db_test.go runs the same rules over
+// rows the real read-merge produced.
 type previewGuardDelta struct {
 	priorExisted     bool
 	priorSystemOwned bool
@@ -49,7 +54,10 @@ type previewGuardDelta struct {
 	priorCandidate   string
 	priorBindingID   string
 	payload          map[string]any
-	actor            string
+	// inheritedCandidate marks payload's candidateRef as the stored value the
+	// read-merge carried in, rather than one this write named.
+	inheritedCandidate bool
+	actor              string
 }
 
 func runPreviewGuard(t *testing.T, d previewGuardDelta) error {
@@ -62,7 +70,8 @@ func runPreviewGuard(t *testing.T, d previewGuardDelta) error {
 		UserId: actor,
 		Role:   auth.RoleOwner,
 	})
-	return (&MemQLEngine{}).validateSitePreview(ctx, d.payload, d.priorExisted, d.priorSystemOwned,
+	_, named := d.payload["candidateRef"]
+	return (&MemQLEngine{}).validateSitePreview(ctx, d.payload, named && !d.inheritedCandidate, d.priorExisted, d.priorSystemOwned,
 		d.priorStatus, d.priorKind, d.priorBundleRef, d.priorCandidate, d.priorBindingID, actor)
 }
 
@@ -86,6 +95,36 @@ func TestARollbackIsNotGatedByThePreviewGuard(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("a rollback on a live storefront was refused: %v", err)
+	}
+}
+
+// THE SAME ROW, THE SAME PRIOR ROW, AND ONLY THE WRITE DIFFERS. A promotion or a
+// withdrawal stores an empty candidateRef, so the publish or rollback after it
+// arrives carrying that field beside a moved bundleRef. A promotion of a
+// candidate already withdrawn looks identical once merged, and it is refused.
+//
+// The storefront bound to a store is the sharp part: a publish mistaken for a
+// promotion reaches for that store, which a zero-value engine cannot answer.
+func TestAWriteInheritingAnEmptyCandidateIsNotAPromotion(t *testing.T) {
+	write := func(inherited bool) error {
+		return runPreviewGuard(t, previewGuardDelta{
+			priorExisted:       true,
+			priorStatus:        "live",
+			priorKind:          storefrontSiteKind,
+			priorBundleRef:     "blob://sites/s/v/3/",
+			priorBindingID:     "acme",
+			payload:            map[string]any{"id": "s", "bundleRef": "blob://sites/s/v/2/", "candidateRef": ""},
+			inheritedCandidate: inherited,
+		})
+	}
+
+	if err := write(true); err != nil {
+		t.Fatalf("a publish or rollback over a stored empty candidate was judged as a promotion: %v", err)
+	}
+	err := write(false)
+	if err == nil || !strings.Contains(err.Error(), PreviewRefusalNoCandidate) {
+		t.Fatalf("a promotion naming a candidate that is not stored: got %v, want a refusal carrying %s",
+			err, PreviewRefusalNoCandidate)
 	}
 }
 

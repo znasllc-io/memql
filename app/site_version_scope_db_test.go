@@ -330,6 +330,25 @@ func TestThePublishPathsStillPointASiteAtItsVersions(t *testing.T) {
 			_, err = rig.eng.Execute(ctx, rig.mutation("promoteSiteCandidate", map[string]any{"siteId": siteID, "candidateRef": next.BundleRef}))
 			require.NoError(t, err)
 			serves(t, host, "PAGE-THREE")
+
+			// The promotion leaves an empty candidate on the row, and the publish
+			// and the rollback after it are still only those.
+			_, err = person.Publish(context.Background(), spell(siteID), bundle("PAGE-FOUR"), edge.TargetServing)
+			require.NoError(t, err)
+			serves(t, host, "PAGE-FOUR")
+			_, err = rig.eng.Execute(ctx, rig.mutation("updateSiteBundle", map[string]any{"siteId": siteID, "bundleRef": next.BundleRef}))
+			require.NoError(t, err)
+			serves(t, host, "PAGE-THREE")
+
+			// Withdrawing a candidate leaves the same empty value, and the same publish.
+			_, err = person.Publish(context.Background(), spell(siteID), bundle("PAGE-FIVE"), edge.TargetCandidate)
+			require.NoError(t, err)
+			_, err = rig.eng.Execute(ctx, rig.mutation("clearSiteCandidate", map[string]any{"siteId": siteID}))
+			require.NoError(t, err)
+			serves(t, host, "PAGE-THREE")
+			_, err = person.Publish(context.Background(), spell(siteID), bundle("PAGE-SIX"), edge.TargetServing)
+			require.NoError(t, err)
+			serves(t, host, "PAGE-SIX")
 		})
 	}
 }

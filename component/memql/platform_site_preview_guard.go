@@ -130,6 +130,7 @@ func (e *MemQLEngine) boundStoreFacts(ctx context.Context, storeId string) (Prev
 func (e *MemQLEngine) validateSitePreview(
 	ctx context.Context,
 	payload map[string]any,
+	deltaNamedCandidate bool,
 	priorExisted bool,
 	priorSystemOwned bool,
 	priorStatus string,
@@ -152,7 +153,14 @@ func (e *MemQLEngine) validateSitePreview(
 	// write that moves the serving version and clears the candidate in the same
 	// delta. Nothing else does that, and promoteSiteCandidate is the only
 	// construct that produces it.
-	promoting := bundlePresent && candidatePresent && candidate == "" && nextBundle != "" && nextBundle != priorBundleRef
+	//
+	// THE WRITE HAS TO NAME THE CANDIDATE. payload is the merged row, and a
+	// promotion and a withdrawal both store an empty candidateRef, so every later
+	// publish and rollback arrives here with a moved bundleRef beside an empty
+	// candidate. A stale page promoting a candidate already withdrawn merges to
+	// that same row over that same prior row: only the write differs, and only
+	// the promotion is refused.
+	promoting := bundlePresent && candidatePresent && deltaNamedCandidate && candidate == "" && nextBundle != "" && nextBundle != priorBundleRef
 
 	// GOING LIVE IS A TRANSITION, so it is judged against the PRIOR status and
 	// not against the merged payload -- every ordinary write to a live site
@@ -279,14 +287,15 @@ func previewRefusalError(r PreviewRefusal) error {
 // enum value rather than a name any of the three invented.
 const storefrontSiteKind = "shopify_storefront"
 
-// previewFieldString reads a string field and reports whether the delta carried
-// it at all.
+// previewFieldString reads a string field and reports whether the row carries it
+// at all.
 //
-// PRESENCE IS THE WHOLE QUESTION for every rule above. A publish, a rename and
-// a status flip all inherit candidateRef and previewBinding through the
-// read-merge, and judging an inherited value would refuse ordinary writes to
-// every deployable that has ever had a candidate -- the same trap
-// platform_site_binding_guard.go avoids by returning early on an absent key.
+// PRESENT DOES NOT MEAN THIS WRITE NAMED IT. executeWrite passes the merged row,
+// so a publish, a rename and a status flip all carry whatever candidateRef and
+// previewBinding the row has stored, the empty value a promotion leaves included.
+// Judging an inherited value would refuse ordinary writes to every deployable
+// that has ever had a candidate, so a rule either compares against the prior row
+// or asks deltaNamedCandidate.
 func previewFieldString(payload map[string]any, key string) (string, bool) {
 	raw, present := payload[key]
 	if !present {

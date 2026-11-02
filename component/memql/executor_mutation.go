@@ -914,6 +914,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// are one map entry, and the operator normalization (memql#5792) clears
 	// only a name nobody asked for.
 	deltaMemqlDomain, deltaNamedMemqlDomain := payload["memqlDomain"]
+	// WHETHER THIS WRITE NAMED A SITE'S CANDIDATE, for the same reason: a
+	// promotion and a publish over a stored empty candidate merge to one row,
+	// and this is what is left to tell them apart. See
+	// platform_site_preview_guard.go.
+	_, deltaNamedCandidate := payload["candidateRef"]
 	// THE STORED OWNER of the row this write lands on, captured before the
 	// read-merge for the same reason as deltaNamedOwner: afterwards the
 	// stored owner and a freshly stamped `ownerUserId: actor.userId` are one
@@ -1672,7 +1677,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// it short-circuits before that read when the write touches none of its
 		// fields, which is every ordinary publish, rename and settings edit.
 		// See component/memql/platform_site_preview_guard.go.
-		if err := e.validateSitePreview(ctx, payload, meta.priorExisted, meta.priorSystemOwned,
+		if err := e.validateSitePreview(ctx, payload, deltaNamedCandidate, meta.priorExisted, meta.priorSystemOwned,
 			meta.priorStatus, meta.priorKind, meta.priorBundleRef, meta.priorCandidateRef,
 			meta.priorBindingStoreId, actor); err != nil {
 			return nil, meta, err
