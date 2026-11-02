@@ -157,28 +157,36 @@ func (c *Client) ObserveSync(ctx context.Context, r SyncRequest) (SyncFacts, err
 	return syncFacts(snapshot.object, r.RequestID), nil
 }
 
-// TerminateSync asks the controller to stop the running operation, as `argocd app
-// terminate-op` does: a sync waiting on a Deployment that never becomes healthy runs
-// forever otherwise. With nothing running it does nothing.
-func (c *Client) TerminateSync(ctx context.Context, target Target) error {
-	path, err := target.path()
+// TerminateSync asks the controller to stop the named sync, as `argocd app terminate-op`
+// does: a sync waiting on a Deployment that never comes up runs forever otherwise. It stops
+// nothing else: another person's operation is theirs, and a sync that has ended has nothing
+// to stop.
+func (c *Client) TerminateSync(ctx context.Context, r SyncRequest) error {
+	path, err := r.Target.path()
 	if err != nil {
 		return err
 	}
-	snapshot, err := c.Read(ctx, target)
+	snapshot, err := c.Read(ctx, r.Target)
 	if err != nil {
 		return err
 	}
-	if stringAt(object(object(snapshot.object, "status"), "operationState"), "phase") != "Running" {
+	state := object(object(snapshot.object, "status"), "operationState")
+	if stringAt(state, "phase") != "Running" || !carriesRequest(object(state, "operation"), r.RequestID) {
 		return nil
 	}
-	body, err := json.Marshal(map[string]any{"status": map[string]any{"operationState": map[string]any{"phase": "Terminating"}}})
+	// Fenced, because an operation that ends between this read and this write must not be
+	// marked Terminating: nothing would ever clear that, and the Application would read as
+	// busy for good.
+	body, err := json.Marshal([]map[string]any{
+		{"op": "test", "path": "/metadata/resourceVersion", "value": stringAt(object(snapshot.object, "metadata"), "resourceVersion")},
+		{"op": "replace", "path": "/status/operationState/phase", "value": "Terminating"},
+	})
 	if err != nil {
 		return err
 	}
 	writing, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err := c.api.Do(writing, http.MethodPatch, path, "application/merge-patch+json", body); err != nil {
+	if _, err := c.api.Do(writing, http.MethodPatch, path, "application/json-patch+json", body); err != nil {
 		return fmt.Errorf("terminate the ArgoCD operation: %w", err)
 	}
 	return nil

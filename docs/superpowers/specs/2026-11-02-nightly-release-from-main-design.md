@@ -246,34 +246,54 @@ the next one must simply carry on.
    and for any running train, because restarting `agent` kills running CI, and that train carries a
    newer release anyway. No train departs while a deploy is moving, for the same reason.
 2. **Guards.** It holds and asks for the Deploy button when, between what the installation runs and
-   this release, a migration does anything but add an index (read from the migration's text, and what
-   the text does not show is treated as a change), a worker action contract changes, or a pipeline step
-   is removed (D10). Because they read from what runs now, a release held back here is still in the range
-   of the next, so nothing slips past. A newer published release carries a waiting one.
+   this release:
+   - a migration does anything but add an index. A Go migration counts as indexes only when every
+     statement it runs is written out and about an index, and every helper it calls is visibly harmless,
+     so one calling a helper this cannot read asks, even beside an index. A SQL one counts only when every
+     statement creates or drops an index. Over the 16 Go and 73 SQL migrations this repository has, that
+     asks of one index migration it did not need to, and that costs one press;
+   - any other engine code changes a table (`CREATE TABLE` in `embedder_tables.go`, say), because not all of
+     them are made by a migration;
+   - a worker action contract changes, on the engine's side or a machine's;
+   - a pipeline step is removed (D10);
+   - or it cannot tell: GitHub stopped listing at 300 files, or gave no patch for more files than it will read
+     whole. GitHub drops patches part way through a large comparison (18 of 181 files between two real
+     releases), so it reads those files itself, up to 60.
+
+   Each says which, and why. Because they read from what runs now, a release held back here is still in the
+   range of the next, so nothing slips past. A newer published release carries a waiting one.
 3. **Pin**, on its own branch, through the native proposal the instance already binds: the seven-file
    pin from `MEMQL_RELEASE_INSTALLATION_OVERLAY`, every byte from the signed catalog or the file it
    replaces. It waits for that pull request's check, with one re-run. A failure here touches nothing: the
    deploy is cancelled, automatic deploys are not paused, and the owner is told.
-4. **Sync.** Each Application, in order, at the pin's exact commit: `operation.sync.revision`, with
-   `targetRevision` left on `main`. Written as `argocd-sync.sh` writes it, for the reason that script
-   exists: prune written false, one declared option, and the persisted operation state cleared in the
-   same fenced write, so nothing is inherited. It first records the commit each Application last synced
-   at, which is what it goes back to, and refuses to start without one. Done is Succeeded, not selective,
-   and Healthy once the controller has compared since the operation ended.
+4. **Sync.** First a last look: the owner still holds the role, their word still stands if it is an automatic
+   deploy, and the window is still open (a pin can pass after it closed, and then it waits for the next). Then
+   each Application, in order, at the pin's exact commit: `operation.sync.revision`, with `targetRevision` left
+   on `main`. Written as `argocd-sync.sh` writes it, for the reason that script exists: prune written false, one
+   declared option, and the persisted operation state cleared in the same fenced write, so nothing is inherited.
+   It first records the commit each Application last synced at, which is what it goes back to, and refuses to
+   start without one. Done is Succeeded, not selective, and Healthy once the controller has compared since the
+   operation ended. Real syncs of `memql` have taken up to 9 minutes, and each has 30.
 5. **Verify**, from outside the cluster: a manual run limited to `verifyStages`, at the pin's commit. A
    run of the same commit that answers instead, a person's or an earlier verification's, is not taken for
    this rollout's.
 6. **Land.** Only now does the pin merge. If GitHub refuses, production already runs it, so that is a
    chore: after 30 minutes it reports deployed and says main lacks its pin.
-7. **Roll back on failure.** A sync that fails, hangs past 30 minutes (its operation is terminated first)
-   or a verification that fails syncs back each Application this deploy started on, to the commit it ran
-   before, verifies that, and closes the pull request. Main never carried the bad pin, and going back needs
-   no CI, which may be what is broken. Discord says what failed and that production is back.
+7. **Roll back on failure.** A sync that fails, hangs past 30 minutes (its own operation is terminated first,
+   and never another person's) or a verification that fails syncs back each Application this deploy started on,
+   last started first, so the product returns before the engine it runs on, to the commit it ran before. It
+   verifies that and closes the pull request. Main never carried the bad pin, and going back needs no CI, which
+   may be what is broken. Discord says what failed and that production is back.
 8. **A release that changes tables or data does not go back by itself.** Old code on a new schema is not
    proven safe. It stops and mentions the owner, who pressed the button and is there.
 9. **Pause.** After a rollback, automatic deploys stop until the owner presses Resume, because the bad
    change is on `main` and the next release would carry it again. If the rollback itself fails, it stops,
    mentions the owner, and pauses too.
+
+A step that fails on every tick for 45 minutes ends: before production moved it says it did not deploy, and
+after, it goes back, or stops if it was already going back. A release that cannot start deploying at all says so
+too. It counts how long a step has been failing and not how old its state is, because a passing error during a
+long rollout says nothing about the rollout.
 
 The Deploy button is the same path with the guards acknowledged and the window ignored, and works for a
 release cut by hand.

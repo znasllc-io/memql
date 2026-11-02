@@ -156,14 +156,16 @@ export function ReleaseTrainPanel({ query, connected, visible = true }: { query:
         const waitingOn = train?.state === "held" || train?.state === "awaiting_approval";
         const deployState = deployment ? deployWords[deployment.state] ?? { word: deployment.state, tone: "muted" as const } : undefined;
         const asking = ask?.repository === status.repository ? ask : null;
+        const trainMoves = train !== undefined && moving.has(train.state);
+        const deployMoves = deployment !== undefined && deployMoving.has(deployment.state);
         return <li key={status.repository}>
           <RecordRow name={name} secondary={secondary} state={state?.word ?? ""} tone={state?.tone ?? "muted"} />
           {train?.heldReason && withReason.has(train.state) ? <Caption>{train.heldReason}</Caption> : null}
-          {status.fromMain && !(train && moving.has(train.state)) ? <div className="os-panel-actions">
+          {status.fromMain && !trainMoves && !deployMoves ? <div className="os-panel-actions">
             {waitingOn && train
               ? <Button disabled={busy} onClick={() => setAsk({ kind: "replace", repository: status.repository, branch: train.branch })}>Replace with a new release</Button>
               : <Button disabled={busy} onClick={() => void start(status.repository)}>Start release now</Button>}
-            {status.canDeploy && !(deployment && deployMoving.has(deployment.state))
+            {status.canDeploy
               ? <Button disabled={busy} onClick={() => setAsk({ kind: "deploy", repository: status.repository, installRepository: status.installRepository })}>Deploy newest release</Button>
               : null}
           </div> : null}

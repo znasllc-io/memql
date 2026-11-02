@@ -455,29 +455,36 @@ func escapeFilePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
-// DirectoryFiles lists the files directly in one directory at a ref: what is there,
-// read directly rather than from a comparison, which stops listing at 300 files. GitHub
-// answers at most 1000 entries for a directory, so one that long is refused rather than
-// read as complete.
-func (c *Client) DirectoryFiles(ctx context.Context, bearer, owner, repo, ref, path string) ([]string, error) {
-	var entries []struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+// ComparedFile is one file a comparison changed. Patch is empty where GitHub gave none,
+// which it does for large files and once a comparison's patches grow past its own limit:
+// read the file itself there.
+type ComparedFile struct {
+	Path, Previous, Status, Patch string
+}
+
+// ComparePatches lists what changed between base and head, with each file's patch.
+// complete is false at 300 files, where GitHub stops listing.
+func (c *Client) ComparePatches(ctx context.Context, bearer, owner, repo, base, head string) (files []ComparedFile, complete bool, err error) {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
+		return nil, false, errors.New("a compare needs a base and a head")
 	}
-	endpoint := repoEndpoint(owner, repo) + "/contents/" + escapePath(path) + "?ref=" + url.QueryEscape(ref)
-	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &entries, largeBody); err != nil {
-		return nil, err
+	var payload struct {
+		Files []struct {
+			Filename         string `json:"filename"`
+			PreviousFilename string `json:"previous_filename"`
+			Status           string `json:"status"`
+			Patch            string `json:"patch"`
+		} `json:"files"`
 	}
-	if len(entries) >= 1000 {
-		return nil, errors.New("github: the directory holds more files than one listing shows")
+	endpoint := repoEndpoint(owner, repo) + "/compare/" + escapePath(base) + "..." + escapePath(head)
+	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &payload, largeBody); err != nil {
+		return nil, false, err
 	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.Type == "file" {
-			names = append(names, entry.Name)
-		}
+	files = make([]ComparedFile, 0, len(payload.Files))
+	for _, f := range payload.Files {
+		files = append(files, ComparedFile{Path: f.Filename, Previous: f.PreviousFilename, Status: f.Status, Patch: f.Patch})
 	}
-	return names, nil
+	return files, len(payload.Files) < compareFileLimit, nil
 }
 
 // MarkPullRequestReady takes a draft out of draft, which GitHub requires before it

@@ -3,6 +3,7 @@ package githubapp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -286,5 +287,25 @@ func TestAddEmptyCommitKeepsTheTreeAndNeverForces(t *testing.T) {
 	}
 	if moved["sha"] != "new1" || moved["force"] != false {
 		t.Errorf("ref update = %v, want the new commit with no force", moved)
+	}
+}
+
+func TestComparePatchesKeepsEachFilesPatchAndSaysWhenTheListStopped(t *testing.T) {
+	hub := newHub().json("/repos/acme/widget/compare/v1.0.0...abc123", http.StatusOK,
+		`{"files":[{"filename":"a.go","status":"modified","patch":"+x"},{"filename":"b.go","previous_filename":"old.go","status":"renamed"}]}`)
+	files, complete, err := trainTestClient(t, hub).ComparePatches(context.Background(), "tok", "acme", "widget", "v1.0.0", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || len(files) != 2 || files[0].Patch != "+x" || files[1].Previous != "old.go" || files[1].Patch != "" {
+		t.Fatalf("files = %+v, complete %v", files, complete)
+	}
+	many := make([]string, 0, compareFileLimit)
+	for n := range compareFileLimit {
+		many = append(many, fmt.Sprintf(`{"filename":"f%d.go"}`, n))
+	}
+	hub = newHub().json("/repos/acme/widget/compare/a...b", http.StatusOK, `{"files":[`+strings.Join(many, ",")+`]}`)
+	if _, complete, err = trainTestClient(t, hub).ComparePatches(context.Background(), "tok", "acme", "widget", "a", "b"); err != nil || complete {
+		t.Fatalf("at the limit: complete %v, %v", complete, err)
 	}
 }

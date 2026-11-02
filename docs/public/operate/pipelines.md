@@ -743,10 +743,11 @@ The engine must be allowed to `get` and `patch` those Applications, and
 - **It waits** for the window and for any running train, because syncing the mesh restarts
   `agent`, which kills running CI. No train departs while a deploy is moving.
 - **Some releases wait for you.** Between what the installation runs and the release: a
-  migration that does anything but add an index, a changed worker action contract, or a
-  removed pipeline step. Discord says which, and **Deploy newest release** goes ahead with
-  them acknowledged. A newer release carries a waiting one, and its own guards read from the
-  same place, so nothing slips past.
+  migration that does anything but add an index, other code that changes a table, a changed
+  worker action contract, or a removed pipeline step. So does one it cannot read all of, past
+  300 changed files. When in doubt it asks, because a wrong "wait" costs one press. Discord says
+  which, and **Deploy newest release** goes ahead with them acknowledged. A newer release carries a
+  waiting one, and its own guards read from the same place, so nothing slips past.
 - **The pin goes on a branch.** Its pull request's check must pass, with one re-run. A failure
   here touches nothing, and says so.
 - **Each Application syncs at the pin's exact commit**, in order, with prune off and nothing
@@ -754,8 +755,9 @@ The engine must be allowed to `get` and `patch` those Applications, and
 - **The rollout is verified** from outside the cluster, by a manual run limited to
   `verifyStages`. Only then does the pin merge, so the branch never carries one that failed.
 - **A failure goes back.** A sync that fails, one that hangs past 30 minutes, or a failed
-  verification syncs each Application it started on back to the commit it ran before,
-  verifies that, and closes the pull request. Going back needs no CI.
+  verification syncs each Application it started on back to the commit it ran before, last
+  started first, verifies that, and closes the pull request. Going back needs no CI. A step
+  that keeps failing for 45 minutes ends the same way, and says why.
 - **A release that changes tables or data does not go back by itself**, because the code before
   it is not proven against the database after it. It stops and mentions the owner.
 - **After going back, automatic deploys pause** until the owner presses **Resume**, because

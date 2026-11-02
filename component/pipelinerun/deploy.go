@@ -158,20 +158,49 @@ func (i *Integration) advanceDeployment(ctx context.Context, d Deps, s pipelines
 	if err != nil {
 		return err
 	}
+	now := d.Now().UTC()
 	if cur != nil && !cur.Finished() {
 		err := i.stepDeployment(ctx, d, s, p, *cur)
-		if err != nil && d.Now().UTC().Sub(cur.StateSince) > deployStuckAfter {
+		if err == nil {
+			i.deployStalls.cleared(p.ID)
+			return nil
+		}
+		if now.Sub(i.deployStalls.failing(p.ID, cur.ID+"@"+cur.State, now)) >= deployStuckAfter {
 			return i.giveUpStep(ctx, d, s, p, *cur, err)
 		}
 		return err
 	}
-	return i.startAutomaticDeployment(ctx, d, s, p, cur)
+	err = i.startAutomaticDeployment(ctx, d, s, p, cur)
+	if err == nil {
+		i.deployStalls.cleared(p.ID)
+		return nil
+	}
+	if now.Sub(i.deployStalls.failing(p.ID, "start", now)) >= deployStuckAfter {
+		i.noteDeployCannotStart(ctx, d, s, p, err)
+	}
+	return err
 }
 
-// giveUpStep ends a step whose every tick has failed for deployStuckAfter: a lost
+// noteDeployCannotStart tells the owner a published release is not deploying. There is
+// no deployment row to hold the failure yet, so nothing else would: the catalog, a
+// guard's read or a token failing only logs, and the night's release quietly never goes.
+func (i *Integration) noteDeployCannotStart(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, stepErr error) {
+	published, err := newestPublishedTrain(ctx, d, p)
+	if err != nil || published == nil {
+		return
+	}
+	reason := fmt.Sprintf("Version %s is published and could not start deploying: %s", published.Version, oneLine(stepErr.Error()))
+	if err := i.notifyTrain(ctx, d, s, p, *published, pipelinenotify.TrainStalled, reason, nil); err != nil {
+		trainLog(d).Warn("pipelines: the owner was not told a release cannot deploy", "repository", p.Repository, "error", err.Error())
+	}
+}
+
+// giveUpStep ends a step that has failed on every tick for deployStuckAfter: a lost
 // GitHub connection, a Role that was never applied. Each state's own deadlines cover
 // what it waits for, and this covers what it could not even ask, because a deploy that
-// only logs would keep every later train from leaving, with nobody told.
+// only logs would keep every later train from leaving, with nobody told. It counts how
+// long the step has been failing and not how old its state is: a passing error during a
+// long rollout says nothing about the rollout.
 func (i *Integration) giveUpStep(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, dep Deployment, stepErr error) error {
 	why := oneLine(stepErr.Error())
 	switch dep.State {
@@ -381,21 +410,36 @@ func (i *Integration) stepPinning(ctx context.Context, d Deps, s pipelines.Train
 	if err != nil {
 		return err
 	}
+	if withdrawn, err := i.deployWordWithdrawn(ctx, d, p, dep); err != nil {
+		return err
+	} else if withdrawn {
+		return i.abandonPin(ctx, d, s, p, dep, "Automatic deploys were stopped before this one moved production.")
+	}
 	if dep.PinSHA == "" {
-		base, _, err := d.GitHub.BranchHead(ctx, in.token, in.p.Repository, in.p.DefaultBranch)
-		if err != nil {
+		// The base is on the row before the pin is asked for, so the request is the same
+		// one whichever tick asks and whatever main has done since: a reply lost after
+		// the pin was made finds that pin rather than making another.
+		if dep.BaseSHA == "" {
+			base, _, err := d.GitHub.BranchHead(ctx, in.token, in.p.Repository, in.p.DefaultBranch)
+			if err != nil {
+				return err
+			}
+			_, _, err = i.casDeployment(ctx, d, dep, DeploymentPatch{BaseSHA: &base})
 			return err
 		}
 		pin, err := d.DeployEffects.ProposeDeployPin(ctx, pipelines.DeployPinRequest{
-			RequestID: "deploy-" + bareID(dep.ID)[:16] + "-" + shortCommit(base), CandidateID: dep.CandidateID, CatalogDigest: dep.CatalogDigest,
-			ExpectedBase: base, OwnerUserID: dep.OwnerUserID, Authority: dep.Authority,
+			RequestID: "deploy-" + bareID(dep.ID)[:16] + "-" + shortCommit(dep.BaseSHA), CandidateID: dep.CandidateID, CatalogDigest: dep.CatalogDigest,
+			ExpectedBase: dep.BaseSHA, OwnerUserID: dep.OwnerUserID, Authority: dep.Authority,
 		})
+		if errors.Is(err, pipelines.ErrDeployBaseMoved) {
+			_, _, err = i.casDeployment(ctx, d, dep, DeploymentPatch{BaseSHA: ptr("")})
+			return err
+		}
 		if err != nil {
 			return err
 		}
 		_, _, err = i.casDeployment(ctx, d, dep, DeploymentPatch{
-			ProposalID: ptr(pin.ProposalID), PullRequest: ptr(pin.PullRequest), PullRequestURL: ptr(pin.PullRequestURL),
-			BaseSHA: ptr(base), PinSHA: ptr(pin.Commit),
+			ProposalID: ptr(pin.ProposalID), PullRequest: ptr(pin.PullRequest), PullRequestURL: ptr(pin.PullRequestURL), PinSHA: ptr(pin.Commit),
 		})
 		return err
 	}
@@ -429,6 +473,19 @@ func (i *Integration) stepPinning(ctx context.Context, d Deps, s pipelines.Train
 		return err
 	}
 	return i.abandonPin(ctx, d, s, p, dep, "The pin's pull request failed its checks, and again after one re-run.")
+}
+
+// deployWordWithdrawn reports an automatic deploy whose owner has since taken back their
+// word, while nothing has moved. The button's press is its own word.
+func (i *Integration) deployWordWithdrawn(ctx context.Context, d Deps, p Pipeline, dep Deployment) (bool, error) {
+	if dep.Acknowledged || dep.Trigger != DeploymentTriggerAutomatic {
+		return false, nil
+	}
+	standing, err := d.Store.Standing(memql.ContextWithFreshRead(ctx), p.ID)
+	if err != nil {
+		return false, err
+	}
+	return standing == nil || !standing.Deploy || !standing.Release, nil
 }
 
 // abandonPin ends a deployment that never touched production.
@@ -475,6 +532,20 @@ func deployRequest(s pipelines.TrainSettings, app DeploymentApplication, request
 // is what it goes back to.
 func (i *Integration) stepSyncing(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, dep Deployment, now time.Time) error {
 	if len(dep.Applications) == 0 {
+		// The last look before production moves: a deploy already moving finishes or
+		// goes back whoever holds the role by then, because stopping it halfway is worse.
+		if withdrawn, err := i.deployWordWithdrawn(ctx, d, p, dep); err != nil {
+			return err
+		} else if withdrawn {
+			return i.abandonPin(ctx, d, s, p, dep, "Automatic deploys were stopped before this one moved production.")
+		}
+		if err := d.DeployEffects.CheckDeployOwner(ctx, dep.OwnerUserID, dep.Authority); err != nil {
+			return err
+		}
+		// Its pin may have passed after the window closed, and then it waits for the next.
+		if !dep.Acknowledged && !s.InDeployWindow(now) {
+			return nil
+		}
 		apps := make([]DeploymentApplication, 0, len(s.Deployment.Applications))
 		for _, name := range s.Deployment.Applications {
 			facts, err := d.DeployEffects.ReadApplication(ctx, s.Deployment.Namespace, name)
@@ -590,7 +661,9 @@ func (i *Integration) stepVerifying(ctx context.Context, d Deps, s pipelines.Tra
 	}
 	run, done, err := i.verification(ctx, d, s, dep, dep.PinSHA, branch)
 	if err != nil {
-		if now.Sub(dep.StateSince) > deployRunStartWait {
+		// A read of a run already going is a passing error. A run that cannot even open
+		// will not verify anything by waiting.
+		if dep.RunID == "" && now.Sub(dep.StateSince) > deployRunStartWait {
 			return i.beginRollback(ctx, d, s, p, dep, "The rollout could not be verified: "+oneLine(err.Error()))
 		}
 		return err
@@ -653,7 +726,9 @@ func (i *Integration) beginRollback(ctx context.Context, d Deps, s pipelines.Tra
 	if pipelines.HasDataGuard(dep.Guards) {
 		return i.stopDeployment(ctx, d, s, p, dep, reason+" This release changes tables or data, so it did not go back by itself. The pin's pull request is still open.")
 	}
-	_, _, err := i.move(ctx, d, dep, DeploymentRollingBack, DeploymentPatch{Step: ptr(0), Reason: ptr(reason), RunID: ptr("")})
+	// The last one started goes back first, so the product returns before the engine it
+	// runs on, as the product's own rollback recipe does.
+	_, _, err := i.move(ctx, d, dep, DeploymentRollingBack, DeploymentPatch{Step: ptr(len(dep.Applications) - 1), Reason: ptr(reason), RunID: ptr("")})
 	return err
 }
 
@@ -665,18 +740,24 @@ func (i *Integration) stopDeployment(ctx context.Context, d Deps, s pipelines.Tr
 	return i.notifyDeployment(ctx, d, s, p, updated, pipelinenotify.DeployStopped, reason)
 }
 
-// stepRollingBack syncs back each Application this deployment started on, in the order
-// it started them. A sync of its own still running is stopped first: one waiting on a
-// Deployment that never comes up runs forever otherwise.
+// stepRollingBack syncs back each Application this deployment started on, last started
+// first. A sync of its own still running is stopped before anything else: one waiting on
+// a Deployment that never comes up runs forever otherwise.
 func (i *Integration) stepRollingBack(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, dep Deployment, now time.Time) error {
-	if dep.Step >= len(dep.Applications) {
-		_, _, err := i.move(ctx, d, dep, DeploymentVerifyingRollback, DeploymentPatch{RunID: ptr("")})
+	next := func() error {
+		if dep.Step <= 0 {
+			_, _, err := i.move(ctx, d, dep, DeploymentVerifyingRollback, DeploymentPatch{RunID: ptr("")})
+			return err
+		}
+		_, _, err := i.casDeployment(ctx, d, dep, DeploymentPatch{Step: ptr(dep.Step - 1)})
 		return err
+	}
+	if dep.Step < 0 || dep.Step >= len(dep.Applications) {
+		return next()
 	}
 	app := dep.Applications[dep.Step]
 	if app.Request == "" {
-		_, _, err := i.casDeployment(ctx, d, dep, DeploymentPatch{Step: ptr(dep.Step + 1)})
-		return err
+		return next() // This deployment never moved it.
 	}
 	if app.Rollback == "" {
 		facts, err := d.DeployEffects.ReadApplication(ctx, s.Deployment.Namespace, app.Name)
@@ -712,8 +793,7 @@ func (i *Integration) stepRollingBack(ctx context.Context, d Deps, s pipelines.T
 	case facts.Partial || facts.Phase == "Failed" || facts.Phase == "Error":
 		return i.stopDeployment(ctx, d, s, p, dep, fmt.Sprintf("%s could not go back: its sync ended %s: %s. %s", app.Name, facts.Phase, oneLine(facts.Message), dep.Reason))
 	case facts.Succeeded && facts.Settled && facts.Healthy:
-		_, _, err := i.casDeployment(ctx, d, dep, DeploymentPatch{Step: ptr(dep.Step + 1)})
-		return err
+		return next()
 	}
 	if now.Sub(app.StartedAt) > deploySyncDeadline {
 		return i.stopDeployment(ctx, d, s, p, dep, fmt.Sprintf("%s did not become healthy going back, in %s (%s). %s", app.Name, deploySyncDeadline, facts.Health, dep.Reason))
@@ -728,7 +808,7 @@ func (i *Integration) stepVerifyingRollback(ctx context.Context, d Deps, s pipel
 	}
 	run, done, err := i.verification(ctx, d, s, dep, dep.BaseSHA, in.p.DefaultBranch)
 	if err != nil {
-		if now.Sub(dep.StateSince) > deployRunStartWait {
+		if dep.RunID == "" && now.Sub(dep.StateSince) > deployRunStartWait {
 			return i.stopDeployment(ctx, d, s, p, dep, "It went back, and that could not be verified: "+oneLine(err.Error())+". "+dep.Reason)
 		}
 		return err

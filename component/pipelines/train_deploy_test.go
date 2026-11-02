@@ -45,34 +45,43 @@ func TestInDeployWindow(t *testing.T) {
 	}
 }
 
-// Over the migrations this repository really has, because a rule that reads text is
+// Over every migration this repository really has, because a rule that reads text is
 // only as good as the text it has seen.
 func TestClassifyRealMigrations(t *testing.T) {
-	read := func(name string) string {
-		t.Helper()
-		body, err := os.ReadFile(filepath.Join("..", "database", name))
+	matches, err := filepath.Glob(filepath.Join("..", "database", "20*.go"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("no Go migrations found: %v", err)
+	}
+	want := map[string]MigrationKind{
+		"20260912000000_site_owner_restamp.go":                MigrationData,
+		"20260921000000_module_readiness_history_collapse.go": MigrationData,
+		// It runs its own statements through a local helper, so it asks. That is the
+		// cost of the rule, and one press of a button.
+		"20260926000000_work_recovery_index.go": MigrationData,
+	}
+	for _, path := range matches {
+		name := filepath.Base(path)
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(body)
-	}
-	for name, want := range map[string]MigrationKind{
-		"20261012010000_email_provider_lookup_index.go":       MigrationIndexes,
-		"20261030000000_site_access_lookup_indexes.go":        MigrationIndexes,
-		"20261029100000_work_run_goal_lookup_index.go":        MigrationIndexes,
-		"20260912000000_site_owner_restamp.go":                MigrationData,
-		"20260921000000_module_readiness_history_collapse.go": MigrationData,
-	} {
-		if got := ClassifyMigration(read(name)); got != want {
-			t.Errorf("%s reads as %s, want %s", name, got, want)
+		expected, named := want[name]
+		if !named {
+			expected = MigrationIndexes // Every other one in this directory only adds an index.
+		}
+		if got := ClassifyMigration(string(body)); got != expected {
+			t.Errorf("%s reads as %s, want %s", name, got, expected)
 		}
 	}
-	matches, err := filepath.Glob(filepath.Join("..", "database", "memory-nodes", "migrations", "*.up.sql"))
-	if err != nil || len(matches) == 0 {
+	sql, err := filepath.Glob(filepath.Join("..", "database", "memory-nodes", "migrations", "*.up.sql"))
+	if err != nil || len(sql) == 0 {
 		t.Fatalf("no SQL migrations found: %v", err)
 	}
 	indexes, data := 0, 0
-	for _, path := range matches {
+	for _, path := range sql {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -84,32 +93,110 @@ func TestClassifyRealMigrations(t *testing.T) {
 			data++
 		}
 	}
-	if data == 0 {
-		t.Errorf("none of %d SQL migrations reads as a change of tables or data", len(matches))
+	if data == 0 || indexes == 0 {
+		t.Errorf("of %d SQL migrations, %d read as indexes and %d as data; a rule that says one thing of all of them reads nothing", len(sql), indexes, data)
 	}
-	t.Logf("%d SQL migrations: %d indexes only, %d tables or data", len(matches), indexes, data)
+	t.Logf("%d SQL migrations: %d indexes only, %d tables or data", len(sql), indexes, data)
 }
 
 func TestClassifyMigrationText(t *testing.T) {
 	wrap := func(body string) string {
-		return "m.MustRegister(func(ctx context.Context, db *bun.DB) error {\n" + body + "\n})"
+		return "package database\nfunc register(m *migrate.Migrations, db *bun.DB) {\n m.MustRegister(func(ctx context.Context, db *bun.DB) error {\n" + body + "\n return nil\n })\n}\n"
 	}
 	for name, tc := range map[string]struct {
 		source string
 		want   MigrationKind
 	}{
-		"a helper beside the migrations":   {`func quoteIdentifier(s string) string { return s }`, MigrationNone},
-		"an index":                         {wrap("db.ExecContext(ctx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS i ON t (a)`)"), MigrationIndexes},
-		"a unique index":                   {wrap("db.ExecContext(ctx, `create unique index i on t (a)`)"), MigrationIndexes},
-		"a column":                         {wrap("db.ExecContext(ctx, `ALTER TABLE t ADD COLUMN c text`)"), MigrationData},
-		"a table":                          {wrap("db.ExecContext(ctx, `CREATE TABLE t (a int)`)"), MigrationData},
-		"rows":                             {wrap("db.ExecContext(ctx, `UPDATE \"MemoryNodes\" SET a = 1`)"), MigrationData},
-		"an index and rows":                {wrap("db.ExecContext(ctx, `CREATE INDEX i ON t (a); DELETE FROM t`)"), MigrationData},
-		"a helper it cannot read":          {wrap("return restampEverything(ctx, db)"), MigrationData},
-		"a change named only in a comment": {wrap("// DELETE FROM t would be wrong\ndb.ExecContext(ctx, `CREATE INDEX i ON t (a)`)"), MigrationIndexes},
+		"a helper beside the migrations":        {"package database\nfunc quoteIdentifier(s string) string { return s }\n", MigrationNone},
+		"not Go at all":                         {"m.MustRegister(", MigrationData},
+		"an index":                              {wrap("db.ExecContext(ctx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS i ON t (a)`)"), MigrationIndexes},
+		"a unique index":                        {wrap("db.ExecContext(ctx, `create unique index i on t (a)`)"), MigrationIndexes},
+		"an index through the helper":           {wrap("ensurePayloadLookupIndex(ctx, db, logger, table, name, field, nil)"), MigrationIndexes},
+		"a column":                              {wrap("db.ExecContext(ctx, `ALTER TABLE t ADD COLUMN c text`)"), MigrationData},
+		"a table":                               {wrap("db.ExecContext(ctx, `CREATE TABLE t (a int)`)"), MigrationData},
+		"a replaced function":                   {wrap("db.ExecContext(ctx, `CREATE OR REPLACE FUNCTION f() RETURNS int`)"), MigrationData},
+		"rows, quoted":                          {wrap("db.ExecContext(ctx, `UPDATE \"MemoryNodes\" SET a = 1`)"), MigrationData},
+		"rows, unquoted":                        {wrap("db.ExecContext(ctx, `UPDATE work_run_heads SET a = 1`)"), MigrationData},
+		"rows, lower case and across lines":     {wrap("db.ExecContext(ctx, `update work_run_heads\n  set a = 1`)"), MigrationData},
+		"an index and rows":                     {wrap("db.ExecContext(ctx, `CREATE INDEX i ON t (a); DELETE FROM t`)"), MigrationData},
+		"an index, and a helper it cannot read": {wrap("ensurePayloadLookupIndex(ctx, db, logger, table, name, field, nil)\n restampEverything(ctx, db)"), MigrationData},
+		"a helper it cannot read":               {wrap("return restampEverything(ctx, db)"), MigrationData},
+		"a statement written elsewhere":         {wrap("ensureThisIndex(ctx)\n db.ExecContext(ctx, statementFromElsewhere)"), MigrationData},
+		"nothing about an index":                {wrap("db.ExecContext(ctx, `VACUUM t`)"), MigrationData},
+		"a change named only in a comment":      {wrap("// DELETE FROM t would be wrong\n db.ExecContext(ctx, `CREATE INDEX i ON t (a)`)"), MigrationIndexes},
 	} {
 		if got := ClassifyMigration(tc.source); got != tc.want {
 			t.Errorf("%s reads as %s, want %s", name, got, tc.want)
+		}
+	}
+	for name, tc := range map[string]struct {
+		source string
+		want   MigrationKind
+	}{
+		"nothing":            {"-- only a comment\n", MigrationNone},
+		"an index":           {"CREATE INDEX IF NOT EXISTS i ON t (a);\n", MigrationIndexes},
+		"session and index":  {"SET lock_timeout = '5s';\ncreate unique index i on t (a);\n", MigrationIndexes},
+		"a table":            {"CREATE TABLE t (a int);\n", MigrationData},
+		"an index and rows":  {"CREATE INDEX i ON t (a);\nUPDATE t SET a = 1;\n", MigrationData},
+		"a statement unseen": {"SELECT do_things();\n", MigrationData},
+	} {
+		if got := ClassifySQLMigration(tc.source); got != tc.want {
+			t.Errorf("SQL, %s reads as %s, want %s", name, got, tc.want)
+		}
+	}
+}
+
+func TestSchemaAndContractChangesInAPatch(t *testing.T) {
+	patch := "@@ -1,3 +1,6 @@\n+++ b/x.go\n context\n+	_, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS t (a int)`)\n+	// ALTER TABLE t would be wrong\n-	return `SELECT 1`\n+	PipelineStepContract = 6\n-	contracts := map[string]int{\"workerHost.pipeline_step\": 5}\n+	x := 1\n"
+	lines := PatchLines(patch)
+	if got := SchemaChanges(lines); len(got) != 1 || !strings.Contains(got[0], "CREATE TABLE") {
+		t.Errorf("schema changes = %q", got)
+	}
+	if got := ContractChanges(lines); len(got) != 2 {
+		t.Errorf("contract changes = %q", got)
+	}
+	if got := SchemaChanges(PatchLines("+	fmt.Println(\"update the table\")\n+	insert := 1\n")); len(got) != 0 {
+		t.Errorf("ordinary code read as a schema change: %q", got)
+	}
+	if got := DifferingLines("a\nb\n// c\n", "a\nd\n// e\n"); strings.Join(got, ",") != "b,d" {
+		t.Errorf("differing lines = %q", got)
+	}
+	for path, want := range map[string]bool{
+		"component/memql/embedder_tables.go":          true,
+		"component/memql/embedder_tables_test.go":     false,
+		"cockpit/internal/store/schema.go":            false,
+		"clients/os/src/x.sql":                        false,
+		"integrations/release/journal.sql":            true,
+		"component/database/migrations/0001.down.sql": false,
+		"README.md": false,
+	} {
+		if got := EngineCodePath(path); got != want {
+			t.Errorf("EngineCodePath(%s) = %v", path, got)
+		}
+	}
+	for path, want := range map[string]bool{
+		"integrations/agent/worker/pipeline_purpose.go": true,
+		"cockpit/internal/worker/tools/capabilities.go": true,
+		"core/computerpermission/contract.go":           true,
+		"cockpit/internal/worker/tools/x_test.go":       false,
+		"component/memql/plugins.go":                    false,
+	} {
+		if got := WorkerContractPath(path); got != want {
+			t.Errorf("WorkerContractPath(%s) = %v", path, got)
+		}
+	}
+}
+
+// The files that really state a contract read as stating one, so the rule above is not
+// looking for words nobody writes.
+func TestRealContractFilesReadAsContracts(t *testing.T) {
+	for _, path := range []string{"integrations/agent/worker/pipeline_purpose.go", "cockpit/internal/worker/tools/capabilities.go"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ContractChanges(PatchLines(strings.ReplaceAll("+"+string(body), "\n", "\n+"))); len(got) == 0 {
+			t.Errorf("%s states no contract this rule can see", path)
 		}
 	}
 }
@@ -138,29 +225,6 @@ func TestRemovedPipelineSteps(t *testing.T) {
 	}
 	if got := RemovedPipelineSteps(after, append(append([]string(nil), after...), "checks.more")); len(got) != 0 {
 		t.Errorf("adding a step reads as removing one: %v", got)
-	}
-}
-
-func TestChangedWorkerContracts(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join("..", "..", WorkerContractPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	real := WorkerContracts(string(source))
-	if real["workerHost.pipeline_step"] == "" {
-		t.Fatalf("the real contracts file reads as %v", real)
-	}
-	if changed := ChangedWorkerContracts(string(source), string(source)); len(changed) != 0 {
-		t.Errorf("the same source differs: %v", changed)
-	}
-	before := `contracts := map[string]int{"workerHost.pipeline_step": 5, "workerHost.fs_read": 2}`
-	after := `contracts := map[string]int{"workerHost.pipeline_step": 6}
-contracts["workerComputer.input_target"] = 1`
-	got := strings.Join(ChangedWorkerContracts(before, after), "; ")
-	for _, want := range []string{"workerHost.pipeline_step 5 to 6", "workerComputer.input_target none to 1", "workerHost.fs_read 2 removed"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("changes %q lack %q", got, want)
-		}
 	}
 }
 

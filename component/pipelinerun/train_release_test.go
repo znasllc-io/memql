@@ -381,3 +381,78 @@ func TestOnlyTheOwnerGivesTheWord(t *testing.T) {
 		}
 	})
 }
+
+// A release's run writes nothing to the row for hours, so one passing error at the end of
+// them says nothing about the release.
+func TestOnePassingErrorDoesNotHoldAQuietRelease(t *testing.T) {
+	th, releaser := newReleaseHarness(t)
+	th.next(t)
+	releaser.answer(pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "building", RunID: "release-run"}, nil)
+	th.next(t)
+	th.clock = th.clock.Add(3 * time.Hour)
+	releaser.answer(pipelines.TrainReleaseStatus{}, errors.New("GitHub blinked"))
+	if got := th.next(t); got.State != TrainReleasing {
+		t.Fatalf("after one error: %s (%s)", got.State, got.HeldReason)
+	}
+}
+
+// A second hold on the same head is news, and it must not be taken for the first.
+func TestAReleaseHeldTwiceSaysSoTwice(t *testing.T) {
+	th, releaser := newReleaseHarness(t)
+	th.next(t)
+	stopped := pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "blocked", Stop: true, Reason: "the first stop"}
+	releaser.answer(stopped, nil)
+	if got := th.next(t); got.State != TrainHeld {
+		t.Fatalf("not held: %s", got.State)
+	}
+	releaser.answer(pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "building"}, nil)
+	if got := th.next(t); got.State != TrainReleasing {
+		t.Fatalf("not going on: %s", got.State)
+	}
+	releaser.answer(pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "blocked", Stop: true, Reason: "the second stop"}, nil)
+	if got := th.next(t); got.State != TrainHeld {
+		t.Fatalf("not held again: %s", got.State)
+	}
+	if text := strings.Join(th.messages(), "\n"); !strings.Contains(text, "the first stop") || !strings.Contains(text, "the second stop") {
+		t.Errorf("messages: %s", text)
+	}
+}
+
+// With the word taken back it only reads: going on would only hold it again next tick.
+func TestAHeldReleaseDoesNotFlipFlopOnceTheWordIsBack(t *testing.T) {
+	th, releaser := newReleaseHarness(t)
+	th.next(t)
+	releaser.answer(pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "building"}, nil)
+	th.next(t)
+	th.allowRelease(t, false, false)
+	if got := th.next(t); got.State != TrainHeld {
+		t.Fatalf("not held: %s", got.State)
+	}
+	for range 3 {
+		if got := th.next(t); got.State != TrainHeld {
+			t.Fatalf("it went on with the word taken back: %s", got.State)
+		}
+	}
+	releaser.answer(pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "published", Published: true}, nil)
+	if got := th.next(t); got.State != TrainPublished {
+		t.Fatalf("a person's publish did not finish it: %s", got.State)
+	}
+}
+
+// Its pull request is merged, so saying it will not land would be wrong.
+func TestReplacingALandedReleaseSaysNothingOfLanding(t *testing.T) {
+	th, releaser := newReleaseHarness(t)
+	th.next(t)
+	releaser.answer(pipelines.TrainReleaseStatus{IntentID: "intent-1", Phase: "blocked", Stop: true, Reason: "stopped"}, nil)
+	held := th.next(t)
+	if _, err := th.integ.TrainExpress(personCtx(ownerID), repoName, nil); err != nil {
+		t.Fatal(err)
+	}
+	th.remote.mu.Lock()
+	defer th.remote.mu.Unlock()
+	for _, comment := range th.remote.comments[held.PullRequest] {
+		if strings.Contains(comment, "will not land") {
+			t.Errorf("a merged pull request was told: %s", comment)
+		}
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -63,8 +65,10 @@ func (i *Integration) advanceRelease(ctx context.Context, d Deps, s pipelines.Tr
 	status, err := d.TrainReleaser.AdvanceTrainRelease(ctx, i.trainReleaseRequest(s, p, t, standing, observe))
 	if err != nil {
 		// Owner authority lost, GitHub down, a recipe refusing: the owner hears once it
-		// has lasted, and every later tick asks again until then.
-		if now.Sub(t.UpdatedAt) < trainReleaseStallWait {
+		// has lasted, and every later tick asks again until then. It counts how long the
+		// step has been failing, because a release's run writes nothing to this row for
+		// hours, and a passing error at the end of them must not stop it.
+		if now.Sub(i.trainStalls.failing(p.ID, t.ID+"@"+t.HeadSHA, now)) < trainReleaseStallWait {
 			return err
 		}
 		return i.hold(ctx, d, s, p, t, "The release could not go on: "+oneLine(err.Error()), nil, "")
@@ -187,9 +191,15 @@ func (i *Integration) observeHeldRelease(ctx context.Context, d Deps, s pipeline
 	if status.Published {
 		return i.recordPublished(ctx, d, s, p, t, releasePatch(t, status), status)
 	}
-	if status.Phase == "building" || status.Phase == "built" {
+	// With the word taken back, this only reads: a person may still finish it by hand, and
+	// going on would only hold it again on the next tick.
+	if standing.Release && (status.Phase == "building" || status.Phase == "built") {
 		patch := releasePatch(t, status)
 		patch.State, patch.HeldReason = ptr(TrainReleasing), ptr("")
+		// It may stop again at this same head, and that is news again.
+		patch.Notified = ptr(slices.DeleteFunc(slices.Clone(t.Notified), func(key string) bool {
+			return strings.HasPrefix(key, string(pipelinenotify.TrainHeld)+"@") || strings.HasPrefix(key, string(pipelinenotify.TrainReminder)+"@")
+		}))
 		_, _, err := i.casTrain(ctx, d, p, t, patch)
 		return err
 	}

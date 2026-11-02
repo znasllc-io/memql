@@ -48,8 +48,9 @@ type memStore struct {
 	runs       map[string]Run
 	deliveries map[string]InboundDelivery
 
-	standings   map[string]TrainStanding
-	deployments map[string]Deployment
+	standings    map[string]TrainStanding
+	deployments  map[string]Deployment
+	failStanding error
 
 	// channels is the notify stage's destinations (D16) by bare id, and
 	// channelOrder the order they were created in -- the DSL reads the newest
@@ -184,6 +185,9 @@ func (s *memStore) LatestTrain(ctx context.Context, pipelineID string) (*Train, 
 func (s *memStore) Standing(_ context.Context, pipelineID string) (*TrainStanding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failStanding != nil {
+		return nil, s.failStanding
+	}
 	st, ok := s.standings[bareID(pipelineID)]
 	if !ok {
 		return nil, nil

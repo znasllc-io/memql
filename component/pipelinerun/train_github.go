@@ -41,7 +41,7 @@ type trainGitHub interface {
 	AddPullRequestLabels(ctx context.Context, token, repository string, number int, labels []string) error
 	PullRequestState(ctx context.Context, token, repository string, number int) (githubapp.PullRequestObservation, error)
 	OwnerLogin(ctx context.Context, credential, user, repository string) (string, error)
-	DirectoryFiles(ctx context.Context, token, repository, ref, path string) ([]string, error)
+	ComparePatches(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedFile, bool, error)
 	MarkPullRequestReady(ctx context.Context, token, repository string, number int) error
 }
 
@@ -55,12 +55,12 @@ func trainPort(d Deps) (trainGitHub, error) {
 	return gh, nil
 }
 
-func (g *packagesGitHub) DirectoryFiles(ctx context.Context, token, repository, ref, path string) ([]string, error) {
+func (g *packagesGitHub) ComparePatches(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedFile, bool, error) {
 	c, owner, name, err := g.target(repository)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return c.DirectoryFiles(ctx, token, owner, name, ref, path)
+	return c.ComparePatches(ctx, token, owner, name, base, head)
 }
 
 func (g *packagesGitHub) MarkPullRequestReady(ctx context.Context, token, repository string, number int) error {

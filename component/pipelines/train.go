@@ -96,6 +96,10 @@ type TrainReleaseStatus struct {
 // ErrDeployBusy says an Application has another operation in progress.
 var ErrDeployBusy = errors.New("pipelines: the Application has another operation in progress")
 
+// ErrDeployBaseMoved says the installation's branch moved before a pin was made, so the
+// pin must start from where it is now.
+var ErrDeployBaseMoved = errors.New("pipelines: the installation's branch moved before its pin was made")
+
 // DeployPinRequest asks for one release's pin on the installation's repository. Its
 // RequestID is what makes it safe to ask twice.
 type DeployPinRequest struct {

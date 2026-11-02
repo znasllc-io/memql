@@ -208,7 +208,9 @@ func (i *Integration) cancelTrain(ctx context.Context, d Deps, s pipelines.Train
 // approval never goes quiet.
 func (i *Integration) retireCancelled(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, cancelled Train, gh trainGitHub, token, reason string, comment bool) {
 	target := cancelled
-	if !comment {
+	if !comment || cancelled.Landed() {
+		// A release replaced after it landed: its pull request is merged, and saying it
+		// will not land would be wrong.
 		target.PullRequest = 0
 	}
 	retireTrain(ctx, d, gh, token, p, target, reason)
@@ -291,6 +293,16 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 				reasons = append(reasons, fmt.Sprintf("#%d %s", sk.Number, sk.Reason))
 			}
 			return Train{}, fmt.Errorf("pipelines: no pull request named can board an express train: %s", strings.Join(reasons, "; "))
+		}
+	}
+	// A deploy restarts agent, which kills running CI, so nothing leaves under one.
+	if s.Deployment != nil {
+		dep, err := d.Store.LatestDeployment(memql.ContextWithFreshRead(ctx), p.ID)
+		if err != nil {
+			return Train{}, err
+		}
+		if dep != nil && dep.Moving() {
+			return Train{}, fmt.Errorf("pipelines: %s is deploying, which restarts what runs a release's tests; start it when that has finished", dep.Version)
 		}
 	}
 	now := d.Now().UTC()

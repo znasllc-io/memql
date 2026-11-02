@@ -135,6 +135,29 @@ func TestATrainPublishesOnItsOwnersWordAcrossReplicas(t *testing.T) {
 	if _, err := f.i.NewestRelease(tick, r.OwnerUserID, r.Authority, "engine", "9.9.9"); err == nil || !strings.Contains(err.Error(), "not in the release catalog") {
 		t.Fatalf("a version never published: %v", err)
 	}
+
+	// A press of the Deploy button: the owner on the line, with no internal origin.
+	pressed, err := f.i.NewestRelease(ownerCtx(), r.OwnerUserID, nil, "engine", "")
+	if err != nil || pressed != release {
+		t.Fatalf("the owner's own press: %+v, %v", pressed, err)
+	}
+	if _, err := f.i.NewestRelease(ownerCtx(), "someone-else", nil, "engine", ""); err == nil {
+		t.Fatal("an owner read a release for another owner's deploy")
+	}
+	if _, err := f.i.NewestRelease(actorContext(auth.RoleAdmin), r.OwnerUserID, nil, "engine", ""); err == nil {
+		t.Fatal("an admin read a release for a deploy")
+	}
+	if _, err := f.i.NewestRelease(context.Background(), r.OwnerUserID, nil, "engine", ""); err == nil {
+		t.Fatal("nobody read a release for a deploy")
+	}
+	if err := f.i.CheckDeployOwner(tick, r.OwnerUserID, r.Authority); err != nil {
+		t.Fatalf("the owner, on a tick: %v", err)
+	}
+	f.ownerRole.Store(string(auth.RoleAdmin))
+	if err := f.i.CheckDeployOwner(tick, r.OwnerUserID, r.Authority); err == nil {
+		t.Fatal("a demoted owner passed")
+	}
+	f.ownerRole.Store(string(auth.RoleOwner))
 }
 
 func TestATrainStopsWhenItsOwnerLosesTheRole(t *testing.T) {

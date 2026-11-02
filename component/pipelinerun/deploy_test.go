@@ -3,12 +3,15 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
 
@@ -48,13 +51,21 @@ type fakeDeployEffects struct {
 	nextPR      int
 	syncErr     error
 	autoSucceed bool
+	ownerErr    error
+	baseMoves   int
 }
 
-func (f *fakeDeployEffects) NewestRelease(_ context.Context, _ string, authority map[string]any, _, version string) (pipelines.DeployRelease, error) {
+// NewestRelease answers as the real one does: under recorded authority on a tick, and
+// to the owner themself on a person's press.
+func (f *fakeDeployEffects) NewestRelease(ctx context.Context, owner string, authority map[string]any, _, version string) (pipelines.DeployRelease, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(authority) == 0 {
-		return pipelines.DeployRelease{}, errors.New("no authority")
+	if auth.OriginFromContext(ctx).IsInternal() {
+		if len(authority) == 0 {
+			return pipelines.DeployRelease{}, errors.New("no authority")
+		}
+	} else if access, ok := auth.AccessFromContext(ctx); !ok || !access.IsClusterOwner() || !sameID(access.UserId, owner) {
+		return pipelines.DeployRelease{}, errors.New("a release is read for a deploy by its pipeline's owner")
 	}
 	if version != "" && version != f.release.Version {
 		return pipelines.DeployRelease{}, errors.New("not in the catalog")
@@ -62,11 +73,27 @@ func (f *fakeDeployEffects) NewestRelease(_ context.Context, _ string, authority
 	return f.release, f.releaseErr
 }
 
-func (f *fakeDeployEffects) ProposeDeployPin(_ context.Context, r pipelines.DeployPinRequest) (pipelines.DeployPin, error) {
+func (f *fakeDeployEffects) CheckDeployOwner(ctx context.Context, _ string, authority map[string]any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if !auth.OriginFromContext(ctx).IsInternal() || len(authority) == 0 {
+		return errors.New("an owner is checked on a tick, under their recorded authority")
+	}
+	return f.ownerErr
+}
+
+func (f *fakeDeployEffects) ProposeDeployPin(ctx context.Context, r pipelines.DeployPinRequest) (pipelines.DeployPin, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return pipelines.DeployPin{}, errors.New("a pin takes internal origin")
+	}
 	if f.pinErr != nil {
 		return pipelines.DeployPin{}, f.pinErr
+	}
+	if f.baseMoves > 0 {
+		f.baseMoves--
+		return pipelines.DeployPin{}, pipelines.ErrDeployBaseMoved
 	}
 	f.pins = append(f.pins, r)
 	f.remote.mu.Lock()
@@ -169,13 +196,11 @@ func newDeployHarness(t *testing.T) *deployHarness {
 	}, release: pipelines.DeployRelease{Version: "0.31.5", Tag: "v0.31.5", SHA: releaseSHA, CandidateID: "sha256:c", CatalogDigest: "sha256:d"}}
 	th.integ.Configure(func(d *Deps) { d.DeployEffects = h.effects; d.TrainReleaser = &fakeReleaser{} })
 	th.allowRelease(t, true, true)
-	contract := []byte(`contracts := map[string]int{"workerHost.pipeline_step": 5}`)
 	manifest := []byte("pipeline:\n  stages:\n  - name: checks\n    steps:\n    - name: unit\n")
 	th.remote.mu.Lock()
 	th.remote.files["main"] = map[string][]byte{"product.env": []byte("ENGINE_REF=v0.31.4\n")}
-	th.remote.files["v0.31.4"] = map[string][]byte{pipelines.WorkerContractPath: contract, pipelines.ManifestPath: manifest}
-	th.remote.files[releaseSHA] = map[string][]byte{pipelines.WorkerContractPath: contract, pipelines.ManifestPath: manifest}
-	th.remote.dirs = map[string]map[string][]string{}
+	th.remote.files["v0.31.4"] = map[string][]byte{pipelines.ManifestPath: manifest}
+	th.remote.files[releaseSHA] = map[string][]byte{pipelines.ManifestPath: manifest}
 	th.remote.mu.Unlock()
 	// Inside the window, with a published train as the newest.
 	th.clock = time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC)
@@ -425,8 +450,8 @@ func TestAFailedVerificationGoesBackToWhatRanBefore(t *testing.T) {
 		t.Errorf("reason = %q", dep.Reason)
 	}
 	dep = h.stepUntil(t, DeploymentVerifyingRollback)
-	if got := h.effects.syncs[2:]; len(got) != 2 || got[0] != "memql@"+mainWas || got[1] != "znas-cloud@"+mainWas {
-		t.Fatalf("syncs back = %v, want each Application at what it ran before", got)
+	if got := h.effects.syncs[2:]; len(got) != 2 || got[0] != "znas-cloud@"+mainWas || got[1] != "memql@"+mainWas {
+		t.Fatalf("syncs back = %v, want each Application at what it ran before, the product before the engine it runs on", got)
 	}
 	for range 3 {
 		if dep = h.step(t); dep.RunID != "" {
@@ -592,11 +617,7 @@ func TestASyncWaitsOutAnotherOperation(t *testing.T) {
 
 func TestAGuardWaitsForTheButtonAndTablesNeverRollBack(t *testing.T) {
 	h := newDeployHarness(t)
-	h.remote.mu.Lock()
-	h.remote.dirs["v0.31.4"] = map[string][]string{"component/database": {"database.go"}}
-	h.remote.dirs[releaseSHA] = map[string][]string{"component/database": {"database.go", "20261102_things.go"}}
-	h.remote.files[releaseSHA]["component/database/20261102_things.go"] = []byte("m.MustRegister(func() { db.ExecContext(ctx, `ALTER TABLE t ADD COLUMN c text`) })")
-	h.remote.mu.Unlock()
+	h.changedFile("component/database/20261102_things.go", "m.MustRegister(func() { db.ExecContext(ctx, `ALTER TABLE t ADD COLUMN c text`) })")
 	dep := h.step(t)
 	if dep.State != DeploymentWaiting || len(dep.Guards) != 1 || dep.Guards[0].Code != pipelines.DeployGuardData {
 		t.Fatalf("guards = %+v, state %s", dep.Guards, dep.State)
@@ -638,32 +659,80 @@ func TestAGuardWaitsForTheButtonAndTablesNeverRollBack(t *testing.T) {
 	}
 }
 
+// changedFile puts a file in what changed between what runs and the release.
+func (h *deployHarness) changedFile(path, source string) {
+	h.remote.mu.Lock()
+	defer h.remote.mu.Unlock()
+	h.remote.files[releaseSHA][path] = []byte(source)
+	h.remote.comparedFiles = append(h.remote.comparedFiles, githubapp.ComparedFile{Path: path, Status: "added", Patch: "+" + strings.ReplaceAll(source, "\n", "\n+")})
+}
+
 func TestEachGuard(t *testing.T) {
+	const index = "package database\nfunc r(m M) { m.MustRegister(func() { db.ExecContext(ctx, `CREATE INDEX i ON t (a)`) }) }\n"
 	for _, tc := range []struct {
 		name  string
 		setup func(*deployHarness)
 		code  string
 	}{
-		{"an index alone waits for nobody", func(h *deployHarness) {
-			h.remote.dirs[releaseSHA] = map[string][]string{"component/database": {"20261102_idx.go"}}
-			h.remote.files[releaseSHA]["component/database/20261102_idx.go"] = []byte("m.MustRegister(func() { db.ExecContext(ctx, `CREATE INDEX i ON t (a)`) })")
+		{"an index alone waits for nobody", func(h *deployHarness) { h.changedFile("component/database/20261102_idx.go", index) }, ""},
+		{"ordinary code waits for nobody", func(h *deployHarness) {
+			h.changedFile("component/server/handler.go", "package server\nvar s = `SELECT 1`\n")
 		}, ""},
-		{"a SQL migration that adds a table", func(h *deployHarness) {
-			h.remote.dirs[releaseSHA] = map[string][]string{"component/database/memory-nodes/migrations": {"2026_t.up.sql", "2026_t.down.sql"}}
-			h.remote.files[releaseSHA]["component/database/memory-nodes/migrations/2026_t.up.sql"] = []byte("CREATE TABLE t (a int);")
+		{"a test's table waits for nobody", func(h *deployHarness) {
+			h.changedFile("component/server/handler_test.go", "package server\nvar s = `CREATE TABLE t (a int)`\n")
+		}, ""},
+		{"a migration that does what it cannot read through", func(h *deployHarness) {
+			h.changedFile("component/database/20261102_rows.go", "package database\nfunc r(m M) { m.MustRegister(func() { ensureThatIndex(ctx); restamp(ctx) }) }\n")
 		}, pipelines.DeployGuardData},
-		{"a changed worker contract", func(h *deployHarness) {
-			h.remote.files[releaseSHA][pipelines.WorkerContractPath] = []byte(`contracts := map[string]int{"workerHost.pipeline_step": 6}`)
+		{"a SQL migration that adds a table", func(h *deployHarness) {
+			h.changedFile("component/database/memory-nodes/migrations/2026_t.up.sql", "CREATE TABLE t (a int);")
+		}, pipelines.DeployGuardData},
+		{"a table made in ordinary code", func(h *deployHarness) {
+			h.changedFile("component/memql/embedder_tables.go", "package memql\nvar s = `CREATE TABLE IF NOT EXISTS e (a int)`\n")
+		}, pipelines.DeployGuardData},
+		{"an edit to a table made in ordinary code, with no patch from GitHub", func(h *deployHarness) {
+			h.remote.mu.Lock()
+			defer h.remote.mu.Unlock()
+			h.remote.files["v0.31.4"]["component/memql/embedder_tables.go"] = []byte("package memql\nvar s = `CREATE TABLE IF NOT EXISTS e (a int)`\n")
+			h.remote.files[releaseSHA]["component/memql/embedder_tables.go"] = []byte("package memql\nvar s = `CREATE TABLE IF NOT EXISTS e (a int, b int)`\n")
+			h.remote.comparedFiles = append(h.remote.comparedFiles, githubapp.ComparedFile{Path: "component/memql/embedder_tables.go", Status: "modified"})
+		}, pipelines.DeployGuardData},
+		{"the engine asking machines for another version", func(h *deployHarness) {
+			h.remote.mu.Lock()
+			defer h.remote.mu.Unlock()
+			h.remote.comparedFiles = append(h.remote.comparedFiles, githubapp.ComparedFile{Path: "integrations/agent/worker/pipeline_purpose.go", Status: "modified",
+				Patch: "@@ -71 +71 @@\n-\tPipelineStepContract = 5\n+\tPipelineStepContract = 6\n"})
+		}, pipelines.DeployGuardContract},
+		{"a machine accepting another version, with no patch from GitHub", func(h *deployHarness) {
+			h.remote.mu.Lock()
+			defer h.remote.mu.Unlock()
+			path := "cockpit/internal/worker/tools/capabilities.go"
+			h.remote.files["v0.31.4"][path] = []byte(`contracts := map[string]int{"workerHost.pipeline_step": 5}`)
+			h.remote.files[releaseSHA][path] = []byte(`contracts := map[string]int{"workerHost.pipeline_step": 6}`)
+			h.remote.comparedFiles = append(h.remote.comparedFiles, githubapp.ComparedFile{Path: path, Status: "modified"})
 		}, pipelines.DeployGuardContract},
 		{"a removed pipeline step", func(h *deployHarness) {
+			h.remote.mu.Lock()
+			defer h.remote.mu.Unlock()
 			h.remote.files[releaseSHA][pipelines.ManifestPath] = []byte("pipeline:\n  stages:\n  - name: checks\n    steps:\n    - name: other\n")
+			h.remote.comparedFiles = append(h.remote.comparedFiles, githubapp.ComparedFile{Path: pipelines.ManifestPath, Status: "modified", Patch: "+x"})
 		}, pipelines.DeployGuardStep},
+		{"more changes than GitHub will list", func(h *deployHarness) {
+			h.remote.mu.Lock()
+			defer h.remote.mu.Unlock()
+			h.remote.compareIncomplete = true
+		}, pipelines.DeployGuardUnknown},
+		{"more files with no patch than it will read", func(h *deployHarness) {
+			h.remote.mu.Lock()
+			defer h.remote.mu.Unlock()
+			for n := range deployUnpatchedLimit + 1 {
+				h.remote.comparedFiles = append(h.remote.comparedFiles, githubapp.ComparedFile{Path: fmt.Sprintf("component/server/f%d.go", n), Status: "modified"})
+			}
+		}, pipelines.DeployGuardUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDeployHarness(t)
-			h.remote.mu.Lock()
 			tc.setup(h)
-			h.remote.mu.Unlock()
 			dep := h.step(t)
 			if tc.code == "" {
 				if len(dep.Guards) != 0 {
@@ -682,10 +751,7 @@ func TestEachGuard(t *testing.T) {
 // the installation runs, so a newer release cannot slip past it.
 func TestANewerReleaseCarriesAWaitingOneAndItsGuards(t *testing.T) {
 	h := newDeployHarness(t)
-	h.remote.mu.Lock()
-	h.remote.dirs[releaseSHA] = map[string][]string{"component/database": {"20261102_things.go"}}
-	h.remote.files[releaseSHA]["component/database/20261102_things.go"] = []byte("m.MustRegister(func() { db.ExecContext(ctx, `DELETE FROM t`) })")
-	h.remote.mu.Unlock()
+	h.changedFile("component/database/20261102_things.go", "package database\nfunc r(m M) { m.MustRegister(func() { db.ExecContext(ctx, `DELETE FROM t`) }) }\n")
 	first := h.step(t)
 	if len(first.Guards) != 1 {
 		t.Fatalf("guards = %+v", first.Guards)
@@ -807,6 +873,17 @@ func TestTwoTicksAtOnceStartOneSync(t *testing.T) {
 	}
 }
 
+// tickSame ticks on one replica: the clock of how long a step has been failing is that
+// replica's, and a new one only starts it again, which delays giving up and nothing else.
+func (h *deployHarness) tickSame(t *testing.T) Deployment {
+	t.Helper()
+	h.clock = h.clock.Add(time.Minute)
+	if _, err := h.integ.TrainTick(automationCtx()); err != nil {
+		t.Fatalf("TrainTick: %v", err)
+	}
+	return h.deployment(t)
+}
+
 // A step that fails on every tick must not log forever: a deploy that never finishes
 // keeps every later train from leaving, with nobody told.
 func TestAStepThatKeepsFailingEnds(t *testing.T) {
@@ -816,9 +893,9 @@ func TestAStepThatKeepsFailingEnds(t *testing.T) {
 		h.effects.mu.Lock()
 		h.effects.apps = map[string]*fakeApplication{}
 		h.effects.mu.Unlock()
-		h.step(t)
+		h.tickSame(t)
 		h.clock = h.clock.Add(deployStuckAfter)
-		dep := h.step(t)
+		dep := h.tickSame(t)
 		if dep.State != DeploymentCancelled || len(h.effects.syncs) != 0 || !strings.Contains(dep.Reason, "could not go on") {
 			t.Fatalf("state %s, syncs %v, reason %q", dep.State, h.effects.syncs, dep.Reason)
 		}
@@ -837,9 +914,10 @@ func TestAStepThatKeepsFailingEnds(t *testing.T) {
 		h.effects.mu.Lock()
 		h.effects.apps = map[string]*fakeApplication{}
 		h.effects.mu.Unlock()
-		h.step(t)
+		h.tickSame(t) // The product never moved, so it passes over that.
+		h.tickSame(t) // The engine did, and this is the first failure.
 		h.clock = h.clock.Add(deployStuckAfter)
-		dep := h.step(t)
+		dep := h.tickSame(t)
 		if dep.State != DeploymentStopped || !strings.Contains(dep.Reason, "could not finish going back") {
 			t.Fatalf("state %s, reason %q", dep.State, dep.Reason)
 		}
@@ -862,11 +940,185 @@ func TestAStepThatKeepsFailingEnds(t *testing.T) {
 		h.remote.mu.Lock()
 		delete(h.remote.trainPRs, 900)
 		h.remote.mu.Unlock()
-		h.step(t)
+		h.tickSame(t)
 		h.clock = h.clock.Add(deployStuckAfter)
-		dep := h.step(t)
+		dep := h.tickSame(t)
 		if dep.State != DeploymentDeployed || !strings.Contains(dep.Reason, "could not be merged") {
 			t.Fatalf("state %s, reason %q", dep.State, dep.Reason)
 		}
 	})
+}
+
+// A passing error in a state that has rightly lasted a long time says nothing about it.
+func TestOnePassingErrorDoesNotEndALongStep(t *testing.T) {
+	t.Run("a release waiting days for the owner", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.changedFile("component/database/20261102_things.go", "package database\nfunc r(m M) { m.MustRegister(func() { db.ExecContext(ctx, `DELETE FROM t`) }) }\n")
+		if dep := h.tickSame(t); dep.State != DeploymentWaiting {
+			t.Fatalf("state %s", dep.State)
+		}
+		h.clock = h.clock.Add(3 * time.Hour)
+		h.store.failStanding = errors.New("the store blinked")
+		if dep := h.tickSame(t); dep.State != DeploymentWaiting {
+			t.Fatalf("after one error: %s (%s)", dep.State, dep.Reason)
+		}
+		h.store.failStanding = nil
+		if dep := h.tickSame(t); dep.State != DeploymentWaiting {
+			t.Fatalf("after it passed: %s (%s)", dep.State, dep.Reason)
+		}
+	})
+	t.Run("a rollout an unconfirmed write interrupts", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.toSyncing(t)
+		h.step(t)
+		h.step(t)
+		h.step(t)
+		h.clock = h.clock.Add(25 * time.Minute)
+		h.effects.syncErr = errors.New("the ArgoCD sync is unconfirmed; ask again with the same request")
+		if dep := h.tickSame(t); dep.State != DeploymentSyncing {
+			t.Fatalf("after one error: %s (%s)", dep.State, dep.Reason)
+		}
+		h.effects.syncErr = nil
+		h.effects.finishSync("memql", "Succeeded", true)
+		if dep := h.tickSame(t); dep.State != DeploymentSyncing || dep.Step != 1 {
+			t.Fatalf("once it answered: %s at %d (%s)", dep.State, dep.Step, dep.Reason)
+		}
+	})
+}
+
+// With no row yet, nothing else would say so, and the night's release quietly never goes.
+func TestADeployThatCannotStartSaysSo(t *testing.T) {
+	h := newDeployHarness(t)
+	h.effects.releaseErr = errors.New("the catalog is unreadable")
+	h.clock = h.clock.Add(time.Minute)
+	h.tick(t)
+	if text := strings.Join(h.messages(), "\n"); strings.Contains(text, "could not start deploying") {
+		t.Fatalf("it told the owner on the first failure: %s", text)
+	}
+	h.clock = h.clock.Add(deployStuckAfter)
+	h.tick(t)
+	if text := strings.Join(h.messages(), "\n"); !strings.Contains(text, "could not start deploying") {
+		t.Errorf("after %s, nobody was told: %s", deployStuckAfter, text)
+	}
+	if dep, _ := h.store.LatestDeployment(context.Background(), h.p.ID); dep != nil {
+		t.Errorf("a deployment row: %+v", dep)
+	}
+}
+
+// A person's press is a person's request, with no internal origin.
+func TestTheButtonWorksWithNothingWaiting(t *testing.T) {
+	h := newDeployHarness(t)
+	h.allowRelease(t, true, false)
+	pressed, err := h.integ.DeployRelease(clusterOwnerCtx(ownerID), repoName, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pressed.Version != "0.31.5" || !pressed.Acknowledged || pressed.Trigger != DeploymentTriggerButton {
+		t.Fatalf("pressed = %+v", pressed)
+	}
+}
+
+// The word taken back while nothing has moved: it stops, and a button's press does not.
+func TestTakingBackTheWordStopsADeployThatHasNotMoved(t *testing.T) {
+	t.Run("while its pin is checked", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.stepUntil(t, DeploymentPinning)
+		h.allowRelease(t, true, false)
+		dep := h.step(t)
+		if dep.State != DeploymentCancelled || !strings.Contains(dep.Reason, "stopped before this one moved production") {
+			t.Fatalf("state %s, reason %q", dep.State, dep.Reason)
+		}
+	})
+	t.Run("just before production moves", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.toSyncing(t)
+		h.allowRelease(t, true, false)
+		dep := h.step(t)
+		if dep.State != DeploymentCancelled || len(h.effects.syncs) != 0 {
+			t.Fatalf("state %s, syncs %v", dep.State, h.effects.syncs)
+		}
+	})
+	t.Run("an owner who lost the role", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.toSyncing(t)
+		h.effects.ownerErr = errors.New("the release owner no longer holds owner authority")
+		h.tickSame(t)
+		if len(h.effects.syncs) != 0 {
+			t.Fatalf("production moved: %v", h.effects.syncs)
+		}
+		h.clock = h.clock.Add(deployStuckAfter)
+		if dep := h.tickSame(t); dep.State != DeploymentCancelled || !strings.Contains(dep.Reason, "no longer holds owner authority") {
+			t.Fatalf("state %s, reason %q", dep.State, dep.Reason)
+		}
+	})
+	t.Run("the button's own word", func(t *testing.T) {
+		h := newDeployHarness(t)
+		h.allowRelease(t, false, false)
+		if _, err := h.integ.DeployRelease(clusterOwnerCtx(ownerID), repoName, ""); err != nil {
+			t.Fatal(err)
+		}
+		if dep := h.stepUntil(t, DeploymentPinning); dep.State != DeploymentPinning {
+			t.Fatalf("state %s", dep.State)
+		}
+		if dep := h.step(t); dep.State != DeploymentPinning || dep.BaseSHA == "" {
+			t.Fatalf("state %s, base %q", dep.State, dep.BaseSHA)
+		}
+	})
+}
+
+// main moving before the pin is made starts over from where it is now, and a reply lost
+// after it was made finds that pin, because the request is named from the row.
+func TestThePinsRequestStaysTheSameWhateverMainDoes(t *testing.T) {
+	h := newDeployHarness(t)
+	h.stepUntil(t, DeploymentPinning)
+	h.effects.baseMoves = 1
+	h.step(t)
+	h.github.mu.Lock()
+	h.github.heads[installRepo+"@main"] = headAnswer{SHA: mainWas}
+	h.github.mu.Unlock()
+	if dep := h.step(t); dep.BaseSHA != "" {
+		t.Fatalf("after main moved, base = %q", dep.BaseSHA)
+	}
+	if dep := h.step(t); dep.BaseSHA != mainWas {
+		t.Fatalf("base = %q, want main as it is now", dep.BaseSHA)
+	}
+	h.step(t)
+	if len(h.effects.pins) != 1 || h.effects.pins[0].ExpectedBase != mainWas || !strings.Contains(h.effects.pins[0].RequestID, shortCommit(mainWas)) {
+		t.Fatalf("pins = %+v", h.effects.pins)
+	}
+}
+
+func TestNoExpressTrainLeavesUnderAMovingDeploy(t *testing.T) {
+	h := newDeployHarness(t)
+	h.toSyncing(t)
+	if _, err := h.integ.TrainExpress(personCtx(ownerID), repoName, nil); err == nil || !strings.Contains(err.Error(), "is deploying") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A window says when production may start to move, so a pin that passes after it closed
+// waits for the next, and holds nothing back meanwhile but what would die under a deploy.
+func TestAPinThatPassesAfterTheWindowWaitsForTheNext(t *testing.T) {
+	h := newDeployHarness(t)
+	h.settings = strings.Replace(h.settings, `"start":"00:00","end":"07:00"`, `"start":"01:00","end":"01:30"`, 1)
+	h.stepUntil(t, DeploymentPinning)
+	for range 5 {
+		if dep := h.step(t); dep.PinSHA != "" {
+			break
+		}
+	}
+	h.passPin(t, ConclusionSuccess)
+	h.clock = time.Date(2026, 10, 29, 1, 40, 0, 0, time.UTC)
+	if dep := h.step(t); dep.State != DeploymentSyncing {
+		t.Fatalf("state %s", dep.State)
+	}
+	for range 3 {
+		if dep := h.step(t); len(dep.Applications) != 0 || len(h.effects.syncs) != 0 {
+			t.Fatalf("it moved production outside its window: %+v, %v", dep.Applications, h.effects.syncs)
+		}
+	}
+	h.clock = time.Date(2026, 10, 30, 0, 59, 0, 0, time.UTC)
+	if dep := h.step(t); len(dep.Applications) != 2 {
+		t.Fatalf("when the window opened: %+v", dep.Applications)
+	}
 }

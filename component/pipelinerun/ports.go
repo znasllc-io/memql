@@ -48,6 +48,10 @@ type TrainReleaser interface {
 // package's rows (wired in app/): the pin, the catalog, and the installation's ArgoCD.
 // pipelines.ErrDeployBusy from StartSync is another operation on that Application.
 type DeployEffects interface {
+	// CheckDeployOwner refuses when the owner no longer holds the owner role.
+	CheckDeployOwner(ctx context.Context, owner string, authority map[string]any) error
+	// NewestRelease reads the catalog: as the owner themself on a person's request, or
+	// under their recorded authority on a tick.
 	NewestRelease(ctx context.Context, owner string, authority map[string]any, profile, version string) (pipelines.DeployRelease, error)
 	ProposeDeployPin(context.Context, pipelines.DeployPinRequest) (pipelines.DeployPin, error)
 	ReadApplication(ctx context.Context, namespace, name string) (pipelines.DeployApplicationFacts, error)

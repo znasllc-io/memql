@@ -170,7 +170,8 @@ type Integration struct {
 	// this replica (train.go, noteTrainStall). In memory on purpose: it only
 	// decides when to tell the owner, the lease keeps the tick on one agent,
 	// and a replica change restarts the count rather than losing the train.
-	trainStalls trainStallClock
+	trainStalls  trainStallClock
+	deployStalls trainStallClock
 }
 
 // New builds the integration over deps. The plug-in factory (capabilities.go)

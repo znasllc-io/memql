@@ -77,10 +77,11 @@ type trainRemote struct {
 	mergeRefusals int
 	// otherFiles answers CompareFiles for a head nothing else names.
 	otherFiles []string
-	// dirs answers DirectoryFiles, keyed ref then path; readied counts the drafts made
-	// ready.
-	dirs    map[string]map[string][]string
-	readied []int
+	// comparedFiles answers ComparePatches, and compareIncomplete says GitHub stopped
+	// listing; readied counts the drafts made ready.
+	comparedFiles     []githubapp.ComparedFile
+	compareIncomplete bool
+	readied           []int
 }
 
 // BranchHead answers a branch this fake moved, and otherwise what the run
@@ -434,11 +435,11 @@ func (r *trainRemote) PullRequestState(ctx context.Context, token, repository st
 	return githubapp.PullRequestObservation{Number: number, State: state, HeadRef: pr.head, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
 }
 
-func (r *trainRemote) DirectoryFiles(ctx context.Context, token, repository, ref, path string) ([]string, error) {
-	watchGitHubCall(r.t, ctx, "DirectoryFiles")
+func (r *trainRemote) ComparePatches(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedFile, bool, error) {
+	watchGitHubCall(r.t, ctx, "ComparePatches")
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.dirs[ref][path]), nil
+	return slices.Clone(r.comparedFiles), !r.compareIncomplete, nil
 }
 
 func (r *trainRemote) MarkPullRequestReady(ctx context.Context, token, repository string, number int) error {

@@ -24,6 +24,9 @@ import (
 )
 
 const InstallationOverlayVariable = "MEMQL_RELEASE_INSTALLATION_OVERLAY"
+
+var errOverlayBaseMoved = errors.New("installation overlay base moved since review")
+
 const overlayContract = "installation.overlay.v1"
 
 var overlayRepository = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$`)
@@ -367,7 +370,7 @@ func (s *overlayScope) build(ctx context.Context, args map[string]any) (any, err
 	if s.record == nil {
 		head, _, err := client.BranchHead(ctx, token, parts[0], parts[1], s.configuration.BaseBranch)
 		if err != nil || head != s.request.ExpectedBaseRevision {
-			return nil, errors.New("installation overlay base moved since review")
+			return nil, errOverlayBaseMoved
 		}
 	}
 	replacements := make([]githubapp.BranchReplacement, 0, len(s.configuration.files()))

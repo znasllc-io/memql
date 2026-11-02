@@ -304,6 +304,12 @@ automation fixtureProposalObservation {
 	require.NoError(t, err)
 	require.Equal(t, pin, again)
 
+	// main moved before anything was made: it says so, and the caller starts over.
+	moved := r
+	moved.RequestID, moved.ExpectedBase = "deploy-"+id.NewShortId(), strings.Repeat("c", 40)
+	_, err = i.ProposeDeployPin(tick, moved)
+	require.ErrorIs(t, err, pl.ErrDeployBaseMoved)
+
 	// Asked with a changed input, it refuses rather than reuse the request.
 	changed := r
 	changed.CatalogDigest = "sha256:" + strings.Repeat("0", 64)

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -241,8 +240,8 @@ func (h githubAt) PullRequestState(_ context.Context, token, repository string, 
 	return githubapp.PullRequestObservation{Number: number, State: state, HeadRef: pr.head, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
 }
 
-func (h githubAt) DirectoryFiles(context.Context, string, string, string, string) ([]string, error) {
-	return nil, nil
+func (h githubAt) ComparePatches(context.Context, string, string, string, string) ([]githubapp.ComparedFile, bool, error) {
+	return nil, true, nil
 }
 
 func (h githubAt) MarkPullRequestReady(context.Context, string, string, int) error { return nil }
@@ -368,6 +367,8 @@ func (c *hopCluster) NewestRelease(context.Context, string, map[string]any, stri
 	return c.release, nil
 }
 
+func (c *hopCluster) CheckDeployOwner(context.Context, string, map[string]any) error { return nil }
+
 func (c *hopCluster) ProposeDeployPin(_ context.Context, r pipelines.DeployPinRequest) (pipelines.DeployPin, error) {
 	return c.pin(r), nil
 }
@@ -391,13 +392,6 @@ func (c *hopCluster) StartSync(_ context.Context, r pipelines.DeployRequest) (pi
 
 func (c *hopCluster) TerminateSync(context.Context, pipelines.DeployRequest) error { return nil }
 
-// repositoryWithContract is a repository a deploy's guards can read.
-func repositoryWithContract(manifest string) fstest.MapFS {
-	files := repositoryWith(manifest)
-	files[pipelines.WorkerContractPath] = &fstest.MapFile{Data: []byte(`contracts := map[string]int{"workerHost.pipeline_step": 5}`)}
-	return files
-}
-
 // A release and its deploy, on two replicas over one Postgres: every row through the
 // real store and its DSL, the verification through the real opening, policy and driver.
 // verifyPasses says whether the rollout passes, and what follows differs accordingly.
@@ -406,8 +400,8 @@ func runDeployAcrossReplicas(t *testing.T, verifyPasses bool) {
 	if c == nil {
 		return
 	}
-	s := c.connectWith(t, "train", pipelinerun.DeliveryWebhook, "", repositoryWithContract(testManifest))
-	install := c.connectWith(t, "install", pipelinerun.DeliveryWebhook, "", repositoryWithContract(installManifest))
+	s := c.connectWith(t, "train", pipelinerun.DeliveryWebhook, "", repositoryWith(testManifest))
+	install := c.connectWith(t, "install", pipelinerun.DeliveryWebhook, "", repositoryWith(installManifest))
 	departure := time.Now().UTC().Add(-time.Minute).Format("15:04")
 	settings := fmt.Sprintf(`{"repositories":{%q:{"enabled":true,"departures":[%q],"timeZone":"UTC","channel":"releases","source":"main","landing":"automatic","releaseProfile":"engine",`+
 		`"deployment":{"repository":%q,"applications":["memql","znas-cloud"],"verifyStages":["deployment"],"window":{"start":"00:00","end":"23:59"}}}}}`,
@@ -581,7 +575,7 @@ func runDeployAcrossReplicas(t *testing.T, verifyPasses bool) {
 		return
 	}
 	dep = until(pipelinerun.DeploymentVerifyingRollback)
-	if want := []string{"memql@" + cluster.was, "znas-cloud@" + cluster.was}; !slices.Equal(cluster.syncs[2:], want) {
+	if want := []string{"znas-cloud@" + cluster.was, "memql@" + cluster.was}; !slices.Equal(cluster.syncs[2:], want) {
 		t.Fatalf("syncs back = %v, want %v", cluster.syncs[2:], want)
 	}
 	for n := range 3 {

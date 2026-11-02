@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
-	"github.com/znasllc-io/memql/integrations/argocd"
-
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/argocd"
 )
 
 // train_deploy.go -- what a deployment asks of the release integration and the cluster
@@ -40,9 +42,16 @@ func (i *Integration) deployClient() (*argocd.Client, error) {
 // name nothing that was not published and sealed.
 func (i *Integration) NewestRelease(ctx context.Context, owner string, authority map[string]any, profile, version string) (pl.DeployRelease, error) {
 	var none pl.DeployRelease
-	owned, _, err := i.standingOwner(ctx, owner, authority)
-	if err != nil {
-		return none, err
+	// A tick acts under the owner's recorded authority. A press of the Deploy button is
+	// the owner on the line, whose own request is their authority, as for a publish.
+	owned := ctx
+	if auth.OriginFromContext(ctx).IsInternal() {
+		var err error
+		if owned, _, err = i.standingOwner(ctx, owner, authority); err != nil {
+			return none, err
+		}
+	} else if caller, err := candidateOwner(ctx); err != nil || caller != memql.BareShortId(owner) {
+		return none, errors.New("a release is read for a deploy by its pipeline's owner")
 	}
 	selected, _, _, err := i.candidateProfile(owned, profile)
 	if err != nil {
@@ -109,6 +118,12 @@ func (i *Integration) NewestRelease(ctx context.Context, owner string, authority
 	return best, nil
 }
 
+// CheckDeployOwner refuses when the owner no longer holds the owner role.
+func (i *Integration) CheckDeployOwner(ctx context.Context, owner string, authority map[string]any) error {
+	_, _, err := i.standingOwner(ctx, owner, authority)
+	return err
+}
+
 // ProposeDeployPin makes the release's pin on its own branch of the installation's
 // repository, through the operator's overlay and recipe. It refuses to invent a fact:
 // every byte comes from the signed publication or the file it replaces.
@@ -124,6 +139,10 @@ func (i *Integration) ProposeDeployPin(ctx context.Context, r pl.DeployPinReques
 	}
 	stored, err := i.proposeOverlay(owned, cfg, overlayRequest{cfg.InstallationID, r.RequestID, r.CandidateID, r.CatalogDigest, r.ExpectedBase}, true)
 	if err != nil {
+		// A recipe's operation reports through the workflow, which keeps its words.
+		if strings.Contains(err.Error(), errOverlayBaseMoved.Error()) {
+			return none, pl.ErrDeployBaseMoved
+		}
 		return none, err
 	}
 	if stored.PullRequest < 1 || !installationCommit.MatchString(stored.BranchCommit) {
@@ -170,11 +189,11 @@ func (i *Integration) StartSync(ctx context.Context, r pl.DeployRequest) (pl.Dep
 	return deployFacts(r.UID, facts), nil
 }
 
-// TerminateSync stops a running operation on one Application.
+// TerminateSync stops one Application's named sync, if it is running.
 func (i *Integration) TerminateSync(ctx context.Context, r pl.DeployRequest) error {
 	client, err := i.deployClient()
 	if err != nil {
 		return err
 	}
-	return client.TerminateSync(ctx, argocd.Target{Namespace: r.Namespace, Name: r.Name, UID: r.UID})
+	return client.TerminateSync(ctx, argocd.SyncRequest{Target: argocd.Target{Namespace: r.Namespace, Name: r.Name, UID: r.UID}, RequestID: r.RequestID})
 }

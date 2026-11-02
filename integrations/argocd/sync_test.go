@@ -16,7 +16,6 @@ type fakeApplicationAPI struct {
 	mu       sync.Mutex
 	obj      map[string]any
 	patches  [][]map[string]any
-	merges   []map[string]any
 	failNext error
 }
 
@@ -32,15 +31,7 @@ func (f *fakeApplicationAPI) Do(_ context.Context, method, _, contentType string
 	case http.MethodGet:
 		return json.Marshal(f.obj)
 	case http.MethodPatch:
-		if contentType == "application/merge-patch+json" {
-			var merge map[string]any
-			if err := json.Unmarshal(body, &merge); err != nil {
-				return nil, err
-			}
-			f.merges = append(f.merges, merge)
-			object(f.obj, "status")["operationState"].(map[string]any)["phase"] = "Terminating"
-			return json.Marshal(f.obj)
-		}
+		_ = contentType
 		var patch []map[string]any
 		if err := json.Unmarshal(body, &patch); err != nil {
 			return nil, err
@@ -60,6 +51,10 @@ func (f *fakeApplicationAPI) Do(_ context.Context, method, _, contentType string
 					f.obj["operation"] = op["value"]
 				case "/status/operationState":
 					delete(object(f.obj, "status"), "operationState")
+				}
+			case "replace":
+				if op["path"] == "/status/operationState/phase" {
+					object(object(f.obj, "status"), "operationState")["phase"] = op["value"]
 				}
 			}
 		}
@@ -265,20 +260,35 @@ func TestASelectiveSyncIsNotADeploy(t *testing.T) {
 	}
 }
 
-func TestTerminateSyncStopsOnlyWhatRuns(t *testing.T) {
+func TestTerminateSyncStopsOnlyItsOwnRunningSync(t *testing.T) {
 	api, client, target := syncFixture(t)
-	if err := client.TerminateSync(context.Background(), target); err != nil {
+	r := SyncRequest{Target: target, RequestID: "deploy-1", Revision: syncRevision}
+	if err := client.TerminateSync(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(api.merges) != 0 {
+	if len(api.patches) != 0 {
 		t.Fatal("it asked to stop an operation that had finished")
 	}
-	object(object(api.obj, "status"), "operationState")["phase"] = "Running"
-	if err := client.TerminateSync(context.Background(), target); err != nil {
+	state := object(object(api.obj, "status"), "operationState")
+	state["phase"] = "Running"
+	state["operation"] = map[string]any{"info": []any{map[string]any{"name": syncRequestInfo, "value": "someone-elses"}}}
+	if err := client.TerminateSync(context.Background(), r); err != nil {
 		t.Fatal(err)
 	}
-	if len(api.merges) != 1 || stringAt(object(object(api.obj, "status"), "operationState"), "phase") != "Terminating" {
-		t.Errorf("merges = %v", api.merges)
+	if len(api.patches) != 0 {
+		t.Fatal("it stopped another person's operation")
+	}
+	state["operation"] = map[string]any{"info": []any{map[string]any{"name": syncRequestInfo, "value": "deploy-1"}}}
+	if err := client.TerminateSync(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.patches) != 1 || stringAt(state, "phase") != "Terminating" {
+		t.Errorf("patches = %v, phase %s", api.patches, stringAt(state, "phase"))
+	}
+	// Fenced, because an operation that ends between the read and the write must not be
+	// marked Terminating: nothing would clear it, and the Application would read as busy.
+	if first := api.patches[0][0]; first["op"] != "test" || first["path"] != "/metadata/resourceVersion" {
+		t.Errorf("the write is not fenced: %v", api.patches[0])
 	}
 }
 
