@@ -55,6 +55,7 @@
 .fleet-assignment-clear { position: absolute; right: 2px; top: 3px; }
 .fleet-assignment-hint { margin-top: 14px; }
 .fleet-assignment-actions { margin-top: 28px; gap: 20px; }
+.fleet-assignment-act-room { visibility: hidden; }
 .fleet-assignment-return { margin-top: 28px; }
 .fleet-assignment-editor button:disabled { cursor: wait; }
 @container model-assignment (max-width: 650px) {

@@ -8,6 +8,8 @@ import { MODEL_PURPOSES, assignmentProposal, sameModelChoices, setupCapacity, ty
 
 const taskIcons = { conversation: MessageCircle, structured: Braces, tools: Wrench, vision: ScanEye, embeddings: Search, audioIn: Mic, audioOut: Volume2, imageGen: Image };
 const dragType = "text/plain";
+const saveLabel = "Save setup";
+const returnLabel = "Return to automatic";
 const taskSummary = (purposes: string[]) => {
   if (purposes.includes("conversation") && purposes.includes("tools") && purposes.includes("vision")) return "Conversation, tools & vision";
   const labels = MODEL_PURPOSES.filter(([id]) => purposes.includes(id)).map(([, label]) => label);
@@ -169,9 +171,15 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
         <Button tone="primary" busy={saving} busyLabel="Returning…" onClick={returnToAutomatic.onConfirm}>Return to automatic</Button>
       </div>
     </InPlaceAsk></div> : <div key="actions" className="os-panel-actions fleet-assignment-actions">
-      {returnToAutomatic ? <button ref={askedBy} type="button" className="os-link" disabled={saving} onClick={() => setAsking(true)}>Return to automatic</button> : null}
+      {/* An act that is not legal is absent, but its room stays. The row is right-aligned,
+          so without Save the way out slides to where Save stood, and a click aimed at Save
+          (one failed read withdraws it) discards the draft. Where the row wraps, losing
+          Return to automatic moves the way out too. */}
+      {returnToAutomatic ? <button ref={askedBy} type="button" className="os-link" disabled={saving} onClick={() => setAsking(true)}>{returnLabel}</button>
+        : view.revision ? <span className="os-link fleet-assignment-act-room" aria-hidden>{returnLabel}</span> : null}
       <button ref={wayOut} type="button" className="os-link" disabled={saving} onClick={onDiscard}>{sameModelChoices(choices, view.choices) && view.revision ? "Done" : "Discard changes"}</button>
-      {capacity.fits && canSave ? <Button tone="primary" busy={saving} busyLabel="Saving setup…" onClick={onSave}>Save setup</Button> : null}
+      {capacity.fits && canSave ? <Button tone="primary" busy={saving} busyLabel="Saving setup…" onClick={onSave}>{saveLabel}</Button>
+        : <span className="os-button fleet-assignment-act-room" aria-hidden>{saveLabel}</span>}
     </div>}
   </div>;
 }

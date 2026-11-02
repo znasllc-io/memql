@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -406,6 +408,48 @@ describe("model setup choices", () => {
  });
 });
 
+// THE ROW IS RIGHT-ALIGNED, so an act stands as far from the edge as what comes
+// after it is wide. A failed read withdraws Save setup; with nothing after it,
+// Discard changes slid to where Save had been, and a click aimed at Save closed
+// the editor, wrote nothing and lost the draft. It withdraws Return to automatic
+// too, and where the row wraps that moves everything after it. jsdom lays nothing
+// out, so this holds the two halves the browser combines: both sides of Discard
+// keep the words and dress that size them, and the stylesheet keeps that room
+// without drawing it (measured in a browser: at 1512 wide Discard stays at x
+// 1259-1378, where it used to move to 1362-1481; at 375 wide, wrapped, it stays at
+// 231-350).
+describe("a read that fails while a setup is edited", () => {
+ it("keeps Discard changes where it stood, with the room of what it withdrew empty", async () => {
+  const sheet = document.head.appendChild(document.createElement("style"));
+  sheet.textContent = readFileSync(join(__dirname, "..", "..", "src", "apps", "fleet", "machines", "machineModels.css"), "utf8");
+  onTestFinished(() => sheet.remove());
+  const labels = {"model:chat":"tools=1", "model:small":"tools=1"};
+  const connection = await mount(labels, {setup:setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  const discard = screen.getByRole("button", {name:"Discard changes"});
+  expect(discard.previousElementSibling).toBe(screen.getByRole("button", {name:"Return to automatic"}));
+  expect(discard.nextElementSibling).toBe(screen.getByRole("button", {name:"Save setup"}));
+  connection.query.fleetModelSetup.mockRejectedValueOnce(new Error("stream closed"));
+  await act(async () => { connection.subscriptions.emit("v1:worker:registration", machineRow({ id: "laptop", ownerUserId: OWNER, labels }), "NODE_UPDATED"); await Promise.resolve(); });
+  await waitFor(() => expect(screen.getByText("The catalog could not be read.")).toBeTruthy());
+  expect(screen.queryByRole("button", {name:"Save setup"})).toBeNull();
+  expect(screen.queryByRole("button", {name:"Return to automatic"})).toBeNull();
+  expect(screen.getByRole("button", {name:"Discard changes"})).toBe(discard);
+  for (const [room, words, dress] of [[discard.nextElementSibling, "Save setup", "os-button"], [discard.previousElementSibling, "Return to automatic", "os-link"]] as const) {
+   expect(room?.textContent).toBe(words);
+   expect(room?.classList.contains(dress)).toBe(true);
+   expect(getComputedStyle(room!).visibility).toBe("hidden");
+   expect(getComputedStyle(room!).display).not.toBe("none");
+   // A press where the act stood lands on nothing.
+   fireEvent.click(room!);
+  }
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+  expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
+  expect(connection.query.fleetClearModelSetup).not.toHaveBeenCalled();
+ });
+});
+
 // THE WAY BACK FROM A SAVED SETUP. Saving always mints a revision, so "Use
 // suggested" with the same picks still leaves a saved setup and its 32K ceiling.
 describe("returning a saved setup to automatic", () => {
@@ -443,7 +487,7 @@ describe("returning a saved setup to automatic", () => {
  it("is absent from a machine already on automatic", async () => {
   await mount(labels, {setup: automatic});
   fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
-  expect(screen.getByRole("button", {name:"Discard changes"})).toBeTruthy();
+  expect(screen.getByRole("button", {name:"Discard changes"}).previousElementSibling).toBeNull();
   expect(screen.queryByRole("button", {name:"Return to automatic"})).toBeNull();
  });
  it("is not a save: Use suggested only fills the draft", async () => {
@@ -528,7 +572,9 @@ describe("returning a saved setup to automatic", () => {
   await waitFor(() => expect(screen.getByText("Returned to automatic.")).toBeTruthy());
   expect(screen.getByText("MemQL chooses automatically")).toBeTruthy();
   await rereadWith(connection, { ...setupFixture, revision: "saved-elsewhere" });
-  await waitFor(() => expect(screen.getByText("Your choices")).toBeTruthy());
+  // useGraphRevision holds a second invalidation until a second after the first, so
+  // the default one-second deadline leaves this read only a few milliseconds.
+  await waitFor(() => expect(screen.getByText("Your choices")).toBeTruthy(), { timeout: 3000 });
   expect(screen.queryByText("Returned to automatic.")).toBeNull();
  });
  it("still reports the return on a machine with nothing installed", async () => {
