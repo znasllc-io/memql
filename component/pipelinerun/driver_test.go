@@ -2108,16 +2108,6 @@ func TestARunEndedOnResumeRestatesItsStepsAttempts(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTimingsMergeOnlyAfterASuccessfulFullRun(t *testing.T) {
-	timed := func(dh *driveHarness, fail bool) {
-		dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
-			res := passed(req)
-			res.Timings = map[string]float64{"acme.test/shop/" + req.Step.Name: 3.5}
-			if fail && req.StepKey == "tests.lint" {
-				res.Status, res.ExitCode = pipelines.OutcomeFailed, 1
-			}
-			return res, nil
-		}
-	}
 	cases := []struct {
 		name  string
 		open  Opening
@@ -2130,14 +2120,23 @@ func TestTimingsMergeOnlyAfterASuccessfulFullRun(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			dh := newDriveHarness(t, driveManifest)
-			p, _ := dh.store.pipeline(dh.p.ID)
-			p.Timings = map[string]float64{"acme.test/kept": 1}
-			dh.store.addPipeline(p)
-			timed(dh, c.fail)
+			dh := newTimingHarness(t, timingManifest, map[string]float64{"acme.test/kept": 1})
+			dh.github.mu.Lock()
+			dh.github.compare[repoName+"@"+shaBase+"..."+shaA] = compareAnswer{Files: []string{"a/a.go", "b/b.go"}, Complete: true}
+			dh.github.mu.Unlock()
+			var fails atomic.Bool
+			fails.Store(c.fail)
+			dh.exec.answer = failing(reportTimes(map[string]map[string]float64{
+				"tests.go": {timedA: 3.5, timedB: 3.5, timedC: 3.5},
+			}), "lanes.fuzz", &fails)
 			run := dh.openRun(t, c.open)
 			deliver(t, dh.integ, run)
 
+			// Whatever the run's verdict, a step that teaches ran and reported, so
+			// an untouched table is this rule's doing and no accident of the plan.
+			if keys := dh.exec.sentKeys(); !slices.Contains(keys, "tests.go#1") {
+				t.Fatalf("the shards ran: %v", keys)
+			}
 			after, _ := dh.store.pipeline(dh.p.ID)
 			if !c.merge {
 				if len(after.Timings) != 1 || after.TimingsRunID != "" {
@@ -2145,7 +2144,7 @@ func TestTimingsMergeOnlyAfterASuccessfulFullRun(t *testing.T) {
 				}
 				return
 			}
-			want := map[string]float64{"acme.test/kept": 1, "acme.test/shop/vet": 3.5, "acme.test/shop/unit": 3.5, "acme.test/shop/lint": 3.5}
+			want := map[string]float64{"acme.test/kept": 1, timedA: 3.5, timedB: 3.5, timedC: 3.5}
 			if len(after.Timings) != len(want) || after.TimingsRunID != run.ID || after.TimingsUpdatedAt.IsZero() {
 				t.Fatalf("timings %v run %q at %v", after.Timings, after.TimingsRunID, after.TimingsUpdatedAt)
 			}

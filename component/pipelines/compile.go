@@ -330,6 +330,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		Secrets:         compiledCopy(declared.Secrets),
 		ImagePullSecret: declared.ImagePullSecret,
 		DependsOn:       compiledCopy(dependsOn),
+		Balanced:        declared.Shards > 1,
 	}
 
 	if step.Execution == ExecutionNative {

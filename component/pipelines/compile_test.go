@@ -109,10 +109,15 @@ func d7Shard(step Step, index, count int, packages ...string) Step {
 
 var (
 	d7BuildVet = d7Command("checks", "build-vet", "go build ./... && go vet ./...")
-	d7GoTests  = d7Command("tests", "go-tests", "go test $MEMQL_PACKAGES", "checks.build-vet")
-	d7DBTests  = func() Step {
+	d7GoTests  = func() Step {
+		s := d7Command("tests", "go-tests", "go test $MEMQL_PACKAGES", "checks.build-vet")
+		s.Balanced = true
+		return s
+	}()
+	d7DBTests = func() Step {
 		s := d7Command("tests", "db-tests", "MEMQL_REQUIRE_DB=1 go test $MEMQL_PACKAGES", "checks.build-vet")
 		s.Services = map[string]Service{"postgres": {Image: d7Postgres}}
+		s.Balanced = true
 		return s
 	}()
 	d7OSChecks = func() Step {
@@ -608,6 +613,49 @@ func TestCompileRejectsUnknownOrDuplicateDSLStageSelections(t *testing.T) {
 				t.Fatalf("invalid selection was accepted: plan=%+v refusal=%+v", plan, refusal)
 			}
 		})
+	}
+}
+
+// Balanced is what a step declares and not how it came out, because it decides
+// which steps teach the timing table: a step that could not split this time must
+// still teach, or a table that left it whole could never let it split again.
+func TestCompileBalancedIsWhatAStepDeclares(t *testing.T) {
+	spec := &Spec{
+		Select: &Select{Go: SelectImportGraph},
+		Stages: []StageSpec{{Name: "tests", Steps: []StepSpec{
+			{Name: "split", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAffected, Shards: 2},
+			{Name: "one", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAffected, Shards: 1},
+			{Name: "packages", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAffected},
+			{Name: "fuzz", Run: "go test -fuzz Fuzz ./a/"},
+		}}},
+	}
+	compile := func(selected []string, timings map[string]float64) Plan {
+		return mustCompilePlan(t, spec, CompileInput{
+			Mode: ModeAffected, Event: EventPullRequest, Timings: timings,
+			Selector: d7Selector(Selection{Packages: selected}),
+		})
+	}
+	balanced := func(plan Plan) []string {
+		var keys []string
+		for _, step := range plan.Steps() {
+			if step.Balanced {
+				keys = append(keys, step.Key)
+			}
+		}
+		return keys
+	}
+	for _, c := range []struct {
+		name string
+		plan Plan
+		want []string
+	}{
+		{"split", compile([]string{d7GRPC, d7Memql}, nil), []string{"tests.split#1", "tests.split#2"}},
+		{"one package cannot split", compile([]string{d7GRPC}, nil), []string{"tests.split"}},
+		{"packages measured at zero cannot split", compile([]string{d7GRPC, d7Memql}, map[string]float64{d7GRPC: 0, d7Memql: 0}), []string{"tests.split"}},
+	} {
+		if got := balanced(c.plan); !slices.Equal(got, c.want) {
+			t.Errorf("%s: balanced steps are %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

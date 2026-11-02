@@ -1447,6 +1447,9 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 			return // the attempt is the replica taking the run over's to re-attach to
 		}
 		rec := dr.attemptReceipt(end, ceiling, len(step.Artifacts) > 0)
+		if step.Balanced {
+			dr.observe(rec.timings)
+		}
 		history := append(slices.Clone(t.snapshot().Attempts), dr.attemptOf(req, end, rec, began))
 		t.setAttempts(history)
 
@@ -2018,6 +2021,9 @@ type receipt struct {
 	// logTail stays in memory, UNMASKED, until the check run masks it; it is
 	// never written to a row.
 	logTail string
+	// timings stays in memory too: what the step reported of each passing
+	// package's time, for runStep to observe if the step teaches the table.
+	timings map[string]float64
 }
 
 func (r receipt) journal() workjournal.Receipt {
@@ -2105,13 +2111,12 @@ func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration,
 	rec.result = map[string]any{"status": status, "metadata": metadata}
 	// A package path is written to the pipeline's timing table: one that
 	// would need masking is no package path, and is not kept.
-	timings := make(map[string]float64, len(res.Timings))
+	rec.timings = make(map[string]float64, len(res.Timings))
 	for path, seconds := range res.Timings {
 		if mask(path) == strings.TrimSpace(path) {
-			timings[path] = seconds
+			rec.timings[path] = seconds
 		}
 	}
-	dr.observe(timings)
 	return rec
 }
 
@@ -2521,7 +2526,11 @@ func (dr *runDriver) maskValues() []string {
 // mask is s with every secret value this drive resolved replaced.
 func (dr *runDriver) mask(s string) string { return pipelines.MaskSecrets(s, dr.maskValues()) }
 
-// observe collects a step's package timings for the pipeline's table.
+// observe collects the package timings of a step that teaches the pipeline's
+// table (timings.go). The table has one row per package and a drive can read
+// several times for one: from two steps that declare shards over it, or from a
+// retried attempt. The largest takes the row, so the row does not depend on
+// which of them finished last.
 func (dr *runDriver) observe(timings map[string]float64) {
 	if len(timings) == 0 {
 		return
@@ -2531,7 +2540,11 @@ func (dr *runDriver) observe(timings map[string]float64) {
 	if dr.observed == nil {
 		dr.observed = map[string]float64{}
 	}
-	maps.Copy(dr.observed, timings)
+	for path, seconds := range timings {
+		if known, seen := dr.observed[path]; !seen || seconds > known {
+			dr.observed[path] = seconds
+		}
+	}
 }
 
 func (dr *runDriver) observedTimings() map[string]float64 {

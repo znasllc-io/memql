@@ -56,7 +56,7 @@ concept pipeline {
   secretNames       []string  @description("The globalSecret NAMES a step of this pipeline may resolve -- the owner's allowlist. A step naming a secret not listed here is refused before any executor sees it, and a name beginning MEMQL_ never resolves whatever this list says.")
   channelIds        []string  @description("The channels a notify stage of this pipeline may deliver to (D16): the ids of v1:pipelines:channel rows, written by pipelinesChannelAllow when a person allows the pipeline on a channel. A notify stage naming a channel outside this set is refused (pipeline_channel_not_allowed).")
   heads             object  @description("What the poll has seen, keyed by ref: {\"branch:<name>\": sha, \"pr:<number>\": sha}. The first poll records it and opens nothing; a later poll opens a run for a head that moved and drops the keys of closed pull requests. Written whole, so a writer always sends the complete map.")
-  timings           object  @description("Seconds per Go import path, merged from every successful FULL run's step timings -- what the shard split balances on. Written whole.")
+  timings           object  @description("Seconds per Go import path, merged from the steps that declare shards in every successful FULL run -- what the shard split balances on. Written whole.")
   timingsRunId      string  @description("The v1:pipelines:run whose timings were merged into this table last.")
   timingsUpdatedAt  datetime  @description("When the timings table was last merged.")
   connectedAt       datetime  @description("When the pipeline was last connected: stamped by createPipeline, so a reconnect moves it.")

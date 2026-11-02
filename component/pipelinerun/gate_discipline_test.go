@@ -149,6 +149,11 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 	})
 
 	t.Run("a driven run, concluded, teaches the timings", func(t *testing.T) {
+		// Only a step that declares shards teaches the table (timings.go), and the
+		// merge is what takes the repository's gate here.
+		dh.setTree(shaA, timingManifest)
+		defer dh.setTree(shaA, driveManifest)
+		dh.addTimedPackages()
 		dh.exec.mu.Lock()
 		dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 			res := passed(req)

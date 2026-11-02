@@ -1539,9 +1539,20 @@ split balances on the pipeline's timing table, heaviest package first, each
 into the lightest shard so far; a package the table has not measured weighs
 five seconds. Packages that cannot be split -- one, or several measured at
 zero -- run as one step under the step's own key. The table learns: after every
-successful full run, each passing package's time from its step's `go test`
-output (an `ok  <package>  <seconds>s` line; a cached result is not a
-measurement) replaces that package's row.
+successful full run, each passing package's time from the `go test` output of a
+step with `shards` of 2 or more (an `ok  <package>  <seconds>s` line; a cached
+result is not a measurement) replaces that package's row, whether or not the step
+came out split.
+
+Only those steps teach, because what the split needs is a package's time in the
+step being split, and a package's time in another step answers a different
+question. A bounded fuzz of a package takes 40 seconds whatever its test suite
+costs, and a lane that runs one package under a build tag can spend five times
+what that package's shard does. A failed-only re-run teaches what it ran of those
+steps and leaves every other row as it was. A package that two such steps both run
+has one row, and the larger of its two times takes it, so the row does not depend
+on which step finished last. The next run's time replaces it either way, so a
+package that gets faster gets lighter.
 
 ---
 
