@@ -3,7 +3,7 @@ import { useConnectionRecovery, useConnectionStatus } from "../chrome/connection
 
 /** Shared, non-blocking connection feedback. Brief browser suspensions are
  * silent. The grace period starts when visible, not while Safari is asleep. */
-export function ConnectionNotice({ className = "" }: { className?: string }) {
+export function ConnectionNotice({ className = "", retryLabel = "Retry connection" }: { className?: string; retryLabel?: string }) {
   const status = useConnectionStatus();
   const { managed, retry } = useConnectionRecovery();
   const recovering = managed && status !== "connected";
@@ -24,8 +24,9 @@ export function ConnectionNotice({ className = "" }: { className?: string }) {
   if (!managed || status === "connected" || phase === "quiet") return null;
   return <div className={`os-connection-notice ${className}`}>
     <span role="status" aria-live="polite">
-      {phase === "connecting" ? <><span className="os-connection-spinner" aria-hidden="true" />Reconnecting…</> : "Can’t reconnect"}
+      {phase === "connecting" ? <span className="os-connection-spinner" aria-hidden="true" /> : null}
+      <span className="os-connection-text">{phase === "connecting" ? "Reconnecting…" : "Can’t reconnect"}</span>
     </span>
-    {phase === "unavailable" ? <button type="button" className="os-button" data-tone="quiet" onClick={retry}>Retry connection</button> : null}
+    {phase === "unavailable" ? <button type="button" className="os-button" data-tone="quiet" aria-label="Retry connection" onClick={retry}>{retryLabel}</button> : null}
   </div>;
 }

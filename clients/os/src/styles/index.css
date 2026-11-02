@@ -1864,7 +1864,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-phone-bar {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
@@ -1874,16 +1873,34 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   width: 20px;
   height: 20px;
 }
+.os-phone-mark, .os-phone-bar > .os-icon-button, .os-phone-bar > .os-link { flex: none; }
+.os-phone-bar > .os-link { margin-inline-start: auto; }
 .os-connection-notice { display: flex; align-items: center; gap: 12px; color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-connection-notice [role="status"] { display: inline-flex; align-items: center; gap: 8px; }
-.os-phone-connection { flex-basis: 100%; justify-content: center; }
+/* On the header's own line, with no way to make it taller: a line of its own moved
+ * every page under the finger, 24.5 px at two seconds and 40 px with Retry. A 30 px
+ * control's margins leave it the 20 px of the shortest line, the home page's. Retry
+ * stands at least 20 px from Sign out, which it used to share no line with. */
+.os-phone-connection { flex: 0 1 auto; min-width: 0; margin-inline-end: 10px; }
+.os-phone-connection [role="status"] { min-width: 0; white-space: nowrap; }
+.os-phone-connection .os-connection-spinner { flex: none; }
+.os-phone-connection .os-connection-text { overflow: hidden; text-overflow: ellipsis; }
+.os-phone-connection .os-button { flex: none; margin-block: calc((20px - var(--os-control-h)) / 2); }
 .os-connection-floating { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); z-index: 1500; padding: 8px 12px; background: var(--os-plate); border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); }
 .os-connection-spinner { width: 12px; height: 12px; border: 1.5px solid var(--os-line); border-top-color: currentColor; border-radius: 50%; animation: os-wizard-spin .8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .os-connection-spinner { animation: none; } }
 .os-phone-content, .os-phone-page { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .os-phone-content { position: relative; }
+/* Only the room the notice leaves, on one line. Starting from nothing, it can never take
+ * from the notice: a shrink ratio, however lopsided, still shaved a fraction of a pixel
+ * off the notice, and any overflow at all puts "..." in place of its last letters. */
 .os-phone-title {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: max-content;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-weight: 600;
 }
 

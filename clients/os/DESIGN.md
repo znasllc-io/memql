@@ -475,6 +475,14 @@ After thirty seconds it offers “Can’t reconnect” and **Retry connection**;
 automatic recovery continues. Hidden time does not consume the visible grace
 period, and reduced motion keeps the cue without spinning it.
 
+On a phone the notice stands on the header's own line, after the title, and adds
+no height, so nothing in the header or under it moves. A line of its own moved every
+page under the finger. The title gives way to it and cuts off its own end, the
+notice cuts off only when nothing else is left to give, and Sign out keeps its edge
+with whatever room is left between it and Retry. **Retry connection** reads “Retry”
+there, because the whole name does not fit beside a title, and keeps its whole name
+for assistive technology. Everywhere else the notice floats.
+
 A feed that falls behind says so on its page's heading line (`kit` `HeadNote`),
 never as a block above the content. It arrives on its own, whatever the person is
 doing, and a block moves the page under the pointer. The note takes only the room

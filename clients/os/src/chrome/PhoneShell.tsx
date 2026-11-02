@@ -90,10 +90,10 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
           <Mark className="os-phone-mark" />
         )}
         <span className="os-phone-title">{current ? current.name : "MemQL OS"}</span>
+        <ConnectionNotice className="os-phone-connection" retryLabel="Retry" />
         <button type="button" className="os-link" onClick={onSignOut}>
           Sign out
         </button>
-        <ConnectionNotice className="os-phone-connection" />
       </header>
       <div className="os-phone-content">
       <div className="os-phone-page" inert={sheet.open}>
