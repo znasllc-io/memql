@@ -1746,6 +1746,29 @@ QueryClient.prototype.fleetCapacity = function (this: QueryClient, args: FleetCa
   return this.executeNamed("fleetCapacity", buildFleetCapacity(args), opts);
 };
 
+/** Return your machine to automatic model routing by removing its saved choices, with a revision check. Existing calls finish. Later calls can use any model the machine offers and contexts above 32K, and are no longer run one at a time. */
+export interface FleetClearModelSetupArgs {
+  registrationId: string;
+  revision: string;
+}
+
+export function buildFleetClearModelSetup(args: FleetClearModelSetupArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "builtin fleetClearModelSetup(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetClearModelSetup(args: FleetClearModelSetupArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetClearModelSetup = function (this: QueryClient, args: FleetClearModelSetupArgs = {} as FleetClearModelSetupArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetClearModelSetup", buildFleetClearModelSetup(args), opts);
+};
+
 /** Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup. */
 export interface FleetEnergySettingsArgs {
   registrationId: string;

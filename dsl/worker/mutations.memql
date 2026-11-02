@@ -1529,7 +1529,7 @@ mutation registration updateWorkerSharingActivity {
   }
 }
 
-/// Save one validated model setup. The engine owns admission and the row version fence.
+/// Save one validated model setup, or the empty block fleetClearModelSetup writes to return the machine to automatic. The engine owns admission and the row version fence.
 /// actor.userId scoping alone cannot enforce hardware capacity, model capabilities, or an expected revision; fleetSetModelSetup performs those checks first.
 @actor
 @serverOnly

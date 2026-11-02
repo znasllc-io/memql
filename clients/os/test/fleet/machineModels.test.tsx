@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 const { ModelsGroup } = await import("../../src/apps/fleet/machines/ModelsGroup");
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
 const { MODEL_PULL_CONCEPT } = await import("../../src/apps/fleet/machines/useModelPulls");
-const { fakeConnection, machineRow, modelPullRow, withSession } = await import("./harness");
+const { builtinReply, fakeConnection, machineRow, modelPullRow, withSession } = await import("./harness");
 
 // The Models group on a machine's detail (epic memql#5103, design D5).
 //
@@ -28,12 +28,12 @@ const OWNER = "v1:identity:user:me";
 
 async function mount(
   labels: Record<string, string>,
-  opts: { owner?: string; viewer?: string; pulls?: Row[]; setup?: Row } = {},
+  opts: { owner?: string; viewer?: string; pulls?: Row[]; setup?: Row; revokedAt?: string } = {},
 ) {
   const connection = fakeConnection({ modelPullsForWorker: opts.pulls ?? [], fleetModelSetup: [opts.setup ?? { id:"laptop",revision:"",choices:{},usableBytes:48e9,diskFreeBytes:100e9,catalog:[{modelId:"hf.co/TheBloke/Llama-2-70B-GGUF:Q4_K_M",runtime:"ollama",purposes:["conversation"],memoryBytes:40e9,sizeBytes:39e9,installed:false,blocked:"",installBlocked:"",recommended:true}] }] });
   h.connection = connection;
   const machine = machineFromRow(
-    machineRow({ id: "laptop", ownerUserId: opts.owner ?? OWNER, labels }),
+    machineRow({ id: "laptop", ownerUserId: opts.owner ?? OWNER, labels, ...(opts.revokedAt ? { revokedAt: opts.revokedAt } : {}) }),
   );
   render(withSession(<ModelsGroup machine={machine} />, { userId: opts.viewer ?? OWNER }));
   await act(async () => {
@@ -373,5 +373,181 @@ describe("model setup choices", () => {
   expect((screen.getByRole("button", {name:"Select chat"}) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => finish());
   expect(screen.getByText("Model setup saved.")).toBeTruthy();
+ });
+});
+
+// THE WAY BACK FROM A SAVED SETUP. Saving always mints a revision, so "Use
+// suggested" with the same picks still leaves a saved setup and its 32K ceiling.
+describe("returning a saved setup to automatic", () => {
+ const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+ const automatic = { ...setupFixture, revision: "", choices: {}, suggestedChoices: { conversation: "chat", tools: "chat" } };
+ const labels = {"model:chat":"tools=1", "model:small":"tools=1"};
+ // The next read answers with this setup, and a graph event is what asks for it.
+ async function rereadWith(connection: Awaited<ReturnType<typeof mount>>, setup: Row) {
+  connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [setup]));
+  await act(async () => { connection.subscriptions.emit("v1:worker:registration", machineRow({ id: "laptop", ownerUserId: OWNER, labels }), "NODE_UPDATED"); await Promise.resolve(); });
+ }
+ async function ask() {
+  const connection = await mount(labels, {setup: setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  fireEvent.click(screen.getByRole("button", {name:"Return to automatic"}));
+  return connection;
+ }
+ it("says what it does before doing it, then sends the revision it read", async () => {
+  const connection = await ask();
+  const question = screen.getByRole("group", {name:/^Returning .* to automatic$/});
+  expect(question.textContent).toMatch(/every model this machine offers/);
+  expect(question.textContent).toMatch(/32K/);
+  expect(question.textContent).toMatch(/one at a time/);
+  expect(question.textContent).toMatch(/saved choices/);
+  expect(connection.query.fleetClearModelSetup).not.toHaveBeenCalled();
+  connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [automatic]));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  expect(connection.query.fleetClearModelSetup).toHaveBeenCalledWith({registrationId:"laptop", revision:"before"});
+  expect(connection.query.fleetSetModelSetup).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByText("MemQL chooses automatically")).toBeTruthy());
+  expect(screen.getByText("Returned to automatic.").getAttribute("role")).toBe("status");
+  expect(screen.queryByText("Your choices")).toBeNull();
+ });
+ it("is absent from a machine already on automatic", async () => {
+  await mount(labels, {setup: automatic});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  expect(screen.getByRole("button", {name:"Discard changes"})).toBeTruthy();
+  expect(screen.queryByRole("button", {name:"Return to automatic"})).toBeNull();
+ });
+ it("is not a save: Use suggested only fills the draft", async () => {
+  const connection = await mount(labels, {setup: {...setupFixture, suggestedChoices: {conversation:"small"}}});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  fireEvent.click(screen.getByRole("button", {name:"Use suggested"}));
+  expect(connection.query.fleetClearModelSetup).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", {name:"Return to automatic"})).toBeTruthy();
+ });
+ it("takes no press from the second click of the double click that asked", async () => {
+  const connection = await ask();
+  fireEvent.click(screen.getByRole("button", {name:"Return to automatic"}));
+  expect(connection.query.fleetClearModelSetup).not.toHaveBeenCalled();
+ });
+ it("moves focus to the question and back to the act when kept, writing nothing", async () => {
+  const connection = await ask();
+  const question = screen.getByRole("group", {name:/^Returning .* to automatic$/});
+  expect(document.activeElement).toBe(question);
+  await settle();
+  fireEvent.click(screen.getByRole("button", {name:"Keep my choices"}));
+  expect(screen.queryByRole("group", {name:/^Returning .* to automatic$/})).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("button", {name:"Return to automatic"}));
+  expect(connection.query.fleetClearModelSetup).not.toHaveBeenCalled();
+ });
+ it("mentions unsaved changes only when there are some, and keeps them after a refusal", async () => {
+  const connection = await mount(labels, {setup: setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  fireEvent.click(screen.getByRole("button", {name:"Return to automatic"}));
+  expect(screen.getByRole("group", {name:/^Returning .* to automatic$/}).textContent).toMatch(/changes here/);
+  connection.query.fleetClearModelSetup.mockRejectedValueOnce(new Error("Connection interrupted"));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  expect(screen.getByText("Connection interrupted")).toBeTruthy();
+  // The question stays open beside its refusal, and closing it loses nothing.
+  await settle();
+  fireEvent.click(screen.getByRole("button", {name:"Keep my choices"}));
+  expect(screen.getByRole("button", {name:"Conversation: small"})).toBeTruthy();
+  expect(screen.queryByText("Returned to automatic.")).toBeNull();
+ });
+ it("withdraws the act when a refusal shows the setup changed elsewhere", async () => {
+  const connection = await ask();
+  connection.query.fleetClearModelSetup.mockRejectedValueOnce(new Error("The model setup changed. Reload it and try again."));
+  connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [{ ...setupFixture, revision: "after" }]));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  await waitFor(() => expect(screen.getByText("This setup changed elsewhere.")).toBeTruthy());
+  expect(screen.getByText("The model setup changed. Reload it and try again.")).toBeTruthy();
+  expect(screen.queryByRole("button", {name:"Return to automatic"})).toBeNull();
+  expect(screen.queryByRole("group", {name:/^Returning .* to automatic$/})).toBeNull();
+  // The act that asked is gone, so focus goes to the way out rather than the page.
+  expect(document.activeElement).toBe(screen.getByRole("button", {name:"Done"}));
+ });
+ it("does not reopen the question, or take focus, when a failed read recovers", async () => {
+  const connection = await ask();
+  connection.query.fleetClearModelSetup.mockRejectedValueOnce(new Error("Connection interrupted"));
+  connection.query.fleetModelSetup.mockRejectedValueOnce(new Error("Still disconnected"));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  await waitFor(() => expect(screen.queryByRole("group", {name:/^Returning .* to automatic$/})).toBeNull());
+  // The person has moved on by the time the read recovers.
+  const elsewhere = screen.getByRole("button", {name:"Select small"});
+  elsewhere.focus();
+  await rereadWith(connection, setupFixture);
+  await waitFor(() => expect(screen.getByRole("button", {name:"Return to automatic"})).toBeTruthy());
+  expect(screen.queryByRole("group", {name:/^Returning .* to automatic$/})).toBeNull();
+  expect(document.activeElement).toBe(elsewhere);
+ });
+ it("offers no change to a machine that has been removed", async () => {
+  await mount(labels, {setup: setupFixture, revokedAt: "2026-10-01T00:00:00Z"});
+  expect(screen.getByText("Your choices")).toBeTruthy();
+  expect(screen.queryByRole("button", {name:"Change model setup"})).toBeNull();
+ });
+ it("says it returned only once the page shows it, and not after a later save", async () => {
+  const connection = await ask();
+  await settle();
+  // The write landed, and the page's read has not caught up yet.
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  expect(screen.getByText("Your choices")).toBeTruthy();
+  expect(screen.queryByText("Returned to automatic.")).toBeNull();
+  await rereadWith(connection, automatic);
+  await waitFor(() => expect(screen.getByText("Returned to automatic.")).toBeTruthy());
+  expect(screen.getByText("MemQL chooses automatically")).toBeTruthy();
+  await rereadWith(connection, { ...setupFixture, revision: "saved-elsewhere" });
+  await waitFor(() => expect(screen.getByText("Your choices")).toBeTruthy());
+  expect(screen.queryByText("Returned to automatic.")).toBeNull();
+ });
+ it("still reports the return on a machine with nothing installed", async () => {
+  const connection = await mount({"runtime:ollama":"1"}, {setup: setupFixture});
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  fireEvent.click(screen.getByRole("button", {name:"Return to automatic"}));
+  connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [automatic]));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  await waitFor(() => expect(screen.getByText("Returned to automatic.")).toBeTruthy());
+ });
+ it("shows a refusal as its sentence, without the engine's frames", async () => {
+  const connection = await ask();
+  connection.query.fleetClearModelSetup.mockRejectedValueOnce(new Error("fleetClearModelSetup: MemQL engine failed to execute query. Details: The model setup changed. Reload it and try again."));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  expect(screen.getByText("The model setup changed. Reload it and try again.")).toBeTruthy();
+  expect(screen.queryByText(/MemQL engine failed/)).toBeNull();
+ });
+ it("shows a refused save without the engine's frames too", async () => {
+  const connection = await mount(labels, {setup:setupFixture});
+  connection.query.fleetSetModelSetup.mockRejectedValueOnce(new Error("fleetSetModelSetup: MemQL engine failed to execute query. Details: The model setup changed. Reload it and try again."));
+  fireEvent.click(screen.getByRole("button", {name:"Change model setup"}));
+  await chooseTask("Conversation", "small");
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Save setup"})); });
+  expect(screen.getByText("The model setup changed. Reload it and try again.")).toBeTruthy();
+ });
+ it("does not report a return nobody confirmed", async () => {
+  const connection = await ask();
+  connection.query.fleetClearModelSetup.mockResolvedValueOnce(builtinReply("fleetClearModelSetup", []));
+  await settle();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name:"Return to automatic"})); });
+  expect(screen.getByText(/did not confirm/)).toBeTruthy();
+  expect(screen.queryByText("Returned to automatic.")).toBeNull();
+  expect(screen.getByRole("group", {name:/^Returning .* to automatic$/})).toBeTruthy();
+ });
+ it("holds its answers and prevents a second write while returning", async () => {
+  const connection = await ask();
+  let finish!: () => void;
+  connection.query.fleetClearModelSetup.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(builtinReply("fleetClearModelSetup", [{ revision: "", automatic: true }])); }));
+  await settle();
+  fireEvent.click(screen.getByRole("button", {name:"Return to automatic"}));
+  fireEvent.click(screen.getByRole("button", {name:"Returning…"}));
+  expect(connection.query.fleetClearModelSetup).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole("button", {name:"Keep my choices"}) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", {name:"Select chat"}) as HTMLButtonElement).disabled).toBe(true);
+  connection.query.fleetModelSetup.mockResolvedValue(builtinReply("fleetModelSetup", [automatic]));
+  await act(async () => finish());
+  await waitFor(() => expect(screen.getByText("Returned to automatic.")).toBeTruthy());
  });
 });

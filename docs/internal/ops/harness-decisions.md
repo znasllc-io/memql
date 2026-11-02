@@ -1721,6 +1721,37 @@ union use `FleetModelAdvertisedOnEveryMachineForTest`. Tests:
 `TestTheContextFloorIsTheServingMachinesWindow`,
 `TestProjectKeepsEachMachinesWindow`, `TestAnEmbeddingModelAnswersEmbeddingCallsOnly`.
 
+**A saved model setup returns to automatic through its own write**
+(`fleetClearModelSetup`, `component/memql/fleet_model_setup.go`). The trigger is
+the owner choosing Return to automatic on a machine's Models page. Saving cannot
+do this: `fleetSetModelSetup` always mints a revision and `ModelSetup.Allows` reads
+only an empty revision as automatic, so the same picks saved again stay capped at
+32K and at one call at a time. The write stores an empty `modelSetup` block rather
+than removing the field, because a read-merge only overwrites keys, and a null is
+refused twice: `setWorkerModelSetup`'s required argument reads it as missing, and
+the concept's schema types the field as an object. Every reader decides on the
+revision, so empty and absent read alike, and a revision with no choices still
+serves nothing. Saving and clearing share `writeModelSetup`, the one write path, so
+own-machine admission, the row version fence and the revision check run in that
+order on both and neither can write outside the fence. The fence refuses a
+heartbeat just as it refuses a rival, so the write tries again, up to three times.
+The revision check on the next attempt tells them apart: a heartbeat leaves the
+revision alone and the write goes through, and a rival gets the plain "changed"
+refusal. The clear runs no capacity or bound-embedder check, because automatic
+narrows nothing and the machine's own memory gate still judges each call. A
+machine already on automatic gets no new row version. The empty block survives
+later heartbeats and renames, which carry it through the read-merge. Calls already
+running finish, and a call waiting on the setup slot rereads the row after its
+wait. Tests:
+`TestAClearedMachineServesAnyModelItOffersAndContextsAbove32K`,
+`TestClearingAModelSetupRefusesAStaleRevisionAndAMachineThatIsNotYours`,
+`TestOnlyTheOwnerWriteCanClearAModelSetup`,
+`TestARivalLandingAfterAdmissionRefusesTheAdmittedWrite`,
+`TestAHeartbeatRacingTheWriteDoesNotRefuseIt`,
+`TestAMachineReturnedToAutomaticAdmitsAnyModelAndALargerContext`,
+`TestACallWaitingOnTheSetupSlotSeesTheMachineReturnToAutomatic`. Not verified on a
+production machine: these run against a real database and fake worker streams.
+
 **A tool-free app turn in an Auto goal is a model call**
 (`integrations/agent/worker/app_gate.go`, `toolFreeTurnWaivesDestination`).
 Pipeline maintenance opens the diagnosis goal for the owner with no route

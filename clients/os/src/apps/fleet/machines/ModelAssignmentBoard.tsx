@@ -1,8 +1,9 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRight, Braces, GripVertical, Image, LockKeyhole, MessageCircle, Mic, ScanEye, Search, Volume2, Wrench, X } from "lucide-react";
 import { Button, Notice, Subhead } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { formatBytes } from "../../../kit/format";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { MODEL_PURPOSES, assignmentProposal, sameModelChoices, setupCapacity, type ModelChoices, type ModelSetupView } from "./modelSetup";
 
 const taskIcons = { conversation: MessageCircle, structured: Braces, tools: Wrench, vision: ScanEye, embeddings: Search, audioIn: Mic, audioOut: Volume2, imageGen: Image };
@@ -13,15 +14,33 @@ const taskSummary = (purposes: string[]) => {
   return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} +${labels.length - 2}` : labels.join(", ") || "No tasks reported";
 };
 
-export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscard, saving, canSave, saveError = "" }: {
+export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscard, saving, canSave, saveError = "", returnToAutomatic }: {
   view: ModelSetupView; choices: ModelChoices; onChange: (choices: ModelChoices) => void;
   onSave: () => void; onDiscard: () => void; saving: boolean; canSave: boolean; saveError?: string;
+  /** Present only while a saved setup stands that this page may still remove; without it the act is absent. */
+  returnToAutomatic?: { machine: string; onConfirm: () => void };
 }) {
   const installed = view.catalog.filter(m => m.installed);
   const [selectedId, setSelectedId] = useState(() => installed.find(m => !m.blocked && m.memoryBytes)?.modelId ?? installed[0]?.modelId ?? "");
   const [preview, setPreview] = useState<ModelChoices | null>(null);
   const [message, setMessage] = useState("");
   const [dropTarget, setDropTarget] = useState("");
+  const [asking, setAsking] = useState(false);
+  const question = useRef<HTMLDivElement>(null);
+  const askedBy = useRef<HTMLButtonElement>(null);
+  const wayOut = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+  const canReturn = !!returnToAutomatic;
+  // A question whose act was withdrawn is over. It must not reopen by itself when
+  // the act comes back, and take focus from wherever the person went.
+  useEffect(() => { if (!canReturn) setAsking(false); }, [canReturn]);
+  const showQuestion = asking && canReturn;
+  useEffect(() => {
+    if (showQuestion) question.current?.focus();
+    // Only when focus went with the question: somebody who moved on keeps their place.
+    else if (wasAsking.current && document.activeElement === document.body) (askedBy.current ?? wayOut.current)?.focus();
+    wasAsking.current = showQuestion;
+  }, [showQuestion]);
   const dragging = useRef("");
   const taskTargets = useRef(new Map<string, HTMLElement>());
   const restoreTaskFocus = useRef("");
@@ -139,10 +158,20 @@ export function ModelAssignmentBoard({ view, choices, onChange, onSave, onDiscar
       </section>
     </div>
     {!capacity.fits ? <Notice tone="warn" sentence="This setup needs attention." next="Clear unavailable assignments, choose smaller models or reuse one across tasks." /> : null}
-    {saveError ? <Notice tone="error" sentence="The setup could not be saved." detail={saveError} /> : null}
-    <div className="os-panel-actions fleet-assignment-actions">
-      <button type="button" className="os-link" disabled={saving} onClick={onDiscard}>{sameModelChoices(choices, view.choices) && view.revision ? "Done" : "Discard changes"}</button>
+    {saveError ? <Notice tone="error" sentence="That change could not be completed." detail={saveError} /> : null}
+    {showQuestion ? <div key="question" ref={question} role="group" tabIndex={-1} aria-label={`Returning ${returnToAutomatic.machine} to automatic`} className="fleet-assignment-return"><InPlaceAsk className="os-fleet-confirm">
+      {/* Saying what changes is the point of asking: this is not Use suggested,
+          which only fills the draft and, once saved, keeps a saved setup's limits. */}
+      <p className="os-fleet-confirm-line">Return <strong>{returnToAutomatic.machine}</strong> to automatic? MemQL will choose from every model this machine offers, including any you left out here. Calls are no longer limited to 32K context or to one at a time.</p>
+      <p className="os-caption">Your saved choices{sameModelChoices(choices, view.choices) ? "" : " and the changes here"} are removed. Calls already running finish.</p>
+      <div className="os-panel-actions">
+        <Button disabled={saving} onClick={() => setAsking(false)}>Keep my choices</Button>
+        <Button tone="primary" busy={saving} busyLabel="Returning…" onClick={returnToAutomatic.onConfirm}>Return to automatic</Button>
+      </div>
+    </InPlaceAsk></div> : <div key="actions" className="os-panel-actions fleet-assignment-actions">
+      {returnToAutomatic ? <button ref={askedBy} type="button" className="os-link" disabled={saving} onClick={() => setAsking(true)}>Return to automatic</button> : null}
+      <button ref={wayOut} type="button" className="os-link" disabled={saving} onClick={onDiscard}>{sameModelChoices(choices, view.choices) && view.revision ? "Done" : "Discard changes"}</button>
       {capacity.fits && canSave ? <Button tone="primary" busy={saving} busyLabel="Saving setup…" onClick={onSave}>Save setup</Button> : null}
-    </div>
+    </div>}
   </div>;
 }

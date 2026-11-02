@@ -2342,6 +2342,32 @@ func FleetCapacityBuild(args FleetCapacityArgs) string {
 	return "builtin fleetCapacity()"
 }
 
+// FleetClearModelSetup -- Return your machine to automatic model routing by removing its saved choices, with a revision check. Existing calls finish. Later calls can use any model the machine offers and contexts above 32K, and are no longer run one at a time.
+type FleetClearModelSetupArgs struct {
+	RegistrationId string
+	Revision       string
+}
+
+// FleetClearModelSetup calls the engine builtin fleetClearModelSetup.
+func (qc *QueryClient) FleetClearModelSetup(ctx context.Context, args FleetClearModelSetupArgs) (*Result, error) {
+	call := FleetClearModelSetupBuild(args)
+	return qc.executeNamed(ctx, "fleetClearModelSetup", call)
+}
+
+func FleetClearModelSetupBuild(args FleetClearModelSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetClearModelSetup(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetEnergySettings -- Read or change your machine's private address and electricity settings. Owner verification and tariff confirmation require a personal session; address is sealed and excluded from lookup.
 type FleetEnergySettingsArgs struct {
 	RegistrationId string

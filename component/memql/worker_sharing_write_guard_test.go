@@ -70,3 +70,43 @@ func TestMachineFeatureAndWorkbenchConsentCannotBeWrittenDirectly(t *testing.T) 
 		}
 	}
 }
+
+// A saved setup is refused its way to automatic the same way a changed one is,
+// and the empty block fleetClearModelSetup leaves is then an ordinary stored value:
+// every heartbeat carries it through unjudged.
+func TestWorkerConsentGuardOnAClearedModelSetup(t *testing.T) {
+	const ana = "v1:identity:user:ana"
+	saved := map[string]any{"revision": "one", "choices": map[string]any{"tools": "chat"}}
+	withSaved := map[string]any{"ownerUserId": ana, "modelSetup": saved}
+	withCleared := map[string]any{"ownerUserId": ana, "modelSetup": map[string]any{}}
+	never := map[string]any{"ownerUserId": ana}
+	client := context.Background()
+
+	cases := []struct {
+		name    string
+		prior   map[string]any
+		final   map[string]any
+		refused bool
+	}{
+		{"a saved setup cleared to the empty block", withSaved, withCleared, true},
+		{"a saved setup removed outright", withSaved, never, true},
+		{"an empty block written over a machine that never had a setup", never, withCleared, true},
+		{"a setup saved over a cleared one", withCleared, withSaved, true},
+		{"a heartbeat carrying the cleared block through", withCleared,
+			map[string]any{"ownerUserId": ana, "lastSeenAt": "now", "modelSetup": map[string]any{}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWorkerConsentServerOnly(client, tc.prior, tc.final)
+			if tc.refused && err == nil {
+				t.Fatal("refusal expected, the write was admitted")
+			}
+			if !tc.refused && err != nil {
+				t.Fatalf("admission expected, got %v", err)
+			}
+			if err := validateWorkerConsentServerOnly(auth.ContextWithInternalOrigin(client), tc.prior, tc.final); err != nil {
+				t.Fatalf("internal origin is the one way past the guard, and it was refused: %v", err)
+			}
+		})
+	}
+}

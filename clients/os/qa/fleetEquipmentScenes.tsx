@@ -73,6 +73,12 @@ export function fleetEquipmentScenes(Frame: Frame) {
         setup = { ...setup, revision: "setup-2", choices: args.choices as typeof setup.choices };
         return builtinReply("fleetSetModelSetup", [{ revision: setup.revision }]);
       });
+      connection.query.fleetClearModelSetup = vi.fn(async () => {
+        if (delaySave) await new Promise<void>(resolve => { finishSave = resolve; });
+        if (refuseSave) throw new Error("Connection interrupted. Your choices are kept; try again.");
+        setup = { ...setup, revision: "", choices: {} };
+        return builtinReply("fleetClearModelSetup", [{ revision: "", automatic: true }]);
+      });
       if (state === "error") connection.query.appSessionsForUser = vi.fn(async () => { throw new Error("Connection interrupted"); });
       let refuseSave = state === "models-save-error", delaySave = state === "models-pending";
       let finishSave: (() => void) | undefined;
