@@ -334,20 +334,23 @@ usage and keeps at least 2 GiB or one quarter of its pool for runtime overhead;
 this is conservative admission, not a reservation against unrelated applications.
 
 Every enrollment under the same operating-system account shares one host build
-lock with local builds, workbenches and local model calls. Inference shares that
-lock with retained workspaces while excluding CI builds. Its admission accounts
-for the workspaces' bounded memory so a goal can use a model, use its workspace,
-then use the model again without discarding that workspace. A retained
+lock with local builds and workbenches. Local model calls take no part in that
+lock: a model call never waits for a pipeline step and is never refused because
+of one, and a step can start during a call. The memory checks on each side are
+the only limit between them. Inference's admission accounts for the workspaces'
+bounded memory so a goal can use a model, use its workspace, then use the model
+again without discarding that workspace. A retained
 `inference-active.json` witness contains only a version, a random attempt
 identity and the time it ends: the call's own deadline, at which its request to
 the runtime is cut off. The original call's confirmed terminal response
 clears its exact witness at once, even if the answer then fails validation or
 cannot be delivered. Interruption, cancellation or an uncertain runtime reply
 keeps the fence until its end, because the runtime may still be generating; an
-exited PID proves nothing. After its end the witness reads as absent: the next
-model call or pipeline step removes it, and a workbench (which shares the lock
-with model calls) and a guarded local build only ignore it. A witness an older
-worker wrote names no end, and
+exited PID proves nothing. Until its end it holds back new model calls, workbenches
+and guarded local builds; a pipeline step does not read it. After its end the
+witness reads as absent: the next model call removes it, and a workbench and a
+guarded local build only ignore it. A witness an older worker wrote names no end,
+and
 expires 30 minutes after it was written (no limit bounds a local call's length,
 so the worker chooses that bound), so an upgrade clears it. A symlink or
 directory in its place is never read or removed. Existing resident-model and

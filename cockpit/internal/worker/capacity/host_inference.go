@@ -50,10 +50,11 @@ func InferenceRecord(attempt string, until time.Time) ([]byte, error) {
 
 // CheckInferenceIdle answers nil when no local model call can still be using
 // this machine, and ErrInferenceUnreconciled, naming when the fence ends, while
-// one may. The caller holds pipeline.lock shared, so a model call may be
-// writing its own record at the same moment: a record past its end reads as
-// idle and is left in place. A caller that excludes every writer uses
-// CheckInferenceIdleExclusive, which also removes it.
+// one may. The caller excludes no model call, so one may be writing its own
+// record at the same moment: a record past its end reads as idle and is left in
+// place. A caller that excludes every writer uses CheckInferenceIdleExclusive,
+// which also removes it. A pipeline step reads neither: it runs beside a model
+// call, with its headroom checks as the only limit between them.
 //
 // WHY A FENCE THAT ENDS. A runtime can go on generating after its caller stops
 // waiting for it (a cancel, a superseded run, a dropped stream, the idle
@@ -62,9 +63,9 @@ func InferenceRecord(attempt string, until time.Time) ([]byte, error) {
 // removes its own witness). Otherwise the record holds until the time it
 // names, the call's own deadline, past which the call's request has been cut
 // off. A fence that only success could clear turned one routine cancel into a
-// machine refusing pipeline steps, workbenches and model calls until somebody
-// removed the file by hand. The headroom checks still measure what is actually
-// free, so a generation still finishing after its deadline is bounded by them.
+// machine refusing workbenches and model calls until somebody removed the file
+// by hand. The headroom checks still measure what is actually free, so a
+// generation still finishing after its deadline is bounded by them.
 //
 // WHAT IS NEVER INTERPRETED. A record that is not a regular file (a symlink, a
 // directory) is a fence that never ends and is never removed: this Cockpit
@@ -83,8 +84,7 @@ func CheckInferenceIdle(root string) error {
 
 // CheckInferenceIdleExclusive is CheckInferenceIdle for a caller that excludes
 // every writer of the record: it holds inference.lock, which every model call
-// holds from before it writes its record until after it removes it, or
-// pipeline.lock exclusively, which no model call can hold beside it. Only then
+// holds from before it writes its record until after it removes it. Only then
 // can a record past its end be removed by its path without the risk of
 // removing a record a call has just written.
 func CheckInferenceIdleExclusive(root string) error {

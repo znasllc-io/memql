@@ -865,16 +865,19 @@ architecture emulation is refused. Native execution also probes Docker when
 
 The worker admits one pipeline command at a time per OS user across all its
 cluster connections. Its exclusive host lock also excludes Fleet workbench
-execution, local inference and guarded local builds for that user. Inference
-retains a durable activity witness when its runtime outcome is uncertain, so a
-process exit cannot make potentially active inference appear idle. The witness
-ends at the call's own deadline (one an older Cockpit wrote, 30 minutes after it
-was written), so a cancelled call keeps the machine from steps only until then;
-until it ends the machine answers `pipeline_capacity_unavailable`: a fleet step,
-or any later attempt, moves on to another machine, and a pool step's first
-attempt waits for the fleet as it does for a busy one. These locks coordinate admission; they do not
-impose hard CPU or memory limits on native commands or coordinate another OS
-account.
+execution and guarded local builds for that user. Local model calls take no part
+in it: a model call never waits for a step and is never refused because of one,
+and a step can start during a call. The memory checks on each side are the only
+limit between them. Inference retains a durable activity witness when its runtime
+outcome is uncertain, so a process exit cannot make potentially active inference
+appear idle. The witness ends at the call's own deadline (one an older Cockpit
+wrote, 30 minutes after it was written), and until then it holds back new model
+calls, workbenches and guarded local builds, never a step. A machine answers
+`pipeline_capacity_unavailable` only for interrupted work it must recover first: a
+fleet step, or any later attempt, moves on to another machine, and a pool step's
+first attempt waits for the fleet as it does for a busy one. These locks
+coordinate admission; they do not impose hard CPU or memory limits on native
+commands or coordinate another OS account.
 
 Pipeline attempt records also outlive process death. A replacement worker
 reconciles recorded containers and networks only against the same Docker daemon;

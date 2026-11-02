@@ -1747,8 +1747,8 @@ nothing ran or a requested retry at place P:
 
 1. P again, up to `sameMachine` times, each after the next of `delaysSeconds`
    (the last one repeats), unless P refused for a reason a delay does not change
-   (its own policy or limits, Host commands off, pipelines no longer allowed, a
-   local model call that may still be running there) or a wait for it ran out;
+   (its own policy or limits, Host commands off, pipelines no longer allowed,
+   interrupted work it must recover first) or a wait for it ran out;
 2. then, for a fleet or pool step with `otherMachines`, any eligible machine not
    yet tried, at once;
 3. then, for a pool step whose installation allows cloud (`cloudFallback`), the

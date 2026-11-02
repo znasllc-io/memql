@@ -173,8 +173,8 @@ def host_build_guard(inherited_fd=None, *, _completed_record=None):
             raise GuardError("This machine is already building or running a Fleet workbench; retry when it finishes") from error
         if os.fstat(fd).st_size:
             raise GuardError("An interrupted Fleet pipeline needs reconciliation before a local build can start")
-        # Inference may outlive the worker process that held the shared lock, so
-        # its record fences builds until the time it names: the call's own
+        # Inference takes no part in this lock and may outlive its worker process,
+        # so its record fences builds until the time it names: the call's own
         # deadline, at which its request is cut off. Before then a PID's
         # disappearance proves nothing. Past it the record reads as absent, as
         # for the Cockpit's readers. It is another program's record, so this

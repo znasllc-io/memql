@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/workbench"
 	"io"
 	"os"
@@ -87,15 +86,6 @@ func acquirePipelineReservation() (*pipelineReservation, error) {
 			return nil, errPipelineBusy
 		}
 		return nil, err
-	}
-	// A local model call that may still be running fences the build until the
-	// time its record names (capacity.CheckInferenceIdle). pipeline.lock is held
-	// exclusively here, so no model call can be writing a new record, and one
-	// past its end is removed. The refusal is pipeline_capacity_unavailable
-	// (runPipelineStep), whose sentence says until when.
-	if err := capacity.CheckInferenceIdleExclusive(root); err != nil {
-		file.Close()
-		return nil, fmt.Errorf("pipeline_step: %w", err)
 	}
 	// A local build uses this same lock but a separate durable record. Its
 	// supervisor may have died while Docker still has effects in progress.
