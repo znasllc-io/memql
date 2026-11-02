@@ -44,9 +44,9 @@ type hostResources struct {
 	leaseRoot func() (string, error)
 }
 
-// resourceReservation keeps the shared host locks until the caller returns.
-// Closing is deliberately separate from completion: an unknown runtime outcome
-// leaves the durable activity witness in place even after both locks close.
+// resourceReservation keeps the machine's inference lock until the caller
+// returns. Closing is deliberately separate from completion: an unknown runtime
+// outcome leaves the durable activity witness in place even after the lock closes.
 type resourceReservation struct {
 	lease   *inferenceLease
 	release func()

@@ -96,9 +96,9 @@ func machineRefusal(code string) (nothingRan, notRetriedHere bool) {
 		return true, true
 	case machineCapacityUnavailable:
 		// The machine could not take its build reservation for a reason that is
-		// not another build: a local model call that may still be running holds
-		// it until the call's own deadline (the inference fence), or a record of
-		// interrupted work needs recovering. Neither ends within a retry's delay.
+		// not another build: a record of interrupted work needs recovering. That
+		// does not end within a retry's delay. A local model call never answers
+		// this, because a step runs beside one.
 		return true, true
 	}
 	return false, false

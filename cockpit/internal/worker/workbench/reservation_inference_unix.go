@@ -11,7 +11,7 @@ import (
 )
 
 // CheckInferenceReservations permits live, bounded workspaces to survive a
-// model/tool/model cycle. The caller holds pipeline.lock shared and budgets
+// model/tool/model cycle. The caller holds inference.lock and budgets
 // Slots * MemoryMiB even for slots that have not been created yet. That fixed
 // bound makes concurrent creation safe after this short journal inspection.
 // Unlocked retained records are uncertain effects, never available capacity.

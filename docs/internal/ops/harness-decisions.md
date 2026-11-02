@@ -2934,9 +2934,28 @@ These source regressions do not establish live Fleet availability, installed
 policy activation or a completed Fleet-to-cloud CI journey; those require
 separate verification against the selected deployment.
 
-Fleet CI owns the host build lock exclusively. Local model calls share that
-lock with persistent workspaces, serialize inference separately, and reserve
-every workspace slot's full RAM cap. This keeps a goal's model/tool/model cycle
+Fleet CI owns the host build lock exclusively against workspaces and local
+builds. Local model calls take no part in it, by the owner's decision of
+2026-11-02. The fleet-first work had a call take the lock shared, so a call
+waited for any step on its machine until the call's deadline, a step that started
+during a call was refused, and a worker restart during a native step refused every
+call until someone reconciled the step. That reached `main` and no machine ran
+it: Cockpits up to 0.21.1 run the two side by side. Measured on production over
+the 14 days to 2026-11-02, successful local calls that overlapped a step were no
+slower than calls that did not: MSI Raider 21 calls at a median of 10.4 s against
+48 at 11.2 s, Black MacBook Pro 6 at 6.1 s against 35 at 8.6 s. The slowest call
+during a step, 531 s, began five minutes before the step, on a 14,657-token prompt
+to `qwen3.8:27b`; the slowest without one, 239 s, was the same kind of call. A
+third of the Kraken Desk's calls ran during a step. The headroom checks on each
+side are the only limit between the two, and this has not been measured with
+several steps on a machine.
+`TestAModelCallAnswersWhileAStepHoldsTheMachine`,
+`TestInferenceLeaseLeavesTheBuildLockFree`,
+`TestARetainedBuildRecordDoesNotRefuseInference` and
+`TestPipelineCapacityIgnoresAnInferenceFence` hold it.
+
+Local model calls serialize inference separately and reserve every workspace
+slot's full RAM cap. This keeps a goal's model/tool/model cycle
 working without treating a live workspace as abandoned or charging host RAM
 against a discrete GPU's VRAM. Unlocked retained workspace records still refuse
 inference. `TestModelToolModelKeepsSameWorkbench` exercises both managers and
@@ -2951,12 +2970,11 @@ the time it records: the call's own deadline, at which its request is cut off
 (that the runtime then stops is not verified; see below), or 30 minutes after it
 began for a context with no deadline (no Cockpit limit bounds a local call, so the bound is chosen). A
 fence only success cleared turned one routine cancel into a machine refusing
-pipeline steps, workbenches and model calls until someone removed the file by
-hand. Past its time the witness reads as absent; a reader that excludes every
-writer (it holds `inference.lock`, or `pipeline.lock` exclusively) removes it,
-and the workbench, which shares `pipeline.lock` with model calls, only ignores
-it, because a path-based removal there could remove a record a call has just
-written. The local build guard (`scripts/lib/host_build_guard.py`, which
+workbenches and model calls until someone removed the file by hand. A pipeline
+step does not read the witness. Past its time the witness reads as absent; a
+reader that excludes every writer (it holds `inference.lock`) removes it, and the
+workbench, which does not, only ignores it, because a path-based removal there
+could remove a record a call has just written. The local build guard (`scripts/lib/host_build_guard.py`, which
 `make dev` runs) reads the end by the same rule for every record the Cockpit
 writes, and leaves a witness past its end in place: it is another program's
 record, which the Cockpit's next exclusive reader removes
@@ -2971,7 +2989,7 @@ exercises real runtime responses and a second manager against the durable
 witness; `TestACancelledCallFencesTheMachineUntilItsDeadline`,
 `TestAnInferenceFenceEndsAtTheTimeItNames`,
 `TestAnInferenceRecordWithNoTimeEndsTheBoundAfterItWasWritten`,
-`TestPipelineCapacityWaitsForAnInferenceFenceUntilItsEnd` and
+`TestPipelineCapacityIgnoresAnInferenceFence` and
 `TestWorkbenchIgnoresAnInferenceFencePastItsEndWithoutRemovingIt` cover the
 expiry. Not verified: a live runtime that keeps generating past its caller's
 deadline.
@@ -3021,8 +3039,8 @@ another version's sibling cannot make an ordinary failure retryable. A refusal
 that will not change within a retry's delay marks the machine not retried here:
 Host commands off, pipelines no longer allowed, the machine's own policy or
 container caps (`denied_by_policy`), and a reservation it cannot take
-(`pipeline_capacity_unavailable`, which a local model call's fence answers until
-its deadline). Exit 75 is a requested retry without `repeatable`, because the
+(`pipeline_capacity_unavailable`, which a record of interrupted work answers until
+it is recovered). Exit 75 is a requested retry without `repeatable`, because the
 command vouches; a timeout is final, because a hang and a stall look alike from
 outside. The reasoning for
 each code is in `integrations/pipelinesteps/attempt_class.go` and
@@ -3223,9 +3241,9 @@ The contract-5 Cockpit release is cut while production still runs the old
 engine, because its macOS steps need today's machines. The engine change leaves
 `cockpit/VERSION` as it is: the contract-5 Cockpit release bumps it in its own
 release PR, as memql#6372 did, because the version belongs to the release, and
-eligibility keys on the contract number, not the version. The 0.21.1 it reads was
+eligibility keys on the contract number, not the version. The 0.21.1 it read was
 stamped by memql#6384 for the last contract-4 release, so that number never names
-a contract-5 Cockpit: a release cut from this code needs the bump first. The manifest change
+a contract-5 Cockpit; 0.22.0 is the first version that does. The manifest change
 cannot move a `verification: true` step: reusable verification requires
 `placement: cluster` (`component/pipelines/verification.go`). Twenty steps
 carry it, the Go and database tests and the node builds and tests among them,

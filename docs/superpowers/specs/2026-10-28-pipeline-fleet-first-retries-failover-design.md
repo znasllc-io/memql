@@ -324,6 +324,10 @@ a repeatable step still gets.
   a local model call's fence until the call's deadline, or interrupted work)
   were retried on the same machine. Neither answer changes within the retry
   delays, so that machine is not retried and the step moves on at once.
+  Corrected 2026-11-02, by the owner's decision: a local model call no longer
+  takes part in the build lock or holds back a step, so
+  `pipeline_capacity_unavailable` now means interrupted work only. The reasons
+  are in `docs/internal/ops/harness-decisions.md`.
 
 ## 5. Choosing the next attempt
 
