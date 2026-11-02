@@ -592,3 +592,36 @@ func TestASecondReplicaResumesATrainFromMain(t *testing.T) {
 		}
 	})
 }
+
+// One release runs at a time, so a held one keeps tonight's from leaving, and the
+// owner hears that once rather than finding out from an empty night.
+func TestAHeldReleaseRemindsAtTheNextDeparture(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	th.tick(t)
+	tr := th.train(t)
+	th.runFor(t, tr, ConclusionCancelled)
+	th.next(t)
+	remindersOf := func() int {
+		n := 0
+		for _, m := range th.messages() {
+			if strings.Contains(m, "is still held") {
+				n++
+			}
+		}
+		return n
+	}
+	if n := remindersOf(); n != 0 {
+		t.Fatalf("a reminder before the next departure: %v", th.messages())
+	}
+	th.clock = th.clock.Add(7 * time.Hour)
+	if got := th.next(t); got.ID != tr.ID || got.State != TrainHeld {
+		t.Fatalf("the held release should still be the newest: %+v", got)
+	}
+	if n := remindersOf(); n != 1 {
+		t.Fatalf("%d reminders after the next departure, want 1: %v", n, th.messages())
+	}
+	th.next(t)
+	if n := remindersOf(); n != 1 {
+		t.Errorf("%d reminders after another tick, want still 1", n)
+	}
+}

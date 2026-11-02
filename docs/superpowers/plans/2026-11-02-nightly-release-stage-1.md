@@ -201,6 +201,11 @@
 - [ ] **Step 4: Run** the same. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(delivery): stop running on every push to main; the nightly release runs everything`.
 
+## Also added while building
+
+- A held release reminds the owner once at the next departure (spec section 5), because one release runs at a time and tonight's stays behind it.
+- `test/pipelinehop/train_main_hop_test.go`: two replicas over one Postgres, through the real store, policy capture and driver.
+
 ## After the tasks
 
 Run `make test` for the touched trees and the db-gated pipelinerun tree, then one fresh review of the whole branch, before anything lands.

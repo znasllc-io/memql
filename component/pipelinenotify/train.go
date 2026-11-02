@@ -211,6 +211,8 @@ func trainCopy(m TrainMessage, branch string) (trainWords, error) {
 			return trainWords{headline: "Release " + branch + " left from main", description: description, color: trainColorDeparted}, nil
 		case TrainHeld:
 			return trainWords{headline: "ACTION NEEDED: " + branch + " is held", description: or(reason, "This release needs you before it can go on."), todo: trainTodoHeldFromMain, color: trainColorAction}, nil
+		case TrainReminder:
+			return trainWords{headline: "ACTION NEEDED: " + branch + " is still held", description: or(reason, "This release needs you before the next one can leave."), todo: trainTodoHeldFromMain, color: trainColorAction}, nil
 		}
 	}
 	switch m.Event {

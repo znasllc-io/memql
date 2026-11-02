@@ -684,8 +684,20 @@ func (i *Integration) observeHeld(ctx context.Context, d Deps, s pipelines.Train
 		return err
 	}
 	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
-	if err != nil || rebuilt || t.RunID == "" {
+	if err != nil || rebuilt {
 		return err
+	}
+	if s.FromMain() {
+		// One release at a time: tonight's stays behind this one, so say so.
+		if _, due := pipelines.DepartureDue(s, t.DepartedAt, d.Now().UTC()); due {
+			if err := i.notifyTrain(ctx, d, s, p, t, pipelinenotify.TrainReminder,
+				fmt.Sprintf("This release has been held since it left at %s, and the next one will not leave until it lands or is cancelled.", t.DepartedAt.UTC().Format("Jan 2 15:04 MST")), nil); err != nil {
+				return err
+			}
+		}
+	}
+	if t.RunID == "" {
+		return nil
 	}
 	// A newer attempt at the train's head than the run it was held on -- the
 	// owner re-ran it -- puts the train back to running, where observeRun
