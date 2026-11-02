@@ -58,7 +58,7 @@ func TestWorkRunReadsDoNotScanTheOwnersHistory(t *testing.T) {
 			pageCtx := ContextWithCursor(reader, cursor)
 			result, scans := capturedScans(t, eng, hook, pageCtx, query)
 			require.NotEmpty(t, scans)
-			require.Contains(t, scans[0], "latest_walk", "an owner-only feed must walk newest first")
+			require.Contains(t, scans[0], "AS later", "an owner-only feed must walk newest first")
 			ids := pageIDs(t, result)
 			require.LessOrEqual(t, len(ids), 50)
 			for _, id := range ids {
@@ -68,6 +68,7 @@ func TestWorkRunReadsDoNotScanTheOwnersHistory(t *testing.T) {
 			if page <= 2 || page == 12 {
 				requireCollapsedAgrees(t, eng, hook, pageCtx, query, result)
 				requireBuffersBelow(t, db, scans[0], 6000, fmt.Sprintf("page %d must cost the page, not the owner's history", page))
+				requireNoSort(t, db, scans[0])
 			}
 			next := result.GetMeta().Cursor
 			if next == "" {
@@ -84,7 +85,7 @@ func TestWorkRunReadsDoNotScanTheOwnersHistory(t *testing.T) {
 		const query = `query workRunsForOwner()`
 		result, scans := capturedScans(t, eng, hook, reader, query)
 		require.NotEmpty(t, scans)
-		require.Contains(t, scans[0], "latest_walk")
+		require.Contains(t, scans[0], "AS later")
 		requireCollapsedAgrees(t, eng, hook, reader, query, result)
 	})
 
@@ -118,7 +119,7 @@ func TestWorkRunReadsDoNotScanTheOwnersHistory(t *testing.T) {
 		const query = `query workSignedRunsForOwner()`
 		result, scans := capturedScans(t, eng, hook, reader, query)
 		require.NotEmpty(t, scans)
-		require.NotContains(t, scans[0], "latest_walk", "a status can reject what a walk finds, so this read stays on the lookup")
+		require.NotContains(t, scans[0], "AS later", "a status can reject what a walk finds, so this read stays on the lookup")
 		lookup := lookupSubquery(t, scans[0])
 		require.Contains(t, lookup, `(payload->>'ownerUserId')`, "the owner index is the only one serving this read")
 		require.NotContains(t, lookup, `(payload->>'status')`, "an unindexed term read in the lookup reads every version's payload")
@@ -154,6 +155,13 @@ const runHistoryOwner = "v1:identity:user:history-owner"
 // line in TOAST as a real run row's does. Every run has its own goal; 40
 // signatures recur across them. The rows the reads must return or refuse are
 // written after the history, version by version.
+//
+// The history spreads over ten chunks and the session plans with production's
+// settings, because a plan decided here is otherwise not production's. On the
+// timescaledb-ha default of random_page_cost 1.1, and on the three chunks this
+// fixture used to have, the planner walked the owner's index. Production, at 4,
+// read the owner's whole range and sorted it, and the buffers this test measured
+// never happened there.
 func runHistoryFixture(t *testing.T) (*bun.DB, *MemQLEngine, *latestPlanCapture) {
 	t.Helper()
 	ctx := context.Background()
@@ -172,14 +180,15 @@ func runHistoryFixture(t *testing.T) (*bun.DB, *MemQLEngine, *latestPlanCapture)
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = admin.ExecContext(ctx, `DROP SCHEMA `+schema+` CASCADE`) })
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()),
-		pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
+		pgdriver.WithConnParams(map[string]any{"search_path": schema,
+			"random_page_cost": "4", "effective_cache_size": "3GB", "work_mem": "8MB"}))), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 	for _, stmt := range []string{
 		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
 		`CREATE TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`,
 		`SELECT public.create_hypertable('"MemoryNodes"','createdAt',chunk_time_interval=>interval '1 day')`,
 		`INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
-         SELECT 'v1:work:run:history-'||n,'v1:work:run',TIMESTAMPTZ '2026-01-01'+n*interval '3 minutes'+v*interval '10 seconds','fixture','{}',
+         SELECT 'v1:work:run:history-'||n,'v1:work:run',TIMESTAMPTZ '2026-01-01'+n*interval '12 minutes'+v*interval '10 seconds','fixture','{}',
            jsonb_build_object('ownerUserId','` + runHistoryOwner + `','goalId','v1:work:goal:history-'||n,
              'goalSignature','sig-history-'||(n%40),'automationName','pipeline','mode','live',
              'status',CASE WHEN v<7 THEN 'running' ELSE 'succeeded' END,
@@ -190,7 +199,7 @@ func runHistoryFixture(t *testing.T) (*bun.DB, *MemQLEngine, *latestPlanCapture)
 		require.NoError(t, err)
 	}
 	const stranger = "v1:identity:user:history-stranger"
-	start := time.Date(2026, 1, 3, 12, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 1, 11, 12, 0, 0, 0, time.UTC)
 	var nodes []memorynodes.MemoryNode
 	add := func(id string, at time.Duration, fields map[string]any) {
 		if fields["automationName"] == nil {
@@ -262,6 +271,26 @@ func requireCollapsedAgrees(t *testing.T, eng *MemQLEngine, hook *latestPlanCapt
 
 // requireBuffersBelow runs the captured statement under EXPLAIN ANALYZE and
 // holds the buffers it touched, hit or read, under bound.
+// requireNoSort fails when the plan sorts anywhere. A walk that sorts has read
+// everything it was meant to stop short of, whatever a small fixture's buffers
+// say: this is the shape production chose for the owner's feed, at 29.6 seconds.
+func requireNoSort(t *testing.T, db *bun.DB, scan string) {
+	t.Helper()
+	var raw []byte
+	require.NoError(t, db.QueryRowContext(context.Background(), `EXPLAIN (FORMAT JSON) `+scan).Scan(&raw))
+	var plans []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &plans))
+	var inspect func(map[string]any)
+	inspect = func(node map[string]any) {
+		require.NotEqual(t, "Sort", node["Node Type"], "the walk must stop at its page, not read the range and sort it: %s", raw)
+		children, _ := node["Plans"].([]any)
+		for _, child := range children {
+			inspect(child.(map[string]any))
+		}
+	}
+	inspect(plans[0]["Plan"].(map[string]any))
+}
+
 func requireBuffersBelow(t *testing.T, db *bun.DB, scan string, bound float64, why string) {
 	t.Helper()
 	var raw []byte

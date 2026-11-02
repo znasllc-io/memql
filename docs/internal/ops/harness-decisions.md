@@ -2784,9 +2784,10 @@ versions:
   (`latestScanWalk`, `component/memql/latest_scan_walk.go`, over the new
   `memory_nodes_work_run_owner_walk_idx`). It walks the owner's versions in page
   order and keeps a version only when no newer one of its run exists, then stops
-  at the page: 4,152 buffers for a page of 50 where the lookup took 97,252. A
-  LATERAL `LIMIT 1` probe was chosen over `NOT EXISTS`, because TimescaleDB
-  excludes chunks for it at run time (10,145 buffers otherwise). The cursor is
+  at the page: 4,152 buffers for a page of 50 where the lookup took 97,252. The
+  probe is a `NOT EXISTS` kept a per-row subplan by its `OFFSET 0`, because
+  TimescaleDB excludes chunks for that at run time, and the page's `LIMIT` rides
+  inside the walk (why, below). The cursor is
   pushed in as `createdAt <= t AND (createdAt < t OR id > i)`, because the
   engine's top-level `OR` sent the planner to a sort of the whole range
   (127,725 buffers for a deep page; 4,431 in this form). The walk is taken only
@@ -2804,11 +2805,33 @@ versions:
   105 buffers through the signature index and an index-only scan through the
   revision index.
 
+**The index did not make the planner walk (measured on production, 2026-11-01).**
+Once the walk index existed there, the first version of this query still read the
+owner's whole range and sorted it: 343,250 versions, 1.6 million buffers and
+29.6 seconds against the eight-second limit. Every number above had come from a
+fixture of three chunks, planned at the `timescaledb-ha` default of
+`random_page_cost` 1.1. Production has ten chunks at 4. The plan turned on three
+parts of the shape, and `latest_scan_walk.go` records what each one measured. The
+`LIMIT` moved inside the walk, because an `ORDER BY` above a subquery plans it for
+full retrieval. The probe became `NOT EXISTS`, because `found IS NULL` over a left
+join is estimated at 0.5% and leaves a `LIMIT` nothing to stop early. It keeps an
+`OFFSET 0`, because without one PostgreSQL makes an anti join that probes every
+chunk (226,883 buffers, against 35,436). The same page now costs 87 ms on
+production's data, and a page of 200 costs 976 ms. Production still walked at a
+window of 1,000 and sorted at 5,000, the widening loop's ceiling. Rejected:
+`SET LOCAL enable_sort = off` around the read, which also worked (126 ms) but puts a
+transaction around every feed read for a plan a single statement can get. The
+`LIMIT` cannot shorten a page, because `decidedByTerm` admits only reads whose
+filter is true for every row the walk yields.
+
 `TestWorkRunReadsDoNotScanTheOwnersHistory` pages the owner's feed to its end
 on the real SQL, against the concept-wide read and its cursor, with no run
-twice and the run the owner gave away gone. Pages 1, 2 and 12 cost 1,541 to
-2,015 buffers over about 9,600 versions of history, against 27,117 before.
-The test also holds the corpus read to 34 buffers and the revision read to 30.
+twice and the run the owner gave away gone. Its fixture now spreads over ten
+chunks and plans at production's settings, which is what made the old query fail
+it at 41,266 buffers with a sort. Pages 1, 2 and 12 cost 1,530 to 2,323 buffers
+over about 9,600 versions of history, and `requireNoSort` holds the plan. The
+corpus read costs 37 buffers and the revision read 40, and on production 7.6 ms and
+4.5 ms with their indexes in place.
 `TestLatestScanWalkTakesOnlyReadsItsTermDecides` pins when the walk is taken,
 without a database, and `TestPayloadWalksAreTheMigratedWalkIndexes` holds the
 walk registry to the catalog. Each new index is about 100 bytes per run
