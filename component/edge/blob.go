@@ -223,9 +223,8 @@ func (i blobInfo) Sys() any           { return nil }
 // AzureDownloader is the one method this adapter needs from an Azure blob
 // client -- narrowed so a test can fake the read without an Azure SDK client
 // or a live account. The assertion below pins *azureblob.AzureBlobUploader
-// (integrations/azureblob, the storage integration's existing client, also
-// behind integration.storage.upload) as satisfying it today, with no
-// wrapping beyond what NewAzureBlobClient does.
+// (integrations/azureblob, the storage integration's existing client) as
+// satisfying it today, with no wrapping beyond what NewAzureBlobClient does.
 type AzureDownloader interface {
 	Download(ctx context.Context, container, objectName string) ([]byte, error)
 }
@@ -236,11 +235,11 @@ var _ AzureDownloader = (*azureblob.AzureBlobUploader)(nil)
 // container.
 //
 // THIS IS NOT A SECOND AZURE CLIENT. Connecting, auth and the write half
-// (Upload, behind integration.storage.upload) stay owned entirely by
-// integrations/azureblob; this type only ever calls Download, holding the
-// edge's read to the same Get(ctx, key) shape every other BundleOpener
-// backend gets. The edge never writes (that is the publisher's job, Task 8)
-// and never lists, so nothing here reaches for more than Download.
+// (Upload) stay owned entirely by integrations/azureblob; this type only ever
+// calls Download, holding the edge's read to the same Get(ctx, key) shape
+// every other BundleOpener backend gets. The edge never writes (that is the
+// publisher's job, Task 8) and never lists, so nothing here reaches for more
+// than Download.
 type azureBlobClient struct {
 	downloader AzureDownloader
 	container  string

@@ -24,7 +24,7 @@ integrations/
 ├── auth/        capabilities.go        # resolveUser, checkPermission
 ├── avatardirect/                       # Direct/Guide avatar: mint LiveKit room + bring Anam up
 ├── avatarvendor/                       # CGO-free Anam/Simli vendor REST + dispatch core
-├── azureblob/                          # storage.upload (registered as `storage`)
+├── azureblob/                          # shared Azure Blob client (registered as `storage`, no DSL capability)
 ├── chat/                               # recentChat tool -- read-only window into a space's utterance stream
 ├── cognition/                          # routing + conductor + client-tool relay
 ├── dailyspace/                         # platform-driven per-user daily-space lifecycle
@@ -210,7 +210,6 @@ Self-registers via `memql.RegisterPlugin`. Capability:
 | `database` | `healthCheck`, `stats` |
 | `embedding` | text embedding (vendor-agnostic over `EmbeddingProviderByName`) |
 | `fileprocessor` | `extractText` (PDF, DOCX, images via VisionAIProvider, plain text) |
-| `azureblob` (registered as `storage`) | `storage.upload` |
 | `identity` | identity-side helpers (resolve etc.) |
 | `knowledge` | corpus seed + lookup helpers |
 | `avatardirect` | `startSession` / `stopSession` (direct/Guide Anam avatar) |

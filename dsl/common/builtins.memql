@@ -485,24 +485,6 @@ builtin similarTo {
   provider  string
 }
 
-// ---- queries/v1/common/builtin/builtinStorageUpload.memql ----
-
-// builtinStorageUpload - Cloud Storage Upload
-// =============================================
-//
-// Upload file data to cloud storage (GCS).
-// Returns the storage URL of the uploaded object.
-
-@executor("integration.storage.upload")
-@args(profile="object")
-@description("Upload file data to cloud storage. Returns storage URL.")
-builtin storageUpload {
-  bucket      string
-  objectName  string!
-  data        string!
-  contentType string
-}
-
 // ---- queries/v1/common/builtin/builtinSttTranscribe.memql ----
 
 // builtinSttTranscribe - Speech-to-Text Transcription

@@ -12,7 +12,7 @@ func TestReplayReadOnlyFollowsRegisteredCallsAndSpecifications(t *testing.T) {
 		{Name: "read", FunctionKind: "query", Expr: &ComparisonExpression{Value: "x"}},
 		{Name: "write", FunctionKind: "mutation"},
 		{Name: "knownRead", Type: FunctionTypeBuiltin, Executor: "integration.database.stats"},
-		{Name: "knownWrite", Type: FunctionTypeBuiltin, Executor: "integration.storage.upload"},
+		{Name: "knownWrite", Type: FunctionTypeBuiltin, Executor: "integration.library.editDocument"},
 		{Name: "unknown", Type: FunctionTypeBuiltin, Executor: "integration.new.publish"},
 		{Name: "metadata", Type: FunctionTypeBuiltin, Executor: BuiltinExecutorConcepts},
 		{Name: "logic", FunctionKind: "logic"},
@@ -22,7 +22,7 @@ func TestReplayReadOnlyFollowsRegisteredCallsAndSpecifications(t *testing.T) {
 		{Name: "predicate", FunctionKind: "query", Expr: &SpecReferenceExpression{Name: "pure"}},
 		{Name: "aiPredicate", FunctionKind: "query", Expr: &SpecReferenceExpression{Name: "model"}},
 		{Name: "missingPredicate", FunctionKind: "query", Expr: &SpecReferenceExpression{Name: "missing"}},
-		{Name: "nestedArg", FunctionKind: "query", Expr: &FunctionCallExpression{Name: "read", Args: map[string]any{"x": &BuiltinFunctionExpression{Executor: "integration.storage.upload"}}}},
+		{Name: "nestedArg", FunctionKind: "query", Expr: &FunctionCallExpression{Name: "read", Args: map[string]any{"x": &BuiltinFunctionExpression{Executor: "integration.library.editDocument"}}}},
 		{Name: "futureIR", FunctionKind: "query", Expr: &unknownReplayExpression{}},
 	} {
 		if err := fns.Upsert(fn); err != nil {
