@@ -1,7 +1,7 @@
 # Nightly release from main: code lands without a pull request, and one automatic release a day carries it to production
 
 - **Date:** 2026-11-02
-- **Status:** the owner's decisions below were made in chat on 2026-11-02, one
+- **Status:** built. The owner's decisions below were made in chat on 2026-11-02, one
   question at a time. The owner asked for the work to be built overnight, ahead of
   reading this record, so it has not had the usual written review. Section 2 says
   which decisions are the owner's and which are this record's.
@@ -78,12 +78,14 @@ Start release build, Prepare candidate, Approve release, Publish release (owner 
   and it is the one pull request the owner asked for ("it creates a PR that has
   consolidated everything into main").
 - **D3 -- Everything is opt-in per repository, off by default.** Settings keys (section
-  3) gate each behaviour, so landing this code changes nothing until the settings
-  change, and each stage can be turned on or back off alone.
-- **D4 -- A train run is always full.** `pipelineModeForEvent` answers `affected` for a
-  pull request, and this train's diff is one `VERSION` line, so it would test nothing.
-  Go makes a train's run full whatever the installed policy says, as it already does for
-  a merge group, because a train's check stands for the whole release.
+  3) gate how a train leaves and lands, and the owner's own switches (D9) gate whether it
+  publishes and deploys, so landing this code changes nothing until those change, and each
+  stage can be turned on or back off alone.
+- **D4 -- A train from `main` always runs in full.** `pipelineModeForEvent` answers `affected`
+  for a pull request, and this train's diff is one `VERSION` line, so it would test nothing.
+  Go makes its run full whatever the installed policy says, as it already does for a merge
+  group, because its check stands for the whole release. A train of pull requests keeps what
+  the policy gives it: its triage reads a failure against its cars.
 - **D5 -- The release is of the tested commit.** `main` may move during a run. The
   version is tagged on the train head that passed, which is an ancestor of `main` after
   landing. Later pushes go out in the next release.
@@ -98,10 +100,17 @@ Start release build, Prepare candidate, Approve release, Publish release (owner 
 - **D8 -- A fix goes on the consolidated pull request.** A push to the train branch starts
   its run (`synchronize`) and the train follows its head. Since a train from `main` never
   rebuilds itself (section 5), the fix is never lost.
-- **D9 -- Standing approval is an owner's setting, recorded as such.** "A model never
-  approves" still holds: nothing here asks a model. The owner chose the behaviour by
-  setting `landing` and `release`, and the candidate's approval names that policy, not a
-  person.
+- **D9 -- Standing approval is the owner's own word, recorded as such.** "A model never
+  approves" still holds: nothing here asks a model. It is not a setting, because an instance
+  variable can be written by people who may not approve a release, and the engine says
+  background work "must never acquire owner authority just because its owner holds that role"
+  without a captured grant. So it is one row per pipeline, `v1:pipelines:standing`, written by
+  a button only the pipeline's owner in the owner role can press, which captures their
+  authority (`auth.CaptureExecutionAuthority`): a ceiling, never a credential. Every tick
+  rebuilds it from the owner's CURRENT stored role (`auth.ContextWithPersistedOwner`), so
+  losing the role ends it on the next tick. The candidate's journal row names the owner,
+  because every publication check compares against them; the train's row records
+  `policy:standing-release:<owner>`.
 - **D10 -- A release that removes a pipeline step waits for the owner.** The pipeline
   must not be able to switch off its own tests. None of the last 13 releases removed a
   step, so this costs nothing in ordinary use. Stopping every manifest change would have
@@ -109,16 +118,25 @@ Start release build, Prepare candidate, Approve release, Publish release (owner 
 
 ## 3. Settings
 
-`MEMQL_PIPELINES_TRAINS` gains four optional keys per repository. The parser stays
-strict, so the engine must be deployed before any of them is written.
+`MEMQL_PIPELINES_TRAINS` gains these optional keys per repository. The parser stays strict, so
+the engine must be deployed before any of them is written.
 
 | Key | Values | Default | Meaning |
 |---|---|---|---|
 | `source` | `pull_requests`, `main` | `pull_requests` | `main`: section 4. Nothing about `pull_requests` changes |
 | `landing` | `approval`, `automatic` | `approval` | `automatic`: a passing train lands without a review. Requires `source: main` |
-| `release` | `manual`, `automatic` | `manual` | `automatic`: a landed train's version is built, approved under D9 and published. Requires `landing: automatic` |
-| `deploy` | `manual`, `automatic` | `manual` | `automatic`: a published release deploys inside `deployWindow`. Requires `release: automatic` |
-| `deployWindow` | `{"start":"HH:MM","end":"HH:MM"}` in `timeZone` | none | When an automatic deploy may start. Required with `deploy: automatic`; may cross midnight |
+| `releaseProfile` | a release profile's name | none | What a landed train publishes under, once the owner allows it. Requires `landing: automatic` |
+| `deployment` | an object, below | none | Where a published release goes. Requires `releaseProfile` |
+
+`deployment`: `repository` (the installation's), `applications` (ArgoCD Applications in sync
+order, the engine before the product that runs on it), `namespace` (default `argocd`),
+`verifyStages` (the installation manifest's stages that verify a rollout), `window`
+(`{"start":"HH:MM","end":"HH:MM"}` in `timeZone`; may cross midnight; an automatic deploy needs
+one, and the button does not).
+
+Two switches are not settings: **Publish by itself** and **Deploy by itself**, in Pipelines >
+Releases, the owner's alone (D9). A switch cannot be turned on until the settings above can do
+what it asks. `MEMQL_RELEASE_INSTALLATION_OVERLAY` names the files a pin changes (section 7).
 
 The owner's end state:
 
@@ -126,8 +144,10 @@ The owner's end state:
 {"repositories":{"znasllc-io/memql":{"enabled":true,"departures":["21:00"],
   "timeZone":"America/Los_Angeles","channel":"znas-instance",
   "ownerDiscordUserId":"<the owner id>","source":"main","landing":"automatic",
-  "release":"automatic","deploy":"automatic",
-  "deployWindow":{"start":"00:00","end":"07:00"}}}}
+  "releaseProfile":"engine",
+  "deployment":{"repository":"znasllc-io/memql-znas","applications":["memql","znas-cloud"],
+    "verifyStages":["deployment","deployment-notification"],
+    "window":{"start":"00:00","end":"07:00"}}}}}
 ```
 
 ## 4. Stage 1: a train from main
@@ -135,8 +155,11 @@ The owner's end state:
 With `source: main`:
 
 - **Departure.** At each `departures` time, or when an owner starts one by hand. A
-  departure finding `main` where the last landed train left it is recorded as cancelled,
-  *Nothing new on main since the last release*, and sends nothing.
+  departure finding `main`'s tree where the last release tested it is recorded as cancelled,
+  *Nothing new on main since the last release*, and sends nothing. It counts from the commit
+  that release tested and not the merge that landed it, because a commit pushed during that
+  run is an ancestor of the merge and in no release (D5). A release that failed after landing
+  and was replaced does not count: the person who started this one wants it tried again.
 - **Building.** The train branch is `main`'s head plus the version bump, built on the
   scratch ref as today. It reads no pull requests and has no cars. The pull request lists
   the commits since the last release (at most 50), and says how many more.
@@ -144,8 +167,10 @@ With `source: main`:
 - **Pass.** `landing: approval`: it waits for the owner's review, as today.
   `landing: automatic`: it lands at once.
 - **Landing does not require `main` to be where the train left it** (D5). GitHub merges the
-  train branch into `main`'s tip. If that conflicts, which only a human fix or a changed
-  `VERSION` can cause, the train holds and says why.
+  train branch into `main`'s tip. A refusal is asked again for five minutes, because GitHub
+  answers a merge that caught `main` moving with 405 "Base branch was modified". If it keeps
+  refusing, which only a human fix or a changed `VERSION` can cause, the train holds and says
+  why.
 - **Nothing rebuilds it.** A moved `main` does not, and there are no cars to drop.
 - **Following its head.** While running or held, a train whose branch moved updates its
   head, goes back to running and may retry once again. The webhook's `synchronize` opens
@@ -184,58 +209,78 @@ In this order:
 
 Main's own failed run is not consulted: there is no push run to read (D6).
 
-## 6. Stage 2: landing and publishing by themselves
+## 6. Stage 2: publishing by itself
 
-`landing: automatic` is section 4. `release: automatic` extends the train past landing, as
-the train's own states, so a takeover resumes from the row like every other step:
+With **Publish by itself** on, a train that lands goes to `releasing` instead of `landed`, and
+stays on its own row, so a takeover resumes from it like every other step. `published` is its
+end. It walks the same saved journey a person walks in Pipelines > Releases, one step per tick,
+through `AdvanceTrainRelease`, so a person can finish by hand whatever it stopped at:
 
-`landed` becomes `releasing`, `published`, in that order, then `deploying`, `deployed` or
-`rolled_back` (section 7). A train that stops here is `held`, as any other.
+1. **Prepare**, selecting the commit the train's run tested (D5), not the head of `main`, which
+   a direct push leaves with no check of its own. The version must be the train's.
+2. **Build.** Tag it and open the release run. Same-tree reuse carries the train run's receipts
+   over: `znasDeliveryEvidenceReuse` admits a full `pull_request` source for a `release`.
+3. **Candidate**, as `releaseResumeBuild` does.
+4. **Approve** under D9, reverifying first, as a person's press does.
+5. **Publish.** It outlives any tick, so it runs detached under the journal's lease: the next
+   tick finds it running, and a pod that dies gives the lease back. It starts at most three times.
 
-1. **Build.** The coordinator calls the same native operations as Check source and Start
-   release build: the source is the train head (D5), the tag `v<VERSION>`.
-2. **Reuse.** The release run reuses the train run's receipts through same-tree reuse: the
-   tag's tree is the tree the train tested. `znasDeliveryEvidenceReuse` admits a full
-   `pull_request` source for a `release` event from a `train/` head.
-3. **Candidate.** Prepare candidate, as `releaseResumeBuild` does.
-4. **Approval under D9.** A new internal operation records the approval as
-   `policy:nightly-release`, naming the setting and the owner whose setting it is. It
-   refuses unless the settings allow it at that moment, the candidate is exactly the one
-   this train's run produced, and the caller has internal origin. No request or model can
-   reach it. Publishing then goes through the existing recipe, which requires an approval
-   and now finds one.
-5. **Failure.** A failed release run re-runs its failed steps once, then holds. The version
-   is spent: the next release takes the next number.
+A failed release run re-runs its failed steps once, as the owner's re-run does, and the saved
+release adopts it. Then it holds, and the version is spent: the next release takes the next
+number. A step that keeps failing, for instance because the owner lost the role, holds after 30
+minutes. While held, the owner finishing it by hand moves it on, the next departure stays behind
+it with a reminder, and **Start release now** replaces it.
+
+Internal origin only, and not a builtin: neither a request nor a model can reach it.
 
 ## 7. Stage 3: deploying and rolling back by themselves
 
-Production has no native installation receiver, so a deploy is what a person does today,
-made safe to run unattended:
+Production has no native installation receiver (`integrations/installation`), so a deploy is what
+a person does today, made safe to run unattended. A deploy is its own row, `v1:pipelines:deployment`,
+because it must not fight a train for the newest-train slot, and because the button can deploy a
+release cut by hand. Each tick takes one step from a fresh read and ends in a compare-and-swap. That
+matters more here than anywhere: syncing the mesh restarts the agent replica running the tick, and
+the next one must simply carry on.
 
-1. **Guards, before anything moves.** The release holds and asks for the Deploy button when
-   it changes tables or data (a migration in the range that is anything but an added
-   index), when it changes a worker action contract, or when it removes a pipeline step
-   (D10). Each says which, and why.
-2. **Window.** An automatic deploy starts only inside `deployWindow`. Past the end it waits
-   for the next night, or for the button.
-3. **Pin.** The engine version and digests are committed to `memql-znas`'s `main`, by the
-   native proposal operation, which already refuses to invent a fact.
-4. **Sync.** The engine Application and then the product, through the ArgoCD client the
-   engine already has (`integrations/argocd`), with prune off, as `argocd-sync.sh` does.
-5. **Verify.** Both Applications are healthy on the pinned revision, and then the
-   `deployment.verify-rollout` step, run by the coordinator, passes. The rule that a
-   superseded ConfigMap reads as OutOfSync and is not a failure moves from a person's
-   memory into the check.
-6. **Roll back on failure.** The pin commit is reverted and the sync and verification run
-   again. Discord says what failed and that production is back on the old version.
-7. **Pause.** After a rollback, automatic deploys stop until the owner resumes them, because
-   the bad change is on `main` and the next release would carry it again. If the rollback
-   itself fails, it stops and mentions the owner.
+1. **Waiting.** For a newly published release, with **Deploy by itself** on. It waits for the window,
+   and for any running train, because restarting `agent` kills running CI, and that train carries a
+   newer release anyway. No train departs while a deploy is moving, for the same reason.
+2. **Guards.** It holds and asks for the Deploy button when, between what the installation runs and
+   this release, a migration does anything but add an index (read from the migration's text, and what
+   the text does not show is treated as a change), a worker action contract changes, or a pipeline step
+   is removed (D10). Because they read from what runs now, a release held back here is still in the range
+   of the next, so nothing slips past. A newer published release carries a waiting one.
+3. **Pin**, on its own branch, through the native proposal the instance already binds: the seven-file
+   pin from `MEMQL_RELEASE_INSTALLATION_OVERLAY`, every byte from the signed catalog or the file it
+   replaces. It waits for that pull request's check, with one re-run. A failure here touches nothing: the
+   deploy is cancelled, automatic deploys are not paused, and the owner is told.
+4. **Sync.** Each Application, in order, at the pin's exact commit: `operation.sync.revision`, with
+   `targetRevision` left on `main`. Written as `argocd-sync.sh` writes it, for the reason that script
+   exists: prune written false, one declared option, and the persisted operation state cleared in the
+   same fenced write, so nothing is inherited. It first records the commit each Application last synced
+   at, which is what it goes back to, and refuses to start without one. Done is Succeeded, not selective,
+   and Healthy once the controller has compared since the operation ended.
+5. **Verify**, from outside the cluster: a manual run limited to `verifyStages`, at the pin's commit. A
+   run of the same commit that answers instead, a person's or an earlier verification's, is not taken for
+   this rollout's.
+6. **Land.** Only now does the pin merge. If GitHub refuses, production already runs it, so that is a
+   chore: after 30 minutes it reports deployed and says main lacks its pin.
+7. **Roll back on failure.** A sync that fails, hangs past 30 minutes (its operation is terminated first)
+   or a verification that fails syncs back each Application this deploy started on, to the commit it ran
+   before, verifies that, and closes the pull request. Main never carried the bad pin, and going back needs
+   no CI, which may be what is broken. Discord says what failed and that production is back.
+8. **A release that changes tables or data does not go back by itself.** Old code on a new schema is not
+   proven safe. It stops and mentions the owner, who pressed the button and is there.
+9. **Pause.** After a rollback, automatic deploys stop until the owner presses Resume, because the bad
+   change is on `main` and the next release would carry it again. If the rollback itself fails, it stops,
+   mentions the owner, and pauses too.
 
-The Deploy button is the same path with the guards acknowledged and the window ignored.
+The Deploy button is the same path with the guards acknowledged and the window ignored, and works for a
+release cut by hand.
 
-**Not proven by this record's tests, and must be before `deploy: automatic` is set:** an
-older engine starting on a database with newer indexes, and a real sync and rollback.
+**Proven by tests:** the patch, against production's API server with `--dry-run=server`; the client,
+against both production Applications' real JSON. **Not proven, and must be before Deploy by itself is
+turned on:** a real sync and rollback, and an older engine starting on a database with newer indexes.
 
 ## 8. Testing
 
@@ -253,25 +298,33 @@ Cross-replica cases come first (`CLAUDE.md`: multi-node is the default).
   as the policy says.
 - **Parsing:** each key's values, defaults and dependencies, and a bad one turning trains off
   as today.
-- **Stage 2:** the approval refuses without the setting, for another candidate, and outside
-  internal origin. Publishing resumes across a takeover.
-- **Stage 3:** each guard over real migration text; the window across midnight; a failed
-  verification rolls back and pauses; a failed rollback stops.
+- **Stage 2:** on a real database and real catalog, the whole journey across two replicas to a sealed
+  release; refused without internal origin, the standing authority or the owner's current role. On real
+  rows across two replicas: landed to published, the row keeping the journey. Each failure path.
+- **Stage 3:** each guard over real migration text; the window across midnight; on real rows across two
+  replicas with the real opening, policy and driver: a whole deploy, and a failed one going back, each
+  verification limited to its stage. A failed pin touches nothing; a hung sync is stopped; a failed
+  rollback stops; tables never go back by themselves; the pin from the catalog with no receiver.
 
 ## 9. Rollout
 
 No step here is taken by landing the code.
 
-1. Land the code on `main`. Nothing changes: every new key is absent.
-2. Release the engine and deploy it, the usual way. `memql-znas`'s DSL change ships with it.
-3. Set `source: main`, then `departures: ["21:00"]`. Watch one night. This is stage 1, with the
-   owner's approval still in place.
-4. Set `landing: automatic` and `release: automatic`. Watch one night.
-5. Prove section 7's unproven items, then set `deploy: automatic`.
+1. Land the code on `main` in both repositories. Nothing changes: every new key and switch is off.
+2. The owner adds the required checks (`MemQL / memql`, `MemQL / znas`, `MemQL / memql-project`, from the
+   app `memql-for-znas-llc`). Until then a release refuses: it cannot verify its source.
+3. Release the engine and deploy it, the usual way. `memql-znas`'s DSL and the Role that lets the engine
+   sync its two Applications ship with it.
+4. Set `source: main`, then `departures: ["21:00"]`. Watch one night. This is stage 1, with the owner's
+   approval still in place.
+5. Set `landing: automatic` and `releaseProfile`. The owner turns on **Publish by itself**. Watch one night.
+6. Write `MEMQL_RELEASE_INSTALLATION_OVERLAY` (`scripts/delivery/deploy-overlay.py`) and `deployment`.
+   Press **Deploy** once with someone watching, which proves section 7's real sync. Force a rollback once,
+   which proves the other half. Then the owner turns on **Deploy by itself**.
 
-At the switch, the open pull requests are not converted. Each one's session or owner lands it
-by pushing to `main`, and the rest can be closed. Dependabot and forks stay pull requests, and
-they merge once their check is green, with no train.
+At the switch, the open pull requests are not converted. Each one's session or owner lands it by pushing
+to `main`, and the rest can be closed. Dependabot and forks stay pull requests, and they merge once their
+check is green, with no train.
 
 ## 10. Risks and accepted limits
 
@@ -282,9 +335,27 @@ they merge once their check is green, with no train.
   Any session that can push to `main` can reach production overnight. The tests and D10 are what
   stand in the way, and D10 cannot see a test weakened inside a script.
 - **GitHub requires no check today.** The rulesets keep the rule with an empty list, so only the
-  train's code requires a passing run, and `scripts/release/release-engine.sh` refuses to publish
-  until the list names the pipeline's check. The owner adds `MemQL / memql`, `MemQL / znas` and
-  `MemQL / memql-project`, from the app `memql-for-znas-llc`.
+  train's code requires a passing run, and `scripts/release/release-engine.sh` and a train's release
+  both refuse to publish until the list names the pipeline's check. The owner adds `MemQL / memql`,
+  `MemQL / znas` and `MemQL / memql-project`, from the app `memql-for-znas-llc`. Direct pushes keep
+  working through the owner's Always-allow bypass; the app is no bypass actor, so a pin merges only
+  once its check is green.
+- **The preflight does not run.** `upgrade-preflight.sh` needs a person's credentials. Its prune gate
+  does not apply with prune off. A surge that cannot be scheduled, or a digest that does not resolve,
+  shows as a rollout that never comes up, and goes back. Slower than refusing, and safe, because old
+  pods stay until new ones are ready.
+- **A workaround a new tag absorbed breaks the render** (`docs/instance.md`: "Delete every workaround").
+  The pin's check, or the sync, fails, and it does not deploy. That needs a person, as it does today.
+- **Verifying needs a Fleet machine.** `deployment.verify-rollout` is placed there. With the owner's
+  machines off it cannot run, and an unverifiable rollout goes back. The window is when they are usually on.
+- **A new engine that passes readiness and cannot tick stops its own rollback.** Old pods keep the
+  coordinator through a rollout that never comes up, but nothing rolls back one that comes up broken in
+  this exact way. The out-of-band availability check still alerts.
+- **The analyzer pin stays behind.** `scripts/dev/package-analysis-engine.ref` is the eighth file a hand-made
+  pin moves. It only pins tooling, the checks do not compare it with the engine, and it is outside the seven
+  the native overlay binds, so it stays until someone moves it.
+- **Only the engine releases itself.** A product change on `memql-znas`'s `main` deploys when the next engine
+  pin syncs that commit's tree, or the way it does today. Its images are built on a release of its own, by hand.
 - **A held release stops that night's deploy** until a human acts, and a fix pushed in the morning
   deploys only in the next window or by the button.
 - **Half of release attempts fail today**, for reasons not yet looked into, so an unattended flow
@@ -295,3 +366,5 @@ they merge once their check is green, with no train.
   it is timed badly. The nightly slot makes that unlikely.
 - **Cockpit releases are not part of this.** A contract change stops the flow (section 7), and
   `cockpit/v*` stays a person's release.
+- **Code reaches production overnight on a machine's word that tests passed.** That is the owner's choice,
+  behind a switch that says so.

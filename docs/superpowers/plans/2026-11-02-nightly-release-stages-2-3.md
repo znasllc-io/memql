@@ -34,15 +34,15 @@
 
 ## Tasks
 
-- [ ] **1. Settings and pure decisions** (`component/pipelines/train.go`, `train_deploy.go`): `releaseProfile`, `deployment{repository,applications,namespace,verifyStages,window}`; `InDeployWindow`; `ClassifyMigration` over real migration text; `RemovedPipelineSteps`; `WorkerContracts`.
-- [ ] **2. Rows** (`dsl/pipelines`, `store_dsl.go`, `types.go`): train states `releasing`, `published` and release fields; concepts `standing`, `deployment`; run `onlyStages`; SDK regenerated. The standing shape never carries `authority`.
-- [ ] **3. A run of named stages** (`open.go`, `tree.go`): `Opening.Stages`, persisted, applied to the plan on whichever replica drives it. Refuses a name the manifest does not have for that event.
-- [ ] **4. ArgoCD sync** (`integrations/argocd/sync.go`): `ReadApplication`, `StartSync`, `ObserveSync`, `TerminateSync`; idempotent on a request id, fenced on uid and resourceVersion.
-- [ ] **5. Release side** (`integrations/release/train_release.go`, `build_prepare.go`, `pipelinerun/release_build.go`): `prepareBuildAt` selects the train head; `AdvanceTrainRelease` takes one step of the journey; internal origin only; approval under the standing grant.
-- [ ] **6. Coordinator: release** (`pipelinerun/train_release.go`, `train.go`, `train_land.go`, `pipelinenotify`): `releasing`, one re-run of failed release steps, `published`; a held release resumes when the owner finishes it by hand; `Start release now` retries a failed release.
-- [ ] **7. Pin** (`integrations/release/train_deploy.go`, `installation_overlay.go`): the seven-file pin through the existing overlay recipe without a receiver; the publication read from the signed catalog.
-- [ ] **8. Coordinator: deploy** (`pipelinerun/deploy.go`, `deploy_guards.go`): waiting, pinning, syncing, verifying, landing, deployed; rolling_back, verifying_rollback, rolled_back; stopped. Standing switch, Deploy button, Resume.
-- [ ] **9. Wiring** (`app/`): release integration to pipelinerun, cluster API for the sync.
-- [ ] **10. OS** (`clients/os/src/apps/cluster/releases`): switches, Deploy, Resume, what is happening now.
-- [ ] **11. Product** (`memql-znas`): evidence reuse admits a full train run for a release; RBAC for the two Applications; runbook.
-- [ ] **12. Two replicas over real Postgres** (`test/pipelinehop`): a release and a deploy resumed across replicas, and a rollback. Then the record, the public docs, one fresh review.
+- [x] **1. Settings and pure decisions** (`component/pipelines/train.go`, `train_deploy.go`): `releaseProfile`, `deployment{repository,applications,namespace,verifyStages,window}`; `InDeployWindow`; `ClassifyMigration` over real migration text; `RemovedPipelineSteps`; `WorkerContracts`.
+- [x] **2. Rows** (`dsl/pipelines`, `store_dsl.go`, `types.go`): train states `releasing`, `published` and release fields; concepts `standing`, `deployment`; run `onlyStages`; SDK regenerated. The standing shape never carries `authority`.
+- [x] **3. A run of named stages** (`open.go`, `tree.go`): `Opening.Stages`, persisted, applied to the plan on whichever replica drives it. Refuses a name the manifest does not have for that event.
+- [x] **4. ArgoCD sync** (`integrations/argocd/sync.go`): `ReadApplication`, `StartSync`, `ObserveSync`, `TerminateSync`; idempotent on a request id, fenced on uid and resourceVersion.
+- [x] **5. Release side** (`integrations/release/train_release.go`, `build_prepare.go`, `pipelinerun/release_build.go`): `prepareBuildAt` selects the train head; `AdvanceTrainRelease` takes one step of the journey; internal origin only; approval under the standing grant.
+- [x] **6. Coordinator: release** (`pipelinerun/train_release.go`, `train.go`, `train_land.go`, `pipelinenotify`): `releasing`, one re-run of failed release steps, `published`; a held release resumes when the owner finishes it by hand; `Start release now` retries a failed release.
+- [x] **7. Pin** (`integrations/release/train_deploy.go`, `installation_overlay.go`): the seven-file pin through the existing overlay recipe without a receiver; the publication read from the signed catalog.
+- [x] **8. Coordinator: deploy** (`pipelinerun/deploy.go`, `deploy_guards.go`): waiting, pinning, syncing, verifying, landing, deployed; rolling_back, verifying_rollback, rolled_back; stopped. Standing switch, Deploy button, Resume.
+- [x] **9. Wiring** (`app/`): release integration to pipelinerun, cluster API for the sync.
+- [x] **10. OS** (`clients/os/src/apps/cluster/releases`): switches, Deploy, Resume, what is happening now.
+- [x] **11. Product** (`memql-znas`): evidence reuse admits a full train run for a release; RBAC for the two Applications; runbook.
+- [x] **12. Two replicas over real Postgres** (`test/pipelinehop`): a release and a deploy resumed across replicas, and a rollback. Then the record, the public docs, one fresh review.

@@ -684,9 +684,9 @@ request. A train then carries the branch as it stands:
 
 - **It leaves** at each `departures` time, or when the pipeline's owner calls
   `pipelinesTrainExpress` with no pull requests, or presses **Start release now**
-  in Pipelines > Releases. A departure that finds the branch where the last landed
-  train left it is recorded as cancelled, *Nothing new on main since the last
-  release*, and sends nothing.
+  in Pipelines > Releases. A departure that finds the branch's tree where the last release
+  tested it is recorded as cancelled, *Nothing new on main since the last release*,
+  and sends nothing. A commit pushed during that release's run reads as new.
 - **It is built** from the branch's head and its version. The patch number goes up,
   unless a person changed `VERSION` on the branch since the last release; that
   version is kept. Its pull request lists the commits since the last release.
@@ -695,8 +695,8 @@ request. A train then carries the branch as it stands:
 - **It lands** by the owner's approval, or by itself with `landing: automatic`, which
   records `policy:landing-automatic` where a person's approval would be. The default
   branch moving under it does not rebuild it or stop it: GitHub merges it into the
-  branch's tip, and what was pushed since goes out next time. If that merge is refused,
-  the train holds and says so.
+  branch's tip, and what was pushed since goes out next time. A refused merge is asked
+  again for five minutes, then the train holds and says so.
 - **A failure** of any kind runs the failed steps again, once. If they pass, the train
   goes on and the message names them as flaky. If they fail again, the train holds and
   mentions the owner, listing the commits since the last release that can reach what
@@ -709,17 +709,72 @@ A pipeline's other pull requests are not carried: merge those as you would on an
 repository. Stop running on every push with your installed policy, by answering no mode
 for the `push` event, or each push still starts a full run.
 
+### Publishing and deploying by itself
+
+A train can go on past landing, one tick at a time, on the owner's word. Nothing here
+starts until the pipeline's owner, in the owner role, turns on a switch in
+Pipelines > Releases. The switches are not settings, because a setting can be written by
+people who may not approve a release. Each records the authority its owner held when
+they pressed it, as a ceiling and never a credential, and every tick re-reads their
+current role, so losing the role ends it. Both can be turned off at any time.
+
+**Publish by itself** needs `landing: automatic` and `releaseProfile`, the name of a
+release profile. A train that lands walks the saved journey in Pipelines > Releases: it
+tags the commit its run tested (not the merge, and not the branch's head), runs the
+release, which reuses the receipts of the run that tested that tree where your policy
+admits them, prepares the candidate, approves it as `policy:standing-release:<owner>`,
+publishes and seals. A failed release run re-runs its failed steps once, then the train
+holds. The version is spent: the next release takes the next number. You can finish a
+held release by hand on the same page, and the train goes on.
+
+**Deploy by itself** needs `deployment`:
+
+| Key | Meaning |
+|---|---|
+| `repository` | The installation's repository |
+| `applications` | Its ArgoCD Applications, in the order they sync |
+| `namespace` | Where they live; default `argocd` |
+| `verifyStages` | The installation manifest's stages that verify a rollout from outside the cluster |
+| `window` | `{"start":"HH:MM","end":"HH:MM"}` in `timeZone`, when an automatic deploy may start. May cross midnight |
+
+The engine must be allowed to `get` and `patch` those Applications, and
+`MEMQL_RELEASE_INSTALLATION_OVERLAY` must name the files a pin changes.
+
+- **It waits** for the window and for any running train, because syncing the mesh restarts
+  `agent`, which kills running CI. No train departs while a deploy is moving.
+- **Some releases wait for you.** Between what the installation runs and the release: a
+  migration that does anything but add an index, a changed worker action contract, or a
+  removed pipeline step. Discord says which, and **Deploy newest release** goes ahead with
+  them acknowledged. A newer release carries a waiting one, and its own guards read from the
+  same place, so nothing slips past.
+- **The pin goes on a branch.** Its pull request's check must pass, with one re-run. A failure
+  here touches nothing, and says so.
+- **Each Application syncs at the pin's exact commit**, in order, with prune off and nothing
+  inherited from an earlier sync. It keeps tracking its branch.
+- **The rollout is verified** from outside the cluster, by a manual run limited to
+  `verifyStages`. Only then does the pin merge, so the branch never carries one that failed.
+- **A failure goes back.** A sync that fails, one that hangs past 30 minutes, or a failed
+  verification syncs each Application it started on back to the commit it ran before,
+  verifies that, and closes the pull request. Going back needs no CI.
+- **A release that changes tables or data does not go back by itself**, because the code before
+  it is not proven against the database after it. It stops and mentions the owner.
+- **After going back, automatic deploys pause** until the owner presses **Resume**, because
+  what caused it is still on the branch.
+
+**Deploy newest release** is the same path for a release of any origin, whatever the hour.
+
 ### Not yet
 
 - **Splitting.** A failure with several suspects holds the train; it does not
   yet split them to find the cause.
 - **A shorter pull request check.** Every pull request, and every train pull
   request, runs the pipeline as its manifest selects it.
-- **Reusing the train's result.** The default branch's push run tests the
-  landed commit again, though its tree is the one the train tested.
+- **Reusing the train's result on a push.** On a train of pull requests, the default
+  branch's push run tests the landed commit again, though its tree is the one the train
+  tested.
 - **Review events.** Approval is read every minute rather than delivered.
-- **Releasing from the train.** Cut a release from the default branch after a
-  train lands, as before.
+- **Releasing from a train of pull requests.** Cut a release from the default branch after
+  it lands, as before. Only a train from main publishes itself.
 
 ## Connecting a pipeline
 
