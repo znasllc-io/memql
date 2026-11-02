@@ -42,8 +42,8 @@ func (o refOpener) Open(ref string) (fs.FS, error) {
 var _ BundleOpener = refOpener(nil)
 
 const (
-	servingRef   = "blob://sites/s-preview/v/serving/"
-	candidateRef = "blob://sites/s-preview/v/candidate/"
+	servingRef   = "blob://sites/s-preview/v-serving/"
+	candidateRef = "blob://sites/s-preview/v-candidate/"
 
 	// The two documents differ in their BODY, not in a header, because the
 	// question is which bundle was opened and a header could be written by

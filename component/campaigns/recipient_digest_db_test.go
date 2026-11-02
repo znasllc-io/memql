@@ -444,7 +444,7 @@ func setUpStorefront(t *testing.T, d *digestTenant, worker *Worker, sender *reco
 	if _, err := worker.handleSaveTemplate(d.owner, templateArgs, 0); err != nil {
 		t.Fatal(err)
 	}
-	d.execute(t, d.owner, call("mutation", "createSite", arg{"siteId", site}, arg{"accountId", d.org}, arg{"hostname", d.suffix + ".example.test"}, arg{"bundleRef", "sites/newsletter/test"}, arg{"kind", "static"}))
+	d.execute(t, d.owner, call("mutation", "createSite", arg{"siteId", site}, arg{"accountId", d.org}, arg{"hostname", d.suffix + ".example.test"}, arg{"bundleRef", "blob://sites/" + site + "/v1/"}, arg{"kind", "static"}))
 	nodes, err = worker.handleConfigureNewsletter(d.owner, map[string]any{"siteId": site, "audienceId": d.audience, "templateId": template, "senderIdentityId": identity, "consentText": "I agree to receive Client's newsletter by email.", "enabled": true}, 0)
 	if err != nil {
 		t.Fatal(err)

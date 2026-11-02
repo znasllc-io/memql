@@ -63,7 +63,7 @@ func newAccessReadFixture(t *testing.T, eng *MemQLEngine, name string) accessRea
 	seedMembership(t, eng, "g-"+ids.account, f.member, "active")
 	require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, f.site, map[string]any{
 		"hostname": ids.site + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft",
-		"bundleRef": "blob://site-access/v1", "ownerUserId": "v1:identity:user:" + f.owner, "accountId": ids.account,
+		"bundleRef": "blob://sites/" + BareShortId(f.site) + "/v1/", "ownerUserId": "v1:identity:user:" + f.owner, "accountId": ids.account,
 	}))
 
 	issued := time.Now().UTC().Truncate(time.Second)

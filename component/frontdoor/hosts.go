@@ -117,6 +117,20 @@ const VSCodeSite = "vscode"
 // here is only that its name exists before any operator creates a row.
 func PlatformSites() []string { return []string{OsSite, VSCodeSite} }
 
+// PlatformSiteBundleDir is the directory the edge image ships a platform site's
+// bundle in (the Dockerfile's final stage), or "" for any other name. A platform
+// site's seed names it, and it is the one directory a site row may name:
+// memql.SiteNamesItsOwnBundle holds every row to that.
+func PlatformSiteBundleDir(name string) string {
+	switch name {
+	case OsSite:
+		return "/app/os"
+	case VSCodeSite:
+		return "/app/vscode-site"
+	}
+	return ""
+}
+
 // PlatformSiteHost is the host a platform site is served at: `<name>.<domain>`.
 // The same composition as any site's; a platform site's hostname differs from
 // a customer's only in who wrote the row.

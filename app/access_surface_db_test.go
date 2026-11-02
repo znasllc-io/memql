@@ -357,7 +357,7 @@ func (w *accessWorld) packageRow(pkg string, domains []string) {
 func (w *accessWorld) siteRow(site, pkg, account string) {
 	w.t.Helper()
 	w.insert("v1:platform:site", site, map[string]any{
-		"hostname": site + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://access-surface/v1",
+		"hostname": site + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://sites/" + site + "/v1/",
 		"ownerUserId": "v1:identity:user:" + w.owner, "accountId": account,
 		"packageId": "v1:platform:package:" + pkg, "packageDeployableName": accessE2EDeployable,
 	})
@@ -796,7 +796,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		w := newAccessWorld(t, rig)
 		theirSite := "as-theirs-" + w.suffix
 		w.insert("v1:platform:site", theirSite, map[string]any{
-			"hostname": theirSite + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://access-surface/v1",
+			"hostname": theirSite + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://sites/" + theirSite + "/v1/",
 			"ownerUserId": "v1:identity:user:" + w.member, "accountId": w.account,
 			"packageId": "v1:platform:package:" + w.pkg, "packageDeployableName": accessE2EDeployable,
 		})
@@ -858,7 +858,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		outsiders := "as-outsiders-" + w.suffix
 		outsider := "v1:identity:user:" + w.stranger
 		w.insert("v1:platform:site", outsiders, map[string]any{
-			"hostname": outsiders + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://access-surface/v1",
+			"hostname": outsiders + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://sites/" + outsiders + "/v1/",
 			"ownerUserId": outsider, "accountId": w.account,
 			"packageId": "v1:platform:package:" + w.pkg, "packageDeployableName": accessE2EDeployable,
 		})

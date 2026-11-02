@@ -210,7 +210,7 @@ a URI, and its scheme decides how a deploy actually happens:
 
 | Scheme | Example | Deploy is | Rollback is | Use for |
 |---|---|---|---|---|
-| `file://` | `file:///app/sites/shop` | An image rebuild + rollout | An image rollback | Something that ships WITH the cluster -- baked into the engine image at build time, or a working-tree path for the dev inner loop |
+| `file://` | `file:///app/os` | An image rebuild + rollout | An image rollback | A platform site, which ships WITH the cluster: the directory the edge image holds it in, and only for that site |
 | `blob://` | `blob://sites/shop/v3f9a2.../` | An upload plus a row write, in seconds | One more row write | Something that changes on its OWN clock |
 
 The guidance is about cadence, not mechanism: **bake what ships with the
@@ -229,7 +229,17 @@ the second baked case (memql#5518): seeded from the same file with
 `index.html` at the root, so no SPA fallback), built into the edge image the
 way the OS is, and served at `vscode.<domain>`. A customer's storefront is
 the opposite case -- it will change far more often than the engine does, so
-`blob://` is almost always the right choice for one.
+`blob://` is the choice for one.
+
+**A site names its own versions.** `bundleRef` and `candidateRef` hold a
+version published for that site (`blob://sites/<its id>/<version>/`), the
+directory the image ships it in if it is a platform site, or nothing yet. A
+write naming anything else is refused with `site_version_not_its_own`, whoever
+makes it, and the edge serves nothing for such a reference on a row that
+already holds one: a live site answers 503 and the edge logs the site and the
+field. The repair is an ordinary write, publishing a bundle or pointing the
+site at one of its own versions. A new site's id is one path segment, because
+it names the site's storage prefix.
 
 ---
 

@@ -290,7 +290,7 @@ func TestSeedMaterializerSystemActorStillRendersItsMutations(t *testing.T) {
 		}},
 		{"createSite", map[string]any{
 			"siteId": "site-3620", "hostname": "site-3620.example.com",
-			"bundleRef": "file:///tmp/site-3620",
+			"bundleRef": "blob://sites/site-3620/v1/",
 		}},
 	}
 	for _, tc := range cases {

@@ -676,8 +676,9 @@ sites (`frontdoor.PlatformSites()`: the OS shell and the VS Code landing page):
 **A platform site is a seeded `v1:platform:site` row, not a role** (memql#5518):
 `systemOwned`, a directory the edge image ships (`/app/os`, `/app/vscode-site`),
 served through the same resolver as a customer's site. Adding a third is one
-entry in `PlatformSites()`, one seed in `dsl/platform/seeds.memql`, one build
-step and one hand-authored local rule.
+entry in `PlatformSites()` and its directory in `PlatformSiteBundleDir()`, one
+seed in `dsl/platform/seeds.memql`, one build step and one hand-authored local
+rule.
 
 **Every host is a SINGLE label under the domain -- a ROUTING fact** (an Ingress
 wildcard matches ONE label, so `*.<domain>` routes every site to the edge)
@@ -1882,7 +1883,9 @@ does not say.
 
 - **Platform** (`dsl/platform/concepts.memql`) -- `site`, a hosted web surface
   and "deployable" (memql#4344): the edge resolves the request `Host` to one of
-  these rows and serves its `bundleRef`. A user's hostname is `<slug>.<domain>`
+  these rows and serves its `bundleRef`, which names only that site's own
+  versions (`memql.SiteNamesItsOwnBundle`, on the write and at the edge, no actor
+  exempt). A user's hostname is `<slug>.<domain>`
   against a reserved set DERIVED from `frontdoor.Roles()` + the OS shell.
   Android / iOS / macOS have NO enum values; they are a written-down TARGET
   shape (epic memql#4885), reported `deployable_target_not_offered`

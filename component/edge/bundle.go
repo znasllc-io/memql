@@ -18,8 +18,9 @@ type BundleOpener interface {
 
 type fileOpener struct{}
 
-// NewFileOpener handles file:// -- the bundle the image ships (the portal) and
-// a working tree (the dev inner loop). Task 4 composes this with blob://.
+// NewFileOpener handles file:// -- a bundle the image ships. Which row may name
+// which directory is the resolver's question, asked before this is reached
+// (memql.SiteNamesItsOwnBundle). Task 4 composes this with blob://.
 func NewFileOpener() BundleOpener { return fileOpener{} }
 
 func (fileOpener) Open(ref string) (fs.FS, error) {

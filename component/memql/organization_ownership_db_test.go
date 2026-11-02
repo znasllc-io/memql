@@ -59,7 +59,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		{"v1:campaigns:template", map[string]any{"name": "Template", "subject": "Subject", "textBody": "Hello", "status": "ready"}},
 		{"v1:campaigns:senderIdentity", map[string]any{"address": "news@example.test", "fromName": "News", "status": "active"}},
 		{"v1:platform:package", map[string]any{"name": "Package", "sourceKind": "repo", "status": "active"}},
-		{"v1:platform:site", map[string]any{"hostname": "site-" + suffix + "." + siteHostnamePolicyDomain(), "kind": "spa", "bundleRef": "blob://site/test", "status": "live"}},
+		{"v1:platform:site", map[string]any{"hostname": "site-" + suffix + "." + siteHostnamePolicyDomain(), "kind": "spa", "bundleRef": "blob://sites/v1-platform-site-" + suffix + "/v1/", "status": "live"}},
 	}
 	for _, tc := range cases {
 		id := strings.ReplaceAll(tc.concept, ":", "-") + "-" + suffix
@@ -137,7 +137,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		t.Fatal(err)
 	}
 	namedSite := "named-site-" + suffix
-	if _, err := engine.Execute(actor, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, bundleRef: "blob://named/test", accountId: %s)`, langparser.QuoteString(namedSite), langparser.QuoteString(namedSite+"."+siteHostnamePolicyDomain()), langparser.QuoteString(acme))); err != nil {
+	if _, err := engine.Execute(actor, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, bundleRef: %s, accountId: %s)`, langparser.QuoteString(namedSite), langparser.QuoteString(namedSite+"."+siteHostnamePolicyDomain()), langparser.QuoteString("blob://sites/"+namedSite+"/v1/"), langparser.QuoteString(acme))); err != nil {
 		t.Fatal(err)
 	}
 	for concept, id := range map[string]string{"v1:campaigns:campaign": campaign, "v1:platform:site": namedSite} {
@@ -215,7 +215,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		if account != "" {
 			argument, want = ", accountId: "+langparser.QuoteString(account), conceptAccountsAccount+":"+account
 		}
-		if _, err := receiver.Execute(remoteOwnerCtx, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, bundleRef: "blob://operator/test"%s)`, langparser.QuoteString(id), langparser.QuoteString(id+"."+siteHostnamePolicyDomain()), argument)); err != nil {
+		if _, err := receiver.Execute(remoteOwnerCtx, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, bundleRef: %s%s)`, langparser.QuoteString(id), langparser.QuoteString(id+"."+siteHostnamePolicyDomain()), langparser.QuoteString("blob://sites/"+id+"/v1/"), argument)); err != nil {
 			t.Fatalf("operator site after hop (account %q): %v", account, err)
 		}
 		var rows []memorynodes.MemoryNode
@@ -338,7 +338,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+acme, auth.VerbExecute, "app:deployables/publish", auth.GrantAllow)
 	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+beta, auth.VerbExecute, "app:deployables/publish", auth.GrantDeny)
 	betaSite := "beta-action-" + suffix
-	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:platform:site", betaSite, map[string]any{"accountId": beta, "ownerUserId": operator, "hostname": betaSite + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "live", "bundleRef": "blob://beta/test"}); err != nil {
+	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:platform:site", betaSite, map[string]any{"accountId": beta, "ownerUserId": operator, "hostname": betaSite + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "live", "bundleRef": "blob://sites/" + betaSite + "/v1/"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := receiver.Execute(delegatedCtx, fmt.Sprintf(`mutation updateSiteStatus(siteId: %s, status: "disabled")`, langparser.QuoteString(namedSite))); err != nil {

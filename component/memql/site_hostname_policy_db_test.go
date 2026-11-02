@@ -195,12 +195,13 @@ func TestSiteCreateRefusesAUserHostnameOutsideThePolicy(t *testing.T) {
 		{"an uppercase hostname", "SHOP." + siteTestDomain, "does not match pattern"},
 		{"a slug over the maximum", strings.Repeat("a", 41) + "." + siteTestDomain, "not a usable site name"},
 	}
-	for _, tc := range cases {
+	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			siteID := "site-refuse-" + uniqueSuffix(fmt.Sprintf("policy-%d", i))
 			_, err := createSiteRaw(t, caller, eng, map[string]any{
-				"siteId":    "site-refuse-" + uniqueSuffix(tc.name),
+				"siteId":    siteID,
 				"hostname":  tc.hostname,
-				"bundleRef": "blob://sites/x/v1/",
+				"bundleRef": "blob://sites/" + siteID + "/v1/",
 			})
 			if err == nil {
 				t.Fatalf("a user claimed %q through createSite. The one `*.%s` Ingress rule is what "+
@@ -266,10 +267,11 @@ func TestSiteCreateRefusesADuplicateHostnameEvenForAClusterOwner(t *testing.T) {
 
 	// A second USER cannot take it...
 	second := userSiteCtx("user-site-dup2-" + uniqueSuffix("site"))
+	secondSite := "site-dup-b-" + uniqueSuffix("site")
 	_, err := createSiteRaw(t, second, eng, map[string]any{
-		"siteId":    "site-dup-b-" + uniqueSuffix("site"),
+		"siteId":    secondSite,
 		"hostname":  hostname,
-		"bundleRef": "blob://sites/b/v1/",
+		"bundleRef": "blob://sites/" + secondSite + "/v1/",
 	})
 	if err == nil {
 		t.Fatal("a second user claimed a hostname another site already answers on")
@@ -281,10 +283,11 @@ func TestSiteCreateRefusesADuplicateHostnameEvenForAClusterOwner(t *testing.T) {
 	// ...and neither can a CLUSTER OWNER. The shape rule is waived for them;
 	// this one is not, because it is about whether the cluster can serve the
 	// row at all.
+	thirdSite := "site-dup-c-" + uniqueSuffix("site")
 	_, err = createSiteRaw(t, clusterOwnerCtx("root-dup-"+uniqueSuffix("site")), eng, map[string]any{
-		"siteId":    "site-dup-c-" + uniqueSuffix("site"),
+		"siteId":    thirdSite,
 		"hostname":  hostname,
-		"bundleRef": "blob://sites/c/v1/",
+		"bundleRef": "blob://sites/" + thirdSite + "/v1/",
 	})
 	if err == nil {
 		t.Fatal("a cluster owner created a SECOND live site on an occupied hostname. Uniqueness is " +
@@ -351,7 +354,7 @@ func TestSiteCrossUserWritesAreRefusedThroughTheMutationPath(t *testing.T) {
 		mutation string
 		args     map[string]any
 	}{
-		{"updateSiteBundle", map[string]any{"siteId": id, "bundleRef": "blob://evil/v1/"}},
+		{"updateSiteBundle", map[string]any{"siteId": id, "bundleRef": "blob://sites/" + id + "/v2/"}},
 		{"updateSiteStatus", map[string]any{"siteId": id, "status": "disabled"}},
 		{"deleteSite", map[string]any{"siteId": id}},
 	} {
@@ -442,7 +445,7 @@ func TestSiteSeededBySystemActorStaysClusterOwnedAcrossReMaterialization(t *test
 	args := map[string]any{
 		"siteId":               id,
 		"hostname":             "portal." + siteTestDomain,
-		"bundleRef":            "file:///app/os",
+		"bundleRef":            "blob://sites/" + id + "/v1/",
 		"status":               "live",
 		"apiProxy":             true,
 		"systemOwned":          true,
@@ -570,11 +573,12 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	// succeeded -- so the refusal is about the SHAPE rather than about who
 	// asked. Pre-release means no shim: a write still carrying the copy is a
 	// caller nobody migrated.
+	legacySite := "site-legacy-" + uniqueSuffix("site")
 	if _, err := createSiteRaw(t, ctx, eng, map[string]any{
-		"siteId":    "site-legacy-" + uniqueSuffix("site"),
+		"siteId":    legacySite,
 		"hostname":  "legacy-" + uniqueSuffix("site") + "." + siteTestDomain,
 		"kind":      "shopify_storefront",
-		"bundleRef": "blob://sites/legacy/v1/",
+		"bundleRef": "blob://sites/" + legacySite + "/v1/",
 		"binding": map[string]any{
 			"storeDomain":        "example-store.myshopify.com",
 			"storefrontTokenRef": "SHOPIFY_STOREFRONT_TOKEN",
@@ -609,11 +613,12 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 		"developer": installed.grants["owner"],
 	}})
 	adminCtx := rankActorCtx("admin-site-shop-"+uniqueSuffix("site"), auth.RoleAdmin)
+	unreadableSite := "site-unreadable-" + uniqueSuffix("site")
 	if _, err := createSiteRaw(t, adminCtx, eng, map[string]any{
-		"siteId":    "site-unreadable-" + uniqueSuffix("site"),
+		"siteId":    unreadableSite,
 		"hostname":  "unreadable-" + uniqueSuffix("site") + "." + siteTestDomain,
 		"kind":      "shopify_storefront",
-		"bundleRef": "blob://sites/unreadable/v1/",
+		"bundleRef": "blob://sites/" + unreadableSite + "/v1/",
 		"binding":   map[string]any{"storeId": storeId},
 	}); err == nil {
 		t.Fatal("an admin bound a storefront to a store below whose read floor they sit")
@@ -630,11 +635,12 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	// capability_not_held; the refusal for a developer WITHOUT the part is
 	// pinned by TestAWriteThatKeepsTheBindingNeedsNoStorePart, under a deny.
 	devCtx := userSiteCtx("user-site-shop-" + uniqueSuffix("site"))
+	developerSite := "site-developer-" + uniqueSuffix("site")
 	devSite, err := createSiteRaw(t, devCtx, eng, map[string]any{
-		"siteId":    "site-developer-" + uniqueSuffix("site"),
+		"siteId":    developerSite,
 		"hostname":  "developer-" + uniqueSuffix("site") + "." + siteTestDomain,
 		"kind":      "shopify_storefront",
-		"bundleRef": "blob://sites/developer/v1/",
+		"bundleRef": "blob://sites/" + developerSite + "/v1/",
 		"binding":   map[string]any{"storeId": storeId},
 	})
 	if err != nil {
@@ -648,11 +654,12 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	// A kind the concept does not declare is refused, which is what makes the
 	// enum a decision rather than a label: android / ios / macos deliberately
 	// have no value (design D5).
+	androidSite := "site-android-" + uniqueSuffix("site")
 	if _, err := createSiteRaw(t, ctx, eng, map[string]any{
-		"siteId":    "site-android-" + uniqueSuffix("site"),
+		"siteId":    androidSite,
 		"hostname":  "android-" + uniqueSuffix("site") + "." + siteTestDomain,
 		"kind":      "android",
-		"bundleRef": "blob://sites/x/v1/",
+		"bundleRef": "blob://sites/" + androidSite + "/v1/",
 	}); err == nil {
 		t.Fatal("kind \"android\" was accepted. Android / iOS / macOS are artifact DISTRIBUTION, " +
 			"not hostname-resolved web surfaces -- a value the edge cannot resolve would be the " +
@@ -702,7 +709,7 @@ func TestAWriteThatKeepsTheBindingNeedsNoStorePart(t *testing.T) {
 		"siteId":    "site-keep-denied-" + suffix,
 		"hostname":  "keep-denied-" + suffix + "." + siteTestDomain,
 		"kind":      "shopify_storefront",
-		"bundleRef": "blob://sites/keep-denied/v1/",
+		"bundleRef": "blob://sites/site-keep-denied-" + suffix + "/v1/",
 		"binding":   map[string]any{"storeId": storeId},
 	}); err == nil {
 		t.Fatal("a developer denied the store part bound a storefront at create")

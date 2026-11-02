@@ -124,7 +124,7 @@ func seedPartGateTargets(t *testing.T, eng *MemQLEngine, member, packageID, site
 		t.Fatal(err)
 	}
 	if siteID != "" {
-		if err := organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, siteID, map[string]any{"hostname": BareShortId(siteID) + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft", "bundleRef": "blob://part-gate/v1", "ownerUserId": member, "accountId": account}); err != nil {
+		if err := organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, siteID, map[string]any{"hostname": BareShortId(siteID) + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft", "bundleRef": "blob://sites/" + BareShortId(siteID) + "/v1/", "ownerUserId": member, "accountId": account}); err != nil {
 			t.Fatal(err)
 		}
 	}

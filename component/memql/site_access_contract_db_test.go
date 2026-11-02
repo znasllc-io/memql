@@ -322,7 +322,7 @@ func TestSiteAccessCodeViewCarriesTheCopiedAccountSoAStaleCopyCanBeSeen(t *testi
 	// The site is Beta's now.
 	require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, site, map[string]any{
 		"hostname": ids.site + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft",
-		"bundleRef": "blob://site-access/v1", "ownerUserId": "v1:identity:user:" + ids.owner, "accountId": beta,
+		"bundleRef": "blob://sites/" + BareShortId(site) + "/v1/", "ownerUserId": "v1:identity:user:" + ids.owner, "accountId": beta,
 	}))
 	owner := auth.ContextWithInternalOrigin(auth.ContextWithAccess(ctx, siteAccessAs(ids.owner, auth.RoleWriter)))
 	mint := func(code string, account string, seed byte) {
@@ -851,7 +851,7 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	for site, account := range map[string]string{siteAcme: acme, siteBeta: beta} {
 		require.NoError(t, organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, site, map[string]any{
 			"hostname": BareShortId(site) + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft",
-			"bundleRef": "blob://site-access/v1", "ownerUserId": "v1:identity:user:" + person, "accountId": account,
+			"bundleRef": "blob://sites/" + BareShortId(site) + "/v1/", "ownerUserId": "v1:identity:user:" + person, "accountId": account,
 		}))
 	}
 

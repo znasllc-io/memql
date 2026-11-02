@@ -100,6 +100,28 @@ func bundleWith(n int) Bundle {
 	return b
 }
 
+// The publisher composes a version's prefix from the site's id, and refuses one
+// that names no single prefix before anything is uploaded.
+func TestPublishRefusesASiteIdThatIsNotOneSegment(t *testing.T) {
+	for _, siteID := range []string{"", "a/b", "..", ".", "a.", `a\b`, "a%2fb"} {
+		t.Run(siteID, func(t *testing.T) {
+			store := newFakeBlobStore()
+			if _, err := NewPublisher(store, newFakeSiteStore(map[string]string{})).Publish(context.Background(), siteID, bundleWith(1), TargetServing); err == nil {
+				t.Fatal("published")
+			}
+			if len(store.objects) != 0 {
+				t.Fatalf("uploaded %d objects before refusing", len(store.objects))
+			}
+		})
+	}
+	// Both spellings of an ordinary id name one prefix.
+	for _, siteID := range []string{"s1", "v1:platform:site:s1", "6f1c2d3e-0000-4000-8000-000000000001"} {
+		if _, err := NewPublisher(newFakeBlobStore(), newFakeSiteStore(map[string]string{})).Publish(context.Background(), siteID, bundleWith(1), TargetServing); err != nil {
+			t.Fatalf("publishing to %q: %v", siteID, err)
+		}
+	}
+}
+
 // ATOMICITY IS THE POINT. A partially-uploaded bundle must never be reachable:
 // the whole thing lands under a NEW version prefix and only then does the row
 // flip. A failure mid-upload leaves the previous version live and untouched.

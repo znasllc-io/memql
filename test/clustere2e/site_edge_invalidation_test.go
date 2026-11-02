@@ -284,7 +284,7 @@ func TestSiteEdgeInvalidation_CrossReplica(t *testing.T) {
 		SiteId:    siteID,
 		Hostname:  hostname,
 		Kind:      "static",
-		BundleRef: "file:///app/os",
+		BundleRef: "blob://sites/" + siteID + "/pending/",
 		Status:    "live",
 		Title:     "clustere2e invalidation probe",
 	}); err != nil {

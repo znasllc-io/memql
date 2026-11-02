@@ -43,8 +43,8 @@
 // names; the Go build knows nothing about how it got there. blob.go's
 // blob:// opener is the other half of the same idea: a bundle that changes
 // on its own clock, uploaded to object storage instead of baked into an
-// image (see dsl/platform/concepts.memql's `site.bundleRef` for the three
-// usages the scheme distinguishes).
+// image (see dsl/platform/concepts.memql's `site.bundleRef` for the usages the
+// scheme distinguishes).
 //
 // # Why this is an allowed HTTP exception
 //

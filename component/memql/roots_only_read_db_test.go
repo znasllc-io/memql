@@ -74,7 +74,7 @@ func TestARootsOnlyReadSkipsTheRelationships(t *testing.T) {
 		"name": "desk", "sourceKind": "repo", "status": "active", "ownerUserId": owner, "accountId": account,
 	})
 	insert("v1:platform:site", site, map[string]any{
-		"hostname": site + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://x/v1",
+		"hostname": site + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://sites/" + site + "/v1/",
 		"ownerUserId": owner, "packageId": "v1:platform:package:" + pkg, "accountId": account, "packageDeployableName": "desk",
 	})
 	t.Cleanup(func() {

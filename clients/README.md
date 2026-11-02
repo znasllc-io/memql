@@ -142,10 +142,9 @@ locally built one cannot diverge in how they were produced.
 
 The shell is a site row (memql#4705): its row's `bundleRef` names the directory
 the edge serves it from, the same mechanism any hosted site uses. There is no
-longer an env var that repoints it. To serve a locally built bundle instead of
-the seeded `file:///app/os`, call the `updateSiteBundle` mutation with
-`siteId: "os"` and a `bundleRef` naming a `clients/os/dist` the edge
-pod can read.
+longer an env var that repoints it. To serve a locally built bundle, rebuild the
+edge image with `make dev NODE=edge`: a site row names only its own versions, so
+a row cannot point the shell at another directory.
 
 In the local cluster the shell is already there, at its own front-door host:
 **<https://os.memql.localhost/>** after `make up`.

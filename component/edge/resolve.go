@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/znasllc-io/memql/component/frontdoor"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // Site is the projection of v1:platform:site the edge needs to serve a request.
@@ -286,6 +287,10 @@ type resolver struct {
 	// reference the edge will not serve gets at resolution (memql#5626).
 	tokenWarnings *refusalLog
 
+	// versionWarnings throttles the warning a site naming a version that is not
+	// its own gets at resolution.
+	versionWarnings *refusalLog
+
 	// sf collapses concurrent cold-cache resolutions for the SAME hostname
 	// into one query, the same shape as integrations/cognition's cache-miss
 	// singleflight groups (e.g. recentUtterSF / spaceInfoSF in
@@ -312,7 +317,7 @@ type resolver struct {
 // served from, and this cache lives on every edge replica, so the TTL is the
 // backstop behind the change-feed invalidation in Task 9.
 func NewResolver(exec QueryExecutor, ttl time.Duration) Resolver {
-	return &resolver{exec: exec, ttl: ttl, cache: map[string]entry{}, logger: slog.Default(), tokenWarnings: newRefusalLog()}
+	return &resolver{exec: exec, ttl: ttl, cache: map[string]entry{}, logger: slog.Default(), tokenWarnings: newRefusalLog(), versionWarnings: newRefusalLog()}
 }
 
 // normalizeHost strips the port and lowercases. A Host header carries a port
@@ -467,6 +472,17 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 			}
 		}
 
+		// THE VERSIONS THE ROW NAMES, held to the rule the write guard holds them
+		// to (component/memql/site_bundle_reference.go). Here, after every way a
+		// host finds its row and before anything can open one, so the page, the
+		// versioned assets and a preview all read the answer. A reference that is
+		// not the site's own is no version at all: a live site with none answers
+		// the 503 any site with nothing to open answers.
+		if site != nil {
+			site.BundleRef = r.ownVersion(site, "bundleRef", site.BundleRef)
+			site.CandidateRef = r.ownVersion(site, "candidateRef", site.CandidateRef)
+		}
+
 		// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames
 		// drives one database query per request -- an amplifier pointed at the
 		// database, reachable by anyone who can resolve the wildcard.
@@ -490,6 +506,20 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 	// *Site the closure returned, nil or not.
 	site, _ := anySite.(*Site)
 	return site, nil
+}
+
+// ownVersion answers ref when the site may serve it and nothing when it may not,
+// telling the operator once an hour for each site, field and reference. The
+// repair is an ordinary write to the row, so the warning names both.
+func (r *resolver) ownVersion(site *Site, field, ref string) string {
+	if memql.SiteNamesItsOwnBundle(site.ID, ref) {
+		return ref
+	}
+	if r.versionWarnings.due(site.ID + "\x00" + field + "\x00" + ref) {
+		r.logger.Warn("edge: this site serves nothing for a reference that is not its own: publish a bundle to it, or point it at one of its own versions",
+			"component", "edge", "siteId", site.ID, "field", field, "ref", ref)
+	}
+	return ""
 }
 
 // warnUnservedToken tells the operator -- once an hour for each site, store

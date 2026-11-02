@@ -282,7 +282,7 @@ func (w *world) packageRow(id, account string, domains []string) {
 func (w *world) siteRow(id string, over map[string]any) {
 	w.t.Helper()
 	payload := map[string]any{
-		"hostname": id + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://site-access/v1",
+		"hostname": id + ".example.test", "kind": "spa", "status": "draft", "bundleRef": "blob://sites/" + id + "/v1/",
 		"ownerUserId": "v1:identity:user:" + w.owner, "accountId": w.account,
 		"packageId": "v1:platform:package:" + w.pkg, "packageDeployableName": w.deployable,
 	}
