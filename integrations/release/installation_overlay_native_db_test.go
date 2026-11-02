@@ -235,10 +235,10 @@ func TestInstallationOverlayNativeFactsRefuseForeignOrAlteredEvidence(t *testing
 	require.Zero(t, h.writes)
 }
 
-// A deploy makes its pin with no receiving installation: this cluster published the
-// release, so the signed catalog is its source, and the same native emitter writes the
-// same files under the same fences.
-func TestADeployPinComesFromTheCatalogWithNoReceiver(t *testing.T) {
+// deployPinFixture is a sealed release ready to pin, on a cluster with no receiving
+// installation.
+func deployPinFixture(t *testing.T) (*overlayScope, *overlayHub, pl.DeployPinRequest, context.Context, *atomic.Value) {
+	t.Helper()
 	s, h, _, _ := overlayNativeJournalFixture(t)
 	i := s.integration
 	i.installation.Store(nil)
@@ -284,6 +284,15 @@ automation fixtureProposalObservation {
 		RequestID: "deploy-" + id.NewShortId(), CandidateID: s.request.CandidateID, CatalogDigest: s.request.CatalogDigest,
 		ExpectedBase: s.request.ExpectedBaseRevision, OwnerUserID: s.owner, Authority: authority,
 	}
+	return s, h, r, tick, role
+}
+
+// A deploy makes its pin with no receiving installation: this cluster published the
+// release, so the signed catalog is its source, and the same native emitter writes the
+// same files under the same fences.
+func TestADeployPinComesFromTheCatalogWithNoReceiver(t *testing.T) {
+	s, h, r, tick, role := deployPinFixture(t)
+	i := s.integration
 	pin, err := i.ProposeDeployPin(tick, r)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -322,7 +331,7 @@ automation fixtureProposalObservation {
 
 	// Without the owner's role, internal origin, or their word, it does nothing.
 	role.Store(string(auth.RoleAdmin))
-	_, err = i.ProposeDeployPin(tick, pl.DeployPinRequest{RequestID: "deploy-" + id.NewShortId(), CandidateID: r.CandidateID, CatalogDigest: r.CatalogDigest, ExpectedBase: r.ExpectedBase, OwnerUserID: s.owner, Authority: authority})
+	_, err = i.ProposeDeployPin(tick, pl.DeployPinRequest{RequestID: "deploy-" + id.NewShortId(), CandidateID: r.CandidateID, CatalogDigest: r.CatalogDigest, ExpectedBase: r.ExpectedBase, OwnerUserID: s.owner, Authority: r.Authority})
 	require.Error(t, err)
 	role.Store(string(auth.RoleOwner))
 	_, err = i.ProposeDeployPin(ownerCtx(), r)
@@ -331,4 +340,21 @@ automation fixtureProposalObservation {
 	noWord.Authority = nil
 	_, err = i.ProposeDeployPin(tick, noWord)
 	require.ErrorContains(t, err, "standing authority")
+}
+
+// A release holding for the owner's Deploy button can wait past the 48 hours after which
+// its inputs are archived. A pin reads the catalog and the run's journal, which archival
+// leaves alone, so that press still works until the run leaves on its usual window.
+func TestADeployPinComesFromAnArchivedRelease(t *testing.T) {
+	s, h, r, tick, _ := deployPinFixture(t)
+	_, err := s.db.Exec(`UPDATE release_candidates SET state='archived' WHERE candidate_id=$1`, r.CandidateID)
+	require.NoError(t, err)
+	pin, err := s.integration.ProposeDeployPin(tick, r)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, e := s.db.Exec(`DELETE FROM release_installation_proposals WHERE proposal_id=$1`, pin.ProposalID)
+		require.NoError(t, e)
+	})
+	require.Positive(t, pin.PullRequest)
+	require.Equal(t, 1, h.prs)
 }

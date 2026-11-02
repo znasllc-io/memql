@@ -236,6 +236,8 @@ type publication struct {
 	maxRequests int
 	attempted   bool
 	replaced    int64
+	// history reads a published release for availability (ObservePublished).
+	history bool
 }
 
 func (s *publication) releasePath() string {

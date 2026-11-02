@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"errors"
 	"slices"
 	"time"
@@ -139,8 +140,41 @@ func (p *candidatePreparer) verifyPublishedInputs(ctx context.Context, snapshot 
 	return proof, nil
 }
 
+// archivalCandidateFor builds the preparer archival verifies with. configuredCandidateFor
+// keeps every new effect on the engine and resolver that prepared it, and the deployment
+// a release exists for moves that engine, normally long before the 48 hours archival
+// waits, so it refused every bound candidate that shipped. Archival selects nothing and
+// publishes nothing. It asks only for what verifyPublishedInputs reads: destinations the
+// current profile still authorizes, which resolve to the digests the candidate was
+// approved with. The binding it takes them from was verified when it was read.
+func (i *Integration) archivalCandidateFor(ctx context.Context, key string) (*candidatePreparer, error) {
+	p, err := i.candidateStorage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b, err := p.ledger.profileBinding(ctx, key, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		return i.configuredCandidate(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	profiles, err := i.candidateProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	index := slices.IndexFunc(profiles, func(profile candidateProfile) bool { return profile.Name == b.ProfileName })
+	if index < 0 {
+		return nil, errors.New("release profile is absent or no longer authorized")
+	}
+	if p.targetReader, err = i.profileTargets(profiles[index], b); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 func (i *Integration) handleCandidateArchive(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	p, err := i.configuredCandidateFor(ctx, asString(args["candidateId"]))
+	p, err := i.archivalCandidateFor(ctx, asString(args["candidateId"]))
 	if err != nil {
 		return nil, err
 	}

@@ -327,6 +327,33 @@ func TestCandidateArchiveFilesRequiresFreshPublishedBytesAndPreservesDraftHistor
 	}
 }
 
+// v0.30.8 has carried a deployment hold in its notes since 48 minutes after it went out, and
+// its archive was refused for it from its first pass on. Its bytes never changed.
+func TestCandidateArchiveFilesAcceptsNotesEditedAfterPublication(t *testing.T) {
+	db := candidateTestDB(t)
+	p, c, fixture := candidateDraftWorkflowFixture(t, db)
+	library := p.library.(*candidateLibraryFixture)
+	publication := preparePublication(t, db, p, c)
+	request := draftRequest(publication)
+	if _, err := p.draft(ownerCtx(), request, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.publish(ownerCtx(), publication); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.draft(ownerCtx(), request, true); err != nil {
+		t.Fatal(err)
+	}
+	trust := sealArchiveFixture(t, p, publication)
+	fixture.asset.mu.Lock()
+	fixture.body = "> Deployment hold: do not deploy.\n\n" + fixture.body
+	fixture.asset.mu.Unlock()
+	record, err := freshDraftHost(p, candidateTestDB(t)).archive(ownerCtx(), publication.CandidateID, "fixture", trust)
+	if err != nil || record.State != "archived" || library.pins[publication.CandidateID] {
+		t.Fatal("a note added to a published release kept its build input", record.State, err)
+	}
+}
+
 func TestCandidateArchiveNPMRequiresFreshCanonicalArchiveWithoutRepublishing(t *testing.T) {
 	db := candidateTestDB(t)
 	p, c, library, writes, corrupt := npmCandidateFixture(t, db)

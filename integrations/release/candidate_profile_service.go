@@ -130,14 +130,9 @@ func (i *Integration) profilePreparer(ctx context.Context, p *candidatePreparer,
 		client = i.github
 	}
 	versions := &candidateVersionReader{client: client, resolver: i.resolver, sources: map[string]candidateVersionSource{}}
-	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, npm: map[string]candidateNPMTarget{}, secret: i.resolver.systemSecret, appToken: i.resolver.appToken}
 	components := map[string]candidateProfileComponent{}
-	facts := map[string]candidateProfileComponentFacts{}
 	for _, c := range profile.Components {
 		versions.sources[c.Component], components[c.Component] = c.candidateVersionSource, c
-	}
-	for _, c := range binding.Facts.Components {
-		facts[c.Name] = c
 	}
 	plan := candidateAssemblyPlan{Name: profile.Name, Compatibility: binding.Selection.Compatibility, Components: []candidateAssemblyComponent{}, Targets: []string{}}
 	selected := map[string]bool{}
@@ -151,6 +146,42 @@ func (i *Integration) profilePreparer(ctx context.Context, p *candidatePreparer,
 	}
 	if len(selected) != len(components) {
 		return nil, errors.New("profile must resolve every declared source component")
+	}
+	targets, err := i.profileTargets(profile, binding)
+	if err != nil {
+		return nil, err
+	}
+	for _, selection := range binding.Selection.Publications {
+		plan.Targets = append(plan.Targets, selection.TargetID)
+	}
+	if err := validateAssemblyPlans([]candidateAssemblyPlan{plan}, versions, targets); err != nil {
+		return nil, err
+	}
+	bound := *p
+	bound.engineRevision = i.profileRevision
+	bound.versionReader, bound.targetReader, bound.evidence = versions, targets, candidateEvidenceReader{engine: i.store.engine}
+	bound.assemblyPlans, bound.profileBinding = []candidateAssemblyPlan{plan}, &binding
+	bound.authority = func(ctx context.Context) error {
+		owner, err := candidateOwner(ctx)
+		if err != nil || owner != binding.Owner {
+			return errors.New("profile requires its original owner")
+		}
+		_, _, current, err := i.candidateProfile(ctx, profile.Name)
+		if err != nil || current != binding.Configuration {
+			return errors.New("release profile authority or installed resolver was changed or revoked")
+		}
+		return nil
+	}
+	return &bound, nil
+}
+
+// profileTargets resolves a binding's selected publications against the profile's fixed
+// destination authority, using the source facts the binding recorded.
+func (i *Integration) profileTargets(profile candidateProfile, binding candidateProfileBinding) (*candidateTargetReader, error) {
+	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, npm: map[string]candidateNPMTarget{}, secret: i.resolver.systemSecret, appToken: i.resolver.appToken}
+	facts := map[string]candidateProfileComponentFacts{}
+	for _, c := range binding.Facts.Components {
+		facts[c.Name] = c
 	}
 	for _, selection := range binding.Selection.Publications {
 		found := false
@@ -185,27 +216,8 @@ func (i *Integration) profilePreparer(ctx context.Context, p *candidatePreparer,
 		if !found {
 			return nil, errors.New("profile publication is outside its fixed destination authority")
 		}
-		plan.Targets = append(plan.Targets, selection.TargetID)
 	}
-	if err := validateAssemblyPlans([]candidateAssemblyPlan{plan}, versions, targets); err != nil {
-		return nil, err
-	}
-	bound := *p
-	bound.engineRevision = i.profileRevision
-	bound.versionReader, bound.targetReader, bound.evidence = versions, targets, candidateEvidenceReader{engine: i.store.engine}
-	bound.assemblyPlans, bound.profileBinding = []candidateAssemblyPlan{plan}, &binding
-	bound.authority = func(ctx context.Context) error {
-		owner, err := candidateOwner(ctx)
-		if err != nil || owner != binding.Owner {
-			return errors.New("profile requires its original owner")
-		}
-		_, _, current, err := i.candidateProfile(ctx, profile.Name)
-		if err != nil || current != binding.Configuration {
-			return errors.New("release profile authority or installed resolver was changed or revoked")
-		}
-		return nil
-	}
-	return &bound, nil
+	return targets, nil
 }
 
 func (p *candidatePreparer) checkProfileAuthority(ctx context.Context) error {

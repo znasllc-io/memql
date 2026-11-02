@@ -464,7 +464,16 @@ native publication receipt and the candidate must have a signed catalog. The
 operation freshly reads and verifies the canonical registry images, release
 assets or npm archive before recording a permanent `archived` state. Missing
 or changed bytes, unfinished publication and an inconsistent catalog refuse
-archival. Historical GitHub releases need not remain selected as latest.
+archival. Historical GitHub releases need not remain selected as latest, and a
+release's name and notes may be edited once it is public, as a deployment hold
+does: its identity, tag and bytes are what archival reads.
+
+Archival is not a new effect on the release, so a candidate from a release profile
+does not need the engine revision or resolver that prepared it. It could not have
+them: the deployment a release exists for replaces that engine, normally well before
+the 48 hours below. It still reads the destinations the candidate was approved with,
+so it refuses when the profile is gone or a destination no longer matches its reviewed
+digest, and the inputs stay retained.
 
 Archival releases only that candidate's Library retention references. Other
 candidate references and deliberately kept Library files still protect shared

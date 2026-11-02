@@ -3,15 +3,21 @@ package release
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -259,4 +265,191 @@ func TestCandidateArchiveScheduleOwnerAndInternalWalls(t *testing.T) {
 			}
 		}
 	}
+}
+
+// sweepArchives runs one pass the way the agent's schedule does: internal origin, no user.
+func sweepArchives(t *testing.T, i *Integration) map[string]any {
+	t.Helper()
+	parent := auth.ContextWithInternalOrigin(auth.ContextWithAccess(t.Context(), &auth.AccessContext{UserId: "system:maintenance", Role: auth.RoleOwner, Synthetic: true}))
+	nodes, err := i.handleSweepPublishedInputs(parent, nil, 0)
+	if err != nil || len(nodes) != 1 {
+		t.Fatal("maintenance failed", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(nodes[0].Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func enrollArchiveSchedule(t *testing.T, i *Integration, db *sql.DB) {
+	t.Helper()
+	owner, _ := candidateOwner(ownerCtx())
+	archiveScheduleCleanup(t, db, owner)
+	if _, err := i.handleArchiveSchedule(ownerCtx(), map[string]any{"enabled": true}, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ageCatalog moves a sealing back, for the retention policy's 48 hours.
+func ageCatalog(t *testing.T, db *sql.DB, candidate, age string) {
+	t.Helper()
+	if _, err := db.Exec(`UPDATE release_catalog SET created_at=clock_timestamp()-$2::interval WHERE candidate_id=$1`, candidate, age); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertInputsReleased(t *testing.T, db *sql.DB, candidate string) {
+	t.Helper()
+	var state string
+	var released bool
+	if err := db.QueryRow(`SELECT c.state,a.inputs_released_at IS NOT NULL FROM release_candidates c JOIN release_candidate_archives a ON a.candidate_id=c.candidate_id WHERE c.candidate_id=$1`, candidate).Scan(&state, &released); err != nil {
+		t.Fatal(err)
+	}
+	if state != "archived" || !released {
+		t.Fatal("the candidate left no evidence of its archive", state, released)
+	}
+}
+
+// moveEngine is what the deployment a release exists for does to its own binding: the next
+// replica runs another commit, and here another resolver as well.
+func moveEngine(t *testing.T, f *buildDBFixture) *Integration {
+	t.Helper()
+	f.i.profileRevision = func() string { return strings.Repeat("e", 40) }
+	*f.source += "\n// The resolver the next engine installs.\n"
+	return f.peer(t)
+}
+
+// The deployment a release exists for changes the engine revision its binding recorded, so
+// on production every bound candidate was refused from its own rollout on, from 2026-10-27,
+// and none was ever archived. A new effect stays bound to the engine that prepared it, which
+// is what the refusal is for. Archival adds no effect, and it must also not fail a young
+// candidate that the policy would only have kept.
+func TestCandidateArchiveScheduleReleasesABoundCandidateAfterItsOwnRollout(t *testing.T) {
+	m := newManyFileRelease(t, 3)
+	if v, err := m.publish(ownerCtx(), m.i); err != nil || v.Catalog.State != "sealed" {
+		t.Fatal("the release did not reach its catalog", v.Phase, err)
+	}
+	enrollArchiveSchedule(t, m.i, m.db)
+	peer := moveEngine(t, m.buildDBFixture)
+	if _, err := peer.configuredCandidateFor(ownerCtx(), m.candidate); err == nil || !strings.Contains(err.Error(), "installed resolver changed") {
+		t.Fatal("a new effect outlived the engine that prepared it", err)
+	}
+	if result := sweepArchives(t, peer); result["inspected"] != float64(1) || result["archived"] != false || !m.library.pins[m.candidate] {
+		t.Fatal("a young candidate did not wait out its 48 hours", result)
+	}
+	if result := sweepArchives(t, peer); result["inspected"] != float64(0) {
+		t.Fatal("cursor did not wrap", result)
+	}
+	ageCatalog(t, m.db, m.candidate, "49 hours")
+	draftPosts, promotes, uploads, _, removed := m.github.counts()
+	if result := sweepArchives(t, peer); result["inspected"] != float64(1) || result["archived"] != true || m.library.pins[m.candidate] {
+		t.Fatal("the candidate's own rollout kept its inputs", result)
+	}
+	assertInputsReleased(t, m.db, m.candidate)
+	afterPosts, afterPromotes, afterUploads, _, afterRemoved := m.github.counts()
+	if afterPosts != draftPosts || afterPromotes != promotes || afterUploads != uploads || afterRemoved != removed {
+		t.Fatal("archival wrote to the published release")
+	}
+	if v := m.read(t); v.Phase != "published" || v.Catalog.State != "sealed" || !slices.Equal(v.Actions, []string{"view_candidate"}) {
+		t.Fatal("the saved release stopped reading as published once archived", v.Phase, v.Catalog, v.Actions)
+	}
+}
+
+// Production's bound engine candidates publish images as well as files, and an image's
+// destination carries the version tag its binding selected.
+func TestCandidateArchiveReleasesABoundImageAfterItsOwnRollout(t *testing.T) {
+	f := newBuildDBFixture(t)
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	f.config.Profiles[0].Registries[0].Origin = server.URL
+	f.config.Profiles[0].Registries[0].Repository = "candidate/" + f.runID
+	f.config.Profiles[0].Registries[0].AllowLoopbackHTTP = true
+	f.publication = `@template
+automation fixtureBuildPublication {
+ args { candidateId string! approvalId string! }
+ builtin releasePublishCandidate(candidateId: args.candidateId, approvalId: args.approvalId, component: "engine", artifact: "image", targetId: "registry")
+ builtin releaseSealPublishedCandidate(candidateId: args.candidateId, approvalId: args.approvalId)
+}`
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, _ := json.Marshal(catalogConfiguration{FormatVersion: 1, Publisher: "fixture", KeyID: "fixture-key", SigningKeySecret: "CATALOG_KEY", PublicKeys: map[string]string{"fixture-key": base64.StdEncoding.EncodeToString(public)}})
+	variables, secrets := f.i.resolver.systemVariable, f.i.resolver.systemSecret
+	f.i.resolver.systemVariable = func(ctx context.Context, name string) (string, error) {
+		if name == ReleaseCatalogConfigurationVariable {
+			return string(catalog), nil
+		}
+		return variables(ctx, name)
+	}
+	f.i.resolver.systemSecret = func(ctx context.Context, name string) (string, error) {
+		if name == "CATALOG_KEY" {
+			return base64.StdEncoding.EncodeToString(key.Seed()), nil
+		}
+		return secrets(ctx, name)
+	}
+	f.pipeline.source.TagExists = true
+	f.pipeline.source.TagSHA = f.pipeline.source.SHA
+	r := f.prepare(t)
+	buildAction(t, f.i, r.ID, "start")
+	f.pipeline.run.Status, f.pipeline.run.Conclusion, f.pipeline.run.WorkRunID = "completed", "success", f.runs["build"]
+	buildAction(t, f.i, r.ID, "observe")
+	v := buildAction(t, f.i, r.ID, "resume")
+	cleanupCandidate(t, f.db, v.CandidateID)
+	p, err := f.i.configuredCandidateFor(ownerCtx(), v.CandidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := p.approve(ownerCtx(), v.CandidateID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := f.i.executeBuild(ownerCtx(), map[string]any{"intentId": r.ID, "approvalId": approved.ApprovalID}, "publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(rows[0].Payload, &v) != nil || v.Catalog.State != "sealed" {
+		t.Fatal("the release did not reach its catalog", v.Phase)
+	}
+	peer := moveEngine(t, f)
+	// The owner's own call takes the same path as the schedule.
+	if _, err := peer.handleCandidateArchive(ownerCtx(), map[string]any{"candidateId": v.CandidateID}, 0); err != nil {
+		t.Fatal("the candidate's own rollout refused its archive", err)
+	}
+	assertInputsReleased(t, f.db, v.CandidateID)
+	if _, err := PublishedCatalog(ownerCtx(), f.db, v.CandidateID, "fixture", map[string]ed25519.PublicKey{"fixture-key": public}); err != nil {
+		t.Fatal("archival broke the published catalog", err)
+	}
+}
+
+// Past the engine's identity, archival still reads only what the candidate was approved to
+// publish to: a profile that is gone or a destination that moved leaves its inputs in place.
+func TestCandidateArchiveOfABoundCandidateStillRequiresItsDestination(t *testing.T) {
+	m := newManyFileRelease(t, 2)
+	if v, err := m.publish(ownerCtx(), m.i); err != nil || v.Catalog.State != "sealed" {
+		t.Fatal("the release did not reach its catalog", v.Phase, err)
+	}
+	peer := moveEngine(t, m.buildDBFixture)
+	refuse := func(reason string) {
+		t.Helper()
+		before := m.github.requests.Load()
+		_, err := peer.handleCandidateArchive(ownerCtx(), map[string]any{"candidateId": m.candidate}, 0)
+		if err == nil || !strings.Contains(err.Error(), reason) || !m.library.pins[m.candidate] || m.github.requests.Load() != before {
+			t.Fatal("archival went past its destination", reason, err)
+		}
+		var state string
+		if err := m.db.QueryRow(`SELECT state FROM release_candidates WHERE candidate_id=$1`, m.candidate).Scan(&state); err != nil || state != "approved" {
+			t.Fatal("a refused archive changed the candidate", state, err)
+		}
+	}
+	profile := &m.config.Profiles[0]
+	secret := profile.ReleaseAssets[1].CredentialSecret
+	profile.ReleaseAssets[1].CredentialSecret = "ANOTHER_TOKEN"
+	refuse("changed since candidate review")
+	profile.ReleaseAssets[1].CredentialSecret = secret
+	profile.ReleaseAssets = profile.ReleaseAssets[:1]
+	refuse("outside its fixed destination authority")
+	m.config.Profiles = nil
+	refuse("no longer authorized")
 }

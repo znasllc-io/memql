@@ -161,9 +161,13 @@ type releaseMetadata struct {
 	UploadURL  string `json:"upload_url"`
 }
 
+func (r releaseMetadata) identified(p *Publisher) bool {
+	return r.ID > 0 && r.Draft != nil && r.Prerelease != nil && r.Tag == p.target.Tag && !(*r.Draft && r.Immutable) &&
+		r.UploadURL == p.upload+"/repos/"+p.target.Repository+"/releases/"+strconv.FormatInt(r.ID, 10)+"/assets{?name,label}"
+}
+
 func (r releaseMetadata) check(p *Publisher, m Metadata, body string) error {
-	if r.ID <= 0 || r.Draft == nil || r.Prerelease == nil || r.Tag != p.target.Tag || r.Name != m.Name || r.Body != body || *r.Prerelease != m.Prerelease ||
-		(*r.Draft && r.Immutable) || r.UploadURL != p.upload+"/repos/"+p.target.Repository+"/releases/"+strconv.FormatInt(r.ID, 10)+"/assets{?name,label}" {
+	if !r.identified(p) || r.Name != m.Name || r.Body != body || *r.Prerelease != m.Prerelease {
 		return errors.New("release identity or reviewed metadata changed")
 	}
 	return nil
@@ -280,6 +284,12 @@ func (s *publication) readRelease(ctx context.Context, m Metadata, body string) 
 	if r.ID != s.p.target.ReleaseID {
 		return r, errors.New("release ID changed")
 	}
+	if s.history {
+		if !r.identified(s.p) {
+			return r, errors.New("release identity changed")
+		}
+		return r, nil
+	}
 	return r, r.check(s.p, m, body)
 }
 
@@ -362,19 +372,24 @@ func (s *publication) observe(ctx context.Context, m Metadata, body string, want
 // Observe verifies the complete approved asset set, every byte, metadata and
 // immutable source. It performs no writes and works after controller replacement.
 func (l *Lifecycle) Observe(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation) (ReleaseState, error) {
-	return l.verify(ctx, releaseID, m, marker, assets, nil)
+	return l.verify(ctx, releaseID, m, marker, assets, nil, false)
 }
 
 // ObservePublished verifies an existing published release, including every
 // approved byte, without requiring it to remain the repository's latest
 // release. This is a read-only availability check for retained history; it
 // cannot substitute for the latest-selection proof required by promotion.
+//
+// It compares what availability rests on: the release's identity, its tag and its
+// bytes. A person may annotate a release once it is public, as v0.30.8's deployment
+// hold did, and notes nobody reviewed say nothing about whether the approved bytes
+// are still there. m is still validated, because it is the record of what was approved.
 func (l *Lifecycle) ObservePublished(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation) (ReleaseState, error) {
 	if err := m.Validate(); err != nil {
 		return ReleaseState{}, err
 	}
 	m.Latest = false
-	state, err := l.verify(ctx, releaseID, m, marker, assets, nil)
+	state, err := l.verify(ctx, releaseID, m, marker, assets, nil, true)
 	if err != nil {
 		return ReleaseState{}, err
 	}
@@ -430,7 +445,7 @@ func (l *Lifecycle) Promote(ctx context.Context, releaseID int64, m Metadata, ma
 	if !observed.bytesRead || !observed.Draft || observed.ReleaseID != releaseID {
 		return ReleaseState{}, errors.New("promotion requires a complete byte observation of this draft")
 	}
-	return l.verify(ctx, releaseID, m, marker, assets, &observed)
+	return l.verify(ctx, releaseID, m, marker, assets, &observed, false)
 }
 
 // stillObserved is the last look before the PATCH, in the order observe closes with.
@@ -450,7 +465,7 @@ func (s *publication) stillObserved(ctx context.Context, m Metadata, body string
 	return *r.Draft, s.checkTag(ctx)
 }
 
-func (l *Lifecycle) verify(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation, observed *ReleaseState) (ReleaseState, error) {
+func (l *Lifecycle) verify(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation, observed *ReleaseState, history bool) (ReleaseState, error) {
 	if releaseID <= 0 {
 		return ReleaseState{}, errors.New("release verification requires an exact ID")
 	}
@@ -467,6 +482,7 @@ func (l *Lifecycle) verify(ctx context.Context, releaseID int64, m Metadata, mar
 		return ReleaseState{}, err
 	}
 	defer close()
+	s.history = history
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	if observed == nil {
