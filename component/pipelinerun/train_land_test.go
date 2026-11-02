@@ -424,3 +424,93 @@ func TestAnApprovalBeforeARebuildNeverLandsTheRebuiltTrain(t *testing.T) {
 		t.Fatalf("state %s; the owner's approval of the current head must land it", got.State)
 	}
 }
+
+func TestStartingAReleaseFromMainByHand(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	th.clock = time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+	got, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", nil)
+	if err != nil {
+		t.Fatalf("TrainExpress: %v", err)
+	}
+	if got.Departure != TrainDepartureExpress || got.State != TrainRunning || len(got.OnBoard) != 0 || got.BaseSHA != baseSHA {
+		t.Errorf("the release = %+v", got)
+	}
+}
+
+func TestAReleaseFromMainCarriesNoNamedPullRequests(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	th.remote.addPR(7, shaA, "success")
+	_, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", []int{7})
+	if err == nil || !strings.Contains(err.Error(), "main") {
+		t.Fatalf("err = %v, want a refusal saying it releases from main", err)
+	}
+	th.store.mu.Lock()
+	creates := len(th.store.trainCreates)
+	th.store.mu.Unlock()
+	if creates != 0 {
+		t.Errorf("a refusal created a train")
+	}
+}
+
+func TestStartingByHandReplacesAHeldReleaseAndIsRefusedWhileRunning(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	th.tick(t)
+	first := th.train(t)
+	if _, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", nil); err == nil {
+		t.Fatal("started a release while one is running")
+	}
+	th.runFor(t, first, ConclusionCancelled)
+	if got := th.next(t); got.State != TrainHeld {
+		t.Fatalf("state = %s", got.State)
+	}
+	got, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", nil)
+	if err != nil {
+		t.Fatalf("TrainExpress: %v", err)
+	}
+	if got.ID == first.ID || got.Replaces != first.ID || got.State != TrainRunning {
+		t.Errorf("the new release = %+v", got)
+	}
+	if pr := th.remote.trainPRs[first.PullRequest]; pr.open {
+		t.Errorf("the replaced release's pull request is still open")
+	}
+}
+
+// A person replacing a held release wanted one release: when it lands, the
+// next one leaves at its own time, not at once.
+func TestAReleaseThatReplacedAnotherDoesNotStartOneMore(t *testing.T) {
+	th := newMainTrainHarness(t, `,"landing":"automatic"`)
+	th.tick(t)
+	th.runFor(t, th.train(t), ConclusionCancelled)
+	th.next(t)
+	second, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", nil)
+	if err != nil {
+		t.Fatalf("TrainExpress: %v", err)
+	}
+	th.runFor(t, second, ConclusionSuccess)
+	if got := th.next(t); got.State != TrainLanded {
+		t.Fatalf("state = %s", got.State)
+	}
+	th.moveMain("4444444444444444444444444444444444444444")
+	got := th.next(t)
+	if got.ID != second.ID {
+		t.Errorf("another release left at once: %+v", got)
+	}
+}
+
+func TestAnExpressTrainFromPullRequestsStillNeedsANumber(t *testing.T) {
+	th := newTrainHarness(t)
+	_, err := th.integ.TrainExpress(personCtx(ownerID), "acme/shop", nil)
+	if err == nil || !strings.Contains(err.Error(), "pull request") {
+		t.Fatalf("err = %v, want it to ask for a pull request", err)
+	}
+}
+
+func TestOnlyTheOwnerStartsAReleaseFromMain(t *testing.T) {
+	th := newMainTrainHarness(t, "")
+	if _, err := th.integ.TrainExpress(personCtx(otherID), "acme/shop", nil); err == nil {
+		t.Fatal("someone who does not own the pipeline started a release")
+	}
+	if _, err := th.integ.TrainExpress(automationCtx(), "acme/shop", nil); err == nil {
+		t.Fatal("a release started with no person behind it")
+	}
+}

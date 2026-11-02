@@ -243,10 +243,12 @@ func (i *Integration) departScheduled(ctx context.Context, d Deps, s pipelines.T
 		last = newest.DepartedAt
 	}
 	at, due := pipelines.DepartureDue(s, last, now)
-	if newest != nil && newest.Departure == TrainDepartureExpress && newest.Replaces != "" {
+	if newest != nil && newest.Departure == TrainDepartureExpress && newest.Replaces != "" && !s.FromMain() {
 		// An express train went ahead of a train it cancelled. That train's
 		// pull requests have waited for it: they leave now, on a new train,
-		// rather than at the next scheduled departure (spec 4.2).
+		// rather than at the next scheduled departure (spec 4.2). A release
+		// from main left nothing waiting: the release that replaced it carried
+		// all of main, and what came after leaves at its own time.
 		at, due = now, true
 	}
 	if !due {

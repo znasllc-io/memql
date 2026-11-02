@@ -219,9 +219,6 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 		return Train{}, errNoStore
 	}
 	requested := uniquePositive(numbers)
-	if len(requested) == 0 {
-		return Train{}, fmt.Errorf("pipelines: an express train needs at least one pull request number")
-	}
 	raw := ""
 	if d.SystemVariable != nil {
 		if raw, err = d.SystemVariable(ctx, pipelines.TrainSettingsVariable); err != nil {
@@ -234,7 +231,16 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	}
 	s, ok := settings[strings.ToLower(strings.TrimSpace(repository))]
 	if !ok {
+		if len(requested) == 0 {
+			return Train{}, fmt.Errorf("pipelines: an express train needs at least one pull request number")
+		}
 		return Train{}, fmt.Errorf("pipelines: release trains are not configured for %s; add it to %s", repository, pipelines.TrainSettingsVariable)
+	}
+	switch {
+	case s.FromMain() && len(numbers) > 0:
+		return Train{}, fmt.Errorf("pipelines: %s releases from main, so a release carries no named pull requests; start one with none", s.Repository)
+	case !s.FromMain() && len(requested) == 0:
+		return Train{}, fmt.Errorf("pipelines: an express train needs at least one pull request number")
 	}
 	p, err := trainPipeline(ctx, d, s.Repository)
 	if err != nil {
@@ -249,25 +255,27 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	}
 	// Board before anything is cancelled: an express train that could carry
 	// nothing must leave the waiting train as it was, and say why for each
-	// number named.
+	// number named. A release from main has nothing to board.
 	gh, token, appID, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return Train{}, err
 	}
-	prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
-	if err != nil {
-		return Train{}, err
-	}
-	board, skipped, err := boardTrain(ctx, gh, token, appID, p, Train{Requested: requested}, prs)
-	if err != nil {
-		return Train{}, err
-	}
-	if len(board) == 0 {
-		reasons := make([]string, 0, len(skipped))
-		for _, sk := range skipped {
-			reasons = append(reasons, fmt.Sprintf("#%d %s", sk.Number, sk.Reason))
+	if !s.FromMain() {
+		prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
+		if err != nil {
+			return Train{}, err
 		}
-		return Train{}, fmt.Errorf("pipelines: no pull request named can board an express train: %s", strings.Join(reasons, "; "))
+		board, skipped, err := boardTrain(ctx, gh, token, appID, p, Train{Requested: requested}, prs)
+		if err != nil {
+			return Train{}, err
+		}
+		if len(board) == 0 {
+			reasons := make([]string, 0, len(skipped))
+			for _, sk := range skipped {
+				reasons = append(reasons, fmt.Sprintf("#%d %s", sk.Number, sk.Reason))
+			}
+			return Train{}, fmt.Errorf("pipelines: no pull request named can board an express train: %s", strings.Join(reasons, "; "))
+		}
 	}
 	now := d.Now().UTC()
 	day := now.In(loc)
