@@ -2,6 +2,7 @@ package library
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,12 +37,30 @@ import (
 // against only its first 4 KiB, and the scan stops when its context ends (the
 // handler gives every call a deadline).
 //
+// COLOUR CODES ARE NOT TEXT. A step's log can hold them: vitest 5 colours its
+// output with no terminal and no CI variable, and stops only for NO_COLOR,
+// TERM=dumb or FORCE_TTY=false, none of which a step's container sets
+// (reproduced in node:22-bookworm-slim, 2026-11-01), and the capture keeps every
+// byte. Left in, an anchored pattern misses the line they open, and a kept line
+// spends its budget on them and spends the evidence's again once they are
+// escaped as JSON. So CSI sequences are stripped before a line is matched and
+// from every kept line. A file returned whole keeps them: complete means the
+// file's own bytes.
+//
 // It adds no secret masking. A pipeline step's archive was masked when it was
 // captured (integrations/pipelinesteps/capture.go); any other file is its
 // reader's own.
 
 const (
-	// excerptMinBytes and excerptMaxBytes bound one call's total budget.
+	// excerptMinBytes is the least a call's budget may leave each of its files,
+	// and excerptMaxBytes bounds the budget. Windows may take three quarters of
+	// a share, and what is left must hold the scan marker and a gap marker, up
+	// to 126 bytes together. A share too small for them comes back empty
+	// (measured up to 466 bytes, on a capped file whose every line matches),
+	// which reads as an empty log, so a call that small is refused rather than
+	// answered. 1 KiB rather than the 504 bytes strictly needed: it leaves room
+	// for some of the file's end, it is the range the property test covers, no
+	// caller asks for less, and eight files still fit in the budget.
 	excerptMinBytes = 1 << 10
 	excerptMaxBytes = 64 << 10
 	// excerptMaxFiles and excerptMaxPatterns bound one call's inputs.
@@ -197,7 +216,7 @@ func excerptTextLimited(ctx context.Context, r io.Reader, patterns []*regexp.Reg
 			contentLen = len(content)
 		}
 		line := excerptLine{n: ex.TotalLines, text: keepExcerptLine(content, contentLen)}
-		matchText := repairExcerptText(content[:min(len(content), excerptMatchMax)])
+		matchText := repairExcerptText(stripExcerptCSI(content[:min(len(content), excerptMatchMax)]))
 		matched := false
 		for _, p := range patterns {
 			if p.MatchString(matchText) {
@@ -391,18 +410,38 @@ func trimExcerptLineEnd(line []byte) []byte {
 	return line
 }
 
-// keepExcerptLine is a line as an excerpt keeps it: cut at excerptLineMax
-// bytes on a character boundary, with the number of bytes cut, then repaired.
-// content may hold only the start of a longer line of contentLen bytes.
+// keepExcerptLine is a line as an excerpt keeps it: without its colour codes,
+// cut at excerptLineMax bytes on a character boundary, with the number of bytes
+// cut, then repaired. content may hold only the start of a longer line of
+// contentLen bytes, whose unread rest is counted as written, codes and all.
 func keepExcerptLine(content []byte, contentLen int) string {
+	plain := stripExcerptCSI(content)
+	contentLen -= len(content) - len(plain)
 	if contentLen <= excerptLineMax {
-		return repairExcerptText(content)
+		return repairExcerptText(plain)
 	}
-	cut := min(excerptLineMax, len(content))
-	for i := 0; i < utf8.UTFMax-1 && cut > 0 && cut < len(content) && !utf8.RuneStart(content[cut]); i++ {
+	cut := min(excerptLineMax, len(plain))
+	for i := 0; i < utf8.UTFMax-1 && cut > 0 && cut < len(plain) && !utf8.RuneStart(plain[cut]); i++ {
 		cut--
 	}
-	return repairExcerptText(content[:cut]) + fmt.Sprintf(" [... %d bytes cut ...]", contentLen-cut)
+	return repairExcerptText(plain[:cut]) + fmt.Sprintf(" [... %d bytes cut ...]", contentLen-cut)
+}
+
+// excerptCSI is one ECMA-48 control sequence in its 7-bit form: ESC [, then any
+// parameter bytes, any intermediate bytes and one final byte. Colour is the
+// common one (ESC [ 31 m); a cursor move is the same grammar and means as little
+// in a stored log. A sequence with no final byte, and any other escape, is left.
+var excerptCSI = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+// stripExcerptCSI returns b without its CSI sequences, and b itself when it
+// holds no escape, which is nearly every line of nearly every log. Its cost is
+// one small fixed program over bytes that are already held, unlike a caller's
+// patterns.
+func stripExcerptCSI(b []byte) []byte {
+	if bytes.IndexByte(b, 0x1b) < 0 {
+		return b
+	}
+	return excerptCSI.ReplaceAll(b, nil)
 }
 
 // repairExcerptText drops NUL bytes, which neither Postgres text nor jsonb

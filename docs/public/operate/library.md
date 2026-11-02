@@ -267,22 +267,32 @@ types. No bytes are fetched before the row is admitted.
 
 - **`libraryReadFile(fileId)`** returns one file's current text, up to 2 MiB.
 - **`libraryReadFileExcerpts(files, patterns, maxBytes)`** returns bounded
-  excerpts of up to eight files under one budget of 1 to 64 KiB. `files` is a
-  list of `{fileId, label}`, and each result echoes its `label` (at most 200
-  bytes). `patterns` are 1 to 32 RE2 expressions of at most 256 bytes each,
-  compiling to at most 1,024 instructions together, each matched against the
-  first 4 KiB of a line. A file that fits its share comes back whole
-  (`complete: true`). A longer one keeps its first lines, the earliest
+  excerpts of up to eight files under one budget of at most 64 KiB and at
+  least 1 KiB for each file; a smaller budget is refused, because a share too
+  small for its omission markers could come back empty. `files` is a list of
+  `{fileId, label}`, and each result echoes its `label` (at most 200 bytes)
+  and answers with the bare `fileId`. `patterns` are 1 to 32 RE2 expressions
+  of at most 256 bytes each, compiling to at most 1,024 instructions together,
+  each matched against the first 4 KiB of a line. A file that fits its share
+  comes back whole (`complete: true`), byte for byte apart from NUL and
+  invalid UTF-8 repairs. A longer one keeps its first lines, the earliest
   matching lines with three lines before and twelve after while its budget
   lasts, and its end; `matchedLines` counts every matching line, kept or not,
   and each omitted range is one marker line such as
-  `[... lines 121-4812 omitted ...]`. A kept line over 2 KiB is cut, and at
-  most the first 64 MiB of a file is read (`scanCapped`). Files are read in
-  ascending size, so a small file returns whole and the larger ones share
-  what it left. A file the caller cannot read is reported as `unavailable`
-  in its own entry, with `libraryReadFile`'s sentence, and does not fail the
-  call; so is a file the call's two-minute scan deadline stops. The version
-  gate covers the row reads and is released before a file's bytes are read.
+  `[... lines 121-4812 omitted ...]`. Colour codes (CSI escape sequences) are
+  ignored when a line is matched and removed from every kept line. A kept
+  line over 2 KiB is cut, and at most the first 64 MiB of a file is read
+  (`scanCapped`). Files are read in ascending size, so a small file returns
+  whole and the larger ones share what it left. The version gate covers the
+  row reads and is released before a file's bytes are read.
+
+  A file reports `unavailable` in its own entry, without failing the call,
+  when no later attempt could read it: the caller cannot read the file
+  (`libraryReadFile`'s sentence), its stored key is outside its owner's
+  Library, its stored bytes are gone (a retired log, or a blob storage no
+  longer has), or the call's two-minute scan deadline stopped it. Any other
+  storage failure fails the whole call with a sentence the work failure path
+  retries, and the cause is logged with the file id.
 
 Neither builtin masks secrets: a pipeline step's log is masked when it is
 captured, and any other file is the caller's own. The failed-run diagnosis

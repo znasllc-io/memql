@@ -2,11 +2,15 @@ package library
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/znasllc-io/memql/core/librarykey"
 )
+
+// errFileKeyRefused is openFileBytes' refusal of a stored key. It is a fact about
+// the row, which a reader may report rather than retry.
+var errFileKeyRefused = errors.New("the stored file is not in its owner's Library")
 
 // openFileBytes opens a Library file's stored bytes, after holding the row's
 // blobUrl to its owner's own library/{owner}/ prefix.
@@ -23,7 +27,7 @@ func (i *Integration) openFileBytes(ctx context.Context, owner, blobURL string) 
 	if err := librarykey.Check(blobURL, owner, ""); err != nil {
 		i.log().Error("library: a file row names a blob key outside its owner's library; refusing to read it",
 			"error", err, "ownerUserId", owner)
-		return nil, fmt.Errorf("the stored file is not in its owner's Library")
+		return nil, errFileKeyRefused
 	}
 	return i.blobFetcher.DownloadStreamURL(ctx, blobURL)
 }
