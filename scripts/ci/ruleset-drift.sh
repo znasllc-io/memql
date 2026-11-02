@@ -83,7 +83,7 @@
 set -euo pipefail
 
 REPO="${RULESET_DRIFT_REPO:-znasllc-io/memql}"
-RULESET_ID="${RULESET_DRIFT_ID:-16630577}"
+RULESET_ID="${RULESET_DRIFT_ID:-26357803}"
 
 # EXPECTED_ENFORCEMENT is the ruleset's own on/off state, asserted SEPARATELY
 # from its rule membership (memql#3837).
@@ -115,10 +115,13 @@ EXPECTED_ENFORCEMENT="${RULESET_DRIFT_ENFORCEMENT:-active}"
 # is still present until that switch, and a present rule this list does not
 # name is neither drift nor a gap, so the audit passes on both sides of the
 # switch. Restoring the queue as a fallback means adding it back here.
+#
+# pull_request is NOT asserted (2026-11-02): a change lands by pushing to main
+# (design record docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md),
+# so nothing requires one any more.
 EXPECTED=(
     deletion
     non_fast_forward
-    pull_request
     required_status_checks
 )
 # Overridable so the tests can drive the warn path with a synthetic baseline,
@@ -166,9 +169,10 @@ function main() {
         echo "  network problem, NOT a drift result -- it must not be read as 'no drift'." >&2
         exit 2
     fi
-    local actual_enforcement actual_raw
+    local actual_enforcement actual_raw actual_checks
     actual_enforcement="$(printf '%s\n' "${raw}" | sed -n '1p')"
     actual_raw="$(printf '%s\n' "${raw}" | sed -n '2p')"
+    actual_checks="$(printf '%s\n' "${raw}" | sed -n '3p')"
     # shellcheck disable=SC2206 # deliberate word-splitting of a space-joined list
     local actual=(${actual_raw})
 
@@ -189,6 +193,16 @@ function main() {
         echo "  the record is that the state was CHOSEN, so a change to it is a new choice." >&2
     fi
     local missing=() unexpected=() warned=0
+
+    # A required_status_checks rule that names no check requires nothing, and its
+    # membership reads exactly like one that does. It warns rather than fails: it
+    # is how the rulesets were saved on 2026-11-02, and a check that is red every
+    # day is a check people mute. The release script refuses to publish until it
+    # names one.
+    if have required_status_checks ${actual[@]+"${actual[@]}"} && [[ -z "${actual_checks}" ]]; then
+        echo "WARN: required_status_checks on ruleset ${RULESET_ID} names no check, so GitHub requires none. Add the pipeline's own check, MemQL / <name>, from its GitHub App." >&2
+        warned=$((warned + 1))
+    fi
 
     local want
     for want in "${EXPECTED[@]}"; do
@@ -244,7 +258,7 @@ function read_ruleset() {
             script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
             python3 "${script_dir}/../lib/github-public-read.py" ruleset --repo="$REPO" --id="$RULESET_ID"
             ;;
-        0) gh api "repos/${REPO}/rulesets/${RULESET_ID}" --jq '.enforcement, ([.rules[].type] | sort | join(" "))' ;;
+        0) gh api "repos/${REPO}/rulesets/${RULESET_ID}" --jq '.enforcement, ([.rules[].type] | sort | join(" ")), ([.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context] | join(", "))' ;;
         *) echo 'RULESET_DRIFT_PUBLIC_API must be 0 or 1' >&2; return 2 ;;
     esac
 }

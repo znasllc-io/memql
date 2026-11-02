@@ -4377,11 +4377,11 @@ QueryClient.prototype.pipelinesStatus = function (this: QueryClient, args: Pipel
   return this.executeNamed("pipelinesStatus", buildPipelinesStatus(args), opts);
 };
 
-/** Start an express release train for one of the caller's repositories, carrying only the named pull requests: the same checks and the same approval as a scheduled train, off schedule. Only the pipeline's owner may start one. It replaces a train that is waiting for approval or held, whose pull requests board the next train, and is refused while a train is building or running. */
+/** Start an express release train for one of the caller's repositories, carrying only the named pull requests, or, on a repository that releases from main, a release of main with none named: the same checks and the same landing as a scheduled train, off schedule. Only the pipeline's owner may start one. It replaces a train that is waiting for approval or held, whose pull requests board the next train, and is refused while a train is building or running. */
 export interface PipelinesTrainExpressArgs {
   /** The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS. */
   repository: string;
-  /** The pull request numbers the express train carries. Each must be ready to board: open, not a draft, its MemQL / memql check passed, no train:hold or train:dropped label. */
+  /** The pull request numbers the express train carries. Each must be ready to board: open, not a draft, its MemQL / memql check passed, no train:hold or train:dropped label. Empty on a repository that releases from main, and only there. */
   pullRequests: number[];
 }
 

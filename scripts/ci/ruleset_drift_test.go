@@ -35,14 +35,19 @@ import (
 // fakeGH answers the one `gh api` call the script makes. The script asks for
 // two facts in one read, so the fake answers in the same shape: line 1 is the
 // enforcement state (FAKE_ENFORCEMENT, default active), line 2 the
-// space-separated rule list (FAKE_RULES). FAKE_GH_FAILS makes the call fail,
-// which is how the unreadable case is exercised.
+// space-separated rule list (FAKE_RULES), line 3 the required checks
+// (one, unless FAKE_NO_CHECKS). FAKE_GH_FAILS makes the call fail, which is how
+// the unreadable case is exercised.
 const fakeGH = `#!/usr/bin/env bash
 if [[ -n "${FAKE_GH_FAILS:-}" ]]; then
   echo "HTTP 404: Not Found" >&2
   exit 1
 fi
-printf '%s\n%s' "${FAKE_ENFORCEMENT:-active}" "$FAKE_RULES"
+checks="MemQL / memql"
+if [[ -n "${FAKE_NO_CHECKS:-}" ]]; then
+  checks=""
+fi
+printf '%s\n%s\n%s' "${FAKE_ENFORCEMENT:-active}" "$FAKE_RULES" "$checks"
 `
 
 func repoRootFromTest(t *testing.T) string {
@@ -89,6 +94,7 @@ func runDrift(t *testing.T, rules string, ghFails bool) (string, int) {
 		"RULESET_DRIFT_KNOWN_ABSENT",
 		"RULESET_DRIFT_ENFORCEMENT",
 		"FAKE_ENFORCEMENT",
+		"FAKE_NO_CHECKS",
 	} {
 		if v := os.Getenv(k); v != "" {
 			env = append(env, k+"="+v)
@@ -329,5 +335,32 @@ func TestEnforcementFailsWhenARecordedDecisionIsReversed(t *testing.T) {
 	if !strings.Contains(out, "ruleset-baseline.md") {
 		t.Errorf("the failure does not point at the decision record, so whoever hits it "+
 			"has the finding and no route to the choice it contradicts\n%s", out)
+	}
+}
+
+// A rule that requires no check reads exactly like one that does, by membership
+// alone. It is how the rulesets were saved on 2026-11-02, so it warns every run
+// without turning the audit red.
+func TestDriftWarnsWhenTheRequiredCheckRuleNamesNoCheck(t *testing.T) {
+	t.Setenv("FAKE_NO_CHECKS", "1")
+	out, code := runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0 with a warning: %s", code, out)
+	}
+	if !strings.Contains(out, "names no check") {
+		t.Errorf("no warning that nothing is required: %s", out)
+	}
+	t.Setenv("FAKE_NO_CHECKS", "")
+	out, code = runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	if code != 0 || strings.Contains(out, "names no check") {
+		t.Errorf("exit %d with a check named: %s", code, out)
+	}
+}
+
+// pull_request stopped being expected when a change began landing by a push.
+func TestDriftNoLongerExpectsAPullRequestRule(t *testing.T) {
+	out, code := runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	if code != 0 {
+		t.Errorf("exit %d: %s", code, out)
 	}
 }

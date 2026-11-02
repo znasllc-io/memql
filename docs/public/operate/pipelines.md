@@ -458,6 +458,8 @@ keyed by repository.
 | `channel` | yes | The name of the pipeline owner's Discord [notification channel](#configure-a-notification-channel) that every train message goes to. It must be active and accept the repository's pipeline |
 | `ownerDiscordUserId` | no | The one Discord user (17 to 20 digits) an ACTION NEEDED message mentions. Without it, messages mention no one |
 | `maxRebuilds` | no | How many times one departure may rebuild its train, 1 to 5; default 2 |
+| `source` | no | `pull_requests`, the default, or `main`: [releasing from main](#releasing-from-main) |
+| `landing` | no | `approval`, the default, or `automatic`: a train lands as soon as its run passes. Requires `source: main` |
 
 An unknown key, a malformed time or zone, or a repository that is not
 `owner/name` turns trains off **in every repository** until it is fixed: each
@@ -674,6 +676,38 @@ branch's own run while pull requests still merge one at a time. The push check
 never runs on a pull request, so require `MemQL / <name>` again when trains
 start; a train pull request's run reports it. To fall back, set `enabled` to
 `false`, restore the saved branch rules, and merge one pull request at a time.
+
+### Releasing from main
+
+Set `source: main` when changes land on the default branch directly, with no pull
+request. A train then carries the branch as it stands:
+
+- **It leaves** at each `departures` time, or when the pipeline's owner calls
+  `pipelinesTrainExpress` with no pull requests, or presses **Start release now**
+  in Pipelines > Releases. A departure that finds the branch where the last landed
+  train left it is recorded as cancelled, *Nothing new on main since the last
+  release*, and sends nothing.
+- **It is built** from the branch's head and its version. The patch number goes up,
+  unless a person changed `VERSION` on the branch since the last release; that
+  version is kept. Its pull request lists the commits since the last release.
+- **Its run is full**, whatever the installed policy says of a pull request: a train
+  differs from its base by one `VERSION` line, so an affected run would test nothing.
+- **It lands** by the owner's approval, or by itself with `landing: automatic`, which
+  records `policy:landing-automatic` where a person's approval would be. The default
+  branch moving under it does not rebuild it or stop it: GitHub merges it into the
+  branch's tip, and what was pushed since goes out next time. If that merge is refused,
+  the train holds and says so.
+- **A failure** of any kind runs the failed steps again, once. If they pass, the train
+  goes on and the message names them as flaky. If they fail again, the train holds and
+  mentions the owner, listing the commits since the last release that can reach what
+  failed (at most 50 are examined). It reverts nothing.
+- **To fix a held train,** push to its branch. Its run starts again on the new head,
+  which may re-run once in its turn. A train from main never rebuilds itself, so the fix
+  is not lost. Closing its pull request cancels it, and the next departure starts fresh.
+
+A pipeline's other pull requests are not carried: merge those as you would on any
+repository. Stop running on every push with your installed policy, by answering no mode
+for the `push` event, or each push still starts a full run.
 
 ### Not yet
 
