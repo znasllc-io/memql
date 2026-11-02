@@ -3326,6 +3326,49 @@ tag).
 hops. Live fleet-to-cloud failover and a production maintenance window for the
 contract-5 switch are not verified.
 
+## The timing table learns from the steps it balances (2026-11-02)
+
+The pipeline's timing table has one row per package and one reader:
+`pipelines.Partition`, placing the packages of a step that declares `shards`. So
+only such a step teaches it (`pipelines.Step.Balanced`, set at compile and read in
+`runStep`). The rationale sits in `component/pipelinerun/timings.go`, and
+[pipelines.md](../../public/operate/pipelines.md) states the rule for operators.
+
+- **Trigger and evidence.** Every step that printed an `ok` line used to teach the
+  table, and the last one read won. Through October 2026 `component/memql` flipped
+  between about 800 s (`tests.db-tests`) and about 40 s (`tests.fuzz`). At 40 s it
+  shared a `db-tests` shard with 24 other packages: 1209 s beside a shard of 79 s.
+- **Largest across a run's steps, rejected.** It fixes `component/memql`, and `app`
+  then weighs about 420 s from `tests.test-agent` against about 80 s in its shard.
+  It also leaves the defect open: a failed-only re-run of `tests.fuzz` still writes
+  40 s over 800 s, because the shards that measured the package are carried and
+  report nothing. Replaying one run's real times through `Partition`, the shards
+  beside `component/memql`'s ran 193 to 615 s under the largest times and 450 to
+  501 s under the shards' own. The longest shard was 782 s under both, because
+  `component/memql` alone sets it, so the re-run case decides this more than balance.
+- **Declared, not split.** `Balanced` follows `shards` above 1 in the manifest, not
+  whether the step split in this run. Otherwise a step whose packages all measured
+  zero would run whole, teach nothing and stay whole.
+- **Two sharded steps over one package.** The larger time takes the row, within one
+  run, and the next run's figure replaces it. A table per step would be exact.
+  Nothing needs that yet, because `go-tests` and `db-tests` select disjoint packages.
+- **Retry, re-run and takeover.** `observed` lives in the drive's memory. A
+  failed-only re-run and a replica that takes a run over teach what they ran of a
+  sharded step, and every other row keeps its figure, stale at worst until the next
+  full run.
+- **Known limits.** A pipeline whose only sharded step never runs in a full run gets
+  no rows and splits by package count. `wantsGoTimings` still reads the logs of
+  steps that cannot teach, and the driver ignores the result: narrowing it would
+  make learning depend on `Balanced` surviving every path to the runner, and if it
+  did not, the table would stop learning with no error.
+
+**Regression tests.** `component/pipelinerun/timings_test.go` and
+`TestCompileBalancedIsWhatAStepDeclares`.
+
+**Not verified.** The shard figures above are a replay of recorded times, not a live
+run under this rule. The first successful full run on an engine with this change
+rewrites the rows, and the run after it is the first planned from them.
+
 ## Release-train allowance across cloud allocation (2026-10-28)
 
 The separate Fleet/cloud spending gate must preserve main's existing train

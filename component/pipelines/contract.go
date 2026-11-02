@@ -159,6 +159,14 @@ type Step struct {
 	// MEMQL_PACKAGES. Nil for a step that selects no packages.
 	Packages []string `json:"packages,omitempty"`
 	Shard    ShardRef `json:"shard"`
+	// Balanced says the step declares `shards` above 1, so the timing table
+	// decides how it splits, including in a run where it could not split at all
+	// (Shard is then zero). Only such a step teaches the table
+	// (pipelinerun/timings.go).
+	// The driver reads it and no runner does, and it follows from what the
+	// manifest at this commit declares, so it is not encoded: no fingerprint
+	// binds it and a runner of another version never sees it.
+	Balanced bool `json:"-"`
 	// Channel names the v1:pipelines:channel a notify step delivers to.
 	Channel string `json:"channel,omitempty"`
 	// Links are the notify stage's own links (a Docs link), rendered into its
@@ -422,8 +430,9 @@ type StepResult struct {
 	// LogCapped says the live log hit its cap; the Library copy is complete.
 	LogCapped bool `json:"logCapped,omitempty"`
 	// Timings is each passing Go package's wall time in seconds, by import
-	// path, read from the step's output with ParseGoTestOutput. The driver
-	// writes them back into the pipeline's timing table after a full run.
+	// path, read from the step's output with ParseGoTestOutput. After a full
+	// run the driver writes those of a Balanced step back into the pipeline's
+	// timing table, and no other step's (pipelinerun/timings.go).
 	Timings map[string]float64 `json:"timings,omitempty"`
 	// Notes are note-class codes (ClassNote): facts a person should see
 	// beside the step that change no outcome -- a declared artifact path that
