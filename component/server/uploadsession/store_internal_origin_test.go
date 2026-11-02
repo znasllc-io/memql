@@ -43,6 +43,30 @@ func (r *recordingExecutor) Execute(ctx context.Context, q string) (any, error) 
 	return map[string]any{"data": []any{}}, nil
 }
 
+// rowExecutor answers every statement with one session row.
+type rowExecutor struct{ row map[string]any }
+
+func (r rowExecutor) Execute(context.Context, string) (any, error) {
+	return map[string]any{"data": []any{r.row}}, nil
+}
+
+// fileId is an outgoing reference, so the engine stores it canonical once the file
+// exists: a new version's session reads back canonical and a fresh upload's bare.
+// The routes compare it with a head's bare id and answer it to clients, so both
+// spellings come out as the bare id. A real engine's read is in
+// app/library_chunked_readback_azurite_test.go.
+func TestByIDAnswersTheBareFileIdHoweverTheRowStoresIt(t *testing.T) {
+	for _, stored := range []string{"f-1", "v1:library:file:f-1"} {
+		row, err := NewStore(rowExecutor{map[string]any{"id": "up-1", "fileId": stored}}).ByID(context.Background(), "up-1")
+		if err != nil || row == nil {
+			t.Fatalf("ByID: %+v %v", row, err)
+		}
+		if row.FileId != "f-1" {
+			t.Errorf("a row storing %q answered file id %q", stored, row.FileId)
+		}
+	}
+}
+
 func TestSessionConstructsAreServerOnlyInTheLoadedRegistry(t *testing.T) {
 	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)

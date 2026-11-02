@@ -14,10 +14,11 @@ import (
 // two parsers together against the real client, offline.
 
 // TestLibraryKeyNeverAdmitsAnObjectThisClientWouldNotOpen is the safety
-// property: whenever librarykey.Check ADMITS a stored URL that this client can
-// open, it opens exactly the object the check judged. Bases include an https endpoint with
-// the account in its path -- a shape MemQL does not run -- where the two
-// parsers differ; there the check must refuse rather than vouch.
+// property: whenever librarykey.Check ADMITS a stored value that this client can
+// open, it opens exactly the object the check judged. A bare key has no container
+// for the check to judge, so the only one it may open is the Library's. Bases
+// include an https endpoint with the account in its path -- a shape MemQL does not
+// run -- where the two parsers differ; there the check must refuse rather than vouch.
 func TestLibraryKeyNeverAdmitsAnObjectThisClientWouldNotOpen(t *testing.T) {
 	bases := []string{
 		"https://acct.blob.core.windows.net",
@@ -32,13 +33,15 @@ func TestLibraryKeyNeverAdmitsAnObjectThisClientWouldNotOpen(t *testing.T) {
 		"library/u-1/../u-2/f-1/payroll.csv",
 		"library/u-2/f-1/payroll.csv",
 		"memql-library/library/u-1/f-1/x",
+		"library/u-1/f-1/C:\\scripts\\deploy.sh",
+		"library/u-1/f-1\\..\\..\\u-2\\x",
 	}
 	for _, base := range bases {
 		client, err := azblob.NewClientWithNoCredential(base, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		u := &AzureBlobUploader{client: client}
+		u := &AzureBlobUploader{client: client, libraryContainer: "memql-library"}
 		for _, object := range objects {
 			bc, err := u.blockClient("memql-library", object)
 			if err != nil {
@@ -54,6 +57,8 @@ func TestLibraryKeyNeverAdmitsAnObjectThisClientWouldNotOpen(t *testing.T) {
 				// client still opens against its own account.
 				"https://foreign.example/memql-library/" + object,
 				"http://foreign.example:10000/devstoreaccount1/memql-library/" + object,
+				// The key on its own, as folder sync stores it.
+				object,
 			}
 			for _, ref := range refs {
 				if librarykey.Check(ref, "u-1", "memql-library") != nil {
@@ -64,6 +69,9 @@ func TestLibraryKeyNeverAdmitsAnObjectThisClientWouldNotOpen(t *testing.T) {
 				// the object the check judged.
 				container, opened, ok := u.splitStoredURL(ref)
 				judgedContainer, judged, _ := librarykey.Split(ref)
+				if judgedContainer == "" {
+					judgedContainer = u.libraryContainer
+				}
 				if ok && (container != judgedContainer || opened != judged) {
 					t.Errorf("base %s: librarykey admitted %q as %s/%s, but this client opens %s/%s",
 						base, ref, judgedContainer, judged, container, opened)
@@ -82,7 +90,7 @@ func TestLibraryKeyAdmitsTheOwnersOwnKeysOnTheEndpointsMemQLRuns(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		u := &AzureBlobUploader{client: client}
+		u := &AzureBlobUploader{client: client, libraryContainer: "memql-library"}
 		for _, object := range []string{"library/u-1/f-1/notes.md", "library/u-1/f-1/k-9/space name%2F#?.tar"} {
 			bc, err := u.blockClient("memql-library", object)
 			if err != nil {
@@ -92,8 +100,13 @@ func TestLibraryKeyAdmitsTheOwnersOwnKeysOnTheEndpointsMemQLRuns(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := librarykey.Check(stored, "v1:identity:user:u-1", "memql-library"); err != nil {
-				t.Errorf("base %s: the owner's own key %q was refused: %v", base, stored, err)
+			for _, ref := range []string{stored, object} {
+				if err := librarykey.Check(ref, "v1:identity:user:u-1", "memql-library"); err != nil {
+					t.Errorf("base %s: the owner's own key %q was refused: %v", base, ref, err)
+				}
+				if container, opened, ok := u.splitStoredURL(ref); !ok || container != "memql-library" || opened != object {
+					t.Errorf("base %s: the owner's own key %q opened as %q %q %t", base, ref, container, opened, ok)
+				}
 			}
 		}
 	}

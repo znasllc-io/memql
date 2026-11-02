@@ -20,12 +20,14 @@ package azureblob
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 )
 
@@ -154,6 +156,24 @@ func isBlobNotFound(err error) bool {
 		strings.Contains(msg, "404")
 }
 
+// errNoBlobObject is a stored value that names no object this reader can open:
+// an Azurite URL on a cloud client, or a local:// or gs:// value, for instance.
+var errNoBlobObject = errors.New("not an azure blob URL (no downloadable object)")
+
+// IsBlobAbsent reports whether DownloadStreamURL failed because there is nothing
+// to read and no later attempt would find anything: the object was retired, the
+// service says the blob is not there, or the stored value names no object.
+// Every other failure may clear, and answers false.
+//
+// It reads the service's own error code. isBlobNotFound's text match would not
+// do here: its "404" also matches a path or a request id in a 500's message, and
+// a read wrongly called absent is never tried again. A missing CONTAINER is left
+// out on purpose: retention retires objects and nothing retires a container, so
+// that is a storage incident someone can put right, not a fact about one file.
+func IsBlobAbsent(err error) bool {
+	return errors.Is(err, ErrBlobRetired) || errors.Is(err, errNoBlobObject) || bloberror.HasCode(err, bloberror.BlobNotFound)
+}
+
 // DownloadStreamURL opens the blob behind a stored URL as a stream. The
 // caller owns the ReadCloser. Unlike DownloadURL there is NO size cap: the
 // export route streams through io.Copy with constant memory, and the
@@ -161,7 +181,7 @@ func isBlobNotFound(err error) bool {
 func (u *AzureBlobUploader) DownloadStreamURL(ctx context.Context, blobURL string) (io.ReadCloser, error) {
 	container, objectName, ok := u.splitStoredURL(blobURL)
 	if !ok {
-		return nil, fmt.Errorf("not an azure blob URL (no downloadable object): %q", blobURL)
+		return nil, fmt.Errorf("%w: %q", errNoBlobObject, blobURL)
 	}
 	resp, err := u.client.DownloadStream(ctx, container, objectName, nil)
 	if err != nil {

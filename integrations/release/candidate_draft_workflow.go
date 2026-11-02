@@ -86,6 +86,7 @@ type candidateDraftScope struct {
 	checked, claimed bool
 	binding, out     candidateDraftRecord
 	proof            *githubrelease.ReleaseState
+	promoter         *githubrelease.Lifecycle
 }
 
 func (s *candidateDraftScope) operations() map[string]workflowhost.Operation {
@@ -276,6 +277,7 @@ func (s *candidateDraftScope) observe(ctx context.Context, _ map[string]any) (an
 	if !s.promote || s.binding.ReleaseID <= 0 {
 		return nil, errors.New("promotion requires an existing native draft binding")
 	}
+	s.proof = nil // a read that fails leaves nothing for a later step to spend
 	c, err := s.client(ctx)
 	if err != nil {
 		return nil, err
@@ -291,20 +293,21 @@ func (s *candidateDraftScope) claimPromotion(ctx context.Context, _ map[string]a
 	if !s.checked || !s.promote || s.proof == nil || s.binding.ReleaseID <= 0 {
 		return nil, errors.New("promotion claim requires native asset readback")
 	}
+	// A claim is never reset, so what can fail without one fails first. A credential may
+	// be a call to GitHub to mint it, and failing here leaves the draft ready to retry.
 	var err error
+	if s.promoter, err = s.client(ctx); err != nil {
+		return nil, err
+	}
 	s.binding, s.claimed, err = s.p.ledger.claimDraftEffect(ctx, s.record.ID, s.request.ApprovalID, s.plan, true)
 	return map[string]any{"claimed": s.claimed, "state": s.binding.State}, err
 }
 func (s *candidateDraftScope) writePromotion(ctx context.Context, _ map[string]any) (any, error) {
-	if !s.promote || !s.claimed || s.binding.State != "promoting" || s.proof == nil {
+	if !s.checked || !s.promote || !s.claimed || s.binding.State != "promoting" || s.proof == nil {
 		return nil, errors.New("release promotion requires its unique durable attempt")
 	}
 	s.claimed = false
-	c, err := s.client(ctx)
-	if err != nil {
-		return nil, err
-	}
-	proof, err := c.Promote(ctx, s.binding.ReleaseID, *s.plan.Target.Draft, s.marker(), s.plan.expected())
+	proof, err := s.promoter.Promote(ctx, s.binding.ReleaseID, *s.plan.Target.Draft, s.marker(), s.plan.expected(), *s.proof)
 	if err != nil {
 		return nil, err
 	}

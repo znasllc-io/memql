@@ -468,6 +468,22 @@ func TestEmailRenderEmbedsPicturesTheCallerCanRead(t *testing.T) {
 	neverWrites(t, engine)
 }
 
+// A picture uploaded in the ordinary way has a row that stores the storage client's
+// URL. A row storing the key alone is what every other fixture here uses.
+func TestEmailRenderEmbedsAPictureWhoseRowStoresTheURL(t *testing.T) {
+	w, engine, blobs := previewFixture(t)
+	addPicture(engine, blobs, "pic", "image/png", previewPNG(t, 4, 3))
+	engine.libraryFiles["file-pic"]["blobUrl"] = "https://acct.blob.core.windows.net/memql/library/" + testOwner + "/file-pic/pic"
+
+	doc := layoutDocument(t, "builtin:letter")
+	setBlock(t, doc, "logo", func(b map[string]any) { b["src"] = "artifact:pic" })
+	got := preview(t, w, importCtx(), doc, nil)
+
+	if !strings.Contains(got.HTML, "data:image/png;base64,") {
+		t.Fatalf("the picture was not embedded: %+v", got.Issues)
+	}
+}
+
 func TestEmailRenderTurnsUnreadablePicturesIntoIssues(t *testing.T) {
 	good := previewPNG(t, 4, 3)
 	const key = "library/user-owner-1/file-pic/pic"

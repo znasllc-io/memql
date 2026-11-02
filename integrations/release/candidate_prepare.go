@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -45,6 +46,43 @@ type candidatePreparer struct {
 	assemblyPlans    []candidateAssemblyPlan
 	assemblyWorkflow *automations.Automation
 	draftDefinitions map[string]*automations.Automation
+	verified         *candidateVerification
+}
+
+// candidateVerification remembers that a publication action has verified this
+// candidate, for its uploads to a private draft only. Whole-candidate verification
+// reads every retained artifact, about 40 s for cockpit/v0.21.1, and a recipe calls
+// one effect per target, so repeating it per upload cost 41 x 40 s.
+//
+// It skips reads of rows that can change (run status, the pipeline's owner), so it
+// is not free. An upload relies instead on the gate before each of its operations
+// (lease, stored owner, profile), the exact approval checked inside each effect's
+// transaction, and its own file's bytes verified again immediately before it. A draft
+// is private, so bytes sent on evidence that has since changed expose nothing. Every
+// public effect still verifies afresh (publicationAction): promotion, and a registry
+// or npm write. It lives no longer than one action, so a retry verifies again, and a
+// direct owner call has none.
+type candidateVerification struct {
+	mu  sync.Mutex
+	key string
+}
+
+func (v *candidateVerification) holds(key string) bool {
+	if v == nil {
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.key == key
+}
+
+func (v *candidateVerification) record(key string) {
+	if v == nil {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.key = key
 }
 
 // The public owner entry binds native dependencies before calling prepare.
@@ -170,6 +208,9 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 	if err := p.bindProfileCandidate(ctx, candidate, key); err != nil {
 		return candidateRecord{}, err
 	}
+	if p.verified.holds(key) {
+		return p.ledger.get(ctx, key)
+	}
 	scope := &candidatePrepareScope{p: p, candidate: candidate, key: key, versionReader: versions}
 	ctx, cancel := context.WithTimeout(ctx, time.Hour)
 	defer cancel()
@@ -191,6 +232,7 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 	if scope.out.ID != key || (scope.out.State != "ready" && scope.out.State != "approved") {
 		return candidateRecord{}, errors.New("release workflow did not complete candidate verification")
 	}
+	p.verified.record(key)
 	return scope.out, nil
 }
 
@@ -304,7 +346,8 @@ func (s *candidatePrepareScope) ready(ctx context.Context, _ map[string]any) (an
 	}
 	// Close the preparation interval with fresh journal and target reads. The
 	// ledger then atomically refuses any concurrent retirement. Publication will
-	// repeat these checks, since later edits cannot be locked by a read here.
+	// repeat these checks before its first effect and every public one, since
+	// later edits cannot be locked by a read here.
 	if _, err := s.inspectEvidence(ctx, nil); err != nil {
 		return nil, err
 	}

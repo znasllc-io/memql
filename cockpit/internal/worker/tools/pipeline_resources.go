@@ -218,8 +218,8 @@ func checkPipelineHeadroom(ctx context.Context, req pipelineStepRequest) error {
 	}
 	reserve := max(pipelineMemoryReserve, host.Total/8)
 	// Keep at least one host CPU and RAM headroom outside the entire step,
-	// including every service. The shared host lease serializes our own clients;
-	// this does not constrain unrelated applications or native commands.
+	// including every service. This does not constrain unrelated applications,
+	// native commands or a local model call that starts afterwards.
 	if cpu > (pipelineHostCPUs()-1)*1000 || host.Available < reserve || memory > host.Available-reserve {
 		return errors.New("pipeline_step: insufficient host CPU or RAM headroom for command and services; no pipeline command started")
 	}

@@ -844,8 +844,8 @@ func normalizeMimeType(v string) string {
 }
 
 // storageKey normalizes v1:library:file.blobUrl into the container-relative
-// key the blob reader wants. Browser uploads record Azure/Azurite URLs;
-// chunked uploads can record bare keys. Use the Library's shared URL parser
+// key the blob reader wants. Uploads record Azure/Azurite URLs; folder sync and
+// older chunked uploads record bare keys. Use the Library's shared URL parser
 // (including its one decoding pass), require the configured container, then
 // check ownership on exactly the key passed to Get. Never fetch the row's URL
 // directly or drop a foreign container: either would change the object whose

@@ -423,6 +423,23 @@ func (e Event) IsRemote() bool {
 	return e.OriginNodeId != ""
 }
 
+// PayloadOmittedFieldsKey is the payload key that marks a thinned row event: a
+// graph event too large to broadcast whole, whose largest fields stayed behind
+// on the node that wrote the row (component/node, meshMaxEventBytes). It lists
+// the fields left out. Only that node's bridge sets it, on the copy it puts on
+// the mesh, so the writer's own subscribers never see it.
+const PayloadOmittedFieldsKey = "payloadOmittedFields"
+
+// PayloadThinned reports whether this event is a thinned copy of a row event.
+//
+// A thinned copy is true about the fields it carries and silent about the rest,
+// so a reader of it must not treat an absent field as an empty one. The row
+// itself is whole, and a read of it answers the missing fields.
+func (e Event) PayloadThinned() bool {
+	_, thinned := e.Payload[PayloadOmittedFieldsKey]
+	return thinned
+}
+
 // Clone returns a deep copy of the event.
 // WithPartition returns a copy of the event with the partition set.
 func (e Event) WithPartition(partition string) Event {

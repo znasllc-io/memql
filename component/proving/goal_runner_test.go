@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/proving/goalfixture"
 	"github.com/znasllc-io/memql/component/work/goaleval"
 	"github.com/znasllc-io/memql/sdk/go/client"
 )
@@ -163,11 +164,46 @@ func TestGoalWorkflowCannotClaimRecoveryWithoutRecordedFailure(t *testing.T) {
 		t.Fatalf("independent red/green oracle fabricated observed recovery: %+v", report)
 	}
 	for _, assertion := range result.Assertions {
-		if assertion.CriterionID == "regression" && assertion.Verdict == "unverified" {
+		if assertion.CriterionID != "regression" {
+			continue
+		}
+		// An oracle that did not finish stopped at Run's error above, so this
+		// unverified can only be the recorded-evidence gate: the independent
+		// oracle saw red then green, and no receipt shows the worker did.
+		if assertion.Verdict == "unverified" {
 			return
 		}
+		// t.TempDir takes the oracle's output with it, so say here what it saw:
+		// train memql#6406 failed on this line and left nothing to diagnose it.
+		evidence, _ := os.ReadFile(assertion.Evidence[0])
+		t.Fatalf("missing unverified recovery evidence: regression is %q: %s", assertion.Verdict, evidence)
 	}
 	t.Fatal("missing unverified recovery evidence")
+}
+
+// An evaluator that could not finish its own checks measured nothing, so a
+// worker that did everything right must not be published as having failed.
+func TestGoalWorkflowScoresNothingWhenItsOracleCouldNotFinish(t *testing.T) {
+	stub := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stub, "go"), []byte("#!/bin/sh\nkill -9 $$\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	f := &evaluationClient{t: t, fix: true}
+	runner, catalog, matrix := testGoalRunner(t, f)
+	report, err := runner.Run(context.Background(), catalog, matrix)
+	if !errors.Is(err, goalfixture.ErrOracleDidNotFinish) {
+		t.Fatalf("Run error %v, want the oracle's", err)
+	}
+	if f.published != 0 || len(report.Attempts) != 1 || report.Attempts[0].Result != nil || report.Attempts[0].State != "observer-error" {
+		t.Fatalf("an oracle that did not finish was scored: report=%+v client=%+v", report, f)
+	}
+	for _, kept := range []string{"oracle-regression.json", "observer-error.json"} {
+		paths, _ := filepath.Glob(filepath.Join(runner.OutputDir, "memql-evaluation-*", kept))
+		if len(paths) != 1 {
+			t.Fatalf("lost %s", kept)
+		}
+	}
 }
 
 func TestGoalWorkflowDoesNotRunAnUnimplementedInjection(t *testing.T) {

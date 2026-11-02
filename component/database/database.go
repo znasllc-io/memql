@@ -57,6 +57,7 @@ type (
 		firstPing    bool
 		isRunning    bool
 		config       *config
+		heldLock     migrationLockWatch
 		lifecycle    common.Lifecycle
 		readyCh      chan struct{}
 		migrationErr error
@@ -1421,21 +1422,24 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	if d.config.migrations != nil {
 		migrationDB, closeMigrationDB := d.migrationBunDB(bunDB)
 		defer closeMigrationDB()
-		migrator := migrate.NewMigrator(migrationDB, d.config.migrations, migrate.WithMarkAppliedOnSuccess(true))
+		migrator := migrate.NewMigrator(migrationDB, migrationsForAttempt(d.config.migrations, runCtx), migrate.WithMarkAppliedOnSuccess(true))
 		if err := migrator.Init(runCtx); err != nil {
 			d.Logger.Error("failed to initialize migrations", "error", err)
 			d.recordMigrationErr(fmt.Errorf("migration init: %w", err))
 		} else {
 			if err := migrator.Lock(runCtx); err != nil {
-				d.Logger.Warn("failed to acquire migration lock; deferring migrations", "error", err)
-				d.recordMigrationErr(fmt.Errorf("migration lock: %w", migrationLockErr(err)))
+				lockErr := migrationLockErr(err)
+				d.reportMigrationLockRefusal(runCtx, migrationDB, migrator, lockErr)
+				d.recordMigrationErr(fmt.Errorf("migration lock: %w", lockErr))
 				return
 			}
+			d.heldLock.clear()
 
 			unlockSafe := true
 			defer func() {
 				if !unlockSafe {
-					d.Logger.Error("migration connection lost; retaining lock until an operator verifies the backend has stopped")
+					d.Logger.Error("migration connection lost; retaining lock until an operator verifies the backend has stopped",
+						"runbook", migrationLockRunbook)
 					return
 				}
 				// The attempt's deadline may have expired. Cleanup needs its own
@@ -1447,9 +1451,17 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 				}
 			}()
 
-			if _, err := migrator.Migrate(runCtx); err != nil {
+			ledgerCtx, endLedger := migrationLedgerContext(runCtx)
+			defer endLedger()
+			if _, err := migrator.Migrate(ledgerCtx); err != nil {
 				unlockSafe = !migrationMayStillBeRunning(err)
-				d.Logger.Error("failed to migrate", "error", err)
+				if errors.Is(err, ErrMigrationDeferred) {
+					// Progress, not a failure: an ERROR here would drown the
+					// one a stuck lock logs.
+					d.Logger.Warn("migration deferred to the next attempt", "error", err)
+				} else {
+					d.Logger.Error("failed to migrate", "error", err)
+				}
 				d.recordMigrationErr(fmt.Errorf("migrate: %w", err))
 			}
 		}
@@ -1492,17 +1504,163 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 // tests for this with errors.Is on MigrationError() and waits the holder out.
 var ErrMigrationLockHeld = errors.New("migration lock held by another migrator")
 
-// ErrMigrationDeferred marks a migration attempt that a migration ended early
-// on purpose: it stopped with nothing of its own left running, everything it
-// did committed or rolled back whole, and the next attempt carries on from
-// where it stopped. The
-// readiness history collapse (20260921000000) is the migration that does it,
-// because its work can outlast one attempt's MIGRATION_TIMEOUT_MS (memql#5604).
+// ErrMigrationDeferred marks a migration attempt that ended early with nothing
+// left that the next attempt could overlap, which then carries on from where
+// this one stopped. Three things say so, each for its own reason:
+//
+//   - The readiness history collapse (20260921000000), whose work can outlast
+//     one attempt's MIGRATION_TIMEOUT_MS (memql#5604): it stopped with nothing of
+//     its own running, and everything it did committed or rolled back whole.
+//   - An index ensure (deferInterruptedIndexWork, latest_row_index.go): a build
+//     may well still be running, but its backend holds the build lock until it
+//     exits, and the next attempt takes that lock before anything else.
+//   - The runner itself (migrationsForAttempt), when the attempt ended between
+//     migrations: what finished is recorded and what follows has not started.
+//
 // It is neither a context nor a transport error, so the runner releases its
 // lock (migrationMayStillBeRunning). A node starts the next attempt on its
 // monitor tick (tryPing, via migrationsPending); the migrate subcommand, which
 // has no tick, starts it at once (awaitMigrations, subcommand_migrate.go).
 var ErrMigrationDeferred = errors.New("deferred to the next migration attempt")
+
+// migrationLedgerGrace is how long bun's own statements may still run once the
+// attempt has ended. A ledger insert takes milliseconds; this bounds the wait
+// for a connection, since pgdriver's read deadline already bounds the read.
+const migrationLedgerGrace = 5 * time.Second
+
+// migrationsForAttempt runs each migration under the attempt's context and
+// leaves bun's own statements on the context Migrate is given
+// (migrationLedgerContext), so an attempt that ends between migrations cannot
+// read as a statement that may still be running.
+//
+// bun runs its ledger statements and every Up under the one context it is
+// handed. So the deadline landing after an Up returned made bun's insert refuse
+// on the expired context, and the runner, which cannot tell that from a
+// statement cut off in flight, kept its lock with nothing running at all: that
+// is how the September 26 rollout stranded it, one ledger row short. Here the
+// insert still lands, and the next Up, finding the attempt over, defers instead
+// of starting.
+//
+// A statement cut off INSIDE an Up is not this case and stays the runner's to
+// retain. Nothing here knows what an arbitrary migration left running.
+func migrationsForAttempt(all *migrate.Migrations, attempt context.Context) *migrate.Migrations {
+	out := migrate.NewMigrations()
+	for _, migration := range all.Sorted() {
+		if up := migration.Up; up != nil {
+			migration.Up = func(_ context.Context, migrator *migrate.Migrator, m *migrate.Migration) error {
+				if err := attempt.Err(); err != nil {
+					return fmt.Errorf("the attempt ended (%v) before this migration started: %w", err, ErrMigrationDeferred)
+				}
+				return up(attempt, migrator, m)
+			}
+		}
+		out.Add(migration)
+	}
+	return out
+}
+
+// migrationLedgerContext is the context bun's own statements run under: it
+// outlives the attempt by migrationLedgerGrace, whether the attempt ran out or
+// the node is stopping.
+func migrationLedgerContext(attempt context.Context) (context.Context, func()) {
+	ledger, cancel := context.WithCancel(context.WithoutCancel(attempt))
+	stop := context.AfterFunc(attempt, func() { time.AfterFunc(migrationLedgerGrace, cancel) })
+	return ledger, func() {
+		stop()
+		cancel()
+	}
+}
+
+// migrationLockRunbook is where a stuck lock's report sends the operator.
+const migrationLockRunbook = "docs/public/operate/env-vars.md#database-tuning"
+
+// migrationLockStuckFloor is the shortest time one lock row must stand before
+// it is reported as stuck, for a deployment whose attempts are short or have no
+// deadline at all.
+const migrationLockStuckFloor = 5 * time.Minute
+
+// migrationLockStuckAfter is how long one lock row must stand before it cannot
+// be an attempt's: an attempt is bounded by its deadline and bun inserts a new
+// row for each one, so twice the deadline leaves room for a sibling configured
+// the same way and its bookkeeping. A sibling with a longer deadline costs a
+// premature report and nothing else, because the report releases nothing.
+func migrationLockStuckAfter(timeoutMs int) time.Duration {
+	return max(2*time.Duration(timeoutMs)*time.Millisecond, migrationLockStuckFloor)
+}
+
+// migrationLockWatch is what this node has seen of the row in the way of its
+// attempts. It is per process on purpose: a restart starts the clock again and
+// reports again a few minutes later, rather than trusting anything stored.
+type migrationLockWatch struct {
+	sync.Mutex
+	id    int64
+	since time.Time
+}
+
+// observe records finding row id and says how long this node has found it. A
+// different id is another attempt's, however long the last one's row stood.
+func (w *migrationLockWatch) observe(id int64, now time.Time) time.Duration {
+	w.Lock()
+	defer w.Unlock()
+	if w.since.IsZero() || w.id != id {
+		w.id, w.since = id, now
+	}
+	return now.Sub(w.since)
+}
+
+func (w *migrationLockWatch) clear() {
+	w.Lock()
+	defer w.Unlock()
+	w.id, w.since = 0, time.Time{}
+}
+
+// MigrationLockHeldFor is how long this node has found the same row in bun's
+// lock table in the way of its attempts: zero when nothing is, or once its own
+// attempt got the lock. It reads no database, so a /metrics scrape can call it.
+func (d *Database) MigrationLockHeldFor() time.Duration {
+	d.heldLock.Lock()
+	defer d.heldLock.Unlock()
+	if d.heldLock.since.IsZero() {
+		return 0
+	}
+	return time.Since(d.heldLock.since)
+}
+
+// reportMigrationLockRefusal says what a refused Lock means. Moments of
+// contention earn the WARN they always did. A row that has outlasted any attempt
+// is the installation's migrations stopped, and nothing else says so: every pod
+// stays Ready and every read keeps its registered plan, just without the indexes
+// it was promised. Production sat in that state for days answering the WARN line
+// about 900 times a pod in eight hours.
+//
+// It reports and releases nothing. Whether the row's holder has stopped is the
+// runbook's to establish, because a row names no holder to ask.
+func (d *Database) reportMigrationLockRefusal(ctx context.Context, db *bun.DB, migrator *migrate.Migrator, err error) {
+	if !errors.Is(err, ErrMigrationLockHeld) {
+		d.Logger.Warn("failed to acquire migration lock; deferring migrations", "error", err)
+		return
+	}
+	var id int64
+	if readErr := db.QueryRowContext(ctx, `SELECT id FROM bun_migration_locks ORDER BY id LIMIT 1`).Scan(&id); readErr != nil {
+		// Released in the moment since the refusal, or unreadable: no evidence
+		// either way, so this attempt says what it always said.
+		d.Logger.Warn("failed to acquire migration lock; deferring migrations", "error", err)
+		return
+	}
+	heldFor := d.heldLock.observe(id, time.Now())
+	if heldFor < migrationLockStuckAfter(d.config.migrationTimeoutMs) {
+		d.Logger.Warn("failed to acquire migration lock; deferring migrations", "error", err)
+		return
+	}
+	args := []any{"lockId", id, "heldFor", heldFor.Round(time.Second).String(), "runbook", migrationLockRunbook}
+	if statuses, statusErr := migrator.MigrationsWithStatus(ctx); statusErr == nil {
+		if pending := statuses.Unapplied(); len(pending) > 0 {
+			args = append(args, "pendingMigrations", len(pending), "nextMigration", pending[0].Name)
+		}
+	}
+	d.Logger.Error("the migration lock has outlasted any attempt: no migration runs until an operator verifies "+
+		"its holder has stopped and releases it", args...)
+}
 
 // pgUniqueViolation is the SQLSTATE of the refusal bun's Lock meets when the
 // lock row already exists.
@@ -1828,9 +1986,10 @@ func sessionConnParams() map[string]any {
 // both end a statement's read with an i/o timeout and send no cancel, so the
 // backend carries on server-side while the migration reports a failure. The
 // runner retains its lock on that uncertain outcome (memql#5604). A statement that is meant to
-// outlive them has to be written for that: the latest-row index build takes a
-// session lock its orphan keeps holding and verifies the catalog after waiting
-// for it (latest_row_index.go). Work that does not have to be one statement
+// outlive them has to be written for that: an index build takes a session lock
+// its orphan keeps holding, and when the attempt ends first it defers, so the
+// next attempt waits on that lock and verifies the catalog
+// (deferInterruptedIndexWork, latest_row_index.go). Work that does not have to be one statement
 // should not be: the readiness history collapse deletes in bounded batches
 // under a server-side statement_timeout, keeps its cursor in a table, and stops
 // before the run's deadline so the next attempt resumes

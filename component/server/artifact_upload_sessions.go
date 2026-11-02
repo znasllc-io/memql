@@ -49,6 +49,7 @@ import (
 	"github.com/znasllc-io/memql/component/server/uploadsession"
 	"github.com/znasllc-io/memql/core/httpstream"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/librarykey"
 )
 
 const (
@@ -105,13 +106,16 @@ type UploadSessionStore interface {
 }
 
 // BlockStore is the staged-block seam: stage one block, inventory the
-// uncommitted set, commit the list. *azureblob.AzureBlobUploader implements
-// it; the fakes in the tests model its one load-bearing property -- state
-// lives with the blob, not with any handler instance.
+// uncommitted set, commit the list, and name the committed object the way a row
+// stores it (the value FileUploader.Upload answers for the same object).
+// *azureblob.AzureBlobUploader implements it; the fakes in the tests model its
+// one load-bearing property -- state lives with the blob, not with any handler
+// instance.
 type BlockStore interface {
 	StageBlock(ctx context.Context, container, objectName, blockID string, chunk []byte) error
 	CommitBlockList(ctx context.Context, container, objectName string, blockIDs []string, contentType string) error
 	UncommittedBlocks(ctx context.Context, container, objectName string) (map[string]int64, error)
+	StoredURL(container, objectName string) (string, error)
 }
 
 // StreamDownloader is the streaming seam for the content route (design
@@ -669,14 +673,14 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 			http.Error(w, "This upload has no valid original version. Start a new upload.", http.StatusConflict)
 			return
 		}
-		landed := head.BlobUrl == session.BlobPath && head.VersionNumber == session.ExpectedVersion+1
+		landed := rowStoresObject(head.BlobUrl, session.BlobPath) && head.VersionNumber == session.ExpectedVersion+1
 		if !landed && head.VersionNumber > session.ExpectedVersion+1 {
 			prior, err := h.store.FileVersion(ctx, session.FileId, session.ExpectedVersion+1)
 			if err != nil {
 				http.Error(w, "version lookup failed", http.StatusInternalServerError)
 				return
 			}
-			landed = prior != nil && prior.BlobUrl == session.BlobPath
+			landed = prior != nil && rowStoresObject(prior.BlobUrl, session.BlobPath)
 		}
 		if landed {
 			if err := h.sessions.Complete(ctx, session.ID); err != nil {
@@ -744,6 +748,26 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// --- the reference the row will store, named before anything is committed ---
+	//
+	// THE URL, as the one-shot route stores, because both clients read it: a
+	// `failed` file with no URL is an upload whose bytes never landed (the Files
+	// Inspector and editors/productivity's documents.ts say so and offer no
+	// download). This file's analysis can fail with its bytes safely stored, as a
+	// scanned PDF's does, so a bare key here would tell its owner to upload it
+	// again, forever. Rows that already hold a bare key are read through
+	// azureblob's splitStoredURL, and none of them has failed: analysis could not
+	// open one, so it only ever marked them ready.
+	//
+	// Asked first because a commit empties the uncommitted inventory: a refusal
+	// after it could never be retried.
+	blobUrl, err := h.blocks.StoredURL(h.bucket, session.BlobPath)
+	if err != nil {
+		h.logger.Error("name the upload's committed blob", "error", err, "uploadId", uploadId)
+		http.Error(w, "block storage refused the commit", http.StatusBadGateway)
+		return
+	}
+
 	// --- commit, in ascending chunk order ---
 	blockIDs := make([]string, 0, total)
 	for n := 1; n <= total; n++ {
@@ -761,7 +785,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 		Name:                   session.Name,
 		MimeType:               session.MimeType,
 		Size:                   int(session.Size),
-		BlobUrl:                session.BlobPath,
+		BlobUrl:                blobUrl,
 		Source:                 "uploaded",
 		Format:                 LibraryFormatForMIME(session.MimeType),
 		FolderId:               session.FolderId,
@@ -793,7 +817,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 	}
 
 	if session.TargetArtifactId != "" {
-		artifactId, version, ok := h.completeVersionSession(w, r, session)
+		artifactId, version, ok := h.completeVersionSession(w, r, session, blobUrl)
 		if !ok {
 			return
 		}
@@ -868,7 +892,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 // writing a head update against an artifact the caller has since lost access
 // to, or against a file that has been archived and re-owned. The read costs
 // one query on a path that just moved gigabytes.
-func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.Request, session *uploadsession.Row) (string, int, bool) {
+func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.Request, session *uploadsession.Row, blobUrl string) (string, int, bool) {
 	ctx := memql.ContextWithFreshRead(r.Context())
 	targetArtifact, head, status, msg := h.resolveVersionTarget(ctx, session.TargetArtifactId)
 	if status != 0 {
@@ -917,7 +941,7 @@ func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.
 			// this path ever held the file, and the analysis pass stamps
 			// what it measures. Inheriting the previous version's hash would
 			// be a false integrity claim rather than a missing one (D5).
-			BlobUrl:                session.BlobPath,
+			BlobUrl:                blobUrl,
 			Format:                 LibraryFormatForMIME(session.MimeType),
 			UploadedFromWorkerId:   session.UploadedFromWorkerId,
 			UploadedFromWorkerName: session.UploadedFromWorkerName,
@@ -933,6 +957,14 @@ func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.
 		return "", 0, false
 	}
 	return targetArtifact.ID, version, true
+}
+
+// rowStoresObject reports whether a row's stored reference names this session's
+// object. A retried complete asks, to learn whether its version already landed, and
+// a session open across a release may find the bare key the route used to store.
+func rowStoresObject(blobUrl, object string) bool {
+	_, stored, ok := librarykey.Split(blobUrl)
+	return ok && stored == object
 }
 
 // completedSessionVersion is this upload's receipt, not today's head. A later

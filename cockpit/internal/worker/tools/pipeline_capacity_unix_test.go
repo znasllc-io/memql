@@ -305,44 +305,34 @@ func TestPipelineLocalBuildFenceDoesNotReclassifyOtherAdmissionFailures(t *testi
 	}
 }
 
-// A build waits for a local model call that may still be running, until the
-// time its fence names; past it the fence is removed and the build admitted.
-// The build holds pipeline.lock exclusively, so no model call can be writing a
-// new record while the stale one is removed.
-func TestPipelineCapacityWaitsForAnInferenceFenceUntilItsEnd(t *testing.T) {
+// A build does not consult a local model call: the two run side by side, and the
+// headroom checks are the only limit between them. It leaves the call's fence in
+// place, in force or past its end: it excludes no model call, so a removal by path
+// could take a record a call has just written.
+func TestPipelineCapacityIgnoresAnInferenceFence(t *testing.T) {
 	isolatePipelineCapacity(t)
 	root, _ := pipelineCapacityRoot()
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, capacity.InferenceActivityFile)
-	write := func(until time.Time) {
-		t.Helper()
-		data, err := capacity.InferenceRecord("0123456789abcdef0123456789abcdef", until)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(time.Now().Add(time.Hour))
-	if reservation, err := acquirePipelineReservation(); !errors.Is(err, capacity.ErrInferenceUnreconciled) {
-		if reservation != nil {
+	for name, until := range map[string]time.Time{"in force": time.Now().Add(time.Hour), "past its end": time.Now().Add(-time.Second)} {
+		t.Run(name, func(t *testing.T) {
+			data, err := capacity.InferenceRecord("0123456789abcdef0123456789abcdef", until)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			reservation, err := acquirePipelineReservation()
+			if err != nil {
+				t.Fatalf("a model call's fence refused a build: %v", err)
+			}
 			reservation.close()
-		}
-		t.Fatalf("a build was admitted beside a model call that may still be running: %v", err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatal("a fence in force was removed", err)
-	}
-	write(time.Now().Add(-time.Second))
-	reservation, err := acquirePipelineReservation()
-	if err != nil {
-		t.Fatalf("a fence past its end refused the build: %v", err)
-	}
-	reservation.close()
-	if _, err := os.Lstat(path); !os.IsNotExist(err) {
-		t.Fatalf("the stale fence was kept: %v", err)
+			if after, err := os.ReadFile(path); err != nil || string(after) != string(data) {
+				t.Fatalf("a build changed a model call's fence: %q %v", after, err)
+			}
+		})
 	}
 }

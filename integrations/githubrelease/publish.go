@@ -42,9 +42,14 @@ type Publisher struct {
 
 // Receipt proves the exact asset observed at publication time, not continuing
 // custody after an administrator edits a release or deletes its assets.
+// ReplacedAssetID names the incomplete asset this publication removed first, so
+// the caller can leave a trace of a remote delete; it is zero when there was none.
+// It is the only field set when Publish returns an error, because a removal is
+// worth reporting even when the upload after it failed.
 type Receipt struct {
 	Repository, Tag, SourceCommit, AssetName, SHA256 string
 	ReleaseID, AssetID, Size                         int64
+	ReplacedAssetID                                  int64
 }
 
 // ErrUncertain means an upload might have happened without verified readback.
@@ -52,9 +57,48 @@ type Receipt struct {
 // Never create another release, overwrite an asset or report success on it.
 var ErrUncertain = errors.New("GitHub release asset publication outcome is uncertain")
 
-// ErrConflict means existing asset metadata or bytes differ from this receipt.
-// No delete/overwrite is performed. After an attempted upload ErrUncertain wins.
+// ErrConflict means a complete asset's metadata or bytes differ from this
+// receipt, or its state is one this adapter cannot read. It is never removed or
+// overwritten: only the owner can say which copy is wrong. So it must mean a read
+// that finished and differed: a read that failed proves nothing about the bytes
+// and is an ordinary error. An asset GitHub still reports as incomplete is not a
+// conflict either (asset.incomplete). After an attempted upload ErrUncertain wins.
 var ErrConflict = errors.New("GitHub release asset conflicts with immutable receipt")
+
+// ConflictError is ErrConflict with the asset it concerns, because a release can
+// hold many and the owner has to find the one that is wrong. Its name comes from
+// the approved target, never from a remote response.
+type ConflictError struct{ AssetName string }
+
+func (e *ConflictError) Error() string { return ErrConflict.Error() + ": " + e.AssetName }
+func (e *ConflictError) Unwrap() error { return ErrConflict }
+
+// settleDelays bounds how long a read after a write waits for GitHub to show that
+// write. On 2026-10-30 a draft POST reported uncertain although GitHub held the
+// draft two seconds earlier, and a retry reconciled it; the assumed cause, list
+// lag, is not proven. A stopped call is expensive, since a many-file publication
+// loses the rest of its run, and a re-read costs one GET. So each read gets a few
+// more chances over fifteen seconds. It stays read-only: the write is never
+// repeated, and a write still unseen afterward stays uncertain. A read with no answer
+// before a promotion's PATCH gets the same chances, because only the owner can recover it.
+var settleDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+// settled repeats a read-only observation until it reports done or the delays run
+// out. It returns the last read's error; done false with no error is an answer
+// the caller judges, since absence is an observation and never proof.
+func settled(ctx context.Context, read func() (bool, error)) error {
+	for attempt := 0; ; attempt++ {
+		done, err := read()
+		if done || attempt == len(settleDelays) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(settleDelays[attempt]):
+		}
+	}
+}
 
 var (
 	repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$`)
@@ -136,10 +180,12 @@ func newPublisher(t Target, requireID bool) (*Publisher, error) {
 }
 
 // Publish performs one bounded protocol effect. The caller must already own an
-// approved destination, durable intent and retained immutable source. A release
-// is checked by ID and its tag resolved to the expected commit before and after
-// upload/readback. GitHub has no conditional upload that atomically locks these
-// facts; detected concurrent drift refuses or returns ErrUncertain.
+// approved destination, durable intent and retained immutable source, and must
+// be the release's only writer: removing an incomplete asset is safe only while
+// no upload of ours is still sending it. A release is checked by ID and its tag
+// resolved to the expected commit before and after upload/readback. GitHub has
+// no conditional upload that atomically locks these facts; detected concurrent
+// drift refuses or returns ErrUncertain.
 func (p *Publisher) Publish(ctx context.Context, v *VerifiedFile) (Receipt, error) {
 	if p == nil || v == nil || p.target.Token == "" {
 		return Receipt{}, errors.New("publisher, explicit credential and verified file are required")
@@ -157,17 +203,18 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedFile) (Receipt, erro
 	defer close()
 	assetID, err := s.publish(ctx, v)
 	if err != nil {
+		partial := Receipt{ReplacedAssetID: s.replaced}
 		if s.attempted {
-			return Receipt{}, ErrUncertain
+			return partial, ErrUncertain
 		}
 		if ctx.Err() != nil {
-			return Receipt{}, ctx.Err()
+			return partial, ctx.Err()
 		}
-		return Receipt{}, err
+		return partial, err
 	}
 	t := p.target
 	return Receipt{Repository: t.Repository, Tag: t.Tag, SourceCommit: t.SourceCommit, ReleaseID: t.ReleaseID,
-		AssetID: assetID, AssetName: t.AssetName, SHA256: v.expected.SHA256, Size: v.expected.Size}, nil
+		AssetID: assetID, AssetName: t.AssetName, SHA256: v.expected.SHA256, Size: v.expected.Size, ReplacedAssetID: s.replaced}, nil
 }
 
 func (p *Publisher) session() (*publication, func()) {
@@ -188,6 +235,7 @@ type publication struct {
 	requests    int
 	maxRequests int
 	attempted   bool
+	replaced    int64
 }
 
 func (s *publication) releasePath() string {
@@ -201,6 +249,11 @@ func (s *publication) publish(ctx context.Context, v *VerifiedFile) (int64, erro
 	a, count, err := s.findAsset(ctx)
 	if err != nil {
 		return 0, err
+	}
+	if a != nil && a.incomplete() {
+		if a, count, err = s.removeIncomplete(ctx, a); err != nil {
+			return 0, err
+		}
 	}
 	if a == nil {
 		if count >= 1000 {
@@ -224,7 +277,14 @@ func (s *publication) publish(ctx context.Context, v *VerifiedFile) (int64, erro
 			_ = response.Body.Close()
 		}
 		_ = f.Close()
-		a, _, err = s.findAsset(ctx)
+		// Its own upload may still be finishing, so one call never removes what it
+		// just sent. One still incomplete after the wait falls to matches below and
+		// leaves the outcome uncertain; the next call recovers it.
+		err = settled(ctx, func() (bool, error) {
+			var err error
+			a, _, err = s.findAsset(ctx)
+			return a != nil && !a.incomplete(), err
+		})
 		if err != nil {
 			return 0, err
 		}
@@ -235,7 +295,7 @@ func (s *publication) publish(ctx context.Context, v *VerifiedFile) (int64, erro
 	if err := a.matches(v.expected, s.p.target.AssetName); err != nil {
 		return 0, err
 	}
-	if err := s.verifyDownload(ctx, a.ID, v.expected); err != nil {
+	if err := s.verifyDownload(ctx, a.ID, s.p.target.AssetName, v.expected); err != nil {
 		return 0, err
 	}
 	if err := s.checkRelease(ctx); err != nil {
@@ -289,21 +349,30 @@ func (s *publication) request(ctx context.Context, method, endpoint string, body
 	return response, nil
 }
 
+// readFailed marks a metadata read that got no usable answer: no response, a status
+// other than 200 or 404, or a body it could not read. It says nothing about the release,
+// so reading again is safe. A 404 or a body that differs is an answer, which the look
+// before a PATCH must not read past: a lagging replica could show the old state next.
+type readFailed struct{ error }
+
 func (s *publication) getJSON(ctx context.Context, path string, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	r, err := s.request(ctx, http.MethodGet, s.p.api+path, nil, 0, "application/vnd.github+json", true)
 	if err != nil {
-		return err
+		return readFailed{err}
 	}
 	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
+	if r.StatusCode == http.StatusNotFound {
 		return errors.New("release API read was refused")
+	}
+	if r.StatusCode != http.StatusOK {
+		return readFailed{errors.New("release API read was refused")}
 	}
 	const maxJSON = 2 << 20
 	data, err := io.ReadAll(io.LimitReader(r.Body, maxJSON+1))
 	if err != nil || len(data) > maxJSON || json.Unmarshal(data, out) != nil {
-		return errors.New("release API returned invalid or excessive metadata")
+		return readFailed{errors.New("release API returned invalid or excessive metadata")}
 	}
 	return nil
 }
@@ -382,9 +451,70 @@ type asset struct {
 	Digest string `json:"digest"`
 }
 
+// incomplete reports an asset that is not finished by GitHub's own account. GitHub
+// documents "starter" for an upload that failed upstream, and that such an asset
+// "can be safely deleted". Its schema's only other value besides "uploaded" is
+// "open", which it does not define; such an asset is treated the same way because
+// this adapter accepts only "uploaded", so it could never complete the release as
+// it stands, and on a draft nothing public can be lost. Any other value, including
+// none, is not proof of anything and stays a conflict.
+func (a *asset) incomplete() bool { return a.State == "starter" || a.State == "open" }
+
+// removeIncomplete is the recovery for an upload cut off part way. GitHub keeps
+// the asset it opened and refuses every later upload under that name, so without
+// this one interrupted upload stops the release for good. The approved upload owns
+// this name on this draft, so clearing its own leftover is part of that approved
+// effect and needs no separate approval.
+//
+// It re-checks the draft and tag, then lists the asset once more as the last read
+// before the DELETE, and returns whatever it finds if that changed: an asset that
+// finished meanwhile goes on to the ordinary byte comparison. GitHub has no
+// conditional delete, so one finishing in the instant after that read would still
+// be removed. Only a release left open to another writer could do that, and
+// readback proves whatever replaces it. attempted is set before the DELETE, because
+// any failure after it leaves the remote state unknown. The returned count is the
+// inventory size, for the caller's asset limit.
+func (s *publication) removeIncomplete(ctx context.Context, a *asset) (*asset, int, error) {
+	if err := s.checkRelease(ctx); err != nil {
+		return nil, 0, err
+	}
+	current, count, err := s.findAsset(ctx)
+	if err != nil {
+		return nil, count, err
+	}
+	if current == nil || current.ID != a.ID || !current.incomplete() {
+		return current, count, nil
+	}
+	s.attempted, s.replaced = true, a.ID
+	deleting, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	r, err := s.request(deleting, http.MethodDelete, s.p.api+"/repos/"+s.p.target.Repository+"/releases/assets/"+strconv.FormatInt(a.ID, 10), nil, 0, "application/vnd.github+json", true)
+	if err != nil {
+		return nil, count, err
+	}
+	_ = r.Body.Close()
+	// 404 means an earlier removal landed and its answer was lost.
+	if r.StatusCode != http.StatusNoContent && r.StatusCode != http.StatusNotFound {
+		return nil, count, errors.New("incomplete release asset could not be removed")
+	}
+	var present *asset
+	err = settled(ctx, func() (bool, error) {
+		var err error
+		present, count, err = s.findAsset(ctx)
+		return err == nil && present == nil, err
+	})
+	if err != nil {
+		return nil, count, err
+	}
+	if present != nil {
+		return nil, count, errors.New("incomplete release asset is still listed after its removal")
+	}
+	return nil, count, nil
+}
+
 func (a *asset) matches(want Expected, name string) error {
 	if a.ID <= 0 || a.Name != name || a.State != "uploaded" || a.Size == nil || *a.Size != want.Size || (a.Digest != "" && a.Digest != want.SHA256) {
-		return ErrConflict
+		return &ConflictError{name}
 	}
 	return nil
 }
@@ -408,7 +538,7 @@ func (s *publication) findAsset(ctx context.Context) (*asset, int, error) {
 			seen[a.ID] = true
 			if a.Name == s.p.target.AssetName {
 				if found != nil {
-					return nil, total, ErrConflict
+					return nil, total, &ConflictError{s.p.target.AssetName}
 				}
 				copy := a
 				found = &copy
@@ -421,7 +551,7 @@ func (s *publication) findAsset(ctx context.Context) (*asset, int, error) {
 	return nil, total, errors.New("release asset inventory did not terminate")
 }
 
-func (s *publication) verifyDownload(ctx context.Context, assetID int64, want Expected) error {
+func (s *publication) verifyDownload(ctx context.Context, assetID int64, name string, want Expected) error {
 	endpoint := s.p.api + "/repos/" + s.p.target.Repository + "/releases/assets/" + strconv.FormatInt(assetID, 10)
 	credential := true
 	for redirects := 0; redirects <= 3; redirects++ {
@@ -432,8 +562,15 @@ func (s *publication) verifyDownload(ctx context.Context, assetID int64, want Ex
 		if r.StatusCode == http.StatusOK {
 			digest, size, err := hashCopy(ctx, io.Discard, r.Body, want.Size)
 			closeErr := r.Body.Close()
-			if err != nil || closeErr != nil || size != want.Size || digest != want.SHA256 {
-				return ErrConflict
+			if size > want.Size {
+				return &ConflictError{name}
+			}
+			// A read that did not finish proves nothing about the bytes.
+			if err != nil || closeErr != nil {
+				return errors.New("release asset download was interrupted")
+			}
+			if size != want.Size || digest != want.SHA256 {
+				return &ConflictError{name}
 			}
 			return nil
 		}

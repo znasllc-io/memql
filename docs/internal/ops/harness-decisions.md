@@ -471,6 +471,19 @@ that requires held-out goals, interaction evidence and measured interventions.
 
 ## Execution decision map
 
+Explicit invocation is a supported automation entry path. The authoring emission
+prompt previously described only event and cron triggers, causing a manual Work
+request to return no constructs even though the loader accepts `@template`.
+The prompt now distinguishes a caller-invoked template from an event/scheduled
+automation: a template declares its args and carries no trigger; adding one
+would introduce an unintended second execution path. Compilation still uses
+Gate 1, and execution retains the caller's current authority, captured routing
+and normal run lifecycle. This guidance creates no route grant and does not
+bypass App delegation when the resulting automation actually calls an agent.
+`TestTemplateIsAThirdWayToBeReachable`, `TestTemplateMayNotAlsoBeTriggered` and
+`TestTheWorkTemplatesLoadAndAreCallable` cover the native loader contract. They
+do not prove that a model will emit the requested automation correctly.
+
 | Decision | Reason and resulting path | Implementation |
 | --- | --- | --- |
 | Select a model and execution route | Use the current policy and requested reasoning level. An Apps route does not grant tools, host access or ownership. Missing app-session wiring is a platform fault, not permission to open another machine. | [App session provider](../../../component/memql/app_session_provider.go) |
@@ -668,6 +681,42 @@ duplicating its original image text. Mixed/already-image content passes through.
 Live delivery and task-specific visual verification require
 their own recorded observations.
 
+## Claude print-mode prompt transport
+
+The worker hands Claude Code one complete text prompt through a private stdin
+pipe, closes it, and drains stdout/stderr concurrently. A large retained review
+can exceed the host's per-argument `exec` limit before the CLI starts; text stdin
+avoids that transport limit without truncating evidence or changing model context
+limits. Claude's [input-error reference](https://code.claude.com/docs/en/errors)
+documents stdin as an alternative to a positional prompt. Its
+[print-mode guide](https://code.claude.com/docs/en/headless) documents a 10 MB
+stdin cap; an upstream refusal remains a failed turn, not permission to shorten
+the input or fall back to an incomplete argv prompt.
+
+Only the harness owns this finite pipe. The engine cannot write interactive
+input into a running App. Follow-ups are still separate authorized turns,
+resuming the recorded session ID. Model/effort, response schema, tool grants,
+workspace and MCP boundaries stay in their existing flags. A missing pipe,
+short write, write error or failed close terminates the supervised process group
+and fails the turn even if a result event claims success. Cancellation stops the
+same group, unblocking a pending writer; the process is reaped and no prompt is
+automatically replayed. There is no new durable transport state to restore on a
+replica change; the existing recorded session reference remains the continuation
+boundary.
+
+`claudeinput_test.go` exercises large exact input, EOF, output backpressure,
+transport failures and cancellation without a real model. Existing Claude grant,
+schema and resume cases preserve those contracts; app-session tests check stdin
+through the actual supervisor and whole-process-group cancellation.
+`TestClaudePromptLeaderExitClosesInputAndStopsDescendant` covers a CLI leader
+exiting while a descendant keeps stdin open but redirects both outputs. The
+supervisor's `Cmd.Wait` closes its `StdinPipe` writer before returning, which
+unblocks input delivery; its failure then stops the remaining process group.
+Group signaling uses the original spawned PID assigned by `Setpgid`, because
+looking up the group after the leader has been reaped misses surviving children.
+These tests prove byte delivery and lifecycle behavior, not a particular
+installed Claude version's model response or successful review of a live PR.
+
 ## Evidence and reuse
 
 | Decision | Reason and resulting path | Implementation |
@@ -714,6 +763,65 @@ an automatically promoted reviewed skill, or proof that a model obeys it. The
 owned-turn prompt and delegation checks validate delivery of the instructions;
 the supervised goal must still supply observed target identity and outcome
 evidence. A screenshot of an old running build cannot close that evidence gap.
+
+## Apps placement before the execution claim
+
+A whole-step App session belongs to the agent that holds its computer's stream.
+A single inference call can be forwarded, but the running session and its tool
+conversation cannot. A retry previously let either agent win the shared run
+claim; the streamless winner then reported no available App while another agent
+held every eligible computer. Changing provider or granting computer access
+would not repair that placement error.
+
+For a persisted owner-selected `route:apps` or explicit `app:` source, the agent
+reads the owned journal and current App doors before claiming. A local eligible
+stream competes normally. An agent that sees only eligible peer streams yields
+without consuming the claim. The probe restores the current persisted owner and
+uses existing allow, sign-in, heartbeat, routing and quota filtering. It never
+opens a session, changes the selection cursor, supplies an owner choice or grants
+native computer tools. A read failure is unknown, not an empty fleet. With no
+eligible door anywhere, normal execution can report its existing NoModel result;
+placement neither silently falls back to paid inference nor waits indefinitely.
+The actual execution gate still checks authority, cancellation and stream state.
+
+Human settlement preparation remains first. A targeted model override keeps its
+requested App; an override to another source and mixed-source replay histories
+keep their existing placement. Auto and policy-chain routes retain ordinary
+arbitration. This change does not migrate an active session or solve a later step
+that changes sources, a stream that moves after preparation, or an unavailable
+MCP service. Those remain execution-time refusals with the existing journal and
+recovery controls.
+
+A stale Apps run can be recovered even when the maintenance leader executes no
+steps. `work.run.recovery` is a scheduling hint on the existing durable run
+lifecycle channel, not a graph write. It carries only run/owner identifiers and a
+hash of the stored generation, routing and real heartbeat. Receivers re-read that
+exact owned state, require it still to be stale and eligible, and use the same
+run/answer claim. Delayed hints cannot adopt a newer answer or rerun.
+
+The sweep waits at most two seconds for an actual recent shared claim, measured
+on the same database clock that timestamps arbitration. A message
+being sent is not execution or progress. Claim acquisition and the sweep's final
+fresh-read/abandon decision share one run-specific Work decision gate, so neither
+can invalidate the other's admission between read and write. Canonical and bare
+run identifiers retain their historical claim spellings; the shared gate and
+exact alias reads honor either existing claim with its unchanged lease rules.
+A recent real claim
+protects the claimant's first-heartbeat gap for only the existing heartbeat
+window. An old claim never renews that protection; an unclaimed or dead run
+still reaches its normal abandoned state. Unknown storage/delivery state is
+reported and left undecided. No heartbeat, goal acceptance, result, permission,
+new generation or separate execution lease is manufactured.
+
+Regression coverage is split at the actual seams:
+`TestWorkDBAppsRetryIsClaimedOnlyWhereTheComputerStreamLives` uses independent
+engine caches, the production dispatcher preparation and real shared claims;
+`TestAppDispatchDBClaimAndAbandonArbitrateAcrossReplicas` forces both decision-lock
+orderings against PostgreSQL; the companion stale-state test covers old claims,
+changed answers, cancellation and reruns. `TestRunRecoveryHintSurvivesRouteGapWithoutBecomingAGraphWrite`
+exercises the existing durable delivery hop. App doors and the eventual model
+invocation are fixtures in the dispatch test; these checks do not claim a live
+computer session, MCP readiness or production rollout was verified.
 
 ## Context pressure and optional work
 
@@ -1172,16 +1280,40 @@ operator's 8 top-level / 30 offline cases passed, including the actual SDK/proto
 boundary. That proof does not establish a successful live deployment or DSL
 loading on every consumer.
 
-The isolated correction is a **candidate, not released behavior**. It claims
-the existing parked row under the package's database gate before acknowledging
-background confirmation; concurrent synchronous confirmation shares that gate.
-Repository confirmation requires the saved report and snapshot and refuses a
-redirect to another attempt. Execution keeps the caller's authority, detaches
-transport cancellation under a plan-derived time budget, and retains durable
-Cancel, heartbeat and bounded terminal bookkeeping. Cancel and abandonment
-checks re-read under the same gate. This is not a persistent job executor:
-process loss, including during the DSL restart, can still abandon the attempt
-before publication. No automatic continuation or effect replay is promised.
+MemQL OS now confirms a parked attempt in the background. The server claims the
+existing parked row under the package's database gate before acknowledging;
+concurrent synchronous confirmation shares that gate. Background confirmation
+requires the saved report and, for a repository source, the saved snapshot, and
+refuses a redirect to another attempt. Execution keeps the caller's authority,
+detaches transport cancellation under a budget derived from the plan (thirty
+minutes, plus each selected build's and asset's own), and retains durable Cancel,
+heartbeat and bounded terminal bookkeeping. Cancel, parking and the abandoned sweep
+re-read under the same gate, so none can act on a row another replica just claimed.
+A call without `background` stays on its request and keeps its earlier behaviour.
+
+This is not a persistent job executor. Process loss, including a package's own DSL
+restarting the bff running it, still abandons the attempt. A durable continuation
+across that restart was reviewed separately and is not part of this path. Retry is
+the recovery: it re-analyses the same snapshot and skips the roll when the active
+pointer already matches, so a run lost to its own roll finishes on the next attempt.
+Auto-deploy does not retry an abandoned run (`retryableAutoInfrastructureFailure`),
+so an unattended one waits for a person.
+
+`abandonedMessage` used to say "nothing was published" of every lost run. That is
+true only before `rolling`, so the sentence now follows the stage the run reached.
+Known limit: a run lost between writing the pointer and asking for the roll leaves
+the nodes on the old tree, and a Retry sees the pointer match and skips the roll.
+Those nodes pick up the new DSL at their next restart.
+
+Regression coverage: `TestBackgroundConfirmationSurvivesClientAndHonorsReplicaCancel`,
+`TestConfirmationClaimExcludesConcurrentReplicas`,
+`TestConfirmationCancelRechecksAfterClaimOnAnotherReplica`,
+`TestConfirmationRefusesCancelledAndForeignSavedRuns`,
+`TestConfirmationSweepRechecksLatestClaimAndStillAbandonsLostRunner`,
+`TestCancelledSynchronousDeploymentStillRecordsBoundedTerminalOutcome` and
+`TestTheAbandonedSentenceSaysWhatTheStageCanHaveChanged`. The claim tests run
+against a real database with a faked pipeline. A live browser disconnect and a real
+self-roll on a cluster have not been exercised.
 
 ## Repository requests in owned Work (source candidate, 2026-10-25)
 
@@ -1825,16 +1957,17 @@ The evidence behind the change:
 The engine adds `libraryReadFileExcerpts`
 (`integrations/library/read_file_excerpts.go`, `excerpt.go`). It reads up to
 eight of the caller's text files, each on `libraryReadFile`'s path
-(`readableTextFile`), under one budget of at most 64 KiB, shared max-min fair in
-ascending stored size. Each excerpt keeps the first lines, the earliest lines
-matching the caller's RE2 patterns with three lines before and twelve after
-while the window budget lasts (`matchedLines` counts them all), and the end of
-the file, with every omitted range marked. The budget bounds the output,
-markers included. A line is held to 64 KiB, matched on its first 4 KiB and
-kept to 2 KiB, and at most 64 MiB is read. A file the caller cannot read, or
-whose bytes fail, is its own `unavailable` entry. A database or gate failure
-fails the call, so the failure path can retry it. The builtin masks nothing and
-grants nothing: `label` is only echoed back.
+(`readableTextFile`), under one budget of at most 64 KiB and at least 1 KiB a
+file, shared max-min fair in ascending stored size. Each excerpt keeps the first
+lines, the earliest lines matching the caller's RE2 patterns with three lines
+before and twelve after while the window budget lasts (`matchedLines` counts
+them all), and the end of the file, with every omitted range marked. The budget
+bounds the output, markers included. A line is held to 64 KiB, matched on its
+first 4 KiB and kept to 2 KiB, and at most 64 MiB is read. A file the caller
+cannot read is its own `unavailable` entry, and every entry answers with the
+bare `fileId`. A database or gate failure fails the call, so the failure path
+can retry it. The builtin masks nothing and grants nothing: `label` is only
+echoed back.
 
 Any signed-in caller can call the builtin with their own file and patterns, so
 its cost is bounded natively, not by the recipe:
@@ -1844,6 +1977,58 @@ its cost is bounded natively, not by the recipe:
 - the version gate covers the row reads only and is released before a file's
   bytes are opened. A version's bytes are never overwritten, so a scan does
   not hold a gate-pool connection.
+
+What a failed read of a file's bytes means (`excerptBytesFailed`, added
+2026-11-01). The recipe reads an `unavailable` entry as a log that is gone, and
+when every log has one it ends with a no-repair result and no retry. Before this
+change every open or read error was such an entry, logged nowhere, so a storage
+blip ended a diagnosis for good. An entry must be a fact no attempt changes, and
+only these are:
+- a stored key `openFileBytes` refuses;
+- a blob that is absent (`azureblob.IsBlobAbsent`): a retired log, the service's
+  `BlobNotFound`, or a stored value naming no object;
+- the scan's own deadline passing, judged by the scan's context and never by the
+  error, because storage's own timeout says the same words and may well pass.
+
+Every other open or read error fails the call in one fixed sentence, "document
+storage may be temporarily unavailable", and is logged with the file id, as the
+entries above are. `transient.unavailable` retries that sentence after 30 seconds
+(`workSpineRecovery`) inside the run's budget of three, and past it a person is
+asked. The tradeoff is that one log's blip costs the other logs' results, which
+the next attempt reads again; nothing is written, so repeating it is safe.
+
+Alternatives rejected:
+- The storage error's own text as the call's error. The symptom table reads the
+  words: a 500 matches no rule and would cost a classifier call, and a path or a
+  request id can hold a "403" or a "404".
+- `isBlobNotFound`'s text match to tell a missing blob. Its "404" matches the same
+  paths and request ids, and a read wrongly called absent is never tried again.
+  `IsBlobAbsent` reads the service's code.
+- A missing container as absent. Nothing retires a container, so that is a storage
+  incident someone can put right. A credential storage refuses takes the same path:
+  it is no blip, but the budget bounds it, and a person hearing about it beats a
+  result saying the log is gone.
+
+Colour codes (added 2026-11-01). vitest 5.0.5 colours its output with no terminal
+and no `CI` variable; it stops only for `NO_COLOR`, `TERM=dumb` or
+`FORCE_TTY=false`, and neither the step's Job nor the toolchain image sets one. The
+`os-checks` step's test command, run with only `PATH` and `HOME` set and its output
+in a file, printed 44 escape sequences in 14 lines, and `node:22-bookworm-slim`
+printed 100 in a 30-line failure. The capture keeps every byte. vitest's failure line opens
+with a code, so the recipe's `^ *(FAIL|×|✗) ` missed it. CSI sequences are now
+stripped before a line is matched and from every kept line, and a kept line is
+measured without them. A file returned whole keeps its bytes, because `complete`
+promises the file itself; its lines are still matched without colour.
+
+A floor per file (added 2026-11-01). `maxBytes` must leave each file 1 KiB. Eight
+files in 1 KiB gave shares of 128 bytes, and a share too small for its markers
+comes back empty: windows may take three quarters of it, and the markers take up to
+126 bytes. Measured empty up to 466 bytes on a capped file whose every line
+matches, and at 133 on one not capped. Refusing such a call was chosen over
+documenting the empty result, because an empty excerpt reads as an empty log and
+the recipe drops it silently, no caller asks for so little (the recipe asks 48 KiB
+for three), and the property test's range then covers every share the handler can
+hand out.
 
 The recipe reads the first three failed steps with logs, in `seq` order, as
 48 KiB of excerpts. It lists every failed step and the run's own
@@ -1876,12 +2061,17 @@ carries the builtin.
 Tests:
 - `TestExcerpt*` and `TestCompileExcerptPatternsRefusesBadInput`
   (`excerpt_test.go`) cover the algorithm. A seeded property test walks every
-  excerpt back to its file line by line.
+  excerpt back to its file line by line, over every share the handler can hand
+  out and, on every other seed, a coloured file. `TestTheExcerptFloorLeavesRoomForItsMarkers`
+  and `TestExcerptOfACappedFileAtTheFloorIsNotEmpty` hold the floor.
 - `TestReadFileExcerpts*` cover malformed input refused before any read, the
   budget split (including a wrong stored size), and a foreign file reported
-  without a fetch.
+  without a fetch. `TestReadFileExcerptsFailsTheCallWhenStorageFails` holds the
+  call's sentence to `work.ClassifyByRules`, `TerminalFailureCode` and `ActFor`.
+- `TestIsBlobAbsentReadsTheServiceCodeNotTheText` (`integrations/azureblob`) drives
+  `DownloadStreamURL` through the real SDK against each answer storage gives.
 - `ReadFileExcerptsAcrossEngines` in `TestDocumentRevisionWorkflow` is the
-  database-backed two-replica case.
+  database-backed two-replica case, malformed input and a storage failure included.
 - memql-znas's `check-delivery-policy.go` drives the recipe through
   `workflowhost.Run` and compiles every pattern.
 
@@ -1890,6 +2080,16 @@ Not verified here:
 - excerpt quality on real failing logs;
 - Retry on a question the old recipe raised. It reruns the failed step under
   the installed recipe and keeps the old run's prefix.
+- A storage failure retried on a live run. The tests stop at the rules table, and
+  a retry through the recipe depends on its read carrying no `on error continue`,
+  true of memql-znas on 2026-11-01.
+- Colour codes in a stored log read directly. No session can read one from a vitest
+  step: the evidence is the reproduction above, and the 40 failed-step tails on
+  GitHub held none, but none of them came from such a step.
+
+Known limitation: a log that fits its share reaches the recipe with its colour
+codes, escaped in the evidence, so it still counts more toward the 65,536-character
+backstop than its text does.
 
 ## A stopped attempt stops waiting for a Job POST that can no longer land (2026-10-30)
 
@@ -2602,6 +2802,248 @@ release today and not `pull_request`, so reuse from a push turns on with the eng
 upgrade, and a pull request's results are reused only once that policy admits them.
 This change helps only after it ships in an engine release.
 
+## A release publishes in one call (2026-11-01)
+
+`cockpit/v0.21.1` (41 files, 736 MB, engine 0.31.9, 2026-10-30) could not finish
+inside one `releasePublishBuild`, the Publish action on the Releases screen. The
+connected workflow is in
+[release-candidates.md](../../public/operate/release-candidates.md#publish-a-whole-release-in-one-call).
+
+Evidence, and what each item turned out to be:
+
+| Observed or read | Finding |
+|---|---|
+| Every per-target call re-verified the whole candidate (about 40 s), and 41 uploads took 1,698 s against a 5-minute limit | Reproduced: 5,084 artifact reads for one publish, with bytes in memory (`TestReleaseBuildPublishesManyFileTargetsInOneCall`) |
+| A retry spent its limit in the recipe's draft loop | Confirmed: the recipe reads `drafts` once at its top, so every sibling called creation. Its promotion loop was worse: every sibling re-read every asset's bytes |
+| An expired context failed the journal save, so the phase stayed `publishing` | Confirmed (`TestReleaseBuildActionCutOffByItsContextStillSavesTheJournal`) |
+| A cut-off upload could leave an asset that refuses every retry (read from code, not observed) | Confirmed in code: `asset.matches` refused with `ErrConflict` forever. GitHub documents the `starter` state and that it "can be safely deleted" |
+| The first call returned `uncertain` although GitHub held the draft | Cause not proven; list lag is assumed. A retry reconciled it |
+| Found here: `withDraftUpload` held a transaction across the upload | The request pool ends a session idle in a transaction after 60 s, so an upload over 60 s failed after succeeding (`FATAL ... idle-in-transaction timeout`, reproduced at a shorter limit), and a retry failed the same way once readback alone took over 60 s. It also blocked every candidate read past its 8 s limit and pinned a request-pool connection for the whole upload |
+| Found here: `verifyDownload` called every failed read a conflict | A dropped connection read as different bytes. Now only a read that finished and differed is a conflict (`TestPublishCallsOnlyACompletedReadAConflict`) |
+
+Chosen path, and why each branch exists:
+
+- **Uploads to the private draft share one verification** (`candidateVerification`,
+  `publicationAction`). Trigger: a recipe calls an effect per target, and it is
+  captured at prepare time in another repository. This skips reads of rows that can
+  change, so it is not free. An upload still passes the gate before each of its inner
+  operations, the ledger checks the exact approval in each effect's transaction, and its
+  file's bytes are verified again before it is sent. Bytes sent to a draft expose nothing
+  if the evidence has since changed.
+- **Anything public verifies afresh** (`publicationAction.preparer(fresh)`): the promotion,
+  and each registry or npm write. Without this a run record changing mid-call went
+  unnoticed until sealing refused it, after the release was public with no signed catalog
+  (`TestReleaseBuildPublicationRereadsTheEvidenceBeforeGoingPublic`). The price is one more
+  read of every artifact per call. A window remains between that read and the seal,
+  as it always did.
+- **Settled groups answer from the journal** (`publicationAction.draft`). One release
+  is shared by all its targets, so the first call settles the group. Creation is
+  settled from `ready` on, promotion only at `published`; `promoting` goes on to
+  reconcile natively, so no once-only fence is skipped. Approval is checked first
+  (`TestPublicationActionCannotSkipApprovalForASettledGroup`). Alternative: have the
+  recipe re-read the journal in its loops. Rejected as the fix because it would leave
+  any other recipe quadratic and tie the engine's cost to a product's recipe. **memql-znas
+  needs no change**: `znasPublishApprovedRelease` as it stands is the regression
+  test's recipe.
+- **No limit on the call as a whole** (`executeBuild`). Any fixed figure is a guess at
+  a release's size and a network's speed, and 8 GiB is allowed. Stop conditions,
+  kept distinct: per-operation watchdogs (`Publish` 30 minutes, `draft` and
+  `publishWithWorkflow` one hour, `releasePublicationOperationLimit` 70 minutes over
+  every recipe operation), the renewed lease, and the gate before every operation.
+  A recipe loops only over the candidate's targets, so the call is finite.
+  Alternative: resume in slices with the client re-invoking. Rejected: the owner asked
+  for one call, and a closed page would strand it.
+- **The call outlives its caller** (`context.WithoutCancel`). A 30-minute upload must
+  not depend on a browser tab, and cutting it is what creates the incomplete asset.
+  Claim and action checks stay on the caller's context, so a caller already gone
+  starts nothing. Tradeoff: nothing can stop a running publication except the gate, and
+  a `CancelRequest` is acknowledged as cancelled while the publication carries on.
+- **The lease and the stored owner are checked before every inner operation**
+  (`checkStoredOwner`, through the preparer's authority), only on an action that outlives
+  its request. Trigger: its access context was fixed at admission and the stream that
+  could have ended it is no longer attached, and one promotion can read bytes for minutes
+  before its claim and PATCH. The authority is captured when the call starts and can only
+  narrow the stored role. The operator key and a troubleshooting cluster are owners with no
+  stored row, so they skip this (`TestStoredOwnerAuthorityByCredential`).
+- **Leases renew while their holder lives** (`keepLease`, `lease.go`). The lease now
+  bounds how long a dead holder blocks a release, not how long work may take. A holder
+  that loses it, or has failed to renew for all but two renewal periods of its life, stops
+  before another may legally claim it. The upload lease (3 minutes) is shorter than the
+  build lease (6), so a retry that gets the build lease is never refused by its dead
+  predecessor's upload.
+- **An upload holds a durable lease and no transaction** (`withDraftUpload`). Promotion
+  and renewal now refuse rather than wait, because a read blocked on a row lock would
+  hit its 8 s limit anyway. Alternatives: a keepalive in the transaction (pins a
+  connection and keeps the candidate row locked for the whole upload) or a dedicated
+  pool (its 5-minute idle limit is shorter than an upload). The price is a schema change,
+  two columns on `release_draft_intents` with constant defaults on a small table.
+- **An interrupted upload recovers on the next publish** (`removeIncomplete`). It removes
+  one asset, by ID, only when GitHub reports `starter` or `open` under the approved name,
+  after re-checking the draft and tag and listing the asset once more. This adapter
+  accepts only `uploaded`, so such an asset could never complete the release, and on a
+  draft nothing public is lost. GitHub documents `starter` as safe to delete and leaves
+  `open` undefined. Alternative: a separate owner action. Rejected: the approval already
+  covers this name on this draft, and a separate step would be the hand-driven work this
+  removes. A call never removes its own upload: one still incomplete after the wait is
+  uncertain, and the next call clears it.
+- **What cannot be recovered says so** (`release_asset_conflict`, `promotion_unconfirmed`).
+  A conflict names its file and asks for the approved file back, not for its removal,
+  because a file with a receipt is never sent again. A claimed promotion keeps its fence
+  even when the read just before its PATCH fails, so that reason tells the owner to check the
+  draft, publish on GitHub and press again
+  (`TestReleaseBuildPublishExplainsAPromotionItCannotRepeat`). A conflict found once a
+  promotion is claimed says so instead of "nothing was changed", because the PATCH may have
+  landed (`TestReleaseBuildConflictFoundAfterTheClaimSaysThePromotionStarted`).
+- **A promotion reads bytes before its claim and after its PATCH, never between**
+  (`Lifecycle.Promote`, `stillObserved`). Trigger: a read failing between the claim and the
+  PATCH sent nothing, yet left the draft `promoting`, and every later press hit
+  `releaseDraftUncertain`. That read covered the whole release, up to 8 GiB, so the window
+  grew with the release. Chosen path: the PATCH takes the proof `Observe` made earlier in the
+  call, and goes only while the inventory, release and tag still match it, including every
+  asset ID. The full read stays after the PATCH. Why this is acceptable:
+  - The second read added little freshness. An asset read early in it was already one whole
+    read old at the PATCH, tied to that moment only by the listing. Now the oldest proof is
+    one read plus the claim's transaction old. "The bytes were read moments earlier" holds
+    only for the last asset read.
+  - GitHub's [asset API](https://docs.github.com/en/rest/releases/assets) offers `name`,
+    `label` and `state` on an update and no way to change bytes, and refuses a same-name
+    upload until the old asset is deleted; `gh release upload --clobber` deletes and then
+    uploads. It does not say that the new asset gets a new ID, and that was not tried against
+    the real API. So the inventory also compares the digest GitHub reports with the approved
+    one (`asset.matches`); a draft asset read on 2026-11-01 at the pinned API version carried
+    one. An asset with no reported digest rests on its ID alone.
+  - The proof cannot come from anywhere else. `bytesRead` is set only by a byte read and stays
+    out of the JSON, so a receipt reloaded from the journal cannot authorize a PATCH. A retry
+    or another replica holds no claim to spend anyway. `observe` drops the old proof before it
+    reads and the write requires a standing check, so a recipe that carried on past a failure
+    still cannot spend what came before it
+    (`TestCandidatePromotionCannotSpendAFailedCheckOrRead`).
+  - Everything the inventory compares, the release's metadata and the tag still stop the PATCH,
+    however they arrive (`TestLifecycleRefusesDriftBeforePromotion`, at both stages). An
+    asset's `label` is not compared, as it never was.
+
+  The price: two things the second read could have stopped are now found only after the PATCH,
+  as `ErrUncertain` on a public release. A replacement a lagging listing does not show yet: the
+  second read could catch it by asking for the old ID, if it reached that asset after the
+  replacement, which favours the files it read last and small releases. So the last look now
+  trusts the listing, and whether GitHub's lags is unproven (see the table above). And bytes
+  changed under an unchanged ID and digest
+  (`TestPromoteFindsBytesChangedUnderAnUnchangedIDOnlyAfterItsPatch`), which GitHub has no call
+  for. The first needs a foreign writer in the seconds around the PATCH, which no order
+  excludes, since our own uploads are fenced by the claim. Asking for each asset by ID in the
+  last look would recover it, for up to 64 more requests in the window, on an unproven premise.
+  Not done, because the window would grow with the file count again.
+
+  Only a read with no usable answer repeats (`readFailed`: no response, a status other than 200
+  or 404, or an unreadable body), for up to 15 s of delays (`settled`), because only the owner
+  can recover it. An answer that differs, or a 404, stops the promotion at once: repeating it
+  would let a lagging replica read past drift already seen
+  (`TestPromoteDoesNotReadPastDriftItHasSeen`). The credential is fetched before the claim
+  (`claimPromotion`), since a GitHub App credential is a network call and failing there leaves
+  the draft `ready`. The recipe did not change, and its identity was measured rather than
+  assumed: a throwaway test fingerprinting both lifecycle recipes' snapshots gave the same
+  values on this change and its base, and the recipe's corpus entry is untouched. What stops
+  an approval made on the old behaviour is `engineRevision`, part of the same identity, as for
+  any engine build. Alternatives: no read before the PATCH, since `Observe` closes with the same
+  reads. Rejected: it loses the last look at drift, and a PATCH sent into a blip strands the
+  release just the same, while a read that succeeded is the best evidence it can land.
+  Resetting the claim when nothing was sent: rejected, because a node that dies cannot tell
+  anyone what it sent, so a reset would rest on the same guess the fence exists to refuse.
+  Moving the byte read after the claim: rejected, it makes the whole read the window and
+  changes the recipe's identity.
+- **Reads after a write repeat for up to 15 seconds** (`settled`). Each read costs a GET
+  and a stopped call loses the rest of a many-file run. Only the read repeats: the draft
+  POST and each asset POST stay single. Still unseen afterward stays uncertain.
+  `Promote`'s read after its PATCH and `EnsureTag` were left alone, with no evidence of lag
+  and an existing recovery. If this was not list lag, this does nothing and the retry still
+  reconciles.
+
+Invariants: the draft POST and promotion PATCH stay once-only under their durable claims;
+there is no automatic claim reset; a PATCH follows a complete byte read in the same call;
+the exact approval is checked inside every effect; a complete asset is never knowingly
+deleted or overwritten; no receipt exists without full readback of its bytes.
+
+What survives a retry or replica change: publication receipts, the draft binding and its
+state, the saved journal and the two lease rows. What does not: the verification memory,
+a promotion's byte-read proof and the configured preparer, which die with the call. A killed pod saves nothing, so its
+release keeps reading `publishing` until the lease lapses, then `uncertain` with
+`publication_interrupted`; the journal keeps its phase until the next action writes one.
+
+Tests (`integrations/release`, db-gated): `TestReleaseBuildPublishesManyFileTargetsInOneCall`
+(41 files through the installed recipe, unchanged, with a lease shorter than the call),
+`TestReleaseBuildRetryWithADraftStillCreatingSpendsOneCallOnIt`,
+`TestReleaseBuildPublishRecoversAnUploadCutOffPartWay`,
+`TestReleaseBuildPublishOutlivesItsCaller`,
+`TestReleaseBuildPublishStopsWhenItsLeaseIsTaken`,
+`TestReleaseBuildPublicationStopsWhenTheOwnerLosesTheRole`,
+`TestReleaseBuildPromotionStopsWhenTheOwnerLosesTheRole`,
+`TestReleaseBuildPromotionReadsNoBytesBetweenItsClaimAndItsPatch`,
+`TestReleaseBuildPromotionHoldsItsCredentialBeforeItsClaim`,
+`TestReleaseBuildPublishExplainsAPromotionItCannotRepeat`,
+`TestReleaseBuildConflictFoundAfterTheClaimSaysThePromotionStarted`,
+`TestCandidatePromotionCannotSpendAFailedCheckOrRead`,
+`TestReleaseBuildVerifiesAfreshBeforeEveryRegistryWrite`,
+`TestReleaseBuildViewTellsARunningPublicationFromAnInterruptedOne`,
+`TestReleaseBuildViewOffersAnInterruptedPublicationAgain`,
+`TestReleaseBuildNamesARealAssetConflictAndLeavesIt`,
+`TestReleaseBuildNamesAConflictFoundAtPromotion`,
+`TestReleaseBuildDoesNotCallADroppedReadAConflict`,
+`TestPublicationActionAnswersASettledDraftWithoutRemoteWork`,
+`TestStoredOwnerCheckReadsTheRealIdentityRow`,
+`TestCandidateVerificationIsRememberedOnlyForItsExactIdentity`, `TestDraftUpload*`.
+`TestKeepLease*` needs no database.
+`integrations/githubrelease`: `TestPublishReplacesTheAssetAnInterruptedUploadLeftBehind`,
+`TestPublishRecoversAnUploadCutOffPartWayOnAnotherHost`,
+`TestPublishNeverRemovesAnAssetItCannotProveIncomplete`,
+`TestPublishKeepsAnAssetThatFinishedWhileItWasChecking`,
+`TestPublishLeavesOtherAssetsAloneDuringRecovery`,
+`TestPublishDoesNotUploadOverAnAssetItCouldNotClear`,
+`TestPublishReportsARemovalEvenWhenItThenFails`,
+`TestPublishWaitsForItsOwnUploadToSettle`, `TestCreateDraftRereadsBeforeReportingUncertainty`,
+`TestPromoteIsNotStoppedByAByteReadFailingAfterObservation`,
+`TestPromoteReadsTheSameBeforeItsPatchHoweverLargeTheRelease`,
+`TestPromoteRequiresACompleteByteObservation`,
+`TestPromoteRepeatsAReadThatGetsNoAnswerBeforeItsPatch`,
+`TestPromoteDoesNotReadPastDriftItHasSeen`, `TestLifecycleRefusesDriftBeforePromotion`,
+`TestPromoteFindsBytesChangedUnderAnUnchangedIDOnlyAfterItsPatch`,
+`TestPromoteSendsNoPatchToAReleasePublishedSinceItsObservation`.
+
+Not verified: nothing here has run against GitHub or on a cluster. How GitHub reports an
+interrupted upload comes from its documentation and third-party reports, and the fixtures
+simulate it: an upload cut off mid-body has never been observed against the real API, nor
+has the `DELETE` of such an asset. The time a real 41-file publish now takes is not
+measured, and neither is whether list lag caused the first `uncertain`. That a re-uploaded
+asset gets a new ID is inferred from GitHub requiring the delete first: GitHub does not
+document it and it has not been tried against the real API.
+
+Known limits:
+
+- nothing but the gate can stop a running publication;
+- a claim with no PATCH behind it leaves the draft `promoting`, which only publishing on
+  GitHub resolves. The fence predates this change. Its window no longer grows with the
+  release: after the claim commits, one check of the lease, the stored owner and the profile,
+  then the inventory, the release and the tag, three GETs for a lightweight tag and eleven at
+  most with annotated ones. Each GET has 30 s, and a read with no answer repeats over 15 s of
+  delays, so one GET hanging on every attempt stretches this to about 165 s. What still strands
+  it: those reads getting no answer throughout, or showing drift; the gate refusing (a lost
+  lease, a lost role, a changed profile); the node dying in that span. A PATCH GitHub refuses
+  or loses reads the same way, and a same-bytes replacement in that span strands a release the
+  second read would have promoted;
+- a replacement a lagging listing does not show, and bytes changed under an unchanged ID and
+  reported digest, are found only after the PATCH, on a public release;
+- `promotion_unconfirmed` does not name what stopped the promotion, because no error text
+  enters the saved reason, so the owner has to look at the draft on GitHub;
+- GitHub has no conditional delete, so an asset that finishes in the instant after the last
+  read is still removed: re-sent if it was ours, lost rather than reported if it was
+  another writer's;
+- an upload from another caller, or a promotion, is refused while an upload runs, where it
+  used to queue (and fail at the 8 s limit on anything slow);
+- a single upload still has its 30-minute ceiling, and each of a promotion's two reads of
+  the release has 30 minutes, which an 8 GiB release needs about 5 MB/s to manage;
+- this reaches only releases prepared on an engine that has it: a saved release is bound
+  to the engine revision that prepared it, so a release in flight across the upgrade must
+  be prepared again.
+
 ## A GitHub check per pipeline step (2026-10-28)
 
 The owner asked to see each step of a run on a pull request, not one check for
@@ -2784,9 +3226,10 @@ versions:
   (`latestScanWalk`, `component/memql/latest_scan_walk.go`, over the new
   `memory_nodes_work_run_owner_walk_idx`). It walks the owner's versions in page
   order and keeps a version only when no newer one of its run exists, then stops
-  at the page: 4,152 buffers for a page of 50 where the lookup took 97,252. A
-  LATERAL `LIMIT 1` probe was chosen over `NOT EXISTS`, because TimescaleDB
-  excludes chunks for it at run time (10,145 buffers otherwise). The cursor is
+  at the page: 4,152 buffers for a page of 50 where the lookup took 97,252. The
+  probe is a `NOT EXISTS` kept a per-row subplan by its `OFFSET 0`, because
+  TimescaleDB excludes chunks for that at run time, and the page's `LIMIT` rides
+  inside the walk (why, below). The cursor is
   pushed in as `createdAt <= t AND (createdAt < t OR id > i)`, because the
   engine's top-level `OR` sent the planner to a sort of the whole range
   (127,725 buffers for a deep page; 4,431 in this form). The walk is taken only
@@ -2804,11 +3247,33 @@ versions:
   105 buffers through the signature index and an index-only scan through the
   revision index.
 
+**The index did not make the planner walk (measured on production, 2026-11-01).**
+Once the walk index existed there, the first version of this query still read the
+owner's whole range and sorted it: 343,250 versions, 1.6 million buffers and
+29.6 seconds against the eight-second limit. Every number above had come from a
+fixture of three chunks, planned at the `timescaledb-ha` default of
+`random_page_cost` 1.1. Production has ten chunks at 4. The plan turned on three
+parts of the shape, and `latest_scan_walk.go` records what each one measured. The
+`LIMIT` moved inside the walk, because an `ORDER BY` above a subquery plans it for
+full retrieval. The probe became `NOT EXISTS`, because `found IS NULL` over a left
+join is estimated at 0.5% and leaves a `LIMIT` nothing to stop early. It keeps an
+`OFFSET 0`, because without one PostgreSQL makes an anti join that probes every
+chunk (226,883 buffers, against 35,436). The same page now costs 87 ms on
+production's data, and a page of 200 costs 976 ms. Production still walked at a
+window of 1,000 and sorted at 5,000, the widening loop's ceiling. Rejected:
+`SET LOCAL enable_sort = off` around the read, which also worked (126 ms) but puts a
+transaction around every feed read for a plan a single statement can get. The
+`LIMIT` cannot shorten a page, because `decidedByTerm` admits only reads whose
+filter is true for every row the walk yields.
+
 `TestWorkRunReadsDoNotScanTheOwnersHistory` pages the owner's feed to its end
 on the real SQL, against the concept-wide read and its cursor, with no run
-twice and the run the owner gave away gone. Pages 1, 2 and 12 cost 1,541 to
-2,015 buffers over about 9,600 versions of history, against 27,117 before.
-The test also holds the corpus read to 34 buffers and the revision read to 30.
+twice and the run the owner gave away gone. Its fixture now spreads over ten
+chunks and plans at production's settings, which is what made the old query fail
+it at 41,266 buffers with a sort. Pages 1, 2 and 12 cost 1,530 to 2,323 buffers
+over about 9,600 versions of history, and `requireNoSort` holds the plan. The
+corpus read costs 37 buffers and the revision read 40, and on production 7.6 ms and
+4.5 ms with their indexes in place.
 `TestLatestScanWalkTakesOnlyReadsItsTermDecides` pins when the walk is taken,
 without a database, and `TestPayloadWalksAreTheMigratedWalkIndexes` holds the
 walk registry to the catalog. Each new index is about 100 bytes per run
@@ -2816,8 +3281,108 @@ version, except the two partial ones, which hold a slice. The owner lookup
 index now serves only the owner reads the walk does not take; dropping it is a
 later migration, once the walk has served production.
 
-**Not verified, and not fixed.** Nothing here ran against production; it takes
-effect in the engine release after 0.31.7. A page of the owner's feed still
+**What production got (corrected 2026-11-01).** The buffer counts above come
+from a migrated test database. Production never had three of these indexes, so
+for days its reads ran as if this section's fixes had not shipped. Read on
+2026-11-01 on 0.31.11: of the run indexes, only `goal_lookup` and `owner_lookup`
+existed, and both identity replicas had logged `failed to acquire migration lock`
+(SQLSTATE 23505) every 30 seconds, about 930 times each, since they started
+eight hours earlier. Against 1,305,390 run versions, the owner feed fell back to
+the owner lookup and read 339,637 versions at 1.6 million buffers in 72 seconds,
+and neither the revision read nor the corpus read finished in 120. A fixture
+cannot see this: `TestPayload*AreTheMigrated*` inspect a database the test
+migrated. A read index is a claim about production only once its migration is in
+production's ledger, so check that before reporting a read as bounded.
+
+**Why the migrations stopped.** The runner keeps bun's lock when a migration ends
+on a context or transport error, so that nothing overlaps a statement that may
+still be running, and nothing ever releases it. The first migration the October 30
+rollout (0.31.9) had to run was this section's goal index, a scan of every chunk
+under an attempt deadline of 180 seconds, which the installation had raised after
+the same thing happened on September 26. Production's files date it: the root index
+was created at 04:36:19 and its chunk copies were still being written at 04:39:39,
+past the deadline. The 15,625 attempts refused since, at four a minute, date the
+lock row to the same moment, and the ledger stops at the migration before it. The
+build finished and the lock stayed, with this section's other three indexes, every
+later migration and every post-migration hook behind it and every pod Ready. The
+pods from that rollout are gone, so no log says whether the deadline or a replaced
+pod ended the attempt. Both take the same path.
+
+**What a build costs there.** The same file times measure it. A pass that reads run
+payloads took over 3 minutes 20 seconds across 3.6 GB of heap: 7, 138, 36 and 18
+seconds for the four largest finished chunks, which is 2,400 to 14,000 run versions
+a second. The site-access passes, built by hand on October 31, read no run payload
+and took about 20 seconds each. Writes wait only while the newest chunk is scanned,
+so a build's pause is that chunk's run versions at those rates, and it is shortest
+just after a new chunk begins.
+
+**Chosen path.** Three changes, each with its own reason:
+
+- **An index build defers** (`deferInterruptedIndexWork`,
+  `component/database/latest_row_index.go`). The runner's rule exists to stop
+  overlap, and for a build the build lock already does: the orphan's backend holds
+  it until it exits, and the next attempt takes it first and judges the index from
+  the catalog. So every context or transport failure in an ensure ends the attempt
+  with `ErrMigrationDeferred` and the lock is released. A chain advances one index
+  at a time. Later migrations cannot start early, because bun runs them in order
+  and this one reaches the ledger only once an attempt has seen its index complete.
+  Hooks cannot run, because a deferred attempt records an error.
+- **An attempt ending between migrations defers** (`migrationsForAttempt`,
+  `component/database/database.go`). bun runs its ledger statements and every Up
+  under one context, so a deadline landing just after an Up returned made the
+  ledger insert refuse, which reads exactly like a statement cut off in flight, and
+  the lock stayed with nothing running. That is how September 26 stranded it. Each
+  Up now runs under the attempt and bun's own statements get five seconds past it.
+- **A lock that stays says so** (`reportMigrationLockRefusal`). bun inserts a new
+  row for each attempt and an attempt is bounded, so one row id seen for longer than
+  twice the deadline, and at least five minutes, is no attempt. That logs an ERROR
+  naming the next migration waiting and sets
+  `memql_database_migration_lock_held_seconds`; `MemqlMigrationLockStuck` alerts on
+  it. Deferrals dropped from ERROR to WARN so the ERROR means something.
+
+**Rejected.** A longer deadline: it was the answer on September 26, it did not hold
+past a larger table, and the startup probe bounds it. Releasing a stale lock
+automatically: the row names no holder and the migration pool's `application_name`
+is the node's own, shared with its request pool, so the catalog cannot establish
+that the holder stopped. That is the runbook's to do until a holder has an identity.
+Booting a check of the read registries against the catalog: reads would be no
+faster for it, and the stuck lock is what needed reporting.
+
+**What is still retained.** A plain statement inside a migration cut off on a
+deadline or a lost connection keeps the lock, because nothing knows what an
+arbitrary migration left running
+(`TestMigrationReadTimeoutRetainsLockWhileBackendRuns`). A pod killed mid-attempt
+leaves its row. Both are now reported rather than silent.
+
+**Regression evidence.** In `component/database/migration_lock_db_test.go`,
+`TestAnIndexBuildThatOutlivesItsAttemptReleasesTheLock` holds a real build past two
+attempts and pins the released lock, no second build, nothing in the ledger and no
+hooks until the orphan finishes. `TestAnAttemptWaitingOnAnOperatorsBuildReleasesTheLock`
+covers a build started by hand, `TestAnAttemptEndingBetweenMigrationsRecordsWhatFinishedAndReleasesTheLock`
+the gap, by deadline and by cancellation, and `TestALockThatOutlastsAnyAttemptIsReportedAsStuck`
+the report. All need `MEMQL_REQUIRE_DB=1`.
+
+**How production recovered (2026-11-01 and 11-02).** Neither step needed a release.
+At the owner's word the three missing indexes were built by hand, one at a time,
+while the row kept the engine out. The builds came first because clearing the row
+first would have started the next build under the same deadline. Each took about
+3 minutes 40 seconds, and 16 writes failed across three pauses of 15 to 18 seconds
+as each pass reached the newest chunk. The revision read then took 4.5 ms and the
+corpus read 7.6 ms, cold. Row 623 was deleted by id on November 2 at 00:31:45 UTC,
+after a script holding the row had re-checked that no build or DDL was running and
+that every index was usable. At the next tick an identity replica recorded all five
+waiting migrations in a quarter of a second, and both replicas ran the
+post-migration hook. Nothing was rebuilt: the index files kept their sizes. The
+refusals stopped, and no statement timed out in the minutes after.
+
+**Not verified, and not fixed.** The runner's changes take effect in the engine
+release after 0.31.11 and have not run on production, so until then a build past the
+deadline can strand the lock again.
+[The runbook](../../public/operate/env-vars.md#database-tuning) covers a lock left
+behind. `MemqlMigrationLockStuck` reaches nobody on production yet: that cluster has
+no prometheus-operator.
+
+A page of the owner's feed still
 visits each version of the runs on it, so a page costs its runs times their
 versions. That is bounded, and no longer the history. `workSignedRunsForOwner`
 (the procedure reuse sweep) stays on the owner lookup: its status term can
@@ -2934,9 +3499,28 @@ These source regressions do not establish live Fleet availability, installed
 policy activation or a completed Fleet-to-cloud CI journey; those require
 separate verification against the selected deployment.
 
-Fleet CI owns the host build lock exclusively. Local model calls share that
-lock with persistent workspaces, serialize inference separately, and reserve
-every workspace slot's full RAM cap. This keeps a goal's model/tool/model cycle
+Fleet CI owns the host build lock exclusively against workspaces and local
+builds. Local model calls take no part in it, by the owner's decision of
+2026-11-02. The fleet-first work had a call take the lock shared, so a call
+waited for any step on its machine until the call's deadline, a step that started
+during a call was refused, and a worker restart during a native step refused every
+call until someone reconciled the step. That reached `main` and no machine ran
+it: Cockpits up to 0.21.1 run the two side by side. Measured on production over
+the 14 days to 2026-11-02, successful local calls that overlapped a step were no
+slower than calls that did not: MSI Raider 21 calls at a median of 10.4 s against
+48 at 11.2 s, Black MacBook Pro 6 at 6.1 s against 35 at 8.6 s. The slowest call
+during a step, 531 s, began five minutes before the step, on a 14,657-token prompt
+to `qwen3.8:27b`; the slowest without one, 239 s, was the same kind of call. A
+third of the Kraken Desk's calls ran during a step. The headroom checks on each
+side are the only limit between the two, and this has not been measured with
+several steps on a machine.
+`TestAModelCallAnswersWhileAStepHoldsTheMachine`,
+`TestInferenceLeaseLeavesTheBuildLockFree`,
+`TestARetainedBuildRecordDoesNotRefuseInference` and
+`TestPipelineCapacityIgnoresAnInferenceFence` hold it.
+
+Local model calls serialize inference separately and reserve every workspace
+slot's full RAM cap. This keeps a goal's model/tool/model cycle
 working without treating a live workspace as abandoned or charging host RAM
 against a discrete GPU's VRAM. Unlocked retained workspace records still refuse
 inference. `TestModelToolModelKeepsSameWorkbench` exercises both managers and
@@ -2951,12 +3535,11 @@ the time it records: the call's own deadline, at which its request is cut off
 (that the runtime then stops is not verified; see below), or 30 minutes after it
 began for a context with no deadline (no Cockpit limit bounds a local call, so the bound is chosen). A
 fence only success cleared turned one routine cancel into a machine refusing
-pipeline steps, workbenches and model calls until someone removed the file by
-hand. Past its time the witness reads as absent; a reader that excludes every
-writer (it holds `inference.lock`, or `pipeline.lock` exclusively) removes it,
-and the workbench, which shares `pipeline.lock` with model calls, only ignores
-it, because a path-based removal there could remove a record a call has just
-written. The local build guard (`scripts/lib/host_build_guard.py`, which
+workbenches and model calls until someone removed the file by hand. A pipeline
+step does not read the witness. Past its time the witness reads as absent; a
+reader that excludes every writer (it holds `inference.lock`) removes it, and the
+workbench, which does not, only ignores it, because a path-based removal there
+could remove a record a call has just written. The local build guard (`scripts/lib/host_build_guard.py`, which
 `make dev` runs) reads the end by the same rule for every record the Cockpit
 writes, and leaves a witness past its end in place: it is another program's
 record, which the Cockpit's next exclusive reader removes
@@ -2971,7 +3554,7 @@ exercises real runtime responses and a second manager against the durable
 witness; `TestACancelledCallFencesTheMachineUntilItsDeadline`,
 `TestAnInferenceFenceEndsAtTheTimeItNames`,
 `TestAnInferenceRecordWithNoTimeEndsTheBoundAfterItWasWritten`,
-`TestPipelineCapacityWaitsForAnInferenceFenceUntilItsEnd` and
+`TestPipelineCapacityIgnoresAnInferenceFence` and
 `TestWorkbenchIgnoresAnInferenceFencePastItsEndWithoutRemovingIt` cover the
 expiry. Not verified: a live runtime that keeps generating past its caller's
 deadline.
@@ -3021,8 +3604,8 @@ another version's sibling cannot make an ordinary failure retryable. A refusal
 that will not change within a retry's delay marks the machine not retried here:
 Host commands off, pipelines no longer allowed, the machine's own policy or
 container caps (`denied_by_policy`), and a reservation it cannot take
-(`pipeline_capacity_unavailable`, which a local model call's fence answers until
-its deadline). Exit 75 is a requested retry without `repeatable`, because the
+(`pipeline_capacity_unavailable`, which a record of interrupted work answers until
+it is recovered). Exit 75 is a requested retry without `repeatable`, because the
 command vouches; a timeout is final, because a hang and a stall look alike from
 outside. The reasoning for
 each code is in `integrations/pipelinesteps/attempt_class.go` and
@@ -3223,9 +3806,9 @@ The contract-5 Cockpit release is cut while production still runs the old
 engine, because its macOS steps need today's machines. The engine change leaves
 `cockpit/VERSION` as it is: the contract-5 Cockpit release bumps it in its own
 release PR, as memql#6372 did, because the version belongs to the release, and
-eligibility keys on the contract number, not the version. The 0.21.1 it reads was
+eligibility keys on the contract number, not the version. The 0.21.1 it read was
 stamped by memql#6384 for the last contract-4 release, so that number never names
-a contract-5 Cockpit: a release cut from this code needs the bump first. The manifest change
+a contract-5 Cockpit; 0.22.0 is the first version that does. The manifest change
 cannot move a `verification: true` step: reusable verification requires
 `placement: cluster` (`component/pipelines/verification.go`). Twenty steps
 carry it, the Go and database tests and the node builds and tests among them,
@@ -3452,6 +4035,34 @@ missing-transcript recovery, refused delivery, unrelated intake and ambiguity. `
 runs the real plan validator and proves the new resume point follows completed
 work. These are fixtures with the real database/plan validator; live rollout and
 completion-disposition verification are reported separately.
+
+## A step's journaled value and what crosses the mesh (2026-11-01)
+
+A statement's bound value is journaled whole, because a resume rebinds it and
+refuses (`ErrResumeResultMissing`) when a non-read statement recorded none. So a
+step row can be large, and a byte cap on the journal is the wrong place to bound
+it. The row stays whole; what is bounded is the copy of its event on the mesh
+(`component/node/eventbridge_thin.go`).
+
+- **Trigger:** a broadcast row event over 128 KiB on the wire. A step that binds a
+  308 KB answer reaches it, because the row holds the value twice (`result` and
+  `value`) and the event holds the row twice.
+- **Chosen path:** the mesh copy drops its largest fields and marks them. The
+  writer's own bus delivers the whole event; a live view elsewhere gets an id-only
+  notification and re-reads the step; Go subscribers keep the small fields they
+  decide on.
+- **Alternatives:** capping `result` and `value` in the journal breaks resume;
+  dropping the second copy of the value (`result` beside `value`) saves a factor
+  of two and leaves the multiplication; a smaller mesh fan-out is a redesign.
+- **Survives a retry or a replica change:** everything, since the store is
+  untouched. The driving replica, a resume and a re-run read rows, not events.
+- **Automations:** a thinned copy never fires one, since the claim key hashes the
+  payload and the two copies would both run. The writer's node fires it.
+- **Unverified:** the cost was measured on the real decode path and the behaviour
+  is held by `component/node/mesh_oversized_row_test.go` over real streams; no
+  production run has been observed with this change. Known limit: an automation
+  loaded only on node types that did not write the row does not fire for a row
+  this large, and the bridge's warning names every such row.
 
 ## Current-step operation completion and retained partial effects
 

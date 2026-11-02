@@ -97,7 +97,17 @@ function make_workdir() {
     # Bash 5.2 can return the original failure from an already-emitted result
     # trap. Do not let errexit skip credential cleanup; EXIT preserves the
     # original status, and unexpected aborts still get their one result.
-    trap '_cap_on_exit || true; cleanup_workdir' EXIT
+    trap _gitops_on_exit EXIT
+}
+
+function _gitops_on_exit() {
+    local rc=$?
+    # Cleanup must precede the result guarantee, which can terminate a script
+    # that exited zero without reporting a result. Keep the original status.
+    set +e
+    cleanup_workdir
+    (exit "$rc")
+    _cap_on_exit
 }
 
 function cleanup_workdir() {

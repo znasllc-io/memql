@@ -49,14 +49,16 @@ TESTS = [
         "TestAzuriteRetirementRefusesChangedContentAndETag",
         "TestAzuriteRetirementFencesLateWritersAndClearsStaging",
         "TestAzuriteReceiptStreamExactVersion", "TestAzuriteStagedBlockLifecycle",
-        "TestAzuriteInventoryOfAnUnknownObjectIsEmpty", "TestAzuriteStoredBlobURLsRoundTripNestedEscapedPaths"]),
+        "TestAzuriteInventoryOfAnUnknownObjectIsEmpty", "TestAzuriteStoredBlobURLsRoundTripNestedEscapedPaths",
+        "TestAzuriteBareLibraryKeyOpensTheCommittedBlob"]),
     ("./integrations/ociregistry", "^TestDistributionRegistry$", ["TestDistributionRegistry"]),
     ("./integrations/release", "^TestCandidatePublicationWithDisposableDistribution$", [
         "TestCandidatePublicationWithDisposableDistribution"]),
-    ("./app", "^(TestReleaseCandidateThroughNativeLibraryAndSecondEngine|TestPipelineStreamAzuriteDBRecoveryAcrossClients|TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients)$", [
+    ("./app", "^(TestReleaseCandidateThroughNativeLibraryAndSecondEngine|TestPipelineStreamAzuriteDBRecoveryAcrossClients|TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients|TestLibraryFilesReadBackFromAzurite)$", [
         "TestReleaseCandidateThroughNativeLibraryAndSecondEngine",
         "TestPipelineStreamAzuriteDBRecoveryAcrossClients",
-        "TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients"]),
+        "TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients",
+        "TestLibraryFilesReadBackFromAzurite"]),
 ]
 
 

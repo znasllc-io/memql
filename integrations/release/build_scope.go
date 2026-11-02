@@ -33,9 +33,11 @@ func (s *releaseBuildScope) operations() map[string]workflowhost.Operation {
 }
 
 // Fresh original-owner/profile authority and the live native lease are required
-// before every bounded operation, including effects after a long remote read.
+// before every bounded operation, including effects after a long remote read. An
+// action that outlives its request also reads the owner's stored role here: the
+// request's access context was fixed at admission and cannot see a demotion.
 func (s *releaseBuildScope) gate(ctx context.Context) (candidateProfile, error) {
-	if err := s.lease.check(ctx); err != nil {
+	if err := s.held(ctx); err != nil {
 		return candidateProfile{}, err
 	}
 	p, _, digest, err := s.i.candidateProfile(ctx, s.lease.record.Selection.ProfileName)
@@ -43,6 +45,17 @@ func (s *releaseBuildScope) gate(ctx context.Context) (candidateProfile, error) 
 		return candidateProfile{}, errors.New("release profile authority changed; this saved release cannot perform new effects")
 	}
 	return p, nil
+}
+
+// held is the part of the gate a profile's own authority check does not cover.
+func (s *releaseBuildScope) held(ctx context.Context) error {
+	if err := s.lease.check(ctx); err != nil {
+		return err
+	}
+	if s.lease.authority == nil {
+		return nil
+	}
+	return s.i.checkStoredOwner(ctx, s.lease.record.Selection.Owner, s.lease.authority)
 }
 
 func (s *releaseBuildScope) facts(ctx context.Context, _ map[string]any) (any, error) {

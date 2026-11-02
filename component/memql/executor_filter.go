@@ -527,9 +527,9 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 			// A read whose coarse lookup term decides it, newest first: walk
 			// the term's versions in page order and stop at the page
 			// (latest_scan_walk.go). The filter runs on the latest versions
-			// the walk keeps, above its fence, and the order below is the
-			// walk's own, so the LIMIT stops the walk.
-			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", walk)
+			// the walk keeps, above its fence, and the walk carries this
+			// limit itself, because one outside it does not change the plan.
+			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", walk(limit))
 			if filter.sql != "" {
 				q = q.Where(filter.sql, filter.args...)
 			}

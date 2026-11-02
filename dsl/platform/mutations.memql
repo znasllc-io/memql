@@ -2628,10 +2628,10 @@ mutation packageDeployment heartbeatPackageDeployment {
 
 /// Close a run whose node stopped saying it was alive.
 ///
-/// A STATUS OF ITS OWN, never 'failed'. Nothing failed that this sweep can name: the D6 order
-/// guarantees every site is still serving what it was serving, and writing 'failed' would put a
-/// verdict on somebody's package that the evidence does not support. The error it stamps names the
-/// node and when it was last heard, which is the whole of what is known.
+/// A STATUS OF ITS OWN, never 'failed'. Nothing failed that this sweep can name, and writing
+/// 'failed' would put a verdict on somebody's package that the evidence does not support. The error
+/// it stamps names the node, when it was last heard, and what the stage the run reached can have
+/// changed, which is the whole of what is known.
 ///
 /// The sweep is the ONE writer allowed to close a stranded row, and this mutation is how: it exists
 /// so that permission is a named construct a reader can find rather than a special case inside a
@@ -3391,5 +3391,29 @@ mutation externalConnection markExternalConnectionDisconnected {
   update {
     id: args.connectionId
     status: "disconnected"
+  }
+}
+
+/// Accept a parked confirmation under the native per-package database gate.
+/// The native caller has freshly verified the caller-visible package and run,
+/// parked status, cancellation and retained snapshot before this single write.
+/// actor.userId scoping is not the fix: even the run's owner must not assign a
+/// runner and heartbeat or leave awaiting_confirm without those checks and the
+/// shared gate. This internal journal transition records the native pipeline's
+/// claim after caller-authorized confirmation; ownership alone cannot prove
+/// that execution was admitted. No snapshot or owner field changes.
+@serverOnly
+mutation packageDeployment claimPackageDeploymentConfirmation {
+  args {
+    deploymentId string!
+    nodeId string!
+    heartbeatAt datetime!
+  }
+  update {
+    accept { nodeId, heartbeatAt }
+    stamp {
+      id: args.deploymentId
+      status: "analyzing"
+    }
   }
 }

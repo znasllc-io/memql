@@ -127,9 +127,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"packageId":        "string (required) -- the package to deploy",
 				"confirm":          "boolean -- pass true to proceed past the always-present confirm gate",
-				"background":       "boolean -- return the persisted analysis run ID immediately; requires confirm:false and no deploymentId",
+				"background":       "boolean -- return the accepted run ID immediately; analysis requires confirm:false and no deploymentId, confirmation requires confirm:true and a parked deploymentId with its saved report and snapshot. Client disconnection does not cancel accepted work; node loss can still abandon the attempt",
 				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip, target}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched. target (memql#5601) is \"serving\" (the default) or \"candidate\": a candidate is published as the site's candidateRef, served only under a preview grant, with bundleRef and the public view untouched; a shopify_storefront has no candidate version and refuses it, and any other value refuses the request",
-				"deploymentId":     "string -- confirm the PARKED run of this id rather than starting a new one (memql#4954). Ignored unless it names a run of this package waiting at the gate; anything else opens a new run",
+				"deploymentId":     "string -- confirm the readable PARKED run of this package under one shared database claim (memql#4954); a run that is not parked or belongs to another package refuses. Omit to start a new attempt",
 				"fromDeploymentId": "string -- retry an earlier run from the bytes it already fetched (task memql#4902) rather than fetching the source again",
 			},
 		},
@@ -210,7 +210,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "sweepAbandoned",
-			Description: "Close every run whose node stopped saying it was alive (epic memql#4900, task memql#4902). A run whose heartbeatAt is older than MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS is closed with the terminal status 'abandoned' and a typed error naming the node that was running it and when it was last heard; a run that is merely slow is untouched. NEVER writes 'failed': nothing failed that this sweep can name, and the D6 order guarantees every site is still serving what it was serving. Returns {checked, abandoned}.",
+			Description: "Close every run whose node stopped saying it was alive (epic memql#4900, task memql#4902). A run whose heartbeatAt is older than MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS is closed with the terminal status 'abandoned' and a typed error naming the node that was running it and when it was last heard; a run that is merely slow is untouched. NEVER writes 'failed': nothing failed that this sweep can name, and the error says what the stage the run reached can have changed. Returns {checked, abandoned}.",
 			Handler:     i.handleSweepAbandoned,
 			ArgsSchema:  map[string]string{},
 		},
@@ -329,6 +329,9 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 	deploy := Deploy
 	if boolArg(args, "background") {
 		deploy = StartAnalysis
+		if boolArg(args, "confirm") {
+			deploy = StartConfirmation
+		}
 	}
 	out, derr := deploy(ctx, deps, DeployRequest{
 		PackageId: strings.TrimSpace(stringArg(args, "packageId")),
@@ -569,6 +572,26 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err
 	}
+	deploymentId := strings.TrimSpace(stringArg(args, "deploymentId"))
+	run, err := deps.Store.deploymentById(memql.ContextWithFreshRead(ctx), deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, refuse(CodeSourceUnreadable, "no deployment %q is readable by this caller", deploymentId)
+	}
+	var result []memorynodes.MemoryNode
+	err = deps.Store.withDeploymentOpeningGate(ctx, rowString(run, "packageId"), func(ctx context.Context) error {
+		var err error
+		result, err = cancelDeploymentLocked(memql.ContextWithFreshRead(ctx), deps, args)
+		return err
+	})
+	return result, err
+}
+
+// Re-read after taking the same gate used by confirmation. A Cancel that saw
+// a parked row must not close it after another replica has started its runner.
+func cancelDeploymentLocked(ctx context.Context, deps *Deps, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	deploymentId := strings.TrimSpace(stringArg(args, "deploymentId"))
 
 	run, err := deps.Store.deploymentById(ctx, deploymentId)

@@ -57,6 +57,22 @@ content route answers 404, as for any file the caller cannot see. A row written
 before the mutation was `@serverOnly` therefore cannot hand over somebody
 else's bytes.
 
+**A row names its bytes one of two ways, and every reader opens both.** Uploads
+store the storage client's URL. Folder sync stores the bare key,
+`library/{owner}/{fileId}/{name}`, and so did the chunked routes before they
+stored the URL, so such rows exist and none needs rewriting. The storage client
+opens a bare key as written in the installation's one container
+(`MEMQL_AZURE_BLOB_CONTAINER`), and the check above judges exactly that key. A
+bare key names no container of its own, so changing that setting strands those
+files until their objects move with it.
+
+The clients read one fact from the shape: a `failed` file with no URL is an
+upload whose bytes never landed. A one-shot upload storage refused keeps its
+intended key on the row for diagnosis. Files and the editor say the upload did
+not finish and offer no download, and the content route answers 404 because
+storage has nothing there. A failed analysis leaves the URL in place, so that
+file stays readable.
+
 **The MemQL copy is independent and durable** (memql#4781, design D12). A file
 uploaded from a machine survives that machine's deletion of the original and
 survives the machine disconnecting; archiving in MemQL never touches the
@@ -129,6 +145,13 @@ Three properties are load-bearing:
 `sha256` on a chunked file is stamped by the ANALYSIS pass, which streams
 the committed blob once -- the handler never held the whole file. Until the
 pass runs, the field is absent: "not measured", never "no hash".
+
+**A file uploaded before the routes stored the URL reads back like any other,
+and its analysis is not redone.** The pass could not open its blob then, so it
+marked the file `ready` with no hash, no summary and no extracted text. Nothing
+runs the pass on such a file again, because that spends model calls nobody asked
+for: its hash stays absent and its text stays out of search until a new version
+is uploaded.
 
 ### Exporting -- `GET /artifacts/{id}/content`
 
@@ -244,22 +267,32 @@ types. No bytes are fetched before the row is admitted.
 
 - **`libraryReadFile(fileId)`** returns one file's current text, up to 2 MiB.
 - **`libraryReadFileExcerpts(files, patterns, maxBytes)`** returns bounded
-  excerpts of up to eight files under one budget of 1 to 64 KiB. `files` is a
-  list of `{fileId, label}`, and each result echoes its `label` (at most 200
-  bytes). `patterns` are 1 to 32 RE2 expressions of at most 256 bytes each,
-  compiling to at most 1,024 instructions together, each matched against the
-  first 4 KiB of a line. A file that fits its share comes back whole
-  (`complete: true`). A longer one keeps its first lines, the earliest
+  excerpts of up to eight files under one budget of at most 64 KiB and at
+  least 1 KiB for each file; a smaller budget is refused, because a share too
+  small for its omission markers could come back empty. `files` is a list of
+  `{fileId, label}`, and each result echoes its `label` (at most 200 bytes)
+  and answers with the bare `fileId`. `patterns` are 1 to 32 RE2 expressions
+  of at most 256 bytes each, compiling to at most 1,024 instructions together,
+  each matched against the first 4 KiB of a line. A file that fits its share
+  comes back whole (`complete: true`), byte for byte apart from NUL and
+  invalid UTF-8 repairs. A longer one keeps its first lines, the earliest
   matching lines with three lines before and twelve after while its budget
   lasts, and its end; `matchedLines` counts every matching line, kept or not,
   and each omitted range is one marker line such as
-  `[... lines 121-4812 omitted ...]`. A kept line over 2 KiB is cut, and at
-  most the first 64 MiB of a file is read (`scanCapped`). Files are read in
-  ascending size, so a small file returns whole and the larger ones share
-  what it left. A file the caller cannot read is reported as `unavailable`
-  in its own entry, with `libraryReadFile`'s sentence, and does not fail the
-  call; so is a file the call's two-minute scan deadline stops. The version
-  gate covers the row reads and is released before a file's bytes are read.
+  `[... lines 121-4812 omitted ...]`. Colour codes (CSI escape sequences) are
+  ignored when a line is matched and removed from every kept line. A kept
+  line over 2 KiB is cut, and at most the first 64 MiB of a file is read
+  (`scanCapped`). Files are read in ascending size, so a small file returns
+  whole and the larger ones share what it left. The version gate covers the
+  row reads and is released before a file's bytes are read.
+
+  A file reports `unavailable` in its own entry, without failing the call,
+  when no later attempt could read it: the caller cannot read the file
+  (`libraryReadFile`'s sentence), its stored key is outside its owner's
+  Library, its stored bytes are gone (a retired log, or a blob storage no
+  longer has), or the call's two-minute scan deadline stopped it. Any other
+  storage failure fails the whole call with a sentence the work failure path
+  retries, and the cause is logged with the file id.
 
 Neither builtin masks secrets: a pipeline step's log is masked when it is
 captured, and any other file is the caller's own. The failed-run diagnosis

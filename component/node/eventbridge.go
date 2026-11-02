@@ -83,7 +83,8 @@ type EventBridge struct {
 	// poll floor (ADR 4.5; see PublishHint).
 	fastPathSink func(Deliverable)
 
-	stats meshStats
+	stats   meshStats
+	thinned meshThinStats
 }
 
 // meshStats is what this node has done with broadcast events since it
@@ -299,6 +300,15 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 			"error", err,
 		)
 		payloadStruct = &structpb.Struct{}
+	}
+
+	// A row too large to broadcast leaves without its largest fields
+	// (eventbridge_thin.go). Only this copy: event.Payload is the writer's own,
+	// and its subscribers keep the whole row.
+	if decision.Broadcast && strings.HasPrefix(event.Topic, events.TopicGraphNode+".") {
+		if size, omitted := thinOversizedRowEvent(payloadStruct); len(omitted) > 0 {
+			eb.noteThinned(event, size, omitted)
+		}
 	}
 
 	eb.sendToPeers(&nodev1.EventForward{

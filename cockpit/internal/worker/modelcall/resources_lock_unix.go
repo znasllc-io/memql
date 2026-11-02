@@ -24,7 +24,7 @@ import (
 )
 
 // Independent of cluster configuration and MEMQL_HOME: separate workers still
-// share the same GPU and host memory. The kernel releases the locks if a worker
+// share the same GPU and host memory. The kernel releases the lock if a worker
 // exits; the separate activity witness still fences uncertain runtime effects.
 func inferenceCapacityRoot() (string, error) {
 	owner, err := user.Current()
@@ -35,9 +35,9 @@ func inferenceCapacityRoot() (string, error) {
 }
 
 type inferenceLease struct {
-	file, pipeline *os.File
-	root           string
-	active         []byte
+	file   *os.File
+	root   string
+	active []byte
 }
 type ownedModel struct {
 	ID      string `json:"id"`
@@ -48,23 +48,17 @@ func acquireInferenceLease(ctx context.Context, root string, poll time.Duration)
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
-	// Builds need exclusive ownership, while an agent's persistent workbench
-	// must survive its next model turn. Sharing this lock permits that cycle;
-	// resource admission reserves every workbench slot's full RAM bound.
-	pipeline, err := lockInferenceFile(ctx, root, "pipeline.lock", syscall.LOCK_SH, poll)
+	// A model call takes no part in the host build lock and reads no build's
+	// record. It never waits for a pipeline step or a local build, which can
+	// outlast its deadline, and is never refused because of one; a step can start
+	// during a call. The memory checks on each side are the only limit between
+	// them. Resource admission still reserves every workbench slot's full RAM
+	// bound, so a goal's workspace survives its next model turn.
+	file, err := lockInferenceFile(ctx, root, poll)
 	if err != nil {
 		return nil, err
 	}
 	ok := false
-	defer func() {
-		if !ok {
-			pipeline.Close()
-		}
-	}()
-	file, err := lockInferenceFile(ctx, root, "inference.lock", syscall.LOCK_EX, poll)
-	if err != nil {
-		return nil, err
-	}
 	defer func() {
 		if !ok {
 			file.Close()
@@ -74,19 +68,19 @@ func acquireInferenceLease(ctx context.Context, root string, poll time.Duration)
 	// completed while we waited, but an interrupted call retains its witness
 	// until the time it names. Holding inference.lock excludes every writer of
 	// that witness, so one past its end is removed here.
-	if err := checkRetainedHostWork(root, pipeline); err != nil {
+	if err := workbench.CheckInferenceReservations(root); err != nil {
 		return nil, err
 	}
 	if err := capacity.CheckInferenceIdleExclusive(root); err != nil {
 		return nil, err
 	}
 	ok = true
-	return &inferenceLease{file: file, pipeline: pipeline, root: root}, nil
+	return &inferenceLease{file: file, root: root}, nil
 }
 
-func lockInferenceFile(ctx context.Context, root, name string, mode int, poll time.Duration) (*os.File, error) {
+func lockInferenceFile(ctx context.Context, root string, poll time.Duration) (*os.File, error) {
 	// Never unlink the lock: replacing its inode would admit a second holder.
-	fd, err := syscall.Open(filepath.Join(root, name), syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
+	fd, err := syscall.Open(filepath.Join(root, "inference.lock"), syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +99,7 @@ func lockInferenceFile(ctx context.Context, root, name string, mode int, poll ti
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		err = syscall.Flock(fd, mode|syscall.LOCK_NB)
+		err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			ok = true
 			return file, nil
@@ -123,24 +117,8 @@ func lockInferenceFile(ctx context.Context, root, name string, mode int, poll ti
 	}
 }
 
-// A missing process does not prove that Docker work ended. Check only retained
-// ownership, without interpreting or clearing another workload's records.
-func checkRetainedHostWork(root string, pipeline *os.File) error {
-	stat, err := pipeline.Stat()
-	if err != nil || !stat.Mode().IsRegular() || stat.Size() != 0 {
-		return errors.New("an interrupted pipeline needs reconciliation before inference can start")
-	}
-	if _, err := os.Lstat(filepath.Join(root, "local-build.json")); err == nil {
-		return errors.New("a retained local build needs reconciliation before inference can start")
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("inspect retained local build: %w", err)
-	}
-	return workbench.CheckInferenceReservations(root)
-}
-
 func (l *inferenceLease) close() {
 	l.file.Close()
-	l.pipeline.Close()
 }
 
 // beginActive precedes every runtime effect, including owned-model eviction.

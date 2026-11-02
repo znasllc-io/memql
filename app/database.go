@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/logstore"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/server"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -24,6 +26,12 @@ func (a *App) databaseAndConcepts() {
 		a.fatal("failed to create database", "error", err)
 	}
 	a.db = mnd
+	metrics.RegisterMigrationLockHeldSource(func() time.Duration {
+		if a.db == nil {
+			return 0
+		}
+		return a.db.MigrationLockHeldFor()
+	})
 	azureblob.ConfigureCapacity(func() *sql.DB {
 		if a.db == nil || a.db.BunDB() == nil {
 			return nil

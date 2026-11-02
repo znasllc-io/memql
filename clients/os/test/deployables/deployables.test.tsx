@@ -441,7 +441,7 @@ describe("the Head's action, by state", () => {
     // explicit target wins and an omitted one reuses whatever the run recorded
     // when it opened, so a Deploy that left it out could confirm a candidate.
     expect(connection.callsNamed("packageDeploy")).toEqual([
-      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {storefront: {target: "serving"}}, deploymentId: "dep-parked")',
+      'builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: true, placements: {storefront: {target: "serving"}}, deploymentId: "dep-parked")',
     ]);
   });
 

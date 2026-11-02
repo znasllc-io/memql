@@ -176,6 +176,29 @@ func TestFanOutSendsAnIdOnlyNotificationForAnUndecidedRow(t *testing.T) {
 		"the id-only notification retained the nested payload object")
 }
 
+// A row too large to broadcast arrives from another node without its largest
+// fields. Passed on as it stands, the client would fold it over its copy of the
+// row and blank them. Whatever the concept's tier, it goes out id-only and the
+// client's re-read answers with the whole row.
+func TestFanOutSendsAnIdOnlyNotificationForAThinnedRow(t *testing.T) {
+	fanoutFixtures(t)
+	s, rec := subscribedSession(t, &auth.AccessContext{UserId: "user-a", Role: auth.RoleWriter})
+	ev := graphEvent("v1:notes:undeclared", "v1:notes:undeclared:n1", map[string]any{"status": "done"})
+	ev.Payload[events.PayloadOmittedFieldsKey] = []any{"result"}
+	s.handleBusEvent(ev)
+
+	got := notificationsOf(t, rec)
+	require.Len(t, got, 1, "a thinned row was dropped instead of notified id-only")
+	require.True(t, got[0].GetPayloadOmitted(),
+		"a thinned row went out as a whole one, which blanks the omitted fields on the client")
+
+	fields := got[0].GetPayload().GetFields()
+	require.Contains(t, fields, "id")
+	require.Contains(t, fields, "concept")
+	require.NotContains(t, fields, "status", "an id-only notification carried the row")
+	require.NotContains(t, fields, events.PayloadOmittedFieldsKey, "the mesh's marker reached a client")
+}
+
 // An UNDECLARED concept is delivered as before. The seam mirrors the read
 // path and does not invent a second, stricter rulebook (design D1) -- a
 // subscription stricter than a read is a second authz implementation, and

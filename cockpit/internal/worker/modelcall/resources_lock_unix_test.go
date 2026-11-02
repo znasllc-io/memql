@@ -23,7 +23,9 @@ import (
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 )
 
-func TestInferenceWaitsForBuildButSharesWorkbenchAcrossProcesses(t *testing.T) {
+// A model call never waits for what holds the host build lock: a pipeline step or
+// a local build holds it exclusively, a workbench shared.
+func TestInferenceDoesNotWaitForTheBuildLockAcrossProcesses(t *testing.T) {
 	for name, mode := range map[string]int{"build": syscall.LOCK_EX, "workbench": syscall.LOCK_SH} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -51,40 +53,41 @@ func TestInferenceWaitsForBuildButSharesWorkbenchAcrossProcesses(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestInferenceLeaseAcrossProcesses$")
-			busy := ""
-			if mode == syscall.LOCK_EX {
-				busy = "1"
-			}
-			cmd.Env = append(os.Environ(), "MEMQL_TEST_INFERENCE_LEASE_ROOT="+root, "MEMQL_TEST_INFERENCE_LEASE_BUSY="+busy)
+			cmd.Env = append(os.Environ(), "MEMQL_TEST_INFERENCE_LEASE_ROOT="+root, "MEMQL_TEST_INFERENCE_LEASE_BUSY=")
 			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("inference did not respect another process's %s reservation: %v %s", name, err, out)
+				t.Fatalf("inference waited for another process's %s reservation: %v %s", name, err, out)
 			}
 		})
 	}
 }
 
-func TestInferenceLeaseExcludesBuildButSharesWorkbenchReservations(t *testing.T) {
+// And what takes that lock does not wait for a model call: a step can start during
+// one, which is the other half of neither waiting for the other.
+func TestInferenceLeaseLeavesTheBuildLockFree(t *testing.T) {
 	root := t.TempDir()
 	lease, err := acquireInferenceLease(context.Background(), root, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.close()
+	if err := lease.beginActive(time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	for _, mode := range []int{syscall.LOCK_EX, syscall.LOCK_SH} {
-		file, err := os.OpenFile(filepath.Join(root, "pipeline.lock"), os.O_RDWR, 0)
+		file, err := os.OpenFile(filepath.Join(root, "pipeline.lock"), os.O_CREATE|os.O_RDWR, 0600)
 		if err != nil {
 			t.Fatal(err)
 		}
 		err = syscall.Flock(int(file.Fd()), mode|syscall.LOCK_NB)
 		file.Close()
-		if mode == syscall.LOCK_EX && !errors.Is(err, syscall.EWOULDBLOCK) || mode == syscall.LOCK_SH && err != nil {
-			t.Fatalf("host reservation mode %d did not respect inference: %v", mode, err)
+		if err != nil {
+			t.Fatalf("a model call in flight held the build lock against mode %d: %v", mode, err)
 		}
 	}
 }
 
 func TestInferencePreservesRetainedHostRecords(t *testing.T) {
-	for _, name := range []string{"pipeline.lock", "local-build.json", "workbench-0.lock", "workbench-unknown.lock", "workbench-admission.lock", capacity.InferenceActivityFile} {
+	for _, name := range []string{"workbench-0.lock", "workbench-unknown.lock", "workbench-admission.lock", capacity.InferenceActivityFile} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, name)
@@ -102,6 +105,76 @@ func TestInferencePreservesRetainedHostRecords(t *testing.T) {
 				t.Fatal("another workload's record changed", err)
 			}
 		})
+	}
+}
+
+// A worker that restarts during a native step leaves its record in pipeline.lock
+// until someone reconciles it, and an interrupted local build leaves
+// local-build.json. Both concern builds. A model call reads neither, so neither
+// can stop a machine answering.
+func TestARetainedBuildRecordDoesNotRefuseInference(t *testing.T) {
+	for _, name := range []string{"pipeline.lock", "local-build.json"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, name)
+			const retained = "retained-unconfirmed-effect"
+			if err := os.WriteFile(path, []byte(retained), 0600); err != nil {
+				t.Fatal(err)
+			}
+			lease, err := acquireInferenceLease(context.Background(), root, time.Millisecond)
+			if err != nil {
+				t.Fatal("a build's record refused a model call: ", err)
+			}
+			lease.close()
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != retained {
+				t.Fatal("another workload's record changed", err)
+			}
+		})
+	}
+}
+
+// Through a real Manager and a real runtime client: a step holds the machine, its
+// attempt recorded in the lock file as a running step's is, and a model call
+// answers without waiting for it and leaves that record alone.
+func TestAModelCallAnswersWhileAStepHoldsTheMachine(t *testing.T) {
+	root := t.TempDir()
+	lock := filepath.Join(root, "pipeline.lock")
+	file, err := os.OpenFile(lock, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	const attempt = `{"execution":"native"}`
+	if _, err := file.WriteString(attempt); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/ps" {
+			fmt.Fprint(w, `{"models":[]}`)
+			return
+		}
+		drain(r)
+		fmt.Fprintln(w, `{"message":{"content":"answer"},"done":true}`)
+	}))
+	defer srv.Close()
+	manager := terminalTestManager(root, ollamaModel(srv.URL, "m", models.Attributes{MaxConcurrent: 1}))
+	t.Cleanup(func() { manager.StopAll("test cleanup") })
+	rec := newRecorder()
+	request := start("during-a-step", "m", KindChat)
+	request.Limits.TimeoutSeconds = 2
+	manager.Start(context.Background(), rec, request)
+	if end := rec.wait(t); end.ErrorCode != "" || end.Error != "" {
+		t.Fatalf("a model call during a step ended %+v", end)
+	}
+	if data, err := os.ReadFile(lock); err != nil || string(data) != attempt {
+		t.Fatalf("the step's record changed: %q %v", data, err)
+	}
+	if err := capacity.CheckInferenceIdle(root); err != nil {
+		t.Fatal("the answered call left its fence: ", err)
 	}
 }
 

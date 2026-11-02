@@ -317,3 +317,25 @@ func TestStatusHistorySeriesExistFromBoot(t *testing.T) {
 		t.Errorf("exported concepts %v, want exactly %v", seen, StatusHistoryConcepts())
 	}
 }
+
+// The gauge is how a stranded migration lock reaches anything that does not
+// read logs: every pod stays Ready while it is true.
+func TestMigrationLockHeldSecondsReadsItsSource(t *testing.T) {
+	t.Cleanup(func() { RegisterMigrationLockHeldSource(nil) })
+
+	RegisterMigrationLockHeldSource(nil)
+	if got := MigrationLockHeldSecondsValue(); got != 0 {
+		t.Fatalf("a node that does not migrate reads %v, want 0", got)
+	}
+
+	RegisterMigrationLockHeldSource(func() time.Duration { return 90 * time.Second })
+	if got := MigrationLockHeldSecondsValue(); got != 90 {
+		t.Fatalf("with a lock held for 90s the gauge reads %v", got)
+	}
+
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if body := rec.Body.String(); !strings.Contains(body, "memql_database_migration_lock_held_seconds 90") {
+		t.Fatalf("the scrape does not carry the reading:\n%s", body)
+	}
+}

@@ -176,11 +176,17 @@ func (s *Store) ByID(ctx context.Context, uploadId string) (*Row, error) {
 		UploadedFromPath:       fieldString(r, "uploadedFromPath"),
 		BackupWatchId:          fieldString(r, "backupWatchId"),
 		BlobPath:               fieldString(r, "blobPath"),
-		FileId:                 fieldString(r, "fileId"),
-		ChunkSize:              fieldInt64(r, "chunkSize"),
-		TargetArtifactId:       fieldString(r, "targetArtifactId"),
-		Status:                 fieldString(r, "status"),
-		ExpectedVersion:        num.ClampInt64(fieldInt64(r, "expectedVersion")),
+		// THE BARE ID, however the row came back. fileId is an outgoing reference,
+		// so the engine stores it canonical when its target already exists: a fresh
+		// upload's session reads back <id> and a new version's reads back
+		// v1:library:file:<id>. Complete compares it with the head's bare id, so on
+		// a real engine every chunked new version was refused while the fakes, which
+		// keep what they are given, passed.
+		FileId:           memql.BareShortId(fieldString(r, "fileId")),
+		ChunkSize:        fieldInt64(r, "chunkSize"),
+		TargetArtifactId: fieldString(r, "targetArtifactId"),
+		Status:           fieldString(r, "status"),
+		ExpectedVersion:  num.ClampInt64(fieldInt64(r, "expectedVersion")),
 	}, nil
 }
 

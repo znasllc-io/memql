@@ -39,6 +39,10 @@ type ReleaseState struct {
 	Draft          bool            `json:"draft"`
 	Assets         []AssetIdentity `json:"assets"`
 	LatestVerified bool            `json:"latestVerified"`
+	// bytesRead marks a state from reading every byte, which Promote requires. It stays
+	// out of the JSON, so a receipt reloaded from a journal can never stand in for that
+	// read: the proof dies with the call that made it.
+	bytesRead bool
 }
 
 type AssetIdentity struct {
@@ -89,8 +93,9 @@ func (l *Lifecycle) session(releaseID int64) (*publication, func(), error) {
 	p := *l.p
 	p.target.ReleaseID = releaseID
 	s, close := p.session()
-	// Two full inventories of at most 64 assets, each allowing three download
-	// redirects, plus bounded tag/release reads. No unbounded polling/retries.
+	// The largest call is a promotion: one full read of at most 64 assets, each
+	// allowing three download redirects, plus bounded tag/release reads, some of them
+	// repeated by settled. That stays well under this. No unbounded polling/retries.
 	s.maxRequests = 640
 	return s, close, nil
 }
@@ -207,7 +212,8 @@ func (s *publication) findDraft(ctx context.Context, m Metadata, body string) (R
 }
 
 // CreateDraft attempts at most one POST. The caller must durably fence that
-// attempt BEFORE entering; never retry it based on a missing release alone.
+// attempt BEFORE entering; never retry it based on a missing release alone. Only
+// the read after it repeats (settled), so list lag alone does not stop a publication.
 func (l *Lifecycle) CreateDraft(ctx context.Context, m Metadata, marker string) (ReleaseState, error) {
 	if marker == "" {
 		return ReleaseState{}, errors.New("draft creation requires its durable intent marker")
@@ -237,7 +243,11 @@ func (l *Lifecycle) CreateDraft(ctx context.Context, m Metadata, marker string) 
 		"tag_name": s.p.target.Tag, "target_commitish": s.p.target.SourceCommit, "name": m.Name, "body": body,
 		"draft": true, "prerelease": m.Prerelease, "generate_release_notes": false, "make_latest": "false",
 	}, nil)
-	state, found, err = s.findDraft(ctx, m, body)
+	err = settled(ctx, func() (bool, error) {
+		var err error
+		state, found, err = s.findDraft(ctx, m, body)
+		return found, err
+	})
 	if err != nil || !found || !state.Draft {
 		return ReleaseState{}, ErrUncertain
 	}
@@ -312,7 +322,7 @@ func (s *publication) observe(ctx context.Context, m Metadata, body string, want
 		return ReleaseState{}, err
 	}
 	for _, a := range assets {
-		if err := s.verifyDownload(ctx, a.ID, Expected{SHA256: a.SHA256, Size: a.Size}); err != nil {
+		if err := s.verifyDownload(ctx, a.ID, a.Name, Expected{SHA256: a.SHA256, Size: a.Size}); err != nil {
 			return ReleaseState{}, err
 		}
 	}
@@ -333,7 +343,7 @@ func (s *publication) observe(ctx context.Context, m Metadata, body string, want
 	if err := s.checkTag(ctx); err != nil {
 		return ReleaseState{}, err
 	}
-	state := ReleaseState{ReleaseID: r.ID, Draft: *r.Draft, Assets: assets}
+	state := ReleaseState{ReleaseID: r.ID, Draft: *r.Draft, Assets: assets, bytesRead: true}
 	if !state.Draft && m.Latest {
 		var latest struct {
 			ID int64 `json:"id"`
@@ -352,7 +362,7 @@ func (s *publication) observe(ctx context.Context, m Metadata, body string, want
 // Observe verifies the complete approved asset set, every byte, metadata and
 // immutable source. It performs no writes and works after controller replacement.
 func (l *Lifecycle) Observe(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation) (ReleaseState, error) {
-	return l.verify(ctx, releaseID, m, marker, assets, false)
+	return l.verify(ctx, releaseID, m, marker, assets, nil)
 }
 
 // ObservePublished verifies an existing published release, including every
@@ -364,7 +374,7 @@ func (l *Lifecycle) ObservePublished(ctx context.Context, releaseID int64, m Met
 		return ReleaseState{}, err
 	}
 	m.Latest = false
-	state, err := l.verify(ctx, releaseID, m, marker, assets, false)
+	state, err := l.verify(ctx, releaseID, m, marker, assets, nil)
 	if err != nil {
 		return ReleaseState{}, err
 	}
@@ -401,15 +411,46 @@ func (l *Lifecycle) CheckDraft(ctx context.Context, releaseID int64, m Metadata,
 	return s.checkTag(ctx)
 }
 
-// Promote verifies before and after one PATCH. GitHub provides no atomic CAS
-// across a release, its tag and assets. The native caller must fence its own
-// uploads and promotion; an external writer can still race the remote effect.
-// After uncertainty use Observe, never automatically issue a second PATCH.
-func (l *Lifecycle) Promote(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation) (ReleaseState, error) {
-	return l.verify(ctx, releaseID, m, marker, assets, true)
+// Promote sends one PATCH and verifies every byte after it. observed is what Observe
+// returned earlier in the same call, and the PATCH goes only while the release still
+// matches it. GitHub provides no atomic CAS across a release, its tag and assets. The
+// native caller must fence its own uploads and promotion; an external writer can still
+// race the remote effect. After uncertainty use Observe, never automatically issue a
+// second PATCH.
+//
+// The caller's claim is never reset, so whatever fails between it and the PATCH strands
+// the release until the owner publishes on GitHub. That span therefore holds no byte
+// read, which would make it as long as the release is large. A second read would add
+// little: an asset read early in it is about one whole read old at the PATCH and rests
+// on the listing just the same. Going without it costs what a listing cannot show: a
+// replacement it does not show yet, which a second read might catch by asking for the
+// old ID, and bytes changed under an unchanged ID, which GitHub has no call for. Those
+// show in the read after the PATCH, as uncertain, on a release already public.
+func (l *Lifecycle) Promote(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation, observed ReleaseState) (ReleaseState, error) {
+	if !observed.bytesRead || !observed.Draft || observed.ReleaseID != releaseID {
+		return ReleaseState{}, errors.New("promotion requires a complete byte observation of this draft")
+	}
+	return l.verify(ctx, releaseID, m, marker, assets, &observed)
 }
 
-func (l *Lifecycle) verify(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation, promote bool) (ReleaseState, error) {
+// stillObserved is the last look before the PATCH, in the order observe closes with.
+// It reports whether the release is still a draft.
+func (s *publication) stillObserved(ctx context.Context, m Metadata, body string, want map[string]AssetExpectation, observed []AssetIdentity) (bool, error) {
+	assets, err := s.inventory(ctx, want)
+	if err != nil {
+		return false, err
+	}
+	if !slices.Equal(assets, observed) {
+		return false, errors.New("release assets changed after byte verification")
+	}
+	r, err := s.readRelease(ctx, m, body)
+	if err != nil {
+		return false, err
+	}
+	return *r.Draft, s.checkTag(ctx)
+}
+
+func (l *Lifecycle) verify(ctx context.Context, releaseID int64, m Metadata, marker string, assets []AssetExpectation, observed *ReleaseState) (ReleaseState, error) {
 	if releaseID <= 0 {
 		return ReleaseState{}, errors.New("release verification requires an exact ID")
 	}
@@ -428,13 +469,30 @@ func (l *Lifecycle) verify(ctx context.Context, releaseID int64, m Metadata, mar
 	defer close()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	state, err := s.observe(ctx, m, body, want)
-	if err != nil || !promote || !state.Draft {
-		return state, err
+	if observed == nil {
+		return s.observe(ctx, m, body, want)
+	}
+	// Only a read with no answer repeats, never the PATCH. A blip here would otherwise
+	// strand the release, and a read that succeeds is also the best evidence the PATCH
+	// can land. An answer that differs stops the promotion at once (readFailed).
+	var draft bool
+	err = settled(ctx, func() (bool, error) {
+		var err error
+		draft, err = s.stillObserved(ctx, m, body, want, observed.Assets)
+		var failed readFailed
+		return !errors.As(err, &failed), err
+	})
+	if err != nil {
+		return ReleaseState{}, err
+	}
+	if !draft {
+		// Someone published it since the observation: nothing to PATCH, and the
+		// caller records this read's proof.
+		return s.observe(ctx, m, body, want)
 	}
 	_, _ = s.lifecycleJSON(ctx, http.MethodPatch, s.releasePath(), map[string]any{"draft": false, "make_latest": strconv.FormatBool(m.Latest)}, nil)
 	after, err := s.observe(ctx, m, body, want)
-	if err != nil || after.Draft || !slices.Equal(state.Assets, after.Assets) {
+	if err != nil || after.Draft || !slices.Equal(observed.Assets, after.Assets) {
 		return ReleaseState{}, ErrUncertain
 	}
 	return after, nil

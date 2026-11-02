@@ -29,7 +29,7 @@ func (h *latestPlanCapture) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) 
 }
 func (h *latestPlanCapture) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
 	if ctx.Value(latestPlanCaptureKey{}) != true || event.Err != nil || !strings.HasPrefix(event.Query, "SELECT") ||
-		!strings.Contains(event.Query, "latest_keys") && !strings.Contains(event.Query, "latest_walk") {
+		!strings.Contains(event.Query, "latest_keys") && !strings.Contains(event.Query, "AS later") {
 		return
 	}
 	h.mu.Lock()

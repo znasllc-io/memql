@@ -3,6 +3,7 @@ package goalfixture
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -36,6 +37,35 @@ type OracleEvidence struct {
 	Output      string `json:"output,omitempty"`
 }
 
+// ErrOracleDidNotFinish means an oracle's own command reported no exit status,
+// so the evaluator measured nothing about the work. Keeping that apart from a
+// failure protects the score: a killed `go test` used to answer "fail", which in
+// a real evaluation publishes a correct fix as failed (captured 2026-11-01 at
+// --cpus=0.1: "go failed: signal: killed" and no test output).
+//
+// Verify still answers every criterion and saves its evidence: the run's verdict
+// is unverified, never fail, and a failure another run reported still stands. It
+// starts no further `go test`, since nothing will be scored and another watchdog
+// on the same machine buys nothing: at --cpus=0.02 a second kill outlasted the
+// package's own -timeout=600s, which panicked before the oracle could say why.
+// The GoalRunner then records an observer error, publishes nothing and stops the
+// matrix, because a machine that cannot finish its checks would waste the next
+// case's model calls too. Nothing can earn a pass this way: a required criterion
+// that is not pass already refuses success (goaleval.Result.Validate). The
+// published contract needs no fourth verdict, since no result carrying this one
+// is ever published.
+//
+// Known limits: this sees only the go command itself, so a compile the kernel
+// kills inside a live `go test` is reported by go as [build failed] and reads as
+// a failure of the tree. A tree that keeps the compiler busy past goTestBound
+// reads as an oracle that did not finish, never as a pass.
+//
+// Regression tests: TestOracleThatCouldNotFinishNeverJudgesTheWork,
+// TestRegressionOracleDoesNotLetAnUnfinishedRunHideAFailure,
+// TestOracleStartsNoFurtherRunAfterOneDidNotFinish and, for the score, proving's
+// TestGoalWorkflowScoresNothingWhenItsOracleCouldNotFinish.
+var ErrOracleDidNotFinish = errors.New("goal oracle did not finish")
+
 func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval.Assertion, error) {
 	files, snapshotErr := w.Snapshot()
 	if snapshotErr == nil {
@@ -48,11 +78,24 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 		}
 	}
 	var assertions []goaleval.Assertion
+	var unfinished []string
+	testCopy := func(files map[string][]byte, name string, independent bool) (string, string) {
+		if len(unfinished) > 0 {
+			unfinished = append(unfinished, name+": not run")
+			return "not run: an earlier oracle run did not finish", "unverified"
+		}
+		out, verdict := w.testCopy(ctx, files, name, independent)
+		if verdict == "unverified" {
+			unfinished = append(unfinished, name+": "+out[strings.LastIndex(out, "\n")+1:])
+		}
+		return out, verdict
+	}
 	for _, c := range s.Criteria {
 		e := OracleEvidence{CriterionID: c.ID, Verdict: "unverified", Detail: "no executable oracle for this criterion"}
 		if snapshotErr != nil {
 			e.Verdict, e.Detail = "fail", snapshotErr.Error()
 		} else {
+			unfinishedBefore := len(unfinished)
 			switch c.ID {
 			case "preservation":
 				e.Verdict, e.Detail = "pass", "preserved tracked, dirty and untracked bytes and tracking state"
@@ -64,7 +107,13 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 				}
 				out, err := Command(ctx, w.Checkout, "git", "status", "--porcelain=v1", "--", "NOTES.txt", "operator-untracked.txt", ".memql-evaluation.json")
 				e.Output = out
-				if err != nil || out != " M NOTES.txt\n?? operator-untracked.txt\n" {
+				switch {
+				case errors.Is(err, errUnfinished):
+					unfinished = append(unfinished, c.ID+": "+err.Error())
+					if e.Verdict == "pass" {
+						e.Verdict = "unverified"
+					}
+				case err != nil || out != " M NOTES.txt\n?? operator-untracked.txt\n":
 					e.Verdict, e.Detail = "fail", "unrelated tracked or untracked state changed"
 				}
 			case "no-fix":
@@ -82,10 +131,10 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 					}
 				}
 			case "correctness":
-				e.Output, e.Verdict = w.testCopy(ctx, files, "correctness", true)
+				e.Output, e.Verdict = testCopy(files, "correctness", true)
 				e.Detail = "independent held-out Sum cases in a separate captured tree"
 			case "checks":
-				e.Output, e.Verdict = w.testCopy(ctx, files, "checks", false)
+				e.Output, e.Verdict = testCopy(files, "checks", false)
 				e.Detail = "independent execution of model-authored package tests"
 				if !hasTests(files) {
 					e.Verdict, e.Detail = "fail", "no model-authored package tests"
@@ -100,9 +149,11 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 						base[name] = b
 					}
 				}
-				red, status := w.testCopy(ctx, base, c.ID+"-base", false)
+				red, status := testCopy(base, c.ID+"-base", false)
 				e.Output, e.Detail, e.Verdict = red, "model-authored tests fail behaviorally against untouched base", "fail"
-				if hasTests(files) && status == "fail" && strings.Contains(red, "--- FAIL: Test") && !strings.Contains(red, "[build failed]") {
+				if hasTests(files) && status == "unverified" {
+					e.Verdict = "unverified"
+				} else if hasTests(files) && status == "fail" && strings.Contains(red, "--- FAIL: Test") && !strings.Contains(red, "[build failed]") {
 					e.Verdict = "pass"
 				}
 				control := map[string][]byte{"go.mod": w.Before["go.mod"], "totals.go": []byte(sumReference)}
@@ -111,18 +162,14 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 						control[name] = b
 					}
 				}
-				greenControl, controlStatus := w.testCopy(ctx, control, c.ID+"-control", false)
+				greenControl, controlStatus := testCopy(control, c.ID+"-control", false)
 				e.Output += "\nCORRECT-BEHAVIOR CONTROL\n" + greenControl
-				if controlStatus != "pass" {
-					e.Verdict = "fail"
-				}
+				e.Verdict = settle(e.Verdict, controlStatus)
 				e.Detail += "; tests pass against an isolated correct-behavior control"
 				if c.ID == "regression" {
-					green, status := w.testCopy(ctx, files, "regression-final", false)
+					green, status := testCopy(files, "regression-final", false)
 					e.Output += "\nFINAL\n" + green
-					if status != "pass" {
-						e.Verdict = "fail"
-					}
+					e.Verdict = settle(e.Verdict, status)
 					e.Detail += " and pass against the captured final tree"
 				}
 			case "refactor":
@@ -143,6 +190,9 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 					}
 				}
 			}
+			if e.Verdict == "unverified" && len(unfinished) > unfinishedBefore {
+				e.Detail = "no conclusion: an oracle run did not finish, which says nothing about the work; it would have established: " + e.Detail
+			}
 		}
 		name := "oracle-" + c.ID + ".json"
 		b, err := json.MarshalIndent(e, "", "  ")
@@ -154,7 +204,23 @@ func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval
 		}
 		assertions = append(assertions, goaleval.Assertion{CriterionID: c.ID, Verdict: e.Verdict, Evidence: []string{filepath.Join(w.Root, name)}})
 	}
+	if len(unfinished) > 0 {
+		return assertions, fmt.Errorf("%w: %s", ErrOracleDidNotFinish, strings.Join(unfinished, "; "))
+	}
 	return assertions, nil
+}
+
+// settle combines two runs of one criterion. A reported failure is a finding
+// about the work and decides it, whatever a sibling run could not say; otherwise
+// a run that did not finish leaves the criterion open.
+func settle(a, b string) string {
+	switch {
+	case a == "fail" || b == "fail":
+		return "fail"
+	case a == "unverified" || b == "unverified":
+		return "unverified"
+	}
+	return "pass"
 }
 
 func sumSignature(fn *ast.FuncDecl) bool {
@@ -200,7 +266,10 @@ func (w *Workspace) testCopy(ctx context.Context, files map[string][]byte, name 
 			return err.Error(), "unverified"
 		}
 	}
-	out, err := Command(ctx, dir, "go", "test", "-count=1", "-timeout=20s", "-v", ".")
+	out, err := commandWithin(ctx, goTestBound, dir, "go", "test", "-count=1", "-timeout=20s", "-v", ".")
+	if errors.Is(err, errUnfinished) {
+		return out + "\n" + fmt.Sprint(err), "unverified"
+	}
 	if err != nil {
 		return out + "\n" + fmt.Sprint(err), "fail"
 	}

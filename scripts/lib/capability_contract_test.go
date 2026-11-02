@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -307,9 +308,10 @@ func TestCapParamPrecedence(t *testing.T) {
 	}
 
 	// Harness sources the library and prints the resolved value of `foo` so the
-	// test can assert precedence. It never calls cap_ok, so the EXIT trap stays
-	// quiet on a clean (exit 0) run. `foo` must be declared via cap_spec_param
-	// -- cap_parse_flags rejects undeclared flags (exit 2, #2508).
+	// test can assert precedence. It ends on cap_ok like any capability: an exit
+	// of 0 with no envelope is reported as a failure (TestCapExitZeroWithoutAResultIsAFailure).
+	// `foo` must be declared via cap_spec_param -- cap_parse_flags rejects
+	// undeclared flags (exit 2, #2508).
 	harness := filepath.Join(t.TempDir(), "capparam_harness.sh")
 	body := "#!/usr/bin/env bash\n" +
 		"set -euo pipefail\n" +
@@ -317,7 +319,8 @@ func TestCapParamPrecedence(t *testing.T) {
 		"cap_init \"test.capParamPrecedence\" \"cap_param precedence harness\"\n" +
 		"cap_spec_param \"foo\" \"precedence probe param\"\n" +
 		"cap_parse_flags \"$@\"\n" +
-		"printf 'RESULT=%s\\n' \"$(cap_param foo defval)\"\n"
+		"printf 'RESULT=%s\\n' \"$(cap_param foo defval)\"\n" +
+		"cap_ok\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
 		t.Fatalf("write harness: %v", err)
 	}
@@ -478,7 +481,8 @@ func TestCapParseFlagsUnknownFlagSemantics(t *testing.T) {
 		"cap_init \"test.unknownFlag\" \"unknown-flag rejection harness\"\n" +
 		"cap_spec_param \"declared\" \"a declared param\"\n" +
 		"cap_parse_flags \"$@\"\n" +
-		"printf 'RESULT=%s\\n' \"$(cap_param declared defval)\"\n"
+		"printf 'RESULT=%s\\n' \"$(cap_param declared defval)\"\n" +
+		"cap_ok\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
 		t.Fatalf("write harness: %v", err)
 	}
@@ -560,7 +564,8 @@ func TestCapParamStdinMultiParam(t *testing.T) {
 		"cap_parse_flags \"$@\"\n" +
 		"printf 'PRODUCT=%s\\n' \"$(cap_param product)\"\n" +
 		"printf 'ORG=%s\\n' \"$(cap_param product-org)\"\n" +
-		"printf 'ABSENT=%s\\n' \"$(cap_param absent fallback)\"\n"
+		"printf 'ABSENT=%s\\n' \"$(cap_param absent fallback)\"\n" +
+		"cap_ok\n"
 	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
 		t.Fatalf("write harness: %v", err)
 	}
@@ -832,6 +837,378 @@ func TestCapProgressWritesOneStderrLine(t *testing.T) {
 			var env envelope
 			if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env); err != nil || !env.OK {
 				t.Errorf("stdout is not exactly one ok envelope (%v):\n%s", err, stdout.String())
+			}
+		})
+	}
+}
+
+// noResultHarness writes a capability script that sources the runtime, calls
+// cap_init and then runs body, and returns its path.
+func noResultHarness(t *testing.T, body string) string {
+	t.Helper()
+	lib := filepath.Join(repoRoot(t), "scripts", "lib", "capability.sh")
+	harness := filepath.Join(t.TempDir(), "noresult_harness.sh")
+	script := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.noResult\" \"a run that never reports its own result\"\n" +
+		body
+	if err := os.WriteFile(harness, []byte(script), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+	return harness
+}
+
+// assertReportedAsFailure runs harness under bashPath and asserts the one
+// outcome the contract allows for a run that never emitted its own result:
+// exit 1, and exactly one envelope on stdout saying that no result was given.
+// wantStderr, when set, is bash's own error, which must still reach stderr --
+// it is the only place the cause is named.
+func assertReportedAsFailure(t *testing.T, bashPath, harness, wantStderr string) {
+	t.Helper()
+	cmd := exec.Command(bashPath, harness)
+	cmd.Stdin = nil
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	diag := "--- stdout ---\n" + stdout.String() + "--- stderr ---\n" + stderr.String()
+
+	if err == nil {
+		t.Fatalf("exited 0 having never called cap_ok or cap_fail: a run that never said it succeeded "+
+			"was reported as a success\n%s", diag)
+	}
+	if code := exitCode(err); code != 1 {
+		t.Errorf("exit %d, want 1 (the contract's code for an unexpected failure)\n%s", code, diag)
+	}
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatalf("no envelope on stdout\n%s", diag)
+	}
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stdout must carry exactly one envelope, got %d lines\n%s", len(lines), diag)
+	}
+	var env envelope
+	if err := json.Unmarshal([]byte(lines[0]), &env); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v\n%s", err, diag)
+	}
+	if env.OK || env.Error == nil || env.Error.Code != 1 {
+		t.Fatalf("want ok=false and error.code=1, got: %s", lines[0])
+	}
+	if env.Capability != "test.noResult" {
+		t.Errorf("envelope names capability %q, want %q", env.Capability, "test.noResult")
+	}
+	if !strings.Contains(env.Error.Message, "without an explicit result") || !strings.Contains(env.Error.Message, "cap_ok") {
+		t.Errorf("the message must say no result was given and name cap_ok; got: %s", env.Error.Message)
+	}
+	if wantStderr != "" && !strings.Contains(stderr.String(), wantStderr) {
+		t.Errorf("stderr lost bash's own %q, which is the only place the cause is named\n%s", wantStderr, diag)
+	}
+}
+
+// TestCapExitZeroWithoutAResultIsAFailure pins what the EXIT trap does when a
+// script ends with status 0 but never emitted an envelope.
+//
+// It used to do nothing. _cap_on_exit spoke only for a NON-zero status, on the
+// theory that a zero meant a clean end -- but a success path MUST call cap_ok,
+// so a zero with no envelope means the script never got as far as saying it
+// succeeded. Trusting that zero is what let bash 3.2's expansion deaths
+// (TestCapBash32ExpansionDeathIsAFailure) exit 0 and report nothing at all.
+//
+// Neither case here needs bash 3.2, so this is the test every CI lane runs.
+func TestCapExitZeroWithoutAResultIsAFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"an exit 0 before cap_ok", "cap_info \"did the work\"\nexit 0\ncap_ok\n"},
+		{"the end of the script without cap_ok", "cap_info \"did the work\"\n"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			assertReportedAsFailure(t, "bash", noResultHarness(t, tc.body), "")
+		})
+	}
+}
+
+// bash32 returns a bash 3.2 to run under, or skips. Stock macOS ships one as
+// /bin/bash and always will; no CI runner here has one outside the
+// bash32-smoke container.
+func bash32(t *testing.T) string {
+	t.Helper()
+	candidates := []string{"/bin/bash"}
+	if p, err := exec.LookPath("bash"); err == nil {
+		candidates = append(candidates, p)
+	}
+	for _, c := range candidates {
+		out, err := exec.Command(c, "-c", `printf '%s' "$BASH_VERSION"`).Output()
+		if err == nil && strings.HasPrefix(string(out), "3.2.") {
+			return c
+		}
+	}
+	t.Skipf("no bash 3.2 to run under (probed %s); stock macOS ships one as /bin/bash",
+		strings.Join(candidates, ", "))
+	return ""
+}
+
+// TestCapBash32ExpansionDeathIsAFailure runs the defect behind the rule above
+// on the interpreter that produces it.
+//
+// Under `set -e` -- which every capability script sets -- stock macOS bash
+// 3.2.57 ends a script that hits a fatal expansion error with the status of
+// the last command that ran, which under `set -e` is almost always 0. Bash 4+
+// exits 1 for the same line. Measured, both ways. So on a Mac a bash 4
+// construct, or any unbound variable, made a capability exit 0 with nothing on
+// stdout: a product repo's argocd-sync.sh printed its compare and then did
+// exactly that.
+//
+// Skipped where there is no bash 3.2, which is every CI runner here: the
+// bash32-smoke lane (scripts/ci/bash32-smoke.sh) runs the unbound-variable
+// shape under the real interpreter instead.
+func TestCapBash32ExpansionDeathIsAFailure(t *testing.T) {
+	bash := bash32(t)
+	cases := []struct {
+		name   string
+		body   string
+		stderr string
+	}{
+		{
+			// The shape that shipped: a bash 4 case modification inside a
+			// predicate an `if` calls.
+			name: "a bad substitution in a function an if calls",
+			body: "function is_x() {\n" +
+				"    case \"${1,,}\" in\n" +
+				"        x) return 0 ;;\n" +
+				"    esac\n" +
+				"    return 1\n" +
+				"}\n" +
+				"if is_x X; then cap_info \"matched\"; fi\n" +
+				"cap_ok\n",
+			stderr: "bad substitution",
+		},
+		{
+			// The commoner one: any unbound variable under `set -u`.
+			name:   "an unbound variable",
+			body:   "cap_info \"value: ${never_set}\"\ncap_ok\n",
+			stderr: "unbound variable",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			assertReportedAsFailure(t, bash, noResultHarness(t, tc.body), tc.stderr)
+		})
+	}
+}
+
+// TestCapabilityTrapsHandCapOnExitTheRealStatus keeps _cap_on_exit reading
+// the script's own exit status when a script composes it with cleanup of its
+// own.
+//
+// THE BUG. `trap 'cleanup_tmp; _cap_on_exit' EXIT` reads naturally and is
+// wrong: _cap_on_exit reads the status from $?, and by the time it runs, $? is
+// cleanup_tmp's, not the script's. scripts/install/hosts-entries.sh composed
+// its trap that way precisely so an abort would still emit an envelope
+// (memql#3562), and an abort there still emitted nothing: the runtime saw
+// cleanup's 0 and took it for a clean end. Now that a 0 with no result is
+// reported as a failure, the same composition would report an abort as an
+// exit 0 and blame the wrong thing.
+//
+// THE RULE. Inline, a trap that names _cap_on_exit names nothing else.
+// Anything that has to run first goes in a handler function that captures $?
+// as its first statement, turns errexit off, and restores the status with
+// `(exit "$rc")` immediately before calling _cap_on_exit -- _install_on_exit in
+// scripts/install/install-binary.sh is the reference. The `set +e` is not
+// optional: under errexit, `(exit "$rc")` is itself a failing command whenever
+// the status is non-zero, so the handler is abandoned there -- on exactly the
+// aborts it exists for -- before _cap_on_exit runs. Measured on bash 3.2 and 5.
+//
+// A trap that never calls _cap_on_exit is a different defect (the guarantee
+// is dropped, not misfed) and is not judged here.
+func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
+	inlineTrap := regexp.MustCompile(`^trap[ \t]+(?:'([^']*)'|"([^"]*)")[ \t]+EXIT\b`)
+	namedTrap := regexp.MustCompile(`^trap[ \t]+'?([A-Za-z_][A-Za-z0-9_]*)'?[ \t]+EXIT\b`)
+	captures := regexp.MustCompile(`^local[ \t]+([A-Za-z_][A-Za-z0-9_]*)=\$\?$`)
+	errexitOff := regexp.MustCompile(`^set[ \t]+\+e([ \t;]|$)`)
+	callsCapOnExit := regexp.MustCompile(`^_cap_on_exit([ \t;]|$)`)
+
+	scripts := capabilityScripts(t)
+	if len(scripts) == 0 {
+		t.Fatal("no capability scripts found -- the discovery glob is broken")
+	}
+	checked := 0
+	for _, path := range scripts {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		lines := strings.Split(string(body), "\n")
+
+		// Every function's code lines (no blanks, no comments), by name.
+		funcs := map[string][]string{}
+		var fn string
+		depth := 0
+		for _, raw := range lines {
+			trimmed := strings.TrimSpace(raw)
+			if depth == 0 {
+				// The header's own braces count: a one-line definition
+				// (`function kc() { kubectl ...; }`) closes where it opens, and
+				// starting from 1 would read the rest of the file as its body.
+				if m := bashFuncHeader.FindStringSubmatch(trimmed); m != nil {
+					if d := strings.Count(raw, "{") - strings.Count(raw, "}"); d > 0 {
+						fn, depth = m[1], d
+					}
+				}
+				continue
+			}
+			depth += strings.Count(raw, "{") - strings.Count(raw, "}")
+			if depth <= 0 {
+				fn, depth = "", 0
+				continue
+			}
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				funcs[fn] = append(funcs[fn], trimmed)
+			}
+		}
+
+		for i, raw := range lines {
+			trimmed := strings.TrimSpace(raw)
+			where := rel(t, path) + ":" + strconv.Itoa(i+1)
+			if m := inlineTrap.FindStringSubmatch(trimmed); m != nil {
+				inline := strings.TrimSpace(m[1] + m[2])
+				if strings.Contains(inline, "_cap_on_exit") && inline != "_cap_on_exit" {
+					t.Errorf("%s: an EXIT trap runs other commands with _cap_on_exit:\n    %s\n"+
+						"_cap_on_exit reads the script's status from $?, which the commands before it "+
+						"have replaced -- an abort is then reported as an exit 0, or not at all.\n"+
+						"Repair: move the cleanup into a handler that starts `local rc=$?`, runs "+
+						"`set +e`, and runs `(exit \"$rc\")` right before _cap_on_exit, as "+
+						"_install_on_exit in scripts/install/install-binary.sh does.", where, trimmed)
+					continue
+				}
+			}
+			m := namedTrap.FindStringSubmatch(trimmed)
+			if m == nil || m[1] == "_cap_on_exit" {
+				continue
+			}
+			code, defined := funcs[m[1]]
+			if !defined {
+				continue
+			}
+			call := -1
+			for j, c := range code {
+				if callsCapOnExit.MatchString(c) {
+					call = j
+					break
+				}
+			}
+			if call < 0 {
+				continue
+			}
+			checked++
+			first := captures.FindStringSubmatch(code[0])
+			if first == nil || call == 0 {
+				t.Errorf("%s: the EXIT handler %s() calls _cap_on_exit but does not begin by capturing "+
+					"the script's status (`local rc=$?`); it begins:\n    %s", where, m[1], code[0])
+				continue
+			}
+			restore := regexp.MustCompile(`^\(exit[ \t]+"?\$\{?` + first[1] + `\}?"?\)([ \t]+#.*)?$`)
+			if !restore.MatchString(code[call-1]) {
+				t.Errorf("%s: the EXIT handler %s() does not restore the status it captured right "+
+					"before calling _cap_on_exit -- `(exit \"$%s\")` must be the line before it; "+
+					"found:\n    %s", where, m[1], first[1], code[call-1])
+				continue
+			}
+			off := false
+			for _, c := range code[1 : call-1] {
+				off = off || errexitOff.MatchString(c)
+			}
+			if !off {
+				t.Errorf("%s: the EXIT handler %s() restores the status without `set +e` first. "+
+					"Under errexit, `(exit \"$%s\")` fails whenever the status is non-zero, and the "+
+					"handler is abandoned there -- on every abort -- before _cap_on_exit runs.",
+					where, m[1], first[1])
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no EXIT handler that calls _cap_on_exit -- either every script stopped " +
+			"composing its trap or this scan stopped matching, and either way it is watching nothing")
+	}
+	t.Logf("checked %d EXIT handler(s) across %d capability script(s)", checked, len(scripts))
+}
+
+// TestCapSourcedScriptLeavesTheShellsExitAlone pins where the exit-0 rule
+// stops: at the capability's own process.
+//
+// A capability script that a shell SOURCES -- a test harness exercising its
+// functions, as scripts/k3d's tests do with up.sh and dev.sh -- still installs
+// the trap from its top-level cap_init. But the shell that sourced it is not
+// the capability, and its exit 0 is its own: holding those shells to cap_ok
+// turned 79 assertions across scripts/k3d red the moment the rule landed. An
+// abort is still reported either way.
+func TestCapSourcedScriptLeavesTheShellsExitAlone(t *testing.T) {
+	lib := filepath.Join(repoRoot(t), "scripts", "lib", "capability.sh")
+	dir := t.TempDir()
+	script := filepath.Join(dir, "sourced_capability.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.sourced\" \"a capability a test harness sources\"\n" +
+		"function greet() { cap_info \"hello\"; }\n" +
+		"function main() { greet; cap_ok; }\n" +
+		"if [[ \"${BASH_SOURCE[0]}\" == \"$0\" ]]; then\n" +
+		"    main \"$@\"\n" +
+		"fi\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	harness := func(name, tail string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("source \""+script+"\"\ngreet\n"+tail), 0o755); err != nil {
+			t.Fatalf("write harness: %v", err)
+		}
+		return p
+	}
+
+	cases := []struct {
+		name  string
+		argv  []string
+		abort bool
+	}{
+		{"a harness file that sources it and ends", []string{harness("ends.sh", "")}, false},
+		{"bash -c that sources it and ends", []string{"-c", "source \"$1\"; greet", "bash", script}, false},
+		{"a harness that sources it and aborts", []string{harness("aborts.sh", "false\n")}, true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", tc.argv...)
+			cmd.Stdin = nil
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			diag := "--- stdout ---\n" + stdout.String() + "--- stderr ---\n" + stderr.String()
+
+			if !tc.abort {
+				if err != nil {
+					t.Fatalf("a shell that sourced a capability and ended cleanly exited %d -- the "+
+						"exit-0 rule reached past the capability into its caller\n%s", exitCode(err), diag)
+				}
+				if strings.TrimSpace(stdout.String()) != "" {
+					t.Errorf("stdout should be empty, the shell never ran the capability\n%s", diag)
+				}
+				return
+			}
+			if code := exitCode(err); code != 1 {
+				t.Fatalf("exit %d, want 1 from the abort\n%s", code, diag)
+			}
+			var env envelope
+			line := strings.TrimSpace(stdout.String())
+			if json.Unmarshal([]byte(line), &env) != nil || env.OK || env.Error == nil ||
+				!strings.Contains(env.Error.Message, "aborted (exit 1)") {
+				t.Errorf("an abort must still be reported, as exactly one envelope\n%s", diag)
 			}
 		})
 	}

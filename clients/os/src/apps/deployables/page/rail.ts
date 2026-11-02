@@ -327,18 +327,17 @@ const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned" | "ca
   refused: "refused",
   failed: "failed",
   // epic memql#4937: a person's own stop. Terminal, and NOT a flavour of
-  // `failed` for the reason `abandoned` is not -- nothing broke, nothing was
-  // published, and every site is still serving what it was serving. The
-  // distinction is who decided: `abandoned` is a loss this cluster OBSERVED,
-  // `cancelled` is a choice somebody MADE, and a surface that collapsed the
-  // two would tell a person their own click was a fault.
+  // `failed` -- nothing broke, and a stop is honoured only before the roll, so
+  // nothing was published and every site is still serving what it was serving.
+  // The distinction from `abandoned` is who decided: that is a loss this cluster
+  // OBSERVED, `cancelled` is a choice somebody MADE, and a surface that collapsed
+  // the two would tell a person their own click was a fault.
   cancelled: "cancelled",
   // memql#4900: a run whose node stopped saying it was alive. Terminal, and
-  // deliberately NOT a flavour of `failed` -- nothing failed that this
-  // cluster can name, and the D6 order guarantees every site is still
-  // serving what it was serving. The MARK is the same, because the run did
-  // stop where it stopped; the SENTENCE is what differs, and it comes from
-  // the row's own error naming the node and when it was last heard.
+  // deliberately NOT a flavour of `failed` -- nothing failed that this cluster
+  // can name. The MARK is the same, because the run did stop where it stopped;
+  // the SENTENCE is what differs, and it comes from the row's own error naming
+  // the node, when it was last heard, and what its stage can have changed.
   abandoned: "abandoned",
 };
 
@@ -357,11 +356,11 @@ export const TERMINAL_RUN_STATUSES: readonly string[] = Object.keys(TERMINAL);
 /**
  * Whether a terminal run DECIDED anything about the deployable.
  *
- * `abandoned` and `cancelled` are the two where the engine guarantees it did
- * not: one is a loss this cluster observed, the other a person's own stop, and
- * both close with "nothing was published, and every site is still serving what
- * it was serving". A run that published nothing and failed at nothing has no
- * standing to mark a stop that describes the deployable.
+ * `abandoned` and `cancelled` are the two that reach no verdict: one is a loss
+ * this cluster observed, the other a person's own stop. Neither found anything
+ * wrong with the deployable, so neither has standing to mark a stop that
+ * describes it. A run lost at the roll or while publishing may still have
+ * changed what is live; its own sentence says so, on its own timeline.
  *
  * It showed as an ERROR on a live, serving deployable's What-it-is stop --
  * the run had died PARKED, so `stoppedAt` was `awaiting_confirm`, and RUN_STOP
@@ -612,9 +611,9 @@ export function refusalStopFor(run: DeploymentRow | null): StopId | null {
   // `abandoned` USED to be placed here (memql#4900), on the reasoning that the
   // sweep writes a typed error and so there is a sentence to put somewhere.
   // There is -- but not on a stop describing the deployable, and not as an
-  // error: the sentence says nothing was published and every site still serves
-  // what it served. A serving deployable was showing it as its own failure.
-  // Same for `cancelled`. Both are the run's story, and the run has a page.
+  // error: the sentence is about the cluster losing a node, not about this app.
+  // A serving deployable was showing it as its own failure. Same for
+  // `cancelled`. Both are the run's story, and the run has a page.
   if (!decidedSomething(run.status)) return null;
   return stoppedStopFor(run);
 }
