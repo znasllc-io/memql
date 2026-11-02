@@ -183,14 +183,14 @@ func TestIsBlobAbsentReadsTheServiceCodeNotTheText(t *testing.T) {
 		}
 	})
 	t.Run("a stored value naming no object", func(t *testing.T) {
-		// The bare key a chunked upload's row stores: storage is never asked,
-		// so no retry can change the answer.
+		// A scheme this reader cannot open: storage is never asked, so no retry
+		// can change the answer.
 		_, err := uploader(t, func(*http.Request) (*http.Response, error) {
-			t.Fatal("storage was asked for a bare key")
+			t.Fatal("storage was asked for a value naming no object")
 			return nil, nil
-		}).DownloadStreamURL(context.Background(), "library/user-a/f-1/step.log")
+		}).DownloadStreamURL(context.Background(), "local://library/user-a/f-1/step.log")
 		if err == nil || !IsBlobAbsent(err) {
-			t.Fatalf("a bare key answered %v, absent=%v", err, IsBlobAbsent(err))
+			t.Fatalf("a value naming no object answered %v, absent=%v", err, IsBlobAbsent(err))
 		}
 	})
 	if IsBlobAbsent(nil) || IsBlobAbsent(context.DeadlineExceeded) {

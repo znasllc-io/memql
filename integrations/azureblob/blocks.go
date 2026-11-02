@@ -157,7 +157,7 @@ func isBlobNotFound(err error) bool {
 }
 
 // errNoBlobObject is a stored value that names no object this reader can open:
-// the bare key a chunked upload's row stores, for one.
+// an Azurite URL on a cloud client, or a local:// or gs:// value, for instance.
 var errNoBlobObject = errors.New("not an azure blob URL (no downloadable object)")
 
 // IsBlobAbsent reports whether DownloadStreamURL failed because there is nothing

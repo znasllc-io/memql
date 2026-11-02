@@ -341,16 +341,16 @@ func TestReadFileExcerptsReportsAnAbsentBlobInItsOwnEntry(t *testing.T) {
 	}
 }
 
-// A chunked upload's row stores a bare key, which the URL reader can never
-// open, so a retry cannot change this answer either. The real adapter is what
-// says so: nothing here reaches its storage client.
-func TestReadFileExcerptsReportsABareKeyInItsOwnEntry(t *testing.T) {
+// A stored value this reader's client cannot open, such as an Azurite URL on a
+// cloud client, names no object, so a retry cannot change this answer either.
+// The real adapter is what says so: nothing here reaches its storage client.
+func TestReadFileExcerptsReportsAValueNamingNoObjectInItsOwnEntry(t *testing.T) {
 	i, stub, _ := excerptStub("user-a", map[string][]byte{"chunked": []byte("FAIL\n")}, nil)
-	stub.files["chunked"]["blobUrl"] = "library/user-a/chunked/step.log"
+	stub.files["chunked"]["blobUrl"] = "http://azurite:10000/devstoreaccount1/memql/library/user-a/chunked/step.log"
 	i.SetBlobFetcher(&azureblob.AzureBlobUploader{})
 	rows, err := i.handleReadFileExcerpts(revisionActor("user-a", auth.RoleReader), excerptArgs("chunked"), 0)
 	if entries := excerptEntries(t, rows, err); entries[0]["unavailable"] != "could not read this saved version" {
-		t.Fatalf("bare key: %v", entries[0])
+		t.Fatalf("value naming no object: %v", entries[0])
 	}
 }
 

@@ -1986,8 +1986,7 @@ blip ended a diagnosis for good. An entry must be a fact no attempt changes, and
 only these are:
 - a stored key `openFileBytes` refuses;
 - a blob that is absent (`azureblob.IsBlobAbsent`): a retired log, the service's
-  `BlobNotFound`, or a stored value naming no object, such as a chunked upload's
-  bare key;
+  `BlobNotFound`, or a stored value naming no object;
 - the scan's own deadline passing, judged by the scan's context and never by the
   error, because storage's own timeout says the same words and may well pass.
 
