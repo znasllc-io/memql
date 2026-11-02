@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/integrations/githubrelease"
 )
@@ -343,6 +344,73 @@ func TestCandidateDraftRejectsChangedMetadataAndUnscopedPorts(t *testing.T) {
 	if _, err := p.ledger.drafts(context.Background(), strings.Repeat("a", 64)); err == nil {
 		t.Fatal("unowned history admitted")
 	}
+}
+
+// Native ports enforce the recipe's prerequisites whatever its order. A recipe that
+// carried on past a failed check or read must not reach the PATCH on what came before.
+func TestCandidatePromotionCannotSpendAFailedCheckOrRead(t *testing.T) {
+	setup := func(t *testing.T) (*candidatePreparer, *candidateDraftFixture, map[string]workflowhost.Operation, string) {
+		t.Helper()
+		db := candidateTestDB(t)
+		p, c, f := candidateDraftWorkflowFixture(t, db)
+		pub := preparePublication(t, db, p, c)
+		request := draftRequest(pub)
+		if _, err := p.draft(ownerCtx(), request, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.publish(ownerCtx(), pub); err != nil {
+			t.Fatal(err)
+		}
+		record, err := p.ledger.get(ownerCtx(), pub.CandidateID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := p.targetReader.draftPlan(ownerCtx(), record, pub.TargetID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition, err := workflowhost.Load(candidatePromotionWorkflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &candidateDraftScope{p: p, request: request, record: record, plan: plan, promote: true, definition: definition}
+		operations := s.operations()
+		for _, name := range []string{"releaseDraftCheckCandidate", "releaseDraftBegin", "releasePromotionObserve"} {
+			if _, err := operations[name](ownerCtx(), nil); err != nil {
+				t.Fatal(name, err)
+			}
+		}
+		return p, f, operations, pub.CandidateID
+	}
+	t.Run("a check that fails after the claim", func(t *testing.T) {
+		p, f, operations, _ := setup(t)
+		if _, err := operations["releasePromotionClaim"](ownerCtx(), nil); err != nil {
+			t.Fatal(err)
+		}
+		p.engineRevision = func() string { return strings.Repeat("e", 40) }
+		if _, err := operations["releaseDraftCheckCandidate"](ownerCtx(), nil); err == nil {
+			t.Fatal("the changed engine passed the check")
+		}
+		if _, err := operations["releasePromotionWrite"](ownerCtx(), nil); err == nil || f.promotes != 0 {
+			t.Fatal("the PATCH went on a check that had failed", err, f.promotes)
+		}
+	})
+	t.Run("a read that fails before the claim", func(t *testing.T) {
+		p, f, operations, candidate := setup(t)
+		f.asset.mu.Lock()
+		f.asset.body = []byte("different bytes")
+		f.asset.mu.Unlock()
+		if _, err := operations["releasePromotionObserve"](ownerCtx(), nil); err == nil {
+			t.Fatal("the changed bytes passed the read")
+		}
+		if _, err := operations["releasePromotionClaim"](ownerCtx(), nil); err == nil {
+			t.Fatal("a claim was spent on a proof the last read could not renew")
+		}
+		history, err := p.ledger.drafts(ownerCtx(), candidate)
+		if err != nil || len(history) != 1 || history[0].State != "ready" {
+			t.Fatal("the failed read spent the claim", history, err)
+		}
+	})
 }
 
 func TestCandidateDraftRollbackPreservesStartedEffect(t *testing.T) {

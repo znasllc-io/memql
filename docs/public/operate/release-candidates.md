@@ -420,11 +420,14 @@ Upload each destination with `releasePublishCandidate`. Once every destination
 in the candidate has a verified complete publication receipt, separately invoke
 `releasePromoteCandidateDraft(candidateId, approvalId, targetId)`. Its recipe
 checks completion, observes every expected asset's full bytes, claims promotion,
-changes visibility and records another verified readback. The tag, name, notes,
-prerelease status, exact asset inventory and asset IDs must agree. The reviewed
-`draft.latest` flag selects whether promotion should also make this
-the latest release. It defaults to false, is incompatible with prereleases, and
-when true requires the latest-release endpoint to read back this exact ID.
+changes visibility and records another verified readback of every byte. The tag,
+name, notes, prerelease status, exact asset inventory and asset IDs must agree.
+Between the claim and the change of visibility it reads no bytes: it reads the
+inventory, the release and its tag, and each asset must still have the ID whose
+bytes it read. The reviewed `draft.latest` flag selects whether promotion should
+also make this the latest release. It defaults to false, is incompatible with
+prereleases, and when true requires the latest-release endpoint to read back this
+exact ID.
 See the [GitHub release API contract](https://docs.github.com/en/rest/releases/releases).
 A saved release does all of this in one call: see
 [Publish a whole release in one call](#publish-a-whole-release-in-one-call).
@@ -490,9 +493,15 @@ archival only; it cannot remove canonical release downloads or registry images.
 An upload lease and pending publication receipts coordinate this system's uploads
 and promotion across replicas. GitHub has no atomic operation binding draft
 visibility, its tag and all assets together. Before/after checks detect observed
-external drift; they cannot exclude concurrent remote administrators. The only delete
-is of an asset GitHub reports as incomplete, under an approved name, on the bound
-draft. Latest selection follows only the reviewed flag.
+external drift; they cannot exclude concurrent remote administrators. Promotion reads an
+asset's bytes before its claim and after its PATCH, and in between the listing stands for
+them: the asset's ID and the digest GitHub reports. GitHub's
+[asset API](https://docs.github.com/en/rest/releases/assets) can rename an asset but
+offers no way to change its bytes, and replacing one means deleting it and uploading
+another. A replacement the listing does not show yet, or bytes changed under an unchanged
+ID and digest, would show only in the read after the PATCH, with the release already
+public. The only delete is of an asset GitHub reports as incomplete, under an approved
+name, on the bound draft. Latest selection follows only the reviewed flag.
 
 The candidate identity includes both lifecycle recipes whenever reviewed draft
 metadata is configured. Changed engine or workflow identity requires fresh
@@ -570,11 +579,32 @@ Two stops need more than pressing again:
   enough, since the next publish sends it. Once it has one, nothing sends it again, so
   removing it would leave the release unable to go public. A read that fails is not a
   conflict: it ends the call as `operation_unconfirmed`, and pressing again reads again.
+  Found once promotion has started, the reason says the release may already be public.
 - **`promotion_unconfirmed`** means making the release public was claimed and could
   not be confirmed. A claimed promotion never repeats its PATCH on a guess, including
   when the read just before the PATCH fails, so pressing again cannot get past it while
-  the release is still a draft. If it is still a draft on GitHub, publish it there, then
-  press **Publish release** again to record it.
+  the release is still a draft. If it is still a draft on GitHub, check that its tag, notes
+  and files are still the approved ones, publish it there, then press **Publish release**
+  again to record it. The press verifies all of that and refuses a release that differs.
+
+A claim with no PATCH behind it is the case only the owner can clear, so little happens
+between the two, and it does not grow with the release. The credential is fetched before
+the claim, and a failure there leaves the draft `ready`, so pressing again works. After
+the claim the call checks the lease, the owner and the release profile, then reads the
+inventory, the release and its tag, usually three requests and no bytes. A read that gets
+no answer repeats for about 15 seconds, longer if a request hangs. A read that shows a
+change stops the promotion at once. What still leaves a claim with no PATCH sent:
+
+- those reads getting no answer after the repeats, or showing that an asset, the tag or
+  the release changed since the bytes were read. A file that differs reads
+  `release_asset_conflict`, and once it is back the next press reads
+  `promotion_unconfirmed`. Anything else reads `promotion_unconfirmed` directly;
+- the lease, the owner's role or the release profile no longer holding;
+- the node dying between the claim and the PATCH, which first reads
+  `publication_interrupted`.
+
+A PATCH GitHub refused or lost reads the same way: nothing can tell whether it landed
+until the release is seen to be public.
 
 ## Publish portable catalog evidence
 

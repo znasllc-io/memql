@@ -79,7 +79,8 @@ func (e *ConflictError) Unwrap() error { return ErrConflict }
 // lag, is not proven. A stopped call is expensive, since a many-file publication
 // loses the rest of its run, and a re-read costs one GET. So each read gets a few
 // more chances over fifteen seconds. It stays read-only: the write is never
-// repeated, and a write still unseen afterward stays uncertain.
+// repeated, and a write still unseen afterward stays uncertain. A read with no answer
+// before a promotion's PATCH gets the same chances, because only the owner can recover it.
 var settleDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
 
 // settled repeats a read-only observation until it reports done or the delays run
@@ -348,21 +349,30 @@ func (s *publication) request(ctx context.Context, method, endpoint string, body
 	return response, nil
 }
 
+// readFailed marks a metadata read that got no usable answer: no response, a status
+// other than 200 or 404, or a body it could not read. It says nothing about the release,
+// so reading again is safe. A 404 or a body that differs is an answer, which the look
+// before a PATCH must not read past: a lagging replica could show the old state next.
+type readFailed struct{ error }
+
 func (s *publication) getJSON(ctx context.Context, path string, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	r, err := s.request(ctx, http.MethodGet, s.p.api+path, nil, 0, "application/vnd.github+json", true)
 	if err != nil {
-		return err
+		return readFailed{err}
 	}
 	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
+	if r.StatusCode == http.StatusNotFound {
 		return errors.New("release API read was refused")
+	}
+	if r.StatusCode != http.StatusOK {
+		return readFailed{errors.New("release API read was refused")}
 	}
 	const maxJSON = 2 << 20
 	data, err := io.ReadAll(io.LimitReader(r.Body, maxJSON+1))
 	if err != nil || len(data) > maxJSON || json.Unmarshal(data, out) != nil {
-		return errors.New("release API returned invalid or excessive metadata")
+		return readFailed{errors.New("release API returned invalid or excessive metadata")}
 	}
 	return nil
 }

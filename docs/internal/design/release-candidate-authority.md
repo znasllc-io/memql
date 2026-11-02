@@ -260,8 +260,13 @@ immutable tag reconciliation, draft inventory, the unique creation claim,
 creation and receipt recording. `releasePromoteDraftWorkflow` requires every
 candidate destination to have a complete publication, observes all release
 bytes, claims promotion, writes and records readback. Native ports enforce
-those prerequisites independently of recipe ordering. Latest selection is a
-reviewed flag, not a Go policy; selecting it requires exact latest-ID readback.
+those prerequisites independently of recipe ordering. The write takes the
+observation from earlier in the same call and reads no bytes before its PATCH,
+only the release, tag and asset IDs, because a claim is never reset and whatever
+fails in that span strands the release. The full read follows the PATCH
+([why](../ops/harness-decisions.md#a-release-publishes-in-one-call-2026-11-01)).
+Latest selection is a reviewed flag, not a Go policy; selecting it requires exact
+latest-ID readback.
 
 `release_draft_intents` has one row per normalized API origin, repository and
 tag. It binds the candidate, owner, approval, canonical plan and unique intent

@@ -153,6 +153,17 @@ func lifecycle(t *testing.T, f *lifecycleFixture) *Lifecycle {
 func (f *lifecycleFixture) inventory() []AssetExpectation {
 	return []AssetExpectation{{Name: f.base.target.AssetName, SHA256: expected([]byte("release bytes")).SHA256, Size: int64(len("release bytes"))}}
 }
+
+// observed is what a promotion holds by the time of its PATCH: the complete byte
+// read made earlier in the same call.
+func (f *lifecycleFixture) observed(t *testing.T) ReleaseState {
+	t.Helper()
+	state, err := lifecycle(t, f).Observe(context.Background(), 73, f.metadata, f.marker, f.inventory())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
 func TestLifecycleCreateRecoverAndPromote(t *testing.T) {
 	for _, lost := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary", true: "lost replies"}[lost], func(t *testing.T) {
@@ -178,7 +189,7 @@ func TestLifecycleCreateRecoverAndPromote(t *testing.T) {
 				t.Fatal(state, found, err, f.creates)
 			}
 			f.base.addAsset(f.base.target.AssetName, []byte("release bytes"))
-			state, err = lifecycle(t, f).Promote(ctx, 73, f.metadata, f.marker, f.inventory())
+			state, err = lifecycle(t, f).Promote(ctx, 73, f.metadata, f.marker, f.inventory(), f.observed(t))
 			if err != nil || state.Draft || len(state.Assets) != 1 {
 				t.Fatal(state, err)
 			}
@@ -203,7 +214,7 @@ func TestLifecycleUncertainRequiresReadOnlyRecovery(t *testing.T) {
 	f.exists = true
 	f.rejectPromote = true
 	f.base.addAsset(f.base.target.AssetName, []byte("release bytes"))
-	if _, err := l.Promote(context.Background(), 73, f.metadata, f.marker, f.inventory()); !errors.Is(err, ErrUncertain) {
+	if _, err := l.Promote(context.Background(), 73, f.metadata, f.marker, f.inventory(), f.observed(t)); !errors.Is(err, ErrUncertain) {
 		t.Fatal(err)
 	}
 	state, err := lifecycle(t, f).Observe(context.Background(), 73, f.metadata, f.marker, f.inventory())
@@ -211,45 +222,102 @@ func TestLifecycleUncertainRequiresReadOnlyRecovery(t *testing.T) {
 		t.Fatal(state, err, f.promotes)
 	}
 }
+
+// Each drift is tried at both stages, because which check sees it depends on when it
+// arrives. Already there when the bytes are read, Observe refuses it. Arriving after
+// that read, only the look before the PATCH can see it.
 func TestLifecycleRefusesDriftBeforePromotion(t *testing.T) {
-	for _, mode := range []string{"source", "name", "body", "prerelease", "unexpected asset", "missing asset", "corrupt bytes", "duplicate name", "wrong size", "wrong digest", "missing marker"} {
-		t.Run(mode, func(t *testing.T) {
-			f := lifecycleFixtureFor(t)
-			f.exists, f.tagExists = true, true
+	other := "sha256:" + strings.Repeat("b", 64)
+	apply := func(f *lifecycleFixture, mode string, metadata *Metadata, marker *string, want *[]AssetExpectation) {
+		f.base.mu.Lock()
+		defer f.base.mu.Unlock()
+		switch mode {
+		case "source":
+			f.base.commit = strings.Repeat("b", 40)
+		case "tag removed":
+			f.tagExists = false
+		case "release removed":
+			f.exists = false
+		case "name on GitHub":
+			f.metadata.Name = "Other"
+		case "body on GitHub":
+			f.metadata.Body = "Different notes"
+		case "prerelease on GitHub":
+			f.metadata.Prerelease = true
+		case "name":
+			metadata.Name = "Other"
+		case "body":
+			metadata.Body = "Different notes"
+		case "prerelease":
+			metadata.Prerelease = true
+		case "unexpected asset":
+			f.base.addAsset("unexpected.zip", nil)
+		case "missing asset":
+			f.base.assets = nil
+		case "replaced asset, same bytes":
+			// Nothing a listing reports differs but the ID. The bytes read belong to
+			// the asset that is gone, so the ID alone must stop this.
+			f.base.assets = nil
 			f.base.addAsset(f.base.target.AssetName, []byte("release bytes"))
-			l := lifecycle(t, f)
-			want := f.inventory()
-			metadata := f.metadata
-			marker := f.marker
-			switch mode {
-			case "source":
-				f.base.commit = strings.Repeat("b", 40)
-			case "name":
-				metadata.Name = "Other"
-			case "body":
-				metadata.Body = "Different notes"
-			case "prerelease":
-				metadata.Prerelease = true
-			case "unexpected asset":
-				f.base.addAsset("unexpected.zip", nil)
-			case "missing asset":
-				f.base.assets = nil
-			case "corrupt bytes":
-				f.base.corrupt = true
-			case "duplicate name":
-				want = append(want, want[0])
-			case "wrong size":
-				want[0].Size++
-			case "wrong digest":
-				want[0].SHA256 = "sha256:" + strings.Repeat("b", 64)
-			case "missing marker":
-				marker = "different"
+		case "renamed asset":
+			f.base.assets[0].Name = "renamed.tar.gz"
+		case "unfinished asset":
+			f.base.assets[0].State = "starter"
+		case "reported size":
+			*f.base.assets[0].Size++
+		case "reported digest":
+			f.base.assets[0].Digest = other
+		case "corrupt bytes":
+			f.base.corrupt = true
+		case "duplicate name":
+			*want = append(*want, (*want)[0])
+		case "wrong size":
+			(*want)[0].Size++
+		case "wrong digest":
+			(*want)[0].SHA256 = other
+		case "wrong digest, none reported":
+			f.base.assets[0].Digest = ""
+			(*want)[0].SHA256 = other
+		case "missing marker":
+			*marker = "different"
+		default:
+			panic(mode)
+		}
+	}
+	for _, mode := range []string{
+		"source", "tag removed", "release removed", "name on GitHub", "body on GitHub", "prerelease on GitHub", "name", "body", "prerelease",
+		"unexpected asset", "missing asset", "replaced asset, same bytes", "renamed asset", "unfinished asset", "reported size", "reported digest",
+		"corrupt bytes", "duplicate name", "wrong size", "wrong digest", "wrong digest, none reported", "missing marker",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			setup := func() *lifecycleFixture {
+				f := lifecycleFixtureFor(t)
+				f.exists, f.tagExists = true, true
+				f.base.addAsset(f.base.target.AssetName, []byte("release bytes"))
+				return f
 			}
-			if _, err := l.Promote(context.Background(), 73, metadata, marker, want); err == nil {
-				t.Fatal("drift accepted")
+			// A new ID on the same bytes is no drift yet: those are the bytes read.
+			if mode != "replaced asset, same bytes" {
+				f := setup()
+				metadata, marker, want := f.metadata, f.marker, f.inventory()
+				apply(f, mode, &metadata, &marker, &want)
+				if _, err := lifecycle(t, f).Observe(context.Background(), 73, metadata, marker, want); err == nil {
+					t.Fatal("drift present at the byte read was accepted")
+				}
 			}
-			if f.promotes != 0 {
-				t.Fatal("drift mutated release")
+			// Bytes that change with nothing else changing get past this look, which
+			// is TestPromoteFindsBytesChangedUnderAnUnchangedIDOnlyAfterItsPatch.
+			if mode != "corrupt bytes" {
+				f := setup()
+				observed := f.observed(t)
+				metadata, marker, want := f.metadata, f.marker, f.inventory()
+				apply(f, mode, &metadata, &marker, &want)
+				if _, err := lifecycle(t, f).Promote(context.Background(), 73, metadata, marker, want, observed); err == nil || errors.Is(err, ErrUncertain) {
+					t.Fatal("drift after the byte read was not refused before the PATCH", err)
+				}
+				if f.promotes != 0 {
+					t.Fatal("drift mutated release", f.promotes)
+				}
 			}
 		})
 	}
@@ -276,7 +344,7 @@ func TestLifecyclePromotesExplicitLatestSelection(t *testing.T) {
 	f.exists, f.tagExists = true, true
 	f.metadata.Latest = true
 	f.base.addAsset(f.base.target.AssetName, []byte("release bytes"))
-	state, err := lifecycle(t, f).Promote(context.Background(), 73, f.metadata, f.marker, f.inventory())
+	state, err := lifecycle(t, f).Promote(context.Background(), 73, f.metadata, f.marker, f.inventory(), f.observed(t))
 	if err != nil || !state.LatestVerified || state.Draft {
 		t.Fatal(state, err)
 	}
@@ -289,6 +357,7 @@ func TestLifecycleDetectsReplacedAssetsAfterPromotion(t *testing.T) {
 	f := lifecycleFixtureFor(t)
 	f.exists, f.tagExists = true, true
 	f.base.addAsset(f.base.target.AssetName, []byte("release bytes"))
+	observed := f.observed(t)
 	original := f.base.hook
 	f.base.hook = func(w http.ResponseWriter, r *http.Request) bool {
 		handled := original(w, r)
@@ -299,7 +368,7 @@ func TestLifecycleDetectsReplacedAssetsAfterPromotion(t *testing.T) {
 		}
 		return handled
 	}
-	if _, err := lifecycle(t, f).Promote(context.Background(), 73, f.metadata, f.marker, f.inventory()); !errors.Is(err, ErrUncertain) {
+	if _, err := lifecycle(t, f).Promote(context.Background(), 73, f.metadata, f.marker, f.inventory(), observed); !errors.Is(err, ErrUncertain) {
 		t.Fatal("asset replacement was not uncertain", err)
 	}
 	if f.promotes != 1 {

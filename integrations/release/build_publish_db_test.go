@@ -229,6 +229,8 @@ type manyFileGitHub struct {
 	beforeUpload func(name string, w http.ResponseWriter, r *http.Request) bool
 	// beforeDownload is the same for one read of an asset's bytes.
 	beforeDownload func(name string, w http.ResponseWriter, r *http.Request) bool
+	// beforeRelease is the same for one read of the release's record or asset list.
+	beforeRelease func(w http.ResponseWriter, r *http.Request) bool
 	// candidate scopes the fence checks to this release's own journal rows.
 	candidate atomic.Value
 	requests  atomic.Int64
@@ -291,6 +293,11 @@ func (g *manyFileGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" && r.URL.Path == release+"/assets" {
 		g.fenced(`release_id=73 AND state='ready' AND upload_lease_until>clock_timestamp()`)
 		if hook := g.beforeUpload; hook != nil && hook(name, w, r) {
+			return
+		}
+	}
+	if r.Method == "GET" && (r.URL.Path == release || r.URL.Path == release+"/assets") {
+		if hook := g.beforeRelease; hook != nil && hook(w, r) {
 			return
 		}
 	}
@@ -563,10 +570,10 @@ func TestReleaseBuildPublishesManyFileTargetsInOneCall(t *testing.T) {
 	if opens := m.library.openCount() - before; opens != 123 {
 		t.Fatal("the candidate was not verified only where the action needs it", opens)
 	}
-	// Each upload's readback (41) and the one promotion's three complete reads:
-	// before its claim, before the PATCH and after it (123). A promotion repeated
-	// per file read the entire release at least 40 more times.
-	if downloads != 164 {
+	// Each upload's readback (41) and the one promotion's two complete reads: before
+	// its claim and after its PATCH (82). A promotion repeated per file read the entire
+	// release at least 40 more times.
+	if downloads != 123 {
 		t.Fatal("the release's bytes were read more than the proof needs", downloads)
 	}
 	var held bool
@@ -914,21 +921,18 @@ func TestReleaseBuildPromotionStopsWhenTheOwnerLosesTheRole(t *testing.T) {
 	}
 }
 
-// Once a promotion is claimed it never repeats on a guess, so a read that fails
-// between the claim and the PATCH cannot be fixed by pressing again. The owner has to
-// be told what will.
+// Once a promotion is claimed it never repeats on a guess, so a read that still fails
+// between the claim and the PATCH cannot be fixed by pressing again. This is the window
+// that remains, and it is a few reads whatever the release's size. The owner has to be
+// told what will fix it.
 func TestReleaseBuildPublishExplainsAPromotionItCannotRepeat(t *testing.T) {
 	m := newManyFileRelease(t, 2)
-	var once sync.Once
-	m.github.beforeDownload = func(_ string, w http.ResponseWriter, _ *http.Request) bool {
-		dropped := false
+	m.github.beforeRelease = func(w http.ResponseWriter, _ *http.Request) bool {
 		if m.draftState() == "promoting" {
-			once.Do(func() {
-				dropped = true
-				dropMidRead(w)
-			})
+			w.WriteHeader(http.StatusBadGateway)
+			return true
 		}
-		return dropped
+		return false
 	}
 	v, err := m.publish(ownerCtx(), m.i)
 	if err != nil {
@@ -938,6 +942,11 @@ func TestReleaseBuildPublishExplainsAPromotionItCannotRepeat(t *testing.T) {
 	if v.Phase != "uncertain" || v.ReasonCode != "promotion_unconfirmed" || promotes != 0 || m.draftState() != "promoting" {
 		t.Fatal("a stopped promotion did not say what it needs", v.Phase, v.ReasonCode, promotes, m.draftState())
 	}
+	// What stopped it may be a change on GitHub, and publishing that by hand is no fix.
+	if !strings.Contains(v.Reason, "still the approved ones") {
+		t.Fatal("the reason sends the owner to publish without checking the draft", v.Reason)
+	}
+	m.github.beforeRelease = nil
 	if v, err = m.publish(ownerCtx(), m.i); err != nil {
 		t.Fatal(err)
 	}
@@ -953,6 +962,144 @@ func TestReleaseBuildPublishExplainsAPromotionItCannotRepeat(t *testing.T) {
 	}
 	if _, promotes, _, _, _ = m.github.counts(); promotes != 0 {
 		t.Fatal("the PATCH was sent after all", promotes)
+	}
+}
+
+// The regression. Whatever can fail between a promotion's claim and its PATCH strands
+// the release until the owner publishes on GitHub, and that used to include a read of
+// every byte, however large the release. A dropped read there now has nothing to drop.
+func TestReleaseBuildPromotionReadsNoBytesBetweenItsClaimAndItsPatch(t *testing.T) {
+	m := newManyFileRelease(t, 2)
+	var inWindow atomic.Int64
+	m.github.beforeDownload = func(_ string, w http.ResponseWriter, _ *http.Request) bool {
+		if _, promotes, _, _, _ := m.github.counts(); promotes == 0 && m.draftState() == "promoting" {
+			inWindow.Add(1)
+			dropMidRead(w)
+			return true
+		}
+		return false
+	}
+	v, err := m.publish(ownerCtx(), m.i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Phase != "published" || v.Catalog.State != "sealed" {
+		t.Fatal("a read in the window stranded the release", v.Phase, v.ReasonCode, m.draftState(), inWindow.Load())
+	}
+	if _, promotes, _, _, _ := m.github.counts(); promotes != 1 || inWindow.Load() != 0 {
+		t.Fatal("the window was not free of byte reads, or the PATCH repeated", promotes, inWindow.Load())
+	}
+}
+
+// A credential that cannot be had costs nothing before the claim and strands the
+// release after it, so a promotion gets its credential first.
+func TestReleaseBuildPromotionHoldsItsCredentialBeforeItsClaim(t *testing.T) {
+	m := newManyFileRelease(t, 2)
+	secrets := m.i.resolver.systemSecret
+	var unavailable atomic.Bool
+	m.i.resolver.systemSecret = func(ctx context.Context, name string) (string, error) {
+		if name == "TAG_TOKEN" && unavailable.Load() {
+			return "", errors.New("the secret store is unreachable")
+		}
+		return secrets(ctx, name)
+	}
+	// The promotion's first read holds a credential already, so from here the next
+	// one asked for is the one its PATCH would use.
+	m.github.beforeDownload = func(string, http.ResponseWriter, *http.Request) bool {
+		if m.receipts() == 2 {
+			unavailable.Store(true)
+		}
+		return false
+	}
+	v, err := m.publish(ownerCtx(), m.i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, promotes, _, _, _ := m.github.counts(); v.Phase != "uncertain" || promotes != 0 || m.draftState() != "ready" {
+		t.Fatal("a credential failure spent the claim", v.Phase, v.ReasonCode, promotes, m.draftState())
+	}
+	m.github.beforeDownload = nil
+	unavailable.Store(false)
+	if v, err = m.publish(ownerCtx(), m.i); err != nil || v.Phase != "published" {
+		t.Fatal("pressing again did not finish", v.Phase, v.ReasonCode, err)
+	}
+	if _, promotes, _, _, _ := m.github.counts(); promotes != 1 {
+		t.Fatal("promotion did not send exactly one PATCH", promotes)
+	}
+}
+
+// Once a promotion is claimed the reason cannot say nothing changed: the release may be
+// public, and an edited file on it is a different problem. Either way the owner is led
+// through the same steps: the approved file back, then whatever each press then says.
+func TestReleaseBuildConflictFoundAfterTheClaimSaysThePromotionStarted(t *testing.T) {
+	for _, afterPatch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "at the last look", true: "after the PATCH"}[afterPatch], func(t *testing.T) {
+			m := newManyFileRelease(t, 2)
+			var approved []byte
+			var once sync.Once
+			m.github.beforeRelease = func(http.ResponseWriter, *http.Request) bool {
+				_, promotes, _, _, _ := m.github.counts()
+				if m.draftState() == "promoting" && (promotes == 1) == afterPatch {
+					once.Do(func() {
+						m.github.mu.Lock()
+						defer m.github.mu.Unlock()
+						approved = m.github.assets[1].body
+						m.github.assets[1].body = []byte("edited after its upload")
+					})
+				}
+				return false
+			}
+			v, err := m.publish(ownerCtx(), m.i)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.github.beforeRelease = nil
+			wantPromotes := 0
+			if afterPatch {
+				// The read after the PATCH cannot tell an edit from a PATCH that did not
+				// land, so it reports the promotion. The next look names the file.
+				wantPromotes = 1
+				if v.ReasonCode != "promotion_unconfirmed" {
+					t.Fatal("wrong bytes after the PATCH were reported as something else", v.Phase, v.ReasonCode)
+				}
+				if v, err = m.publish(ownerCtx(), m.i); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if v.Phase != "uncertain" || v.ReasonCode != "release_asset_conflict" || !strings.Contains(v.Reason, "file-01.tar.gz") || m.draftState() != "promoting" {
+				t.Fatal("the changed file was not named", v.Phase, v.ReasonCode, v.Reason, m.draftState())
+			}
+			if strings.Contains(v.Reason, "nothing was changed") || strings.Contains(v.Reason, "in the draft") {
+				t.Fatal("a claimed promotion was reported as if nothing had happened", v.Reason)
+			}
+			if _, promotes, _, _, _ := m.github.counts(); promotes != wantPromotes {
+				t.Fatal("the PATCH count is wrong", promotes, wantPromotes)
+			}
+			m.github.mu.Lock()
+			m.github.assets[1].body = approved
+			m.github.mu.Unlock()
+			if v, err = m.publish(ownerCtx(), m.i); err != nil {
+				t.Fatal(err)
+			}
+			if !afterPatch {
+				// The claim is spent, so a restored file still needs the owner's hand.
+				if v.ReasonCode != "promotion_unconfirmed" {
+					t.Fatal("pressing again guessed", v.Phase, v.ReasonCode)
+				}
+				m.github.mu.Lock()
+				m.github.published = true
+				m.github.mu.Unlock()
+				if v, err = m.publish(ownerCtx(), m.i); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if v.Phase != "published" || v.Catalog.State != "sealed" {
+				t.Fatal("the restored release was not recorded", v.Phase, v.ReasonCode)
+			}
+			if _, promotes, _, _, _ := m.github.counts(); promotes != wantPromotes {
+				t.Fatal("the PATCH was repeated", promotes, wantPromotes)
+			}
+		})
 	}
 }
 

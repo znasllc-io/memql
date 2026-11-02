@@ -237,16 +237,22 @@ func (i *Integration) executeBuild(ctx context.Context, args map[string]any, act
 		// No error/provider body enters a durable public progress projection.
 		lease.record.ReasonCode, lease.record.Reason = "operation_unconfirmed", "The operation did not finish with verified readback. Check the saved release before continuing."
 		var conflict *githubrelease.ConflictError
+		started := action == "publish" && s.promotionStarted(recording)
 		if errors.As(err, &conflict) {
 			// Unlike an interrupted upload, nothing here can decide which copy is
 			// right, so publishing again would only stop in the same place. It asks
 			// for the approved file back rather than for its removal: once a file has
 			// a receipt nothing sends it again, so removal would strand the release.
 			lease.record.ReasonCode, lease.record.Reason = "release_asset_conflict", "The file "+conflict.AssetName+" in the draft is not the approved file, and nothing was changed. Put the approved file in its place, then publish again."
-		} else if action == "publish" && s.promotionStarted(recording) {
+			if started {
+				// The PATCH may have landed, so this may no longer be a draft.
+				lease.record.Reason = "The file " + conflict.AssetName + " in the release is not the approved file, and making the release public had already started, so it may be public. Put the approved file in its place, then publish again."
+			}
+		} else if started {
 			// A claimed promotion never repeats its PATCH on a guess, so pressing again
-			// cannot get past this while the release is still a draft.
-			lease.record.ReasonCode, lease.record.Reason = "promotion_unconfirmed", "Making the release public was started and could not be confirmed, and it is never repeated on a guess. If it is still a draft on GitHub, publish it there. Then publish again here to record it."
+			// cannot get past this while the release is still a draft. What stopped it
+			// may be a change on GitHub, and publishing that by hand would fix nothing.
+			lease.record.ReasonCode, lease.record.Reason = "promotion_unconfirmed", "Making the release public was started and could not be confirmed, and it is never repeated on a guess. If it is still a draft on GitHub, check that its tag, notes and files are still the approved ones and publish it there. Then publish again here to record it."
 		}
 		if lease.record.TagAttempted || lease.record.RunAttempted || lease.record.PublicationStarted {
 			lease.record.Phase = "uncertain"
