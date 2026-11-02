@@ -203,3 +203,102 @@ func TestTrainMessageRefusesABadMentionID(t *testing.T) {
 		t.Error("an unknown train event was accepted")
 	}
 }
+
+func fromMainMessage(event TrainEvent) TrainMessage {
+	m := trainMessage(event)
+	m.FromMain, m.OnBoard, m.LeftOff = true, nil, nil
+	return m
+}
+
+func TestAReleaseFromMainSaysWhatLeft(t *testing.T) {
+	m := fromMainMessage(TrainDeparted)
+	m.Commits = 12
+	d := decodeTrain(t, m)
+	e := d.Embeds[0]
+	if !strings.Contains(e.Title, "Release train/2026-10-28-1 left from main") {
+		t.Errorf("title = %q", e.Title)
+	}
+	if !strings.Contains(e.Description, "12 commits since the last release") {
+		t.Errorf("description = %q", e.Description)
+	}
+	if d.Content != "" {
+		t.Errorf("a departure mentioned someone: %q", d.Content)
+	}
+	m.Commits = 0
+	if e := decodeTrain(t, m).Embeds[0]; strings.Contains(e.Description, "commit") {
+		t.Errorf("with no count, description = %q", e.Description)
+	}
+}
+
+func TestAHeldReleaseFromMainSaysHowToGoOn(t *testing.T) {
+	m := fromMainMessage(TrainHeld)
+	m.Reason = "tests.go-unit#1 failed again on its re-run"
+	m.Failed = []string{"tests.go-unit#1"}
+	d := decodeTrain(t, m)
+	if !strings.Contains(d.Content, trainMentionID) {
+		t.Errorf("a held release must mention the owner: %q", d.Content)
+	}
+	var todo string
+	for _, f := range d.Embeds[0].Fields {
+		if f.Name == "What you need to do" {
+			todo = f.Value
+		}
+	}
+	if !strings.Contains(todo, "Push the fix") || !strings.Contains(todo, "Close its pull request") {
+		t.Errorf("todo = %q", todo)
+	}
+	if strings.Contains(todo, "train:hold") {
+		t.Errorf("a release from main has no pull request to hold: %q", todo)
+	}
+}
+
+func TestARetryingReleaseAsksNothing(t *testing.T) {
+	m := fromMainMessage(TrainRetrying)
+	m.Reason = "re-running tests.go-unit#1 once before anyone has to look"
+	m.Failed = []string{"tests.go-unit#1"}
+	d := decodeTrain(t, m)
+	if d.Content != "" {
+		t.Errorf("a retry mentioned someone: %q", d.Content)
+	}
+	if !strings.Contains(d.Embeds[0].Title, "Re-running failed steps of train/2026-10-28-1 once") {
+		t.Errorf("title = %q", d.Embeds[0].Title)
+	}
+	if !strings.Contains(trainFieldNames(d), "Failed") {
+		t.Errorf("fields = %s", trainFieldNames(d))
+	}
+	if TrainRetrying.ActionNeeded() {
+		t.Errorf("a retry is not something the owner must act on")
+	}
+}
+
+func TestASuspectCommitCannotMentionAnyone(t *testing.T) {
+	m := fromMainMessage(TrainHeld)
+	m.Suspects = []string{"abc1234 bump @everyone and <@999999999999999999>"}
+	got, err := TrainDiscordMessage(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		AllowedMentions struct {
+			Users []string `json:"users"`
+		} `json:"allowed_mentions"`
+	}
+	if err := json.Unmarshal(got, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.AllowedMentions.Users) != 1 || payload.AllowedMentions.Users[0] != trainMentionID {
+		t.Errorf("allowed mentions = %v", payload.AllowedMentions.Users)
+	}
+	d := decodeTrain(t, m)
+	var field string
+	for _, f := range d.Embeds[0].Fields {
+		if f.Name == "Commits that reach it" {
+			field = f.Value
+		}
+	}
+	if !strings.Contains(field, "abc1234") {
+		t.Fatalf("no suspects field in %s", trainFieldNames(d))
+	}
+	// What stops a mention is allowed_mentions, above, and that Discord notifies
+	// no mention inside an embed; the field only has to carry the commit.
+}

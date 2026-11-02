@@ -34,6 +34,13 @@ func (i *Integration) awaitApproval(ctx context.Context, d Deps, s pipelines.Tra
 	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 		return err
 	}
+	if moved, err := i.followTrainHead(ctx, d, s, p, t, token); moved || err != nil {
+		return err
+	}
+	if s.LandsAutomatically() {
+		// The owner turned this on while the train was waiting for them.
+		return i.landAutomatically(ctx, d, s, p, t, t.RunID)
+	}
 	rebuilt, err := i.rebuildIfAsked(ctx, d, s, p, t, gh, token)
 	if err != nil || rebuilt {
 		return err
@@ -82,16 +89,22 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 	if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 		return err
 	}
-	head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
-	if err != nil {
-		return err
-	}
-	if head != t.BaseSHA {
-		updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1), ApprovedBy: ptr(""), ApprovedSHA: ptr("")})
-		if err != nil || !ok {
+	// A train from main releases the commit its run tested, and main moving under
+	// it is the ordinary case: GitHub merges it into main's tip, and what was pushed
+	// since goes out in the next release (design record
+	// 2026-11-02-nightly-release-from-main-design.md, D5).
+	if !s.FromMain() {
+		head, _, err := d.GitHub.BranchHead(ctx, token, p.Repository, p.DefaultBranch)
+		if err != nil {
 			return err
 		}
-		return i.build(ctx, d, s, p, updated)
+		if head != t.BaseSHA {
+			updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainBuilding), Rebuilds: ptr(t.Rebuilds + 1), ApprovedBy: ptr(""), ApprovedSHA: ptr("")})
+			if err != nil || !ok {
+				return err
+			}
+			return i.build(ctx, d, s, p, updated)
+		}
 	}
 	sha, err := gh.MergePullRequest(ctx, token, p.Repository, t.PullRequest, t.HeadSHA)
 	if err != nil {
@@ -104,6 +117,16 @@ func (i *Integration) land(ctx context.Context, d Deps, s pipelines.TrainSetting
 		// there first -- and then the train landed.
 		if done, err := i.settleClosedTrain(ctx, d, s, p, t, gh, token); done || err != nil {
 			return err
+		}
+		if s.FromMain() {
+			// A person's push is why GitHub refused: that head has its own run.
+			if moved, err := i.followTrainHead(ctx, d, s, p, t, token); moved || err != nil {
+				return err
+			}
+			if d.Now().UTC().Sub(t.UpdatedAt) < trainLandRetry {
+				trainLog(d).Info("pipelines: GitHub refused a train's merge; the next tick asks again", "repository", p.Repository, "branch", t.Branch, "status", status)
+				return nil
+			}
 		}
 		return i.hold(ctx, d, s, p, t, fmt.Sprintf("GitHub would not merge the approved train (%d). Its head or main moved, or a rule refused it.", status), nil, "")
 	}
@@ -135,7 +158,13 @@ func (i *Integration) settleClosedTrain(ctx context.Context, d Deps, s pipelines
 // comment on each pull request on board naming the commit that boarded and
 // the merge commit, the branch deleted, and the landed message.
 func (i *Integration) recordLanded(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, t Train, gh trainGitHub, token, mergeSHA string) error {
-	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(TrainLanded), LandedSHA: ptr(mergeSHA)})
+	state := TrainLanded
+	if releases, err := i.trainReleasesItself(ctx, d, s, p); err != nil {
+		return err
+	} else if releases {
+		state = TrainReleasing
+	}
+	updated, ok, err := i.casTrain(ctx, d, p, t, TrainPatch{State: ptr(state), LandedSHA: ptr(mergeSHA), HeldReason: ptr("")})
 	if err != nil || !ok {
 		return err
 	}
@@ -151,6 +180,12 @@ func (i *Integration) recordLanded(ctx context.Context, d Deps, s pipelines.Trai
 	reason := "Landed " + trainCount(len(t.OnBoard)) + " on main."
 	if mergeSHA != "" {
 		reason = fmt.Sprintf("Landed %s on main as %s.", trainCount(len(t.OnBoard)), shortCommit(mergeSHA))
+	}
+	if s.FromMain() {
+		reason = fmt.Sprintf("Landed %s at %s as %s.", p.DefaultBranch, shortCommit(t.BaseSHA), shortCommit(mergeSHA))
+		if t.Retried {
+			reason += " It passed on its re-run, so the steps named earlier look flaky."
+		}
 	}
 	return i.notifyTrain(ctx, d, s, p, updated, pipelinenotify.TrainLanded, reason, nil)
 }
@@ -173,7 +208,9 @@ func (i *Integration) cancelTrain(ctx context.Context, d Deps, s pipelines.Train
 // approval never goes quiet.
 func (i *Integration) retireCancelled(ctx context.Context, d Deps, s pipelines.TrainSettings, p Pipeline, cancelled Train, gh trainGitHub, token, reason string, comment bool) {
 	target := cancelled
-	if !comment {
+	if !comment || cancelled.Landed() {
+		// A release replaced after it landed: its pull request is merged, and saying it
+		// will not land would be wrong.
 		target.PullRequest = 0
 	}
 	retireTrain(ctx, d, gh, token, p, target, reason)
@@ -200,9 +237,6 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 		return Train{}, errNoStore
 	}
 	requested := uniquePositive(numbers)
-	if len(requested) == 0 {
-		return Train{}, fmt.Errorf("pipelines: an express train needs at least one pull request number")
-	}
 	raw := ""
 	if d.SystemVariable != nil {
 		if raw, err = d.SystemVariable(ctx, pipelines.TrainSettingsVariable); err != nil {
@@ -215,7 +249,16 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	}
 	s, ok := settings[strings.ToLower(strings.TrimSpace(repository))]
 	if !ok {
+		if len(requested) == 0 {
+			return Train{}, fmt.Errorf("pipelines: an express train needs at least one pull request number")
+		}
 		return Train{}, fmt.Errorf("pipelines: release trains are not configured for %s; add it to %s", repository, pipelines.TrainSettingsVariable)
+	}
+	switch {
+	case s.FromMain() && len(numbers) > 0:
+		return Train{}, fmt.Errorf("pipelines: %s releases from main, so a release carries no named pull requests; start one with none", s.Repository)
+	case !s.FromMain() && len(requested) == 0:
+		return Train{}, fmt.Errorf("pipelines: an express train needs at least one pull request number")
 	}
 	p, err := trainPipeline(ctx, d, s.Repository)
 	if err != nil {
@@ -230,25 +273,37 @@ func (i *Integration) TrainExpress(ctx context.Context, repository string, numbe
 	}
 	// Board before anything is cancelled: an express train that could carry
 	// nothing must leave the waiting train as it was, and say why for each
-	// number named.
+	// number named. A release from main has nothing to board.
 	gh, token, appID, err := trainAccess(ctx, d, p)
 	if err != nil {
 		return Train{}, err
 	}
-	prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
-	if err != nil {
-		return Train{}, err
-	}
-	board, skipped, err := boardTrain(ctx, gh, token, appID, p, Train{Requested: requested}, prs)
-	if err != nil {
-		return Train{}, err
-	}
-	if len(board) == 0 {
-		reasons := make([]string, 0, len(skipped))
-		for _, sk := range skipped {
-			reasons = append(reasons, fmt.Sprintf("#%d %s", sk.Number, sk.Reason))
+	if !s.FromMain() {
+		prs, err := gh.TrainPullRequests(ctx, token, p.Repository, p.DefaultBranch)
+		if err != nil {
+			return Train{}, err
 		}
-		return Train{}, fmt.Errorf("pipelines: no pull request named can board an express train: %s", strings.Join(reasons, "; "))
+		board, skipped, err := boardTrain(ctx, gh, token, appID, p, Train{Requested: requested}, prs)
+		if err != nil {
+			return Train{}, err
+		}
+		if len(board) == 0 {
+			reasons := make([]string, 0, len(skipped))
+			for _, sk := range skipped {
+				reasons = append(reasons, fmt.Sprintf("#%d %s", sk.Number, sk.Reason))
+			}
+			return Train{}, fmt.Errorf("pipelines: no pull request named can board an express train: %s", strings.Join(reasons, "; "))
+		}
+	}
+	// A deploy restarts agent, which kills running CI, so nothing leaves under one.
+	if s.Deployment != nil {
+		dep, err := d.Store.LatestDeployment(memql.ContextWithFreshRead(ctx), p.ID)
+		if err != nil {
+			return Train{}, err
+		}
+		if dep != nil && dep.Moving() {
+			return Train{}, fmt.Errorf("pipelines: %s is deploying, which restarts what runs a release's tests; start it when that has finished", dep.Version)
+		}
 	}
 	now := d.Now().UTC()
 	day := now.In(loc)
@@ -361,6 +416,44 @@ func (i *Integration) handleTrainExpress(ctx context.Context, args map[string]an
 		"pullRequest": t.PullRequest,
 		"onBoard":     boarded,
 	}), nil
+}
+
+// handleTrainStatus reads what the caller's repositories do by themselves.
+func (i *Integration) handleTrainStatus(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	rows, err := i.TrainStatus(handlerContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"repositories": rows}), nil
+}
+
+// handleTrainStanding sets the owner's standing word.
+func (i *Integration) handleTrainStanding(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	release, _ := args["release"].(bool)
+	deploy, _ := args["deploy"].(bool)
+	st, err := i.SetStanding(handlerContext(ctx), stringArg(args, "repository"), release, deploy)
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"repository": st.Repository, "release": st.Release, "deploy": st.Deploy, "setAt": formatTime(st.SetAt)}), nil
+}
+
+// handleDeployRelease is the owner's Deploy button.
+func (i *Integration) handleDeployRelease(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	dep, err := i.DeployRelease(handlerContext(ctx), stringArg(args, "repository"), stringArg(args, "version"))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"deploymentId": dep.ID, "version": dep.Version, "state": dep.State}), nil
+}
+
+// handleDeploymentResume lets automatic deploys go on.
+func (i *Integration) handleDeploymentResume(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	dep, err := i.ResumeDeployments(handlerContext(ctx), stringArg(args, "repository"))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"deploymentId": dep.ID, "version": dep.Version, "state": dep.State}), nil
 }
 
 // intListArg reads a list of whole numbers: the engine hands a JSON number

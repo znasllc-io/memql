@@ -61,7 +61,11 @@ type Deps struct {
 	OpenMaintenanceGoal func(context.Context, MaintenanceRequest) (string, error)
 	Store               Store
 	GitHub              GitHub
-	Gate                Gate
+	// TrainReleaser and DeployEffects let a train go on past landing. Nil on a node
+	// wired with neither, and then it stops at landed (design record 2026-11-02).
+	TrainReleaser TrainReleaser
+	DeployEffects DeployEffects
+	Gate          Gate
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies
@@ -166,7 +170,8 @@ type Integration struct {
 	// this replica (train.go, noteTrainStall). In memory on purpose: it only
 	// decides when to tell the owner, the lease keeps the tick on one agent,
 	// and a replica change restarts the count rather than losing the train.
-	trainStalls trainStallClock
+	trainStalls  trainStallClock
+	deployStalls trainStallClock
 }
 
 // New builds the integration over deps. The plug-in factory (capabilities.go)

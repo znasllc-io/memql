@@ -4229,3 +4229,34 @@ unit checks do not count as MemQL performing its own feature work or as a live
 utility lookup. Required-database checks and native CI must cover the final
 revision before integration. Shared test/runtime capacity and the active Ask
 run are not changed by this work.
+
+## Releasing from main (2026-11-02)
+
+**Trigger.** No scheduled release train had landed. Of 89 pull requests left off the last
+four trains, 75 had not passed their own check, and pull request runs were 7 in 10 of all
+runs. The owner removed the pull request requirement and asked for one automatic release a
+day ([design record](../../superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
+
+**Chosen path.** A train from main (`source: main`) reuses the coordinator's record, lease and
+compare-and-swap, with no cars. It never rebuilds, lands after `main` moved, and follows a push
+to its own branch. Its run is full whatever the policy says (`policyModeForEvent`). A failure
+re-runs once and then holds.
+
+**Alternatives.** A branch per change boarding like a pull request: kept out because whoever
+pushes second resolves a conflict at push time, and it needs boarding, rehearsal and merging
+`main` into every branch. A separate release branch beside the train: the train branch is one.
+
+**What survives a takeover.** Everything: every step reads the row and writes through
+`casTrain`. `TestASecondReplicaResumesATrainFromMain` resumes from running, held and landing, and
+two ticks at once land once.
+
+**Stop conditions.** A second failure, a cancelled or refused run, and a refused merge each hold
+and mention the owner. A held train's fix is a push to its branch.
+
+**Regression tests.** `component/pipelinerun/train_main_test.go`, `train_land_test.go`,
+`component/pipelines/train_test.go`, `train_triage_test.go`, `TestATrainRunIsFullWhateverThePolicyAnswers`,
+and `clients/os/test/cluster/releaseTrains.test.tsx`.
+
+**Unverified.** No live train from main has run: the settings are not set, and production has not
+deployed this code. Landing without `main`'s push run, and a release built from a train's receipts,
+are stages 2 and 3.

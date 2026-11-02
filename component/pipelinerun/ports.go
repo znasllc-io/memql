@@ -38,6 +38,27 @@ type Gate func(ctx context.Context, key string, fn func(context.Context) error) 
 // name the pipeline's secretNames allowlist holds.
 type Secrets func(ctx context.Context, name string) (string, error)
 
+// TrainReleaser is the release integration as a train needs it (wired in app/): one step
+// of publishing a landed train's commit.
+type TrainReleaser interface {
+	AdvanceTrainRelease(context.Context, pipelines.TrainReleaseRequest) (pipelines.TrainReleaseStatus, error)
+}
+
+// DeployEffects is what a deployment does outside GitHub's pull requests and this
+// package's rows (wired in app/): the pin, the catalog, and the installation's ArgoCD.
+// pipelines.ErrDeployBusy from StartSync is another operation on that Application.
+type DeployEffects interface {
+	// CheckDeployOwner refuses when the owner no longer holds the owner role.
+	CheckDeployOwner(ctx context.Context, owner string, authority map[string]any) error
+	// NewestRelease reads the catalog: as the owner themself on a person's request, or
+	// under their recorded authority on a tick.
+	NewestRelease(ctx context.Context, owner string, authority map[string]any, profile, version string) (pipelines.DeployRelease, error)
+	ProposeDeployPin(context.Context, pipelines.DeployPinRequest) (pipelines.DeployPin, error)
+	ReadApplication(ctx context.Context, namespace, name string) (pipelines.DeployApplicationFacts, error)
+	StartSync(context.Context, pipelines.DeployRequest) (pipelines.DeployApplicationFacts, error)
+	TerminateSync(context.Context, pipelines.DeployRequest) error
+}
+
 // Store is every row this package reads and writes, over the DSL constructs
 // of dsl/pipelines (and Deployables' packageById, the outbound seam's staging
 // and the Library's file read). Each method applies its own authority, so a
@@ -172,8 +193,14 @@ type Store interface {
 	// server-only writes, made under the pipeline owner's authority.
 	LatestTrain(ctx context.Context, pipelineID string) (*Train, error)
 	TrainsSince(ctx context.Context, pipelineID string, since time.Time) ([]Train, error)
+	LastLandedTrain(ctx context.Context, pipelineID string) (*Train, error)
 	CreateTrain(ctx context.Context, owner string, t Train) error
 	UpdateTrain(ctx context.Context, owner, trainID string, patch TrainPatch) error
+	Standing(ctx context.Context, pipelineID string) (*TrainStanding, error)
+	SetStanding(ctx context.Context, owner string, s TrainStanding) error
+	LatestDeployment(ctx context.Context, pipelineID string) (*Deployment, error)
+	CreateDeployment(ctx context.Context, owner string, dep Deployment) error
+	UpdateDeployment(ctx context.Context, owner, deploymentID string, patch DeploymentPatch) error
 	UpdateChannel(ctx context.Context, owner, channelID string, patch ChannelPatch) error
 
 	// StageNotification stages one outbound row for the outbound worker to

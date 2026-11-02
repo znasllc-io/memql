@@ -123,8 +123,15 @@ function parse_arguments() {
 function report_policy() {
     log_step "Ruleset policy on ${REPO}"
 
-    local rs
-    rs="$(gh api "repos/${REPO}/rulesets" --jq '[.[]|select(.enforcement=="active")][0].id' 2>/dev/null || true)"
+    local rs=""
+    # The list form omits the rules and the bypass, and a repository may hold more
+    # than one active ruleset: a no-bypass one forbids force pushes beside the one
+    # that names the required checks, so the first active one proves nothing.
+    local id
+    for id in $(gh api "repos/${REPO}/rulesets" --jq '.[]|select(.enforcement=="active")|.id' 2>/dev/null || true); do
+        rs="$id"
+        gh api "repos/${REPO}/rulesets/${id}" 2>/dev/null | jq -e 'any(.rules[]; .type=="required_status_checks")' >/dev/null 2>&1 && break
+    done
     if [[ -z "$rs" || "$rs" == "null" ]]; then
         log_warn "no active ruleset found -- nothing is being bypassed"
         HAS_BYPASS="unknown"

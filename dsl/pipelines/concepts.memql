@@ -88,6 +88,7 @@ concept run {
   attempt            int!  @description("1 for the first run of a key; a re-run is attempt + 1.")
   trigger            enum("webhook", "poll", "schedule", "manual", "rerun", "qualification")!  @description("What opened this row: a GitHub delivery, the poll, the daily schedule, a person's manual rehearsal, a re-run request, or an owner's bounded first-PR qualification.")
   rerunOf            string  @description("The pipelines run this attempt re-runs, when trigger is rerun. Empty otherwise.")
+  onlyStages         []string  @description("The manifest stages this run is limited to: a deploy's verification, which must not run everything else a manual run would. Empty runs what the event selects.")
   rerunFailedOnly    bool  @description("This attempt re-runs only what did not pass in rerunOf (epic memql#5479): a step rerunOf passed, with the same package slice, is carried over as skipped pipeline_passed_earlier rather than run again, and everything else runs. False for a whole re-run and for every attempt a delivery or the poll opened.")
   deliveryId         string  @description("GitHub's delivery GUID (the X-GitHub-Delivery header) of the webhook that opened this run. Correlation only; empty for a poll or a re-run.")
   inboundRequestId   string  @description("The verified staged GitHub request that opened this run. Native repository updates reread its signed body and bind the actor, repository, PR and exact commit; an absent or expired request grants no write authority.")
@@ -149,7 +150,7 @@ concept train {
   repository      string!  @description("The repository as lower-cased owner/name.")
   branch          string!  @description("The train branch, train/<yyyy-mm-dd>-<n>, rebuilt from main on every rebuild.")
   departure       enum("scheduled", "express")!  @description("Why the train left: a scheduled departure from MEMQL_PIPELINES_TRAINS, or an express train the owner asked for.")
-  state           enum("building", "running", "awaiting_approval", "landing", "landed", "held", "cancelled")!  @description("Where the train is. `held` waits for the owner; `landed` and `cancelled` are final.")
+  state           enum("building", "running", "awaiting_approval", "landing", "landed", "releasing", "published", "held", "cancelled")!  @description("Where the train is. `held` waits for the owner; `landed` and `cancelled` are final.")
   requested       []int  @description("An express train's pull request numbers: only these board it. Empty for a scheduled train.")
   replaces        string  @description("The train an express train went ahead of. That train was cancelled, and its pull requests leave on a new train as soon as this one finishes.")
   onBoard         []object  @description("[{number, title, sha, url}] -- the pull requests the train carries, each at the commit it boarded with.")
@@ -162,11 +163,19 @@ concept train {
   pullRequestUrl  string  @description("The train pull request's page.")
   runId           string  @description("The v1:pipelines:run of the train pull request's head, once one opened.")
   rebuilds        int  @description("Rebuilds in this departure: a dropped pull request, a held one, or a moved main. The settings cap them (default 2).")
-  retried         bool  @description("The run's failed steps were re-run once for an environmental failure.")
-  approvedBy      string  @description("The GitHub login whose approval landed the train.")
+  retried         bool  @description("The run's failed steps were re-run once: for an environmental failure, or for any failure on a train from main.")
+  approvedBy      string  @description("The GitHub login whose approval landed the train, or policy:landing-automatic when the repository's train settings landed it.")
   approvedSha     string  @description("The commit that approval named.")
   landedSha       string  @description("The merge commit the train landed on main as.")
   heldReason      string  @description("Why the train waits for the owner, as the owner reads it.")
+  releaseIntentId string  @description("The saved release this landed train is publishing, once it was prepared.")
+  releaseRunId    string  @description("The v1:pipelines:run of that release, once it opened.")
+  releaseRetried  bool  @description("The release run's failed steps were re-run once.")
+  releaseCandidateId string  @description("The release candidate that run produced.")
+  releaseApprovalId string  @description("The approval recorded for that candidate.")
+  releaseApprovedBy string  @description("Who approved it: policy:standing-release, naming the owner whose standing row allowed it.")
+  releaseCatalogDigest string  @description("The signed catalog record of the published release.")
+  publishAttempts int  @description("How many times this train has started publishing. A publish that keeps stopping holds the train.")
   notified        []string  @description("<event>@<headSha> keys of the messages already sent, so a message is sent once whichever replica's tick sends it.")
   departedAt      datetime!  @description("When the train left: its departure time, or when the express request was made.")
   updatedAt       datetime  @description("When the coordinator last wrote the row.")
@@ -175,6 +184,79 @@ concept train {
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
   @relationship(type="references", as="testedBy", field="runId", target=run, direction="outgoing")
+}
+
+/// The owner's standing word that a repository's trains may publish, and its published releases may
+/// deploy, with nobody pressing anything (design record 2026-11-02-nightly-release-from-main-design.md,
+/// D9). One row per pipeline, written by the pipeline's owner through pipelinesTrainStanding, which
+/// records the authority they held when they pressed it: a ceiling, never a credential. Every tick
+/// rebuilds that authority from the owner's CURRENT stored role, so losing the owner role ends it. It is
+/// not a setting because a setting can be written by people who may not approve a release.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="repository", tertiary="release", status="deploy")
+concept standing {
+  ownerUserId  string  @serverSet  @description("v1:identity:user.id of the pipeline's owner who set this.")
+  accountId    string  @description("Copied from the pipeline, so this row is readable by exactly the people its pipeline is.")
+  pipelineId   string!  @description("The v1:pipelines:pipeline this row speaks for.")
+  repository   string!  @description("The repository as lower-cased owner/name.")
+  release      bool  @description("A landed train builds, approves under this row, and publishes its version.")
+  deploy       bool  @description("A published release deploys inside the settings' window.")
+  authority    object  @description("The ceiling captured when the owner pressed the button: no credential. Read only by the coordinator.")
+  setAt        datetime  @description("When the owner last changed this row.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
+}
+
+/// One attempt to put one published release on the installation (design record
+/// 2026-11-02-nightly-release-from-main-design.md, section 7): the pin on a branch, each ArgoCD Application
+/// synced at that exact commit, the rollout verified from outside the cluster, and the pin merged. A failure
+/// syncs each Application back to the commit it ran before. Written by component/pipelinerun's coordinator
+/// alone. One deployment per pipeline is unfinished at a time; the newest row is the current one.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="version", secondary="repository", tertiary="state", status="state")
+concept deployment {
+  ownerUserId     string  @serverSet  @description("v1:identity:user.id of the pipeline's owner.")
+  accountId       string  @description("Copied from the pipeline, so the deployment is readable by exactly the people its pipeline is.")
+  pipelineId      string!  @description("The v1:pipelines:pipeline of the repository the release came from.")
+  repository      string!  @description("That repository as lower-cased owner/name.")
+  version         string!  @description("The version being deployed, without its tag prefix.")
+  tag             string  @description("Its git tag.")
+  sha             string  @description("The commit the release was built from.")
+  candidateId     string  @description("The published release candidate.")
+  catalogDigest   string  @description("Its signed catalog record.")
+  trainId         string  @description("The v1:pipelines:train that published it, when one did.")
+  trigger         enum("automatic", "button")!  @description("Who started it: the window, under the owner's standing row, or the owner's Deploy button.")
+  requestedBy     string  @description("Who pressed the button, or the policy that started it.")
+  authority       object  @description("The authority it acts under: the button's, or the standing row's. A ceiling, no credential.")
+  guards          []object  @description("[{code, detail}] -- why this release waits for the owner's button.")
+  acknowledged    bool  @description("The owner pressed Deploy knowing the guards above.")
+  state           enum("waiting", "pinning", "syncing", "verifying", "landing", "deployed", "rolling_back", "verifying_rollback", "rolled_back", "stopped", "cancelled")!  @description("Where it stands.")
+  installRepository string  @description("The installation's repository as lower-cased owner/name.")
+  proposalId      string  @description("The native proposal that made the pin.")
+  pullRequest     int  @description("The pin's pull request. It merges only after verification, so main never carries a pin that failed.")
+  pullRequestUrl  string  @description("That pull request's page.")
+  baseSha         string  @description("The installation's main when the pin was made.")
+  pinSha          string  @description("The pin commit every Application syncs at.")
+  landedSha       string  @description("The merge commit once the pin reached main.")
+  applications    []object  @description("[{name, uid, previous, request, startedAt}] -- each Application, the commit it ran before, and the sync in flight.")
+  step            int  @description("The Application being synced, by position.")
+  runId           string  @description("The v1:pipelines:run verifying the rollout.")
+  reason          string  @description("Why it stopped or went back, as the owner reads it.")
+  resumedBy       string  @description("Who resumed automatic deploys after this one went back.")
+  resumedAt       datetime  @description("When they did. A rollback pauses automatic deploys until then, because the bad change is still on main.")
+  notified        []string  @description("<event>@<version> keys of the messages already sent.")
+  stateSince      datetime  @description("When it entered this state: what each state's deadline counts from.")
+  requestedAt     datetime!  @description("When it was started.")
+  updatedAt       datetime  @description("When the coordinator last wrote the row.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
+  @relationship(type="references", as="verifiedBy", field="runId", target=run, direction="outgoing")
 }
 
 /// Where a notify stage delivers (D16): a Discord webhook or an email list, named by a manifest

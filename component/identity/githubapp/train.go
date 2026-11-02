@@ -218,6 +218,98 @@ func (c *Client) PutBranchFile(ctx context.Context, bearer, owner, repo, branch,
 	return out.Commit.SHA, nil
 }
 
+// ComparedCommit is one commit between two heads: its full id, its message's
+// first line, and its first parent, which is what it changed against even when
+// it is a merge.
+type ComparedCommit struct {
+	SHA, Subject, Parent string
+}
+
+// CompareCommits lists the commits base..head, oldest first, up to the page
+// GitHub gives, and total, how many there are in all: a long gap lists fewer
+// than total, and the caller says so.
+func (c *Client) CompareCommits(ctx context.Context, bearer, owner, repo, base, head string) (commits []ComparedCommit, total int, err error) {
+	var out struct {
+		TotalCommits int `json:"total_commits"`
+		Commits      []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message string `json:"message"`
+			} `json:"commit"`
+			Parents []struct {
+				SHA string `json:"sha"`
+			} `json:"parents"`
+		} `json:"commits"`
+	}
+	endpoint := repoEndpoint(owner, repo) + "/compare/" + escapePath(base) + "..." + escapePath(head) + "?per_page=100"
+	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &out, largeBody); err != nil {
+		return nil, 0, err
+	}
+	commits = make([]ComparedCommit, 0, len(out.Commits))
+	for _, k := range out.Commits {
+		cc := ComparedCommit{SHA: k.SHA, Subject: strings.TrimSpace(firstMessageLine(k.Commit.Message))}
+		if len(k.Parents) > 0 {
+			cc.Parent = k.Parents[0].SHA
+		}
+		commits = append(commits, cc)
+	}
+	return commits, out.TotalCommits, nil
+}
+
+func firstMessageLine(message string) string {
+	line, _, _ := strings.Cut(message, "\n")
+	return line
+}
+
+// AddEmptyCommit puts a commit that changes nothing on top of branch and
+// answers its id. A train from main needs a commit of its own, or GitHub has
+// nothing to open a pull request for, and when its version needs no bump there
+// is no file to change. The ref moves without force: losing a race fails here
+// rather than discarding what won it.
+func (c *Client) AddEmptyCommit(ctx context.Context, bearer, owner, repo, branch, message string) (string, error) {
+	if err := checkBranchName(branch); err != nil {
+		return "", err
+	}
+	// The git endpoints, not /commits: that one answers with every file's patch,
+	// which for a large head does not fit a default read (largeBody).
+	var ref struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/git/ref/heads/"+branch, bearer, &ref); err != nil {
+		return "", err
+	}
+	if ref.Object.SHA == "" {
+		return "", errors.New("github: the branch's head names no commit")
+	}
+	var head struct {
+		Tree struct {
+			SHA string `json:"sha"`
+		} `json:"tree"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/git/commits/"+ref.Object.SHA, bearer, &head); err != nil {
+		return "", err
+	}
+	if head.Tree.SHA == "" {
+		return "", errors.New("github: the branch's head names no tree")
+	}
+	var made struct {
+		SHA string `json:"sha"`
+	}
+	in := map[string]any{"message": message, "tree": head.Tree.SHA, "parents": []string{ref.Object.SHA}}
+	if _, err := c.callJSON(ctx, http.MethodPost, repoEndpoint(owner, repo)+"/git/commits", bearer, in, &made); err != nil {
+		return "", err
+	}
+	if made.SHA == "" {
+		return "", errors.New("github: the new commit has no id")
+	}
+	if _, err := c.callJSON(ctx, http.MethodPatch, repoEndpoint(owner, repo)+"/git/refs/heads/"+branch, bearer, map[string]any{"sha": made.SHA, "force": false}, nil); err != nil {
+		return "", err
+	}
+	return made.SHA, nil
+}
+
 // CreatePullRequest opens a ready pull request (never a draft: a train
 // pull request is ready for the owner the moment its run passes) and returns
 // its number and page.
@@ -361,4 +453,65 @@ func escapeFilePath(p string) string {
 		parts[i] = url.PathEscape(s)
 	}
 	return strings.Join(parts, "/")
+}
+
+// ComparedFile is one file a comparison changed. Patch is empty where GitHub gave none,
+// which it does for large files and once a comparison's patches grow past its own limit:
+// read the file itself there.
+type ComparedFile struct {
+	Path, Previous, Status, Patch string
+}
+
+// ComparePatches lists what changed between base and head, with each file's patch.
+// complete is false at 300 files, where GitHub stops listing.
+func (c *Client) ComparePatches(ctx context.Context, bearer, owner, repo, base, head string) (files []ComparedFile, complete bool, err error) {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
+		return nil, false, errors.New("a compare needs a base and a head")
+	}
+	var payload struct {
+		Files []struct {
+			Filename         string `json:"filename"`
+			PreviousFilename string `json:"previous_filename"`
+			Status           string `json:"status"`
+			Patch            string `json:"patch"`
+		} `json:"files"`
+	}
+	endpoint := repoEndpoint(owner, repo) + "/compare/" + escapePath(base) + "..." + escapePath(head)
+	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &payload, largeBody); err != nil {
+		return nil, false, err
+	}
+	files = make([]ComparedFile, 0, len(payload.Files))
+	for _, f := range payload.Files {
+		files = append(files, ComparedFile{Path: f.Filename, Previous: f.PreviousFilename, Status: f.Status, Patch: f.Patch})
+	}
+	return files, len(payload.Files) < compareFileLimit, nil
+}
+
+// MarkPullRequestReady takes a draft out of draft, which GitHub requires before it
+// merges one. A pull request that is not a draft is left alone.
+func (c *Client) MarkPullRequestReady(ctx context.Context, bearer, owner, repo string, number int) error {
+	var pr struct {
+		NodeID string `json:"node_id"`
+		Draft  bool   `json:"draft"`
+	}
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/pulls/"+strconv.Itoa(number), bearer, &pr); err != nil {
+		return err
+	}
+	if !pr.Draft {
+		return nil
+	}
+	if pr.NodeID == "" {
+		return errors.New("github: the pull request names no node id")
+	}
+	var result struct {
+		Errors []json.RawMessage `json:"errors"`
+	}
+	in := map[string]any{"query": queueReadyMutation, "variables": map[string]any{"input": map[string]any{"pullRequestId": pr.NodeID}}}
+	if _, err := c.callJSON(ctx, http.MethodPost, "/graphql", bearer, in, &result); err != nil {
+		return err
+	}
+	if len(result.Errors) != 0 {
+		return errors.New("github: the pull request could not be marked ready")
+	}
+	return nil
 }

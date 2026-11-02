@@ -63,6 +63,38 @@ type trainRemote struct {
 	// tokenErr fails every token mint: the owner's connection lost the
 	// repository, say.
 	tokenErr error
+	// commitsBetween answers CompareCommits, keyed "base...head"; a commit's
+	// files are in shaFiles.
+	commitsBetween map[string][]githubapp.ComparedCommit
+	// commitTotals overrides how many commits a comparison says there are.
+	commitTotals map[string]int
+	// refuseMerges makes GitHub refuse every merge, as a conflict with a main
+	// that moved does; mergeAttempts counts the calls.
+	refuseMerges  bool
+	mergeAttempts int
+	// mergeRefusals makes GitHub refuse this many merges with 405, as it does a merge
+	// that caught main moving.
+	mergeRefusals int
+	// otherFiles answers CompareFiles for a head nothing else names.
+	otherFiles []string
+	// comparedFiles answers ComparePatches, and compareIncomplete says GitHub stopped
+	// listing; readied counts the drafts made ready.
+	comparedFiles     []githubapp.ComparedFile
+	compareIncomplete bool
+	readied           []int
+}
+
+// BranchHead answers a branch this fake moved, and otherwise what the run
+// driver's fake knows: main, in these tests.
+func (r *trainRemote) BranchHead(ctx context.Context, token, repository, branch string) (string, string, error) {
+	r.mu.Lock()
+	sha, ok := r.branches[branch]
+	r.mu.Unlock()
+	if ok {
+		watchGitHubCall(r.t, ctx, "BranchHead")
+		return sha, "", nil
+	}
+	return r.fakeGitHub.BranchHead(ctx, token, repository, branch)
 }
 
 const trainAppID = 4822538
@@ -295,7 +327,36 @@ func (r *trainRemote) CompareFiles(ctx context.Context, token, repository, base,
 			return append([]string(nil), r.prFiles[n]...), true, nil
 		}
 	}
-	return nil, true, nil
+	if base == head {
+		return nil, true, nil
+	}
+	return append([]string(nil), r.otherFiles...), true, nil
+}
+
+func (r *trainRemote) CompareCommits(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedCommit, int, error) {
+	watchGitHubCall(r.t, ctx, "CompareCommits")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := base + "..." + head
+	commits := append([]githubapp.ComparedCommit(nil), r.commitsBetween[key]...)
+	total := len(commits)
+	if n, ok := r.commitTotals[key]; ok {
+		total = n
+	}
+	return commits, total, nil
+}
+
+// AddEmptyCommit moves branch to a new commit holding what the old one did.
+func (r *trainRemote) AddEmptyCommit(ctx context.Context, token, repository, branch, message string) (string, error) {
+	watchGitHubCall(r.t, ctx, "AddEmptyCommit")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sha := r.nextSHA("e")
+	if old, ok := r.files[r.branches[branch]]; ok {
+		r.files[sha] = old
+	}
+	r.setBranch(branch, sha)
+	return sha, nil
 }
 
 // Tree serves headTree at any commit when a test set one: the train's head
@@ -318,6 +379,14 @@ func (r *trainRemote) MergePullRequest(ctx context.Context, token, repository st
 	watchGitHubCall(r.t, ctx, "MergePullRequest")
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.mergeAttempts++
+	if r.refuseMerges {
+		return "", &githubapp.StatusError{Status: http.StatusConflict, Endpoint: "/merge"}
+	}
+	if r.mergeRefusals > 0 {
+		r.mergeRefusals--
+		return "", &githubapp.StatusError{Status: http.StatusMethodNotAllowed, Endpoint: "/merge"}
+	}
 	pr := r.trainPRs[number]
 	if pr != nil && pr.open && r.raceMerge {
 		r.raceMerge = false
@@ -363,7 +432,22 @@ func (r *trainRemote) PullRequestState(ctx context.Context, token, repository st
 	if pr.open {
 		state = "open"
 	}
-	return githubapp.PullRequestObservation{Number: number, State: state, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
+	return githubapp.PullRequestObservation{Number: number, State: state, HeadRef: pr.head, Merged: pr.merged, MergeCommitSHA: pr.landedAs}, nil
+}
+
+func (r *trainRemote) ComparePatches(ctx context.Context, token, repository, base, head string) ([]githubapp.ComparedFile, bool, error) {
+	watchGitHubCall(r.t, ctx, "ComparePatches")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.comparedFiles), !r.compareIncomplete, nil
+}
+
+func (r *trainRemote) MarkPullRequestReady(ctx context.Context, token, repository string, number int) error {
+	watchGitHubCall(r.t, ctx, "MarkPullRequestReady")
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.readied = append(r.readied, number)
+	return nil
 }
 
 func (r *trainRemote) OwnerLogin(ctx context.Context, credential, user, repository string) (string, error) {

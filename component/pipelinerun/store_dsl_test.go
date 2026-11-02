@@ -195,6 +195,34 @@ func everyStoreCall(s Store, value string) []struct {
 				PullRequest: ptr(42), Rebuilds: ptr(1), Retried: ptr(true), Notified: ptr([]string{value}), UpdatedAt: ptr(now),
 			})
 		}},
+		{"LastLandedTrain", func() error { _, err := s.LastLandedTrain(ctx, value); return err }},
+		{"UpdateTrain (a release's fields)", func() error {
+			return s.UpdateTrain(ctx, value, value, TrainPatch{
+				ReleaseIntentID: ptr(value), ReleaseRunID: ptr(value), ReleaseCandidateID: ptr(value), ReleaseApprovalID: ptr(value),
+				ReleaseApprovedBy: ptr(value), ReleaseCatalogDigest: ptr(value), ReleaseRetried: ptr(true), PublishAttempts: ptr(2),
+			})
+		}},
+		{"Standing", func() error { _, err := s.Standing(ctx, value); return err }},
+		{"SetStanding (every field)", func() error {
+			return s.SetStanding(ctx, value, TrainStanding{ID: value, AccountID: value, PipelineID: value, Repository: value,
+				Release: true, Deploy: true, Authority: map[string]any{"roleCeiling": value}, SetAt: now})
+		}},
+		{"LatestDeployment", func() error { _, err := s.LatestDeployment(ctx, value); return err }},
+		{"CreateDeployment (every field)", func() error {
+			return s.CreateDeployment(ctx, value, Deployment{ID: value, AccountID: value, PipelineID: value, Repository: value, Version: value, Tag: value,
+				SHA: value, CandidateID: value, CatalogDigest: value, TrainID: value, Trigger: value, RequestedBy: value, Authority: map[string]any{"roleCeiling": value},
+				Guards: []pipelines.DeployGuard{{Code: value, Detail: value}}, Acknowledged: true, State: value, InstallRepository: value, Reason: value,
+				StateSince: now, RequestedAt: now, UpdatedAt: now})
+		}},
+		{"UpdateDeployment (every field)", func() error {
+			return s.UpdateDeployment(ctx, value, value, DeploymentPatch{
+				State: ptr(value), RequestedBy: ptr(value), Trigger: ptr(value), ProposalID: ptr(value), PullRequestURL: ptr(value), BaseSHA: ptr(value),
+				PinSHA: ptr(value), LandedSHA: ptr(value), RunID: ptr(value), Reason: ptr(value), ResumedBy: ptr(value),
+				Guards: ptr([]pipelines.DeployGuard{{Code: value, Detail: value}}), Acknowledged: ptr(true), Authority: ptr(map[string]any{"roleCeiling": value}),
+				PullRequest: ptr(42), Step: ptr(1), Applications: ptr([]DeploymentApplication{{Name: value, UID: value, Previous: value, Request: value, Rollback: value, StartedAt: now}}),
+				ResumedAt: ptr(now), StateSince: ptr(now), UpdatedAt: ptr(now), Notified: ptr([]string{value}),
+			})
+		}},
 		{"StageNotification (to a secret)", func() error {
 			return s.StageNotification(ctx, NotificationRequest{
 				RequestID: value, Medium: "webhook", TargetSecret: value, Subject: value, Body: value, DedupeKey: value, RequestedBy: value,

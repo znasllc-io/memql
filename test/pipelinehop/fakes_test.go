@@ -122,7 +122,11 @@ type fakeRepo struct {
 	tags              map[string]string // "tags/<name>" -> sha
 	commits           map[string]bool   // the commits a tarball exists for
 	changed           []string          // every compare's answer
-	files             fstest.MapFS
+	// A train's GitHub: the files each commit holds, and its pull requests.
+	commitFiles map[string]map[string][]byte
+	trainPRs    map[int]*fakeTrainPR
+	nextPR      int
+	files       fstest.MapFS
 }
 
 // checkWrite is one check-run write, as GitHub received it.

@@ -18,6 +18,7 @@ const buildPublicationContract = "release-build-publication-v1"
 // configuration can supply a provider client, grant, or execution receipt.
 type ReleaseBuildPipeline interface {
 	InspectReleaseBuild(context.Context, pl.ReleaseBuildRequest) (pl.ReleaseBuildSource, error)
+	InspectReleaseBuildAt(context.Context, pl.ReleaseBuildRequest, string) (pl.ReleaseBuildRequest, pl.ReleaseBuildSource, error)
 	StartReleaseBuild(context.Context, pl.ReleaseBuildRequest, func(context.Context) error) (pl.ReleaseBuildRun, error)
 	ObserveReleaseBuild(context.Context, pl.ReleaseBuildRequest) (pl.ReleaseBuildRun, bool, error)
 }

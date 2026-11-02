@@ -359,8 +359,8 @@ func (c *cluster) connectWith(t *testing.T, label, delivery string, compute pipe
 	if err != nil {
 		t.Fatalf("connect %s: %v", s.name, err)
 	}
-	if res.Repository != s.name || !slices.Equal(res.Stages, testStages) {
-		t.Fatalf("connect answered %+v; want %s with stages %v", res, s.name, testStages)
+	if res.Repository != s.name || !slices.Equal(res.Stages[:min(len(testStages), len(res.Stages))], testStages) {
+		t.Fatalf("connect answered %+v; want %s with stages starting %v", res, s.name, testStages)
 	}
 	p, err := c.b.store.PipelineByID(fresh(), res.PipelineID)
 	if err != nil || p == nil {

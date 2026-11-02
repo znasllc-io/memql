@@ -337,55 +337,29 @@ native assembly and publication contract. Deployment composition remains in
 
 MemQL uses a single long-lived branch: `main`.
 
-1. **Every change goes through a branch + PR; `main` refuses direct pushes**
-   (a repository ruleset: `pull_request`, `required_status_checks`,
-   `deletion` and `non_fast_forward`; the merge queue went with the switch below).
-   **Release trains carry `main`**
-   ([pipelines.md](docs/public/operate/pipelines.md#release-trains); design
-   record [2026-10-27](docs/superpowers/specs/2026-10-27-release-trains-design.md)):
-   a session branches, pushes, opens the PR, gets its `MemQL / memql` check
-   green, and **stops -- it never merges, and never reviews or approves a pull
-   request**: sessions act on GitHub under the owner's account, so a session's
-   approval of a train pull request would land code the owner has not seen.
-   At each departure (twice a day, per
-   `MEMQL_PIPELINES_TRAINS`) the MemQL app merges every ready PR onto one
-   `train/<date>-<n>` branch, runs the pipeline once and opens a train PR; the
-   owner's GitHub approval of that PR is what lands it, and Discord says what
-   happened and what needs the owner. A PR a train drops gets `train:dropped`:
-   its session fixes it, pushes, and removes the label. `train:hold` keeps a PR
-   off trains. An urgent fix asks the owner for an express train
-   (`pipelinesTrainExpress`). **Trains are on since 2026-10-29** (the
-   record's section 12; what was done and what is still to come is in
-   [ruleset-baseline.md](docs/internal/ops/ruleset-baseline.md#release-trains-replace-the-merge-queue-2026-10-27)):
-   `main` requires `MemQL / memql`, the check a train pull request's run
-   reports.
-2. **Emergencies only: the owner's BYPASS, never a settings change.** GitHub
-   never lets a PR's author approve it, so the requirement stays on and an
-   emergency proceeds through the bypass (`require_code_owner_review: true` +
-   `bypass_actors: RepositoryRole(admin), pull_request`):
+1. **A change lands by pushing to `main`, with no pull request and no CI of its
+   own** (the owner's decision, 2026-11-02; design record
+   [2026-11-02](docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
+   Pull `main`, write the change and its tests, run the tests of what you touched,
+   pull again and resolve any conflict yourself, then push: the session that wrote
+   the change is the one that knows how to merge it. Work that is not ready stays
+   on a branch of its own. **Never force-push:** a ruleset with no bypass refuses
+   it, on `memql`, `memql-znas`, `memql-project` and `memql-fylo` alike.
 
-   ```bash
-   scripts/dev/merge-as-owner.sh --pr=<n> --check                          # policy + readiness, merges nothing
-   scripts/dev/merge-as-owner.sh --pr=<n> --emergency="<why it cannot wait>"   # posts the reason, then merges
-   ```
+   **Nothing tests `main` until the release does,** so a broken `main` stops every
+   session and the night's release. Fix it or revert it at once, whoever broke it.
+   Until production's delivery policy declines it (design record, D6), each push
+   also starts a full run, so push finished work, not every commit.
 
-   The script refuses a merge without `--emergency` and posts the reason on the
-   PR before it merges, so the trail says why `main` moved outside a train. It
-   requires a successful check from every context the live ruleset requires,
-   bound to **GitHub App 4822538**, and refuses a red, pending, cancelled,
-   skipped or absent required check; absence is not success (the historical
-   `ci-required` gap allowed memql#5709 to merge while its tests were still
-   pending). The App binding and newest matching attempt are verified
-   independently. Non-required failures remain visible as `failed (not
-   required)` and their logs still deserve review. If the required-check list
-   cannot be read, the script refuses on every failed or running check. It
-   MEASURES the drift from the base (`compare/<base>...<head>`, printed by
-   `--check` as a `base` line) and refuses on a non-zero count or an unreadable
-   comparison; forcing with `--admin` lands a tree CI never tested against the
-   current base. It measures rather than reading `mergeStateStatus`, which names
-   only the STRONGEST blocker: every owner PR is `BLOCKED` on a code-owner
-   review its author may not give, and that hides any staleness. Do not "fix"
-   any of this by lowering `require_code_owner_review`.
+2. **A release leaves once a day, and by hand.** Where a repository sets
+   `source: main` in `MEMQL_PIPELINES_TRAINS`
+   ([pipelines.md](docs/public/operate/pipelines.md#releasing-from-main)), a train
+   branches off `main`, runs everything, and lands by the owner's approval or by
+   itself. A failure re-runs its failed steps once and then holds for a person, who
+   pushes the fix to the train's branch. Forks and Dependabot still use pull
+   requests, which a person merges once their check is green;
+   `scripts/dev/merge-as-owner.sh` remains for that. A session never reviews or
+   approves a pull request: it acts on GitHub under the owner's account.
 3. **Pre-release -- no backwards-compat shims or deprecation windows, EXCEPT in
    the DSL.** For Go seams, wire contracts, gRPC messages and env vars: fix
    MemQL and the consumer at once and delete what is no longer needed. The

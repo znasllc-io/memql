@@ -136,6 +136,7 @@ mutation run createPipelineRun {
     trigger         string!
     rerunOf         string
     rerunFailedOnly bool
+    onlyStages      []string
     deliveryId      string
     inboundRequestId string
     pullRequest     int
@@ -159,7 +160,7 @@ mutation run createPipelineRun {
     durationMs      int
   }
   insert {
-    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, inboundRequestId, pullRequest, headBranch, releaseTag, baseSha, title, version, policySnapshot, qualification, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs }
+    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, inboundRequestId, pullRequest, headBranch, releaseTag, baseSha, title, version, policySnapshot, qualification, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs, onlyStages }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -293,13 +294,124 @@ mutation train updatePipelineTrain {
     approvedSha     string
     landedSha       string
     heldReason      string
+    releaseIntentId string
+    releaseRunId    string
+    releaseRetried  bool
+    releaseCandidateId string
+    releaseApprovalId string
+    releaseApprovedBy string
+    releaseCatalogDigest string
+    publishAttempts int
     notified        []string
     updatedAt       string
   }
   update {
-    accept { state, onBoard, leftOff, dropped, version, baseSha, headSha, pullRequest, pullRequestUrl, runId, rebuilds, retried, approvedBy, approvedSha, landedSha, heldReason, notified, updatedAt }
+    accept { state, onBoard, leftOff, dropped, version, baseSha, headSha, pullRequest, pullRequestUrl, runId, rebuilds, retried, approvedBy, approvedSha, landedSha, heldReason, releaseIntentId, releaseRunId, releaseRetried, releaseCandidateId, releaseApprovalId, releaseApprovedBy, releaseCatalogDigest, publishAttempts, notified, updatedAt }
     stamp {
       id: args.trainId
+    }
+  }
+}
+
+/// The owner's standing word (D9). @serverOnly: pipelinesTrainStanding checks the caller is the pipeline's
+/// owner and holds the owner role, and captures their authority, before this write. A client-written row
+/// would skip both and hand the coordinator an owner's authority it was never given.
+@serverOnly
+@actor
+mutation standing setPipelineStanding {
+  args {
+    standingId  string!
+    pipelineId  string!
+    accountId   string
+    repository  string!
+    release     bool!
+    deploy      bool!
+    authority   object
+    setAt       string!
+  }
+  insert {
+    accept { pipelineId, accountId, repository, release, deploy, authority, setAt }
+    stamp {
+      id: args.standingId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Create a deployment (design record 2026-11-02, section 7). @createOnly on state: a second create landing
+/// on an existing deployment's id must not put a finished one back to waiting.
+///
+/// @serverOnly: a deployment moves production. A client-written row could claim a release the owner never
+/// chose, or authority they never gave.
+@createOnly("state")
+@serverOnly
+@actor
+mutation deployment createPipelineDeployment {
+  args {
+    deploymentId  string!
+    pipelineId    string!
+    accountId     string
+    repository    string!
+    version       string!
+    tag           string
+    sha           string
+    candidateId   string
+    catalogDigest string
+    trainId       string
+    trigger       string!
+    requestedBy   string
+    authority     object
+    guards        []object
+    acknowledged  bool
+    state         string!
+    installRepository string
+    reason        string
+    stateSince    string
+    requestedAt   string!
+    updatedAt     string
+  }
+  insert {
+    accept { pipelineId, accountId, repository, version, tag, sha, candidateId, catalogDigest, trainId, trigger, requestedBy, authority, guards, acknowledged, state, installRepository, reason, stateSince, requestedAt, updatedAt }
+    stamp {
+      id: args.deploymentId
+      ownerUserId: actor.userId
+      step: 0
+    }
+  }
+}
+
+/// Advance a deployment. A read-merge with no defaults: the coordinator writes only what a step changes.
+/// @serverOnly for the reason createPipelineDeployment is.
+@serverOnly
+mutation deployment updatePipelineDeployment {
+  args {
+    deploymentId  string!
+    state         string
+    guards        []object
+    acknowledged  bool
+    requestedBy   string
+    authority     object
+    trigger       string
+    proposalId    string
+    pullRequest   int
+    pullRequestUrl string
+    baseSha       string
+    pinSha        string
+    landedSha     string
+    applications  []object
+    step          int
+    runId         string
+    reason        string
+    resumedBy     string
+    resumedAt     string
+    notified      []string
+    stateSince    string
+    updatedAt     string
+  }
+  update {
+    accept { state, guards, acknowledged, requestedBy, authority, trigger, proposalId, pullRequest, pullRequestUrl, baseSha, pinSha, landedSha, applications, step, runId, reason, resumedBy, resumedAt, notified, stateSince, updatedAt }
+    stamp {
+      id: args.deploymentId
     }
   }
 }

@@ -42,18 +42,38 @@ baseline exists so that "quietly" stops being a property the repository has.
 
 ---
 
-## Ruleset 16630577 — `default`
+## Direct pushes to `main` (2026-11-02)
+
+The owner removed the pull request requirement on `memql`, `memql-znas`,
+`memql-project` and `memql-fylo` on 2026-11-02, so a change lands by pushing to
+`main` ([design record](../../superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
+On `memql` the rulesets were recreated, which is why their ids changed. Each
+repository now holds two, because a bypass covers every rule in its ruleset:
+
+| Ruleset on `memql` | Rules | Bypass |
+|---|---|---|
+| `26357803`, `default branch` | `deletion`, `non_fast_forward`, `required_status_checks` | repository admin, always |
+| `26357817`, `no force push` | `deletion`, `non_fast_forward` | none |
+
+An admin, which is what every session runs as, can push to `main` past the required
+check, and nobody can force-push it or delete it. Both are asserted, by the
+`ruleset-drift` and `ruleset-no-force-push` jobs.
+
+**Open, and warned about on every audit:** the required check rule names no check on
+any of the four, so GitHub requires none. The train's code still requires a passing run,
+but `scripts/release/release-engine.sh` refuses to publish until the rule names exactly
+one. Add `MemQL / memql`, `MemQL / znas` and `MemQL / memql-project`, from the app
+`memql-for-znas-llc` (4822538). `memql-fylo` has no pipeline reporting a check yet.
+
+## Ruleset 16630577 — `default` (replaced, 2026-11-02)
 
 **Enforcement:** `active`
 **Rules:** `deletion`, `non_fast_forward`, `pull_request`,
 `required_status_checks`. `merge_queue` was removed when release trains were
 switched on, 2026-10-29 ([below](#release-trains-replace-the-merge-queue-2026-10-27))
-**Asserted by:** the `ruleset-drift` job.
 
-This is the ruleset that makes `main` refuse a direct push and routes every
-change through a PR (CLAUDE.md, "Branch Workflow"). The four asserted rules are
-required to be present; there are no recorded gaps. `merge_queue` was removed
-at the switch and is deliberately not asserted.
+This was the ruleset that made `main` refuse a direct push and routed every
+change through a PR. The section stays for its history.
 
 The full narrative of the 2026-08-06 double drop and the 2026-08-14 restore is
 in [merge-queue.md](merge-queue.md); the point-in-time evidence is in
@@ -211,7 +231,7 @@ rulesets were saved before those writes.
 
 ---
 
-## Ruleset 19450314 — `Code Quality Copilot review for default branch`
+## Ruleset 19450314 — `Code Quality Copilot review for default branch` (deleted, 2026-11-02)
 
 **Enforcement:** `disabled` — deliberately. See the decision below.
 **Rules:** `copilot_code_review`

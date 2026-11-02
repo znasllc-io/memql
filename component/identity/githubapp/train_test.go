@@ -3,6 +3,7 @@ package githubapp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -231,5 +232,80 @@ func TestRefsReviewsCommentsAndLabels(t *testing.T) {
 	}
 	if err := c.CreateBranchRef(ctx, "tok", "acme", "widget", "train/../main", "x"); err == nil {
 		t.Errorf("CreateBranchRef accepted a branch name with ..")
+	}
+}
+
+func TestCompareCommitsReadsSubjectsAndTotal(t *testing.T) {
+	hub := newHub().on("/repos/acme/widget/compare/aaa...bbb", func(r *http.Request) (int, string) {
+		if r.URL.Query().Get("per_page") != "100" {
+			return http.StatusBadRequest, `{"message":"unexpected query"}`
+		}
+		return http.StatusOK, `{"total_commits":120,"commits":[
+			{"sha":"c1","commit":{"message":"Fix the badge\n\nThe long story."},"parents":[{"sha":"p1"}]},
+			{"sha":"c2","commit":{"message":"Merge branch x"},"parents":[{"sha":"first"},{"sha":"second"}]}]}`
+	})
+	got, total, err := trainTestClient(t, hub).CompareCommits(context.Background(), "tok", "acme", "widget", "aaa", "bbb")
+	if err != nil {
+		t.Fatalf("CompareCommits: %v", err)
+	}
+	if total != 120 || len(got) != 2 {
+		t.Fatalf("got %d commits of %d, want 2 of 120", len(got), total)
+	}
+	if got[0] != (ComparedCommit{SHA: "c1", Subject: "Fix the badge", Parent: "p1"}) {
+		t.Errorf("first commit = %+v", got[0])
+	}
+	if got[1].Parent != "first" {
+		t.Errorf("a merge's parent = %q, want its first", got[1].Parent)
+	}
+}
+
+func TestAddEmptyCommitKeepsTheTreeAndNeverForces(t *testing.T) {
+	hub := newHub().
+		json("/repos/acme/widget/git/ref/heads/train-build/2026-11-02-1", http.StatusOK, `{"object":{"sha":"head1"}}`).
+		json("/repos/acme/widget/git/commits/head1", http.StatusOK, `{"tree":{"sha":"tree1"}}`).
+		json("/repos/acme/widget/git/commits", http.StatusCreated, `{"sha":"new1"}`).
+		json("/repos/acme/widget/git/refs/heads/train-build/2026-11-02-1", http.StatusOK, `{}`)
+	sha, err := trainTestClient(t, hub).AddEmptyCommit(context.Background(), "tok", "acme", "widget", "train-build/2026-11-02-1", "chore: release")
+	if err != nil {
+		t.Fatalf("AddEmptyCommit: %v", err)
+	}
+	if sha != "new1" {
+		t.Errorf("sha = %q", sha)
+	}
+	reqs := hub.seen()
+	if len(reqs) != 4 {
+		t.Fatalf("made %d requests, want 4", len(reqs))
+	}
+	var made, moved map[string]any
+	_ = json.Unmarshal([]byte(hub.bodies[reqs[2]]), &made)
+	_ = json.Unmarshal([]byte(hub.bodies[reqs[3]]), &moved)
+	if made["tree"] != "tree1" || made["message"] != "chore: release" {
+		t.Errorf("commit body = %v", made)
+	}
+	if parents, _ := made["parents"].([]any); len(parents) != 1 || parents[0] != "head1" {
+		t.Errorf("parents = %v, want the branch's head", made["parents"])
+	}
+	if moved["sha"] != "new1" || moved["force"] != false {
+		t.Errorf("ref update = %v, want the new commit with no force", moved)
+	}
+}
+
+func TestComparePatchesKeepsEachFilesPatchAndSaysWhenTheListStopped(t *testing.T) {
+	hub := newHub().json("/repos/acme/widget/compare/v1.0.0...abc123", http.StatusOK,
+		`{"files":[{"filename":"a.go","status":"modified","patch":"+x"},{"filename":"b.go","previous_filename":"old.go","status":"renamed"}]}`)
+	files, complete, err := trainTestClient(t, hub).ComparePatches(context.Background(), "tok", "acme", "widget", "v1.0.0", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || len(files) != 2 || files[0].Patch != "+x" || files[1].Previous != "old.go" || files[1].Patch != "" {
+		t.Fatalf("files = %+v, complete %v", files, complete)
+	}
+	many := make([]string, 0, compareFileLimit)
+	for n := range compareFileLimit {
+		many = append(many, fmt.Sprintf(`{"filename":"f%d.go"}`, n))
+	}
+	hub = newHub().json("/repos/acme/widget/compare/a...b", http.StatusOK, `{"files":[`+strings.Join(many, ",")+`]}`)
+	if _, complete, err = trainTestClient(t, hub).ComparePatches(context.Background(), "tok", "acme", "widget", "a", "b"); err != nil || complete {
+		t.Fatalf("at the limit: complete %v, %v", complete, err)
 	}
 }

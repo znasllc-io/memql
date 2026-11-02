@@ -59,7 +59,7 @@ class PublicReadTest(unittest.TestCase):
     def test_ruleset_identity_and_missing_state_fail(self):
         valid = {"id": 123, "enforcement": "disabled", "rules": [{"type": "pull_request"}]}
         with patch.object(audit, "read", return_value=valid):
-            self.assertEqual(audit.facts("ruleset", "acme/widget", ruleset="123"), ["disabled", "pull_request"])
+            self.assertEqual(audit.facts("ruleset", "acme/widget", ruleset="123"), ["disabled", "pull_request", ""])
         for change in ({"id": 124}, {"enforcement": None}, {"rules": None}):
             with self.subTest(change=change), patch.object(audit, "read", return_value={**valid, **change}):
                 with self.assertRaises(ValueError):

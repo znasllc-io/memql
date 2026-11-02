@@ -200,6 +200,53 @@ func TriageTrainFailure(in TrainTriageInput) TrainVerdict {
 	return TrainVerdict{Action: "hold", Reason: "could not tell which pull request caused " + keys}
 }
 
+// TriageMainTrainFailure decides a failed run of a train from main (design
+// record 2026-11-02-nightly-release-from-main-design.md, section 5). There is no
+// pull request to drop and no push run of main to compare with, so the choice is
+// short: the first failure of any kind runs its failed steps again, because with
+// no CI on each change a flaky test would otherwise stop the night's release, and
+// the next one stops for a person.
+func TriageMainTrainFailure(failed []TrainFailedStep, retried bool) TrainVerdict {
+	keys := failedKeys(failed)
+	if !retried {
+		return TrainVerdict{Action: "retry", Reason: "re-running " + keys + " once before anyone has to look"}
+	}
+	return TrainVerdict{Action: "hold", Reason: keys + " failed again on its re-run"}
+}
+
+// TrainCommit is one commit on main since the last release, as far as triage
+// needs it. Complete says Files is the whole list of what it changed.
+type TrainCommit struct {
+	SHA, Subject string
+	Files        []string
+	Complete     bool
+}
+
+// SuspectCommits are the commits whose change can reach a failed step's
+// packages, by the same analysis a pull request train uses (TrainReachOf): a place
+// for a person to start, never a verdict. Nothing is reverted because of it. With
+// no graph nothing can be told, and an empty commit, such as a merge that changed
+// nothing, changed nothing.
+func SuspectCommits(g *Graph, commits []TrainCommit, failed []TrainFailedStep, fullGlobs []string) []TrainCommit {
+	if g == nil {
+		return nil
+	}
+	var out []TrainCommit
+	for _, c := range commits {
+		if c.Complete && len(c.Files) == 0 {
+			continue
+		}
+		reach := TrainReachOf(g, c.Files, c.Complete, fullGlobs)
+		for _, f := range failed {
+			if len(f.Packages) > 0 && (reach.Unbounded || overlaps(reach.Packages, f.Packages)) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // sameStep reports whether main's failed step m is the train's failed step
 // f: the same key when neither is a shard, or packages in common.
 func sameStep(f, m TrainFailedStep) bool {

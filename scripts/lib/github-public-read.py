@@ -74,7 +74,9 @@ def facts(kind, repo, tag="", ruleset=""):
             raise ValueError("GitHub returned a different or invalid ruleset")
         if not isinstance(row["rules"], list):
             raise ValueError("GitHub ruleset rules are not a list")
-        return [row["enforcement"], " ".join(sorted(name(rule["type"]) for rule in row["rules"]))]
+        checks = [check["context"] for rule in row["rules"] if rule["type"] == "required_status_checks"
+                  for check in rule.get("parameters", {}).get("required_status_checks", [])]
+        return [row["enforcement"], " ".join(sorted(name(rule["type"]) for rule in row["rules"])), ", ".join(checks)]
     raise ValueError("unknown public audit read")
 
 

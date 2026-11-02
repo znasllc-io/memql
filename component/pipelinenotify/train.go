@@ -42,12 +42,27 @@ const (
 	// TrainStalled says a train has stopped moving for a reason the owner
 	// may need to fix: no run started, or a step that keeps failing.
 	TrainStalled TrainEvent = "stalled"
+	// TrainRetrying says a release from main is re-running its failed steps
+	// once. It asks nothing: if they pass, the message that follows says so.
+	TrainRetrying TrainEvent = "retrying"
+	// TrainPublished says a release from main is published.
+	TrainPublished TrainEvent = "published"
+	// The rest are a deployment's (design record 2026-11-02, section 7), which has a
+	// version and no branch.
+	DeployWaiting    TrainEvent = "deploy_waiting"
+	DeployCancelled  TrainEvent = "deploy_cancelled"
+	DeployStarted    TrainEvent = "deploy_started"
+	DeployDeployed   TrainEvent = "deployed"
+	DeployUnmerged   TrainEvent = "deployed_unmerged"
+	DeployRolledBack TrainEvent = "rolled_back"
+	DeployStopped    TrainEvent = "deploy_stopped"
 )
 
 // ActionNeeded reports whether the event asks something of the owner.
 func (e TrainEvent) ActionNeeded() bool {
 	switch e {
-	case TrainHeld, TrainAwaitingApproval, TrainReminder, TrainAdmissionHeld, TrainStalled:
+	case TrainHeld, TrainAwaitingApproval, TrainReminder, TrainAdmissionHeld, TrainStalled,
+		DeployWaiting, DeployCancelled, DeployUnmerged, DeployRolledBack, DeployStopped:
 		return true
 	}
 	return false
@@ -70,6 +85,13 @@ type TrainMessage struct {
 	Failed                                                  []string
 	Reason, MentionUserID                                   string
 	At                                                      time.Time
+	// FromMain marks a release from main, which has no pull requests on board.
+	// Commits is how many commits it carries since the last release.
+	FromMain bool
+	Commits  int
+	// Suspects are commits that can reach what failed, each its short id and
+	// subject: a place to start, not a verdict. Repository text, so escaped.
+	Suspects []string
 }
 
 const trainUsername = "MemQL Pipelines"
@@ -113,7 +135,9 @@ func TrainDiscordMessage(m TrainMessage) ([]byte, error) {
 	if hasPR {
 		train = markdownLink(branch, markdownDestination(prURL), discordFieldValueMax)
 	}
-	embed.Fields = append(embed.Fields, discordField{Name: "Train", Value: train})
+	if branch != "" {
+		embed.Fields = append(embed.Fields, discordField{Name: "Train", Value: train})
+	}
 	if v := escapeDiscord(oneLineText(m.Version)); v != "" {
 		embed.Fields = append(embed.Fields, discordField{Name: "Version", Value: fitRunes(v, discordFieldValueMax)})
 	}
@@ -138,6 +162,13 @@ func TrainDiscordMessage(m TrainMessage) ([]byte, error) {
 			failed = append(failed, escapeDiscord(oneLineText(f)))
 		}
 		embed.Fields = append(embed.Fields, discordField{Name: "Failed", Value: fitRunes(strings.Join(failed, ", "), discordFieldValueMax)})
+	}
+	if len(m.Suspects) > 0 {
+		var lines []string
+		for _, c := range m.Suspects {
+			lines = append(lines, escapeDiscord(oneLineText(c)))
+		}
+		embed.Fields = append(embed.Fields, discordField{Name: "Commits that reach it", Value: fitLines(lines, discordFieldValueMax)})
 	}
 	if raw, ok := osAddress(m.OSOrigin); ok {
 		embed.Fields = append(embed.Fields, discordField{Name: "MemQL OS", Value: markdownLink("Open", markdownDestination(raw), discordFieldValueMax)})
@@ -168,6 +199,13 @@ type trainWords struct {
 }
 
 const (
+	trainTodoDeploy = "Open Pipelines > Releases to deploy it, or leave it and the next release carries it."
+	trainTodoResume = "Automatic deploys are paused, because what caused this is still on main. Fix it, then press Resume in Pipelines > Releases."
+)
+
+const trainTodoHeldFromMain = "Push the fix to this release's branch, or re-run its run, and it goes on by itself. Close its pull request to cancel the release."
+
+const (
 	trainTodoApprove = "Review the train pull request on GitHub and approve it. It lands within a minute of your approval."
 	trainTodoHeld    = "Close the train pull request to cancel this train, or add train:hold to a pull request on board to rebuild without it. If main itself fails, land its fix on an express train first: this train's pull requests leave on a new train as soon as it lands."
 	trainTodoAdmit   = "Open an admission window for the build pool: the Azure cost guard is holding new runs."
@@ -182,7 +220,42 @@ func trainCopy(m TrainMessage, branch string) (trainWords, error) {
 		}
 		return fallback
 	}
+	version := "v" + strings.TrimPrefix(escapeDiscord(oneLineText(m.Version)), "v")
 	switch m.Event {
+	case TrainPublished:
+		return trainWords{headline: "Released " + version, description: or(reason, "The release is published."), color: trainColorLanded}, nil
+	case DeployStarted:
+		return trainWords{headline: "Deploying " + version, description: or(reason, "The pin passed its checks. Production is being updated."), color: trainColorDeparted}, nil
+	case DeployWaiting:
+		return trainWords{headline: "ACTION NEEDED: " + version + " waits for your Deploy button", description: or(reason, "This release needs you before it deploys."), todo: trainTodoDeploy, color: trainColorAction}, nil
+	case DeployCancelled:
+		return trainWords{headline: "ACTION NEEDED: " + version + " did not deploy", description: or(reason, "Production was not touched."), todo: trainTodoDeploy, color: trainColorAction}, nil
+	case DeployDeployed:
+		return trainWords{headline: "PASSED: " + version + " is deployed", description: or(reason, "Production is on this version and its checks passed."), color: trainColorLanded}, nil
+	case DeployUnmerged:
+		return trainWords{headline: "ACTION NEEDED: " + version + " is deployed, and main does not have its pin", description: or(reason, "Merge its pull request."), todo: trainTodoDeploy, color: trainColorAction}, nil
+	case DeployRolledBack:
+		return trainWords{headline: "ACTION NEEDED: " + version + " was rolled back", description: or(reason, "Production is back on what ran before."), todo: trainTodoResume, color: trainColorDropped}, nil
+	case DeployStopped:
+		return trainWords{headline: "ACTION NEEDED: " + version + " stopped partway", description: or(reason, "Production may be on either version."), todo: trainTodoResume, color: trainColorDropped}, nil
+	}
+	if m.FromMain {
+		switch m.Event {
+		case TrainDeparted:
+			description := "The full run starts now."
+			if m.Commits > 0 {
+				description = plural(m.Commits, "commit") + " since the last release. The full run starts now."
+			}
+			return trainWords{headline: "Release " + branch + " left from main", description: description, color: trainColorDeparted}, nil
+		case TrainHeld:
+			return trainWords{headline: "ACTION NEEDED: " + branch + " is held", description: or(reason, "This release needs you before it can go on."), todo: trainTodoHeldFromMain, color: trainColorAction}, nil
+		case TrainReminder:
+			return trainWords{headline: "ACTION NEEDED: " + branch + " is still held", description: or(reason, "This release needs you before the next one can leave."), todo: trainTodoHeldFromMain, color: trainColorAction}, nil
+		}
+	}
+	switch m.Event {
+	case TrainRetrying:
+		return trainWords{headline: "Re-running failed steps of " + branch + " once", description: or(reason, "Some steps failed. They run once more before anyone has to look."), color: trainColorDeparted}, nil
 	case TrainDeparted:
 		return trainWords{
 			headline:    "Train " + branch + " left with " + plural(len(m.OnBoard), "pull request"),

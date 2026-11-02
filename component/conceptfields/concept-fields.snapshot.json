@@ -3987,6 +3987,72 @@
       }
     },
     {
+      "concept": "v1:pipelines:deployment",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "acknowledged",
+        "applications",
+        "authority",
+        "baseSha",
+        "candidateId",
+        "catalogDigest",
+        "guards",
+        "installRepository",
+        "landedSha",
+        "notified",
+        "ownerUserId",
+        "pinSha",
+        "pipelineId",
+        "proposalId",
+        "pullRequest",
+        "pullRequestUrl",
+        "reason",
+        "repository",
+        "requestedAt",
+        "requestedBy",
+        "resumedAt",
+        "resumedBy",
+        "runId",
+        "sha",
+        "state",
+        "stateSince",
+        "step",
+        "tag",
+        "trainId",
+        "trigger",
+        "updatedAt",
+        "version"
+      ],
+      "required": [
+        "pipelineId",
+        "repository",
+        "requestedAt",
+        "state",
+        "trigger",
+        "version"
+      ],
+      "enums": {
+        "state": [
+          "cancelled",
+          "deployed",
+          "landing",
+          "pinning",
+          "rolled_back",
+          "rolling_back",
+          "stopped",
+          "syncing",
+          "verifying",
+          "verifying_rollback",
+          "waiting"
+        ],
+        "trigger": [
+          "automatic",
+          "button"
+        ]
+      }
+    },
+    {
       "concept": "v1:pipelines:pipeline",
       "file": "pipelines/concepts.memql",
       "fields": [
@@ -4063,6 +4129,7 @@
         "maintenanceState",
         "mode",
         "notes",
+        "onlyStages",
         "ownerUserId",
         "pipelineId",
         "policySnapshot",
@@ -4144,6 +4211,24 @@
       }
     },
     {
+      "concept": "v1:pipelines:standing",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "authority",
+        "deploy",
+        "ownerUserId",
+        "pipelineId",
+        "release",
+        "repository",
+        "setAt"
+      ],
+      "required": [
+        "pipelineId",
+        "repository"
+      ]
+    },
+    {
       "concept": "v1:pipelines:train",
       "file": "pipelines/concepts.memql",
       "fields": [
@@ -4163,9 +4248,17 @@
         "onBoard",
         "ownerUserId",
         "pipelineId",
+        "publishAttempts",
         "pullRequest",
         "pullRequestUrl",
         "rebuilds",
+        "releaseApprovalId",
+        "releaseApprovedBy",
+        "releaseCandidateId",
+        "releaseCatalogDigest",
+        "releaseIntentId",
+        "releaseRetried",
+        "releaseRunId",
         "replaces",
         "repository",
         "requested",
@@ -4195,6 +4288,8 @@
           "held",
           "landed",
           "landing",
+          "published",
+          "releasing",
           "running"
         ]
       }

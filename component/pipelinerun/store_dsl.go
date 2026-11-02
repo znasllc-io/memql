@@ -82,9 +82,15 @@ const (
 
 	// The release train's record: the coordinator's server-only read and its
 	// two server-only writes.
-	qPipelineTrainsForPipeline = "pipelineTrainsForPipeline" // (pipelineId)
-	mCreatePipelineTrain       = "createPipelineTrain"
-	mUpdatePipelineTrain       = "updatePipelineTrain"
+	qPipelineTrainsForPipeline      = "pipelineTrainsForPipeline" // (pipelineId)
+	qPipelineLastLandedTrain        = "pipelineLastLandedTrain"   // (pipelineId)
+	mCreatePipelineTrain            = "createPipelineTrain"
+	mUpdatePipelineTrain            = "updatePipelineTrain"
+	qPipelineStandingForPipeline    = "pipelineStandingForPipeline" // (pipelineId)
+	mSetPipelineStanding            = "setPipelineStanding"
+	qPipelineDeploymentsForPipeline = "pipelineDeploymentsForPipeline" // (pipelineId)
+	mCreatePipelineDeployment       = "createPipelineDeployment"
+	mUpdatePipelineDeployment       = "updatePipelineDeployment"
 
 	// Deployables' read of the source a pipeline hangs off (dsl/platform).
 	qPackageByID = "packageById" // (packageId)
@@ -622,6 +628,9 @@ func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
 	if r.RerunFailedOnly {
 		args["rerunFailedOnly"] = true
 	}
+	if len(r.OnlyStages) > 0 {
+		args["onlyStages"] = stringList(r.OnlyStages)
+	}
 	setIfSet(args, "deliveryId", r.DeliveryID)
 	setIfSet(args, "inboundRequestId", bareID(r.InboundRequestID))
 	setIfSet(args, "headBranch", r.HeadBranch)
@@ -784,6 +793,18 @@ func (s *dslStore) TrainsSince(ctx context.Context, pipelineID string, since tim
 	return out, nil
 }
 
+// LastLandedTrain is the newest train that reached the default branch, whatever came
+// next, or nil. Its own query, because TrainsSince reads the newest twenty rows and
+// every quiet night adds a cancelled one.
+func (s *dslStore) LastLandedTrain(ctx context.Context, pipelineID string) (*Train, error) {
+	rows, err := s.systemRead(ctx, qPipelineLastLandedTrain, map[string]any{"pipelineId": bareID(pipelineID)})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	t := trainFromRow(rows[0])
+	return &t, nil
+}
+
 // CreateTrain writes a train's first row under its owner's authority.
 func (s *dslStore) CreateTrain(ctx context.Context, owner string, t Train) error {
 	if _, err := requireOwner(owner, mCreatePipelineTrain); err != nil {
@@ -849,6 +870,20 @@ func (s *dslStore) UpdateTrain(ctx context.Context, owner, trainID string, patch
 	setNamed(args, "approvedSha", patch.ApprovedSHA)
 	setNamed(args, "landedSha", patch.LandedSHA)
 	setNamed(args, "heldReason", patch.HeldReason)
+	setNamed(args, "releaseIntentId", patch.ReleaseIntentID)
+	setNamed(args, "releaseCandidateId", patch.ReleaseCandidateID)
+	setNamed(args, "releaseApprovalId", patch.ReleaseApprovalID)
+	setNamed(args, "releaseApprovedBy", patch.ReleaseApprovedBy)
+	setNamed(args, "releaseCatalogDigest", patch.ReleaseCatalogDigest)
+	if patch.ReleaseRunID != nil {
+		args["releaseRunId"] = bareID(*patch.ReleaseRunID)
+	}
+	if patch.ReleaseRetried != nil {
+		args["releaseRetried"] = *patch.ReleaseRetried
+	}
+	if patch.PublishAttempts != nil {
+		args["publishAttempts"] = *patch.PublishAttempts
+	}
 	if patch.RunID != nil {
 		args["runId"] = bareID(*patch.RunID)
 	}
@@ -877,6 +912,229 @@ func (s *dslStore) UpdateTrain(ctx context.Context, owner, trainID string, patch
 		args["updatedAt"] = patch.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return s.ownerWrite(ctx, owner, mUpdatePipelineTrain, args)
+}
+
+// Standing is a pipeline's standing row, or nil when its owner never set one. It
+// carries the authority, so it is a server read.
+func (s *dslStore) Standing(ctx context.Context, pipelineID string) (*TrainStanding, error) {
+	rows, err := s.systemRead(ctx, qPipelineStandingForPipeline, map[string]any{"pipelineId": bareID(pipelineID)})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	row := rows[0]
+	st := TrainStanding{
+		ID:          bareID(rowString(row, "id")),
+		OwnerUserID: rowString(row, "ownerUserId"),
+		AccountID:   bareID(rowString(row, "accountId")),
+		PipelineID:  bareID(rowString(row, "pipelineId")),
+		Repository:  rowString(row, "repository"),
+		Release:     rowBool(row, "release"),
+		Deploy:      rowBool(row, "deploy"),
+		SetAt:       rowTime(row, "setAt"),
+	}
+	st.Authority, _ = row["authority"].(map[string]any)
+	return &st, nil
+}
+
+// SetStanding writes a pipeline's standing row under its owner's authority.
+func (s *dslStore) SetStanding(ctx context.Context, owner string, st TrainStanding) error {
+	if _, err := requireOwner(owner, mSetPipelineStanding); err != nil {
+		return err
+	}
+	if bareID(st.ID) == "" {
+		return fmt.Errorf("pipelines: %s: a standing row needs an id", mSetPipelineStanding)
+	}
+	args := map[string]any{
+		"standingId": bareID(st.ID),
+		"pipelineId": bareID(st.PipelineID),
+		"repository": normalizeRepository(st.Repository),
+		"release":    st.Release,
+		"deploy":     st.Deploy,
+		"setAt":      st.SetAt.UTC().Format(time.RFC3339Nano),
+	}
+	setIfSet(args, "accountId", bareID(st.AccountID))
+	if len(st.Authority) > 0 {
+		args["authority"] = st.Authority
+	}
+	return s.ownerWrite(ctx, owner, mSetPipelineStanding, args)
+}
+
+// LatestDeployment is a pipeline's newest deployment, or nil when it has none.
+func (s *dslStore) LatestDeployment(ctx context.Context, pipelineID string) (*Deployment, error) {
+	rows, err := s.systemRead(ctx, qPipelineDeploymentsForPipeline, map[string]any{"pipelineId": bareID(pipelineID)})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	dep := deploymentFromRow(rows[0])
+	return &dep, nil
+}
+
+// CreateDeployment writes a deployment's first row under its owner's authority.
+func (s *dslStore) CreateDeployment(ctx context.Context, owner string, dep Deployment) error {
+	if _, err := requireOwner(owner, mCreatePipelineDeployment); err != nil {
+		return err
+	}
+	if bareID(dep.ID) == "" {
+		return fmt.Errorf("pipelines: %s: a deployment needs an id", mCreatePipelineDeployment)
+	}
+	args := map[string]any{
+		"deploymentId": bareID(dep.ID),
+		"pipelineId":   bareID(dep.PipelineID),
+		"repository":   normalizeRepository(dep.Repository),
+		"version":      dep.Version,
+		"trigger":      dep.Trigger,
+		"state":        dep.State,
+		"requestedAt":  dep.RequestedAt.UTC().Format(time.RFC3339Nano),
+	}
+	setIfSet(args, "accountId", bareID(dep.AccountID))
+	setIfSet(args, "tag", dep.Tag)
+	setIfSet(args, "sha", dep.SHA)
+	setIfSet(args, "candidateId", dep.CandidateID)
+	setIfSet(args, "catalogDigest", dep.CatalogDigest)
+	setIfSet(args, "trainId", bareID(dep.TrainID))
+	setIfSet(args, "requestedBy", dep.RequestedBy)
+	setIfSet(args, "installRepository", dep.InstallRepository)
+	setIfSet(args, "reason", dep.Reason)
+	if len(dep.Authority) > 0 {
+		args["authority"] = dep.Authority
+	}
+	if dep.Guards != nil {
+		args["guards"] = deployGuardObjects(dep.Guards)
+	}
+	if dep.Acknowledged {
+		args["acknowledged"] = true
+	}
+	if !dep.StateSince.IsZero() {
+		args["stateSince"] = dep.StateSince.UTC().Format(time.RFC3339Nano)
+	}
+	if !dep.UpdatedAt.IsZero() {
+		args["updatedAt"] = dep.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return s.ownerWrite(ctx, owner, mCreatePipelineDeployment, args)
+}
+
+// UpdateDeployment advances a deployment under its owner's authority.
+func (s *dslStore) UpdateDeployment(ctx context.Context, owner, deploymentID string, patch DeploymentPatch) error {
+	if _, err := requireOwner(owner, mUpdatePipelineDeployment); err != nil {
+		return err
+	}
+	args := map[string]any{"deploymentId": bareID(deploymentID)}
+	setNamed(args, "state", patch.State)
+	setNamed(args, "requestedBy", patch.RequestedBy)
+	setNamed(args, "trigger", patch.Trigger)
+	setNamed(args, "proposalId", patch.ProposalID)
+	setNamed(args, "pullRequestUrl", patch.PullRequestURL)
+	setNamed(args, "baseSha", patch.BaseSHA)
+	setNamed(args, "pinSha", patch.PinSHA)
+	setNamed(args, "landedSha", patch.LandedSHA)
+	setNamed(args, "reason", patch.Reason)
+	setNamed(args, "resumedBy", patch.ResumedBy)
+	if patch.RunID != nil {
+		args["runId"] = bareID(*patch.RunID)
+	}
+	if patch.Guards != nil {
+		args["guards"] = deployGuardObjects(*patch.Guards)
+	}
+	if patch.Acknowledged != nil {
+		args["acknowledged"] = *patch.Acknowledged
+	}
+	if patch.Authority != nil {
+		args["authority"] = *patch.Authority
+	}
+	if patch.PullRequest != nil {
+		args["pullRequest"] = *patch.PullRequest
+	}
+	if patch.Step != nil {
+		args["step"] = *patch.Step
+	}
+	if patch.Applications != nil {
+		args["applications"] = deployApplicationObjects(*patch.Applications)
+	}
+	if patch.ResumedAt != nil && !patch.ResumedAt.IsZero() {
+		args["resumedAt"] = patch.ResumedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if patch.StateSince != nil && !patch.StateSince.IsZero() {
+		args["stateSince"] = patch.StateSince.UTC().Format(time.RFC3339Nano)
+	}
+	if patch.Notified != nil {
+		args["notified"] = stringList(*patch.Notified)
+	}
+	if patch.UpdatedAt != nil && !patch.UpdatedAt.IsZero() {
+		// Nanoseconds: updatedAt is the row's version (casDeployment).
+		args["updatedAt"] = patch.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return s.ownerWrite(ctx, owner, mUpdatePipelineDeployment, args)
+}
+
+func deployGuardObjects(guards []pipelines.DeployGuard) []map[string]any {
+	out := make([]map[string]any, 0, len(guards))
+	for _, g := range guards {
+		out = append(out, map[string]any{"code": g.Code, "detail": g.Detail})
+	}
+	return out
+}
+
+func deployApplicationObjects(apps []DeploymentApplication) []map[string]any {
+	out := make([]map[string]any, 0, len(apps))
+	for _, a := range apps {
+		o := map[string]any{"name": a.Name}
+		setIfSet(o, "uid", a.UID)
+		setIfSet(o, "previous", a.Previous)
+		setIfSet(o, "request", a.Request)
+		setIfSet(o, "rollback", a.Rollback)
+		if !a.StartedAt.IsZero() {
+			o["startedAt"] = a.StartedAt.UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+func deploymentFromRow(row map[string]any) Deployment {
+	dep := Deployment{
+		ID:                bareID(rowString(row, "id")),
+		OwnerUserID:       rowString(row, "ownerUserId"),
+		AccountID:         bareID(rowString(row, "accountId")),
+		PipelineID:        bareID(rowString(row, "pipelineId")),
+		Repository:        rowString(row, "repository"),
+		Version:           rowString(row, "version"),
+		Tag:               rowString(row, "tag"),
+		SHA:               rowString(row, "sha"),
+		CandidateID:       rowString(row, "candidateId"),
+		CatalogDigest:     rowString(row, "catalogDigest"),
+		TrainID:           bareID(rowString(row, "trainId")),
+		Trigger:           rowString(row, "trigger"),
+		RequestedBy:       rowString(row, "requestedBy"),
+		Acknowledged:      rowBool(row, "acknowledged"),
+		State:             rowString(row, "state"),
+		InstallRepository: rowString(row, "installRepository"),
+		ProposalID:        rowString(row, "proposalId"),
+		PullRequest:       rowInt(row, "pullRequest"),
+		PullRequestURL:    rowString(row, "pullRequestUrl"),
+		BaseSHA:           rowString(row, "baseSha"),
+		PinSHA:            rowString(row, "pinSha"),
+		LandedSHA:         rowString(row, "landedSha"),
+		Step:              rowInt(row, "step"),
+		RunID:             bareID(rowString(row, "runId")),
+		Reason:            rowString(row, "reason"),
+		ResumedBy:         rowString(row, "resumedBy"),
+		ResumedAt:         rowTime(row, "resumedAt"),
+		Notified:          rowStrings(row, "notified"),
+		StateSince:        rowTime(row, "stateSince"),
+		RequestedAt:       rowTime(row, "requestedAt"),
+		UpdatedAt:         rowTime(row, "updatedAt"),
+	}
+	dep.Authority, _ = row["authority"].(map[string]any)
+	for _, o := range rowObjects(row, "guards") {
+		dep.Guards = append(dep.Guards, pipelines.DeployGuard{Code: rowString(o, "code"), Detail: rowString(o, "detail")})
+	}
+	for _, o := range rowObjects(row, "applications") {
+		dep.Applications = append(dep.Applications, DeploymentApplication{
+			Name: rowString(o, "name"), UID: rowString(o, "uid"), Previous: rowString(o, "previous"),
+			Request: rowString(o, "request"), Rollback: rowString(o, "rollback"), StartedAt: rowTime(o, "startedAt"),
+		})
+	}
+	return dep
 }
 
 func trainCars(cars []TrainCar) []TrainCar {
@@ -1215,6 +1473,7 @@ func runFromRow(row map[string]any) Run {
 		Trigger:            rowString(row, "trigger"),
 		RerunOf:            bareID(rowString(row, "rerunOf")),
 		RerunFailedOnly:    rowBool(row, "rerunFailedOnly"),
+		OnlyStages:         rowStrings(row, "onlyStages"),
 		DeliveryID:         rowString(row, "deliveryId"),
 		InboundRequestID:   bareID(rowString(row, "inboundRequestId")),
 		PullRequest:        rowInt(row, "pullRequest"),
@@ -1278,30 +1537,38 @@ func channelFromRow(row map[string]any) Channel {
 // trainFromRow reads a v1:pipelines:train through pipelineTrainFull.
 func trainFromRow(row map[string]any) Train {
 	t := Train{
-		ID:             bareID(rowString(row, "id")),
-		OwnerUserID:    rowString(row, "ownerUserId"),
-		AccountID:      bareID(rowString(row, "accountId")),
-		PipelineID:     bareID(rowString(row, "pipelineId")),
-		Repository:     rowString(row, "repository"),
-		Branch:         rowString(row, "branch"),
-		Departure:      rowString(row, "departure"),
-		Replaces:       bareID(rowString(row, "replaces")),
-		State:          rowString(row, "state"),
-		Version:        rowString(row, "version"),
-		BaseSHA:        rowString(row, "baseSha"),
-		HeadSHA:        rowString(row, "headSha"),
-		PullRequest:    rowInt(row, "pullRequest"),
-		PullRequestURL: rowString(row, "pullRequestUrl"),
-		RunID:          bareID(rowString(row, "runId")),
-		Rebuilds:       rowInt(row, "rebuilds"),
-		Retried:        rowBool(row, "retried"),
-		ApprovedBy:     rowString(row, "approvedBy"),
-		ApprovedSHA:    rowString(row, "approvedSha"),
-		LandedSHA:      rowString(row, "landedSha"),
-		HeldReason:     rowString(row, "heldReason"),
-		Notified:       rowStrings(row, "notified"),
-		DepartedAt:     rowTime(row, "departedAt"),
-		UpdatedAt:      rowTime(row, "updatedAt"),
+		ID:                   bareID(rowString(row, "id")),
+		OwnerUserID:          rowString(row, "ownerUserId"),
+		AccountID:            bareID(rowString(row, "accountId")),
+		PipelineID:           bareID(rowString(row, "pipelineId")),
+		Repository:           rowString(row, "repository"),
+		Branch:               rowString(row, "branch"),
+		Departure:            rowString(row, "departure"),
+		Replaces:             bareID(rowString(row, "replaces")),
+		State:                rowString(row, "state"),
+		Version:              rowString(row, "version"),
+		BaseSHA:              rowString(row, "baseSha"),
+		HeadSHA:              rowString(row, "headSha"),
+		PullRequest:          rowInt(row, "pullRequest"),
+		PullRequestURL:       rowString(row, "pullRequestUrl"),
+		RunID:                bareID(rowString(row, "runId")),
+		Rebuilds:             rowInt(row, "rebuilds"),
+		Retried:              rowBool(row, "retried"),
+		ApprovedBy:           rowString(row, "approvedBy"),
+		ApprovedSHA:          rowString(row, "approvedSha"),
+		LandedSHA:            rowString(row, "landedSha"),
+		HeldReason:           rowString(row, "heldReason"),
+		ReleaseIntentID:      rowString(row, "releaseIntentId"),
+		ReleaseRunID:         bareID(rowString(row, "releaseRunId")),
+		ReleaseCandidateID:   rowString(row, "releaseCandidateId"),
+		ReleaseApprovalID:    rowString(row, "releaseApprovalId"),
+		ReleaseApprovedBy:    rowString(row, "releaseApprovedBy"),
+		ReleaseCatalogDigest: rowString(row, "releaseCatalogDigest"),
+		ReleaseRetried:       rowBool(row, "releaseRetried"),
+		PublishAttempts:      rowInt(row, "publishAttempts"),
+		Notified:             rowStrings(row, "notified"),
+		DepartedAt:           rowTime(row, "departedAt"),
+		UpdatedAt:            rowTime(row, "updatedAt"),
 	}
 	if list, ok := row["requested"].([]any); ok {
 		for _, v := range list {

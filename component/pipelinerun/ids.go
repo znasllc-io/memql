@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -84,6 +85,18 @@ func RunGateKey(runID string) string { return "pipelines.drive:" + bareID(runID)
 // call (the rules above).
 func TrainGateKey(repository string) string {
 	return "pipelines.train:" + normalizeRepository(repository)
+}
+
+// StandingIDFor is a pipeline's one standing row.
+func StandingIDFor(pipelineID string) string {
+	return deriveID("pipelines.standing", bareID(pipelineID))
+}
+
+// DeploymentIDFor is a deployment's id: one per (pipeline, version, attempt), so two
+// replicas that both decide to start one write the same row, and the second create is
+// refused by @createOnly rather than deploying twice.
+func DeploymentIDFor(pipelineID, version string, attempt int) string {
+	return deriveID("pipelines.deployment", fmt.Sprintf("%s\x00%s\x00%d", bareID(pipelineID), version, attempt))
 }
 
 // TrainIDFor is a train's id: one per (pipeline, branch), so two replicas

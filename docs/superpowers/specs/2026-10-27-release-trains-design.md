@@ -9,6 +9,9 @@ owner: znas
 
 # Release trains
 
+> **Followed by** [a nightly release from main](2026-11-02-nightly-release-from-main-design.md)
+> (2026-11-02): a repository can release from main with no pull requests on board.
+
 Owner brief, 2026-10-27. Many pull requests to this repository run the full
 pipeline at the same time, and every merge leaves the others behind `main` to
 run again. The owner wants changes to collect and reach production on a
