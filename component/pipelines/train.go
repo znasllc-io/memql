@@ -50,6 +50,22 @@ func IsTrainEvent(event Event, headBranch string) bool {
 	return event == EventPullRequest && strings.HasPrefix(headBranch, TrainBranchPrefix)
 }
 
+// What a train carries and how it lands (design record
+// docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md, section 3).
+// The defaults are the pull request train: a repository that names neither key
+// behaves exactly as it did before these existed.
+const (
+	TrainSourcePullRequests = "pull_requests"
+	TrainSourceMain         = "main"
+	TrainLandingApproval    = "approval"
+	TrainLandingAutomatic   = "automatic"
+)
+
+// TrainAutomaticApprover is what a train that landed by itself records as who
+// approved it. It is a setting's name, not a person's: the owner chose this by
+// setting landing, and nothing asked a model (spec D9).
+const TrainAutomaticApprover = "policy:landing-automatic"
+
 // defaultTrainRebuilds is the cap on rebuilds in one departure when the
 // settings name none: two, the owner's figure (spec section 6, step 6).
 const defaultTrainRebuilds = 2
@@ -63,7 +79,18 @@ type TrainSettings struct {
 	Channel            string   // the notification channel messages go to
 	OwnerDiscordUserID string   // the one Discord user an action-needed message mentions; may be empty
 	MaxRebuilds        int      // 1..5
+	// Source is TrainSourceMain, or empty for a train of pull requests.
+	Source string
+	// Landing is TrainLandingAutomatic, or empty for the owner's approval.
+	Landing string
 }
+
+// FromMain reports a train that carries main as it stands, with no pull
+// requests on board.
+func (s TrainSettings) FromMain() bool { return s.Source == TrainSourceMain }
+
+// LandsAutomatically reports a train that lands as soon as its run passes.
+func (s TrainSettings) LandsAutomatically() bool { return s.Landing == TrainLandingAutomatic }
 
 var (
 	trainDepartureRe  = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
@@ -92,6 +119,8 @@ func ParseTrainSettings(raw string) (map[string]TrainSettings, error) {
 			Channel            string   `json:"channel"`
 			OwnerDiscordUserID string   `json:"ownerDiscordUserId"`
 			MaxRebuilds        int      `json:"maxRebuilds"`
+			Source             string   `json:"source"`
+			Landing            string   `json:"landing"`
 		} `json:"repositories"`
 	}
 	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
@@ -134,6 +163,24 @@ func ParseTrainSettings(raw string) (map[string]TrainSettings, error) {
 		if rebuilds < 1 || rebuilds > 5 {
 			return nil, fmt.Errorf("%s: %s: maxRebuilds %d is outside 1 to 5", TrainSettingsVariable, repo, e.MaxRebuilds)
 		}
+		source, landing := "", ""
+		switch e.Source {
+		case "", TrainSourcePullRequests:
+		case TrainSourceMain:
+			source = TrainSourceMain
+		default:
+			return nil, fmt.Errorf("%s: %s: source %q is neither %s nor %s", TrainSettingsVariable, repo, e.Source, TrainSourcePullRequests, TrainSourceMain)
+		}
+		switch e.Landing {
+		case "", TrainLandingApproval:
+		case TrainLandingAutomatic:
+			landing = TrainLandingAutomatic
+		default:
+			return nil, fmt.Errorf("%s: %s: landing %q is neither %s nor %s", TrainSettingsVariable, repo, e.Landing, TrainLandingApproval, TrainLandingAutomatic)
+		}
+		if landing == TrainLandingAutomatic && source != TrainSourceMain {
+			return nil, fmt.Errorf("%s: %s: landing %s requires source %s; pull requests on board land by the owner's approval", TrainSettingsVariable, repo, TrainLandingAutomatic, TrainSourceMain)
+		}
 		out[repo] = TrainSettings{
 			Repository:         repo,
 			Enabled:            e.Enabled,
@@ -142,6 +189,8 @@ func ParseTrainSettings(raw string) (map[string]TrainSettings, error) {
 			Channel:            strings.TrimSpace(e.Channel),
 			OwnerDiscordUserID: e.OwnerDiscordUserID,
 			MaxRebuilds:        rebuilds,
+			Source:             source,
+			Landing:            landing,
 		}
 	}
 	return out, nil

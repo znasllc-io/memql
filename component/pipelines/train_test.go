@@ -41,6 +41,42 @@ func TestParseTrainSettingsOfNothingIsNoTrains(t *testing.T) {
 	}
 }
 
+func TestParseTrainSettingsDefaultsToPullRequestsAndApproval(t *testing.T) {
+	for name, extra := range map[string]string{
+		"naming neither":      "",
+		"naming the defaults": `,"source":"pull_requests","landing":"approval"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseTrainSettings(`{"repositories":{"acme/shop":{"enabled":true,"departures":["09:00"],"timeZone":"UTC","channel":"c"` + extra + `}}}`)
+			if err != nil {
+				t.Fatalf("ParseTrainSettings: %v", err)
+			}
+			s := got["acme/shop"]
+			if s.FromMain() || s.LandsAutomatically() {
+				t.Errorf("FromMain = %v, LandsAutomatically = %v, want both false", s.FromMain(), s.LandsAutomatically())
+			}
+		})
+	}
+}
+
+func TestParseTrainSettingsReadsSourceAndLanding(t *testing.T) {
+	got, err := ParseTrainSettings(`{"repositories":{"acme/shop":{"enabled":true,"departures":["21:00"],"timeZone":"UTC","channel":"c","source":"main","landing":"automatic"}}}`)
+	if err != nil {
+		t.Fatalf("ParseTrainSettings: %v", err)
+	}
+	s := got["acme/shop"]
+	if !s.FromMain() || !s.LandsAutomatically() {
+		t.Errorf("FromMain = %v, LandsAutomatically = %v, want both true", s.FromMain(), s.LandsAutomatically())
+	}
+	got, err = ParseTrainSettings(`{"repositories":{"acme/shop":{"enabled":true,"departures":["21:00"],"timeZone":"UTC","channel":"c","source":"main"}}}`)
+	if err != nil {
+		t.Fatalf("ParseTrainSettings: %v", err)
+	}
+	if s := got["acme/shop"]; !s.FromMain() || s.LandsAutomatically() {
+		t.Errorf("source main alone: FromMain = %v, LandsAutomatically = %v, want true and false", s.FromMain(), s.LandsAutomatically())
+	}
+}
+
 func TestParseTrainSettingsRefuses(t *testing.T) {
 	entry := func(field string) string {
 		fields := map[string]string{
@@ -72,6 +108,9 @@ func TestParseTrainSettingsRefuses(t *testing.T) {
 		{"a repository with no owner", `{"repositories":{"memql":{` + entry("") + `}}}`, "memql"},
 		{"no departures", `{"repositories":{"a/b":{` + strings.Replace(entry(""), `["09:00"]`, `[]`, 1) + `}}}`, "departures"},
 		{"something that is not JSON", `repositories: a/b`, "MEMQL_PIPELINES_TRAINS"},
+		{"an unknown source", `{"repositories":{"a/b":{` + entry(`"source":"branches"`) + `}}}`, "source"},
+		{"an unknown landing", `{"repositories":{"a/b":{` + entry(`"landing":"sometimes"`) + `}}}`, "landing"},
+		{"landing by itself with pull requests on board", `{"repositories":{"a/b":{` + entry(`"landing":"automatic"`) + `}}}`, "source"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

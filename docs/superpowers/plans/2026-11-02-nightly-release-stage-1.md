@@ -36,9 +36,9 @@
 - Test: `component/pipelines/train_test.go`
 
 **Interfaces:**
-- Produces: `TrainSourcePullRequests = "pull_requests"`, `TrainSourceMain = "main"`, `TrainLandingApproval = "approval"`, `TrainLandingAutomatic = "automatic"`; `TrainSettings.Source`, `TrainSettings.Landing` (always the resolved value, never empty); `func (s TrainSettings) FromMain() bool`; `func (s TrainSettings) LandsAutomatically() bool`.
+- Produces: `TrainSourcePullRequests = "pull_requests"`, `TrainSourceMain = "main"`, `TrainLandingApproval = "approval"`, `TrainLandingAutomatic = "automatic"`; `TrainSettings.Source`, `TrainSettings.Landing` (empty for the default, so an entry naming neither reads exactly as it does today); `func (s TrainSettings) FromMain() bool`; `func (s TrainSettings) LandsAutomatically() bool`.
 
-- [ ] **Step 1: Write failing tests.** `TestParseTrainSettingsDefaultsToPullRequestsAndApproval` (an entry naming neither: `Source == "pull_requests"`, `Landing == "approval"`, `FromMain() == false`). `TestParseTrainSettingsReadsSourceAndLanding` (`source: main`, `landing: automatic`). Add to the `TestParseTrainSettingsRefuses` table: `source: "branches"`, naming `source`; `landing: "sometimes"`, naming `landing`; `landing: "automatic"` with no `source: main`, naming both.
+- [ ] **Step 1: Write failing tests.** `TestParseTrainSettingsDefaultsToPullRequestsAndApproval` (an entry naming neither, or naming the defaults: `FromMain() == false`, `LandsAutomatically() == false`). `TestParseTrainSettingsReadsSourceAndLanding` (`source: main`, `landing: automatic`). Add to the `TestParseTrainSettingsRefuses` table: `source: "branches"`, naming `source`; `landing: "sometimes"`, naming `landing`; `landing: "automatic"` with no `source: main`, naming both.
 - [ ] **Step 2: Run** `go test ./component/pipelines/ -run TrainSettings`. Expected: FAIL.
 - [ ] **Step 3: Implement** in `ParseTrainSettings`, one refusal per key, each naming the repository.
 - [ ] **Step 4: Run** the same. Expected: PASS.
