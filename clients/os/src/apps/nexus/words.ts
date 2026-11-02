@@ -191,7 +191,7 @@ export function runModeWord(mode: string): string {
 export function runModeDetail(mode: string): string {
   switch (mode) {
     case "live":
-      return "reasoning steps called a model; deterministic steps did not";
+      return "every step ran now; nothing was served from the journal";
     case "replay":
       return "every model call was served from the journal -- no provider was reached";
     case "fork":
@@ -406,9 +406,9 @@ export type StepKind = (typeof STEP_KINDS)[number];
 export function stepKindWord(kind: string): string {
   switch (kind) {
     case "deterministic":
-      return "Deterministic";
+      return "Workflow step";
     case "reasoning":
-      return "Reasoning";
+      return "Model work";
     case "decision":
       return "Decision";
     case "human":
@@ -418,7 +418,7 @@ export function stepKindWord(kind: string): string {
     case "subrun":
       return "Subrun";
     case "":
-      return "Unclassified";
+      return "Model use not reported";
     default:
       return kind;
   }
@@ -427,9 +427,9 @@ export function stepKindWord(kind: string): string {
 export function stepKindMeaning(kind: string): string {
   switch (kind) {
     case "deterministic":
-      return "ran without calling a model";
+      return "recorded workflow activity; nested work may include model calls";
     case "reasoning":
-      return "called a model";
+      return "recorded as model-backed work";
     case "decision":
       return "a spec answered it";
     case "human":
