@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,6 +60,32 @@ func TestAMachineCodeThatIsNotAStableWordIsNotRepeated(t *testing.T) {
 	} {
 		if got := (&ModelCallFailed{ErrorCode: code}).Code(); got != want {
 			t.Errorf("Code() for %q = %q, want %q", code, got, want)
+		}
+	}
+}
+
+// The re-pick predicate must never be guessed (CLAUDE.md), so exactly one code
+// means nothing ran: the machine declining for memory, which it sends only before
+// handing the call to a runtime. Everything else may have generated, and an
+// unknown code or a bare error is the same as having run.
+func TestOnlyAMemoryRefusalSaysTheCallNeverRan(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"the machine declined for memory", &ModelCallFailed{ErrorCode: "insufficient_memory"}, true},
+		{"the same on the forwarded form", &ModelCallFailed{Forwarded: true, Machine: "laptop", ErrorCode: "insufficient_memory"}, true},
+		{"wrapped on its way up", fmt.Errorf("fleet call: %w", &ModelCallFailed{ErrorCode: "insufficient_memory"}), true},
+		{"a runtime that failed", &ModelCallFailed{ErrorCode: "runtime_error"}, false},
+		{"a timeout", &ModelCallFailed{ErrorCode: "timeout"}, false},
+		{"a worker that stopped", &ModelCallFailed{ErrorCode: "worker_stopped"}, false},
+		{"no code at all", &ModelCallFailed{}, false},
+		{"not a machine's failure", errors.New("insufficient_memory"), false},
+		{"nothing", nil, false},
+	} {
+		if got := ModelCallNeverRan(tc.err); got != tc.want {
+			t.Errorf("%s: ModelCallNeverRan = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

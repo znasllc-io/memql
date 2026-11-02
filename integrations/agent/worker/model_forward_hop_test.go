@@ -21,8 +21,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -373,5 +375,133 @@ func TestAModelTheMachineDoesNotOfferIsRefusedBeforeStart(t *testing.T) {
 	}
 	if !out.RefusedBeforeStart || out.ErrorCode != "model_call_refused" {
 		t.Fatalf("out = %+v, want a pre-start model_call_refused", out)
+	}
+}
+
+// addMachineBeforeLaptop puts a second machine on the holding replica, ordered
+// ahead of the hop's own, so a call reaches it first.
+func addMachineBeforeLaptop(t *testing.T, h *modelHop, id string, serve serveFn) {
+	t.Helper()
+	w := &workerservice.Worker{
+		RegistrationId: id,
+		OwnerUserId:    h.owner,
+		Name:           id,
+		Capabilities:   []string{workerservice.CapabilityHeadless, workerservice.ModelCapability},
+		Labels:         map[string]string{workerservice.ModelLabel(hopModel): "1", workerservice.RuntimeLabelPrefix + "ollama": "1"},
+		Concurrency:    map[string]uint32{workerservice.ModelCapability: 2},
+	}
+	w.SetModelCallFunc(func(ctx context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		handle, emit, finish := workerservice.NewModelCallLoopback(req, func(string) {})
+		go func() { finish(serve(ctx, req, emit)) }()
+		return handle, nil
+	})
+	h.link.handler.registry.Add(w)
+	cand := machine(id)
+	cand.ConnectedNodeId = nodeB
+	cand.Capabilities = []string{workerservice.CapabilityHeadless, workerservice.ModelCapability}
+	cand.Labels = map[string]string{workerservice.ModelLabel(hopModel): "1"}
+	h.store.machines = append([]Candidate{cand}, h.store.machines...)
+}
+
+// failingWith is a machine that ends every call it is handed with this code.
+func failingWith(tried *atomic.Int32, code string) serveFn {
+	return func(context.Context, workerservice.ModelCallRequest, func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+		tried.Add(1)
+		return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishError, ErrorCode: code, Error: "the machine's words for " + code}
+	}
+}
+
+// fleetInferenceOverHop calls the hop's machines from the replica holding their
+// streams, or from the one that has to forward to it.
+func fleetInferenceOverHop(t *testing.T, h *modelHop, remote bool) *FleetInference {
+	t.Helper()
+	f := newFleetInference(t, h.store)
+	if remote {
+		f.selfNodeId, f.forward = nodeA, h.link.router
+	} else {
+		f.selfNodeId, f.registry = nodeB, h.link.handler.registry
+	}
+	return f
+}
+
+// A machine that declines for memory never handed the call to a runtime, so the
+// next machine holding the model takes it. Before this the refusal counted as a
+// call that had run: one machine too small for a model ended the call for every
+// other machine that could have served it, and it stayed first in the order, so
+// that happened to every call.
+func TestAMachineWithNoRoomPassesTheCallToTheNextMachine(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "holding replica", true: "other replica"}[remote], func(t *testing.T) {
+			var tried atomic.Int32
+			h := newModelHop(t, func(_ context.Context, _ workerservice.ModelCallRequest, emit func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+				emit(workerservice.ModelCallDelta{Seq: 1, Content: "answer"})
+				return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop}
+			}, nil)
+			addMachineBeforeLaptop(t, h, "no-room", failingWith(&tried, "insufficient_memory"))
+
+			result, err := fleetInferenceOverHop(t, h, remote).Call(authorityCtx(t, h.owner),
+				memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+			if err != nil {
+				t.Fatalf("the next machine could serve this: %v", err)
+			}
+			if tried.Load() != 1 {
+				t.Fatalf("the first machine was asked %d time(s)", tried.Load())
+			}
+			if result.ExecutionSurface != "fleet:laptop" || result.Content != "answer" {
+				t.Fatalf("result = %+v, want the answer from the next machine", result)
+			}
+		})
+	}
+}
+
+// Every other failure stays final, on both paths. A runtime that failed may have
+// generated, and running it again elsewhere is the same generation twice, which
+// the loop caps and the identical-request breaker exist to notice (memql#4680).
+func TestAFailureAfterTheRuntimeWasHandedTheCallIsNotOfferedAgain(t *testing.T) {
+	for _, code := range []string{"runtime_error", "timeout", "worker_stopped"} {
+		for _, remote := range []bool{false, true} {
+			t.Run(code+map[bool]string{false: " on the holding replica", true: " on another replica"}[remote], func(t *testing.T) {
+				var tried atomic.Int32
+				h := newModelHop(t, func(context.Context, workerservice.ModelCallRequest, func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+					t.Error("a call that may have run was run again on another machine")
+					return workerservice.ModelCallOutcome{}
+				}, nil)
+				addMachineBeforeLaptop(t, h, "failed", failingWith(&tried, code))
+
+				_, err := fleetInferenceOverHop(t, h, remote).Call(authorityCtx(t, h.owner),
+					memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+				if err == nil {
+					t.Fatal("the failure was lost")
+				}
+				var unavailable *memqlengine.FleetUnavailable
+				if errors.As(err, &unavailable) {
+					t.Fatalf("a call that may have run reads as one that never started: %v", err)
+				}
+				if tried.Load() != 1 {
+					t.Fatalf("the machine was asked %d time(s)", tried.Load())
+				}
+			})
+		}
+	}
+}
+
+// When no machine has room the call is unavailable, not failed, so the route
+// moves on to its next source at once, with the machine's words on the record.
+func TestWhenNoMachineHasRoomTheFleetIsUnavailable(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "holding replica", true: "other replica"}[remote], func(t *testing.T) {
+			var tried atomic.Int32
+			h := newModelHop(t, failingWith(&tried, "insufficient_memory"), nil)
+
+			_, err := fleetInferenceOverHop(t, h, remote).Call(authorityCtx(t, h.owner),
+				memqlengine.FleetCallRequest{ActingUserId: h.owner, ModelId: hopModel, Kind: memqlengine.FleetKindChat})
+			var unavailable *memqlengine.FleetUnavailable
+			if !errors.As(err, &unavailable) {
+				t.Fatalf("err = %T %v, want FleetUnavailable", err, err)
+			}
+			if !strings.Contains(err.Error(), "the machine's words for insufficient_memory") {
+				t.Fatalf("the machine's reason did not reach the record: %v", err)
+			}
+		})
 	}
 }

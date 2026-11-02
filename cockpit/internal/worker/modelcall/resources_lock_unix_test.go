@@ -253,8 +253,12 @@ func TestUnconfirmedOwnedModelUnloadRetainsInferenceActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	lease.close()
+	// The first read only refuses what can never fit. A second would be admission.
+	var reads atomic.Int32
 	resources := resourcesForTest(func() (memoryHeadroom, error) {
-		t.Error("unconfirmed unload reached memory admission")
+		if reads.Add(1) > 1 {
+			t.Error("unconfirmed unload reached memory admission")
+		}
 		return memoryHeadroom{Total: 64 * gib, Available: 40 * gib}, nil
 	})
 	resources.leaseRoot = func() (string, error) { return root, nil }
@@ -425,9 +429,11 @@ func TestSeparateWorkersRecoverOwnershipAndReclaimBeforeAdmission(t *testing.T) 
 		t.Fatal("active model unloaded")
 	}
 	release.close()
+	// Headroom is judged after the prior worker's model is gone: only then is
+	// there room.
 	b.probe = func() (memoryHeadroom, error) {
 		if !unloaded.Load() {
-			t.Error("read headroom before reclaiming prior worker's model")
+			return memoryHeadroom{Total: 64 * gib, Available: 4 * gib}, nil
 		}
 		return memoryHeadroom{Total: 64 * gib, Available: 40 * gib}, nil
 	}

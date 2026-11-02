@@ -55,6 +55,13 @@ const (
 	CodeToolsUnsupported = "tools_unsupported"
 	// CodeDuplicateRequest: a request id already live on this worker.
 	CodeDuplicateRequest = "duplicate_request"
+	// CodeInsufficientMemory: this machine declined the call for memory, and
+	// nothing reached the runtime. It is separate from CodeRuntimeError because
+	// the fix is on this machine's memory, not in the runtime's logs, and the
+	// engine offers the call to another machine for this code and no other
+	// failure (component/worker's ModelCallNeverRan), so it must never be sent
+	// once a runtime has been handed the call.
+	CodeInsufficientMemory = "insufficient_memory"
 	// CodeRuntimeError: the local runtime failed the call.
 	CodeRuntimeError = "runtime_error"
 	// CodeCancelled: the cluster cancelled it.
@@ -437,8 +444,9 @@ func (m *Manager) resolve(ctx context.Context, start *memqlv1.ModelCallStart) (m
 // shared by every cluster's Manager for that reason (memql-cockpit#432).
 //
 // WAITING, NOT REFUSING, because a refusal is a FAILED call: the engine
-// treats any error a worker ends a call with as the call having run, and
-// does not try another machine. Before the ceiling was shared, a second
+// treats an error a worker ends a call with as the call having run, and does
+// not try another machine (only CodeInsufficientMemory says otherwise). Before
+// the ceiling was shared, a second
 // cluster's call went straight to the runtime and queued there; a call
 // that finds the machine full now queues here instead, where the ceiling
 // can see it. It waits as long as a call queued in the runtime could have
@@ -869,6 +877,10 @@ func (m *Manager) classify(c *call, err error) (finish, code, detail string) {
 	}
 	if errors.Is(err, context.Canceled) {
 		return FinishCancelled, CodeCancelled, "the call was cancelled"
+	}
+	var refused *memoryRefusal
+	if errors.As(err, &refused) {
+		return FinishError, CodeInsufficientMemory, err.Error()
 	}
 	return FinishError, CodeRuntimeError, err.Error()
 }

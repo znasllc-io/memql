@@ -196,10 +196,11 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 
 	start := f.buildStart(req)
 	// Candidates are tried in the router's order. A machine that refuses
-	// BEFORE START is skipped; one that refuses after is not retried, because
-	// a generation that reached a machine may have run -- and re-running it is
-	// exactly the shape the loop caps and the identical-request breaker exist
-	// to notice (memql#4680).
+	// BEFORE START is skipped, and that includes one that declined for memory,
+	// which has run nothing (ModelCallNeverRan); one that refuses after is not
+	// retried, because a generation that reached a machine may have run -- and
+	// re-running it is exactly the shape the loop caps and the identical-request
+	// breaker exist to notice (memql#4680).
 	var lastErr error
 	for _, cand := range plan.Candidates {
 		res, outcome, err := f.attempt(ctx, req, cand, start)
@@ -503,6 +504,9 @@ func (f *FleetInference) attemptLocal(
 		activity.end("failed")
 	}
 	wg.Wait()
+	if workerservice.ModelCallNeverRan(waitErr) {
+		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, waitErr
+	}
 	if waitErr != nil {
 		return memqlengine.FleetCallResult{}, ForwardCompleted, waitErr
 	}

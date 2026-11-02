@@ -20,8 +20,9 @@ headroom and pressure.
 
 On macOS, admission counts free, purgeable and pageable file-backed memory, and
 refuses warning/critical pressure. It keeps 1–4 GiB of additional headroom for the
-OS. Ollama's reported weight bytes receive a conservative 25% plus 2 GiB allowance
-for context and temporary buffers. This estimate is not a measured peak and
+OS. Ollama's reported weight bytes receive an allowance of an eighth of themselves,
+at least 2 GiB, for context and temporary buffers, which reproduces the catalog's
+residency at a 32K working context. This estimate is not a measured peak and
 particularly large context windows may need a larger declared budget. An
 OpenAI-compatible model should declare `peak_memory_bytes` in its `models` entry
 because `/v1/models` cannot report its working set. The peak must include temporary
@@ -31,8 +32,11 @@ reservation up, and smaller images never scale it down. Without a reference area
 the declared peak must cover the largest request accepted by the runtime. Ollama
 context windows above 32K receive additional context headroom. Unknown peaks still
 serialize and respect OS pressure but cannot predict
-a cold load. Admission waits within the existing call deadline and continues
-sending keepalives; it does not request a larger timeout.
+a cold load. Admission waits for headroom for at most 30 seconds, inside the call's
+deadline, and continues sending keepalives; it does not request a larger timeout.
+A model that can never fit is refused at once, before anything is unloaded. Either
+way the call ends with `insufficient_memory`, nothing has reached the runtime, and
+the engine offers the call to the next machine holding the model.
 
 ## Managed MLX services
 
