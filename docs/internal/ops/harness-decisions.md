@@ -2602,6 +2602,161 @@ release today and not `pull_request`, so reuse from a push turns on with the eng
 upgrade, and a pull request's results are reused only once that policy admits them.
 This change helps only after it ships in an engine release.
 
+## A release publishes in one call (2026-11-01)
+
+`cockpit/v0.21.1` (41 files, 736 MB, engine 0.31.9, 2026-10-30) could not finish
+inside one `releasePublishBuild`, the Publish action on the Releases screen. The
+connected workflow is in
+[release-candidates.md](../../public/operate/release-candidates.md#publish-a-whole-release-in-one-call).
+
+Evidence, and what each item turned out to be:
+
+| Observed or read | Finding |
+|---|---|
+| Every per-target call re-verified the whole candidate (about 40 s), and 41 uploads took 1,698 s against a 5-minute limit | Reproduced: 5,084 artifact reads for one publish, with bytes in memory (`TestReleaseBuildPublishesManyFileTargetsInOneCall`) |
+| A retry spent its limit in the recipe's draft loop | Confirmed: the recipe reads `drafts` once at its top, so every sibling called creation. Its promotion loop was worse: every sibling re-read every asset's bytes |
+| An expired context failed the journal save, so the phase stayed `publishing` | Confirmed (`TestReleaseBuildActionCutOffByItsContextStillSavesTheJournal`) |
+| A cut-off upload could leave an asset that refuses every retry (read from code, not observed) | Confirmed in code: `asset.matches` refused with `ErrConflict` forever. GitHub documents the `starter` state and that it "can be safely deleted" |
+| The first call returned `uncertain` although GitHub held the draft | Cause not proven; list lag is assumed. A retry reconciled it |
+| Found here: `withDraftUpload` held a transaction across the upload | The request pool ends a session idle in a transaction after 60 s, so an upload over 60 s failed after succeeding (`FATAL ... idle-in-transaction timeout`, reproduced at a shorter limit), and a retry failed the same way once readback alone took over 60 s. It also blocked every candidate read past its 8 s limit and pinned a request-pool connection for the whole upload |
+| Found here: `verifyDownload` called every failed read a conflict | A dropped connection read as different bytes. Now only a read that finished and differed is a conflict (`TestPublishCallsOnlyACompletedReadAConflict`) |
+
+Chosen path, and why each branch exists:
+
+- **Uploads to the private draft share one verification** (`candidateVerification`,
+  `publicationAction`). Trigger: a recipe calls an effect per target, and it is
+  captured at prepare time in another repository. This skips reads of rows that can
+  change, so it is not free. An upload still passes the gate before each of its inner
+  operations, the ledger checks the exact approval in each effect's transaction, and its
+  file's bytes are verified again before it is sent. Bytes sent to a draft expose nothing
+  if the evidence has since changed.
+- **Anything public verifies afresh** (`publicationAction.preparer(fresh)`): the promotion,
+  and each registry or npm write. Without this a run record changing mid-call went
+  unnoticed until sealing refused it, after the release was public with no signed catalog
+  (`TestReleaseBuildPublicationRereadsTheEvidenceBeforeGoingPublic`). The price is one more
+  read of every artifact per call. A window remains between that read and the seal,
+  as it always did.
+- **Settled groups answer from the journal** (`publicationAction.draft`). One release
+  is shared by all its targets, so the first call settles the group. Creation is
+  settled from `ready` on, promotion only at `published`; `promoting` goes on to
+  reconcile natively, so no once-only fence is skipped. Approval is checked first
+  (`TestPublicationActionCannotSkipApprovalForASettledGroup`). Alternative: have the
+  recipe re-read the journal in its loops. Rejected as the fix because it would leave
+  any other recipe quadratic and tie the engine's cost to a product's recipe. **memql-znas
+  needs no change**: `znasPublishApprovedRelease` as it stands is the regression
+  test's recipe.
+- **No limit on the call as a whole** (`executeBuild`). Any fixed figure is a guess at
+  a release's size and a network's speed, and 8 GiB is allowed. Stop conditions,
+  kept distinct: per-operation watchdogs (`Publish` 30 minutes, `draft` and
+  `publishWithWorkflow` one hour, `releasePublicationOperationLimit` 70 minutes over
+  every recipe operation), the renewed lease, and the gate before every operation.
+  A recipe loops only over the candidate's targets, so the call is finite.
+  Alternative: resume in slices with the client re-invoking. Rejected: the owner asked
+  for one call, and a closed page would strand it.
+- **The call outlives its caller** (`context.WithoutCancel`). A 30-minute upload must
+  not depend on a browser tab, and cutting it is what creates the incomplete asset.
+  Claim and action checks stay on the caller's context, so a caller already gone
+  starts nothing. Tradeoff: nothing can stop a running publication except the gate, and
+  a `CancelRequest` is acknowledged as cancelled while the publication carries on.
+- **The lease and the stored owner are checked before every inner operation**
+  (`checkStoredOwner`, through the preparer's authority), only on an action that outlives
+  its request. Trigger: its access context was fixed at admission and the stream that
+  could have ended it is no longer attached, and one promotion can read bytes for minutes
+  before its claim and PATCH. The authority is captured when the call starts and can only
+  narrow the stored role. The operator key and a troubleshooting cluster are owners with no
+  stored row, so they skip this (`TestStoredOwnerAuthorityByCredential`).
+- **Leases renew while their holder lives** (`keepLease`, `lease.go`). The lease now
+  bounds how long a dead holder blocks a release, not how long work may take. A holder
+  that loses it, or has failed to renew for all but two renewal periods of its life, stops
+  before another may legally claim it. The upload lease (3 minutes) is shorter than the
+  build lease (6), so a retry that gets the build lease is never refused by its dead
+  predecessor's upload.
+- **An upload holds a durable lease and no transaction** (`withDraftUpload`). Promotion
+  and renewal now refuse rather than wait, because a read blocked on a row lock would
+  hit its 8 s limit anyway. Alternatives: a keepalive in the transaction (pins a
+  connection and keeps the candidate row locked for the whole upload) or a dedicated
+  pool (its 5-minute idle limit is shorter than an upload). The price is a schema change,
+  two columns on `release_draft_intents` with constant defaults on a small table.
+- **An interrupted upload recovers on the next publish** (`removeIncomplete`). It removes
+  one asset, by ID, only when GitHub reports `starter` or `open` under the approved name,
+  after re-checking the draft and tag and listing the asset once more. This adapter
+  accepts only `uploaded`, so such an asset could never complete the release, and on a
+  draft nothing public is lost. GitHub documents `starter` as safe to delete and leaves
+  `open` undefined. Alternative: a separate owner action. Rejected: the approval already
+  covers this name on this draft, and a separate step would be the hand-driven work this
+  removes. A call never removes its own upload: one still incomplete after the wait is
+  uncertain, and the next call clears it.
+- **What cannot be recovered says so** (`release_asset_conflict`, `promotion_unconfirmed`).
+  A conflict names its file and asks for the approved file back, not for its removal,
+  because a file with a receipt is never sent again. A claimed promotion keeps its fence
+  even when the read just before its PATCH fails, so that reason tells the owner to publish
+  on GitHub and press again (`TestReleaseBuildPublishExplainsAPromotionItCannotRepeat`).
+- **Reads after a write repeat for up to 15 seconds** (`settled`). Each read costs a GET
+  and a stopped call loses the rest of a many-file run. Only the read repeats: the draft
+  POST and each asset POST stay single. Still unseen afterward stays uncertain.
+  `Promote` and `EnsureTag` were left alone, with no evidence of lag and an existing
+  recovery. If this was not list lag, this does nothing and the retry still reconciles.
+
+Invariants: the draft POST and promotion PATCH stay once-only under their durable claims;
+the exact approval is checked inside every effect; a complete asset is never knowingly
+deleted or overwritten; no receipt exists without full readback of its bytes.
+
+What survives a retry or replica change: publication receipts, the draft binding and its
+state, the saved journal and the two lease rows. What does not: the verification memory
+and the configured preparer, which die with the call. A killed pod saves nothing, so its
+release keeps reading `publishing` until the lease lapses, then `uncertain` with
+`publication_interrupted`; the journal keeps its phase until the next action writes one.
+
+Tests (`integrations/release`, db-gated): `TestReleaseBuildPublishesManyFileTargetsInOneCall`
+(41 files through the installed recipe, unchanged, with a lease shorter than the call),
+`TestReleaseBuildRetryWithADraftStillCreatingSpendsOneCallOnIt`,
+`TestReleaseBuildPublishRecoversAnUploadCutOffPartWay`,
+`TestReleaseBuildPublishOutlivesItsCaller`,
+`TestReleaseBuildPublishStopsWhenItsLeaseIsTaken`,
+`TestReleaseBuildPublicationStopsWhenTheOwnerLosesTheRole`,
+`TestReleaseBuildPromotionStopsWhenTheOwnerLosesTheRole`,
+`TestReleaseBuildVerifiesAfreshBeforeEveryRegistryWrite`,
+`TestReleaseBuildViewTellsARunningPublicationFromAnInterruptedOne`,
+`TestReleaseBuildViewOffersAnInterruptedPublicationAgain`,
+`TestReleaseBuildNamesARealAssetConflictAndLeavesIt`,
+`TestReleaseBuildNamesAConflictFoundAtPromotion`,
+`TestReleaseBuildDoesNotCallADroppedReadAConflict`,
+`TestPublicationActionAnswersASettledDraftWithoutRemoteWork`,
+`TestStoredOwnerCheckReadsTheRealIdentityRow`,
+`TestCandidateVerificationIsRememberedOnlyForItsExactIdentity`, `TestDraftUpload*`.
+`TestKeepLease*` needs no database.
+`integrations/githubrelease`: `TestPublishReplacesTheAssetAnInterruptedUploadLeftBehind`,
+`TestPublishRecoversAnUploadCutOffPartWayOnAnotherHost`,
+`TestPublishNeverRemovesAnAssetItCannotProveIncomplete`,
+`TestPublishKeepsAnAssetThatFinishedWhileItWasChecking`,
+`TestPublishLeavesOtherAssetsAloneDuringRecovery`,
+`TestPublishDoesNotUploadOverAnAssetItCouldNotClear`,
+`TestPublishReportsARemovalEvenWhenItThenFails`,
+`TestPublishWaitsForItsOwnUploadToSettle`, `TestCreateDraftRereadsBeforeReportingUncertainty`.
+
+Not verified: nothing here has run against GitHub or on a cluster. How GitHub reports an
+interrupted upload comes from its documentation and third-party reports, and the fixtures
+simulate it: an upload cut off mid-body has never been observed against the real API, nor
+has the `DELETE` of such an asset. The time a real 41-file publish now takes is not
+measured, and neither is whether list lag caused the first `uncertain`.
+
+Known limits:
+
+- nothing but the gate can stop a running publication;
+- a read that fails between a promotion's claim and its PATCH leaves it `promoting`, which
+  only publishing on GitHub resolves. The fence predates this change. Its window is a read
+  of the whole release, so it grows with the release;
+- GitHub has no conditional delete, so an asset that finishes in the instant after the last
+  read is still removed: re-sent if it was ours, lost rather than reported if it was
+  another writer's;
+- an upload from another caller, or a promotion, is refused while an upload runs, where it
+  used to queue (and fail at the 8 s limit on anything slow);
+- a single upload still has its 30-minute ceiling, and one promotion must read the release
+  twice within 30 minutes, which an 8 GiB release needs about 9 MB/s to manage;
+- this reaches only releases prepared on an engine that has it: a saved release is bound
+  to the engine revision that prepared it, so a release in flight across the upgrade must
+  be prepared again.
+
 ## A GitHub check per pipeline step (2026-10-28)
 
 The owner asked to see each step of a run on a pull request, not one check for

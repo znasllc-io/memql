@@ -101,6 +101,9 @@ func (l *candidateLedger) beginReviewedDraft(ctx context.Context, key, approval 
 	if err != nil {
 		return binding, err
 	}
+	if err := requireNoDraftUpload(ctx, tx, plan.ResourceKey); err != nil {
+		return binding, err
+	}
 	if err := requireReadyDrafts(ctx, tx, owner, old); err != nil {
 		return binding, err
 	}

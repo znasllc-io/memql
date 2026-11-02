@@ -56,10 +56,13 @@ func (l *candidateLedger) build(ctx context.Context, key string) (releaseBuildRe
 		return releaseBuildRecord{}, err
 	}
 	var body []byte
-	if err := db.QueryRowContext(ctx, `SELECT body FROM release_build_intents WHERE intent_id=$1 AND owner_user_id=$2`, key, owner).Scan(&body); err != nil {
+	var leased bool
+	if err := db.QueryRowContext(ctx, `SELECT body,lease_until>clock_timestamp() FROM release_build_intents WHERE intent_id=$1 AND owner_user_id=$2`, key, owner).Scan(&body, &leased); err != nil {
 		return releaseBuildRecord{}, err
 	}
-	return decodeBuild(body, owner, key)
+	record, err := decodeBuild(body, owner, key)
+	record.leased = leased
+	return record, err
 }
 
 func (l *candidateLedger) builds(ctx context.Context, limit int) ([]releaseBuildRecord, error) {
@@ -74,7 +77,7 @@ func (l *candidateLedger) builds(ctx context.Context, limit int) ([]releaseBuild
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT intent_id,body FROM release_build_intents WHERE owner_user_id=$1 ORDER BY created_at DESC,intent_id LIMIT $2`, owner, limit)
+	rows, err := db.QueryContext(ctx, `SELECT intent_id,body,lease_until>clock_timestamp() FROM release_build_intents WHERE owner_user_id=$1 ORDER BY created_at DESC,intent_id LIMIT $2`, owner, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +86,15 @@ func (l *candidateLedger) builds(ctx context.Context, limit int) ([]releaseBuild
 	for rows.Next() {
 		var key string
 		var body []byte
-		if err := rows.Scan(&key, &body); err != nil {
+		var leased bool
+		if err := rows.Scan(&key, &body, &leased); err != nil {
 			return nil, err
 		}
 		record, err := decodeBuild(body, owner, key)
 		if err != nil {
 			return nil, err
 		}
+		record.leased = leased
 		out = append(out, record)
 	}
 	return out, rows.Err()
@@ -99,10 +104,15 @@ type releaseBuildLease struct {
 	ledger *candidateLedger
 	record releaseBuildRecord
 	token  string
+	// authority is set only on an action that outlives its request, whose access
+	// context cannot see a later change of role (gate).
+	authority map[string]any
 }
 
-// The lease is longer than the bounded workflow call. A crashed holder retains
-// its attempted fences; expiry permits observation, never replay of a POST.
+// A live holder renews the lease for as long as its action runs (keepLease), so
+// the lease bounds how long a dead holder blocks the release and says nothing
+// about how long the work may take. A crashed holder retains its attempted
+// fences; expiry permits observation, never replay of a POST.
 func (l *candidateLedger) claimBuild(ctx context.Context, key string) (*releaseBuildLease, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
@@ -114,8 +124,8 @@ func (l *candidateLedger) claimBuild(ctx context.Context, key string) (*releaseB
 	}
 	token := id.NewShortId()
 	var body []byte
-	err = db.QueryRowContext(ctx, `UPDATE release_build_intents SET lease_id=$3,lease_until=clock_timestamp()+interval '6 minutes'
-WHERE intent_id=$1 AND owner_user_id=$2 AND lease_until<clock_timestamp() RETURNING body`, key, owner, token).Scan(&body)
+	err = db.QueryRowContext(ctx, `UPDATE release_build_intents SET lease_id=$3,lease_until=clock_timestamp()+($4::bigint*interval '1 millisecond')
+WHERE intent_id=$1 AND owner_user_id=$2 AND lease_until<clock_timestamp() RETURNING body`, key, owner, token, buildLeaseTiming.ttl.Milliseconds()).Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("release is unavailable or another replica is already handling it")
 	}
@@ -126,7 +136,27 @@ WHERE intent_id=$1 AND owner_user_id=$2 AND lease_until<clock_timestamp() RETURN
 	if err != nil {
 		return nil, err
 	}
-	return &releaseBuildLease{l, record, token}, nil
+	return &releaseBuildLease{ledger: l, record: record, token: token}, nil
+}
+
+func (s *releaseBuildLease) renew(ctx context.Context) error {
+	db, err := s.ledger.database()
+	if err != nil {
+		return err
+	}
+	result, err := db.ExecContext(ctx, `UPDATE release_build_intents SET lease_until=clock_timestamp()+($4::bigint*interval '1 millisecond')
+WHERE intent_id=$1 AND owner_user_id=$2 AND lease_id=$3 AND lease_until>clock_timestamp()`, s.record.ID, s.record.Selection.Owner, s.token, buildLeaseTiming.ttl.Milliseconds())
+	if err != nil {
+		return err
+	}
+	renewed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if renewed != 1 {
+		return errLeaseLost
+	}
+	return nil
 }
 
 func (s *releaseBuildLease) check(ctx context.Context) error {

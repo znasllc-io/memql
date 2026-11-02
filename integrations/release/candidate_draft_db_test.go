@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/integrations/githubrelease"
@@ -296,40 +295,21 @@ func TestCandidatePromotionFencesNativeUploads(t *testing.T) {
 	if _, err := p.publish(ownerCtx(), pub); err != nil {
 		t.Fatal(err)
 	}
-	entered, release := make(chan struct{}), make(chan struct{})
-	written := make(chan error, 1)
-	claimed := make(chan error, 1)
-	go func() {
-		written <- p.ledger.withDraftUpload(ownerCtx(), rec.ID, pub.ApprovalID, plan, func(id int64) error {
-			close(entered)
-			<-release
-			if id != 73 {
-				return errors.New("binding changed")
-			}
-			return nil
-		})
-	}()
-	<-entered
-	go func() {
-		_, ok, err := freshDraftHost(p, db).ledger.claimDraftEffect(ownerCtx(), rec.ID, pub.ApprovalID, plan, true)
-		if err == nil && !ok {
-			err = errors.New("promotion not claimed")
+	if err := p.ledger.withDraftUpload(ownerCtx(), rec.ID, pub.ApprovalID, plan, func(_ context.Context, id int64) error {
+		if id != 73 {
+			return errors.New("binding changed")
 		}
-		claimed <- err
-	}()
-	select {
-	case err := <-claimed:
-		t.Fatal("promotion escaped active upload fence", err)
-	case <-time.After(75 * time.Millisecond):
-	}
-	close(release)
-	if err := <-written; err != nil {
+		if _, claimed, err := freshDraftHost(p, db).ledger.claimDraftEffect(ownerCtx(), rec.ID, pub.ApprovalID, plan, true); !errors.Is(err, errDraftUploadRunning) || claimed {
+			t.Fatal("promotion escaped active upload fence", claimed, err)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-claimed; err != nil {
-		t.Fatal(err)
+	if _, claimed, err := freshDraftHost(p, db).ledger.claimDraftEffect(ownerCtx(), rec.ID, pub.ApprovalID, plan, true); err != nil || !claimed {
+		t.Fatal("promotion not claimed after the upload finished", claimed, err)
 	}
-	if err := p.ledger.withDraftUpload(ownerCtx(), rec.ID, pub.ApprovalID, plan, func(int64) error { t.Fatal("upload entered promoting draft"); return nil }); err == nil {
+	if err := p.ledger.withDraftUpload(ownerCtx(), rec.ID, pub.ApprovalID, plan, func(context.Context, int64) error { t.Fatal("upload entered promoting draft"); return nil }); err == nil {
 		t.Fatal("promotion fence missing")
 	}
 }

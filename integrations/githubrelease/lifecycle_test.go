@@ -21,6 +21,8 @@ type lifecycleFixture struct {
 	tagExists                                            bool
 	creates, tags, promotes                              int
 	loseCreate, losePromote, rejectCreate, rejectPromote bool
+	// listLag is how many inventory reads still omit a draft that exists.
+	listLag, listReads int
 }
 
 func lifecycleFixtureFor(t *testing.T) *lifecycleFixture {
@@ -76,8 +78,11 @@ func lifecycleFixtureFor(t *testing.T) *lifecycleFixture {
 			if r.URL.Query().Get("per_page") != "100" || r.URL.Query().Get("page") != "1" {
 				t.Error("unbounded releases query")
 			}
+			f.listReads++
 			entries := []any{}
-			if f.exists {
+			if f.exists && f.listLag > 0 {
+				f.listLag--
+			} else if f.exists {
 				entries = append(entries, response())
 			}
 			_ = json.NewEncoder(w).Encode(entries)

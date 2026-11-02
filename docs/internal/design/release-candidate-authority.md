@@ -132,7 +132,10 @@ Every evidence artifact is pinned, not only the image selected for publication.
 Product OCI archives undergo complete archive, platform, image and layer checks.
 Evidence and destination reads repeat immediately before readiness; publication
 must repeat verification again because later journal/configuration changes cannot
-be locked by a completed read. Preparation itself publishes nothing.
+be locked by a completed read. A direct owner call repeats it per effect. A saved
+release's one-call publish repeats it before its first effect and before each public
+one, and its uploads to the private draft reuse that. Preparation itself publishes
+nothing.
 
 Artifact bytes come from the native upload journal, not an editable Library
 row. `OpenRunFileReceipt` repeats owner, internal-origin and producing-attempt
@@ -182,8 +185,10 @@ destination administrator has never subsequently removed those bytes.
 
 The file path uses `integrations/githubrelease` to snapshot receipt-bound bytes,
 publish only to the selected existing draft and verify a full independent
-download. It repeats draft/tag checks and never creates, promotes, deletes or
-overwrites a release or asset. A failed readback retains the same pending SQL
+download. It repeats draft/tag checks and never creates or promotes a release, and
+never deletes or overwrites a complete asset. The one asset it deletes is what an
+interrupted upload left under its approved name, in a state GitHub reports as
+incomplete. A failed readback retains the same pending SQL
 intent and all pins. Another engine can reconcile the same destination and
 finish it without uploading a second asset. Both verified snapshot types close
 on success and failure; publication cancellation includes time waiting for an
@@ -266,10 +271,13 @@ that point another host observes only; neither an empty inventory nor a lost
 connection authorizes another draft POST or promotion PATCH. A crash between
 claim and send is conservatively uncertain. There is no automatic claim reset.
 
-A file upload takes the same native resource lock through the protocol effect.
-Promotion must also see every publication receipt complete. Pending receipts
-remain a fence after an uploader process dies and its transaction releases.
-Claiming promotion blocks every subsequent native upload. These are our own
+A file upload holds a renewed lease on that row through the protocol effect, and no
+transaction: the request pool ends a session idle in a transaction after 60 s, and a
+candidate read blocked on the row lock refuses after 8 s. Promotion and renewal
+refuse while the lease is live, and promotion must also see every publication
+receipt complete. Pending receipts remain a fence after an uploader process dies,
+until its lease lapses and after. Claiming promotion blocks every subsequent native
+upload. These are our own
 writer guarantees; GitHub has no atomic draft/tag/asset CAS against an external
 administrator. Complete before/after observations detect visible drift.
 
@@ -281,7 +289,7 @@ candidate evidence. Mutable remote state is never inferred from UI state.
 
 Real SQL and ordinary DSL tests cover one create across concurrent hosts, lost
 creation and promotion replies, fresh-host observation, pending-publication
-refusal, upload/promotion locking, changed metadata and mandatory native scope.
+refusal, upload/promotion fencing, changed metadata and mandatory native scope.
 Local HTTP fixtures verify exact tag, marker, metadata, asset bytes and latest
 selection. They perform no public release effects and do not claim a complete
 installed multi-repository release rehearsal.

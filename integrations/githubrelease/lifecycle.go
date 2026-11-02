@@ -207,7 +207,8 @@ func (s *publication) findDraft(ctx context.Context, m Metadata, body string) (R
 }
 
 // CreateDraft attempts at most one POST. The caller must durably fence that
-// attempt BEFORE entering; never retry it based on a missing release alone.
+// attempt BEFORE entering; never retry it based on a missing release alone. Only
+// the read after it repeats (settled), so list lag alone does not stop a publication.
 func (l *Lifecycle) CreateDraft(ctx context.Context, m Metadata, marker string) (ReleaseState, error) {
 	if marker == "" {
 		return ReleaseState{}, errors.New("draft creation requires its durable intent marker")
@@ -237,7 +238,11 @@ func (l *Lifecycle) CreateDraft(ctx context.Context, m Metadata, marker string) 
 		"tag_name": s.p.target.Tag, "target_commitish": s.p.target.SourceCommit, "name": m.Name, "body": body,
 		"draft": true, "prerelease": m.Prerelease, "generate_release_notes": false, "make_latest": "false",
 	}, nil)
-	state, found, err = s.findDraft(ctx, m, body)
+	err = settled(ctx, func() (bool, error) {
+		var err error
+		state, found, err = s.findDraft(ctx, m, body)
+		return found, err
+	})
 	if err != nil || !found || !state.Draft {
 		return ReleaseState{}, ErrUncertain
 	}
@@ -312,7 +317,7 @@ func (s *publication) observe(ctx context.Context, m Metadata, body string, want
 		return ReleaseState{}, err
 	}
 	for _, a := range assets {
-		if err := s.verifyDownload(ctx, a.ID, Expected{SHA256: a.SHA256, Size: a.Size}); err != nil {
+		if err := s.verifyDownload(ctx, a.ID, a.Name, Expected{SHA256: a.SHA256, Size: a.Size}); err != nil {
 			return ReleaseState{}, err
 		}
 	}

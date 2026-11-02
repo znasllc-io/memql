@@ -86,7 +86,7 @@ func (s *candidatePublishScope) writeFile(ctx context.Context, _ map[string]any)
 		return nil, err
 	}
 	var receipt githubrelease.Receipt
-	err = s.p.ledger.withDraftUpload(ctx, s.record.ID, s.request.ApprovalID, plan, func(releaseID int64) error {
+	err = s.p.ledger.withDraftUpload(ctx, s.record.ID, s.request.ApprovalID, plan, func(ctx context.Context, releaseID int64) error {
 		var lifecycle *githubrelease.Lifecycle
 		marker := ""
 		if plan.Target.ReleaseID == 0 {
@@ -107,6 +107,9 @@ func (s *candidatePublishScope) writeFile(ctx context.Context, _ map[string]any)
 			return err
 		}
 		receipt, err = publisher.Publish(ctx, s.file)
+		if receipt.ReplacedAssetID != 0 && s.p.logger != nil {
+			s.p.logger.Warn("release upload removed an incomplete asset an earlier attempt left behind", "candidate", s.record.ID, "target", s.intent.Target.TargetID, "releaseId", releaseID, "removedAssetId", receipt.ReplacedAssetID)
+		}
 		if err != nil {
 			return err
 		}

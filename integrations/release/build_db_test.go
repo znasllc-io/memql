@@ -102,11 +102,29 @@ type buildDBFixture struct {
 	loseTag     bool
 	workflow    string
 	publication string
+	// ownerRole is the role stored for the fixture's owner, read fresh by a long
+	// publication. A real row would change who owns the shared test database.
+	ownerRole *atomic.Value
+}
+
+// buildIdentityEngine is the real engine except for the one identity read.
+type buildIdentityEngine struct {
+	memql.IntegrationEngineAccess
+	role *atomic.Value
+}
+
+func (e *buildIdentityEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	if strings.HasPrefix(query, "query userByIdSystem(") {
+		return memql.NewResultWithOutput(map[string]any{"role": e.role.Load()}), nil
+	}
+	return e.IntegrationEngineAccess.Execute(ctx, query)
 }
 
 func newBuildDBFixture(t *testing.T) *buildDBFixture {
 	t.Helper()
-	f := &buildDBFixture{profileDBFixture: newProfileDBFixture(t, "release", "full"), workflow: buildFixtureWorkflow, publication: buildFixturePublication}
+	f := &buildDBFixture{profileDBFixture: newProfileDBFixture(t, "release", "full"), workflow: buildFixtureWorkflow, publication: buildFixturePublication, ownerRole: &atomic.Value{}}
+	f.ownerRole.Store(string(auth.RoleOwner))
+	f.i.store.engine = &buildIdentityEngine{f.i.store.engine, f.ownerRole}
 	owner, _ := candidateOwner(ownerCtx())
 	var pipelineID string
 	if err := f.db.QueryRow(`SELECT payload->>'pipelineId' FROM "MemoryNodes" WHERE id=$1 ORDER BY "createdAt" DESC LIMIT 1`, "v1:pipelines:run:"+f.runID).Scan(&pipelineID); err != nil {
@@ -205,6 +223,7 @@ func (f *buildDBFixture) prepare(t *testing.T) releaseBuildRecord {
 func (f *buildDBFixture) peer(t *testing.T) *Integration {
 	t.Helper()
 	i := NewIntegration(nil, assemblyEngine(t, f.db), f.i.resolver)
+	i.store.engine = &buildIdentityEngine{i.store.engine, f.ownerRole}
 	i.profileSource, i.profileRevision = f.i.profileSource, f.i.profileRevision
 	if err := i.ConfigureCandidates(*f.i.candidateDeps.Load()); err != nil {
 		t.Fatal(err)

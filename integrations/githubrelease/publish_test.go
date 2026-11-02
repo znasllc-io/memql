@@ -29,6 +29,7 @@ type releaseFixture struct {
 	target  Target
 	assets  []fixtureAsset
 	posts   int
+	deletes []int64
 	draft   bool
 	commit  string
 	tag     gitObject
@@ -36,6 +37,9 @@ type releaseFixture struct {
 	lost    bool
 	corrupt bool
 	reject  bool
+	// nextAsset numbers assets for the fixture's lifetime, so a replacement
+	// never reuses the identity of the asset it replaced.
+	nextAsset int64
 	// hook runs outside mu and may implement one response or update fixture
 	// state under mu. It is installed before starting any publication.
 	hook func(http.ResponseWriter, *http.Request) bool
@@ -116,6 +120,17 @@ func fixture(t *testing.T) *releaseFixture {
 			}
 			w.WriteHeader(201)
 			_ = json.NewEncoder(w).Encode(f.assets[len(f.assets)-1].asset)
+		case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/repos/owner/project/releases/assets/"):
+			id, _ := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/repos/owner/project/releases/assets/"), 10, 64)
+			f.deletes = append(f.deletes, id)
+			for index, a := range f.assets {
+				if a.ID == id {
+					f.assets = append(f.assets[:index], f.assets[index+1:]...)
+					w.WriteHeader(204)
+					return
+				}
+			}
+			w.WriteHeader(404)
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/repos/owner/project/releases/assets/"):
 			id, _ := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/repos/owner/project/releases/assets/"), 10, 64)
 			if r.Header.Get("Accept") != "application/octet-stream" {
@@ -146,7 +161,8 @@ func fixture(t *testing.T) *releaseFixture {
 
 func (f *releaseFixture) addAsset(name string, body []byte) {
 	want := expected(body)
-	f.assets = append(f.assets, fixtureAsset{asset: asset{ID: int64(len(f.assets)) + 100, Name: name, State: "uploaded", Size: &want.Size, Digest: want.SHA256}, body: append([]byte(nil), body...)})
+	f.nextAsset++
+	f.assets = append(f.assets, fixtureAsset{asset: asset{ID: f.nextAsset + 99, Name: name, State: "uploaded", Size: &want.Size, Digest: want.SHA256}, body: append([]byte(nil), body...)})
 }
 
 func publisher(t *testing.T, target Target) *Publisher {
@@ -193,7 +209,7 @@ func TestPublishExactBytesAndReconcileFromAnotherHost(t *testing.T) {
 }
 
 func TestPublishRefusesConflictsWithoutMutation(t *testing.T) {
-	for _, mode := range []string{"checksum", "metadata", "size", "starter", "duplicate", "missing size", "published", "moved tag", "tag loop", "tag depth", "wrong upload URL", "wrong draft ID"} {
+	for _, mode := range []string{"checksum", "metadata", "size", "duplicate", "missing size", "published", "moved tag", "tag loop", "tag depth", "wrong upload URL", "wrong draft ID"} {
 		t.Run(mode, func(t *testing.T) {
 			f := fixture(t)
 			data := []byte("approved asset")
@@ -205,8 +221,6 @@ func TestPublishRefusesConflictsWithoutMutation(t *testing.T) {
 				f.assets[0].Digest = "sha256:" + strings.Repeat("f", 64)
 			case "size":
 				*f.assets[0].Size++
-			case "starter":
-				f.assets[0].State = "starter"
 			case "duplicate":
 				f.addAsset(f.target.AssetName, data)
 			case "missing size":
@@ -243,8 +257,8 @@ func TestPublishRefusesConflictsWithoutMutation(t *testing.T) {
 			if _, err := publisher(t, f.target).Publish(context.Background(), verified(t, data)); err == nil || errors.Is(err, ErrUncertain) {
 				t.Fatal("preexisting mismatch did not refuse before effect", err)
 			}
-			if f.posts != 0 {
-				t.Fatal("conflict caused upload")
+			if f.posts != 0 || len(f.deletes) != 0 {
+				t.Fatal("conflict caused a remote write", f.posts, f.deletes)
 			}
 		})
 	}
