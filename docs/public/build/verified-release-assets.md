@@ -84,21 +84,32 @@ An existing same-name asset succeeds only when its uploaded state, size and
 optional metadata digest agree and a complete binary download independently
 matches the receipt. If absent, the adapter repeats the draft/tag check and
 sends one raw upload. It then lists and downloads the asset again, even when
-the upload response was lost. A final release/tag and asset identity check
+the upload response was lost, re-reading the list for up to 15 seconds while its
+upload is not yet shown or is still finishing. A final release/tag and asset identity check
 must pass before it returns a receipt. A new host can reconcile with a new
 verified handle and the same target; process-local state is not the receipt.
 
-`ErrConflict` reports preexisting incompatible bytes or metadata. `ErrUncertain`
-means a POST might have had an effect that readback could not verify. The caller
+`ErrConflict` reports a complete asset with incompatible bytes or metadata, or an
+asset in a state the adapter cannot read, and `ConflictError` names the asset. A read
+that fails is an ordinary error and proves nothing about the bytes. `ErrUncertain`
+means a POST or DELETE might have had an effect that readback could not verify. The caller
 keeps its intent and source pins and reconciles the exact same destination.
 Remote error bodies and signed URLs are not returned as error text. A successful
 request or an asset's declared digest alone never constitutes publication proof.
 
 GitHub's [asset API](https://docs.github.com/en/rest/releases/assets) can leave
-a `starter` asset after an upstream failure and refuses duplicate filenames.
-The adapter leaves both starter and conflicting assets untouched; cleanup or a
-different release requires its own explicitly authorized workflow. It follows
-at most three binary-download redirects to configured HTTPS origins without
+a `starter` asset after an upstream failure, says it can be safely deleted, and
+refuses duplicate filenames. Its schema's only other value besides `uploaded` is
+`open`, which it does not define. The adapter accepts only `uploaded`, so an asset in
+either state under the approved name could never complete the release, and it treats
+one as what an interrupted upload left behind: it checks the draft and tag again,
+lists the asset once more, deletes exactly that asset ID, confirms it is gone and
+uploads. GitHub has no conditional delete, so that last read narrows the window
+without closing it. The receipt reports the asset it replaced, even when the call then
+fails. The caller must be the release's only writer, because deleting an asset another
+of its uploads is still sending would fail that upload. A call never deletes the asset
+its own upload just created. Conflicting complete assets stay untouched; removing one
+requires the owner. It follows at most three binary-download redirects to configured HTTPS origins without
 credentials, cookies or referrers. API and upload redirects are refused.
 
 Each publication has a 30-minute ceiling including handle admission, at most
@@ -118,8 +129,8 @@ mutations. A verified receipt records what was observed, not a guarantee that
 the remote asset remains present forever.
 
 Tests use local HTTP and TLS fixtures, including concurrent publishers,
-annotated tags, lost replies, conflicting/starter assets, malformed or excessive
-metadata, credential confinement, corrupt/truncated byte streams, cancellation
+annotated tags, lost replies, conflicting assets, interrupted uploads and their
+replacement, malformed or excessive metadata, credential confinement, corrupt/truncated byte streams, cancellation
 and second-host reconciliation. They do not publish to GitHub. The candidate
 controller additionally exercises native SQL authority, retained artifacts and
 scoped DSL composition. Full installed qualification must cover these contracts

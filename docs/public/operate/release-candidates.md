@@ -420,12 +420,17 @@ Upload each destination with `releasePublishCandidate`. Once every destination
 in the candidate has a verified complete publication receipt, separately invoke
 `releasePromoteCandidateDraft(candidateId, approvalId, targetId)`. Its recipe
 checks completion, observes every expected asset's full bytes, claims promotion,
-changes visibility and records another verified readback. The tag, name, notes,
-prerelease status, exact asset inventory and asset IDs must agree. The reviewed
-`draft.latest` flag selects whether promotion should also make this
-the latest release. It defaults to false, is incompatible with prereleases, and
-when true requires the latest-release endpoint to read back this exact ID.
+changes visibility and records another verified readback of every byte. The tag,
+name, notes, prerelease status, exact asset inventory and asset IDs must agree.
+Between the claim and the change of visibility it reads no bytes: it reads the
+inventory, the release and its tag, and each asset must still have the ID whose
+bytes it read. The reviewed `draft.latest` flag selects whether promotion should
+also make this the latest release. It defaults to false, is incompatible with
+prereleases, and when true requires the latest-release endpoint to read back this
+exact ID.
 See the [GitHub release API contract](https://docs.github.com/en/rest/releases/releases).
+A saved release does all of this in one call: see
+[Publish a whole release in one call](#publish-a-whole-release-in-one-call).
 
 An existing positive `releaseId` still supports uploads. To promote that draft
 through this API, declare its exact `draft` metadata before candidate review.
@@ -446,8 +451,10 @@ unchanged. Retrying the same explicit action on another node reconciles its
 durable identity. Creation uses bounded authenticated release inventory and an
 exact intent marker; promotion uses the bound release ID and full asset set.
 Neither repeats a POST/PATCH merely because the prior response was lost or the
-effect is not yet visible. Uncertainty retains the candidate and artifacts and
-prevents retirement. If readback cannot prove completion, resolve the remote
+effect is not yet visible. Creation re-reads the inventory for up to 15 seconds
+after its one POST before calling the outcome uncertain, because a new draft can
+be missing from the list for a moment. Uncertainty retains the candidate and
+artifacts and prevents retirement. If readback cannot prove completion, resolve the remote
 state explicitly; there is no automatic fence reset. A crash between claiming
 and sending an effect is also uncertain.
 
@@ -483,12 +490,18 @@ revocation or expiry leaves the inputs retained. Disable with
 already admitted pass may finish. This enrollment authorizes duplicate-input
 archival only; it cannot remove canonical release downloads or registry images.
 
-Native row locks and pending publication receipts coordinate this system's
-uploads and promotion across replicas. GitHub has no atomic operation binding
-draft visibility, its tag and all assets together. Before/after checks detect
-observed external drift; they cannot exclude concurrent remote administrators.
-No delete or overwrite is performed. Latest selection follows only the reviewed
-flag.
+An upload lease and pending publication receipts coordinate this system's uploads
+and promotion across replicas. GitHub has no atomic operation binding draft
+visibility, its tag and all assets together. Before/after checks detect observed
+external drift; they cannot exclude concurrent remote administrators. Promotion reads an
+asset's bytes before its claim and after its PATCH, and in between the listing stands for
+them: the asset's ID and the digest GitHub reports. GitHub's
+[asset API](https://docs.github.com/en/rest/releases/assets) can rename an asset but
+offers no way to change its bytes, and replacing one means deleting it and uploading
+another. A replacement the listing does not show yet, or bytes changed under an unchanged
+ID and digest, would show only in the read after the PATCH, with the release already
+public. The only delete is of an asset GitHub reports as incomplete, under an approved
+name, on the bound draft. Latest selection follows only the reviewed flag.
 
 The candidate identity includes both lifecycle recipes whenever reviewed draft
 metadata is configured. Changed engine or workflow identity requires fresh
@@ -507,6 +520,91 @@ Renewal refuses pending uploads, uncertain creation or promotion, already
 published releases, and candidates containing registry publications. Reconcile
 unfinished effects under their original authority before renewing. Uploading or
 promoting alone never transfers authority to a different candidate.
+
+### Publish a whole release in one call
+
+**Publish release** (`releasePublishBuild`) runs the saved recipe once and finishes
+the release, however many files it has: the draft, every upload, the promotion and
+the signed catalog record. No per-file calls are needed. A recipe may call each
+effect once per target, and the cost stays proportional to the release:
+
+- The whole candidate is verified before the call's first effect, and uploads to the
+  private draft reuse that verification. Each upload still checks the lease, the
+  owner's stored role and the release profile, the journal still checks the exact
+  approval, and the file's own bytes are verified again immediately before it is sent.
+- Anything public verifies afresh: the promotion, and each registry or npm write.
+- Once a release's draft is `ready`, draft creation for its other files answers
+  from the journal. Once it is `published`, so does promotion.
+
+Direct calls to `releaseCreateCandidateDraft`, `releasePublishCandidate` and
+`releasePromoteCandidateDraft` keep their own full verification.
+
+The call has no time limit as a whole, because no fixed limit suits both ten files
+and 8 GiB. One upload may take 30 minutes and any one recipe operation 70, and a
+stuck operation ends the call. The call continues if the page closes or the
+connection drops; read its progress with `releaseGetBuild`. While it runs the
+release reads `publishing` and does not offer **Publish release**.
+
+It stops before its next operation if the owner loses the owner role or the release
+profile changes, and a new engine version replaces the node running it. Nothing else
+stops it: a request to cancel the call is acknowledged, and the publication carries
+on.
+
+Uploads to one release run one at a time. An upload from any other caller is refused
+while one is running, and so are promotion and draft renewal, until it finishes or
+for up to 3 minutes after the node running it died.
+
+If a call stops, press **Publish release** again, on any replica. Completed uploads
+keep their receipts and are not sent again, and neither the draft POST nor the
+promotion PATCH repeats. The release reads `uncertain` with the reason. If its node
+died, it reads `publishing` for up to 6 minutes, then `uncertain` with the reason
+`publication_interrupted`, and offers the action again.
+
+An upload cut off part way can leave an asset GitHub reports as `starter` or `open`.
+GitHub then refuses every later upload under that name, and
+[documents](https://docs.github.com/en/rest/releases/assets) that a `starter` asset
+can be safely deleted. The next publish removes exactly that asset and uploads the
+file again, logging the asset ID it replaced. It first checks that the release is
+still the bound draft at the approved tag, and reads the asset once more in case it
+finished. GitHub has no conditional delete, so that last read narrows the window
+without closing it. A call never does this to its own upload, because that upload may
+still be finishing.
+
+Two stops need more than pressing again:
+
+- **`release_asset_conflict`** names a file that is finished but is not the approved
+  file, or whose state is unknown. It is left alone, because nothing can tell which
+  copy is right. Put the approved file in its place, then publish again. If the file
+  has no complete publication yet (`releaseCandidatePublications`), removing it is
+  enough, since the next publish sends it. Once it has one, nothing sends it again, so
+  removing it would leave the release unable to go public. A read that fails is not a
+  conflict: it ends the call as `operation_unconfirmed`, and pressing again reads again.
+  Found once promotion has started, the reason says the release may already be public.
+- **`promotion_unconfirmed`** means making the release public was claimed and could
+  not be confirmed. A claimed promotion never repeats its PATCH on a guess, including
+  when the read just before the PATCH fails, so pressing again cannot get past it while
+  the release is still a draft. If it is still a draft on GitHub, check that its tag, notes
+  and files are still the approved ones, publish it there, then press **Publish release**
+  again to record it. The press verifies all of that and refuses a release that differs.
+
+A claim with no PATCH behind it is the case only the owner can clear, so little happens
+between the two, and it does not grow with the release. The credential is fetched before
+the claim, and a failure there leaves the draft `ready`, so pressing again works. After
+the claim the call checks the lease, the owner and the release profile, then reads the
+inventory, the release and its tag, usually three requests and no bytes. A read that gets
+no answer repeats for about 15 seconds, longer if a request hangs. A read that shows a
+change stops the promotion at once. What still leaves a claim with no PATCH sent:
+
+- those reads getting no answer after the repeats, or showing that an asset, the tag or
+  the release changed since the bytes were read. A file that differs reads
+  `release_asset_conflict`, and once it is back the next press reads
+  `promotion_unconfirmed`. Anything else reads `promotion_unconfirmed` directly;
+- the lease, the owner's role or the release profile no longer holding;
+- the node dying between the claim and the PATCH, which first reads
+  `publication_interrupted`.
+
+A PATCH GitHub refused or lost reads the same way: nothing can tell whether it landed
+until the release is seen to be public.
 
 ## Publish portable catalog evidence
 

@@ -72,6 +72,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"npmregistry/publish.go":                 "checks registry tarball readback against the immutable source receipt's standard SHA-256 before confirming publication",
 		"npmregistry/publish_test.go":            "independently computes standard SHA-256 npm archive receipts for publication and readback integrity tests",
 		"release/candidate_npm_db_test.go":       "constructs immutable Library SHA-256 receipts for the real npm release preparation and publication path",
+		"release/build_publish_db_test.go":       "constructs immutable Library SHA-256 receipts and the asset digests GitHub reports for the real many-file publication path",
 		// Release artifact digests are standard SHA-256 over the exact blob
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.

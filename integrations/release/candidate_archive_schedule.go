@@ -116,6 +116,17 @@ func (i *Integration) handleArchiveSchedule(ctx context.Context, args map[string
 	return resultNode("archiveSchedule", "", map[string]any{"enabled": enabled})
 }
 
+// storedOwnerResolver reads an owner's current stored role, never a cached one.
+func (i *Integration) storedOwnerResolver() *auth.IdentityResolver {
+	return auth.NewIdentityResolver(auth.QueryRunnerFunc(func(c context.Context, query string) (any, error) {
+		result, err := i.store.engine.Execute(memql.ContextWithFreshRead(c), query)
+		if err != nil || result == nil {
+			return nil, err
+		}
+		return result.OutputPayload(), nil
+	}), i.logger)
+}
+
 func (i *Integration) handleSweepPublishedInputs(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if auth.OriginFromContext(ctx) != auth.OriginInternal {
 		return nil, errors.New("published input maintenance requires internal origin")
@@ -144,14 +155,7 @@ func (i *Integration) handleSweepPublishedInputs(ctx context.Context, _ map[stri
 			i.logger.Warn("published input archive cursor release failed", "error", err)
 		}
 	}()
-	resolver := auth.NewIdentityResolver(auth.QueryRunnerFunc(func(c context.Context, query string) (any, error) {
-		result, err := i.store.engine.Execute(memql.ContextWithFreshRead(c), query)
-		if err != nil || result == nil {
-			return nil, err
-		}
-		return result.OutputPayload(), nil
-	}), i.logger)
-	ownerCtx, err := auth.ContextWithPersistedOwner(ctx, "v1:identity:user:"+scan.owner, scan.grant, resolver)
+	ownerCtx, err := auth.ContextWithPersistedOwner(ctx, "v1:identity:user:"+scan.owner, scan.grant, i.storedOwnerResolver())
 	if err != nil {
 		return nil, err
 	}

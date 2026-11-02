@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -226,7 +227,7 @@ func TestCandidateDraftRenewalSerializesHostsAndPermanentlyFencesOldAuthority(t 
 	if _, err := p.ledger.beginPublication(ctx, old.ID, old.ApprovalID, prior.TargetID, prior.Component, prior.Artifact); err == nil {
 		t.Fatal("old host started publication")
 	}
-	if err := p.ledger.withDraftUpload(ctx, old.ID, old.ApprovalID, plan, func(int64) error { t.Fatal("old host wrote remotely"); return nil }); err == nil {
+	if err := p.ledger.withDraftUpload(ctx, old.ID, old.ApprovalID, plan, func(context.Context, int64) error { t.Fatal("old host wrote remotely"); return nil }); err == nil {
 		t.Fatal("old upload authority remained valid")
 	}
 	if _, err := p.ledger.drafts(ctx, old.ID); err != nil {
@@ -244,7 +245,7 @@ func TestCandidateDraftRenewalSerializesHostsAndPermanentlyFencesOldAuthority(t 
 	}
 }
 
-func TestCandidateDraftRenewalWaitsForInFlightUploadAndRefusesItsPendingReceipt(t *testing.T) {
+func TestCandidateDraftRenewalRefusesAnInFlightUploadAndItsPendingReceipt(t *testing.T) {
 	db := candidateTestDB(t)
 	p, c, _ := candidateDraftWorkflowFixture(t, db)
 	prior := preparePublication(t, db, p, c)
@@ -257,39 +258,15 @@ func TestCandidateDraftRenewalWaitsForInFlightUploadAndRefusesItsPendingReceipt(
 	}
 	ctx, cancel := context.WithTimeout(ownerCtx(), 5*time.Second)
 	defer cancel()
-	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	unblock := func() { once.Do(func() { close(release) }) }
-	defer unblock()
-	written, renewed := make(chan error, 1), make(chan error, 1)
-	go func() {
-		written <- p.ledger.withDraftUpload(ctx, old.ID, old.ApprovalID, plan, func(int64) error {
-			close(entered)
-			<-release
-			return nil
-		})
-	}()
-	select {
-	case <-entered:
-	case err := <-written:
-		t.Fatal("upload did not enter", err)
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	go func() {
-		_, err := freshDraftHost(p, db).ledger.beginReviewedDraft(ctx, next.ID, next.ApprovalID, plan)
-		renewed <- err
-	}()
-	select {
-	case err := <-renewed:
-		t.Fatal("renewal crossed an active upload", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	unblock()
-	if err := <-written; err != nil {
+	if err := p.ledger.withDraftUpload(ctx, old.ID, old.ApprovalID, plan, func(context.Context, int64) error {
+		if _, err := freshDraftHost(p, db).ledger.beginReviewedDraft(ctx, next.ID, next.ApprovalID, plan); !errors.Is(err, errDraftUploadRunning) {
+			t.Fatal("renewal crossed an active upload", err)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-renewed; err == nil || !strings.Contains(err.Error(), "unfinished publication") {
+	if _, err := freshDraftHost(p, db).ledger.beginReviewedDraft(ctx, next.ID, next.ApprovalID, plan); err == nil || !strings.Contains(err.Error(), "unfinished publication") {
 		t.Fatal("renewal ignored an unrecorded upload result", err)
 	}
 }

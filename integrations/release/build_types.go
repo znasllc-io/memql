@@ -104,6 +104,9 @@ type releaseBuildRecord struct {
 	PublicationStarted bool                  `json:"publicationStarted"`
 	CreatedAt          time.Time             `json:"createdAt"`
 	UpdatedAt          time.Time             `json:"updatedAt"`
+	// leased says a live holder had the lease when this record was read. It is a
+	// read of the lease columns, never journal content.
+	leased bool
 }
 
 func (r releaseBuildRecord) validate(owner, key string) error {

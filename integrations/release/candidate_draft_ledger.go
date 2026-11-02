@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/githubrelease"
@@ -169,9 +170,12 @@ func (l *candidateLedger) claimDraftEffect(ctx context.Context, candidateID, app
 		return rec, false, tx.Commit()
 	}
 	if promotion {
+		if err := requireNoDraftUpload(ctx, tx, plan.ResourceKey); err != nil {
+			return rec, false, err
+		}
 		// Every approved destination must have a complete native receipt before
 		// exposing the release. A missing/pending write also fences in-flight
-		// uploads after a process dies, when a transaction lock is no longer held.
+		// uploads after a process dies, before its upload lease has lapsed.
 		candidate, err := readCandidate(ctx, tx, owner, candidateID)
 		if err != nil {
 			return rec, false, err
@@ -294,24 +298,108 @@ func (l *candidateLedger) recordPromotion(ctx context.Context, candidateID, appr
 	return rec, tx.Commit()
 }
 
-// Hold the native resource lock through one file upload. Promotion takes the
-// same lock and refuses pending publication receipts, including lost replies.
-// This fences our writers; the remote provider has no cross-resource CAS.
-func (l *candidateLedger) withDraftUpload(ctx context.Context, candidateID, approvalID string, plan candidateDraftPlan, write func(int64) error) error {
-	tx, owner, err := l.draftTransaction(ctx, candidateID, approvalID)
+// errDraftUploadRunning refuses a promotion, renewal or second upload while the
+// release's upload lease is live. A holder that died releases it when it lapses.
+var errDraftUploadRunning = errors.New("an upload to this release is still running; try again once it has finished")
+
+// withDraftUpload fences one file upload with a renewed durable lease. Promotion
+// and renewal refuse while it is live, and promotion also refuses pending
+// publication receipts, including lost replies. This fences our writers; the
+// remote provider has no cross-resource CAS.
+//
+// It deliberately holds no transaction across write. The request pool ends a
+// session idle in a transaction after 60 s, which failed an upload after it had
+// succeeded and silently dropped the lock, and every candidate read waited on the
+// row lock until its 8 s limit, which blinded the Releases screen for the whole
+// upload. What survives a retry or replica change is the lease row; write's context
+// ends if that lease is lost.
+func (l *candidateLedger) withDraftUpload(ctx context.Context, candidateID, approvalID string, plan candidateDraftPlan, write func(context.Context, int64) error) error {
+	lease, err := l.claimDraftUpload(ctx, candidateID, approvalID, plan)
 	if err != nil {
 		return err
+	}
+	defer lease.close(ctx)
+	work, stop := keepLease(ctx, uploadLeaseTiming, lease.renew)
+	defer stop()
+	return write(work, lease.releaseID)
+}
+
+type draftUploadLease struct {
+	ledger                    *candidateLedger
+	resourceKey, owner, token string
+	releaseID                 int64
+}
+
+func (l *candidateLedger) claimDraftUpload(ctx context.Context, candidateID, approvalID string, plan candidateDraftPlan) (*draftUploadLease, error) {
+	tx, owner, err := l.draftTransaction(ctx, candidateID, approvalID)
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
 	rec, err := readDraft(ctx, tx, owner, candidateID, approvalID, plan)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rec.State != "ready" || rec.ReleaseID <= 0 {
-		return errors.New("release upload requires a bound draft that is not being promoted")
+		return nil, errors.New("release upload requires a bound draft that is not being promoted")
 	}
-	if err := write(rec.ReleaseID); err != nil {
+	token := id.NewShortId()
+	result, err := tx.ExecContext(ctx, `UPDATE release_draft_intents SET upload_lease_id=$2,upload_lease_until=clock_timestamp()+($3::bigint*interval '1 millisecond')
+WHERE resource_key=$1 AND upload_lease_until<=clock_timestamp()`, plan.ResourceKey, token, uploadLeaseTiming.ttl.Milliseconds())
+	if err != nil {
+		return nil, err
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if claimed != 1 {
+		return nil, errDraftUploadRunning
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &draftUploadLease{l, plan.ResourceKey, owner, token, rec.ReleaseID}, nil
+}
+
+func (s *draftUploadLease) renew(ctx context.Context) error {
+	db, err := s.ledger.database()
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	result, err := db.ExecContext(ctx, `UPDATE release_draft_intents SET upload_lease_until=clock_timestamp()+($4::bigint*interval '1 millisecond')
+WHERE resource_key=$1 AND owner_user_id=$2 AND upload_lease_id=$3 AND upload_lease_until>clock_timestamp()`, s.resourceKey, s.owner, s.token, uploadLeaseTiming.ttl.Milliseconds())
+	if err != nil {
+		return err
+	}
+	renewed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if renewed != 1 {
+		return errLeaseLost
+	}
+	return nil
+}
+
+// close is best effort: a lease it fails to release lapses on its own.
+func (s *draftUploadLease) close(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if db, err := s.ledger.database(); err == nil {
+		_, _ = db.ExecContext(ctx, `UPDATE release_draft_intents SET upload_lease_id='',upload_lease_until='epoch' WHERE resource_key=$1 AND owner_user_id=$2 AND upload_lease_id=$3`, s.resourceKey, s.owner, s.token)
+	}
+}
+
+// requireNoDraftUpload runs under the caller's lock on the draft row, which is
+// the lock an upload claim takes, so the answer stays true until that commit.
+func requireNoDraftUpload(ctx context.Context, tx *sql.Tx, resourceKey string) error {
+	var running bool
+	if err := tx.QueryRowContext(ctx, `SELECT upload_lease_until>clock_timestamp() FROM release_draft_intents WHERE resource_key=$1`, resourceKey).Scan(&running); err != nil {
+		return err
+	}
+	if running {
+		return errDraftUploadRunning
+	}
+	return nil
 }

@@ -18,6 +18,10 @@ func (i *Integration) handleCandidateDraft(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
+	return draftResult(ctx, p, args, promote)
+}
+
+func draftResult(ctx context.Context, p *candidatePreparer, args map[string]any, promote bool) ([]memorynodes.MemoryNode, error) {
 	rec, err := p.draft(ctx, candidateDraftRequest{CandidateID: asString(args["candidateId"]), ApprovalID: asString(args["approvalId"]), TargetID: asString(args["targetId"])}, promote)
 	if err != nil {
 		return nil, err

@@ -326,6 +326,10 @@ func (i *Integration) handleCandidatePublish(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err
 	}
+	return publishCandidateResult(ctx, p, args)
+}
+
+func publishCandidateResult(ctx context.Context, p *candidatePreparer, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	record, err := p.publish(ctx, candidatePublishRequest{CandidateID: asString(args["candidateId"]), ApprovalID: asString(args["approvalId"]), TargetID: asString(args["targetId"]), Component: asString(args["component"]), Artifact: asString(args["artifact"])})
 	if err != nil {
 		return nil, err

@@ -178,10 +178,14 @@ every new effect. A configuration change cannot reset the same release's
 once-only fences. Existing history remains readable, but changed or revoked
 authority may require operator attention.
 
-Publication recovery uses the candidate's native draft, upload, promotion and
-catalog journals. The configured recipe resumes verified prior work rather than
-publishing another draft. Do not delete an intent, move a tag, fabricate a
-receipt or replace an approved destination to make recovery appear successful.
+**Publish release** finishes the whole release in one call, and it keeps going if
+the page closes. Publication recovery uses the candidate's native draft, upload,
+promotion and catalog journals. If a publication stops, press **Publish release**
+again: the configured recipe resumes verified prior work rather than publishing
+another draft, and an upload cut off part way is replaced. Do not delete an intent,
+move a tag, fabricate a receipt or replace an approved destination to make recovery
+appear successful. See
+[Publish a whole release in one call](release-candidates.md#publish-a-whole-release-in-one-call).
 
 ### Recover a failed build
 
