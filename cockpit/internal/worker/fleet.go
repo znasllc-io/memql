@@ -436,5 +436,5 @@ func (f *Fleet) capacityProbe(calls *modelcall.Manager) CapacityProbe {
 	if f == nil || f.modelsInv == nil || f.discoverer == nil {
 		return nil
 	}
-	return &capacity.Prober{OllamaBase: f.discoverer.ResolvedOllamaBaseURL, InFlight: calls.InFlightByModel}
+	return &capacity.Prober{OllamaBase: f.discoverer.ResolvedOllamaBaseURL, InFlight: calls.InFlightByModel, Memory: modelcall.AdmissionMemory}
 }

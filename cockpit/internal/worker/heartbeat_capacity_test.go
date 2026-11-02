@@ -1,10 +1,13 @@
 package worker
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/modelcall"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 )
 
 // A beat carries the capacity report when there is one and nothing when
@@ -30,5 +33,19 @@ func TestHeartbeatCarriesTheCapacityReport(t *testing.T) {
 	}
 	if seam.frames[1].GetHeartbeat().GetCapacity() != nil {
 		t.Fatal("a beat with no report carried one")
+	}
+}
+
+// A machine's report offers what its gate would spend. Left to the capacity
+// package's default it would also offer what the gate keeps for workspaces, and the
+// engine would admit calls the gate then declines (memql#6414).
+func TestTheReportThisMachineSendsOffersWhatItsGateWouldSpend(t *testing.T) {
+	f := &Fleet{modelsInv: testInventory(&countingDiscoverer{}, &time.Time{}), discoverer: &models.Discoverer{}}
+	prober, ok := f.capacityProbe(modelcall.NewManager(modelcall.Options{})).(*capacity.Prober)
+	if !ok {
+		t.Fatal("a machine with models takes no capacity reading")
+	}
+	if reflect.ValueOf(prober.Memory).Pointer() != reflect.ValueOf(modelcall.AdmissionMemory).Pointer() {
+		t.Fatal("the report does not read memory through modelcall.AdmissionMemory")
 	}
 }

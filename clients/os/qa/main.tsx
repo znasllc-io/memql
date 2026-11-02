@@ -2124,7 +2124,7 @@ function routingQa(opts: { chatModel?: boolean; machines?: boolean; busy?: boole
     balance: { speed: 70, cost: 40, quality: 55, recommended: { speed: 50, cost: 50, quality: 50 }, customized: true },
     budget: { monthlyLimitUSD: 50, spentThisMonthUSD: 12.4, resetsAt: "2026-11-01T00:00:00Z" },
     capacity: opts.busy
-      ? [{ machineId: "studio", name: "studio-mac", memory: { totalBytes: 36e9, freeBytes: 9e9, kind: "unified" }, loaded: ["qwen3.8:27b"], models: [{ modelId: "qwen3.8:27b", inFlight: 2, slots: 2, tokensPerSecond: 31 }, { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, needBytes: 20e9 }] }]
+      ? [{ machineId: "studio", name: "studio-mac", memory: { totalBytes: 36e9, freeBytes: 9e9, kind: "unified" }, loaded: ["qwen3.8:27b"], models: [{ modelId: "qwen3.8:27b", inFlight: 2, slots: 2, tokensPerSecond: 31 }, { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, roomBytes: 20e9, fits: false }] }]
       : [],
     routes: [
       ...qaShippedRoutes().map((r) => (r.name === "localOnly" ? qaRouteRow("localOnly", "fleet:strongest", ["app:claude-code"], { customized: true }) : r)),

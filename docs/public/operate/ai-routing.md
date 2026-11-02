@@ -407,23 +407,29 @@ Builtins: `routesForActor`, `routeSave`, `routeDelete`, `routeReset`,
 ### Fleet capacity
 
 Under every route, a fleet source admits a machine only when it can take the
-call now. A machine that cannot load the model -- not loaded, and less free
-memory (counting idle loaded models) than the catalog's `memoryNeedBytes` plus
-10%, at least 1 GB -- is ruled out with the figures in `considered`. A machine
-with every slot in use, or one whose recent calls mostly failed or ran over
-three times slower than its peers, goes behind every machine that passes and
-is used only when none does. Memory is judged from the cockpit's capacity
-report (free memory and loaded models, on every heartbeat); a machine that
-does not report is admitted on its slots alone. `fleetCapacity` returns what
-each of your machines can take on: slots in use, memory, loaded models, recent
-latency and tokens per second, and whether it is degraded.
+call now. A machine without room is ruled out with the figures in `considered`.
+Room is its free memory plus what idle models other than this one hold, and the
+call wants what it still has to load plus a reserve: a sixteenth of the pool,
+between 1 and 4 GB. Where models share memory with a machine's workspaces, its free
+memory leaves out the 3 GB kept for them. What it has to load comes from the catalog's `memoryNeedBytes`
+or the estimate from its `sizeBytes`, whichever is larger, with 2 GB more for each
+32K of context above 32K, less what is already loaded. A machine with every slot
+in use, or one whose recent calls mostly failed or ran over three times slower
+than its peers, goes behind every machine that passes and is used only when none
+does. Memory is judged from the cockpit's capacity report (free memory and loaded
+models, on every heartbeat); a machine that does not report is admitted on its
+slots alone. `fleetCapacity` returns what each of your machines can take on: slots
+in use, memory, loaded models, recent latency and tokens per second, whether it is
+degraded, and for each model the room it wants and whether it fits.
 
-The machine has the last word. Its cockpit checks its own memory before handing
-the call to a runtime, and a machine that cannot take the call ends it with
-`insufficient_memory` having run nothing. The call then goes to the next machine
-holding the model, and when there is none, to the route's next source. No other
-failure moves a call to another machine: one a runtime was handed may have
-generated, and running it again would be the same generation twice.
+The machine has the last word, and it runs the same sum on the same reading of
+free memory. Its cockpit checks its own memory before handing the call to a
+runtime, and a machine that cannot take the call ends it with
+`insufficient_memory` having run nothing. That now happens mainly when memory has
+moved since the last heartbeat. The call then goes to the next machine holding the
+model, and when there is none, to the route's next source. No other failure moves
+a call to another machine: one a runtime was handed may have generated, and running
+it again would be the same generation twice.
 
 ## Explicit API choices and automatic Ask routing
 

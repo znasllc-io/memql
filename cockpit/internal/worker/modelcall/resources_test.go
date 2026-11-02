@@ -16,6 +16,8 @@ import (
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 )
 
+const gib = uint64(1 << 30)
+
 func resourcesForTest(probe func() (memoryHeadroom, error)) *hostResources {
 	return &hostResources{gate: make(chan struct{}, 1), owned: make(map[string]models.Info), probe: probe, poll: time.Millisecond}
 }

@@ -139,13 +139,17 @@ message Register {
 // how every machine was admitted before this message existed.
 message Capacity {
   // The pool models load into: unified memory on Apple Silicon, the card's
-  // VRAM on a discrete GPU, system memory on a CPU-only machine.
+  // VRAM on a discrete GPU (the card with the least free, when there are
+  // several), system memory on a CPU-only machine.
   uint64 memory_total_bytes = 1;
-  // What a NEW model could take from that pool now without swapping: on
-  // unified memory the smaller of the memory the OS reports available and
-  // the GPU's wired limit less what loaded models hold. Memory held by an
-  // IDLE loaded model is not counted here; it is on LoadedModel, so the
-  // engine can count it as reclaimable.
+  // What a NEW model could take from that pool now without swapping: the figure
+  // the machine's own memory gate finds, less what the gate keeps for workspaces
+  // when they share the pool, so the engine judges what the gate will. Zero under
+  // memory pressure, when the gate admits nothing, and on a card whose host lacks
+  // the RAM for its workspaces. On unified memory it is also held to the GPU's
+  // wired limit less what loaded models hold. Memory
+  // held by an IDLE loaded model is not counted here; it is on LoadedModel, so
+  // the engine can count it as reclaimable.
   uint64 memory_free_bytes = 2;
   // "unified" | "vram" | "system". Any other word is stored as empty.
   string memory_kind = 3;

@@ -282,7 +282,7 @@ describe("fleet capacity", () => {
     loaded: ["qwen3.8:27b"],
     models: [
       { modelId: "qwen3.8:27b", inFlight: 2, slots: 2, tokensPerSecond: 31.4, medianLatencyMs: 900 },
-      { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, needBytes: 20e9 },
+      { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, roomBytes: 24e9, fits: false },
     ],
     ...over,
   });
@@ -296,9 +296,9 @@ describe("fleet capacity", () => {
   });
 
   it("reads memory written flat, and the other names a reply may use", () => {
-    const read = capacityFrom([{ registrationId: "studio", memoryFreeBytes: 3e9, loadedModels: [], models: [{ model: "m", active: 1, maxConcurrent: 4, memoryNeedBytes: 5e9 }] }]);
+    const read = capacityFrom([{ registrationId: "studio", memoryFreeBytes: 3e9, loadedModels: [], models: [{ model: "m", active: 1, maxConcurrent: 4, roomBytes: 5e9, fits: false }] }]);
     expect(read.machines[0]).toMatchObject({ machineId: "studio", memoryFreeBytes: 3e9 });
-    expect(read.machines[0]!.models[0]).toMatchObject({ modelId: "m", inFlight: 1, slots: 4, needBytes: 5e9 });
+    expect(read.machines[0]!.models[0]).toMatchObject({ modelId: "m", inFlight: 1, slots: 4, roomBytes: 5e9, fits: false });
   });
 
   it("reads the engine's reply: per-model slots, loaded models as objects, machine performance", () => {
@@ -315,9 +315,9 @@ describe("fleet capacity", () => {
         memory: { reported: true, kind: "unified", totalBytes: 36e9, freeBytes: 9e9, idleLoadedBytes: 0 },
         loadedModels: [{ model: "qwen3.8:27b", runtime: "ollama", sizeBytes: 18e9, activeCalls: 2 }],
         models: [
-          { modelId: "qwen3-embedding:0.6b", slots: { inFlight: 0, max: 4 }, needBytes: 1e9, loaded: false },
-          { modelId: "qwen3.5:9b", slots: { inFlight: 0, max: 2 }, needBytes: 20e9, loaded: false },
-          { modelId: "qwen3.8:27b", slots: { inFlight: 2, max: 2 }, needBytes: 18e9, loaded: true },
+          { modelId: "qwen3-embedding:0.6b", slots: { inFlight: 0, max: 4 }, needBytes: 1e9, roomBytes: 3e9, fits: true, loaded: false },
+          { modelId: "qwen3.5:9b", slots: { inFlight: 0, max: 2 }, needBytes: 20e9, roomBytes: 22e9, fits: false, loaded: false },
+          { modelId: "qwen3.8:27b", slots: { inFlight: 2, max: 2 }, needBytes: 18e9, roomBytes: 2e9, fits: true, loaded: true },
         ],
         performance: { calls: 12, medianLatencyMs: 850, tokensPerSec: 28.5 },
         degraded: false,
@@ -326,12 +326,12 @@ describe("fleet capacity", () => {
     }]);
     expect(engine.machines[0]).toMatchObject({ machineId: "studio", name: "Studio", memoryFreeBytes: 9e9, loaded: ["qwen3.8:27b"] });
     expect(capacityReason(engine, "studio", "qwen3.8:27b")).toBe("busy, 2 of 2");
-    expect(capacityReason(engine, "studio", "qwen3.5:9b")).toBe("needs 20 GB, 9 GB free");
+    expect(capacityReason(engine, "studio", "qwen3.5:9b")).toBe("needs 22 GB, 9 GB free");
     expect(capacityReason(engine, "studio", "qwen3-embedding:0.6b")).toBe("");
     expect(engine.machines[0]!.models[2]).toMatchObject({ tokensPerSecond: 28.5, medianLatencyMs: 850 });
     // An older reply listing bare ids still reads, with nothing measured.
     const bare = capacityFrom([{ registrationId: "studio", models: ["qwen3.5:9b"] }]);
-    expect(bare.machines[0]!.models[0]).toMatchObject({ modelId: "qwen3.5:9b", inFlight: null, slots: null, needBytes: null });
+    expect(bare.machines[0]!.models[0]).toMatchObject({ modelId: "qwen3.5:9b", inFlight: null, slots: null, roomBytes: null, fits: null });
   });
 
   it("says a model is busy when every slot is in use", () => {
@@ -340,17 +340,18 @@ describe("fleet capacity", () => {
     expect(capacityReason(capacity, "v1:worker:registration:studio", "qwen3.8:27b")).toBe("busy, 2 of 2");
   });
 
-  it("says a model that is not loaded needs its memory and headroom free", () => {
-    const capacity = capacityFrom([studio()]);
-    expect(capacityReason(capacity, "studio", "qwen3.5:9b")).toBe("needs 20 GB, 9 GB free");
-    // Loaded already: nothing to fit.
-    expect(capacityReason(capacityFrom([studio({ loaded: ["qwen3.5:9b"] })]), "studio", "qwen3.5:9b")).toBe("");
-    // Room with headroom to spare.
-    expect(capacityReason(capacityFrom([studio({ memory: { freeBytes: 40e9 } })]), "studio", "qwen3.5:9b")).toBe("");
+  it("repeats the engine's verdict on memory, with the room the engine asks for", () => {
+    expect(capacityReason(capacityFrom([studio()]), "studio", "qwen3.5:9b")).toBe("needs 24 GB, 9 GB free");
+    // The engine said it fits, whatever this page might have worked out.
+    const fits = { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, roomBytes: 24e9, fits: true };
+    expect(capacityReason(capacityFrom([studio({ models: [fits] })]), "studio", "qwen3.5:9b")).toBe("");
+    // Loaded is not the same as admitted: a warm model still keeps the reserve.
+    const warm = { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, roomBytes: 4e9, fits: false, loaded: true };
+    expect(capacityReason(capacityFrom([studio({ memory: { freeBytes: 1e9 }, models: [warm] })]), "studio", "qwen3.5:9b")).toBe("needs 4 GB, 1 GB free");
   });
 
   it("gives no reason from a figure that was not reported", () => {
-    const silent = capacityFrom([{ machineId: "studio", models: [{ modelId: "qwen3.5:9b", needBytes: 20e9 }, { modelId: "qwen3.8:27b", inFlight: 5 }] }]);
+    const silent = capacityFrom([{ machineId: "studio", models: [{ modelId: "qwen3.5:9b", needBytes: 20e9, roomBytes: 24e9, fits: false }, { modelId: "qwen3.8:27b", inFlight: 5 }] }]);
     expect(capacityReason(silent, "studio", "qwen3.5:9b")).toBe("");
     expect(capacityReason(silent, "studio", "qwen3.8:27b")).toBe("");
     expect(capacityReason(null, "studio", "qwen3.8:27b")).toBe("");
@@ -371,12 +372,18 @@ describe("fleet capacity", () => {
     const strongest = readSource("fleet:strongest", facts({ machines: [box], capacity }));
     expect(strongest.readiness).toBe("idle");
     expect(strongest.reason).toBe("busy, 2 of 2");
-    expect(readSource("fleet:fastest", facts({ machines: [box], capacity })).reason).toBe("needs 20 GB, 9 GB free");
+    expect(readSource("fleet:fastest", facts({ machines: [box], capacity })).reason).toBe("needs 24 GB, 9 GB free");
     expect(readSource("fleet:qwen3.8:27b", facts({ machines: [box], capacity })).reason).toBe("busy, 2 of 2");
     // Without the measurement, readiness is as it was.
     expect(readSource("fleet:strongest", facts({ machines: [box] })).serves).toBe("qwen3.8:27b");
     // With room for the smaller model, the selector serves with it.
-    const roomy = capacityFrom([studio({ memory: { freeBytes: 40e9 } })]);
+    const roomy = capacityFrom([studio({
+      memory: { freeBytes: 40e9 },
+      models: [
+        { modelId: "qwen3.8:27b", inFlight: 2, slots: 2 },
+        { modelId: "qwen3.5:9b", inFlight: 0, slots: 2, roomBytes: 24e9, fits: true },
+      ],
+    })]);
     expect(readSource("fleet:strongest", facts({ machines: [box], capacity: roomy })).serves).toBe("qwen3.5:9b");
   });
 });

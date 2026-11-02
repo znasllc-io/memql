@@ -6,7 +6,9 @@
 // and the machine can serve the model without overcommitting memory. This
 // file reads the same measurement (`fleetCapacity()`) so the routing page can
 // say why a source cannot take calls in a few words -- "Busy, 2 of 2",
-// "Needs 20 GB, 9 GB free" -- instead of drawing it ready.
+// "Needs 20 GB, 9 GB free" -- instead of drawing it ready. The memory half is
+// the engine's own verdict (`fits`, `roomBytes`). This page used to work out a sum
+// of its own, which is how a reading drifts from the admission it describes.
 //
 // MISSING IS NOT ZERO. A machine that reports no memory is not a machine with
 // no free memory, and a model with no slot figure is not a busy one: either
@@ -27,8 +29,10 @@ export interface ModelCapacity {
   slots: number | null;
   tokensPerSecond: number | null;
   medianLatencyMs: number | null;
-  /** Memory the model needs to load, or null when not reported. */
-  needBytes: number | null;
+  /** Free memory the engine asks of this machine for this model, or null when not reported. */
+  roomBytes: number | null;
+  /** The engine's verdict on that memory, or null when it has none. */
+  fits: boolean | null;
   loaded: boolean;
 }
 
@@ -78,9 +82,9 @@ function asRow(v: unknown): Row | null {
 }
 
 // One offered model. `fleetCapacity` gives each its own `slots` object
-// ({inFlight, max}), its catalog `needBytes` and whether it is `loaded`; the
-// machine's `performance` stands in when the model carries no figures of its
-// own. A bare id (an older reply) is the model with nothing measured.
+// ({inFlight, max}), the engine's memory verdict (`roomBytes`, `fits`) and whether
+// it is `loaded`; the machine's `performance` stands in when the model carries no
+// figures of its own. A bare id (an older reply) is the model with nothing measured.
 function modelFrom(raw: unknown, loaded: readonly string[], performance: Row | null): ModelCapacity | null {
   const row = typeof raw === "string" ? { modelId: raw } : asRow(raw);
   if (row === null) return null;
@@ -93,7 +97,8 @@ function modelFrom(raw: unknown, loaded: readonly string[], performance: Row | n
     slots: (slots ? num(slots, "max") : null) ?? num(row, "slots", "maxConcurrent", "concurrency"),
     tokensPerSecond: num(row, "tokensPerSecond", "tps") ?? (performance ? num(performance, "tokensPerSec", "tokensPerSecond") : null),
     medianLatencyMs: num(row, "medianLatencyMs", "latencyMs", "p50LatencyMs") ?? (performance ? num(performance, "medianLatencyMs") : null),
-    needBytes: num(row, "needBytes", "memoryNeedBytes"),
+    roomBytes: num(row, "roomBytes"),
+    fits: typeof row["fits"] === "boolean" ? row["fits"] : null,
     loaded: row["loaded"] === true || loaded.includes(modelId),
   };
 }
@@ -132,8 +137,6 @@ export function capacityFrom(rows: readonly Row[]): CapacityFacts {
   return { machines: raw.map(machineFrom).filter((m): m is MachineCapacity => m !== null) };
 }
 
-const GIB = 1024 ** 3;
-
 /** Gigabytes in the words the router's reasons use: "20 GB", "9 GB", "0.6 GB". */
 export function gigabytes(bytes: number): string {
   const gb = bytes / 1e9;
@@ -145,9 +148,9 @@ export function gigabytes(bytes: number): string {
  * or nothing says otherwise.
  *
  * The router's admission, read for a person: a model with every slot in use
- * is busy; a model that is not loaded needs its memory plus a tenth (at least
- * a gigabyte) of headroom free. Lower-case, like every reading's reason, so
- * it joins a sentence; the board capitalizes it where it stands alone.
+ * is busy, and a model the engine says does not fit needs the room the engine
+ * asks for. Lower-case, like every reading's reason, so it joins a sentence; the
+ * board capitalizes it where it stands alone.
  */
 export function capacityReason(capacity: CapacityFacts | null | undefined, machineId: string, modelId: string): string {
   if (!capacity) return "";
@@ -157,11 +160,8 @@ export function capacityReason(capacity: CapacityFacts | null | undefined, machi
   if (model && model.slots !== null && model.slots > 0 && model.inFlight !== null && model.inFlight >= model.slots) {
     return `busy, ${model.inFlight} of ${model.slots}`;
   }
-  const loaded = machine.loaded.includes(modelId) || model?.loaded === true;
-  const need = model?.needBytes ?? null;
-  if (!loaded && need !== null && need > 0 && machine.memoryFreeBytes !== null) {
-    const headroom = Math.max(need * 0.1, GIB);
-    if (machine.memoryFreeBytes < need + headroom) return `needs ${gigabytes(need)}, ${gigabytes(Math.max(0, machine.memoryFreeBytes))} free`;
+  if (model?.fits === false && model.roomBytes !== null && machine.memoryFreeBytes !== null) {
+    return `needs ${gigabytes(model.roomBytes)}, ${gigabytes(Math.max(0, machine.memoryFreeBytes))} free`;
   }
   return "";
 }

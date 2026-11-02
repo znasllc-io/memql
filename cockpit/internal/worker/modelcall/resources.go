@@ -17,9 +17,8 @@ import (
 	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/workbench"
+	"github.com/znasllc-io/memql/core/fleetmemory"
 )
-
-const gib = uint64(1 << 30)
 
 type memoryHeadroom struct {
 	Total, Available uint64
@@ -45,6 +44,65 @@ type hostResources struct {
 	// headroomWait is how long a call waits for memory; zero is
 	// defaultHeadroomWait.
 	headroomWait time.Duration
+}
+
+// readMemoryHeadroom reads the machine through the reader the capacity report uses,
+// so the engine and this gate judge one figure. The bound is for nvidia-smi: the
+// wait around this call has its own ceiling, and a hung tool must not outlast it.
+func readMemoryHeadroom() (memoryHeadroom, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	mem, err := capacity.ReadMemory(ctx)
+	if err != nil {
+		return memoryHeadroom{}, err
+	}
+	return headroomFrom(mem), nil
+}
+
+func headroomFrom(mem capacity.Memory) memoryHeadroom {
+	return memoryHeadroom{Total: mem.Total, Available: mem.Available, Pressure: mem.Pressure, DedicatedGPU: mem.Kind == capacity.KindVRAM}
+}
+
+// workbenchRAM is what admission budgets for workspaces: every hard-bounded
+// workspace, including a creation racing a reading. Charging the full caps may
+// count resident pages twice, but avoids granting usage credit to an unverified
+// Docker daemon or blocking a goal's model turn for the lifetime of its own
+// workspace. Empty future slots are covered too, so the short journal lock need not
+// span the runtime call.
+const workbenchRAM = uint64(workbench.Slots) * uint64(workbench.MemoryMiB) << 20
+
+// AdmissionMemory is what the capacity report offers: this machine's reading, less
+// what its gate keeps for workspaces. The engine cannot see that allowance, so a
+// report that still counted it would admit calls the gate then declines. It lives
+// here because workbench imports capacity, so capacity cannot ask.
+func AdmissionMemory(ctx context.Context) (capacity.Memory, error) {
+	return admissionMemory(ctx, capacity.ReadMemory, capacity.ReadSystemHeadroom)
+}
+
+// admissionMemory takes a reading to what the gate would spend of it. A shared pool
+// holds the workspaces, so they come off what it offers. A card does not: there the
+// allowance is a question about the host's RAM, which the report has no field for,
+// so a host that cannot keep it reads as pressure, which offers nothing.
+func admissionMemory(ctx context.Context, read func(context.Context) (capacity.Memory, error), readHost func() (capacity.SystemHeadroom, error)) (capacity.Memory, error) {
+	mem, err := read(ctx)
+	if err != nil {
+		return mem, err
+	}
+	if mem.Kind != capacity.KindVRAM {
+		mem.Available -= min(mem.Available, workbenchRAM)
+		return mem, nil
+	}
+	host, err := readHost()
+	if err != nil || host.Available > host.Total || !hostKeepsWorkbenchRAM(host) {
+		mem.Pressure = true
+	}
+	return mem, nil
+}
+
+// hostKeepsWorkbenchRAM is whether a machine whose models run on their own card
+// still has the RAM its workspaces are budgeted, with the reserve left over.
+func hostKeepsWorkbenchRAM(host capacity.SystemHeadroom) bool {
+	return !host.Pressure && host.Available >= fleetmemory.Reserve(host.Total)+workbenchRAM
 }
 
 // resourceReservation keeps the machine's inference lock until the caller
@@ -125,36 +183,24 @@ type memoryRefusal struct{ detail string }
 
 func (e *memoryRefusal) Error() string { return e.detail }
 
-// workingSet is a conservative admission estimate, never reported as usage.
-// Declared peaks include temporary buffers. Ollama's actual file size gets an
-// eighth of itself, and at least 2 GiB, of context/compute headroom: the figure
-// that reproduces the catalog's residency at a 32K working context
-// (dsl/models/seeds.memql), which is what the engine admits on and what a machine
-// class is chosen by. A larger allowance refuses the catalog's own pick on the
-// class it is picked for: 25% plus 2 GiB put the 24 GB class's 27B past every
-// 24 GB card, permanently. Runtime resident bytes can raise this estimate.
-// Unknown runtimes still get exclusive admission and pressure protection, but
-// must declare a peak to protect a cold load in advance.
+// workingSet is what a call to this model is judged on. Declared peaks include
+// temporary buffers; otherwise Ollama's actual file size gets the estimate the
+// engine also uses (fleetmemory.WorkingSet). Runtime resident bytes can raise this
+// estimate. Unknown runtimes still get exclusive admission and pressure protection,
+// but must declare a peak to protect a cold load in advance.
 func workingSet(info models.Info) uint64 {
 	if info.PeakMemoryBytes != 0 {
 		return info.PeakMemoryBytes
 	}
-	if info.ModelBytes == 0 {
-		return 0
-	}
-	headroom := max(info.ModelBytes/8, 2*gib)
-	if info.ModelBytes > math.MaxUint64-headroom {
-		return math.MaxUint64
-	}
-	return info.ModelBytes + headroom
+	return fleetmemory.WorkingSet(info.ModelBytes)
 }
 
 // memoryReserve is what admission leaves free on a pool: room for the operating
 // system and, where the pool is also the host's memory, for every workspace.
-func memoryReserve(pool memoryHeadroom, workbenchRAM uint64) uint64 {
-	reserve := min(4*gib, max(gib, pool.Total/16))
+func memoryReserve(pool memoryHeadroom, workbenches uint64) uint64 {
+	reserve := fleetmemory.Reserve(pool.Total)
 	if !pool.DedicatedGPU {
-		reserve += workbenchRAM
+		reserve += workbenches
 	}
 	return reserve
 }
@@ -184,29 +230,16 @@ func requestMemory(info models.Info, start *memqlv1.ModelCallStart) models.Info 
 		peak = saturatedMultiply(peak, max(uint64(1), factor))
 		peak = saturatedMultiply(peak, uint64(max(1, payload.Image.Count)))
 	} else if info.Kind == models.KindOllama && info.PeakMemoryBytes == 0 {
-		contextTokens := start.GetParams().GetContextTokens()
-		if contextTokens > 32768 {
-			extra := saturatedMultiply(uint64((contextTokens-1)/32768), 2*gib)
-			if extra > math.MaxUint64-peak {
-				peak = math.MaxUint64
-			} else {
-				peak += extra
-			}
-		}
+		peak = fleetmemory.ForContext(peak, start.GetParams().GetContextTokens())
 	}
 	info.PeakMemoryBytes = peak
 	return info
 }
 
 func (r *hostResources) acquire(ctx context.Context, info models.Info, client *http.Client, logger *slog.Logger) (*resourceReservation, error) {
-	// Budget every hard-bounded workspace, including a creation racing this
-	// snapshot. Charging the full caps may count resident pages twice, but avoids
-	// granting usage credit to an unverified Docker daemon or blocking a goal's
-	// model turn for the lifetime of its own workspace. Empty future slots are
-	// covered too, so the short journal lock need not span the runtime call.
-	var workbenchRAM uint64
+	var workbenches uint64
 	if r.leaseRoot != nil {
-		workbenchRAM = uint64(workbench.Slots) * uint64(workbench.MemoryMiB) << 20
+		workbenches = workbenchRAM
 	}
 	// WHAT CAN NEVER FIT IS REFUSED FIRST: before it queues behind the gate, and
 	// before the reclaim below unloads an idle model for nothing. That idle model
@@ -215,7 +248,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 	if err != nil {
 		return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 	}
-	if peak := workingSet(info); peak > pool.Total || memoryReserve(pool, workbenchRAM) > pool.Total-peak {
+	if !fleetmemory.CanFit(workingSet(info), pool.Total, memoryReserve(pool, workbenches)) {
 		return nil, &memoryRefusal{detail: fmt.Sprintf("model %q needs more memory than this machine can safely offer", info.ID)}
 	}
 	select {
@@ -307,7 +340,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		if err != nil {
 			return nil, fmt.Errorf("cannot establish inference memory headroom: %w", err)
 		}
-		reserve := memoryReserve(state, workbenchRAM)
+		reserve := memoryReserve(state, workbenches)
 		resident := uint64(0)
 		if info.Kind == models.KindOllama {
 			resident, err = ollamaResident(ctx, client, info)
@@ -317,7 +350,7 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 		}
 		additional := wanted - min(wanted, resident)
 		hostReady := true
-		if state.DedicatedGPU && workbenchRAM != 0 {
+		if state.DedicatedGPU && workbenches != 0 {
 			probe := r.systemProbe
 			if probe == nil {
 				probe = capacity.ReadSystemHeadroom
@@ -326,10 +359,9 @@ func (r *hostResources) acquire(ctx context.Context, info models.Info, client *h
 			if err != nil || host.Total == 0 || host.Available > host.Total {
 				return nil, fmt.Errorf("cannot establish host RAM headroom for inference and workbenches")
 			}
-			hostReserve := min(4*gib, max(gib, host.Total/16)) + workbenchRAM
-			hostReady = !host.Pressure && host.Available >= hostReserve
+			hostReady = hostKeepsWorkbenchRAM(host)
 		}
-		if hostReady && !state.Pressure && state.Available >= reserve && state.Available-reserve >= additional {
+		if hostReady && !state.Pressure && state.Available >= fleetmemory.RoomWanted(wanted, resident, reserve) {
 			r.owned[key] = info
 			if err := save(); err != nil {
 				return nil, err

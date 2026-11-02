@@ -255,12 +255,12 @@ work alike. It reads only the registration row and the decision record, never
 the stream, so a replica that does not hold a machine's stream decides exactly
 as the one that does. Three questions, in order:
 
-- **Memory.** The model is already loaded, or the pool has room for the model's
-  catalog `memoryNeedBytes` plus 10% headroom (at least 1 GiB). Room is the
-  reported free memory plus what IDLE loaded models hold, because the runtime
-  unloads an idle model to make room. A machine without room is ruled out:
-  "not enough free memory to load qwen3.8:27b (needs 22 GB with headroom, 9 GB
-  free)", with "N GB more held by idle models" when there are any.
+- **Memory.** The pool has room for what the call still has to load, with the
+  machine's reserve left free. Room is the reported free memory plus what IDLE
+  loaded models other than this one hold, because the machine unloads those
+  first. A machine without room is ruled out: "not enough free memory to load
+  qwen3.8:27b (needs 22 GB with headroom, 9 GB free)", with "N GB more held by
+  idle models" when there are any. See "One sum" below for the figures.
 - **A free slot** for the model (`FleetMachine.Busy()`'s comparison): "every
   slot is in use (2 of 2 calls running)".
 - **Not degraded.** Over its last 20 decisions within fifteen minutes (at least
@@ -277,6 +277,50 @@ refusal. A degraded machine is the only machine some fleets have, and the
 fifteen-minute window is what lets it recover. When every machine is ruled out
 for memory, the fleet door refuses with every machine's reason, and the route
 moves to its next source.
+
+**One sum (memql#6414).** The machine decides again before it hands a call to a
+runtime, and for a while each side had its own arithmetic against its own reading
+of free memory. On one Mac at one instant the report read 31.0 GB and the gate
+21.3 GB, so the engine kept admitting calls the gate then declined, each costing
+up to 30 seconds. Now both sides call `core/fleetmemory`, and the report reads
+memory through the gate's reader (the Cockpit's `capacity.ReadMemory`):
+
+- **Free** is what comes back without swapping anyone else's memory out: on macOS
+  free, purgeable and file-backed pages (not inactive ones, which can be anonymous
+  memory); on a card its free VRAM, and with several cards the one with the least
+  free (they are never added together); otherwise `MemAvailable`. Under memory
+  pressure the report offers zero, because the gate admits nothing then.
+- **Workspaces:** the gate keeps their whole budget, 3 GiB, out of what it spends.
+  The engine cannot see that, so the machine's report leaves it out too
+  (`modelcall.AdmissionMemory`). On a pool they share, it comes off the free figure.
+  A card holds none of them, so the question is the host's RAM: its reserve plus the
+  budget, and a host without that reads as pressure.
+- **Wanted** is `reserve + need - min(need, resident)`. The reserve is a sixteenth
+  of the pool, between 1 and 4 GiB. A loaded model still keeps it, because the gate
+  asks for it, so "already loaded" is not a free pass here.
+- **Need** on the machine is its declared peak or the file plus an eighth of itself
+  (at least 2 GiB), plus 2 GiB per 32K of context above 32K. In the engine it is
+  the larger of the catalog's `memoryNeedBytes` and that same estimate from the
+  catalog's `sizeBytes`, plus the same for the window the call would ask this
+  machine to allocate.
+- **Never fits:** a need that leaves no reserve on the whole pool is refused by both,
+  loaded or not. The gate's reserve here includes the workspace budget, which the
+  engine cannot see. On real figures the engine refuses such a need anyway, because
+  what is loaded and what is free cannot add up to more than the pool.
+
+The engine can therefore refuse where the gate would admit, when the catalog asks
+for more than the estimate does; that costs only the next machine. The reverse
+wastes a call, and `cockpit/internal/worker/modelcall/admission_agreement_test.go`
+holds it shut by running the real `AdmitFleetMachine` and the real `acquire` on the
+same figures for every Ollama model in the catalog. Five things can still disagree,
+each costing one 30-second decline, because the engine cannot see them: a report up
+to two minutes old; an idle model someone loaded by hand, which the gate will not
+unload; a peak declared in the machine's `policy.yaml` above the catalog's figure,
+and the image sizes that scale it; a machine under pressure with enough idle memory
+to cover the whole model, because unloading might end the pressure; and a shared
+pool with less free than the workspace budget and an idle model, because a report
+cannot offer less than nothing, so the engine counts up to 3 GiB the gate will keep.
+A model the catalog states no need for is the gate's alone to judge.
 
 **Signals.** The cockpit reports `Capacity` on Register and every Heartbeat:
 the pool total and free, its kind (`unified`, `vram`, `system`) and each loaded
@@ -296,13 +340,15 @@ measuredAt}`, one entry per machine behind the caller's catalog:
   slots: { inFlight, max },                 // max 0: no ceiling declared
   memory: { reported, kind, totalBytes, freeBytes, idleLoadedBytes, reportedAt },
   loadedModels: [{ model, runtime, sizeBytes, expiresAt, activeCalls }],
-  models: [modelId],
+  models: [{ modelId, slots, needBytes, roomBytes, fits, loaded }],
   performance: { calls, medianLatencyMs, tokensPerSec },  // null: unmeasured
   degraded, degradedReason }
 ```
 
-Calls in flight per model are `loadedModels[].activeCalls`; performance is per
-machine over two hours of `v1:router:call`. Auto's ranking does not read
+Calls in flight per model are `loadedModels[].activeCalls`. `roomBytes` and `fits`
+are admission's memory verdict at the working context, absent without a fresh report
+and a stated need; the routing page repeats them rather than doing the sum itself.
+Performance is per machine over two hours of `v1:router:call`. Auto's ranking does not read
 capacity yet: a fleet door that admits no machine refuses, and Auto moves to
 its next source at call time.
 

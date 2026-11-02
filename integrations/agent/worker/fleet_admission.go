@@ -108,10 +108,11 @@ func (f *FleetInference) capacitySignals(ctx context.Context, now time.Time) (ma
 // another candidate is admitted outright, and otherwise kept, full machines
 // before degraded ones: a full machine queues the call on its own slot, as
 // every machine did before admission existed.
-func (f *FleetInference) admit(ctx context.Context, plan RoutePlan, modelId string) RoutePlan {
+func (f *FleetInference) admit(ctx context.Context, plan RoutePlan, req memqlengine.FleetCallRequest) RoutePlan {
 	if len(plan.Candidates) == 0 {
 		return plan
 	}
+	modelId := req.ModelId
 	now := time.Now()
 	if f.clock != nil {
 		now = f.clock()
@@ -128,6 +129,7 @@ func (f *FleetInference) admit(ctx context.Context, plan RoutePlan, modelId stri
 			MaxConcurrent:   c.Concurrency[workerservice.ModelCapability],
 			Capacity:        c.Capacity,
 			MemoryNeedBytes: need,
+			ContextTokens:   contextTokensForCandidate(req, c),
 			Health:          health.For(c.RegistrationId, modelId),
 			Now:             now,
 		})

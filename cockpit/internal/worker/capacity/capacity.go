@@ -5,6 +5,13 @@
 // "Fleet capacity"), so a call is never placed where it would push the
 // runtime into swapping.
 //
+// The report and the machine's own gate read memory through one reader, ReadMemory,
+// and judge it with one sum (core/fleetmemory). A call the engine admits on this
+// report is therefore one the gate admits on the same figures, rather than a call
+// the machine declines once it arrives. What the gate keeps back for workspaces is
+// off the report before it is sent (modelcall.AdmissionMemory), because the engine
+// cannot see it.
+//
 // A report is sent on every heartbeat. When this machine cannot measure --
 // an operating system this package does not probe, a runtime that does not
 // answer -- it sends none, and the engine admits it on its concurrency slots
@@ -58,12 +65,16 @@ type Loaded struct {
 type Memory struct {
 	Kind  string
 	Total uint64
-	// Available is what the operating system (or the card) can hand out now.
+	// Available is what the operating system (or the card) can hand a new
+	// allocation now without swapping anyone else's memory out.
 	Available uint64
 	// ModelLimit is the most the GPU may hold on unified memory -- macOS
 	// wires at most a share of the pool for the GPU -- zero when it does
 	// not apply.
 	ModelLimit uint64
+	// Pressure is the operating system saying new work must wait, whatever
+	// Available says.
+	Pressure bool
 }
 
 // Prober takes a measurement.
@@ -74,7 +85,7 @@ type Prober struct {
 	// machine serves: they share one GPU.
 	InFlight func() map[string]int
 	// Memory and HTTPClient default to the platform probe and a plain client.
-	Memory     func(ctx context.Context) (Memory, bool)
+	Memory     func(ctx context.Context) (Memory, error)
 	HTTPClient *http.Client
 	Now        func() time.Time
 }
@@ -88,10 +99,10 @@ func (p *Prober) Probe(ctx context.Context) (Report, bool) {
 	defer cancel()
 	memory := p.Memory
 	if memory == nil {
-		memory = probeMemory
+		memory = ReadMemory
 	}
-	mem, ok := memory(ctx)
-	if !ok || mem.Total == 0 || !validKind(mem.Kind) {
+	mem, err := memory(ctx)
+	if err != nil || mem.Total == 0 || !validKind(mem.Kind) {
 		return Report{}, false
 	}
 	// Without the runtime's own list there is no telling which models are
@@ -113,6 +124,12 @@ func (p *Prober) Probe(ctx context.Context) (Report, bool) {
 		held += loaded[i].SizeBytes
 	}
 	free := mem.Available
+	// The gate admits nothing under pressure, warm models included, so nothing is
+	// on offer. The engine has no other way to hear it: the report carries no such
+	// word, and this figure is what it judges a machine on.
+	if mem.Pressure {
+		free = 0
+	}
 	if mem.ModelLimit > 0 {
 		room := uint64(0)
 		if mem.ModelLimit > held {
