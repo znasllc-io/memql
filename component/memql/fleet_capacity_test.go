@@ -207,6 +207,60 @@ func TestFleetHealthJudgesDegradedMachines(t *testing.T) {
 	}
 }
 
+// A stored row's createdAt reaches the fold as a time.Time, and a string only
+// after a trip through JSON. Reading the string alone made every real row look
+// infinitely old, so no machine ever had recent evidence and none could ever be
+// judged degraded, however it was behaving (memql#6414).
+func TestFleetHealthReadsACreatedAtInEitherForm(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		name string
+		form func(time.Time) any
+	}{
+		{"as the engine returns it", func(at time.Time) any { return at.UTC() }},
+		{"after a trip through JSON", func(at time.Time) any { return at.UTC().Format(time.RFC3339Nano) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rows []map[string]any
+			for i := 0; i < 4; i++ {
+				rows = append(rows, map[string]any{"executionSurface": "fleet:a", "model": "m", "outcome": "error", "createdAt": tc.form(now.Add(-time.Minute))})
+			}
+			rows = append(rows, map[string]any{"executionSurface": "fleet:a", "model": "m", "outcome": "error", "createdAt": tc.form(now.Add(-time.Hour))})
+			h := FoldFleetHealth(rows, now).For("a", "m")
+			if h.Samples != 4 || h.Failures != 4 {
+				t.Fatalf("health = %d failures in %d samples, want 4 in 4: the four recent calls, and not the one an hour old", h.Failures, h.Samples)
+			}
+			if degraded, why := h.Degraded("m"); !degraded || why != "degraded: 4 of its last 4 calls failed" {
+				t.Fatalf("degraded=%v %q", degraded, why)
+			}
+		})
+	}
+}
+
+// What a person reads about a machine counts its answers. A failed call weighs
+// on the degraded check and nowhere else, and a ten-minute stall is not a
+// latency (memql#6414).
+func TestAMachinesFailedCallsAreNotInItsPerformanceFigures(t *testing.T) {
+	now := time.Now()
+	createdAt := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	row := func(outcome string, ms, tps float64) map[string]any {
+		return map[string]any{"executionSurface": "fleet:a", "model": "m", "outcome": outcome, "totalDurationMs": ms, "tokensPerSec": tps, "createdAt": createdAt}
+	}
+	x := FoldFleetHealth([]map[string]any{
+		row("ok", 900, 40),
+		row("error", 600000, 0),
+		row("error", 1500, 0),
+		row("cancelled", 2000, 0),
+	}, now)
+	calls, ms, tps := x.Performance("a")
+	if calls != 1 || ms != 900 || tps != 40 {
+		t.Fatalf("performance = %d calls, %v ms, %v tok/s, want the one answer: 1 call, 900 ms, 40 tok/s", calls, ms, tps)
+	}
+	if h := x.For("a", "m"); h.Samples != 3 || h.Failures != 2 || h.MedianMs != 900 {
+		t.Fatalf("health = %+v, want 2 failures in 3 samples, cancelled left out, and only the answer's latency", h)
+	}
+}
+
 func TestFleetCapacityRowRoundTrips(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	in := FleetCapacity{MemoryTotalBytes: 64 * gib, MemoryFreeBytes: 30 * gib, MemoryKind: FleetMemoryVRAM, ReportedAt: now, MeasuredAt: now,

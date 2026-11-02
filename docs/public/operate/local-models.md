@@ -459,7 +459,9 @@ pretending it is free of consequence.
   is **never inferred** — inferring it would claim work ran on somebody's
   hardware when nobody established that. Absence still reads as `metered`.
 - `executionSurface` names the machine, as `fleet:<registrationId>`, so
-  "which of my machines did this" is answerable from the ledger alone.
+  "which of my machines did this" is answerable from the ledger alone. A call
+  the machine took and failed names it too, and `outcome` says how the call
+  ended, so read it before counting a row as served.
 - `plan.tokenSpentLocal` sits beside `tokenSpentSubscription`.
 
 The two caps want opposite answers, exactly as they do for subscription spend:

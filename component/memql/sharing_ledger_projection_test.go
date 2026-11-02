@@ -54,6 +54,18 @@ func TestTheLedgerQueryUsesTheLedgerShape(t *testing.T) {
 	}
 }
 
+// A row names its machine however the call ended, so the degraded check can see
+// a machine failing (memql#6414). The person who lent it is told what it SERVED,
+// and the shape below may not project `outcome`, so the query's own filter is the
+// one place left to say so. Without it, "Served 41 calls" counts the failures.
+// sharing_ledger_db_test.go holds the same thing against stored rows.
+func TestTheLedgerQueryFiltersToCallsTheMachineServed(t *testing.T) {
+	body := constructBody(t, readRouterDSL(t, "queries"), "query call "+LedgerQuery)
+	if !regexp.MustCompile(`row\.outcome\s*==\s*"ok"`).MatchString(body) {
+		t.Fatalf("query %s does not filter on row.outcome == \"ok\".\nIts body was:\n%s", LedgerQuery, body)
+	}
+}
+
 // And the direction that would be missed: the ledger must NOT be reading the
 // evidence fold's shape, which carries prompt-adjacent fields the ledger has no
 // business projecting. The two shapes answer different questions about the same

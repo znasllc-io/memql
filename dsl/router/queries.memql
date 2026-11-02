@@ -112,6 +112,11 @@ query call routerDecisionsRecent {
 /// It is a SEPARATE query from routerCallsInWindow for that reason: the fold's
 /// read is gated on `actor.isClusterOwner`, which is right for a maintenance
 /// sweep and returns zero rows for the machine owner this one serves.
+///
+/// ONLY WHAT THE MACHINE SERVED (memql#6414). A row names its machine however the call ended, so
+/// the degraded check can see a machine failing. The person who lent it is told how many calls it
+/// served, and a call it failed is not one. The filter is here because routerCallLedger may not
+/// project `outcome`: the fold never sees a failed row at all.
 @unbounded("one machine's calls for one ISO week -- the window is the bound, and the fold needs every call in it to count people correctly")
 @serverOnly
 query call routerCallsOnMachine {
@@ -124,6 +129,7 @@ query call routerCallsOnMachine {
     until    string!
   }
   filter  row => row.executionSurface == args.surface
+              && row.outcome == "ok"
               && row.createdAt >= args.since
               && row.createdAt < args.until
   shape   routerCallLedger

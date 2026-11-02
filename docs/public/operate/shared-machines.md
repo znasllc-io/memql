@@ -204,6 +204,9 @@ One sentence a week, and it is the whole surface:
 | ... and some were the cluster's own work | "Served 41 calls this week, 12 of them for 2 other people and 3 for the cluster's own work." |
 | none were yours | "Served 12 calls this week, all for 2 other people." |
 
+The sentence counts what the machine **served**. A call it failed, or one its
+caller cancelled, is not in it.
+
 That is the ledger, and what it leaves out is the point. Somebody who lends
 their machine is entitled to know it is **being used** — and how much of its
 week went to other people, which is the question a lender actually asks — but

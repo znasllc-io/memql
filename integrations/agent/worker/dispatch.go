@@ -258,6 +258,10 @@ const (
 	// the machine, the machine was at its concurrency cap, or its owner had
 	// switched the feature off. Nothing ran.
 	ForwardRefusedBeforeStart
+	// ForwardUnconfirmed -- a model call's envelope left and its caller stopped
+	// waiting before anything came back. It may have reached the machine, so
+	// never re-pick, and nothing says it did, so the machine is not charged.
+	ForwardUnconfirmed
 )
 
 // RemoteDispatcher forwards a dispatch to the agent replica named by the

@@ -198,7 +198,7 @@ type CallRecord struct {
 	// beside the winning model's window, which is what makes an under-counted
 	// estimate diagnosable rather than merely wrong.
 	MinContextTokens int
-	// MachineOwnerUserId names whose machine served a local call. Empty until
+	// MachineOwnerUserId names whose machine took a local call. Empty until
 	// epic 4 (shared machines) fills it.
 	MachineOwnerUserId string
 
@@ -219,7 +219,8 @@ type CallRecord struct {
 	ServedEffort string
 	// ExecutionSurface names where the call ran: empty for MemQL's
 	// own provider calls, "cockpit-app:<appId>" for one made by a
-	// local app on a user's machine.
+	// local app on a user's machine, "fleet:<registrationId>" for one
+	// a fleet machine took, whether it served it or failed it.
 	ExecutionSurface string
 }
 

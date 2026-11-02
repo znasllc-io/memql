@@ -23,10 +23,12 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -209,7 +211,7 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 		}
 		lastErr = err
 		if outcome != ForwardRefusedBeforeStart {
-			return memqlengine.FleetCallResult{}, err
+			return failureOn(cand, req.ActingUserId, outcome, err), err
 		}
 		f.logger.Debug("fleet inference: candidate refused before start, trying the next",
 			"model", req.ModelId, "machine", cand.RegistrationId, "error", err)
@@ -357,14 +359,38 @@ func (f *FleetInference) attempt(
 			fmt.Errorf("machine %s is connected to replica %s and this node has no forward",
 				cand.Label(), cand.ConnectedNodeId)
 	}
-	out, err := f.forward.ForwardModelCall(ctx, cand.ConnectedNodeId, cand.RegistrationId,
-		req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta, req.OnActivity))
+	return f.forwardTo(ctx, req, cand, cand.ConnectedNodeId, start)
+}
+
+// forwardTo runs the call on a machine the replica named by target holds.
+func (f *FleetInference) forwardTo(
+	ctx context.Context,
+	req memqlengine.FleetCallRequest,
+	cand Candidate,
+	target string,
+	start *memqlv1.ModelCallStart,
+) (memqlengine.FleetCallResult, ForwardOutcome, error) {
+	// Anything relayed, keepalives included, is the machine's word that it has
+	// the call. This side has no other way to know: a caller that gives up
+	// before the terminal answer leaves only this to go on.
+	var heard atomic.Bool
+	sink := deltaSink(req.OnDelta, req.OnActivity)
+	out, err := f.forward.ForwardModelCall(ctx, target, cand.RegistrationId,
+		req.ActingUserId, start, workerservice.ModelCallTimeoutDefault,
+		func(seq uint64, content string, keepalive bool) {
+			heard.Store(true)
+			if sink != nil {
+				sink(seq, content, keepalive)
+			}
+		})
 	if err != nil {
-		outcome := ForwardCompleted
-		if out.RefusedBeforeStart {
-			outcome = ForwardRefusedBeforeStart
+		switch {
+		case out.RefusedBeforeStart:
+			return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
+		case heard.Load():
+			return memqlengine.FleetCallResult{}, ForwardCompleted, err
 		}
-		return memqlengine.FleetCallResult{}, outcome, err
+		return memqlengine.FleetCallResult{}, ForwardUnconfirmed, err
 	}
 	if out.RefusedBeforeStart {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
@@ -419,23 +445,7 @@ func (f *FleetInference) attemptLocal(
 		// Affinity miss: prefer forward/retry when another replica is named.
 		target := strings.TrimSpace(cand.ConnectedNodeId)
 		if target != "" && target != f.selfNodeId && f.forward != nil {
-			out, err := f.forward.ForwardModelCall(ctx, target, cand.RegistrationId,
-				req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta, req.OnActivity))
-			if err != nil {
-				outcome := ForwardCompleted
-				if out.RefusedBeforeStart {
-					outcome = ForwardRefusedBeforeStart
-				}
-				return memqlengine.FleetCallResult{}, outcome, err
-			}
-			if out.RefusedBeforeStart {
-				return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
-					fmt.Errorf("%s refused before start: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
-			}
-			if !out.Ok() {
-				return memqlengine.FleetCallResult{}, ForwardCompleted, forwardedFailure(cand, out)
-			}
-			return resultFromEnd(cand, req.ActingUserId, out.End), ForwardCompleted, nil
+			return f.forwardTo(ctx, req, cand, target, start)
 		}
 		// Holding-pod registry miss (prod dump: Ask already on holder pszjr,
 		// connectedNodeId==self, WorkerById nil). Forward cannot help — we ARE
@@ -536,7 +546,7 @@ func machineOwnerAttribution(cand Candidate, actingUserId string) string {
 	return strings.TrimSpace(cand.OwnerUserId)
 }
 
-// FleetSurfacePrefix is how a fleet-served call names its machine on the
+// FleetSurfacePrefix is how a fleet call names its machine on the
 // ledger's executionSurface, mirroring `cockpit-app:<appId>` (memql#4362).
 const FleetSurfacePrefix = "fleet:"
 
@@ -557,14 +567,55 @@ func deltaSink(onDelta func(string), onActivity func()) func(uint64, string, boo
 	}
 }
 
-func resultFromEnd(cand Candidate, actingUserId string, end *memqlv1.ModelCallEnd) memqlengine.FleetCallResult {
-	res := memqlengine.FleetCallResult{
+// failureOn is the result beside a failed call. It names the machine that took
+// the call: the degraded check counts only rows that name a machine, and one
+// failing every call would otherwise stay first in the order (memql#6414).
+//
+// It names none when nothing says the machine did anything wrong: it was never
+// heard from, or it declined the call and ran nothing.
+func failureOn(cand Candidate, actingUserId string, outcome ForwardOutcome, err error) memqlengine.FleetCallResult {
+	var failed *workerservice.ModelCallFailed
+	if outcome == ForwardUnconfirmed || (errors.As(err, &failed) && modelCallDeclines[failed.ErrorCode]) {
+		return memqlengine.FleetCallResult{}
+	}
+	return placedOn(cand, actingUserId)
+}
+
+// modelCallDeclines are the codes a machine ends a call with before handing it to
+// a runtime (cockpit modelcall's refuse): it is at its cap, its advertisement was
+// a beat stale, or the call itself was wrong. None says the machine is failing,
+// and the degraded check's verdict covers every model it holds.
+//
+// A LIST IS SAFE IN THIS DIRECTION: a wrong entry loses a machine some evidence
+// and moves no call. A code not on it counts against the machine. worker_stopped
+// is not on it even when it is a refusal: the stream went, and that is the
+// machine. TestEveryRefusalTheCockpitSendsIsADecline holds the list to the
+// Cockpit's source.
+var modelCallDeclines = map[string]bool{
+	"model_not_offered":          true,
+	"model_concurrency_exceeded": true,
+	"unsupported_kind":           true,
+	"modality_unsupported":       true,
+	"payload_unavailable":        true,
+	"schema_unsupported":         true,
+	"tools_unsupported":          true,
+	"duplicate_request":          true,
+}
+
+// placedOn names the machine a call went to, for the decision row. It is all a
+// failed call's result carries.
+func placedOn(cand Candidate, actingUserId string) memqlengine.FleetCallResult {
+	return memqlengine.FleetCallResult{
 		ExecutionSurface: FleetSurfacePrefix + cand.RegistrationId,
 		MachineLabel:     cand.Label(),
 		// WHOSE HARDWARE, and only when it is not the caller's (epic
 		// memql#5327, design D15). See machineOwnerAttribution.
 		MachineOwnerUserId: machineOwnerAttribution(cand, actingUserId),
 	}
+}
+
+func resultFromEnd(cand Candidate, actingUserId string, end *memqlv1.ModelCallEnd) memqlengine.FleetCallResult {
+	res := placedOn(cand, actingUserId)
 	if end == nil {
 		return res
 	}

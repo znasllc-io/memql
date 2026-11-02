@@ -19,6 +19,9 @@ type stubFleet struct {
 	activity  bool
 	toolCalls []common.ToolCall
 	err       error
+	// failedOn is what Call returns beside err: the machine that failed it, or
+	// nothing for a refusal no machine ran.
+	failedOn FleetCallResult
 	// preference stands in for the owner's routingPolicy.modelPreference.
 	preference    []string
 	preferenceErr error
@@ -40,7 +43,7 @@ func (s *stubFleet) ModelPreference(_ context.Context, _ string) ([]string, erro
 func (s *stubFleet) Call(_ context.Context, req FleetCallRequest) (FleetCallResult, error) {
 	s.lastReq = req
 	if s.err != nil {
-		return FleetCallResult{}, s.err
+		return s.failedOn, s.err
 	}
 	if s.activity && req.OnActivity != nil {
 		req.OnActivity()
@@ -68,6 +71,89 @@ func onlineModel(id string, structured bool) FleetModel {
 
 func userCtx(userId string) context.Context {
 	return auth.ContextWithUserActor(context.Background(), userId)
+}
+
+// guardedElsewhere rides the background lane: every call through the provider
+// passes the process-wide guard, and the interactive lane's budget of 20 calls in
+// 10 seconds is the rest of this package's.
+func guardedElsewhere(userId string) context.Context {
+	return ContextWithBackgroundLane(userCtx(userId))
+}
+
+// uniquePrompt is a prompt no other test sends, for the guard's identical-request
+// breaker.
+func uniquePrompt(t *testing.T) []common.ChatMessage {
+	t.Helper()
+	return []common.ChatMessage{{Role: "user", Content: t.Name()}}
+}
+
+// A machine that started a call and failed it is reported the way a machine that
+// answered is, because the router's row is written from these accessors and the
+// degraded check folds that row (memql#6414, point 4).
+func TestAFailedFleetCallReportsTheMachineItFailedOn(t *testing.T) {
+	failure := errors.New("the machine's runtime failed the call")
+	r := newProviderRegistry()
+	r.SetFleetInference(&stubFleet{
+		models: []FleetModel{onlineModel("llama3.1:8b", true)},
+		err:    failure,
+		failedOn: FleetCallResult{
+			ExecutionSurface: "fleet:studio", MachineLabel: "Studio", MachineOwnerUserId: "v1:identity:user:olivia",
+		},
+	})
+	entry, ok := r.EntryForContext(userCtx("alice"), "fleet:llama3.1:8b")
+	if !ok {
+		t.Fatal("a fleet reference must resolve to an entry")
+	}
+	p := entry.Client.(*fleetProvider)
+	if _, err := p.CallChat(guardedElsewhere("alice"), uniquePrompt(t)); !errors.Is(err, failure) {
+		t.Fatalf("err = %v, want the machine's failure unchanged", err)
+	}
+	if got := p.ExecutionSurface(); got != "fleet:studio" {
+		t.Fatalf("ExecutionSurface = %q, want the machine that failed the call", got)
+	}
+	if got := p.MachineOwner(); got != "v1:identity:user:olivia" {
+		t.Fatalf("MachineOwner = %q, want whose machine failed the call", got)
+	}
+}
+
+// A row is about ONE call. A provider that served a call and then answers a
+// second one without reaching any machine must not name the first machine, or
+// the second failure is charged to hardware that never saw it.
+func TestAFleetCallThatReachedNoMachineDoesNotNameTheLastOne(t *testing.T) {
+	refusal := &FleetUnavailable{ModelId: "llama3.1:8b", Total: 1}
+	offline := onlineModel("llama3.1:8b", true)
+	offline.Machines[0].Online = false
+	for _, tc := range []struct {
+		name  string
+		block func(*stubFleet)
+	}{
+		{"the fleet refused it", func(s *stubFleet) { s.err = refusal }},
+		{"it never left the provider", func(s *stubFleet) { s.models = []FleetModel{offline} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fleet := &stubFleet{models: []FleetModel{onlineModel("llama3.1:8b", true)}, answer: "hello"}
+			r := newProviderRegistry()
+			r.SetFleetInference(fleet)
+			entry, ok := r.EntryForContext(userCtx("alice"), FleetStrongest)
+			if !ok {
+				t.Fatal("a fleet selector must resolve to an entry")
+			}
+			p := entry.Client.(*fleetProvider)
+			if _, err := p.CallChat(guardedElsewhere("alice"), uniquePrompt(t)); err != nil {
+				t.Fatal(err)
+			}
+			if got := p.ExecutionSurface(); got != "fleet:laptop" {
+				t.Fatalf("after a served call ExecutionSurface = %q", got)
+			}
+			tc.block(fleet)
+			if _, err := p.CallChat(guardedElsewhere("alice"), uniquePrompt(t)); !errors.Is(err, ErrFleetUnavailable) {
+				t.Fatalf("err = %v, want the refusal", err)
+			}
+			if got := p.ExecutionSurface(); got != "" {
+				t.Fatalf("ExecutionSurface = %q, want none: this call reached no machine", got)
+			}
+		})
+	}
 }
 
 // A `fleet:<modelId>` name resolves DYNAMICALLY through Entry. Doing it here

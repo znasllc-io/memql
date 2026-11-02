@@ -36,9 +36,11 @@ package router
 // provider -- a call to Anthropic ran on nobody's machine, and the empty
 // string is the true reading rather than a missing one.
 type surfaceReporter interface {
-	// ExecutionSurface names the machine that served the most recent call,
-	// as `fleet:<registrationId>` or `cockpit-app:<appId>`, and "" when the
-	// call did not run on anybody's machine.
+	// ExecutionSurface names the machine the most recent call went to, as
+	// `fleet:<registrationId>` or `cockpit-app:<appId>`, and "" when the call
+	// did not run on anybody's machine. A fleet provider answers for a call the
+	// machine failed as well as one it served, because the degraded check folds
+	// this field and the row's outcome says which it was (memql#6414).
 	ExecutionSurface() string
 }
 
@@ -57,7 +59,7 @@ func surfaceOf(p any) string {
 	return r.ExecutionSurface()
 }
 
-// machineOwnerReporter is what a provider says about WHOSE MACHINE served the
+// machineOwnerReporter is what a provider says about WHOSE MACHINE took the
 // most recent call.
 //
 // STRUCTURAL, beside surfaceReporter and for its reason: component/router pins
@@ -79,12 +81,12 @@ func surfaceOf(p any) string {
 // is deliberate: the question is whether this call used somebody else's
 // hardware, and for both of them the answer is no.
 type machineOwnerReporter interface {
-	// MachineOwner names the owner of the machine that served the most recent
-	// call, and "" when that owner is the caller or there was no machine.
+	// MachineOwner names the owner of the machine the most recent call went to,
+	// and "" when that owner is the caller or there was no machine.
 	MachineOwner() string
 }
 
-// machineOwnerOf asks a provider whose machine served the call.
+// machineOwnerOf asks a provider whose machine took the call.
 func machineOwnerOf(p any) string {
 	r, ok := p.(machineOwnerReporter)
 	if !ok {
