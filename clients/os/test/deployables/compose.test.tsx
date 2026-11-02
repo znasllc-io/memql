@@ -26,6 +26,7 @@ import {
   githubGrantRow,
   repositoriesReply,
   repositoryFixture,
+  siteRow,
   STORE,
   previewReadinessRow,
   probeReply,
@@ -1070,6 +1071,112 @@ describe("the compose flow: leaving and coming back", () => {
     expect(railStates(region)).toEqual(["complete", "complete", "complete", "open", "skipped", "pending"]);
     await openAddresses();
     expect(await forward("Deploy")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A gate with no address left to ask for
+// ---------------------------------------------------------------------------
+
+describe("a gate over apps that already have their addresses", () => {
+  // THE UPDATE THAT WAITS FOR A PERSON. An automatic run parks when its plan
+  // changes, and a Redeploy can be left at the gate, and either way every app
+  // the run would publish already has a site. The row used to open this flow
+  // on an Address step with no question on it and no Deploy on the bar, so the
+  // run could only be cancelled from here.
+  const site = (status: string) =>
+    siteRow({ id: "site-store", hostname: "shop.memql.example.com", status, packageId: "pkg-acme", packageDeployableName: "storefront" });
+
+  async function openGate(connection: FakeConnection): Promise<HTMLElement> {
+    mount(connection);
+    await click((await screen.findByText("storefront")).closest(".os-row") as HTMLElement);
+    return screen.findByRole("region", { name: /^Deploy / });
+  }
+
+  const finished = (over: Record<string, unknown> = {}) =>
+    parkedRun("pkg-acme", {
+      status: "succeeded",
+      finishedAt: "2026-09-01T13:05:00Z",
+      deployables: [{ name: "storefront", siteId: "site-store", hostname: "shop.memql.example.com", bundleRef: "blob://a/v2/", version: "v2", created: false }],
+      ...over,
+    });
+
+  it("offers Deploy at Review, and the rail says where the app stays", async () => {
+    const run = parkedRun("pkg-acme");
+    const region = await openGate(fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("live")] }));
+    expect(await forward("Deploy")).toBeTruthy();
+    expect(forwardAct("Choose addresses")).toBeNull();
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "skipped", "pending"]);
+    expect(within(region).getByText("shop.memql.example.com")).toBeTruthy();
+    expect((document.querySelector(".os-actbar") as HTMLElement).textContent ?? "").toContain("visitors get this version as soon as it is deployed");
+  });
+
+  it("confirms the run that asked, sending no address and no domains", async () => {
+    const run = parkedRun("pkg-acme");
+    const connection = fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("live")] });
+    await openGate(connection);
+    const deploy = await forward("Deploy");
+    await readTheBar();
+    await click(deploy);
+    const confirm = connection.callsNamed("packageDeploy").find((c) => c.includes("confirm: true")) ?? "";
+    expect(confirm).toContain('placements: {storefront: {target: "serving"}}');
+    expect(confirm).toContain('deploymentId: "dep-1"');
+  });
+
+  it("shows the address read-only when the step is opened, with Deploy still on the bar", async () => {
+    const run = parkedRun("pkg-acme");
+    const region = await openGate(fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("live")] }));
+    await forward("Deploy");
+    await click(within(region).getByRole("button", { name: /^Address/ }));
+    expect(within(region).getByLabelText("Where storefront lives").textContent).toContain("shop.memql.example.com");
+    expect(screen.queryByLabelText("The name storefront answers at")).toBeNull();
+    expect(forwardAct("Deploy")).toBeTruthy();
+  });
+
+  it("keeps a run scoped to one app scoped, without an empty domains list", async () => {
+    // `domains: []` is a value the engine reads: it opts this run out of the
+    // domains the manifest declares. An app nobody was asked about sends none.
+    const run = parkedRun("pkg-acme", { report: REPORT_TWO, scopedTo: ["storefront"] });
+    const connection = fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("live")] });
+    await openGate(connection);
+    const deploy = await forward("Deploy");
+    await readTheBar();
+    await click(deploy);
+    const confirm = connection.callsNamed("packageDeploy").find((c) => c.includes("confirm: true")) ?? "";
+    expect(confirm).toContain('storefront: {target: "serving"}');
+    expect(confirm).toMatch(/web: \{[^}]*skip: true\}/);
+    expect(confirm).toContain('deploymentId: "dep-1"');
+  });
+
+  it("ends on Live for a site that was already serving, with no Go live to press", async () => {
+    const run = parkedRun("pkg-acme");
+    const connection = fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("live")] });
+    await openGate(connection);
+    await forward("Deploy");
+    await emit(connection, DEPLOYMENT_CONCEPT, finished(), "NODE_UPDATED");
+    const bar = () => document.querySelector(".os-actbar") as HTMLElement;
+    await waitFor(() => expect(bar().textContent ?? "").toContain("serving at shop.memql.example.com"));
+    expect(bar().textContent ?? "").toContain("Live");
+    expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toEqual(["Done"]);
+  });
+
+  it("still ends on Go live for a site that has never served", async () => {
+    const run = parkedRun("pkg-acme");
+    const connection = fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("draft")] });
+    await openGate(connection);
+    await forward("Deploy");
+    expect((document.querySelector(".os-actbar") as HTMLElement).textContent ?? "").toContain("going live is the step after");
+    await emit(connection, DEPLOYMENT_CONCEPT, finished(), "NODE_UPDATED");
+    expect(await forward("Go live")).toBeTruthy();
+    expect((document.querySelector(".os-actbar") as HTMLElement).textContent ?? "").toContain("not live yet");
+  });
+
+  it("still asks where a new app lives when its sibling already serves", async () => {
+    const run = parkedRun("pkg-acme", { report: REPORT_TWO });
+    const region = await openGate(fakeConnection({ packages: [ACME], awaitingConfirm: [run], deployments: { "pkg-acme": [run] }, sites: [site("live")] }));
+    expect(await forward("Choose addresses")).toBeTruthy();
+    expect(forwardAct("Deploy")).toBeNull();
+    expect(railStates(region)[3]).toBe("open");
   });
 });
 

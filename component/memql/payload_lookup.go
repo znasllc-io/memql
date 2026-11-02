@@ -52,6 +52,10 @@ var payloadLookups = []payloadLookup{
 	// of every owner, so the index holds only this one's runs.
 	{index: "memory_nodes_work_run_revision_lookup_idx", field: "automationName", concepts: []string{"v1:work:run"},
 		partial: []payloadEquality{{"automationName", "reviseLibraryDocument"}}},
+	// The revocation check (authSessionByTokenHash) runs for verified HTTP
+	// requests and user stream opens. A digest names one session, so its range
+	// is that session's versions, however many sessions the cluster has.
+	{index: "memory_nodes_auth_session_hash_lookup_idx", field: "tokenHash", concepts: []string{"v1:identity:authSession"}},
 	{index: "memory_nodes_recipient_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:recipient"}},
 	{index: "memory_nodes_consent_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:consentEvent"}},
 	// The access surface's two credential lookups and "last opened"
