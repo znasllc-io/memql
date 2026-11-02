@@ -971,8 +971,11 @@ func TestTheCheckRunNeverPromisesARetryTheRowDoesNotHold(t *testing.T) {
 	}
 }
 
-// overlapGitHub holds the first check-run write that says a step is retrying
-// until it is released, and notes whether two writes were ever in flight at once.
+// overlapGitHub holds the first write of the run's own check that says a step is
+// retrying until it is released, and notes whether two writes of that check were
+// ever in flight at once. A step check goes straight through, uncounted: progressMu
+// is about the run's own check alone, and the drive's writer writes step checks
+// outside it on purpose, so that none ever delays the run's own (step_checks.go).
 type overlapGitHub struct {
 	*fakeGitHub
 	held    chan struct{} // closed when the held write has begun
@@ -985,6 +988,9 @@ type overlapGitHub struct {
 }
 
 func (g *overlapGitHub) UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error {
+	if isStepCheck(run) {
+		return g.fakeGitHub.UpdateCheckRun(ctx, token, repository, id, run)
+	}
 	g.mu.Lock()
 	g.inFlight++
 	g.overlapped = g.overlapped || g.inFlight > 1
@@ -1074,12 +1080,12 @@ func TestARetrysPublishAndTheWorkflowsProgressNeverOverlap(t *testing.T) {
 	// Its progress has had every chance to reach GitHub; it must be waiting.
 	time.Sleep(200 * time.Millisecond)
 	if inFlight, overlapped := gh.state(); inFlight != 1 || overlapped {
-		t.Errorf("%d check-run writes in flight (overlapped %v) while the retry's publish is held; the sibling's progress must wait for it", inFlight, overlapped)
+		t.Errorf("%d writes of the run's own check in flight (overlapped %v) while the retry's publish is held; the sibling's progress must wait for it", inFlight, overlapped)
 	}
 	release()
 	waitDrives(t, rh.integ)
 	if _, overlapped := gh.state(); overlapped {
-		t.Error("two check-run writes were in flight at once")
+		t.Error("two writes of the run's own check were in flight at once")
 	}
 	if got, _ := rh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
 		t.Errorf("the run ended %s; want success", got.Conclusion)
