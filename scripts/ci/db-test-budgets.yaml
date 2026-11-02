@@ -30,16 +30,21 @@ classes: |
   db      work      integrations/work  480s     serial    1
   # Revision workflows exercise two engines and must not compete with other DB suites.
   # Flat at a median near 135s since 10-16, but its worst pass reached 179.9s of
-  # 180s, and 150.5s on 11-02. Give it the 300s the release class has.
+  # 180s, and 150.5s on 11-02. Give it 300s.
   db      library   integrations/library 300s   serial    1
   # The release suite passes in 154s on a laptop. With the same-tree reuse cases
   # it exhausted the 180s alarm on the bounded AKS runner while a new test was
   # only 3s old. Give the whole package headroom; keep every test and its
   # operation deadlines.
-  db      release   integrations/release 300s   serial    1
+  # memql#6429's 38 tests took it from 81s to 238s side by side on a laptop, and
+  # from a median of 150s to this alarm on both main runs of 2026-11-02, where
+  # every other package kept its usual time. 90s of the rise is a real wait: six
+  # tests run out githubrelease's settleDelays of 15s, which this package cannot
+  # shorten. The rest scales about 1.9 times on the runner, so expect about 370s.
+  db      release   integrations/release 600s   serial    1
   # The installation suite went from a median of 37s on 10-16..20 to 141s on
   # 11-02, with a worst pass of 162s of the default class's 180s. Give it its own
-  # 300s, as the release class has; keep every test and its operation deadlines.
+  # 300s; keep every test and its operation deadlines.
   db      installation integrations/installation 300s serial 1
   # Campaigns now covers 498 cases, including independent two-engine hops.
   # Keep each lock/write deadline assertion; give the full suite its own budget.
