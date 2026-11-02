@@ -13,6 +13,7 @@ import (
 type analysisAudit chan DeployAuditEvent
 
 func (a analysisAudit) Deploy(_ context.Context, ev DeployAuditEvent) { a <- ev }
+func (a analysisAudit) Rollback(context.Context, RollbackAuditEvent)  {}
 
 type waitingSource struct {
 	*fakeFetcher

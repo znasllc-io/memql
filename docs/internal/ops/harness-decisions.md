@@ -1357,6 +1357,88 @@ Regression coverage: `TestACallerLeavingMidBuildLeavesTheConfirmedDeployRunning`
 The websocket itself is in none of them: they cancel the context it would have
 cancelled, and no live browser disconnect has been exercised.
 
+### A rollback outlives its caller too, and ends on the audit trail (2026-11-02)
+
+`Rollback` ran entirely on the stream's context and has no row, so the coupling above
+was worse here. It repoints each site and then moves the pointer and rolls, and a
+connection dropped between the two left the sites back and the DSL not, with no record
+of it anywhere. Its own comments say that state is what it exists to prevent.
+
+It now follows the same rule. The row, the refusals and the reads a refusal depends
+on stay on the request, since going away there changes nothing. Everything after
+keeps the caller's authority through `context.WithoutCancel`. A caller that stays gets
+the outcome, and one that leaves gets its own context's error and ends only its wait.
+There is no Cancel to keep: a run's is honoured only before the roll, and a rollback
+starts with the publish.
+
+Ten minutes stands where the caller's lifetime was. A rollback is one row write per
+site, one blob write and one patch per rolled workload, with nothing to build or
+upload, so it does not need the thirty minutes a confirmed run gets for those stages.
+Too short turns a slow database into the apart-state, and too long lets a rollback
+somebody has given up on land over whatever they did since.
+
+**Does it also need a durable record of how it ended? Yes, and that record is an
+audit event, not a row.** A reply reaches only a caller who stayed, so without a record
+a failure after the caller left would be gone. Logs alone are not enough: the store
+drops lines under pressure by design and moves them to the archive after 30 days. A
+rollback also left no trace of who did it, though it can change what the whole cluster
+can do, and the deploy's own audit event exists to answer exactly that question. So
+every attempt writes one `package_rollback` event, on a context that outlives the caller
+and the budget, with the outcome, the real error and how far it got. The same facts go
+in a log line first, stamped with the deployment's bare id, because that is what the Logs
+button beside **Roll back to this** filters on, and because the trail is owner-only
+while the roles holding the `publish` part by default (owner and developer) may read
+logs.
+
+The real error is the event's `failureReason`, and not a stable code as on a deploy's
+event, because a deploy's row has the sentence and a rollback has no row. It is the one
+field that shows as itself in the Audit section. That section also read `detail` as a
+string, so every writer's object detail rendered blank, including the deploy's; it now
+shows the object as it came.
+
+A new `packageDeployment` row was rejected. Every reader of that timeline takes its
+rows for deploys: the OS's reading of which attempt is live, the auto-deploy comparison
+(`lastSucceededDeployment`) and `Rollback` itself, whose trust in a `succeeded` row is
+why the concept is `@serverWritten`. A rollback row would change what each of them
+means, and it is a feature of its own rather than part of this fix. A heartbeat and
+sweep were rejected with it: they serve a run that lasts minutes and has a rail somebody
+watches, and a rollback is a handful of writes.
+
+What that costs, stated rather than discovered:
+
+- A process that dies mid-rollback leaves no ending. Each thing a rollback moves gets
+  its own log line, so those lines say how far it got, and rolling back again repeats
+  what is already done.
+- A stage that ignores its deadline holds the goroutine with nothing recorded, because
+  no heartbeat stops to let a sweep notice. The real stages all take the context.
+- Nothing serializes a rollback against another rollback or a live run, as before.
+  What changes is that a person who reconnects and presses again now overlaps a first
+  rollback that used to have died with the connection. Against the same target that
+  repeats the same writes, at worst with a second restart. Against a different one,
+  inside those few seconds, the two can interleave, as two tabs always could, and the
+  trail shows both. The package's gate is no answer: opening, confirming, parking,
+  cancelling and sweeping a run all take it with a five-second wait, so holding it
+  through a rollback would fail them.
+- A pointer that moved before its roll failed is the known limit a deploy has: the next
+  attempt sees the pointer match and skips the roll. The line and the event say
+  `pointerMoved` without `rolled`.
+
+The OS used to show `stream closed` under the button when the socket dropped mid-call.
+It now says the rollback may be going on and where to read how it ended.
+
+Regression coverage: `TestACallerLeavingBetweenTheSitesAndThePointerLeavesTheRollbackRunning`,
+`TestACallerLeavingARollbackEndsOnlyTheWait`, `TestACallerThatStaysGetsTheRollbacksOutcome`,
+`TestARollbackThatFailsAfterItsCallerLeftReportsTheRealError`,
+`TestADetachedRollbackIsStillBounded`, `TestARollbackPastItsBudgetSaysSo`,
+`TestARollbackRefusedBeforeAnythingMovedIsOnTheTrail`,
+`TestACallerGoneBeforeAnythingMovedStopsTheRollback`,
+`TestARollbackLeavesALineForEachThingItMoved`,
+`TestAFinishedRollbackIsOnTheTrailAndInItsLogs` and `TestRollbackAuditWriteIsStamped`.
+`TestARollbackThatFailsAfterItsCallerLeftLeavesTheRealErrorOnTheTrail` and
+`TestARollbackThatOutlivesItsCallerWritesThePackageUnderItsAuthority` use real rows and
+the real `createAuditEvent`. As above, they cancel the context the websocket would have
+cancelled, and no live browser disconnect has been exercised.
+
 ## Repository requests in owned Work (source candidate, 2026-10-25)
 
 An owned goal can need a repository change while ordinary capability discovery

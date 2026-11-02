@@ -468,6 +468,52 @@ connected. Every confirmed run has a time budget instead of its caller's lifetim
 thirty minutes, plus each build's and asset's own, from the saved report when
 there is one.
 
+### If the connection closes during a rollback
+
+A rollback puts each site back and then moves the DSL pointer and rolls, so one
+stopped between the two would leave the sites back and the DSL not. It does not
+belong to the connection that asked for it. `packageRollback` reads the deployment
+and answers its refusals on the request, where going away changes nothing. Once
+anything can move, a caller that stays gets the outcome, and a caller that goes
+first gets its own error while the rollback goes on to its end, under that caller's
+authority. Ten minutes is its time budget, in place of the caller's lifetime.
+
+Nothing stops a rollback once it has started. Cancel belongs to a run and is honoured
+only before its roll, and a rollback starts with the publish. To change course, roll
+back again to the attempt you want.
+
+A rollback has no row on the package's timeline, so how it ended is in two other
+places, whoever is still connected:
+
+- **The Logs of the attempt you rolled back to**, from the Logs button beside its
+  **Roll back to this**. Each site it put back, the pointer and the roll get a line.
+  One that did not finish logs at `error`, with its real error, the sites it put
+  back and whether the pointer moved and the roll was asked for. Owners and
+  developers, the roles that hold the `publish` part by default, may read these.
+- **The audit trail**, in the Cluster app, under the action `package_rollback`: who
+  asked, the outcome (`success`, `failure`, or `blocked` for a refusal before
+  anything moved), the real error as why it failed, and in its detail the deployment
+  and the same record of how far it got. Only a cluster owner reads the trail. It
+  keeps what the log store can drop under pressure and archives after 30 days.
+
+A rollback that did not finish can leave these:
+
+| Where it stopped | What is live |
+|---|---|
+| At a site | The sites listed are back, the others and the DSL are not |
+| At the pointer | Every site is back, and the DSL is not |
+| At the roll | Every site is back and the pointer has moved, but the nodes stay on the old DSL until they restart |
+
+Rolling back to the same attempt again repeats what is already done and finishes the
+rest, with one exception that matches a deploy's. A rollback whose pointer moved and
+whose roll failed sees the pointer already right next time, skips the roll and
+reports success. So when either record shows `pointerMoved` true and `rolled` false,
+restart the workloads named in `MEMQL_PACKAGES_ROLL_TARGETS` yourself.
+
+This is not a persistent executor. If the process running a rollback dies, nothing
+finishes the job or closes it: its log lines stop where it stopped and the trail has
+no ending for it. Read those lines and roll back again.
+
 ### If a run stops reporting progress
 
 A deploy runs on one node, and this is not a persistent executor. A package whose

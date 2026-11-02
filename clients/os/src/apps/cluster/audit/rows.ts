@@ -36,7 +36,7 @@ export function auditFromRow(raw: Row): AuditRow {
     targetType: stringOf(row, "targetType"),
     targetId: stringOf(row, "targetId"),
     targetEmail: stringOf(row, "targetEmail"),
-    detail: stringOf(row, "detail"),
+    detail: detailOf(row),
     sourceIP: stringOf(row, "sourceIP"),
     userAgent: stringOf(row, "userAgent"),
     correlationId: stringOf(row, "correlationId"),
@@ -77,4 +77,12 @@ export function outcomeTone(outcome: string): "neutral" | "accent" | "muted" {
 function stringOf(row: Row, key: string): string {
   const v = row[key];
   return typeof v === "string" ? v : "";
+}
+
+/** Most writers record `detail` as an object and its keys differ by action, so it
+ *  is shown as it came. Read as a string, every one of those rendered blank. */
+function detailOf(row: Row): string {
+  const v = row["detail"];
+  if (typeof v === "string") return v;
+  return v === null || v === undefined ? "" : JSON.stringify(v);
 }

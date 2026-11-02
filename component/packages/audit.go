@@ -13,7 +13,7 @@ import (
 	"github.com/znasllc-io/memql/core/logger"
 )
 
-// Auditor records the outcome of a deploy on v1:identity:auditEvent.
+// Auditor records the outcome of a deploy or a rollback on v1:identity:auditEvent.
 //
 // SUCCESS AND REFUSAL BOTH (design section E), which is the property worth
 // stating: an audit log that only records failures answers "what went wrong"
@@ -21,6 +21,7 @@ import (
 // this cluster serves is exactly the second question.
 type Auditor interface {
 	Deploy(ctx context.Context, ev DeployAuditEvent)
+	Rollback(ctx context.Context, ev RollbackAuditEvent)
 }
 
 // DeployAuditEvent is one recorded attempt.
@@ -36,6 +37,25 @@ type DeployAuditEvent struct {
 	Deployables   []DeployableOutcome
 }
 
+// RollbackAuditEvent is how one rollback ended. A deploy's row carries its real
+// error and how far it got, and a rollback has no row, so this carries both.
+type RollbackAuditEvent struct {
+	PackageId string
+	// DeploymentId is the deployment it returned to, which is not changed by this.
+	DeploymentId string
+	DslVersion   string
+	// Outcome is success, failure, or blocked for a refusal before anything moved.
+	Outcome string
+	// FailureReason is the real error, whichever stage stopped it. A deploy's is a
+	// stable code because its row has the sentence. This is what the Audit section
+	// shows as why it failed, and a refusal's sentence starts with its code.
+	FailureReason string
+	// Sites are the ones it put back, which on a failure can be some of them.
+	Sites        []string
+	PointerMoved bool
+	Rolled       bool
+}
+
 // engineAuditor writes through the same createAuditEvent mutation every other
 // Go writer in this tree uses.
 type engineAuditor struct {
@@ -46,6 +66,9 @@ type engineAuditor struct {
 // AuditAction is the action string this epic writes. Named rather than
 // inlined, because the OS and any operator query filtering the trail key on it.
 const AuditAction = "package_deploy"
+
+// AuditActionRollback is the same trail's word for a rollback ending.
+const AuditActionRollback = "package_rollback"
 
 func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 	if a == nil || a.engine == nil {
@@ -74,6 +97,26 @@ func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 		}
 		detail["sites"] = sites
 	}
+	a.write(ctx, AuditAction, ev.PackageId, ev.DeploymentId, outcome, ev.FailureReason, detail)
+}
+
+func (a *engineAuditor) Rollback(ctx context.Context, ev RollbackAuditEvent) {
+	if a == nil || a.engine == nil {
+		return
+	}
+	detail := map[string]any{
+		"deploymentId": ev.DeploymentId,
+		"dslVersion":   ev.DslVersion,
+		"pointerMoved": ev.PointerMoved,
+		"rolled":       ev.Rolled,
+	}
+	if len(ev.Sites) > 0 {
+		detail["sites"] = ev.Sites
+	}
+	a.write(ctx, AuditActionRollback, ev.PackageId, ev.DeploymentId, ev.Outcome, ev.FailureReason, detail)
+}
+
+func (a *engineAuditor) write(ctx context.Context, action, packageId, deploymentId, outcome, failureReason string, detail map[string]any) {
 	detailJSON, err := json.Marshal(detail)
 	if err != nil {
 		detailJSON = []byte("{}")
@@ -85,7 +128,7 @@ func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 	b.WriteString(", occurredAt: ")
 	b.WriteString(langparser.QuoteString(time.Now().UTC().Format(time.RFC3339Nano)))
 	b.WriteString(", category: \"configuration\", action: ")
-	b.WriteString(langparser.QuoteString(AuditAction))
+	b.WriteString(langparser.QuoteString(action))
 	if ac, ok := auth.AccessFromContext(ctx); ok {
 		b.WriteString(", actorUserId: ")
 		b.WriteString(langparser.QuoteString(ac.UserId))
@@ -107,12 +150,12 @@ func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 	// is a DSL change with a conformance gate behind it, and the trail reads
 	// perfectly well with the action naming what kind of thing this was.
 	b.WriteString(", targetId: ")
-	b.WriteString(langparser.QuoteString(ev.PackageId))
+	b.WriteString(langparser.QuoteString(packageId))
 	b.WriteString(", outcome: ")
 	b.WriteString(langparser.QuoteString(outcome))
-	if ev.FailureReason != "" {
+	if failureReason != "" {
 		b.WriteString(", failureReason: ")
-		b.WriteString(langparser.QuoteString(ev.FailureReason))
+		b.WriteString(langparser.QuoteString(failureReason))
 	}
 	b.WriteString(", detail: ")
 	b.Write(detailJSON)
@@ -125,9 +168,9 @@ func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 	// above field by field, so the stamp reaches this createAuditEvent and
 	// nothing else.
 	if err := (&store{engine: a.engine}).writeInternal(ctx, b.String()); err != nil {
-		a.logger.Warn("packages: the deploy audit event could not be written",
-			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, ev.DeploymentId),
-			"deployment", ev.DeploymentId, "package", ev.PackageId,
+		a.logger.Warn("packages: the audit event could not be written",
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, deploymentId),
+			"action", action, "deployment", deploymentId, "package", packageId,
 			"outcome", outcome, "err", err)
 	}
 }

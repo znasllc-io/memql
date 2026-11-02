@@ -230,6 +230,7 @@ func (p *fakePublisher) ReadSnapshot(_ context.Context, ref string) ([]byte, err
 type fakeAuditor struct{ events []DeployAuditEvent }
 
 func (a *fakeAuditor) Deploy(_ context.Context, ev DeployAuditEvent) { a.events = append(a.events, ev) }
+func (a *fakeAuditor) Rollback(context.Context, RollbackAuditEvent)  {}
 
 // ---------------------------------------------------------------------------
 // Harness

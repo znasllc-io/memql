@@ -135,7 +135,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rollback",
-			Description: "Restore a package to a previous deployment's (dslVersion, site bundleRefs) tuple (epic memql#4794, D7). Executes the D6 order REVERSED -- publish back first, then the pointer back and a roll -- so the app and the schema never disagree in either direction.",
+			Description: "Restore a package to a previous deployment's (dslVersion, site bundleRefs) tuple (epic memql#4794, D7). Executes the D6 order REVERSED -- publish back first, then the pointer back and a roll -- so the app and the schema never disagree in either direction. Refusals happen on the request, before anything moves; after that a caller that leaves ends only its wait, and the rollback goes on to its end under a ten-minute budget. How it ended is in the logs of the deployment it returned to and on the audit trail as package_rollback, with the real error, whoever is still connected.",
 			Handler:     i.handleRollback,
 			ArgsSchema: map[string]string{
 				"packageId":    "string (required) -- the package to roll back",

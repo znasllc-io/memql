@@ -310,6 +310,8 @@ export interface FakeSeed {
   repointError?: string;
   /** Fails the next `packageRollback` with this server message. */
   rollbackError?: string;
+  /** Drops the socket under the next `packageRollback`, as the SDK reports it. */
+  rollbackDropped?: boolean;
   /** Fails the next `packageRestore` with this server message. */
   restoreError?: string;
   /**
@@ -624,6 +626,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin packageRollback(")) {
         if (seed.rollbackError !== undefined) throw new Error(seed.rollbackError);
+        if (seed.rollbackDropped) throw Object.assign(new Error("stream closed"), { reason: "transport" });
         return builtinReply("packageRollback", []);
       }
 

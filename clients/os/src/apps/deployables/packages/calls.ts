@@ -1,4 +1,4 @@
-import { renderMemQLValue, rowString, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { isTransportInterruption, renderMemQLValue, rowString, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 // Every write and every on-demand read this surface makes, in one place.
 //
@@ -257,8 +257,21 @@ export async function revokeSourceCredential(query: QueryClient, credentialId: s
   await query.sourceCredentialRevoke({ credentialId });
 }
 
+/**
+ * A rollback outlives its caller on the engine, so a dropped socket says nothing
+ * about how it ended. `stream closed` is the transport talking, and it would reach
+ * the page reading as though the rollback had failed. The first half of the
+ * sentence is there because a socket can also drop before the call arrives.
+ */
 export async function rollbackPackage(query: QueryClient, packageId: string, deploymentId: string): Promise<void> {
-  await query.packageRollback({ packageId, deploymentId });
+  try {
+    await query.packageRollback({ packageId, deploymentId });
+  } catch (err: unknown) {
+    if (isTransportInterruption(err)) {
+      throw new Error("The connection closed before this rollback answered. If it reached the cluster it goes on without this page, and the Logs of the attempt you rolled back to say how it ended.");
+    }
+    throw err;
+  }
 }
 
 /**

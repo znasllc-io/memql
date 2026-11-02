@@ -1197,6 +1197,26 @@ describe("Every attempt, on the source's History view", () => {
     expect(connection.callsNamed("packageRollback")).toEqual(['builtin packageRollback(packageId: "pkg-acme", deploymentId: "dep-older")']);
   });
 
+  // The engine goes on with a rollback whose caller left, so "stream closed" under
+  // the button would read as a failure of something that may well be finishing.
+  it("says a dropped connection is not how a rollback ended, and where to read it", async () => {
+    const older = run({ id: "dep-older", sourceVersion: "bbbbbbbbbbbbbbbbbbbb", startedAt: "2026-08-20T12:00:00Z", createdAt: "2026-08-20T12:00:00Z" });
+    const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [SUCCEEDED, older] }, rollbackDropped: true }, "store.memql.example.com");
+    const history = await openHistoryView(await openSourceView(page));
+    await click(within(history).getByRole("button", { name: /Roll back to/ }));
+    expect(await within(history).findByText(/it goes on without this page, and the Logs of the attempt/)).toBeTruthy();
+    expect(within(history).queryByText("stream closed")).toBeNull();
+  });
+
+  it("still shows a rollback's own refusal as what it said", async () => {
+    const older = run({ id: "dep-older", sourceVersion: "bbbbbbbbbbbbbbbbbbbb", startedAt: "2026-08-20T12:00:00Z", createdAt: "2026-08-20T12:00:00Z" });
+    const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [SUCCEEDED, older] }, rollbackError: "dsl_requires_authoring: owner or developer only." }, "store.memql.example.com");
+    const history = await openHistoryView(await openSourceView(page));
+    await click(within(history).getByRole("button", { name: /Roll back to/ }));
+    expect(await within(history).findByText(/owner or developer only/)).toBeTruthy();
+    expect(within(history).queryByText(/goes on without this page/)).toBeNull();
+  });
+
   it("lists a parked run as waiting for you", async () => {
     const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [PARKED, SUCCEEDED] } }, "store.memql.example.com");
     const history = await openHistoryView(await openSourceView(page));

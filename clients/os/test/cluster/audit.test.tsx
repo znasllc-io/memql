@@ -101,6 +101,23 @@ describe("the audit trail", () => {
     expect(screen.getByText("not a cluster owner")).toBeTruthy();
   });
 
+  // Most writers record detail as an object, a rollback's included, and that is
+  // where it says which deployment it returned to and how far it got.
+  it("shows a detail recorded as an object", async () => {
+    mount(
+      fakeConnection({
+        recentAuditEvents: [
+          auditEventRow({
+            id: "e1",
+            detail: { deploymentId: "dep-older", pointerMoved: true, rolled: false },
+          }),
+        ],
+      }),
+    );
+    await click(await screen.findByText("sign_in"));
+    expect(screen.getByText('{"deploymentId":"dep-older","pointerMoved":true,"rolled":false}')).toBeTruthy();
+  });
+
   it("re-reads from the first page when the category changes, never continuing the old cursor", async () => {
     // A keyset cursor is bound to the query it came from. Carrying one across
     // a category change would continue a walk of a DIFFERENT set, which reads

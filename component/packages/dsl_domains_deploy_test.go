@@ -733,9 +733,9 @@ func TestARollbackRestoresTheDomainsOfTheDeploymentItReturnsTo(t *testing.T) {
 
 	// The rollback's lines are about the deployment it returns to, and carry it
 	// as their subject for the reason the deploy's do: the run's Logs section
-	// selects by it.
+	// selects by it, on the exact bare id.
 	t.Run("its log lines are about the deployment it returned to", func(t *testing.T) {
-		const returnedTo = "subject.id=v1:platform:packageDeployment:old"
+		const returnedTo = "subject.id=old"
 		failed := newHarness(t, validPackage(), ownerPackage())
 		failedLog, failedBuf := capturedLog()
 		failed.deps.Logger = failedLog
