@@ -55,7 +55,7 @@ func TestASiteWithLiveAccessCodesCannotChangeOrganization(t *testing.T) {
 		id := site(name)
 		payload := map[string]any{
 			"hostname": ids.site + "-" + name + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft",
-			"bundleRef": "blob://site-access/v1", "ownerUserId": "v1:identity:user:" + owner,
+			"bundleRef": "blob://sites/" + BareShortId(id) + "/v1/", "ownerUserId": "v1:identity:user:" + owner,
 		}
 		if account != "" {
 			payload["accountId"] = account

@@ -30,7 +30,7 @@ func TestStorefrontPublicationPreservesAnUnreadableExistingBinding(t *testing.T)
 	siteID, err := createSiteRaw(t, ownerCtx, eng, map[string]any{
 		"siteId": "site-" + suffix, "accountId": account,
 		"hostname": "shop-" + suffix + "." + siteTestDomain,
-		"kind":     "shopify_storefront", "bundleRef": "blob://sites/test/old/",
+		"kind":     "shopify_storefront", "bundleRef": "blob://sites/site-" + suffix + "/old/",
 	})
 	if err != nil {
 		t.Fatalf("create the member's storefront: %v", err)
@@ -69,11 +69,11 @@ func TestStorefrontPublicationPreservesAnUnreadableExistingBinding(t *testing.T)
 
 	t.Run("bundle update inherits both bindings without reading the store", func(t *testing.T) {
 		if _, err := runSiteMutation(t, borrowed, eng, "updateSiteBundle", map[string]any{
-			"siteId": siteID, "bundleRef": "blob://sites/test/new/",
+			"siteId": siteID, "bundleRef": "blob://sites/site-" + suffix + "/new/",
 		}); err != nil {
 			t.Fatalf("publishing bytes with unchanged store bindings: %v", err)
 		}
-		if got := stringFromAny(stored()["bundleRef"]); got != "blob://sites/test/new/" {
+		if got := stringFromAny(stored()["bundleRef"]); got != "blob://sites/site-"+suffix+"/new/" {
 			t.Fatalf("published bundle = %q", got)
 		}
 		assertBindings(t)
@@ -88,7 +88,7 @@ func TestStorefrontPublicationPreservesAnUnreadableExistingBinding(t *testing.T)
 		_, err := createSiteRaw(t, borrowed, eng, map[string]any{
 			"siteId": "new-" + suffix, "accountId": account,
 			"hostname": "new-" + suffix + "." + siteTestDomain,
-			"kind":     "shopify_storefront", "bundleRef": "blob://sites/test/new/",
+			"kind":     "shopify_storefront", "bundleRef": "blob://sites/new-" + suffix + "/new/",
 			"binding": map[string]any{bindingStoreIdKey: storeB},
 		})
 		refusedUnreadable(t, err)
@@ -98,11 +98,11 @@ func TestStorefrontPublicationPreservesAnUnreadableExistingBinding(t *testing.T)
 			row["binding"] = map[string]any{bindingStoreIdKey: storeB}
 		})
 		_, err := runSiteMutation(t, borrowed, eng, "updateSiteBundle", map[string]any{
-			"siteId": siteID, "bundleRef": "blob://sites/test/hooked/",
+			"siteId": siteID, "bundleRef": "blob://sites/site-" + suffix + "/hooked/",
 		})
 		refusedUnreadable(t, err)
 		assertBindings(t)
-		if got := stringFromAny(stored()["bundleRef"]); got == "blob://sites/test/hooked/" {
+		if got := stringFromAny(stored()["bundleRef"]); got == "blob://sites/site-"+suffix+"/hooked/" {
 			t.Fatal("the refused hook still published its bundle")
 		}
 	})

@@ -1138,6 +1138,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, organizationPrior, payload); err != nil {
 		return nil, meta, err
 	}
+	// A SITE NAMES ITS OWN VERSIONS, at the same seam and for the same reason: a
+	// hook may set bundleRef on its author's write, and the rule is about a
+	// change. See site_bundle_reference.go.
+	if conceptMeta.Name == conceptPlatformSite {
+		if err := validateSiteBundleRefs(id, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	// THE CERTIFICATION LADDER is server-written only (epic memql#5408,
 	// issue #5409). Here, beside the organization boundary and for its
 	// reasons: it judges a CHANGE, so it needs the stored row (organizationPrior

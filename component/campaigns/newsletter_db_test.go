@@ -84,7 +84,7 @@ func TestNewsletterEnrollmentAndWelcomeAcrossReplicas(t *testing.T) {
 	}
 
 	site := suffix + "-site"
-	execute(owner, call("mutation", "createSite", arg{"siteId", site}, arg{"accountId", org}, arg{"hostname", suffix + ".example.test"}, arg{"bundleRef", "sites/newsletter/test"}, arg{"kind", "static"}))
+	execute(owner, call("mutation", "createSite", arg{"siteId", site}, arg{"accountId", org}, arg{"hostname", suffix + ".example.test"}, arg{"bundleRef", "blob://sites/" + site + "/v1/"}, arg{"kind", "static"}))
 	configArgs := map[string]any{"siteId": site, "audienceId": audience, "templateId": template, "senderIdentityId": identity, "consentText": "I agree to receive Client's newsletter by email.", "enabled": true}
 	execute(owner, call("mutation", "createClientAccount", arg{"accountId", org + "-other"}, arg{"name", "Other client"}))
 	execute(owner, call("mutation", "createAudience", arg{"audienceId", audience + "-other"}, arg{"accountId", org + "-other"}, arg{"name", "Other audience"}))

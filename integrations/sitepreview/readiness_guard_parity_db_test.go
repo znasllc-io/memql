@@ -269,8 +269,8 @@ func TestReadinessAndTheGuardAgreeForACallerWhoCannotReadTheStore(t *testing.T) 
 		langparser.QuoteString(group), langparser.QuoteString(group), langparser.QuoteString(account)))
 	must(seeder, fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: "active")`,
 		langparser.QuoteString(membership), langparser.QuoteString(group), langparser.QuoteString(writerId)))
-	must(writer, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, accountId: %s, kind: "shopify_storefront", bundleRef: "blob://sites/parity-w/v1/")`,
-		langparser.QuoteString(siteId), langparser.QuoteString("parity-w-"+suffix+".parity.example"), langparser.QuoteString(account)))
+	must(writer, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, accountId: %s, kind: "shopify_storefront", bundleRef: %s)`,
+		langparser.QuoteString(siteId), langparser.QuoteString("parity-w-"+suffix+".parity.example"), langparser.QuoteString(account), langparser.QuoteString("blob://sites/"+memql.BareShortId(siteId)+"/v1/")))
 	must(seeder, fmt.Sprintf(`mutation updateSiteStoreBinding(siteId: %s, storeId: %s)`,
 		langparser.QuoteString(siteId), langparser.QuoteString(store)))
 

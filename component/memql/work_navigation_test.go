@@ -44,7 +44,7 @@ func TestNavigationResolvesBuiltInSiteForOwnerWithoutSharingItWithAnotherRole(t 
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
 	site := "nav-" + id.NewShortId()
-	_, err := createSiteRaw(t, systemSiteCtx(), e, map[string]any{"siteId": site, "hostname": site + "." + siteTestDomain, "bundleRef": "blob://navigation/test", "title": "MemQL for Visual Studio Code and Cursor", "systemOwned": true})
+	_, err := createSiteRaw(t, systemSiteCtx(), e, map[string]any{"siteId": site, "hostname": site + "." + siteTestDomain, "bundleRef": "blob://sites/" + site + "/v1/", "title": "MemQL for Visual Studio Code and Cursor", "systemOwned": true})
 	require.NoError(t, err)
 	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleWriter} {
 		owner := "v1:identity:user:" + id.NewShortId()

@@ -331,7 +331,7 @@ func TestStorefrontPreview_BothDestinationsAcceptTheSameSandbox(t *testing.T) {
 	if _, err := qc.CreateStore(ctx, memqlclient.CreateStoreArgs{StoreId: storeID, Domain: storeID + ".myshopify.com", IsDevelopment: true, IsDevelopmentSet: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := qc.CreateSite(ctx, memqlclient.CreateSiteArgs{SiteId: siteID, Hostname: "clustere2e-" + suffix + ".example.com", Kind: "shopify_storefront", Status: "draft", BundleRef: "blob://sites/shared/v1/", Binding: map[string]any{"storeId": storeID}}); err != nil {
+	if _, err := qc.CreateSite(ctx, memqlclient.CreateSiteArgs{SiteId: siteID, Hostname: "clustere2e-" + suffix + ".example.com", Kind: "shopify_storefront", Status: "draft", BundleRef: "blob://sites/" + siteID + "/v1/", Binding: map[string]any{"storeId": storeID}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := qc.UpdateSitePreviewBinding(ctx, memqlclient.UpdateSitePreviewBindingArgs{SiteId: siteID, StoreId: storeID}); err != nil {

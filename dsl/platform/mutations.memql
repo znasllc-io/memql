@@ -591,6 +591,10 @@ mutation site createSite {
 /// are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ??
 /// ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
 ///
+/// A SITE NAMES ITS OWN VERSIONS, a comparison against the row's own id and therefore Go
+/// (component/memql/site_bundle_reference.go): a version published under this site's prefix, or
+/// the directory the image ships it in for a platform site.
+///
 /// AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared
 /// edits preserve the original owner and record the current writer on the new version. Package
 /// publication also checks the target site's deploy/publish permission before external effects;

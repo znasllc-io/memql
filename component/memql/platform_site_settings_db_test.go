@@ -209,7 +209,7 @@ func TestSiteSettingsRefusedOnASystemOwnedRow(t *testing.T) {
 	if _, err := createSiteRaw(t, systemSiteCtx(), eng, map[string]any{
 		"siteId":      id,
 		"hostname":    "portal-set-" + suffix + "." + siteTestDomain,
-		"bundleRef":   "file:///app/os",
+		"bundleRef":   "blob://sites/" + id + "/v1/",
 		"status":      "live",
 		"systemOwned": true,
 	}); err != nil {

@@ -21,7 +21,7 @@ func TestStorefrontTestingOpensSharedBuildWithoutCandidateOrStore(t *testing.T) 
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	siteID, host := "testing-"+suffix, "shop-"+suffix+".example.com"
 	owner := parityOwner("testing-owner-" + suffix)
-	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "shopify_storefront", status: "draft", bundleRef: "blob://sites/shared/v1/")`, langparser.QuoteString(siteID), langparser.QuoteString(host))); err != nil {
+	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "shopify_storefront", status: "draft", bundleRef: %s)`, langparser.QuoteString(siteID), langparser.QuoteString(host), langparser.QuoteString("blob://sites/"+siteID+"/v1/"))); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -66,7 +66,7 @@ func TestStorefrontTestingOpensSharedBuildWithoutCandidateOrStore(t *testing.T) 
 		if err != nil || u.Scheme != "https" || u.Host != "test--"+host || !memql.WellFormedPreviewToken(u.Query().Get(memql.PreviewGrantParam)) {
 			t.Fatal("testing entry URL is not scoped to testing origin")
 		}
-		if result["candidateRef"] != "blob://sites/shared/v1/" {
+		if result["candidateRef"] != "blob://sites/"+siteID+"/v1/" {
 			t.Fatal("testing did not use shared build")
 		}
 		site, ok, err := integration.store.SiteByID(owner, siteID)

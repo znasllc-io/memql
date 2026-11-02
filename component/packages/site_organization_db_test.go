@@ -119,7 +119,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	if blobs.puts != 0 {
 		t.Fatal("denied publish reached object storage")
 	}
-	if err := pub.RepointSite(memberCtx, siteID, "blob://forbidden"); err == nil {
+	if err := pub.RepointSite(memberCtx, siteID, "blob://sites/"+siteID+"/forbidden/"); err == nil {
 		t.Fatal("A publish grant rolled back B")
 	}
 	row := mustExecute(t, eng, memberCtx, fmt.Sprintf(`query siteById(siteId: %s)`, langparser.QuoteString(siteID)))[0]
@@ -138,7 +138,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	if blobs.puts != 0 {
 		t.Fatal("denied target data write uploaded bytes")
 	}
-	if err := pub.RepointSite(memberCtx, siteID, "blob://data-forbidden"); err == nil {
+	if err := pub.RepointSite(memberCtx, siteID, "blob://sites/"+siteID+"/data-forbidden/"); err == nil {
 		t.Fatal("rollback bypassed denied target data permission")
 	}
 	if err := requireSiteRowAction(memberCtx, pub.store, row, "retire"); err == nil {
@@ -159,7 +159,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	if blobs.puts != 1 {
 		t.Fatalf("authorized publish wrote %d files", blobs.puts)
 	}
-	if err := pub.RepointSite(memberCtx, siteID, "blob://permitted"); err != nil {
+	if err := pub.RepointSite(memberCtx, siteID, "blob://sites/"+siteID+"/permitted/"); err != nil {
 		t.Fatal(err)
 	}
 	var persistedOwner, creator, org string

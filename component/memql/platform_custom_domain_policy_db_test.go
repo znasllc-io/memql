@@ -124,7 +124,7 @@ func TestCustomDomainCreateRefusesAHostnameASiteAlreadyServes(t *testing.T) {
 	if _, err := createSiteRaw(t, systemSiteCtx(), eng, map[string]any{
 		"siteId":    "site-taken-" + suffix,
 		"hostname":  taken,
-		"bundleRef": "blob://sites/taken/v1/",
+		"bundleRef": "blob://sites/site-taken-" + suffix + "/v1/",
 	}); err != nil {
 		t.Fatalf("could not seed the colliding site: %v", err)
 	}

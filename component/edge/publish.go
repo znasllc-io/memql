@@ -14,6 +14,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -204,6 +205,11 @@ func version(b Bundle) string {
 func (p *Publisher) Publish(ctx context.Context, siteID string, b Bundle, target Target) (Result, error) {
 	if !target.valid() {
 		return Result{}, fmt.Errorf("edge: refusing to publish to %s: unknown target %q", siteID, target)
+	}
+	// The prefix below is composed from this id, and the write that follows the
+	// upload is what would have judged it, so it is judged before a byte moves.
+	if !memql.SiteIDNamesOnePrefix(siteID) {
+		return Result{}, fmt.Errorf("edge: refusing to publish to %q: a site's id names its storage prefix, so it is one path segment", siteID)
 	}
 	if len(b) == 0 {
 		return Result{}, fmt.Errorf("edge: refusing to publish an empty bundle to %s", siteID)

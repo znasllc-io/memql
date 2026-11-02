@@ -159,6 +159,27 @@ func TestPlatformSitesAreExactHostsAndNotRoles(t *testing.T) {
 // Ingress served the controller's self-signed default. The certificate
 // therefore names every EXACT host the front door serves, and nothing else:
 // no wildcard, and no host that is not an Ingress rule.
+// A site row may name a directory only when it is this one, so a platform site
+// with no entry here would be refused its own seed at boot.
+func TestEveryPlatformSiteNamesTheDirectoryTheImageShipsItIn(t *testing.T) {
+	seen := map[string]string{}
+	for _, name := range PlatformSites() {
+		dir := PlatformSiteBundleDir(name)
+		if !strings.HasPrefix(dir, "/app/") {
+			t.Errorf("platform site %q has bundle directory %q, want one under the image's /app", name, dir)
+		}
+		if other, taken := seen[dir]; taken {
+			t.Errorf("platform sites %q and %q share the directory %q", other, name, dir)
+		}
+		seen[dir] = name
+	}
+	for _, name := range []string{"", "shop", "app", "sites"} {
+		if dir := PlatformSiteBundleDir(name); dir != "" {
+			t.Errorf("%q is not a platform site and has the bundle directory %q", name, dir)
+		}
+	}
+}
+
 func TestCertificateSANsAreExactlyTheExactHosts(t *testing.T) {
 	sans := CertificateSANs(domain)
 

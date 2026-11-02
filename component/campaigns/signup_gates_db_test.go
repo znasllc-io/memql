@@ -408,7 +408,7 @@ func (f *digestFixture) TestTwoConcurrentSignupsForTheSameNewAddressMakeOneMembe
 func (f *digestFixture) TestTwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress(t *testing.T) {
 	n := f.newEmptyNewsletter(t, "gate-two-sites")
 	second := n.suffix + "-site-two"
-	n.execute(t, n.owner, call("mutation", "createSite", arg{"siteId", second}, arg{"accountId", n.org}, arg{"hostname", n.suffix + "-two.example.test"}, arg{"bundleRef", "sites/newsletter/test"}, arg{"kind", "static"}))
+	n.execute(t, n.owner, call("mutation", "createSite", arg{"siteId", second}, arg{"accountId", n.org}, arg{"hostname", n.suffix + "-two.example.test"}, arg{"bundleRef", "blob://sites/" + second + "/v1/"}, arg{"kind", "static"}))
 	nodes, err := n.worker.handleConfigureNewsletter(n.owner, map[string]any{"siteId": second, "audienceId": n.audience, "templateId": n.suffix + "-tpl", "senderIdentityId": n.suffix + "-sender", "consentText": "I agree to receive Client's newsletter by email.", "enabled": true}, 0)
 	if err != nil {
 		t.Fatal(err)
