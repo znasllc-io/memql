@@ -14318,8 +14318,9 @@ button.os-cluster-mesh-peer:focus-visible {
 }
 /* The numbered trail reflects registration events, never a fabricated Next. */
 .os-fleet-addpage { container-type: inline-size; }
-.fleet-install-options { display: flex; flex-direction: column; margin-top: 8px; }
-.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 12px 0; }
+/* One boundary after the operating system; related choices use spacing. */
+.fleet-install-options { display: flex; flex-direction: column; margin-top: 8px; border-top: 1px solid var(--os-line); }
+.fleet-install-options > div { position: relative; padding: 12px 0; }
 .fleet-install-options p { margin: 4px 0 0 42px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
 .os-activity-target { position: relative; min-width: 0; }
 .os-activity-target[data-activity] { outline: 2px dashed var(--os-accent); outline-offset: 5px; border-radius: 6px; }

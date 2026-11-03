@@ -111,7 +111,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    grouping grammar. Settings groups keep their `fieldset` and `legend`
    SEMANTICS (a legend names its group to assistive tech), but the legend
    dresses as a Subhead and the legend-breaking-the-border box is gone --
-   one look, not two. Panel actions align to the right edge in the shared
+   one look, not two. Use spacing within a group; reserve horizontal dividers
+   for a change of subject, never between every related field or toggle.
+   Add Machine keeps one divider after the operating-system choice, separating
+   the machine's identity from its capabilities. Its capability toggles form
+   one group with no dividers between them.
+   Panel actions align to the right edge in the shared
    `os-panel-actions` row. An action such as Disconnect stays on that same
    edge when it expands into Cancel and confirmation; do not shift the
    controls left or fill the panel width. Confirmation copy sits above them,
