@@ -10,13 +10,22 @@ SERVICE = r'''
 #import <dispatch/dispatch.h>
 #include <assert.h>
 
+typedef NS_ENUM(NSInteger, SMAppServiceStatus) {
+    SMAppServiceStatusNotRegistered,
+    SMAppServiceStatusEnabled,
+    SMAppServiceStatusRequiresApproval,
+    SMAppServiceStatusNotFound,
+};
+NSString * const SMAppServiceErrorDomain = @"SMAppServiceErrorDomain";
 static int completedCalls = 0;
 static int synchronousCalls = 0;
 static int completionCode = 0;
+static NSString *completionDomain = @"fixture";
+static SMAppServiceStatus fixtureStatus = SMAppServiceStatusEnabled;
 static int64_t completionDelay = 20 * NSEC_PER_MSEC;
 static dispatch_semaphore_t callbackFinished;
 @interface SMAppService : NSObject
-@property(nonatomic) int status;
+@property(nonatomic, readonly) SMAppServiceStatus status;
 + (instancetype)agentServiceWithPlistName:(NSString *)name;
 - (BOOL)registerAndReturnError:(NSError **)error;
 - (BOOL)unregisterAndReturnError:(NSError **)error;
@@ -24,6 +33,7 @@ static dispatch_semaphore_t callbackFinished;
 @end
 @implementation SMAppService
 + (instancetype)agentServiceWithPlistName:(NSString *)name { return [self new]; }
+- (SMAppServiceStatus)status { return fixtureStatus; }
 - (BOOL)registerAndReturnError:(NSError **)error { return YES; }
 - (BOOL)unregisterAndReturnError:(NSError **)error { synchronousCalls++; return YES; }
 - (void)unregisterWithCompletionHandler:(void (^)(NSError *))handler {
@@ -31,7 +41,7 @@ static dispatch_semaphore_t callbackFinished;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, completionDelay),
                    dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         completedCalls++;
-        handler(result ? [NSError errorWithDomain:@"fixture" code:result userInfo:nil] : nil);
+        handler(result ? [NSError errorWithDomain:completionDomain code:result userInfo:nil] : nil);
         dispatch_semaphore_signal(callbackFinished);
     });
 }
@@ -63,6 +73,28 @@ int main(void) {
         free(why); why = NULL;
         assert(dispatch_semaphore_wait(callbackFinished, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
         assert(completedCalls == 3 && synchronousCalls == 0);
+        // macOS 27 refuses to unregister an agent it holds no record of with
+        // EPERM, then reports it not found: that is already unregistered.
+        completionDelay = 20 * NSEC_PER_MSEC;
+        completionCode = EPERM;
+        completionDomain = SMAppServiceErrorDomain;
+        fixtureStatus = SMAppServiceStatusNotFound;
+        assert(memqlAppServiceChange("fixture.plist", 0, &why) == 0);
+        assert(dispatch_semaphore_wait(callbackFinished, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+        assert(why == NULL);
+        // EPERM while the record remains, or from another domain, still refuses.
+        fixtureStatus = SMAppServiceStatusEnabled;
+        assert(memqlAppServiceChange("fixture.plist", 0, &why) == EPERM);
+        assert(dispatch_semaphore_wait(callbackFinished, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+        assert(why != NULL);
+        free(why); why = NULL;
+        fixtureStatus = SMAppServiceStatusNotFound;
+        completionDomain = @"fixture";
+        assert(memqlAppServiceChange("fixture.plist", 0, &why) == EPERM);
+        assert(dispatch_semaphore_wait(callbackFinished, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+        assert(why != NULL);
+        free(why); why = NULL;
+        assert(completedCalls == 6 && synchronousCalls == 0);
     }
     return 0;
 }
@@ -83,7 +115,7 @@ def main():
         subprocess.run(['xcrun', 'clang', '-x', 'objective-c', '-fobjc-arc', '-fblocks',
                         '-framework', 'Foundation', str(native), '-o', str(executable)], check=True)
         subprocess.run([str(executable)], check=True, timeout=15)
-    print('PASS: native unregister completion, error propagation, bounded timeout and late callback lifetime; service APIs stubbed.')
+    print('PASS: native unregister completion, error propagation, unregister of an unrecorded agent, bounded timeout and late callback lifetime; service APIs stubbed.')
 
 
 if __name__ == '__main__':

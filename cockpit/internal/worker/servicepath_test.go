@@ -128,17 +128,20 @@ func TestLaunchAgentPlist_CarriesTheServicePath(t *testing.T) {
 	}
 }
 
-// TestShellPlistWritersCarryTheServicePath. Two shell scripts write the
-// same LaunchAgent -- install-mac.sh and the root install.sh's legacy-label
-// migration -- and neither can import the Go above. Each spells the PATH
-// out; this pins every spelling to it, so a directory added here and
-// forgotten there fails a test instead of a machine. MemQL.app writes no
-// plist: its agent is registered from the bundle (memql-cockpit#545), and
-// the worker extends its own PATH.
+// TestShellPlistWritersCarryTheServicePath. Three shell scripts write the
+// same LaunchAgent -- install-mac.sh for a raw worker, activate-app.sh for
+// a MemQL.app without a Team ID (which runs from a per-user plist again),
+// and the root install.sh's legacy-label migration -- and none can import
+// the Go above. Each spells the PATH out; this pins every spelling to it,
+// so a directory added here and forgotten there fails a test instead of a
+// machine. A MemQL.app with a Team ID writes no plist: its agent is
+// registered from the bundle (memql-cockpit#545), and the worker extends
+// its own PATH.
 func TestShellPlistWritersCarryTheServicePath(t *testing.T) {
 	want := servicePath(launchdDefaultPath, "${HOME}")
 	for _, rel := range []string{
 		filepath.Join("..", "..", "scripts", "install", "install-mac.sh"),
+		filepath.Join("..", "..", "scripts", "macos", "activate-app.sh"),
 		filepath.Join("..", "..", "install.sh"),
 	} {
 		body, err := os.ReadFile(rel)

@@ -22,13 +22,19 @@ not imply TCC grants: macOS must approve the actual bundle, and only
 current-worker preflight results can confirm access. Raw executable grants are
 not silently moved or reset during migration.
 
-### Services the app registers itself (memql-cockpit#545)
+### How the worker and the menu start
 
-MemQL.app carries both service definitions in
-`Contents/Library/LaunchAgents`: `com.znasllc.memql-worker` (the worker, kept
-alive) and `com.znasllc.memql-cockpit-menubar` (the menu, Aqua sessions only).
-The app's own executable registers them with SMAppService, so Login Items lists
-one **MemQL** with the app's icon:
+The two services keep their labels however they start:
+`com.znasllc.memql-worker` (the worker, kept alive) and
+`com.znasllc.memql-cockpit-menubar` (the menu, Aqua sessions only).
+
+- **A build without a Team ID** runs them from per-user plists in
+  `~/Library/LaunchAgents`, which `scripts/macos/activate-app.sh` writes. Every
+  release is such a build, because releases are signed ad-hoc, and so is the
+  local self-signed identity below.
+- **A build with a Team ID** registers them itself through SMAppService, from
+  the plists the bundle carries in `Contents/Library/LaunchAgents`
+  (memql-cockpit#545), so Login Items lists one **MemQL** with the app's icon:
 
 ```sh
 MemQL.app/Contents/MacOS/MemQL worker service register --menu=on   # or --menu=off
@@ -36,23 +42,57 @@ MemQL.app/Contents/MacOS/MemQL worker service unregister            # both; --wo
 MemQL.app/Contents/MacOS/MemQL worker service status
 ```
 
-Per-user plists in `~/Library/LaunchAgents` showed there as two bare
-executables, `MemQL` and `MemQLCockpit`, with the generic icon. macOS ties such
-a plist to an app only through a shared Team ID, and an ad-hoc build has none.
-An agent registered from inside the bundle is recorded under that app whatever
-its signature.
+The owner chose this split on 2026-11-03, after the 0.22.0 activation stopped
+the worker on both Macs it ran on. This is what macOS 27.0.1 does. It was
+measured with a scratch bundle under its own bundle identifier and labels:
 
-A plist inside the signed bundle is the same for every account. It sets only
-`MEMQL_SERVICE=app`, and the worker supplies the rest when it starts. HOME
-comes from the account when launchd gives none. stdout and stderr go to
-`~/.memql/state/worker.log`, where the per-user plist sent them. The variables
-in `~/.memql/state/service.env` are applied. Only `OLLAMA_HOST`,
-`OLLAMA_MODELS` (written by the installer from its shell) and `PATH` (yours to
-set) are read.
+1. Background Task Management (BTM) keeps one record per label, shared by a
+   per-user plist and an app registration. It also stores the code requirement
+   it saw first. Without a Team ID that requirement is the build's code hash,
+   for ad-hoc and self-signed builds alike.
+2. A registration made while any record exists for the label reuses that
+   record. Every call reports success, and then launchd cannot start the job:
+   `job state = spawn failed`, exit 78 (`EX_CONFIG`), `needs LWCR update`. An
+   upgrade is exactly this, with or without an unregister first. Neither
+   `kickstart -k` nor putting the previous build back recovers it. A
+   registration runs only when BTM holds no record at all, and then the next
+   build fails the same way.
+3. Unregistering an agent BTM holds no record of answers `Operation not
+   permitted (ServiceManagement error 1)`, the error 0.22.0 stopped on. BTM
+   removes a per-user plist's record a minute or so after the plist leaves
+   `~/Library/LaunchAgents`. An unregister while the record remains only
+   switches the record off.
+4. A per-user plist has no such pin. BTM refreshes its record when the
+   executable changes, and both Macs have upgraded that way.
 
-`launchctl print` names such a job's program inside its bundle
-(`program identifier = Contents/MacOS/MemQL`, with `parent bundle identifier =
-com.znasllc.memql-worker`), not by path, and Restart MemQL accepts that form.
+The cost is the one #545 removed. macOS ties a per-user plist to its app only
+through a Team ID, so until a Developer ID build exists, Login Items lists the
+worker and the menu as two bare executables, `MemQL` and `MemQLCockpit`, with
+the generic icon.
+
+Not verified:
+
+- SMAppService with a Team ID, because no such build exists yet. The
+  expectation is that the stored requirement is then the team, so upgrades keep
+  working.
+- Why the first activation failed on the two Macs. The error means BTM held no
+  record when it unregistered, yet with the per-user records an upgrade
+  normally finds, the unregister succeeds. Leftovers from earlier
+  registrations are the likely cause.
+
+Both plists set `MEMQL_SERVICE=app`, so the worker reads
+`~/.memql/state/service.env` whichever way it starts. A plist inside the signed
+bundle is the same for every account, so the worker supplies the rest itself.
+HOME comes from the account when launchd gives none. stdout and stderr go to
+`~/.memql/state/worker.log` unless a per-user plist already sent them to a
+file. From `service.env` it reads only `OLLAMA_HOST`, `OLLAMA_MODELS` (written
+by the installer from its shell) and `PATH` (yours to set). These win over the
+same variables in a plist.
+
+`launchctl print` names a per-user job's program by path. It names a registered
+one inside its bundle (`program identifier = Contents/MacOS/MemQL`, with
+`parent bundle identifier = com.znasllc.memql-worker`). Restart MemQL accepts
+both.
 
 The token installer selects this layout for computer-use version 0.15 and
 later, with the exact matching `memql-app-darwin-{arm64,amd64}.tar.gz` and SHA256
@@ -73,19 +113,65 @@ scripts/macos/install-app-files.sh --app=/absolute/built/MemQL.app \
 scripts/macos/activate-app.sh --app=/absolute/Applications/MemQL.app
 ```
 
-Activation registers the app's services and retires the per-user plists an
-earlier install wrote. Those plists are stopped and moved to
-`~/.memql/backups/legacy-agent.*`. Previous bundles and CLI links are retained
-for rollback. Known
-legacy worker agents and the old standalone menu are retired; unrelated apps,
-enrollments, credentials, policies and models are not modified. Activation
-records the bundle fingerprints and avoids restarting an unchanged install.
-The uninstaller removes only the standard matching bundle for the selected
-prefix; custom destinations and rollback copies remain.
+Activation starts the worker, waits until launchd reports it running, and then
+starts the menu.
 
-This layout fixes app attribution and presentation; it does **not** turn an
-ad-hoc signature into a stable distribution identity. Developer ID provisioning
-and signed-upgrade validation below remain necessary. The bundle's minimum
+On a build without a Team ID it edits the existing per-user worker plist in
+place. Only the executable is replaced; arguments, log paths and any PATH or
+variables you set stay. A missing plist is written fresh. Both services
+restart when the definition or the app changed, or when a job that an earlier
+release registered through SMAppService holds the worker's label, because that
+job cannot run a new build. An unchanged, running install is left alone. The
+previous plist is kept under `~/.memql/backups/app-activation.*`. If the worker
+does not start from the new plist, the previous one is put back and started
+before activation reports the failure.
+
+A worker switched off in System Settings > General > Login Items is refused
+(exit 3) before anything stops, because turning it back on is your decision. A
+switched-off menu only produces a warning.
+
+On a build with a Team ID, activation stops the per-user plists, moves them to
+`~/.memql/backups/legacy-agent.*`, and registers the app's services. If macOS
+refuses, or the registered worker does not run, those plists are put back and
+this build starts from them before the failure is reported. Whatever macOS
+answers, the Mac keeps a worker. When the unregister switched off the record
+that the plists share (item 3), BTM keeps it off, so that fallback may not
+start at the next login. This is not verified. If it does not, turn MemQL on
+in Login Items.
+
+Known legacy worker agents and the old standalone menu are retired. Unrelated
+apps, enrollments, credentials, policies and models are not modified. Previous
+bundles and CLI links are retained for rollback. Activation records the bundle
+fingerprints and how it started the services, and avoids restarting an
+unchanged install. The uninstaller asks the app to unregister only when the
+app has a Team ID, and otherwise stops the per-user plists by label. It removes
+only the standard matching bundle for the selected prefix. Custom destinations
+and rollback copies remain.
+
+The installer runs the `activate-app.sh` packed in the release archive, not
+the repository's copy, so a change to activation reaches a Mac only with the
+next Cockpit release.
+
+#### A Mac the 0.22.0 activation left without a worker
+
+0.22.0 stopped the per-user services and moved their plists to
+`~/.memql/backups/legacy-agent.*`. It then exited 5 on the unregister in item 3,
+and every re-run failed the same way. Until a release with per-user activation
+reaches that Mac, do not re-run the 0.22.0 installer. Put the plists back and
+start them:
+
+```sh
+for label in com.znasllc.memql-worker com.znasllc.memql-cockpit-menubar; do
+  saved="$(ls -t ~/.memql/backups/legacy-agent.*/"$label".plist 2>/dev/null | head -n 1)"
+  [ -n "$saved" ] && cp -p "$saved" ~/Library/LaunchAgents/ \
+    && launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/"$label".plist
+done
+```
+
+The app bundle gives the worker an identity macOS can show for permissions. It
+does **not** turn an ad-hoc signature into a stable distribution identity.
+Developer ID provisioning remains necessary, both for signed upgrades
+(validated below) and for the single Login Items entry. The bundle's minimum
 macOS version is read from the actual worker Mach-O build metadata.
 
 ### Stable signing for local development

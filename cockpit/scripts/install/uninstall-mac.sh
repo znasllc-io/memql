@@ -309,9 +309,23 @@ function stop_agent() {
     fi
 }
 
+# app_has_team_id: only a MemQL.app signed with a Team ID registers its
+# services through SMAppService (activate-app.sh). Every release is signed
+# ad-hoc ("TeamIdentifier=not set") and runs them from per-user plists.
+function app_has_team_id() {
+    local team
+    team="$(codesign --display --verbose=1 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p' || true)"
+    [[ "$team" =~ ^[A-Z0-9]{10}$ ]]
+}
+
 # The MemQL.app whose own executable registered the worker and menu
-# services (memql-cockpit#545). Only that app can take them back out of
-# Login Items, and only it can start them again: there is no plist to reload.
+# services through SMAppService (memql-cockpit#545): a build with a Team
+# ID. Only that app can take them back out of Login Items, and only it can
+# start them again: there is no plist to reload. A build without one
+# registered nothing: its services run from per-user plists, which
+# remove_launch_agent stops by label. Asking it to unregister would fail
+# with ServiceManagement error 144 while those run, or else switch off the
+# Login Items record they use.
 function app_service_executables() {
     local mode app identifier
     for mode in $REMOVE_MODES; do
@@ -319,13 +333,15 @@ function app_service_executables() {
         [[ -d "$app" && ! -L "$app" && -f "$app/Contents/Library/LaunchAgents/$SERVICE_LABEL_DARWIN.plist" ]] || continue
         identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null || true)"
         [[ "$identifier" == com.znasllc.memql-worker ]] || continue
+        app_has_team_id "$app" || continue
         echo "$app/Contents/MacOS/MemQL"
     done
 }
 
-# Before anything is removed, the app unregisters what it registered; that
-# stops both services. An app from before memql-cockpit#545 registered
-# nothing, and remove_launch_agent stops its plists by label.
+# Before anything is removed, an app that registered its services takes
+# them back out, which stops both. Every other install -- an app from
+# before memql-cockpit#545 or without a Team ID -- registered nothing, and
+# remove_launch_agent stops its plists by label.
 function unregister_app_services() {
     local executable
     while IFS= read -r executable; do

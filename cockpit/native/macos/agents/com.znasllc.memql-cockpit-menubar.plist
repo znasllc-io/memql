@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The menu, registered with the worker by MemQL.app through SMAppService
-  (memql-cockpit#545), so Login Items shows the two as one MemQL.
+  The menu, registered with the worker through SMAppService by a MemQL.app
+  signed with a Team ID (memql-cockpit#545), so Login Items shows the two as
+  one MemQL. A build without one runs it from a per-user plist.
 -->
 <plist version="1.0">
 <dict>

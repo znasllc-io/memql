@@ -54,9 +54,10 @@ enum PermissionBridge {
         let lines = output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
         guard lines.contains("pid = \(pid)") else { return false }
         if lines.contains("program = \(executable)") { return true }
-        // MemQL.app registers the worker itself (memql-cockpit#545), and
-        // launchd then names the program inside the bundle that registered
-        // it rather than by path: MemQL.app's own main executable.
+        // A MemQL.app with a Team ID registers the worker itself
+        // (memql-cockpit#545), and launchd then names the program inside the
+        // bundle that registered it rather than by path: MemQL.app's own main
+        // executable. A per-user plist's job names it by path, above.
         return executable.hasSuffix(".app/Contents/MacOS/MemQL")
             && lines.contains("parent bundle identifier = com.znasllc.memql-worker")
             && lines.contains { $0.hasPrefix("program identifier = Contents/MacOS/MemQL ") || $0 == "program identifier = Contents/MacOS/MemQL" }

@@ -137,8 +137,9 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
 
     // Follow the worker service's selected executable for both system and
     // user-local installs. Never search PATH or start a second worker.
-    // Inside MemQL.app the worker is the app's own executable, which also
-    // registers the service (memql-cockpit#545), so there is no plist to read.
+    // Inside MemQL.app the worker is the app's own executable, whether its
+    // per-user plist or the app's own registration (memql-cockpit#545)
+    // starts it, so no plist needs reading.
     private func workerExecutableURL() -> URL {
         let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         if app.pathExtension == "app", Bundle(url: app)?.bundleIdentifier == "com.znasllc.memql-worker" {

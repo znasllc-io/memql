@@ -8,6 +8,7 @@ package worker
 #import <Foundation/Foundation.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <dispatch/dispatch.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -45,6 +46,17 @@ static long memqlAppServiceChange(const char *plist, int on, char **why) {
                     return -1;
                 }
                 error = completionError;
+                // An agent Background Task Management holds no record of
+                // answers EPERM, and its status then reads not found:
+                // nothing is registered, which is what was asked. A re-run
+                // activation met this after the per-user plists had left
+                // and BTM had collected their records, and stopped with the
+                // worker down (cockpit/docs/macos-menu.md). Any other
+                // refusal, or EPERM while a record remains, is still one.
+                if (error && [error.domain isEqualToString:SMAppServiceErrorDomain] && error.code == EPERM
+                    && service.status == SMAppServiceStatusNotFound) {
+                    error = nil;
+                }
                 done = error == nil;
             }
             if (done) return 0;
@@ -79,6 +91,8 @@ func appServiceStatus(plist string) int {
 
 // ServiceManagement's codes for a change that is already true
 // (SMErrors.h): registering what is registered, unregistering what is not.
+// macOS 27's EPERM for unregistering an agent it has no record of is
+// settled in the bridge above, where the status can still be asked.
 const (
 	smErrorJobNotFound       = 6
 	smErrorAlreadyRegistered = 12

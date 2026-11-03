@@ -77,6 +77,16 @@ def exercise(base, version):
         launch = shim / 'launchctl'
         launch.write_text('#!/bin/bash\nfunction main() { echo forbidden-live-service-call >&2; exit 99; }\nmain "$@"\n')
         launch.chmod(0o755)
+        # Releases are signed ad-hoc: no Team ID. The uninstall cases for an
+        # app that registered its services through SMAppService name one.
+        codesign = shim / 'codesign'
+        codesign.write_text('#!/bin/bash\nfunction main() {\n'
+            '    if [[ "$1" == --display && -n "${MEMQL_TEST_TEAM_ID:-}" ]]; then\n'
+            '        printf \'TeamIdentifier=%s\\n\' "$MEMQL_TEST_TEAM_ID" >&2\n'
+            '        return 0\n'
+            '    fi\n'
+            '    exec /usr/bin/codesign "$@"\n}\nmain "$@"\n')
+        codesign.chmod(0o755)
         env = {k: v for k, v in os.environ.items() if not k.startswith('MEMQL_INSTALL_')}
         env.update(HOME=str(user), PATH=str(shim) + ':' + env['PATH'],
                    MEMQL_INSTALL_RAW_BASE=base + '/scripts/install',
@@ -187,10 +197,10 @@ main "$@"
         second[second.index('https://fixture.invalid')] = 'https://other.invalid'
         paired = subprocess.run(second, input=script, env=env, cwd=root, capture_output=True)
         assert paired.returncode == 0, paired.stdout.decode() + paired.stderr.decode()
-        # MemQL.app takes its own services out of Login Items on uninstall
-        # (memql-cockpit#545). The fixture app's executable records that and
-        # runs every other command on the real worker, so no test reaches
-        # SMAppService.
+        # A MemQL.app with a Team ID takes its own services out of Login Items
+        # on uninstall (memql-cockpit#545); one without registered nothing.
+        # The fixture app's executable records `worker service` and runs every
+        # other command on the real worker, so no test reaches SMAppService.
         real_worker = root / 'real-memql'
         shutil.copyfile(app / 'Contents/MacOS/MemQL', real_worker)
         real_worker.chmod(0o755)
@@ -291,10 +301,18 @@ function main() {
 }
 main "$@"
 ''')
-        # A worker MemQL.app registered has no plist to reload: the app
-        # starts it again for the enrollment that remains.
+        # A running worker with no plist to reload, from an app without a
+        # Team ID: it registered nothing, so nothing could start it again for
+        # the enrollment that remains. Refused before anything changes.
         held = root / 'held-worker.plist'
         (agents / (worker_label + '.plist')).rename(held)
+        orphan = uninstall('--cluster=https://fixture.invalid', expected=3)
+        assert b'no regular service plist' in (orphan.stdout + orphan.stderr)
+        assert not service_calls.exists() and (private / 'workers.yaml').read_bytes() == saved_registry
+        # From an app with a Team ID, the app registered it: the app starts it
+        # again for the enrollment that remains. The rest of this run is such
+        # an app, so a whole removal below unregisters its services.
+        env['MEMQL_TEST_TEAM_ID'] = 'ABCDE12345'
         env['MEMQL_TEST_DELAY_STOP'] = '1'
         uninstall('--cluster=https://fixture.invalid')
         del env['MEMQL_TEST_DELAY_STOP']
@@ -371,7 +389,7 @@ main "$@"
         (private / 'worker.yaml').write_text('state_dir: ' + str(private / 'alias/state') + '\n')
         uninstall('--all-homes', '--purge')
         assert (outside / 'state/keep').read_text() == 'untouched'
-        print(json.dumps({'ok': True, 'version': version, 'tested': 'piped HTTP fresh/repeated install; multi-home scoped uninstall and mirror repair; shared purge refusal; delayed bootout and stubborn/failed stop; malformed/missing runtime safety; last-home and repeated cleanup; explicit purge; credentials/backups retained; exact-path embedded helper cleanup with sibling/unrelated process retention; scoped permission resets and failure retention; shared bundle-ID refusal; unchanged/changed signing identity updates; no OS services or registration; no token output'}))
+        print(json.dumps({'ok': True, 'version': version, 'tested': 'piped HTTP fresh/repeated install; multi-home scoped uninstall and mirror repair; app services registered only with a Team ID; shared purge refusal; delayed bootout and stubborn/failed stop; malformed/missing runtime safety; last-home and repeated cleanup; explicit purge; credentials/backups retained; exact-path embedded helper cleanup with sibling/unrelated process retention; scoped permission resets and failure retention; shared bundle-ID refusal; unchanged/changed signing identity updates; no OS services or registration; no token output'}))
 
 
 def main():

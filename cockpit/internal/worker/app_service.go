@@ -13,26 +13,32 @@ import (
 )
 
 // ===========================================================================
-// MemQL.app REGISTERS ITS OWN SERVICES (memql-cockpit#545)
+// MemQL.app WITH A TEAM ID REGISTERS ITS OWN SERVICES (memql-cockpit#545)
 // ===========================================================================
-// The worker and the menu used to run from per-user plists in
-// ~/Library/LaunchAgents. macOS ties such a plist to its app only when both
-// carry the same Team ID, and an ad-hoc signed build carries none, so Login
-// Items listed two bare executables -- "MemQL" and "MemQLCockpit" -- with
-// the generic exec icon. An agent registered through SMAppService from a
-// plist inside the bundle is recorded under the app that registered it,
-// signature or not: one MemQL, with its icon.
+// The worker and the menu run from per-user plists in ~/Library/LaunchAgents.
+// macOS ties such a plist to its app only when both carry the same Team ID,
+// and an ad-hoc signed build carries none, so Login Items lists two bare
+// executables -- "MemQL" and "MemQLCockpit" -- with the generic exec icon.
+// An agent registered through SMAppService from a plist inside the bundle
+// is recorded under the app that registered it: one MemQL, with its icon.
 //
 // So both plists live in MemQL.app/Contents/Library/LaunchAgents, and this
 // executable -- the bundle's main one, which SMAppService resolves them
 // against -- registers them: `memql worker service register|unregister|
-// status`. The headless install has no bundle and keeps its plists.
+// status`. activate-app.sh asks it to only for a build with a Team ID (the
+// owner's decision, 2026-11-03). Without one, macOS 27 pins the
+// registration to the build's code hash, and the next build it registers
+// over that record cannot start (cockpit/docs/macos-menu.md), so every
+// ad-hoc release keeps per-user plists, which activate-app.sh writes. The
+// headless install has no bundle and keeps its plist too.
 //
 // A plist inside the signed bundle is the same for every account, so it
-// cannot carry what the per-user plist did: this account's HOME, the log
+// cannot carry what the per-user plist does: this account's HOME, the log
 // under it, the Ollama variables the installer passes. The embedded worker
 // plist sets only MEMQL_SERVICE=app, and prepareAppService fills the rest
-// in before anything reads them.
+// in before anything reads them. activate-app.sh's per-user plist sets
+// MEMQL_SERVICE=app as well, so service.env holds this account's variables
+// whichever way the worker was started.
 
 const (
 	workerAgentPlist = "com.znasllc.memql-worker.plist"
@@ -64,8 +70,9 @@ func prepareAppService() {
 	for name, value := range readServiceEnv(filepath.Join(state, serviceEnvFile)) {
 		_ = os.Setenv(name, value)
 	}
-	// Where the per-user plist's StandardOutPath sent it, and where the
-	// menu's log window reads (control_logs.go).
+	// Where the per-user plist's StandardOutPath sends it, and where the
+	// menu's log window reads (control_logs.go). A file launchd already
+	// opened from such a plist is kept.
 	redirectServiceOutput(filepath.Join(state, "worker.log"))
 }
 
