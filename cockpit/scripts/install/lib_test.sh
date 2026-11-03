@@ -2055,12 +2055,17 @@ for _platform in mac linux; do
     expect_eq "$_un --cluster --dry-run with a sibling leaves HOME byte-identical" "$(tree_fingerprint "$_h")" "$_before"
 
     # (f) The exact shapes MemQL OS emits, piped, on an empty HOME: all
-    # parse, all exit 0, none creates ~/.memql.
+    # parse, all exit 0, none creates ~/.memql. On a machine with a system
+    # install the shapes that auto-detect run with --user-local, like the
+    # auto-detect runs above: detection finds that install, removing it
+    # needs sudo, and no run here has sudo, so they would exit 4.
     for _shape in "" "--purge" "--user-local" "--cluster=https://api.example.test" "--cluster=https://api.example.test --dry-run" "--cluster=https://api.example.test --purge --user-local"; do
         _h="${_tmp}/nf-shape-${_platform}-${_shape//[^a-z]/_}"
         mkdir -p "$_h"
-        # shellcheck disable=SC2086  # the shape is a flag list on purpose
-        _out="$(run_uninstaller_piped "$_un" "$_h" $_shape)"
+        _flags="$_shape"
+        [[ "$_shape" == *--user-local* ]] || _flags="$_shape $_auto_flag"
+        # shellcheck disable=SC2086  # the flags are a list on purpose
+        _out="$(run_uninstaller_piped "$_un" "$_h" $_flags)"
         _rc=$?
         if [[ "$_rc" == 0 && ! -e "${_h}/.memql" && "$_out" != *"choose --cluster"* \
             && ( "$_out" == *"SUCCESS:"* || "$_out" == *"DRY RUN: nothing was changed."* ) ]]; then
