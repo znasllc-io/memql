@@ -27,12 +27,51 @@ func TestInstallerScripts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("installer checks require %s: %v", suite.tool, err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+			ctx, cancel := suiteContext(t)
 			defer cancel()
 			output, err := exec.CommandContext(ctx, tool, suite.file).CombinedOutput()
 			if err != nil {
 				t.Fatalf("%s failed (%v):\n%s", suite.file, err, output)
 			}
 		})
+	}
+}
+
+// suiteContext stops a suite shortly before the test binary's own deadline,
+// so a suite that hangs still fails with its output; the binary's timeout
+// panic would print none of it. How long a healthy suite takes is the
+// machine's business. The fixed three-minute bound this replaces killed
+// lib_test.sh on CyberPC on 2026-11-03 while every check it had run was
+// passing (cockpit 0.22.1's push run), though the whole package needs about
+// 96 s on the MSI Raider. The cost: a hung suite is noticed near the lane's
+// -timeout (600 s in memql-package.yaml) rather than at three minutes.
+func suiteContext(t *testing.T) (context.Context, context.CancelFunc) {
+	deadline, ok := t.Deadline()
+	if !ok {
+		// -timeout=0: nothing else ends the run, so keep a bound of our own.
+		return context.WithTimeout(t.Context(), 10*time.Minute)
+	}
+	// Time to print the output: a tenth of what is left, at most 30 s.
+	return context.WithDeadline(t.Context(), deadline.Add(-min(time.Until(deadline)/10, 30*time.Second)))
+}
+
+// A suite may run until shortly before the test binary's own deadline: a
+// slower machine is held to the -timeout its lane set, not to a bound of ours.
+func TestASuiteRunsUntilShortlyBeforeTheBinaryDeadline(t *testing.T) {
+	deadline, ok := t.Deadline()
+	if !ok {
+		t.Skip("run without -timeout=0: the bound under test is the binary's deadline")
+	}
+	ctx, cancel := suiteContext(t)
+	defer cancel()
+	got, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("a suite must have a deadline, so a hung suite still fails with its output")
+	}
+	if !got.Before(deadline) {
+		t.Fatalf("suite deadline %v is not before the binary's %v: a timeout panic would print none of the suite's output", got, deadline)
+	}
+	if margin := deadline.Sub(got); margin > 30*time.Second {
+		t.Fatalf("suite deadline ends %v before the binary's: a healthy suite on a slower machine is killed early", margin)
 	}
 }
