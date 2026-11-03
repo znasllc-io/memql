@@ -446,6 +446,17 @@ pipeline:
           only: not-db-gated
           shards: 4
           timeout: 30m
+          # component/architecture builds its call graph here, as it does in
+          # gate-inputs. The namespace's default 4Gi killed the shard running it
+          # (exit 137) on main's 9b5a76da1 (2026-11-02) and 3792c5b4e
+          # (2026-11-03), about 200s into that package, while the same source
+          # fit on other runs: the edge gate-inputs sat at before it got 6144.
+          # On a Mac under these flags, at two CPUs as here, that package's
+          # processes reached 4.9 GiB resident (2026-11-03), so 5120 would leave
+          # no margin. Four shards at 6144 exceed memql-background's 22Gi, so at
+          # most three run at once. TestEngineManifestGoTestsStepHasHeadroom
+          # holds the floor.
+          memoryMiB: 6144
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50

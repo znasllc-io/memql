@@ -764,6 +764,23 @@ func TestEngineManifestGateStepHasHeadroom(t *testing.T) {
 	}
 }
 
+// go-tests runs component/architecture with its call graph on every full run,
+// the same package and flags that put the gate step at 6144 MiB. Its shards had
+// the namespace's default 4Gi, and the shard holding that package was killed at
+// it (exit 137) on main's 9b5a76da1 (2026-11-02) and 3792c5b4e (2026-11-03),
+// both partway into the architecture test, with the same Go source passing on
+// other runs. The measurement lives on the step in memql-package.yaml; this
+// holds the floor.
+func TestEngineManifestGoTestsStepHasHeadroom(t *testing.T) {
+	step, ok := engineDeclaredStep(engineManifest(t).Pipeline, manifestStepGoTests)
+	if !ok {
+		t.Fatalf("the pipeline has no %s step", manifestStepGoTests)
+	}
+	if step.MemoryMiB < 6144 {
+		t.Errorf("the %s step declares %d MiB; it needs at least 6144, because the default 4Gi killed the shard running component/architecture (exit 137)", manifestStepGoTests, step.MemoryMiB)
+	}
+}
+
 // The db step's `go test` gets a DSN naming the sidecar it declares -- the pod's
 // own localhost, the service's user, password and database -- and
 // MEMQL_REQUIRE_DB=1, which turns a database it cannot reach into a failure
