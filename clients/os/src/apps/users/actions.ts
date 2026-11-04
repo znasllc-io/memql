@@ -145,6 +145,22 @@ export interface UsersActions {
   roleDeactivate: (slug: string) => Promise<boolean>;
 }
 
+/**
+ * The grid's `resource:verb` pairs as the `{ verb, resource }` objects roleCreate
+ * and roleUpdate read (`grants []object!`). The engine refuses any entry that is
+ * not an object, so sending the pairs as text made every role write fail.
+ *
+ * Split at the LAST colon: a verb never carries one, and a resource may
+ * (`app:deployables`). A pair with no colon keeps an empty resource, which the
+ * engine refuses by name rather than this file guessing.
+ */
+export function grantObjects(pairs: readonly string[]): { verb: string; resource: string }[] {
+  return pairs.map((pair) => {
+    const at = pair.lastIndexOf(":");
+    return { verb: pair.slice(at + 1), resource: at < 0 ? "" : pair.slice(0, at) };
+  });
+}
+
 /** What New role sends: the whole role in one call, grants included. */
 export interface RoleDraft {
   slug: string;
@@ -397,7 +413,7 @@ export function useUsersActions(): UsersActions {
       const result: Result | null = await runQuery(`role:new:${input.slug}`, (q) =>
         q.executeNamed(
           "roleCreate",
-          `builtin roleCreate(slug: ${renderMemQLValue(input.slug)}, name: ${renderMemQLValue(input.name)}, rank: ${renderMemQLValue(input.rank)}, description: ${renderMemQLValue(input.description)}, grants: ${renderMemQLValue([...input.grants])}, accountId: ${renderMemQLValue(input.accountId)})`,
+          `builtin roleCreate(slug: ${renderMemQLValue(input.slug)}, name: ${renderMemQLValue(input.name)}, rank: ${renderMemQLValue(input.rank)}, description: ${renderMemQLValue(input.description)}, grants: ${renderMemQLValue(grantObjects(input.grants))}, accountId: ${renderMemQLValue(input.accountId)})`,
         ),
       );
       if (result === null) return null;
@@ -413,7 +429,7 @@ export function useUsersActions(): UsersActions {
       const result: Result | null = await runQuery(slug, (q) =>
         q.executeNamed(
           "roleUpdate",
-          `builtin roleUpdate(slug: ${renderMemQLValue(slug)}, grants: ${renderMemQLValue([...grants])})`,
+          `builtin roleUpdate(slug: ${renderMemQLValue(slug)}, grants: ${renderMemQLValue(grantObjects(grants))})`,
         ),
       );
       return decisionRefusal(result);

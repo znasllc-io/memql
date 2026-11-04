@@ -15,6 +15,7 @@ const { accountRow, fakeConnection, grantRow, roleRow, userRow, withSession } = 
 const { click, memoryStore, renderApp } = await import("./mount");
 const { ROLE_GRID_VOCABULARY, cellState, gridPairs } = await import("../../src/apps/users/grid");
 const { placementSentence, proposeRank, slugFrom } = await import("../../src/apps/users/NewRolePage");
+const { grantObjects } = await import("../../src/apps/users/actions");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -325,5 +326,42 @@ describe("proposing a slot on the ladder", () => {
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).queryByRole("button", { name: "Create role" })).toBeNull();
     owner.unmount();
+  });
+});
+
+// ===========================================================================
+// WHAT A ROLE WRITE SENDS
+// ===========================================================================
+
+describe("the permissions a role write sends", () => {
+  it("sends each permission as the { verb, resource } object the engine reads", async () => {
+    // roleCreate and roleUpdate declare `grants []object!` and refuse any entry
+    // that is not an object ("grant 1 is not an object"), so a role could be
+    // neither created nor given a permission. The grid's `resource:verb`
+    // spelling is the client's own vocabulary and stops at the wire.
+    const connection = seed({ searchUsers: [] });
+    const view = mount(connection);
+    await click(await screen.findByRole("button", { name: /Acme lead/ }));
+    await screen.findByText("Permissions");
+    await click(screen.getByRole("checkbox", { name: "Delete People" }));
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Save permissions" }));
+
+    const call = await vi.waitFor(() => {
+      const found = connection.query.executeNamed.mock.calls.find(([name]) => name === "roleUpdate");
+      if (!found) throw new Error("roleUpdate was not called");
+      return String(found[1]);
+    });
+    expect(call).toContain('{resource: "principal", verb: "delete"}');
+    expect(call).toContain('{resource: "data", verb: "read"}');
+    expect(call).not.toContain('"principal:delete"');
+    view.unmount();
+  });
+
+  it("splits a pair at its last colon, so a resource may carry one of its own", () => {
+    expect(grantObjects(["data:read", "app:deployables:read"])).toEqual([
+      { verb: "read", resource: "data" },
+      { verb: "read", resource: "app:deployables" },
+    ]);
   });
 });
