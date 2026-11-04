@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/packs/reviewspack"
@@ -38,7 +40,8 @@ func livePackEngine(t *testing.T) *memql.MemQLEngine {
 	// never Starts must install itself (the engine's own db tests do the same).
 	eng.InstallGrantResolution()
 	t.Cleanup(func() { auth.SetGrantSource(nil); auth.SetMembershipSource(nil) })
-	prov, err := reviewspack.NewProvider(memql.PluginContext{Engine: eng, Logger: eng.Logger})
+	prov, err := reviewspack.NewProvider(memql.PluginContext{Engine: eng, Logger: eng.Logger,
+		BunDB: func() *bun.DB { return liveDB }})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}

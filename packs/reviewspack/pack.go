@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strings"
 	"time"
 
@@ -79,6 +80,10 @@ type Provider struct {
 	// orders reads one order, its lines and its products; nil is
 	// engineOrders (request.go). A field for the same reason as now.
 	orders orderReader
+	// redactor rewrites a row's every version (erase.go).
+	redactor redactor
+	// osBase is the admin panel's address; nil derives it from MEMQL_DOMAIN.
+	osBase func() string
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }
@@ -196,6 +201,32 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"orderGid":      "string (required)",
 				"productHandle": "string (required)",
 				"siteId":        "string (required)",
+			},
+		},
+		{
+			Name:        "eraseReviewer",
+			Description: "Erase one review's writer data in every saved version. The store's named owner only.",
+			Handler:     p.eraseReviewer,
+			ArgsSchema: map[string]string{
+				"reviewId": "string (required)",
+				"note":     "string (optional)",
+			},
+		},
+		{
+			Name:        "exportStore",
+			Description: "One store's whole reviews record as a JSON file.",
+			Handler:     p.exportStore,
+			ArgsSchema: map[string]string{
+				"storeId": "string (required)",
+				"siteId":  "string (required) - the store's site, judged by the organization gate",
+			},
+		},
+		{
+			Name:        "notifyModerator",
+			Description: "Tell the store's moderator a review is waiting. Internal origin only.",
+			Handler:     p.notifyModerator,
+			ArgsSchema: map[string]string{
+				"reviewId": "string (required)",
 			},
 		},
 		{
@@ -319,12 +350,15 @@ func (p *Provider) setPublicDisplay(ctx context.Context, args map[string]any, _ 
 	if storeID == "" {
 		return nil, fmt.Errorf("reviews: storeId is required; a display toggle is per store")
 	}
-	if err := p.requireSiteForStore(ctx, asString(args["siteId"]), storeID); err != nil {
+	site, err := p.siteForStore(ctx, asString(args["siteId"]), storeID)
+	if err != nil {
 		return nil, err
 	}
 	// MERGED (settings.go): the store's row carries more than this toggle,
 	// and a version holding only publicDisplay would clear the rest.
-	return p.writeSettings(ctx, storeID, map[string]any{"publicDisplay": on})
+	changes := map[string]any{"publicDisplay": on}
+	stampOrganization(changes, site)
+	return p.writeSettings(ctx, storeID, changes)
 }
 
 // SettingsRowID derives the one settings row id for a store.
@@ -426,9 +460,10 @@ func asString(v any) string {
 // NewProvider builds the pack IntegrationProvider.
 func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 	return &Provider{
-		engine: pctx.Engine,
-		reader: &engineRowReader{engine: pctx.Engine},
-		writer: &engineWriter{engine: pctx.Engine},
+		engine:   pctx.Engine,
+		reader:   &engineRowReader{engine: pctx.Engine},
+		writer:   &engineWriter{engine: pctx.Engine},
+		redactor: sqlRedactor{db: pctx.BunDB},
 	}, nil
 }
 
@@ -462,3 +497,5 @@ func Register(domain string) {
 	memql.BindPluginToPack(domain, domain)
 	memql.RegisterPluginForContract(domain, ContractVersion, NewProvider)
 }
+
+func sortStrings(s []string) { sort.Strings(s) }

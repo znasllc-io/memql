@@ -138,7 +138,8 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	if storeID == "" {
 		return nil, fmt.Errorf("reviews: storeId is required; settings are per store")
 	}
-	if err := p.requireSiteForStore(ctx, asString(args["siteId"]), storeID); err != nil {
+	site, err := p.siteForStore(ctx, asString(args["siteId"]), storeID)
+	if err != nil {
 		return nil, err
 	}
 	changes := map[string]any{}
@@ -164,7 +165,17 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	if len(changes) == 0 {
 		return nil, fmt.Errorf("reviews: name at least one setting to change")
 	}
+	stampOrganization(changes, site)
 	return p.writeSettings(ctx, storeID, changes)
+}
+
+// stampOrganization records the store's organization -- its site's -- on the
+// settings, so later acts are checked against it (siteForStore). The site was
+// already checked to belong to any organization the settings carried.
+func stampOrganization(changes map[string]any, site map[string]any) {
+	if acct := strings.TrimSpace(asString(site["accountId"])); acct != "" {
+		changes["accountId"] = acct
+	}
 }
 
 // writeSettings merges changes into the store's current settings row and
@@ -187,6 +198,13 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 	}
 	if len(current) == 0 && !operator {
 		return nil, fmt.Errorf("reviews: this store has no reviews settings yet; the cluster's operators set them up")
+	}
+	// THE ORGANIZATION IS THE OPERATORS' TO SET. Whose store this is must not
+	// be decided by the first site that happens to touch it, so a change of
+	// organization from anyone else is dropped and the row keeps its own.
+	if acct, set := changes["accountId"]; set && !operator &&
+		bareAccount(asString(acct)) != bareAccount(asString(current["accountId"])) {
+		delete(changes, "accountId")
 	}
 	if next, naming := changes["removalApproverUserId"]; naming && next != asString(current["removalApproverUserId"]) {
 		now := strings.TrimSpace(asString(current["removalApproverUserId"]))
@@ -248,21 +266,47 @@ func sortedKeys(m map[string]any) []string {
 	return out
 }
 
-// requireSiteForStore checks the site an act names serves the store it acts
-// on. The organization gate judged the act against that SITE's organization,
-// so a site bound to another store would let a person granted the part in
-// one organization act on another's store.
+// requireSiteForStore checks the site an act names is the store's own; see
+// siteForStore.
 func (p *Provider) requireSiteForStore(ctx context.Context, siteID, storeID string) error {
+	_, err := p.siteForStore(ctx, siteID, storeID)
+	return err
+}
+
+// siteForStore answers the site an act names, once it has checked the site is
+// the STORE'S OWN. The organization gate judged the act against that site's
+// organization, so the site must serve the store, and -- once the store's
+// settings carry an organization -- belong to that organization: a site of
+// another organization bound to the same store would let a person granted the
+// part there act on this store.
+func (p *Provider) siteForStore(ctx context.Context, siteID, storeID string) (map[string]any, error) {
 	siteID = strings.TrimSpace(siteID)
 	if siteID == "" {
-		return fmt.Errorf("reviews: siteId is required: the act is judged against the organization of the store's site")
+		return nil, fmt.Errorf("reviews: siteId is required: the act is judged against the organization of the store's site")
 	}
 	site := p.siteRow(ctx, siteID)
 	if site == nil {
-		return fmt.Errorf("reviews: site %q is not readable by this caller", siteID)
+		return nil, fmt.Errorf("reviews: site %q is not readable by this caller", siteID)
 	}
 	if !siteServesStore(site, storeID) {
-		return fmt.Errorf("reviews: site %q is not bound to store %q", siteID, storeID)
+		return nil, fmt.Errorf("reviews: site %q is not bound to store %q", siteID, storeID)
 	}
-	return nil
+	settings, err := p.settingsFor(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	if want := bareAccount(asString(settings["accountId"])); want != "" && bareAccount(asString(site["accountId"])) != want {
+		return nil, fmt.Errorf("reviews: site %q belongs to another organization than store %q's reviews", siteID, storeID)
+	}
+	return site, nil
+}
+
+// bareAccount is an organization id without its concept prefix: one may be
+// written either way.
+func bareAccount(id string) string {
+	id = strings.TrimSpace(id)
+	if i := strings.LastIndex(id, ":"); i >= 0 {
+		return id[i+1:]
+	}
+	return id
 }

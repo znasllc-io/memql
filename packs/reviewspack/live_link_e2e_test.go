@@ -15,8 +15,10 @@ package reviewspack_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +104,61 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	}
 	refusedAs(t, submitThrough(eng, merchant, store, handle, token, "too late"), "link_used")
 
+	// ---- the store's record leaves with it ---------------------------------
+	export := payloadOf(t, eng, asPerson(merchant, auth.Role("user")),
+		`builtin reviewsExportStore(storeId: `+quote(store)+`, siteId: `+quote(site)+`)`)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(export["json"].(string)), &doc); err != nil {
+		t.Fatalf("the export is not JSON: %v", err)
+	}
+	if len(doc["decisions"].([]any)) != 1 || doc["reviews"].([]any)[0].(map[string]any)["state"] != "published" {
+		t.Fatalf("export = %v, want the review published and its decision", doc)
+	}
+
+	// ---- erasure on request ---------------------------------------------------
+	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
+		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, removalApproverUserId: `+quote(merchant)+`)`); err != nil {
+		t.Fatalf("naming the removal approver: %v", err)
+	}
+	if _, err := eng.Execute(asPerson(merchant, auth.Role("user")),
+		`builtin reviewsEraseReviewer(reviewId: `+quote(reviewID)+`, note: "asked by email")`); err != nil {
+		t.Fatalf("the named owner could not erase: %v", err)
+	}
+	after := payloadOf(t, eng, asMerchant(merchant),
+		`builtin reviewsPublishedForProduct(storeId: `+quote(store)+`, productHandle: `+quote(handle)+`)`)
+	if after["count"] != float64(0) {
+		t.Fatalf("an erased review is still public (count %v)", after["count"])
+	}
+	// EVERY VERSION, read off the table itself: the history is where a
+	// point-in-time read would still find the words.
+	versionRows, err := liveDB.DB.QueryContext(context.Background(),
+		`SELECT coalesce(payload->>'body',''), coalesce(payload->>'authorName',''), coalesce(payload->>'erasedAt','') FROM "MemoryNodes" WHERE id = $1`,
+		"v1:reviews:review:"+strings.TrimPrefix(reviewID, "v1:reviews:review:"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := 0
+	for versionRows.Next() {
+		var body, name, erased string
+		if err := versionRows.Scan(&body, &name, &erased); err != nil {
+			t.Fatal(err)
+		}
+		versions++
+		if body != "" || name != "" || erased == "" {
+			t.Fatalf("version %d still holds the writer's words (body %q, name %q, erasedAt %q)", versions, body, name, erased)
+		}
+	}
+	_ = versionRows.Close()
+	if versions < 2 {
+		t.Fatalf("found %d versions of the review, want both revisions rewritten", versions)
+	}
+	var email string
+	if err := liveDB.DB.QueryRowContext(context.Background(),
+		`SELECT coalesce(payload->>'email','') FROM "MemoryNodes" WHERE id = $1 ORDER BY "createdAt" DESC LIMIT 1`,
+		"v1:reviews:reviewRequest:request-"+n).Scan(&email); err != nil || email != "" {
+		t.Fatalf("the link's email = %q (%v), want it erased", email, err)
+	}
+
 	// An expired link and a forged token refuse by name too.
 	expiredToken := token + "-expired"
 	putRequest(t, eng, merchant, store, "request-exp-"+n, handle+"-x", expiredToken, time.Now().Add(-time.Hour))
@@ -117,5 +174,44 @@ func TestLiveE2E_TheOrderLineQueryLoads(t *testing.T) {
 		&auth.AccessContext{UserId: "user-reviews-op", Role: auth.RoleOwner}), &auth.TokenInfo{Subject: "user-reviews-op"})
 	if _, err := eng.Execute(ctx, `query reviewOrderLines(storeId: "store-none", orderGid: "gid://shopify/Order/0")`); err != nil {
 		t.Fatalf("reviewOrderLines did not resolve: %v", err)
+	}
+}
+
+// THE MODERATOR IS TOLD, BY THE STORE'S AUTOMATION ONLY: one outbound email per
+// review revision, staged through the transactional outbox.
+func TestLiveE2E_AWaitingReviewStagesOneEmailForTheModerator(t *testing.T) {
+	eng := livePackEngine(t)
+	n := strconv.FormatInt(time.Now().UnixNano(), 36)
+	merchant := "user-reviews-notify-" + n
+	store := "store-reviews-notify-" + n
+	site := "site-reviews-notify-" + n
+	handle := "floss-picks-" + n
+	token := "tok-notify-" + n + "-0123456789abcdefghijklmnopqrstuvwxyz"
+	seedSite(t, eng, site, merchant, store)
+	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
+		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, notifyEmail: "moderator@example.com")`); err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	putRequest(t, eng, merchant, store, "request-notify-"+n, handle, token, time.Now().Add(time.Hour))
+	if err := submitThrough(eng, merchant, store, handle, token, "a waiting review"); err != nil {
+		t.Fatal(err)
+	}
+	reviewID := "review-notify-" + n
+	if _, err := eng.Execute(asMerchant(merchant), `builtin reviewsNotifyModerator(reviewId: `+quote(reviewID)+`)`); err == nil {
+		t.Fatal("a client call staged a moderator email")
+	}
+	staged := payloadOf(t, eng, auth.ContextWithInternalOrigin(asMerchant(merchant)),
+		`builtin reviewsNotifyModerator(reviewId: `+quote(reviewID)+`)`)
+	if staged["status"] != "staged" {
+		t.Fatalf("notice = %v, want an email staged", staged)
+	}
+	var target, subject string
+	if err := liveDB.DB.QueryRowContext(context.Background(),
+		`SELECT coalesce(payload->>'target',''), coalesce(payload->>'subject','') FROM "MemoryNodes" WHERE concept = 'v1:platform:outboundRequest' AND id LIKE $1 ORDER BY "createdAt" DESC LIMIT 1`,
+		"%"+staged["requestId"].(string)+"%").Scan(&target, &subject); err != nil {
+		t.Fatalf("no outbound request was staged: %v", err)
+	}
+	if target != "moderator@example.com" || !strings.Contains(subject, handle) {
+		t.Fatalf("staged email to %q about %q", target, subject)
 	}
 }

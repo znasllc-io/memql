@@ -118,3 +118,28 @@ builtin reviewsIssueRequest {
   productHandle  string  @required  @description("The product of that order to review.")
   siteId         string  @required  @description("The store's site the link points at.")
 }
+
+@requiresCapability("execute", "app:deployables/reviews")
+@executor("integration.reviews.eraseReviewer")
+@args(profile="object")
+@description("Erase one review's writer data on request -- the store's named owner only. Records an erase decision first (the review is hidden from then on), then blanks name, email, headline and text in EVERY saved version of the review, and the buyer's email on its link. The decision log keeps who erased it and when, with no personal data. Running it again on an erased review finishes a run that stopped part way.")
+builtin reviewsEraseReviewer {
+  reviewId  string  @required  @description("The review whose writer's data to erase.")
+  note      string  @description("Optional note: how the request arrived.")
+}
+
+@requiresCapability("execute", "app:deployables/reviews")
+@executor("integration.reviews.exportStore")
+@args(profile="object")
+@description("One store's whole reviews record as a JSON file: every review with its state, every decision, every buyer link (without its token hash) and the settings. Answers {fileName, json}. Read under the caller's own actor.")
+builtin reviewsExportStore {
+  storeId  string  @required  @description("The store to export.")
+  siteId   string  @required  @description("The store's site: the organization gate judges the export against its organization.")
+}
+
+@executor("integration.reviews.notifyModerator")
+@args(profile="object")
+@description("Tell the store's moderator a review is waiting: one email per review revision to the address the store's settings name, with the product and the admin panel's address and no review text or writer data. Called by the store's own automation on a review's create and update events; refuses any call without internal origin.")
+builtin reviewsNotifyModerator {
+  reviewId  string  @required  @description("The review that arrived or changed.")
+}

@@ -176,3 +176,14 @@ query orderLineItem reviewOrderLines {
   filter  row => row.storeId == args.storeId && row.parentGid == args.orderGid
   shape   orderLineItemMirror
 }
+
+@description("Every buyer link of one store, for the store's export.")
+@unbounded("one store's links -- bounded by the store's orders")
+@actor
+query reviewRequest reviewRequestsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  shape   reviewRequestFull
+}

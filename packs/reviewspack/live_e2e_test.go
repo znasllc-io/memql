@@ -64,6 +64,10 @@ func runScope() (merchantA, merchantB, storeLive, storeDev, handle string) {
 		"store-reviews-live-" + n, "store-reviews-dev-" + n, "boot-" + n
 }
 
+// liveDB is the database the newest live engine runs on, handed to the pack's
+// plugin context the way the app hands it (app/plugins.go).
+var liveDB *bun.DB
+
 func liveEngine(t *testing.T) *memql.MemQLEngine {
 	return liveEngineWithDisabled(t)
 }
@@ -93,6 +97,7 @@ func liveEngineWithDisabled(t *testing.T, disabled ...string) *memql.MemQLEngine
 	if bunDB == nil {
 		t.Fatal("nil bun.DB after migrate")
 	}
+	liveDB = bunDB
 
 	const domain = reviewspack.Domain
 	memqldsl.RegisterTree(domain, reviewspack.Tree())
