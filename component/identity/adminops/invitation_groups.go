@@ -108,6 +108,38 @@ func (s *Service) validateInvitationGroups(
 	return out, "", nil
 }
 
+// invitationJoinsAccount answers D10 for an invitation: does accepting it make
+// the recipient a member of `accountID`? It does when one of the groups it
+// carries is an ACTIVE group of that organization -- an account group or a
+// custom group tied to it, the same groups a person's membership is read from
+// once they exist (targetIsAccountMember).
+//
+// A group that cannot be read answers "no" for the whole invitation: a scoped
+// role issued on an unchecked group is the failure D10 exists to prevent, and
+// validateInvitationGroups refuses the unreadable group a moment later anyway.
+func (s *Service) invitationJoinsAccount(ctx context.Context, groupIDs []string, accountID string) bool {
+	accountID = memql.BareShortId(strings.TrimSpace(accountID))
+	if accountID == "" {
+		return false
+	}
+	joins := false
+	for _, raw := range groupIDs {
+		id := memql.BareShortId(strings.TrimSpace(raw))
+		if id == "" {
+			continue
+		}
+		group, err := s.groupByID(ctx, id)
+		if err != nil {
+			return false
+		}
+		if group != nil && rowString(group, "status") == "active" &&
+			memql.BareShortId(rowString(group, "accountId")) == accountID {
+			joins = true
+		}
+	}
+	return joins
+}
+
 // groupByID reads one group under internal origin.
 //
 // groupById is @requiresRank("admin") and this path has already refused

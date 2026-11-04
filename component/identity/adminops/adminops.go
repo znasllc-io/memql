@@ -1158,18 +1158,52 @@ func signInPolicyOrDefault(policy string) string {
 // targetIsAccountMember answers D10's membership question: is the target
 // principal a member of the groups belonging to `accountId`?
 //
-// IT ANSWERS FALSE, AND THAT IS THE HONEST STATE OF THE TREE RATHER THAN A
-// STUB LEFT UNFINISHED. A scoped role is one whose accountId is set, and
-// nothing in the product creates one yet: the New role rail that would offer
-// the scope is record C (memql#5167) and the account-scoped GROUPS a
-// membership would be read from are record A (memql#5165). Until a role can be
-// authored with a scope, this function is asked about a state no row is in.
+// A MEMBER is an ACTIVE membership in an ACTIVE group of that organization --
+// the same answer the groups integration gives before a delegated organization
+// administrator may manage a person (requireOrganizationTarget). Two
+// definitions of one membership would let a person be a member for one seam
+// and a stranger for the other.
 //
-// False is the fail-closed answer for the day that changes. A scoped role
-// granted to somebody outside its account is the exact failure D10 exists to
-// prevent, and "we could not check" is not a reason to skip the check -- the
-// refusal names `target_not_a_member_of_the_scope`, which is a sentence an
-// operator can act on, while a silent pass is not.
-func (s *Service) targetIsAccountMember(_ context.Context, _ string, _ string) bool {
+// This used to answer a constant false, written while no role could carry a
+// scope. The New role rail (memql#5167) now authors scoped roles over the
+// account groups of memql#5165, and the constant made every one of them a role
+// nobody could hold.
+//
+// EVERY UNREADABLE ANSWER IS "NO". A scoped role granted to somebody outside
+// its organization is the exact failure D10 exists to prevent, and "we could
+// not check" is not a reason to skip the check: the refusal names
+// `target_not_a_member_of_the_scope`, which an operator can act on.
+func (s *Service) targetIsAccountMember(ctx context.Context, userID string, accountID string) bool {
+	userID = memqlengine.BareShortId(strings.TrimSpace(userID))
+	accountID = memqlengine.BareShortId(strings.TrimSpace(accountID))
+	if userID == "" || accountID == "" {
+		return false
+	}
+	// groupsForAccount and membersOfGroup are read under internal origin, as
+	// groupByID reads a group: the caller already passed `authorize`.
+	internal := auth.ContextWithInternalOrigin(ctx)
+	res, err := s.Engine.Execute(internal,
+		fmt.Sprintf(`query groupsForAccount(accountId: %s)`, langparser.QuoteString(accountID)))
+	if err != nil {
+		return false
+	}
+	for _, g := range memqlengine.MaterializeRows(res) {
+		groupID := memqlengine.BareShortId(rowString(g, "id"))
+		if groupID == "" || rowString(g, "status") != "active" ||
+			memqlengine.BareShortId(rowString(g, "accountId")) != accountID {
+			continue
+		}
+		members, err := s.Engine.Execute(internal,
+			fmt.Sprintf(`query membersOfGroup(groupId: %s)`, langparser.QuoteString(groupID)))
+		if err != nil {
+			return false
+		}
+		for _, m := range memqlengine.MaterializeRows(members) {
+			if rowString(m, "status") == "active" &&
+				memqlengine.BareShortId(rowString(m, "userId")) == userID {
+				return true
+			}
+		}
+	}
 	return false
 }

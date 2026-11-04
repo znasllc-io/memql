@@ -138,6 +138,11 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 	// also what selects the CAPABILITY the caller must hold -- create-on-
 	// admission or create-on-principal rather than update-on-principal -- so a
 	// developer keeps the invitations memql#4917 gave it.
+	//
+	// THE MEMBERSHIP A SCOPED ROLE NEEDS (D10) is the invitation's own: there
+	// is no principal to look up, and accepting makes the recipient a member of
+	// every group the invitation carries. So a scoped role is issuable exactly
+	// when one of those groups is an active group of its organization.
 	if role != "" {
 		if !auth.IsValidRole(auth.Role(role)) {
 			return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
@@ -148,7 +153,8 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 		refusal := auth.MayAssignRole(
 			auth.UserContext{ID: act.userID, Role: inviterSlug},
 			auth.AssignOnInvitation,
-			"", "", role, nil,
+			"", "", role,
+			func(accountID string) bool { return s.invitationJoinsAccount(ctx, in.GroupIds, accountID) },
 		)
 		if refusal != auth.AssignAllowed {
 			// `role_above_inviter` is KEPT for the two refusals that meant it
