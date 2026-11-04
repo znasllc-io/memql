@@ -44,6 +44,10 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 // and never wire args: the reviewed template snapshot a welcome froze at signup, and
 // the digest of the address its consent covered. The zero value is an ordinary send.
 type singleSend struct {
+	// orderRecipient, when set, is the recipient an ORDER entitles
+	// (send_order.go): used in place of a recipient row, and asked no
+	// subscription -- the order is the reason for the message.
+	orderRecipient   *Recipient
 	deferWhenLimited bool
 	confirm          bool
 	// snapshot, when set, is the template the send must carry: the copy frozen when

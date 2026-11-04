@@ -172,6 +172,22 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 				"emailRuleId":      "string (optional) - the rule this send came from; also names the audience to resolve the recipient in",
 			},
 		},
+		{
+			Name: "sendOrderMessage",
+			Description: "Send ONE message an ORDER entitles to that order's buyer (the third shape: neither this cluster's own people nor a list): " +
+				"the address is read off the mirrored order, never passed; the suppression list, the RFC 8058 pair, the organization's sender " +
+				"and the ledger are the marketing lane's; no subscription is asked. Trusted jobs only (internal origin).",
+			Handler: w.handleSendOrderMessage,
+			ArgsSchema: map[string]string{
+				"storeId":          "string (required) - the store the order was placed on",
+				"orderGid":         "string (required) - the mirrored order whose buyer is mailed",
+				"accountId":        "string (optional) - the store's organization; the template and sender must belong to it",
+				"templateId":       "string (required) - the reviewed template, its {{fields.<key>}} tags filled from fields",
+				"requestId":        "string (required) - stable identifier for this one message; a retry returns its receipt",
+				"fields":           "object (optional) - text values for the template's {{fields.<key>}} tags",
+				"senderIdentityId": "string (optional) - an identity in the organization; omission resolves its configured sender",
+			},
+		},
 	}, workflowhost.ScopedCapabilities(ops)...)
 }
 

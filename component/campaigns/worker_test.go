@@ -77,6 +77,8 @@ type fakeEngine struct {
 	// shopifyProducts backs purchasableVariants for #4140. Nil is an empty
 	// catalog. Rows are mirrored VARIANTS since memql#4389.
 	shopifyProducts []map[string]any
+	orders          map[string]map[string]any // gid -> mirrored order
+	boundSites      []map[string]any          // sitesBoundToStore
 	// shopifyStores backs the `stores` read that decides whether a Shopify
 	// catalog is in play at all.
 	shopifyStores []map[string]any
@@ -196,6 +198,13 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query clientAccountById"):
 		if row, ok := e.accounts[argOf(q, "accountId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query sitesBoundToStore"):
+		return rowsEnvelope(e.boundSites), nil
+	case strings.HasPrefix(q, "query shopifyOrderByGid"):
+		if row, ok := e.orders[argOf(q, "gid")]; ok {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil

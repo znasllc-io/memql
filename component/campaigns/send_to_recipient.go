@@ -122,9 +122,15 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, errors.New("campaigns.sendToRecipient: publish the reviewed template before sending")
 	}
 
-	recipient, found, err := w.store.RecipientByID(ctx, recipientID)
-	if err != nil {
-		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
+	var recipient Recipient
+	found = true
+	if opts.orderRecipient != nil {
+		recipient = *opts.orderRecipient
+	} else {
+		recipient, found, err = w.store.RecipientByID(ctx, recipientID)
+		if err != nil {
+			return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
+		}
 	}
 	if !found {
 		// "No such row" and "not yours" are one answer here, deliberately.
@@ -235,7 +241,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 			"recipientId": recipient.ID, "emailRuleId": emailRuleID,
 		})
 	}
-	if recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" && !(opts.confirm && recipient.SubscriptionStatus == "pending") {
+	if opts.orderRecipient == nil && recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" && !(opts.confirm && recipient.SubscriptionStatus == "pending") {
 		recordOutcome(Delivery{
 			Status: "skipped", SkipReason: recipient.SubscriptionStatus,
 		})

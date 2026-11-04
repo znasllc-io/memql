@@ -1251,6 +1251,30 @@ without their DNS records is the one way to make deliverability worse by
 using this feature. There is no preflight for it, because any check the engine
 could run would be a guess about records it cannot see from inside the cluster.
 
+### Mail an order entitles
+
+A third shape sits beside the outbox and the marketing lane:
+`campaignSendOrderMessage`, one message to the buyer of one order -- the review
+request a store sends some days after a purchase, for instance. The buyer is on
+no list, and asking only subscribers would be asking only the customers a store
+expects to be happy, so this route asks no subscription. What keeps it from
+being a way to mail strangers:
+
+- **It takes an order, never an address.** The buyer's address is read off the
+  mirrored order (`storeId` + `orderGid`); no argument names a recipient. The
+  recipient exists only for that send -- no recipient row is written, so the
+  buyer lands on no list a campaign could reach.
+- **Every lawful-mail property of the marketing lane is kept.** The
+  organization's suppression list is consulted at the point of send, the RFC 8058
+  pair is attached and its one-click unsubscribe suppresses the address for the
+  organization, the organization's sender is resolved, and the outcome is
+  ledgered once per `requestId` with the single send's durable receipt.
+- **Trusted jobs only.** A call without internal origin is refused before
+  anything is read.
+
+The template fills `{{fields.<key>}}` from the call's `fields` (the product, the
+link, its expiry), and needs the same review and publication as any other.
+
 ### Campaigns do not use the transactional outbox
 
 `v1:platform:outboundRequest` and its worker deliver transactional mail.
