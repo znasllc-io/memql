@@ -1123,6 +1123,37 @@ export function ChoiceStack({
   );
 }
 
+/**
+ * A horizontal radio group: a few options that need no explaining, one of
+ * which holds -- a filter, a window, a mode. `ChoiceStack` is its sibling for
+ * options that do. Several apps wrote this markup out by hand
+ * (`os-choice-row`); this is it once, so the next one does not.
+ */
+export function ChoiceRow({ label, value, onChange, options }: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: readonly { value: string; label: ReactNode; ariaLabel?: string }[];
+}) {
+  return (
+    <div className="os-choice-row" role="radiogroup" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          aria-label={option.ariaLabel}
+          className="os-choice"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Containers and notices
 // ---------------------------------------------------------------------------

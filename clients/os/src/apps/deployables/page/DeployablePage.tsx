@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { Activity, Lock } from "lucide-react";
+import { Activity, Lock, MessageSquareText } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -14,7 +14,8 @@ import { deploymentFromRow, recordedAsCandidate, type DeploymentRow, type Packag
 import type { PartsHeld } from "../parts";
 import { deployedByLabel, deployerOf, type NameOf } from "../people";
 import { usePackageDeployments } from "../packages/usePackages";
-import { ownerLabel, siteName, type SiteRow } from "../rows";
+import { boundStoreId, ownerLabel, siteName, type SiteRow } from "../rows";
+import { ReviewsSection } from "../reviews/ReviewsSection";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, candidateBlockedReason, candidateTargetOffered, runForApp, siblingRunInFlight, type ActName } from "./acts";
@@ -414,14 +415,27 @@ export function DeployablePage({
       back={{ label: name, onSelect: toOverview }} />;
   }
 
-  // EVERY DETAIL CHANGES THE PAGE (the owner's rule, 2026-11-03).
+  // REVIEWS TAKE THE PANE, for the Store's reason: a queue, one review with its
+  // log and its acts, the store's decision log and its settings are pages, and
+  // each draws its own Head under this one's trail. Absent without the reviews
+  // part, and for a deployable that fronts no store.
+  const reviewsStore = site.kind === "shopify_storefront" && !site.systemOwned ? boundStoreId(site) : "";
+  if (detail === "reviews" && can.reviews && reviewsStore !== "") {
+    const toOverview = () => setDetail(null);
+    return <ReviewsSection
+      site={site} storeId={reviewsStore} name={name} nameOf={nameOf} viewerUserId={viewerUserId}
+      trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }]}
+      back={{ label: name, onSelect: toOverview }} />;
+  }
+
+  // EVERY OTHER DETAIL CHANGES THE PAGE TOO (the owner's rule, 2026-11-03).
   // Traffic, Access codes and each stop's detail used to open a dialog over
   // the page; now each takes the page's place under its own Head, so the
   // trail names where the person is and both Backs -- the row's and the
   // browser's -- step out. The bar stays: the deployable's acts are still the
   // deployable's while one of its details is open. Visit still asks in a
   // dialog, and Logs opens the Logs app.
-  const inPage = detail !== null && detail !== "whereItLives" && detail !== "store" ? detail : null;
+  const inPage = detail !== null && detail !== "whereItLives" && detail !== "store" && detail !== "reviews" ? detail : null;
   // A NEW ACCESS CODE IS SHOWN ONCE, so Back waits for Done while one stands,
   // as the dialog's Close and Escape did: the row's Back is inert, and the
   // browser's Back lands on it.
@@ -465,6 +479,8 @@ export function DeployablePage({
                 the whole axis, and a code opens a gate that only a package's own
                 deployable can declare. */}
             {can.access && !site.systemOwned && site.packageDeployableName ? <IconButton label="Access codes" onClick={() => setDetail("access")}><Lock size={16} aria-hidden /></IconButton> : null}
+            {/* A store's reviews, for whoever holds the reviews part. */}
+            {can.reviews && reviewsStore !== "" ? <IconButton label="Reviews" onClick={() => setDetail("reviews")}><MessageSquareText size={16} aria-hidden /></IconButton> : null}
           </Head>
 
           <Chips label="Deployable facts">
@@ -684,5 +700,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 
 // Each detail's title, as its page's Head and the trail name it.
 function detailTitle(detail: WorkspaceDetail): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store", reviews: "Reviews" }[detail];
 }

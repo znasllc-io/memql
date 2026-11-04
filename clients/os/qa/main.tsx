@@ -87,6 +87,7 @@ import { LocalDeployablesSettingsStore } from "../src/apps/deployables/settings"
 import { PageNavigationProvider } from "../src/kit/pageNavigation";
 import { TrailRow } from "../src/kit/TrailRow";
 import { DeployablePage } from "../src/apps/deployables/page/DeployablePage";
+import { reviewName } from "../src/apps/deployables/reviews/model";
 import { ALL_PARTS, partsWithout } from "../src/apps/deployables/parts";
 import {
   previewGrantRow,
@@ -789,6 +790,80 @@ function AccessPage({ site = ACCESS_SITE }: { site?: Row }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// REVIEWS (a store's reviews, as a section of its deployable)
+// ---------------------------------------------------------------------------
+// The queue with every length a review comes in -- a headline and a line, no
+// headline, a paragraph that runs long -- one review open with a log behind it,
+// a decline's reason step, the store's decision log, and the settings. Opened
+// through the page's own `initialDetail`, over the real page and its trail.
+const REVIEWS_SITE = siteRow({
+  id: "site-shop", hostname: "shop.memql.example.com", title: "Example Storefront", kind: "shopify_storefront",
+  binding: { storeId: "store-live" }, packageId: "pkg-shop", packageDeployableName: "storefront",
+});
+const reviewAt = (hours: number): string => new Date(Date.now() - hours * 3_600_000).toISOString();
+const QA_REVIEWS = [
+  { id: "v1:reviews:review:r1", state: "waiting", productHandle: "floss-picks", title: "Easy to use", body: "Gentle on my gums and easy to hold.", rating: 5, authorName: "Dana", authorEmail: "dana@example.com", verifiedBuyer: true, revision: 1, contentHash: "h1", createdAt: reviewAt(4 * 24) },
+  { id: "v1:reviews:review:r2", state: "waiting", productHandle: "toothpaste-tablets", title: "", body: "They foam less than paste, which took a week to get used to, but my kids now ask for them. The jar is great for travel and nothing leaks in a bag.", rating: 4, authorName: "Sam", authorEmail: "sam@example.com", verifiedBuyer: true, revision: 2, contentHash: "h2", createdAt: reviewAt(30) },
+  { id: "v1:reviews:review:r3", state: "waiting", productHandle: "kids-brush", title: "Too hard for my toddler", body: "The bristles are firmer than I expected.", rating: 2, authorName: "", authorEmail: "a.parent@example.com", verifiedBuyer: true, revision: 1, contentHash: "h3", createdAt: reviewAt(3) },
+];
+const QA_REVIEW_DETAIL = {
+  review: QA_REVIEWS[1],
+  decisions: [
+    { id: "d2", reviewId: "v1:reviews:review:r2", action: "askToFix", reason: "personal_information", note: "Named the school; asked by email to take it out.", decidedBy: "u-carol", at: reviewAt(48), revision: 1 },
+  ],
+  acts: ["publish", "decline", "askToFix", "escalate"],
+  moderates: true,
+};
+const QA_REVIEWS_SEED: FakeSeed = {
+  reviews: {
+    list: { waiting: { reviews: QA_REVIEWS, total: 3, next: "", counts: { waiting: 3, published: 41, declined: 2, removed: 1, all: 47 } } as unknown as Row },
+    get: Object.fromEntries(QA_REVIEWS.map((r) => [r.id, { ...QA_REVIEW_DETAIL, review: r, decisions: r.id === "v1:reviews:review:r2" ? QA_REVIEW_DETAIL.decisions : [] }])) as unknown as Record<string, Row>,
+    log: {
+      decisions: [
+        { id: "l1", reviewId: "v1:reviews:review:r9", action: "publish", decidedBy: "u-carol", at: reviewAt(2), revision: 1, reviewState: "published", productHandle: "floss-picks", title: "Better than the plastic ones" },
+        { id: "l2", reviewId: "v1:reviews:review:r8", action: "decline", reason: "spam_or_advertising", note: "Links to another shop.", decidedBy: "u-me", at: reviewAt(20), revision: 1, reviewState: "declined", productHandle: "toothpaste-tablets", title: "Cheaper at" },
+        { id: "l3", reviewId: "v1:reviews:review:r2", action: "askToFix", reason: "personal_information", note: "Named the school; asked by email to take it out.", decidedBy: "u-carol", at: reviewAt(48), revision: 1, reviewState: "waiting", productHandle: "toothpaste-tablets", title: "" },
+        { id: "l4", reviewId: "v1:reviews:review:r7", action: "remove", reason: "reviewer_request", decidedBy: "u-owner", at: reviewAt(72), revision: 1, reviewState: "removed", productHandle: "kids-brush", title: "Changed my mind" },
+        { id: "l5", reviewId: "v1:reviews:review:r6", action: "escalate", note: "Mentions a reaction; passed to the clinical lead.", decidedBy: "u-me", at: reviewAt(96), revision: 1, reviewState: "published", productHandle: "floss-picks", title: "Gums bled at first" },
+      ],
+      total: 5, next: "",
+    } as unknown as Row,
+    settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-owner" }, may: { edit: true, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row,
+  },
+};
+const QA_NAMES: Record<string, string> = { "u-carol": "Carol Reyes", "u-owner": "Store Owner" };
+/** A QA review as the list names it. */
+function qaReviewNamed(index: number) {
+  const r = QA_REVIEWS[index]!;
+  return { title: r.title, body: r.body, state: "waiting" as const };
+}
+const REVIEWS_CLICKS: Record<string, string> = {
+  review: `Open review ${reviewName(qaReviewNamed(1))}`,
+  "review-decline": "Open review Too hard for my toddler|Decline",
+  "reviews-log": "Decision log",
+  "reviews-settings": "Review settings",
+};
+
+function ReviewsPage({ site = REVIEWS_SITE }: { site?: Row }) {
+  return (
+    <WindowBody fallback="Deployables">
+      <DeployablePage
+        site={siteFromRow(site)}
+        pkg={null}
+        credentials={[]}
+        viewerUserId="u-me"
+        nameOf={(id) => QA_NAMES[id] ?? ""}
+        can={ALL_PARTS}
+        clusterDomain="memql.example.com"
+        onBack={() => {}}
+        onOpenSource={() => {}}
+        initialDetail="reviews"
+      />
+    </WindowBody>
+  );
+}
+
 // A view may bring its own CONNECTION and its own session wrapper. The Store
 // and Deployables views share `test/deployables/harness`; the Data origins
 // views need `test/cluster/harness`, whose fake answers `dataOrigins` and
@@ -1296,6 +1371,12 @@ const VIEWS: Record<
   "preview-failing": { seed: PREVIEW_FAILING, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
   "preview-refused": { seed: PREVIEW_REFUSED, render: () => <PreviewPage site={siteFromRow(siteRow({ ...SHOP, id: "site-shop", candidateRef: "blob://sites/site-shop/v2/", previewBinding: { storeId: "store-example" } } as never))} /> },
   "preview-none": { seed: PREVIEW_NONE, render: () => <PreviewPage site={siteFromRow(SHOP)} /> },
+  reviews: { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
+  "reviews-empty": { seed: { reviews: { ...QA_REVIEWS_SEED.reviews, list: { waiting: { reviews: [], total: 0, next: "", counts: { waiting: 0, published: 41, declined: 2, removed: 1, all: 44 } } as unknown as Row } } }, framed: true, render: () => <ReviewsPage /> },
+  review: { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
+  "review-decline": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
+  "reviews-log": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
+  "reviews-settings": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   access: { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
   "access-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-minted": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
@@ -2281,7 +2362,7 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? REVIEWS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
     // A choice card and a record row answer to their names: a card's note ("1,204

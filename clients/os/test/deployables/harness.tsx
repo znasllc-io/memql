@@ -210,6 +210,21 @@ export interface FakeSeed {
   accessRegenerateError?: string;
   accessSetExpiryError?: string;
   accessRemoveError?: string;
+  /**
+   * The reviews pack's answers (packs/reviewspack): `reviewsList` keyed by the
+   * filter asked, `reviewsGet` keyed by review id, the store's decision log
+   * and its settings. ABSENT IS EMPTY: a store nobody has reviewed.
+   */
+  reviews?: {
+    list?: Record<string, Row>;
+    get?: Record<string, Row>;
+    log?: Row;
+    settings?: Row;
+    /** Fails the next decision or erasure with this server message. */
+    decideError?: string;
+    /** Fails the next settings save with this server message. */
+    settingsError?: string;
+  };
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
   registerSourceError?: string;
@@ -474,6 +489,33 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const stub = {
     executeNamed: vi.fn(async (_name: string, call: string, opts?: { cursor?: string }) => {
       calls.push(call);
+
+      // ---- reviews (packs/reviewspack) ----
+      if (call.startsWith("builtin reviewsList(")) {
+        const state = /state: "([^"]*)"/.exec(call)?.[1] ?? "waiting";
+        return builtinReply("reviewsList", [seed.reviews?.list?.[state] ?? ({ reviews: [], total: 0, next: "", counts: {} } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin reviewsGet(")) {
+        const id = /reviewId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const answer = seed.reviews?.get?.[id];
+        if (answer === undefined) throw new Error(`reviews: review "${id}" is not readable by this caller`);
+        return builtinReply("reviewsGet", [answer]);
+      }
+      if (call.startsWith("builtin reviewsDecisionLog(")) return builtinReply("reviewsDecisionLog", [seed.reviews?.log ?? ({ decisions: [], total: 0, next: "" } as unknown as Row)]);
+      if (call.startsWith("builtin reviewsSettings(")) {
+        return builtinReply("reviewsSettings", [seed.reviews?.settings ?? ({ exists: false, settings: {}, may: { edit: false, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin reviewsDecide(") || call.startsWith("builtin reviewsEraseReviewer(")) {
+        if (seed.reviews?.decideError !== undefined) throw new Error(seed.reviews.decideError);
+        return builtinReply("reviewsDecide", [{ decisionId: "d-new" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin reviewsUpdateSettings(")) {
+        if (seed.reviews?.settingsError !== undefined) throw new Error(seed.reviews.settingsError);
+        return builtinReply("reviewsUpdateSettings", [{ changed: [] } as unknown as Row]);
+      }
+      if (call.startsWith("builtin reviewsExportStore(")) {
+        return builtinReply("reviewsExportStore", [{ fileName: "reviews-store-live-2026-11-04.json", json: "{\"format\":\"memql.reviews.export/v1\"}" } as unknown as Row]);
+      }
 
       // ---- pipelines (epic memql#5479) ----
       if (call === "query pipelineRunsForOwner()") {

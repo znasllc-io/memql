@@ -1,0 +1,18 @@
+/* A review's own words, as the writer sent them: their line breaks kept. */
+.os-review-text {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  max-width: 72ch;
+}
+.os-review-text p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Cap the field, never the page: a number of days or an address needs no
+   more width than a line of text. */
+.os-review-settings .os-form-field {
+  max-width: 32rem;
+}

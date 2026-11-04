@@ -57,6 +57,7 @@ export {
   Check,
   Chip,
   Chips,
+  ChoiceRow,
   ChoiceStack,
   CopyField,
   CopyValue,
