@@ -68,7 +68,7 @@
 # Go: the official 1.27.3 distribution. Only /usr/local/go is taken; its
 # binaries are statically linked, so they run on the bookworm base below
 # whatever Debian release the golang image itself is built on.
-FROM golang:1.27.3@sha256:957861185dbf29d93668ace41e011d091c6e779953d47f0316ef2cc58e28fe2b AS go-dist
+FROM golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS go-dist
 
 # Node 22 on bookworm, like the base below, so the copied binaries run against
 # the C library they were built against.
