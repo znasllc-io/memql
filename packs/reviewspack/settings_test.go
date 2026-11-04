@@ -51,7 +51,7 @@ func existingSettings() map[string]any {
 
 func TestTheDisplayToggleKeepsEveryOtherSetting(t *testing.T) {
 	out, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(),
-		map[string]any{"storeId": "store-live", "publicDisplay": true}, true)
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "publicDisplay": true}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestTheDisplayToggleKeepsEveryOtherSetting(t *testing.T) {
 
 func TestUpdateSettingsMergesTheFieldsItIsGiven(t *testing.T) {
 	out, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(),
-		map[string]any{"storeId": "store-live", "linkLifetimeDays": 21, "notifyEmail": "reviews@example.com"}, false)
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "linkLifetimeDays": 21, "notifyEmail": "reviews@example.com"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestUpdateSettingsRefusesValuesOutOfRange(t *testing.T) {
 		{"storeId": "store-live", "requestDelayDays": -1},
 		{"storeId": "store-live", "notifyEmail": "not an address"},
 		{"storeId": "store-live", "unknownSetting": true},
-		{"linkLifetimeDays": 10},
+		{"siteId": "site-1", "linkLifetimeDays": 10},
 	}
 	for _, args := range bad {
 		if _, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(), args, false); err == nil {
@@ -101,7 +101,7 @@ func TestUpdateSettingsRefusesValuesOutOfRange(t *testing.T) {
 // NAMING THE OWNER WHO APPROVES REMOVALS IS NOT A MODERATOR'S CALL. A
 // moderator who could name themselves would remove reviews unapproved.
 func TestOnlyTheCurrentOwnerOrAnOperatorNamesTheRemovalApprover(t *testing.T) {
-	args := map[string]any{"storeId": "store-live", "removalApproverUserId": "mod-1"}
+	args := map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": "mod-1"}
 	if _, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(), args, false); err == nil {
 		t.Fatal("a moderator named themselves the removal approver")
 	}
@@ -129,11 +129,11 @@ func TestEffectiveSettingsDefaults(t *testing.T) {
 // merchant must be able to show reviews live while hiding them under preview.
 func TestTheDisplayToggleIsPerStore(t *testing.T) {
 	op := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "staff-1", Role: auth.RoleOwner})
-	hidden, err := writeSettings(t, op, nil, map[string]any{"storeId": "store-live", "publicDisplay": false}, true)
+	hidden, err := writeSettings(t, op, nil, map[string]any{"siteId": "site-1", "storeId": "store-live", "publicDisplay": false}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shown, err := writeSettings(t, op, nil, map[string]any{"storeId": "store-live", "publicDisplay": true}, true)
+	shown, err := writeSettings(t, op, nil, map[string]any{"siteId": "site-1", "storeId": "store-live", "publicDisplay": true}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestTheDisplayToggleIsPerStore(t *testing.T) {
 		t.Fatal("toggle did not change")
 	}
 	// writeSettings asserts each answer is the named store's own row id.
-	if _, err := writeSettings(t, op, nil, map[string]any{"storeId": "store-dev", "publicDisplay": true}, true); err != nil {
+	if _, err := writeSettings(t, op, nil, map[string]any{"siteId": "site-1", "storeId": "store-dev", "publicDisplay": true}, true); err != nil {
 		t.Fatal(err)
 	}
 	if SettingsRowID("store-live") == SettingsRowID("store-dev") {
@@ -156,7 +156,7 @@ func TestTheDisplayToggleIsPerStore(t *testing.T) {
 // whoever reaches the call first.
 func TestOnlyAnOperatorCreatesAStoresSettings(t *testing.T) {
 	if _, err := writeSettings(t, moderatorCtx("mod-1"), nil,
-		map[string]any{"storeId": "store-live", "publicDisplay": true}, true); err == nil {
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "publicDisplay": true}, true); err == nil {
 		t.Fatal("a non-operator created a store's settings row")
 	}
 }

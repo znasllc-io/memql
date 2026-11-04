@@ -49,6 +49,9 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 	if storeID == "" {
 		return nil, fmt.Errorf("reviews: storeId is required")
 	}
+	if err := p.requireSiteForStore(ctx, asString(args["siteId"]), storeID); err != nil {
+		return nil, err
+	}
 	want := strings.TrimSpace(asString(args["state"]))
 	if want == "" {
 		want = string(StateWaiting)

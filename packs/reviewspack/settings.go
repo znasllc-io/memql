@@ -138,6 +138,9 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	if storeID == "" {
 		return nil, fmt.Errorf("reviews: storeId is required; settings are per store")
 	}
+	if err := p.requireSiteForStore(ctx, asString(args["siteId"]), storeID); err != nil {
+		return nil, err
+	}
 	changes := map[string]any{}
 	names := make([]string, 0, len(args))
 	for k := range args {
@@ -145,7 +148,7 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	}
 	sort.Strings(names)
 	for _, k := range names {
-		if k == "storeId" {
+		if k == "storeId" || k == "siteId" {
 			continue
 		}
 		check, known := settingFields[k]
@@ -243,4 +246,23 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// requireSiteForStore checks the site an act names serves the store it acts
+// on. The organization gate judged the act against that SITE's organization,
+// so a site bound to another store would let a person granted the part in
+// one organization act on another's store.
+func (p *Provider) requireSiteForStore(ctx context.Context, siteID, storeID string) error {
+	siteID = strings.TrimSpace(siteID)
+	if siteID == "" {
+		return fmt.Errorf("reviews: siteId is required: the act is judged against the organization of the store's site")
+	}
+	site := p.siteRow(ctx, siteID)
+	if site == nil {
+		return fmt.Errorf("reviews: site %q is not readable by this caller", siteID)
+	}
+	if !siteServesStore(site, storeID) {
+		return fmt.Errorf("reviews: site %q is not bound to store %q", siteID, storeID)
+	}
+	return nil
 }

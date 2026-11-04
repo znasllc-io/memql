@@ -60,6 +60,9 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	store := "store-reviews-link-" + n
 	handle := "floss-picks-" + n
 	token := "tok-" + n + "-0123456789abcdefghijklmnopqrstuvwxyz"
+	site := "site-reviews-link-" + n
+	seedSite(t, eng, site, merchant, store)
+	grantReviewsPart(t, eng, merchant)
 	putRequest(t, eng, merchant, store, "request-"+n, handle, token, time.Now().Add(14*24*time.Hour))
 
 	if err := submitThrough(eng, merchant, store, handle, token, "first words"); err != nil {
@@ -83,7 +86,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 
 	// Published, the link closes: the next submit is link_used.
 	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
-		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, publicDisplay: true)`); err != nil {
+		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, publicDisplay: true)`); err != nil {
 		t.Fatalf("settings: %v", err)
 	}
 	reviewID := rows[0]["id"].(string)

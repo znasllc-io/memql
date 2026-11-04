@@ -69,7 +69,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // version and exercise it end to end against a development store, and still
 // not be able to put it in front of a shopper.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "connect", "rerun", "cancel", "channels"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "reviews", "connect", "rerun", "cancel", "channels"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
 
@@ -94,6 +94,7 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   store: false,
   preview: false,
   access: false,
+  reviews: false,
   connect: false,
   rerun: false,
   cancel: false,
@@ -110,6 +111,7 @@ export const ALL_PARTS: PartsHeld = Object.freeze({
   store: true,
   preview: true,
   access: true,
+  reviews: true,
   connect: true,
   rerun: true,
   cancel: true,

@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews":
 		return true
 	}
 	return false
@@ -67,6 +67,18 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 			return "v1:platform:siteAccessCode", "codeId"
 		case "packageAnalyze", "packageDeploy", "packageCancelDeployment", "packageRollback", "packageArchive", "packageDeactivateDeployable", "packageRestore", "packageSetAutoDeploy":
 			return "v1:platform:package", "packageId"
+		// Review moderation (the reviews pack). An act on one review is asked
+		// about the REVIEW, whose accountId was copied off its site when it was
+		// written; an act on a store's reviews as a whole -- the moderation
+		// list, the settings, the display toggle, issuing a link -- is asked
+		// about the SITE the store is served through, which the pack checks is
+		// bound to that store. Reads stay row-tier queries: a review row is
+		// admitted only to its merchant, its organization's people and the
+		// cluster's owners, so no read crosses an organization.
+		case "reviewsDecide", "reviewsEraseReviewer":
+			return "v1:reviews:review", "reviewId"
+		case "reviewsList", "reviewsUpdateSettings", "reviewsSetPublicDisplay", "reviewsIssueRequest", "reviewsExportStore":
+			return "v1:platform:site", "siteId"
 		}
 	}
 	return "", ""

@@ -34,6 +34,10 @@ import (
 func livePackEngine(t *testing.T) *memql.MemQLEngine {
 	t.Helper()
 	eng := liveEngine(t)
+	// GRANTS ARE READ ONLY THROUGH AN INSTALLED SOURCE, which an engine that
+	// never Starts must install itself (the engine's own db tests do the same).
+	eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(nil); auth.SetMembershipSource(nil) })
 	prov, err := reviewspack.NewProvider(memql.PluginContext{Engine: eng, Logger: eng.Logger})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -69,8 +73,12 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 	n := strconv.FormatInt(time.Now().UnixNano(), 36)
 	merchant := "user-reviews-shop-" + n
 	staff := "user-reviews-staff-" + n
+	stranger := "user-reviews-nopart-" + n
 	store := "store-reviews-pub-" + n
+	site := "site-reviews-pub-" + n
 	handle := "boot-" + n
+	seedSite(t, eng, site, merchant, store)
+	grantReviewsPart(t, eng, merchant)
 
 	// A shopper's review, exactly as the bff writes one.
 	call := `submitReview(body: "Great boots", productHandle: ` + quote(handle) +
@@ -83,7 +91,7 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 	// The store's settings, set up by an operator who is also the site owner
 	// (the production shape: the deployable's owner is a cluster operator).
 	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
-		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, publicDisplay: true)`); err != nil {
+		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, publicDisplay: true)`); err != nil {
 		t.Fatalf("reviewsUpdateSettings: %v", err)
 	}
 
@@ -97,7 +105,7 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 		t.Fatalf("a review nobody published is public (count %v) with the store's display on", got)
 	}
 	queue := payloadOf(t, eng, asPerson(merchant, auth.Role("user")),
-		`builtin reviewsList(storeId: `+quote(store)+`)`)
+		`builtin reviewsList(storeId: `+quote(store)+`, siteId: `+quote(site)+`)`)
 	if queue["total"] != float64(1) {
 		t.Fatalf("the queue holds %v reviews, want the one waiting", queue["total"])
 	}
@@ -115,6 +123,11 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 	if _, err := eng.Execute(asPerson(staff, auth.RoleOwner),
 		`builtin reviewsDecide(reviewId: `+quote(reviewID)+`, action: "publish", revision: 1)`); err == nil {
 		t.Fatal("a cluster operator recorded a decision on a store's review")
+	}
+	// And a person without the reviews part cannot decide either.
+	if _, err := eng.Execute(asPerson(stranger, auth.Role("user")),
+		`builtin reviewsDecide(reviewId: `+quote(reviewID)+`, action: "publish", revision: 1)`); err == nil {
+		t.Fatal("a person without the reviews part recorded a decision")
 	}
 
 	// ---- PROOF 2 ------------------------------------------------------------

@@ -23,7 +23,9 @@ builtin reviewsExportReview {
 @executor("integration.reviews.setPublicDisplay")
 @args(profile="object")
 @description("Flip one store's public display toggle at runtime. This is data, not a .memql edit, and does not require a rebuild. Per STORE, so a merchant can show reviews on their live storefront while they stay hidden on the development store a candidate is being exercised against.")
+@requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsSetPublicDisplay {
+  siteId  string  @required  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
   storeId        string  @required  @description("The store whose toggle this is.")
   publicDisplay  bool    @required  @description("When true, reviews render on the storefront.")
 }
@@ -41,6 +43,7 @@ builtin reviewsPublishedForProduct {
 @executor("integration.reviews.decide")
 @args(profile="object")
 @description("Record one moderation decision on a review: publish, decline, askToFix, escalate or remove. The decider is the calling person (the cluster's operators are refused), the store and organization are read off the review, and the decision is refused when the review has changed since the revision named. Decline, askToFix and remove need a listed reason; remove belongs to the store's named owner. Erasing a writer's data is reviewsEraseReviewer.")
+@requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsDecide {
   reviewId  string   @required  @description("The review to decide.")
   action    string   @required  @description("publish, decline, askToFix, escalate or remove.")
@@ -53,7 +56,9 @@ builtin reviewsDecide {
 @executor("integration.reviews.updateSettings")
 @args(profile="object")
 @description("Change one store's reviews settings and keep the rest: every write merges into the store's one settings row. A store with no settings is set up by the cluster's operators; the owner who approves removals is named by the current owner or an operator.")
+@requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsUpdateSettings {
+  siteId  string  @required  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
   storeId                string   @required  @description("The store whose settings these are.")
   publicDisplay          bool     @description("Show published reviews on the storefront.")
   linkLifetimeDays       integer  @description("Days a buyer's review link stays open, 1 to 365.")
@@ -68,7 +73,9 @@ builtin reviewsUpdateSettings {
 @executor("integration.reviews.list")
 @args(profile="object")
 @description("The moderation list: one store's reviews with the state their decision log gives them and the last decision on each. state defaults to waiting, oldest first; every other state, and all, is newest first. Projects the writer's email, because a moderator may need to reply; never served to a storefront.")
+@requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsList {
+  siteId  string  @required  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
   storeId  string   @required  @description("The store to list.")
   state    string   @description("waiting (the default), published, declined, removed, erased or all.")
   limit    integer  @description("Page size; 50 when omitted, at most 200.")
@@ -104,6 +111,7 @@ builtin reviewsDraftForLink {
 @executor("integration.reviews.issueRequest")
 @args(profile="object")
 @description("Mint one buyer's review link by hand -- the cluster's operators only, for testing a store before it goes live or re-sending a link on the store's request. The order line must earn one (a paid line above $0 of a paid, uncancelled order). Answers the link once; only its hash is kept.")
+@requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsIssueRequest {
   storeId        string  @required  @description("The store the order was placed on.")
   orderGid       string  @required  @description("The mirrored order.")

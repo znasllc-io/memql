@@ -112,6 +112,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Handler:     p.setPublicDisplay,
 			ArgsSchema: map[string]string{
 				"storeId":       "string (required) - the store this toggle is for",
+				"siteId":        "string (required) - the store's site, judged by the organization gate",
 				"publicDisplay": "bool (required)",
 			},
 		},
@@ -135,6 +136,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Handler:     p.updateSettings,
 			ArgsSchema: map[string]string{
 				"storeId":               "string (required)",
+				"siteId":                "string (required) - the store's site, judged by the organization gate",
 				"publicDisplay":         "bool (optional)",
 				"linkLifetimeDays":      "integer (optional) - 1 to 365",
 				"requestDelayDays":      "integer (optional) - 0 to 365",
@@ -151,6 +153,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Handler:     p.list,
 			ArgsSchema: map[string]string{
 				"storeId": "string (required)",
+				"siteId":  "string (required) - the store's site, judged by the organization gate",
 				"state":   "string (optional) - waiting|published|declined|removed|erased|all",
 				"limit":   "integer (optional) - default 50",
 				"after":   "string (optional) - cursor",
@@ -315,6 +318,9 @@ func (p *Provider) setPublicDisplay(ctx context.Context, args map[string]any, _ 
 	storeID := strings.TrimSpace(asString(args["storeId"]))
 	if storeID == "" {
 		return nil, fmt.Errorf("reviews: storeId is required; a display toggle is per store")
+	}
+	if err := p.requireSiteForStore(ctx, asString(args["siteId"]), storeID); err != nil {
+		return nil, err
 	}
 	// MERGED (settings.go): the store's row carries more than this toggle,
 	// and a version holding only publicDisplay would clear the rest.

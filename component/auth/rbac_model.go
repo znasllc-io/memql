@@ -282,6 +282,12 @@ var appPartGrants = map[string][]Role{
 	// visitor into part of a site the public cannot see, and ends them, and a
 	// person may be trusted to deploy without being trusted to do that.
 	"app:deployables/access": {RoleOwner, RoleDeveloper},
+	// The reviews part: see a store's reviews and act on them in the
+	// Deployables app. Held by the cluster's operators so they can host and
+	// set a store up; the reviews pack still refuses an operator's moderation
+	// decision -- the store decides, through its own people granted the part
+	// in its organization.
+	"app:deployables/reviews": {RoleOwner, RoleDeveloper},
 	// Attaching the Shopify store a storefront fronts (memql#5541). Owner
 	// alone until v1:shopify:store took a read floor at developer (Connect
 	// Shopify, D3): before it, a developer holding the part would have been

@@ -728,6 +728,21 @@ seed capability cap-owner-execute-app-deployables-access { roleSlug: "owner"  ve
 @description("developer: the access part of the Deployables app -- mint, regenerate, re-time and remove the access codes that open part of a deployable to a named visitor (deployable access codes, design record 2026-10-29).")
 seed capability cap-developer-execute-app-deployables-access { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/access"  predefined: true }
 
+// ---- app:deployables/reviews -- a store's reviews, in the Deployables app ----
+//
+// OWNER AND DEVELOPER, like the parts above, and its own part because it is a
+// different CONSEQUENCE: it reaches what a store's customers wrote, not what
+// the store serves. The cluster's operators hold it to host a store and set its
+// reviews up, and the reviews pack still REFUSES their moderation decisions --
+// the store decides, through its own people, each granted the part in the
+// store's organization. The shared organization gate judges every act against
+// the organization of the review or the site it names
+// (component/memql/organization_action_capabilities.go).
+@description("owner: the reviews part of the Deployables app -- a store's reviews, its moderation list, settings and links. The reviews pack refuses an operator's moderation decision; the store's own people decide.")
+seed capability cap-owner-execute-app-deployables-reviews { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/reviews"  predefined: true }
+@description("developer: the reviews part of the Deployables app -- a store's reviews, its moderation list, settings and links. The reviews pack refuses an operator's moderation decision; the store's own people decide.")
+seed capability cap-developer-execute-app-deployables-reviews { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/reviews"  predefined: true }
+
 // ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
 //
 // OWNER AND DEVELOPER, like the parts above (Connect Shopify design, D3). It

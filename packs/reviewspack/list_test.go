@@ -17,6 +17,7 @@ import (
 type listReader struct {
 	reviews   []map[string]any
 	decisions []map[string]any
+	site      map[string]any // siteById; nil answers the store's own site
 	asked     map[string]map[string]string
 }
 
@@ -25,8 +26,14 @@ func (l *listReader) Rows(_ context.Context, query string, args map[string]strin
 		l.asked = map[string]map[string]string{}
 	}
 	l.asked[query] = args
-	if query == "reviewsInStore" {
+	switch query {
+	case "reviewsInStore":
 		return l.reviews, nil
+	case "siteById":
+		if l.site != nil {
+			return []map[string]any{l.site}, nil
+		}
+		return []map[string]any{liveSite}, nil
 	}
 	return nil, nil
 }
@@ -96,7 +103,7 @@ func TestTheQueueIsWaitingReviewsOldestFirst(t *testing.T) {
 		reviews:   []map[string]any{listRow("newer", 60), listRow("older", 0), listRow("shown", 30)},
 		decisions: []map[string]any{decisionRow("shown", ActionPublish, 1, 0)},
 	}
-	got := list(t, r, map[string]any{"storeId": "store-live"})
+	got := list(t, r, map[string]any{"storeId": "store-live", "siteId": "site-1"})
 	if want := []string{"older", "newer"}; len(got.Reviews) != 2 || ids(got)[0] != want[0] || ids(got)[1] != want[1] {
 		t.Fatalf("queue = %v, want %v (waiting only, oldest first)", ids(got), want)
 	}
@@ -113,7 +120,7 @@ func TestEveryOtherViewIsNewestFirstWithItsLastDecision(t *testing.T) {
 			decisionRow("b", ActionPublish, 1, 1),
 		},
 	}
-	got := list(t, r, map[string]any{"storeId": "store-live", "state": "published"})
+	got := list(t, r, map[string]any{"storeId": "store-live", "siteId": "site-1", "state": "published"})
 	if len(got.Reviews) != 2 || ids(got)[0] != "b" {
 		t.Fatalf("published = %v, want newest first", ids(got))
 	}
@@ -121,7 +128,7 @@ func TestEveryOtherViewIsNewestFirstWithItsLastDecision(t *testing.T) {
 		got.Reviews[0].LastDecision.DecidedBy != "moderator-1" {
 		t.Fatalf("lastDecision = %+v", got.Reviews[0].LastDecision)
 	}
-	all := list(t, r, map[string]any{"storeId": "store-live", "state": "all"})
+	all := list(t, r, map[string]any{"storeId": "store-live", "siteId": "site-1", "state": "all"})
 	if all.Total != 2 {
 		t.Fatalf("all: total = %d, want 2", all.Total)
 	}
@@ -133,11 +140,11 @@ func TestTheListIsPagedWithACursor(t *testing.T) {
 		rows = append(rows, listRow(string(rune('a'+i)), i))
 	}
 	r := &listReader{reviews: rows}
-	first := list(t, r, map[string]any{"storeId": "store-live", "limit": 2})
+	first := list(t, r, map[string]any{"storeId": "store-live", "siteId": "site-1", "limit": 2})
 	if first.Count != 2 || first.Total != 5 || first.Next == "" {
 		t.Fatalf("first page = %+v", first)
 	}
-	second := list(t, r, map[string]any{"storeId": "store-live", "limit": 2, "after": first.Next})
+	second := list(t, r, map[string]any{"storeId": "store-live", "siteId": "site-1", "limit": 2, "after": first.Next})
 	if second.Count != 2 || ids(second)[0] != "c" {
 		t.Fatalf("second page = %v, want it to start at c", ids(second))
 	}
@@ -145,7 +152,7 @@ func TestTheListIsPagedWithACursor(t *testing.T) {
 
 func TestTheListRefusesAnUnknownStateOrNoStore(t *testing.T) {
 	p := &Provider{reader: &listReader{}}
-	if _, err := p.list(context.Background(), map[string]any{"storeId": "store-live", "state": "hidden"}, 0); err == nil {
+	if _, err := p.list(context.Background(), map[string]any{"storeId": "store-live", "siteId": "site-1", "state": "hidden"}, 0); err == nil {
 		t.Fatal("an unknown state was accepted")
 	}
 	if _, err := p.list(context.Background(), map[string]any{}, 0); err == nil {

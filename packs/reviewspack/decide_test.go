@@ -22,6 +22,18 @@ type decideReader struct {
 	review    map[string]any   // reviewById
 	decisions []map[string]any // reviewDecisionsForReview
 	settings  map[string]any   // reviewSettingsForStore
+	site      map[string]any   // siteById; nil answers the store's own site
+}
+
+// liveSite is a site bound to the store the fixtures act on.
+// Like a real storefront it carries two bindings: the live store it serves and
+// the development store a candidate is previewed against.
+var liveSite = map[string]any{"id": "site-1", "ownerUserId": "merchant-1", "accountId": "acct-shop",
+	"hostname": "shop.example.com", "binding": map[string]any{"storeId": "store-live"},
+	"previewBinding": map[string]any{"storeId": "store-dev"}}
+
+func operatorCtxFor(userID string) context.Context {
+	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: userID, Role: auth.RoleOwner})
 }
 
 func (d *decideReader) Rows(_ context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -38,6 +50,11 @@ func (d *decideReader) Rows(_ context.Context, query string, args map[string]str
 			return nil, nil
 		}
 		return []map[string]any{d.settings}, nil
+	case "siteById":
+		if d.site != nil {
+			return []map[string]any{d.site}, nil
+		}
+		return []map[string]any{liveSite}, nil
 	}
 	return nil, nil
 }
