@@ -95,12 +95,20 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 		at  time.Time
 	}
 	matched := make([]entry, 0, len(rows))
+	// EVERY FILTER'S COUNT, whichever is open: the panel shows how much waits
+	// without asking for each state.
+	counts := map[string]int{"all": 0}
+	for _, st := range States {
+		counts[string(st)] = 0
+	}
 	for _, row := range rows {
 		id := strings.TrimSpace(asString(row["id"]))
 		if id == "" {
 			continue
 		}
 		state := StateOf(VersionOf(row), decisions[canonicalReviewID(id)])
+		counts[string(state)]++
+		counts["all"]++
 		if want != "all" && string(state) != want {
 			continue
 		}
@@ -155,6 +163,7 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 		"count":   len(page),
 		"total":   total,
 		"next":    next,
+		"counts":  counts,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("reviews: marshal list: %w", err)

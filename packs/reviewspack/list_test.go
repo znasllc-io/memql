@@ -159,3 +159,31 @@ func TestTheListRefusesAnUnknownStateOrNoStore(t *testing.T) {
 		t.Fatal("a list with no store was accepted")
 	}
 }
+
+// EVERY FILTER SAYS HOW MANY IT HOLDS, whichever one is open, so the panel can
+// show how much is waiting without asking for each state.
+func TestTheListCountsEveryFilter(t *testing.T) {
+	r := &listReader{
+		reviews: []map[string]any{listRow("w1", 0), listRow("w2", 1), listRow("p1", 2), listRow("d1", 3)},
+		decisions: []map[string]any{
+			decisionRow("p1", ActionPublish, 1, 0),
+			withReason(decisionRow("d1", ActionDecline, 1, 0), "profanity", ""),
+		},
+	}
+	nodes, err := (&Provider{reader: r}).list(context.Background(), map[string]any{"storeId": "store-live", "siteId": "site-1", "state": "published"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Counts map[string]int `json:"counts"`
+	}
+	if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"waiting": 2, "published": 1, "declined": 1, "removed": 0, "erased": 0, "all": 4}
+	for k, n := range want {
+		if out.Counts[k] != n {
+			t.Fatalf("counts = %v, want %v", out.Counts, want)
+		}
+	}
+}
