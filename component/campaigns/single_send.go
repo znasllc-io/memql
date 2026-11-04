@@ -47,9 +47,14 @@ type singleSend struct {
 	// orderRecipient, when set, is the recipient an ORDER entitles
 	// (send_order.go): used in place of a recipient row, and asked no
 	// subscription -- the order is the reason for the message.
-	orderRecipient   *Recipient
-	deferWhenLimited bool
-	confirm          bool
+	orderRecipient *Recipient
+	// installationSender, set only with orderRecipient, is the trusted job
+	// saying an operator chose the installation's own sender for this
+	// organization's order mail (send_order.go). Only the transport moves:
+	// suppression, the unsubscribe and the ledger stay the organization's.
+	installationSender bool
+	deferWhenLimited   bool
+	confirm            bool
 	// snapshot, when set, is the template the send must carry: the copy frozen when
 	// the person signed up, checked against the stored template's identity.
 	snapshot *Template

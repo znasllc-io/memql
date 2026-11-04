@@ -204,3 +204,106 @@ func TestAnOrderMessageNeverMailsAnotherOrganizationsBuyers(t *testing.T) {
 		t.Fatal("mail was sent")
 	}
 }
+
+// THE INSTALLATION'S OWN SENDER MAY STAND IN, WHEN THE JOB SAYS SO. An
+// organization with no mailbox of its own can have its order mail leave from
+// the installation's sender -- the one whose organization is "self" -- when the
+// trusted job that runs the send says an operator chose it. The message still
+// belongs to the store's organization: its suppression list decides, and its
+// unsubscribe is the one the buyer gets. Only the transport is the
+// installation's.
+func houseSender() map[string]any {
+	house := senderIdentityRow("si-house", "noreply@house.example.test", "House", "active")
+	house["accountId"] = "self"
+	return house
+}
+
+func TestAnOrderMessageMayLeaveFromTheInstallationsSenderWhenTheJobSaysSo(t *testing.T) {
+	engine := orderSendEngine()
+	engine.senderIdentities["si-house"] = houseSender()
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	args := orderArgs()
+	args["senderIdentityId"] = "si-house"
+	args["installationSender"] = true
+	nodes, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0)
+	if err != nil {
+		t.Fatalf("sendOrderMessage: %v", err)
+	}
+	if got := decodeResult(t, nodes); got["sent"] != true {
+		t.Fatalf("result = %+v, want sent", got)
+	}
+	if sender.count() != 1 {
+		t.Fatalf("messages = %d, want one", sender.count())
+	}
+	as := sender.sentAs[0]
+	if bare(as.AccountID) != "self" || as.Address != "noreply@house.example.test" {
+		t.Fatalf("sent as %+v, want the installation's own sender and connection", as)
+	}
+	if sender.sent[0].To != "buyer@example.test" {
+		t.Fatalf("To = %q, want the order's own buyer", sender.sent[0].To)
+	}
+	if sender.sent[0].Headers[headerListUnsubscribe] == "" {
+		t.Error("the buyer was handed no unsubscribe")
+	}
+}
+
+func TestTheInstallationsSenderStillHonoursTheStoresSuppressionList(t *testing.T) {
+	engine := orderSendEngine()
+	engine.senderIdentities["si-house"] = houseSender()
+	engine.suppression = map[string]map[string]any{
+		EmailDigest("buyer@example.test"): {"id": EmailDigest("buyer@example.test"), "reason": "unsubscribed"},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	args := orderArgs()
+	args["senderIdentityId"] = "si-house"
+	args["installationSender"] = true
+	nodes, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeResult(t, nodes); got["skipped"] != true {
+		t.Fatalf("result = %+v, want skipped", got)
+	}
+	if sender.count() != 0 {
+		t.Fatal("a buyer the store's organization suppressed was mailed")
+	}
+}
+
+func TestTheInstallationsSenderIsRefusedUnlessTheJobChoseIt(t *testing.T) {
+	engine := orderSendEngine()
+	engine.senderIdentities["si-house"] = houseSender()
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	args := orderArgs()
+	args["senderIdentityId"] = "si-house"
+	if _, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0); err == nil {
+		t.Fatal("an organization's order mail left from the installation's sender nobody chose")
+	}
+	if sender.count() != 0 {
+		t.Fatal("mail was sent")
+	}
+}
+
+func TestOnlyTheInstallationsSenderMayStandInForAnOrganizations(t *testing.T) {
+	engine := orderSendEngine()
+	other := senderIdentityRow("si-x", "hello@other.example.test", "Other", "active")
+	other["accountId"] = "v1:accounts:account:acct-x"
+	engine.senderIdentities["si-x"] = other
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	args := orderArgs()
+	args["senderIdentityId"] = "si-x"
+	args["installationSender"] = true
+	if _, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0); err == nil {
+		t.Fatal("an organization's order mail left from another organization's mailbox")
+	}
+	if sender.count() != 0 {
+		t.Fatal("mail was sent")
+	}
+}

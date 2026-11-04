@@ -197,7 +197,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		// follow-up, not a thing to approximate.
 	}
 
-	identity, refusal := w.resolveSendIdentity(ctx, campaign)
+	identity, refusal := w.resolveSendIdentityFor(ctx, campaign, opts.orderRecipient != nil && opts.installationSender)
 	if refusal.refused() {
 		err := fmt.Errorf("campaigns.sendToRecipient: %s", refusal.Reason)
 		if !refusal.Terminal {

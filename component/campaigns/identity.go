@@ -113,6 +113,23 @@ func (r identityRefusal) refused() bool { return r.Reason != "" }
 // The send path already holds that context for every other owned read it
 // makes, which is what keeps this from being a new privilege.
 func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign) (resolvedIdentity, identityRefusal) {
+	return w.resolveSendIdentityFor(ownerCtx, campaign, false)
+}
+
+// installationAccount is the organization the installation itself is: the
+// seeded account whose bare id is "self", whose email connection carries the
+// cluster's own mail.
+const installationAccount = "self"
+
+// resolveSendIdentityFor is resolveSendIdentity with one exception a caller
+// must ask for by name. allowInstallation lets an identity of the
+// installation's own organization send for another organization -- an order
+// message whose operator chose the installation's sender because the store's
+// organization has no mailbox of its own (send_order.go). The identity is still
+// NAMED, never inferred; any other organization's identity is still refused;
+// and only the transport moves to the installation's connection. The
+// campaign's organization keeps its suppression list, unsubscribe and ledger.
+func (w *Worker) resolveSendIdentityFor(ownerCtx context.Context, campaign Campaign, allowInstallation bool) (resolvedIdentity, identityRefusal) {
 	// The DEFAULT mailbox. A campaign that names no identity still gets its
 	// own fromName onto the From header (design D6): a SendAs carrying only
 	// a display name means "the configured mailbox, under this name", which
@@ -149,8 +166,12 @@ func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign
 			Terminal: true,
 		}
 	}
+	transport := campaign.AccountID
 	if !sameOrganization(campaign.AccountID, identity.AccountID) {
-		return resolvedIdentity{}, identityRefusal{Reason: "campaign and sending identity must belong to the same organization", Terminal: true}
+		if !allowInstallation || bare(identity.AccountID) != installationAccount {
+			return resolvedIdentity{}, identityRefusal{Reason: "campaign and sending identity must belong to the same organization", Terminal: true}
+		}
+		transport = identity.AccountID
 	}
 	if identity.Disabled() {
 		return resolvedIdentity{}, identityRefusal{
@@ -174,7 +195,7 @@ func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign
 		fromName = strings.TrimSpace(identity.FromName)
 	}
 	return resolvedIdentity{
-		SendAs:  email.SendAs{AccountID: campaign.AccountID, Address: strings.TrimSpace(identity.Address), FromName: fromName},
+		SendAs:  email.SendAs{AccountID: transport, Address: strings.TrimSpace(identity.Address), FromName: fromName},
 		Label:   w.cfg.SendingIdentityFor(identity.Address),
 		ReplyTo: strings.TrimSpace(identity.ReplyTo),
 	}, identityRefusal{}

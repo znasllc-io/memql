@@ -107,7 +107,12 @@ func (w *Worker) handleSendOrderMessage(ctx context.Context, args map[string]any
 	if id := strings.TrimSpace(argString(args, "senderIdentityId")); id != "" {
 		send["senderIdentityId"] = id
 	}
-	return w.sendToRecipientOnce(ctx, send, singleSend{deferWhenLimited: true, orderRecipient: &recipient})
+	// THE INSTALLATION'S SENDER, ONLY WHEN THE JOB SAYS AN OPERATOR CHOSE IT.
+	// An organization with no mailbox of its own may have its order mail
+	// leave from the installation's sender; the identity read decides whether
+	// the one named is that sender, and anything else stays refused.
+	installation, _ := args["installationSender"].(bool)
+	return w.sendToRecipientOnce(ctx, send, singleSend{deferWhenLimited: true, orderRecipient: &recipient, installationSender: installation})
 }
 
 // orderRecipientID is the stable id of the recipient one order entitles: per

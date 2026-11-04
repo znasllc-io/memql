@@ -1273,7 +1273,20 @@ being a way to mail strangers:
   anything is read.
 
 The template fills `{{fields.<key>}}` from the call's `fields` (the product, the
-link, its expiry), and needs the same review and publication as any other.
+link, its expiry), and needs the same review and publication as any other. A
+field may not choose where a template's link goes, so a template writes the
+store's own address and takes the link's parts in its query:
+`https://shop.example.com/reviews/write?product={{fields.productHandle}}&t={{fields.reviewToken}}`.
+
+The send goes out as the `senderIdentityId` the call names, which must belong
+to the store's organization -- with one exception the caller asks for by name.
+When the call also says `installationSender: true`, an identity of the
+installation's own organization (the one whose id is `self`) may stand in for an
+organization with no mailbox of its own. Only the transport moves to the
+installation's connection: the store's organization keeps its suppression list,
+the unsubscribe the buyer gets and the ledger, and any other organization's
+identity is still refused. The reviews pack says it only for the sender a
+store's reviews settings name, which only the cluster's operators can set.
 
 ### Campaigns do not use the transactional outbox
 
