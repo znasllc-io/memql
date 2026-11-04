@@ -67,17 +67,17 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 			return "v1:platform:siteAccessCode", "codeId"
 		case "packageAnalyze", "packageDeploy", "packageCancelDeployment", "packageRollback", "packageArchive", "packageDeactivateDeployable", "packageRestore", "packageSetAutoDeploy":
 			return "v1:platform:package", "packageId"
-		// Review moderation (the reviews pack). An act on one review is asked
-		// about the REVIEW, whose accountId was copied off its site when it was
-		// written; an act on a store's reviews as a whole -- the moderation
-		// list, the settings, the display toggle, issuing a link -- is asked
-		// about the SITE the store is served through, which the pack checks is
-		// bound to that store. Reads stay row-tier queries: a review row is
-		// admitted only to its merchant, its organization's people and the
-		// cluster's owners, so no read crosses an organization.
-		case "reviewsDecide", "reviewsEraseReviewer":
+		// Review moderation (the reviews pack). An act or read on one review is
+		// asked about the REVIEW, whose accountId was copied off its site when
+		// it was written; one on a store's reviews as a whole -- the moderation
+		// list, the decision log, the settings, the display toggle, issuing a
+		// link, the export -- is asked about the SITE the store is served
+		// through, which the pack checks is bound to that store. Beneath the
+		// builtins the rows stay row-tier: a review row is admitted only to its
+		// merchant, its organization's people and the cluster's owners.
+		case "reviewsDecide", "reviewsEraseReviewer", "reviewsGet":
 			return "v1:reviews:review", "reviewId"
-		case "reviewsList", "reviewsUpdateSettings", "reviewsSetPublicDisplay", "reviewsIssueRequest", "reviewsExportStore":
+		case "reviewsList", "reviewsDecisionLog", "reviewsSettings", "reviewsUpdateSettings", "reviewsSetPublicDisplay", "reviewsIssueRequest", "reviewsExportStore":
 			return "v1:platform:site", "siteId"
 		}
 	}

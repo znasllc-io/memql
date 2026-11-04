@@ -137,6 +137,34 @@ builtin reviewsExportStore {
   siteId   string  @required  @description("The store's site: the organization gate judges the export against its organization.")
 }
 
+@requiresCapability("execute", "app:deployables/reviews")
+@executor("integration.reviews.get")
+@args(profile="object")
+@description("One review as the moderation list shows it, its whole decision log newest first, and the acts the caller may take on it now -- the ones the engine would accept, so the admin panel offers no other. The cluster's operators read it and may take none. Read under the caller's own actor.")
+builtin reviewsGet {
+  reviewId  string  @required  @description("The review to read. The organization gate judges the read against the review's organization.")
+}
+
+@requiresCapability("execute", "app:deployables/reviews")
+@executor("integration.reviews.decisionLog")
+@args(profile="object")
+@description("THE DECISION LOG: every decision on one store's reviews, newest first, each with who made it, when, on which revision, why, and the product, headline and current state of its review -- never the writer's name or address. Read under the caller's own actor.")
+builtin reviewsDecisionLog {
+  storeId  string   @required  @description("The store whose log to read.")
+  siteId   string   @required  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  limit    integer  @description("Page size; 50 when omitted, at most 200.")
+  after    string   @description("The cursor the previous page answered as next.")
+}
+
+@requiresCapability("execute", "app:deployables/reviews")
+@executor("integration.reviews.settings")
+@args(profile="object")
+@description("One store's reviews settings with every default applied, whether the store has settings at all, and what the caller may change: a store with none is set up by the cluster's operators, and only the current owner or an operator names who approves removals.")
+builtin reviewsSettings {
+  storeId  string  @required  @description("The store whose settings to read.")
+  siteId   string  @required  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+}
+
 @executor("integration.reviews.notifyModerator")
 @args(profile="object")
 @description("Tell the store's moderator a review is waiting: one email per review revision to the address the store's settings name, with the product and the admin panel's address and no review text or writer data. Called by the store's own automation on a review's create and update events; refuses any call without internal origin.")

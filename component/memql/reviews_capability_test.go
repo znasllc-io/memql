@@ -24,6 +24,11 @@ func TestTheReviewsBuiltinsNameTheirOrganizationTarget(t *testing.T) {
 		"reviewsUpdateSettings":   {"v1:platform:site", "siteId"},
 		"reviewsSetPublicDisplay": {"v1:platform:site", "siteId"},
 		"reviewsIssueRequest":     {"v1:platform:site", "siteId"},
+		"reviewsExportStore":      {"v1:platform:site", "siteId"},
+		"reviewsEraseReviewer":    {"v1:reviews:review", "reviewId"},
+		"reviewsGet":              {"v1:reviews:review", "reviewId"},
+		"reviewsDecisionLog":      {"v1:platform:site", "siteId"},
+		"reviewsSettings":         {"v1:platform:site", "siteId"},
 	} {
 		fn := &Function{Name: name, FunctionKind: "builtin",
 			RequiresCapability: CapabilityRequirement{Verb: auth.VerbExecute, Resource: "app:deployables/reviews"}}

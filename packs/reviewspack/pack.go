@@ -224,6 +224,34 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "get",
+			Description: "One review, its whole decision log and the acts the caller may take on it now.",
+			Handler:     p.get,
+			ArgsSchema: map[string]string{
+				"reviewId": "string (required)",
+			},
+		},
+		{
+			Name:        "decisionLog",
+			Description: "Every decision on one store's reviews, newest first.",
+			Handler:     p.decisionLog,
+			ArgsSchema: map[string]string{
+				"storeId": "string (required)",
+				"siteId":  "string (required) - the store's site, judged by the organization gate",
+				"limit":   "integer (optional) - default 50",
+				"after":   "string (optional) - cursor",
+			},
+		},
+		{
+			Name:        "settings",
+			Description: "One store's reviews settings with defaults applied, and what the caller may change.",
+			Handler:     p.readSettings,
+			ArgsSchema: map[string]string{
+				"storeId": "string (required)",
+				"siteId":  "string (required) - the store's site, judged by the organization gate",
+			},
+		},
+		{
 			Name:        "notifyModerator",
 			Description: "Tell the store's moderator a review is waiting. Internal origin only.",
 			Handler:     p.notifyModerator,
