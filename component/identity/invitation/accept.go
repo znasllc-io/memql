@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/enrolment"
 	"github.com/znasllc-io/memql/component/identity/registration"
@@ -42,6 +43,18 @@ type AcceptDeps struct {
 	// unable to retry because the invitation is single-use. The
 	// implementation logs; an admin fixes a missing membership in one click.
 	PlaceInGroups func(ctx context.Context, userId, email string, groupIds []string, issuedBy string)
+
+	// JoinsOrganization asks D10 again for an invitation whose role is scoped
+	// to an organization: does one of the groups it carries -- `groupIds` --
+	// still make its holder a member of `accountId`? Issue checked that, but
+	// a group can be archived or re-tied before the invitee arrives, and
+	// PlaceInGroups re-reads every group and places nobody in a dead one, so
+	// the person would hold the organization's role outside it.
+	//
+	// A FUNCTION for the reason PlaceInGroups is one: the groups live in
+	// integrations/, which this package must not import. NIL REFUSES every
+	// scoped role, exactly as a nil membership answer refuses one at issue.
+	JoinsOrganization func(ctx context.Context, groupIds []string, accountId string) bool
 }
 
 // AcceptResult is what the accept hands back to the page.
@@ -61,6 +74,12 @@ type AcceptResult struct {
 // that can be spent: unknown, not a user invitation, revoked, already used
 // or expired.
 var ErrNotRedeemable = errors.New("identity: invitation is not redeemable")
+
+// ErrOrganizationNotJoined is returned when the invitation names a role scoped
+// to an organization and none of the groups it carries is still an active
+// group of that organization. Nothing has been written: the invitation stays
+// pending, and whoever invited them can fix the group or issue a new one.
+var ErrOrganizationNotJoined = errors.New("identity: the invitation's role belongs to an organization none of its groups still joins")
 
 const conceptUser = "v1:identity:user"
 
@@ -115,6 +134,18 @@ func Accept(ctx context.Context, deps AcceptDeps, plainToken, sourceIP string) (
 	role := strings.TrimSpace(row.Role)
 	if role == "" && internal {
 		role = deps.InternalDefaultRole
+	}
+
+	// D10, AGAIN, BEFORE ANYTHING IS WRITTEN. A scoped role is holdable only
+	// by a member of its organization, and the membership comes from the
+	// groups this invitation carries. Refusing here writes nothing, so the
+	// invitation is still pending and nobody holds a role outside its
+	// organization; refusing after the user write would strand a half-made
+	// account behind a spent invitation.
+	if scope := auth.RoleAccountScope(auth.Role(role)); scope != "" {
+		if deps.JoinsOrganization == nil || !deps.JoinsOrganization(ctx, row.GroupIds, scope) {
+			return AcceptResult{}, ErrOrganizationNotJoined
+		}
 	}
 	seed := identity.UserProfileSeed{
 		// Stamped at creation for the reason memql#4304 gives: the flag

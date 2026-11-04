@@ -693,6 +693,7 @@ func (a *App) integrationsIdentity() {
 				InternalEmail:       policy.IsInternalEmail,
 				InternalDefaultRole: policy.InternalDefaultRole,
 				PlaceInGroups:       placer.placeInvitedUser,
+				JoinsOrganization:   placer.invitationJoinsOrganization,
 			}, plainToken, sourceIP)
 			if err != nil {
 				return identityweb.InvitationAcceptResult{}, err

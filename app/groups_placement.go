@@ -88,6 +88,35 @@ func (p *groupPlacer) placeInvitedUser(ctx context.Context, userId, email string
 	p.applyDomainJoin(ctx, userId, email, true)
 }
 
+// invitationJoinsOrganization answers D10 again when an invitation whose role
+// is scoped to `accountId` is accepted: is one of the groups it carries still
+// an active group of that organization? It runs BEFORE the account is
+// written, so a "no" leaves nothing behind.
+//
+// UNLIKE PLACEMENT, THIS IS A JUDGEMENT, and that is why it may fail the
+// arrival where placement may not: placing somebody in a dead group is a
+// membership an admin adds in one click, while a role held outside its
+// organization is the state D10 exists to prevent. An unreadable group is a
+// "no" for the same reason.
+func (p *groupPlacer) invitationJoinsOrganization(ctx context.Context, groupIds []string, accountId string) bool {
+	if p == nil || p.groups == nil {
+		return false
+	}
+	readCtx := auth.ContextWithInternalOrigin(groups.SystemActorContext(ctx))
+	for _, groupId := range groupIds {
+		joins, err := p.groups.GroupJoinsOrganization(readCtx, groupId, accountId)
+		if err != nil {
+			p.warn("could not read an invitation's group, so its scoped role was refused",
+				"group", groupId, "organization", accountId, "error", err.Error())
+			return false
+		}
+		if joins {
+			return true
+		}
+	}
+	return false
+}
+
 // placeFirstSignIn applies domain join to somebody arriving without an
 // invitation.
 //

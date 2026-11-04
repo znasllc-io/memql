@@ -154,3 +154,27 @@ func (i *Integration) PlaceInvitedMember(ctx context.Context, groupID, userID, i
 		Status:  StatusActive,
 	}, memql.BareShortId(strings.TrimSpace(issuedBy)), "")
 }
+
+// GroupJoinsOrganization reports whether a membership of `groupID` makes a
+// person a member of organization `accountID`: the group exists, is ACTIVE,
+// and is tied to that organization. It is D10 asked again when an invitation
+// carrying a role scoped to `accountID` is accepted, because the group was
+// judged at issue and may have been archived, or re-tied, since.
+//
+// An unreadable group is an ERROR rather than a "no", so the caller decides;
+// the acceptance seam refuses on either.
+func (i *Integration) GroupJoinsOrganization(ctx context.Context, groupID, accountID string) (bool, error) {
+	if i == nil || i.store == nil {
+		return false, nil
+	}
+	groupID = memql.BareShortId(strings.TrimSpace(groupID))
+	accountID = memql.BareShortId(strings.TrimSpace(accountID))
+	if groupID == "" || accountID == "" {
+		return false, nil
+	}
+	group, err := i.store.GroupByID(ctx, groupID)
+	if err != nil {
+		return false, err
+	}
+	return group != nil && group.Status == StatusActive && memql.BareShortId(group.AccountID) == accountID, nil
+}
