@@ -82,7 +82,7 @@ func (p *Provider) sendDueRequests(ctx context.Context, args map[string]any, _ i
 		return nil, err
 	}
 	now := p.clock()
-	tally := map[string]int{"stores": 0, "considered": 0, "sent": 0, "skipped": 0, "pending": 0, "failed": 0}
+	tally := map[string]int{"stores": 0, "considered": 0, "sent": 0, "skipped": 0, "pending": 0, "failed": 0, "ambiguous": 0}
 	for _, settings := range settingsRows {
 		eff := EffectiveSettings(settings)
 		storeID := strings.TrimSpace(asString(settings["storeId"]))
@@ -90,7 +90,11 @@ func (p *Provider) sendDueRequests(ctx context.Context, args map[string]any, _ i
 		if storeID == "" || (only != "" && storeID != only) || !eff.RequestsEnabled || eff.RequestTemplateID == "" || accountID == "" {
 			continue
 		}
-		site := p.servingSite(sys, storeID, accountID)
+		site, ambiguous := p.servingSite(sys, storeID, accountID)
+		if ambiguous {
+			tally["ambiguous"]++
+			continue
+		}
 		if site == nil {
 			continue
 		}
@@ -205,25 +209,69 @@ func (p *Provider) askOrder(ctx, sys context.Context, site, settings map[string]
 	}
 }
 
-// servingSite is the site of the store's organization that SERVES the store:
-// its owner writes the requests, and its address is the link's.
-func (p *Provider) servingSite(sys context.Context, storeID, accountID string) map[string]any {
+// servingSite is the ONE live site of the store's organization that serves
+// the store: its address is the link's, and its owner writes the requests.
+//
+// It is chosen strictly, because both of those are authority. The serving
+// binding must name the store (a preview binding never makes a store a
+// site's), the site must be the organization's and live, and an id must be
+// of the right concept in either spelling -- a slug that only looks like the
+// store's or the organization's is not theirs. Two live sites serving one
+// store is a choice this job cannot make, so it answers ambiguous and the
+// store is skipped until one remains.
+func (p *Provider) servingSite(sys context.Context, storeID, accountID string) (map[string]any, bool) {
 	bare := bareAccount(storeID)
-	rows, err := p.reader.RowsWithList(sys, "sitesBoundToStore", map[string]string{}, "storeIds", []string{storeID, bare, "v1:shopify:store:" + bare})
+	rows, err := p.reader.RowsWithList(sys, "sitesBoundToStore", map[string]string{}, "storeIds", []string{storeID, bare, storePrefix + bare})
 	if err != nil {
-		return nil
+		return nil, false
 	}
+	var found map[string]any
 	for _, site := range rows {
 		b, _ := site["binding"].(map[string]any)
-		if bareAccount(asString(b["storeId"])) != bare || bareAccount(asString(site["accountId"])) != bareAccount(accountID) {
+		if !sameIn(storePrefix, asString(b["storeId"]), storeID) || !sameIn(accountPrefix, asString(site["accountId"]), accountID) {
+			continue
+		}
+		if strings.TrimSpace(asString(site["status"])) != "live" {
 			continue
 		}
 		if strings.TrimSpace(asString(site["ownerUserId"])) == "" || strings.TrimSpace(asString(site["hostname"])) == "" {
 			continue
 		}
-		return site
+		if found != nil {
+			return nil, true
+		}
+		found = site
 	}
-	return nil
+	return found, false
+}
+
+const (
+	storePrefix   = "v1:shopify:store:"
+	accountPrefix = "v1:accounts:account:"
+)
+
+// sameIn reports whether two ids name the same row of one concept. Either may
+// be written bare or canonically; an id of any other concept names no row of
+// this one, whatever its slug.
+func sameIn(prefix, a, b string) bool {
+	ca, cb := canonicalIn(prefix, a), canonicalIn(prefix, b)
+	return ca != "" && ca == cb
+}
+
+func canonicalIn(prefix, id string) string {
+	id = strings.TrimSpace(id)
+	switch {
+	case id == "":
+		return ""
+	case strings.HasPrefix(id, prefix):
+		if id == prefix {
+			return ""
+		}
+		return id
+	case strings.Contains(id, ":"):
+		return ""
+	}
+	return prefix + id
 }
 
 func setIfPresentAny(m map[string]any, key, value string) {

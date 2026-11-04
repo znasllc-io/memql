@@ -196,3 +196,84 @@ func TestTheDailyAskRefusesAClient(t *testing.T) {
 		t.Fatal("a refused call did something")
 	}
 }
+
+// THE LINK GOES TO THE ONE LIVE SITE THAT SERVES THE STORE. The site is the
+// link's address and the authority each request is written under, so it is
+// chosen strictly: a serving binding (a preview binding never makes a store a
+// site's), the store's organization, a site that is live, and ids of the
+// right concept in either spelling -- a slug that only LOOKS like the store's
+// or the organization's is not theirs. Two live sites serving one store is
+// not a choice the job can make: the store is skipped and the receipt counts
+// it, so a person decides.
+func TestTheLinkGoesToTheOneLiveSiteThatServesTheStore(t *testing.T) {
+	site := func(id string, change func(map[string]any)) map[string]any {
+		s := map[string]any{}
+		for k, v := range liveSite {
+			s[k] = v
+		}
+		s["id"], s["hostname"] = id, id+".example.com"
+		if change != nil {
+			change(s)
+		}
+		return s
+	}
+	status := func(v string) func(map[string]any) { return func(s map[string]any) { s["status"] = v } }
+	cases := []struct {
+		name      string
+		sites     []map[string]any
+		host      string // the link's host; empty means nothing is asked
+		ambiguous int
+	}{
+		{"the store's live site", []map[string]any{site("live", nil)}, "live.example.com", 0},
+		{"a preview binding does not serve the store", []map[string]any{site("preview", func(s map[string]any) {
+			s["binding"] = map[string]any{"storeId": "store-other"}
+			s["previewBinding"] = map[string]any{"storeId": "store-live"}
+		})}, "", 0},
+		{"a draft site", []map[string]any{site("draft", status("draft"))}, "", 0},
+		{"a disabled site", []map[string]any{site("paused", status("disabled"))}, "", 0},
+		{"an archived site", []map[string]any{site("gone", status("archived"))}, "", 0},
+		{"a site with no status", []map[string]any{site("unset", func(s map[string]any) { delete(s, "status") })}, "", 0},
+		{"another organization's site", []map[string]any{site("theirs", func(s map[string]any) { s["accountId"] = "acct-other" })}, "", 0},
+		{"another concept's id carrying the store's slug", []map[string]any{site("lookalike", func(s map[string]any) {
+			s["binding"] = map[string]any{"storeId": "v1:shopify:product:store-live"}
+		})}, "", 0},
+		{"another concept's id carrying the organization's slug", []map[string]any{site("lookalike", func(s map[string]any) {
+			s["accountId"] = "v1:identity:user:acct-shop"
+		})}, "", 0},
+		{"the canonical spellings", []map[string]any{site("canonical", func(s map[string]any) {
+			s["binding"] = map[string]any{"storeId": "v1:shopify:store:store-live"}
+			s["accountId"] = "v1:accounts:account:acct-shop"
+		})}, "canonical.example.com", 0},
+		{"one live site among others that are not", []map[string]any{
+			site("draft", status("draft")), site("live", nil), site("gone", status("archived")),
+		}, "live.example.com", 0},
+		{"two live sites", []map[string]any{site("one", nil), site("two", nil)}, "", 1},
+	}
+	for _, c := range cases {
+		r, w, m, p := dueFixture()
+		r.sites = c.sites
+		nodes, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		var summary map[string]any
+		_ = json.Unmarshal(nodes[0].Payload, &summary)
+		if got := summary["ambiguous"]; got != float64(c.ambiguous) {
+			t.Errorf("%s: receipt ambiguous = %v, want %d", c.name, got, c.ambiguous)
+		}
+		if c.host == "" {
+			if len(m.calls) != 0 || len(w.calls) != 0 {
+				t.Errorf("%s: the store was asked (%d mails, %d writes)", c.name, len(m.calls), len(w.calls))
+			}
+			continue
+		}
+		if len(m.calls) != 1 {
+			t.Errorf("%s: mails = %d, want one", c.name, len(m.calls))
+			continue
+		}
+		fields, _ := m.calls[0]["fields"].(map[string]any)
+		if url, _ := fields["reviewUrl"].(string); !strings.HasPrefix(url, "https://"+c.host+"/reviews/write?") {
+			t.Errorf("%s: link = %q, want it on %s", c.name, url, c.host)
+		}
+	}
+}

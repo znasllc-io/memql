@@ -29,7 +29,7 @@ type decideReader struct {
 // Like a real storefront it carries two bindings: the live store it serves and
 // the development store a candidate is previewed against.
 var liveSite = map[string]any{"id": "site-1", "ownerUserId": "merchant-1", "accountId": "acct-shop",
-	"hostname": "shop.example.com", "binding": map[string]any{"storeId": "store-live"},
+	"hostname": "shop.example.com", "status": "live", "binding": map[string]any{"storeId": "store-live"},
 	"previewBinding": map[string]any{"storeId": "store-dev"}}
 
 func operatorCtxFor(userID string) context.Context {
