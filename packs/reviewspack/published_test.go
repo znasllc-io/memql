@@ -271,8 +271,11 @@ func TestTheDeclaredShopperSurfaceIsExactlyThreeRoutes(t *testing.T) {
 	if memql.ShopperReadFor(Domain, "published") == nil {
 		t.Fatal("the published read must be declared")
 	}
-	if draft := memql.ShopperReadFor(Domain, "draft"); draft == nil || draft.Construct != "reviewsDraftForLink" {
-		t.Fatal("the draft read must be declared")
+	if draft := memql.ShopperReadFor(Domain, "draft"); draft == nil || draft.Construct != "reviewsDraftForLink" || !draft.Private {
+		t.Fatal("the draft read must be declared, and private: its answer is one buyer's own review")
+	}
+	if memql.ShopperReadFor(Domain, "published").Private {
+		t.Fatal("the published read is the same for everyone and must stay cacheable")
 	}
 	// NOTHING ELSE. createReview, setReviewDisplay, the moderation
 	// capability and the merchant's own lists stay unreachable.

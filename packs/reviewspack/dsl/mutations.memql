@@ -134,10 +134,11 @@ mutation reviewDecision appendReviewDecision {
     reason       string   @enum("spam_or_advertising", "profanity", "harassing_or_obscene", "discriminatory", "personal_information", "defamatory", "false_or_dangerous", "believed_fake", "unrelated", "confidential", "undisclosed_connection", "reviewer_request")
     note         string   @maxLength(4000)
     revision     int!
+    contentHash  string   @maxLength(64)
     decidedBy    string!
   }
   insert {
-    accept { ownerUserId, reviewId, storeId, accountId, action, reason, note, revision, decidedBy }
+    accept { ownerUserId, reviewId, storeId, accountId, action, reason, note, revision, contentHash, decidedBy }
     stamp {
       id: args.decisionId
     }

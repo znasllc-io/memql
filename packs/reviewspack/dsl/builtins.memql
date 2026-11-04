@@ -46,7 +46,8 @@ builtin reviewsDecide {
   action    string   @required  @description("publish, decline, askToFix, escalate or remove.")
   reason    string   @description("One of the listed reasons; required for decline, askToFix and remove (which also takes reviewer_request).")
   note      string   @description("Optional note.")
-  revision  integer  @required  @description("The revision the person deciding was reading.")
+  revision     integer  @required  @description("The revision the person deciding was reading.")
+  contentHash  string   @description("The fingerprint of the words they were reading, as reviewsList answers it. Recommended: two edits sent at once can arrive as one revision, and with it a decision is refused when the words changed.")
 }
 
 @executor("integration.reviews.updateSettings")

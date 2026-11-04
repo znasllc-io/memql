@@ -211,15 +211,15 @@ func (p *Provider) openLink(ctx context.Context, storeID, token, productHandle s
 		if err != nil {
 			return nil, err
 		}
-		lk.state = StateOf(asInt(lk.review["revision"]), decisions)
+		lk.state = StateOf(VersionOf(lk.review), decisions)
 		switch lk.state {
 		case StatePublished, StateRemoved, StateErased:
 			return nil, refuse(RefusalLinkUsed, "the review is "+string(lk.state)+" and can no longer change")
 		}
 	}
-	expires, err := time.Parse(time.RFC3339Nano, asString(req["expiresAt"]))
-	if err != nil || !p.clock().Before(expires) {
-		return nil, refuse(RefusalLinkExpired, "the link expired at "+asString(req["expiresAt"]))
+	expires := asTime(req["expiresAt"])
+	if expires.IsZero() || !p.clock().Before(expires) {
+		return nil, refuse(RefusalLinkExpired, "the link expired at "+timeText(req["expiresAt"]))
 	}
 	return lk, nil
 }
@@ -276,7 +276,7 @@ func (p *Provider) draftForLink(ctx context.Context, args map[string]any, _ int)
 	body := map[string]any{
 		"state":         "new",
 		"productHandle": strings.TrimSpace(asString(lk.request["productHandle"])),
-		"expiresAt":     asString(lk.request["expiresAt"]),
+		"expiresAt":     timeText(lk.request["expiresAt"]),
 	}
 	if lk.review != nil {
 		body["state"] = string(lk.state)

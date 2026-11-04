@@ -101,7 +101,15 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 	if queue["total"] != float64(1) {
 		t.Fatalf("the queue holds %v reviews, want the one waiting", queue["total"])
 	}
-	reviewID := queue["reviews"].([]any)[0].(map[string]any)["id"].(string)
+	queued := queue["reviews"].([]any)[0].(map[string]any)
+	reviewID := queued["id"].(string)
+	contentHash, _ := queued["contentHash"].(string)
+	if contentHash == "" {
+		t.Fatal("the queue carries no fingerprint of the words it lists")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, asText(queued["createdAt"])); err != nil {
+		t.Fatalf("the queue's createdAt %v is not ISO text: %v", queued["createdAt"], err)
+	}
 
 	// ---- PROOF 3 ------------------------------------------------------------
 	if _, err := eng.Execute(asPerson(staff, auth.RoleOwner),
@@ -111,12 +119,20 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 
 	// ---- PROOF 2 ------------------------------------------------------------
 	if _, err := eng.Execute(asPerson(merchant, auth.Role("user")),
-		`builtin reviewsDecide(reviewId: `+quote(reviewID)+`, action: "publish", revision: 1)`); err != nil {
+		`builtin reviewsDecide(reviewId: `+quote(reviewID)+`, action: "publish", revision: 1, contentHash: "0000")`); err == nil {
+		t.Fatal("a publish naming words the review does not hold was recorded")
+	}
+	if _, err := eng.Execute(asPerson(merchant, auth.Role("user")),
+		`builtin reviewsDecide(reviewId: `+quote(reviewID)+`, action: "publish", revision: 1, contentHash: `+quote(contentHash)+`)`); err != nil {
 		t.Fatalf("the store's person could not publish: %v", err)
 	}
 	shown := read()
 	if shown["count"] != float64(1) {
 		t.Fatalf("after a publish the public read shows %v reviews, want 1", shown["count"])
+	}
+	first := shown["reviews"].([]any)[0].(map[string]any)
+	if _, err := time.Parse(time.RFC3339Nano, asText(first["createdAt"])); err != nil {
+		t.Fatalf("the public read's createdAt %v is not ISO text a browser parses: %v", first["createdAt"], err)
 	}
 	summary, _ := shown["summary"].(map[string]any)
 	if summary == nil || summary["average"] != float64(5) || summary["reviewCount"] != float64(1) {
@@ -158,4 +174,9 @@ func TestLiveE2E_NoClientWritesSettingsOrDecisionsDirectly(t *testing.T) {
 	if rows := rowsOf(t, eng, client, `query reviewDecisionsForReview(reviewId: "r-direct")`); len(rows) != 0 {
 		t.Fatalf("a client recorded a decision directly, around reviewsDecide: %v", rows)
 	}
+}
+
+func asText(v any) string {
+	s, _ := v.(string)
+	return s
 }

@@ -422,6 +422,12 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A PRIVATE READ is never cached and leaks no referrer, whatever it
+	// answers -- set before the first byte, so refusals carry it too.
+	if read.Private {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+	}
 	args, bad := shopperArgs(read.Fields, r.URL.Query().Get)
 	if bad != "" {
 		writeShopperJSONError(w, http.StatusBadRequest, shopperReasonInvalid)
@@ -454,7 +460,9 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 	// while because a storefront renders it on every product page, and it is
 	// explicitly not private: nothing here is per-visitor, because there is
 	// no visitor identity in the first place.
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	if !read.Private {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// ExecuteResult keeps its output private: encoding the wrapper would
 	// expose engine bookkeeping and omit the actual rows. Materialize the

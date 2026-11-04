@@ -97,7 +97,7 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 		if id == "" {
 			continue
 		}
-		state := StateOf(asInt(row["revision"]), decisions[canonicalReviewID(id)])
+		state := StateOf(VersionOf(row), decisions[canonicalReviewID(id)])
 		if want != "all" && string(state) != want {
 			continue
 		}
@@ -106,12 +106,17 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			out[k] = v
 		}
 		out["state"] = string(state)
+		// The fingerprint of the words listed: a moderator's decision names it
+		// back, so it applies to the words they read and no others.
+		out["contentHash"] = contentHashOf(row)
+		if t := timeText(row["createdAt"]); t != "" {
+			out["createdAt"] = t
+		}
 		if last := lastDecision(decisions[canonicalReviewID(id)]); last != nil {
 			out["lastDecision"] = last
 		}
 		out["decisionCount"] = len(decisions[canonicalReviewID(id)])
-		at, _ := time.Parse(time.RFC3339Nano, asString(row["createdAt"]))
-		matched = append(matched, entry{row: out, at: at})
+		matched = append(matched, entry{row: out, at: asTime(row["createdAt"])})
 	}
 	oldestFirst := want == string(StateWaiting)
 	sort.SliceStable(matched, func(i, j int) bool {

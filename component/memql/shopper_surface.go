@@ -280,7 +280,13 @@ type ShopperRead struct {
 	Fields []ShopperField
 	// Refusals are the codes this read's construct may refuse with by name,
 	// answered as {"error": code}; see ShopperForm.Refusals.
-	Refusals    []string
+	Refusals []string
+	// Private marks a read whose answer depends on a secret argument (a review
+	// link's token) rather than being the same for everyone. It is answered
+	// Cache-Control: no-store and Referrer-Policy: no-referrer, refusals
+	// included: a shared cache must not keep one person's answer, and the
+	// secret must not leave in a Referer.
+	Private     bool
 	Description string
 }
 

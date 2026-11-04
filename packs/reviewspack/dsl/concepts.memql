@@ -75,6 +75,7 @@ concept reviewDecision {
   reason     enum("spam_or_advertising", "profanity", "harassing_or_obscene", "discriminatory", "personal_information", "defamatory", "false_or_dangerous", "believed_fake", "unrelated", "confidential", "undisclosed_connection", "reviewer_request")  @description("Required for decline, askToFix and remove; absent otherwise. The closed set tracks the reasons the FTC's rule on consumer reviews allows a business to withhold a review for, plus spam, profanity and an undisclosed connection; reviewer_request is for a removal only. A rating or a sentiment is never a reason.")
   note       string   @description("Optional note from the person deciding: why, whom a safety concern went to, what the writer was asked to change.")
   revision   int!     @description("The review revision this decision was made on. It covers that revision and no other.")
+  contentHash  string  @description("Fingerprint of the words the decision was made on -- headline, text, rating and name. Two edits sent at once can both arrive as one revision; a publish covers only the words it fingerprinted. Empty on a decision recorded before fingerprints, which covers its revision.")
   decidedBy  string!  @description("v1:identity:user.id of the person who decided, read from the caller, never an argument.")
 }
 

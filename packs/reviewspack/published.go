@@ -164,7 +164,7 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 		if _, isHidden := hidden[id]; isHidden {
 			continue
 		}
-		if StateOf(asInt(row["revision"]), decisions[canonicalReviewID(id)]) != StatePublished {
+		if StateOf(VersionOf(row), decisions[canonicalReviewID(id)]) != StatePublished {
 			continue
 		}
 		verified, _ := row["verifiedBuyer"].(bool)
@@ -175,8 +175,8 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 			Body:            asString(row["body"]),
 			Rating:          asRating(row["rating"]),
 			AuthorName:      asString(row["authorName"]),
-			CreatedAt:       asString(row["createdAt"]),
-			CreatedAtClient: asString(row["createdAtClient"]),
+			CreatedAt:       timeText(row["createdAt"]),
+			CreatedAtClient: timeText(row["createdAtClient"]),
 			VerifiedBuyer:   verified,
 		})
 	}
@@ -184,9 +184,7 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 	// because a sorted query carries the implicit row cap. createdAt is the
 	// version clock, so an edit that was published reads at its own time.
 	sort.SliceStable(shown, func(i, j int) bool {
-		ti, _ := time.Parse(time.RFC3339Nano, shown[i].CreatedAt)
-		tj, _ := time.Parse(time.RFC3339Nano, shown[j].CreatedAt)
-		return ti.After(tj)
+		return asTime(shown[i].CreatedAt).After(asTime(shown[j].CreatedAt))
 	})
 	// SCORED BEFORE THE PAGE IS CUT, so the summary is over every shown
 	// review and the list is the newest `limit` of them.
@@ -231,16 +229,16 @@ func canonicalReviewIDs(ids []string) []string {
 // decisionFromRow reads one reviewDecision row as the reviewDecisionFull shape
 // projects it.
 func decisionFromRow(row map[string]any) Decision {
-	at, _ := time.Parse(time.RFC3339Nano, asString(row["createdAt"]))
 	return Decision{
-		ID:        asString(row["id"]),
-		ReviewID:  canonicalReviewID(asString(row["reviewId"])),
-		Action:    asString(row["action"]),
-		Reason:    asString(row["reason"]),
-		Note:      asString(row["note"]),
-		Revision:  asInt(row["revision"]),
-		DecidedBy: asString(row["decidedBy"]),
-		At:        at,
+		ID:          asString(row["id"]),
+		ReviewID:    canonicalReviewID(asString(row["reviewId"])),
+		Action:      asString(row["action"]),
+		Reason:      asString(row["reason"]),
+		Note:        asString(row["note"]),
+		Revision:    asInt(row["revision"]),
+		ContentHash: asString(row["contentHash"]),
+		DecidedBy:   asString(row["decidedBy"]),
+		At:          asTime(row["createdAt"]),
 	}
 }
 

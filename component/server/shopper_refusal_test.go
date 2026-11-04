@@ -88,3 +88,56 @@ func TestAReadAnswersADeclaredRefusalAsJSON(t *testing.T) {
 		t.Fatalf("body = %s, want {\"error\":\"link_used\"}", rec.Body.String())
 	}
 }
+
+// A READ THAT ANSWERS PER SECRET IS NEVER CACHED. The draft read's answer is
+// one buyer's own review, keyed by the token in their link: a shared cache
+// must not keep it, a stale copy would show old words right after an edit,
+// and the link must not leak through a Referer. The published read is the
+// same for everyone and stays cacheable.
+func TestAPrivateReadIsNeverCachedAndLeaksNoReferrer(t *testing.T) {
+	t.Cleanup(memql.ResetShopperSurfaceForTest)
+	memql.ResetShopperSurfaceForTest()
+	memql.RegisterShopperRead(memql.ShopperRead{
+		Pack: "reviews", Name: "draft", Construct: "reviewsDraftForLink", Kind: memql.ShopperReadKindBuiltin,
+		Fields:  []memql.ShopperField{{Name: "requestToken", Required: true, MaxLength: 200}},
+		Private: true,
+	})
+	memql.RegisterShopperRead(memql.ShopperRead{
+		Pack: "reviews", Name: "published", Construct: "reviewsPublishedForProduct", Kind: memql.ShopperReadKindBuiltin,
+		Fields: []memql.ShopperField{{Name: "productHandle", Required: true, MaxLength: 200}},
+	})
+	sites := &shopperFakeSites{owner: "user-merchant",
+		site: &ShopperSite{ID: "site1", ShopperForms: true, StoreID: "store-live"}}
+	h := NewShopperHandler(&shopperRecordingExecutor{}, sites, nil)
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for k, v := range goodStamp() {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	draft := get("/reads/reviews/draft?requestToken=t0k3n")
+	if cc := draft.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("draft Cache-Control = %q, want no-store", cc)
+	}
+	if rp := draft.Header().Get("Referrer-Policy"); rp != "no-referrer" {
+		t.Fatalf("draft Referrer-Policy = %q, want no-referrer", rp)
+	}
+	if cc := get("/reads/reviews/published?productHandle=boot").Header().Get("Cache-Control"); cc != "public, max-age=60" {
+		t.Fatalf("published Cache-Control = %q, want it still cacheable", cc)
+	}
+	// A refusal from a private read is not cached either.
+	ex := &shopperRecordingExecutor{err: memql.NewShopperRefusal("link_used", "x")}
+	memql.ResetShopperSurfaceForTest()
+	memql.RegisterShopperRead(memql.ShopperRead{
+		Pack: "reviews", Name: "draft", Construct: "reviewsDraftForLink", Kind: memql.ShopperReadKindBuiltin,
+		Fields: []memql.ShopperField{{Name: "requestToken", Required: true, MaxLength: 200}},
+		Private: true, Refusals: []string{"link_used"},
+	})
+	h = NewShopperHandler(ex, sites, nil)
+	if cc := get("/reads/reviews/draft?requestToken=t0k3n").Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("a private read's refusal Cache-Control = %q, want no-store", cc)
+	}
+}

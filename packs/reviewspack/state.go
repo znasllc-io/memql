@@ -1,6 +1,9 @@
 package reviewspack
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -86,14 +89,93 @@ var States = []State{StateWaiting, StatePublished, StateDeclined, StateRemoved, 
 
 // Decision is one row of the log, as the lifecycle reads it.
 type Decision struct {
-	ID        string
-	ReviewID  string
-	Action    string
-	Reason    string
-	Note      string
-	Revision  int
-	DecidedBy string
-	At        time.Time
+	ID       string
+	ReviewID string
+	Action   string
+	Reason   string
+	Note     string
+	Revision int
+	// ContentHash is the fingerprint of the words the decision was made on
+	// (contentHashOf). Empty on a decision recorded before fingerprints, which
+	// covers its revision as it always did.
+	ContentHash string
+	DecidedBy   string
+	At          time.Time
+}
+
+// ReviewVersion is what a decision must match to cover a review: the
+// revision it holds and the fingerprint of its words.
+type ReviewVersion struct {
+	Revision    int
+	ContentHash string
+}
+
+// VersionOf reads a review row's version.
+func VersionOf(row map[string]any) ReviewVersion {
+	return ReviewVersion{Revision: asInt(row["revision"]), ContentHash: contentHashOf(row)}
+}
+
+// contentHashOf fingerprints the WORDS of a review -- headline, text, rating
+// and name -- and nothing else, so a rewrite that changes no word (a field
+// added, a version re-stamped) keeps it, and two different texts that both
+// arrived as one revision number never share it.
+func contentHashOf(row map[string]any) string {
+	words := struct {
+		Title  string `json:"t"`
+		Body   string `json:"b"`
+		Rating int    `json:"r"`
+		Name   string `json:"a"`
+	}{
+		Title:  strings.TrimSpace(asString(row["title"])),
+		Body:   strings.TrimSpace(asString(row["body"])),
+		Rating: asRating(row["rating"]),
+		Name:   strings.TrimSpace(asString(row["authorName"])),
+	}
+	raw, _ := json.Marshal(words)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+// covers reports whether a publish or decline covers a review's current
+// version: the same revision, and the same words when the decision recorded
+// them.
+func covers(d Decision, current ReviewVersion) bool {
+	if revisionOf(d.Revision) != revisionOf(current.Revision) {
+		return false
+	}
+	return d.ContentHash == "" || current.ContentHash == "" || d.ContentHash == current.ContentHash
+}
+
+// asTime reads a time off a row whether the engine answers a time value or
+// text: a row's createdAt comes back as a time.Time, a payload datetime as
+// RFC 3339 text. Unreadable is zero.
+func asTime(v any) time.Time {
+	switch t := v.(type) {
+	case time.Time:
+		return t.UTC()
+	case *time.Time:
+		if t == nil {
+			return time.Time{}
+		}
+		return t.UTC()
+	case string:
+		s := strings.TrimSpace(t)
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05.999999999-07:00", "2006-01-02T15:04:05.999999999"} {
+			if parsed, err := time.Parse(layout, s); err == nil {
+				return parsed.UTC()
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// timeText is a time as ISO text a browser parses, or "" when unreadable.
+func timeText(v any) string {
+	t := asTime(v)
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
 }
 
 // revisionOf normalizes a revision: a row written before revisions existed
@@ -114,9 +196,8 @@ func changesState(action string) bool {
 	return false
 }
 
-// StateOf derives a review's state from its decisions and its current revision.
-func StateOf(currentRevision int, decisions []Decision) State {
-	current := revisionOf(currentRevision)
+// StateOf derives a review's state from its decisions and its current version.
+func StateOf(current ReviewVersion, decisions []Decision) State {
 	var latest *Decision
 	ordered := append([]Decision(nil), decisions...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -141,11 +222,11 @@ func StateOf(currentRevision int, decisions []Decision) State {
 	case ActionRemove:
 		return StateRemoved
 	case ActionPublish:
-		if revisionOf(latest.Revision) == current {
+		if covers(*latest, current) {
 			return StatePublished
 		}
 	case ActionDecline:
-		if revisionOf(latest.Revision) == current {
+		if covers(*latest, current) {
 			return StateDeclined
 		}
 	}

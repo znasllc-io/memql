@@ -79,6 +79,7 @@ shape reviewDecision reviewDecisionFull {
   reason
   note
   revision
+  contentHash
   decidedBy
   row.createdAt
 }

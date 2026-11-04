@@ -60,9 +60,17 @@ func (p *Provider) decide(ctx context.Context, args map[string]any, _ int) ([]me
 	if err != nil {
 		return nil, err
 	}
-	current := revisionOf(asInt(review["revision"]))
+	version := VersionOf(review)
+	current := revisionOf(version.Revision)
 	if seen := asInt(args["revision"]); revisionOf(seen) != current {
 		return nil, fmt.Errorf("reviews: the review changed while it was open (now revision %d); read it again before deciding", current)
+	}
+	// THE WORDS, NOT ONLY THEIR NUMBER: two edits sent at once can both
+	// arrive as one revision, so a caller names the fingerprint of the words
+	// it showed (reviewsList answers it), and a decision on words the review
+	// no longer holds is refused.
+	if seen := strings.TrimSpace(asString(args["contentHash"])); seen != "" && seen != version.ContentHash {
+		return nil, fmt.Errorf("reviews: the review's words changed while it was open; read it again before deciding")
 	}
 	storeID := strings.TrimSpace(asString(review["storeId"]))
 	// THE ROW BELONGS TO THE REVIEW'S MERCHANT, not to the person deciding:
@@ -80,7 +88,7 @@ func (p *Provider) decide(ctx context.Context, args map[string]any, _ int) ([]me
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateDecision(action, reason, StateOf(current, decisions), approver); err != nil {
+	if err := ValidateDecision(action, reason, StateOf(version, decisions), approver); err != nil {
 		return nil, err
 	}
 
@@ -93,6 +101,7 @@ func (p *Provider) decide(ctx context.Context, args map[string]any, _ int) ([]me
 		"storeId":     storeID,
 		"action":      action,
 		"revision":    current,
+		"contentHash": version.ContentHash,
 		"decidedBy":   decidedBy,
 	}
 	// OPTIONAL FIELDS ARE SENT ONLY WITH SOMETHING IN THEM: the mutation
@@ -103,7 +112,7 @@ func (p *Provider) decide(ctx context.Context, args map[string]any, _ int) ([]me
 	if err := p.writer.Write(ctx, "appendReviewDecision", write); err != nil {
 		return nil, err
 	}
-	next := StateOf(current, append(decisions, Decision{ID: decisionID, Action: action, Revision: current, At: now}))
+	next := StateOf(version, append(decisions, Decision{ID: decisionID, Action: action, Revision: current, ContentHash: version.ContentHash, At: now}))
 	return receipt("v1:reviews:decided", decisionID, map[string]any{
 		"decisionId": decisionID, "reviewId": reviewID, "action": action, "state": string(next),
 	})

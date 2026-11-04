@@ -5579,6 +5579,7 @@
       "fields": [
         "accountId",
         "action",
+        "contentHash",
         "decidedBy",
         "note",
         "ownerUserId",

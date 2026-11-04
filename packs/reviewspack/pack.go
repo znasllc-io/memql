@@ -121,11 +121,12 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"on the revision the person deciding read. Never the cluster's operators.",
 			Handler: p.decide,
 			ArgsSchema: map[string]string{
-				"reviewId": "string (required)",
-				"action":   "string (required) - publish|decline|askToFix|escalate|remove",
-				"reason":   "string (optional) - a listed reason",
-				"note":     "string (optional)",
-				"revision": "integer (required) - the revision read",
+				"reviewId":    "string (required)",
+				"action":      "string (required) - publish|decline|askToFix|escalate|remove",
+				"reason":      "string (optional) - a listed reason",
+				"note":        "string (optional)",
+				"revision":    "integer (required) - the revision read",
+				"contentHash": "string (recommended) - the fingerprint of the words read",
 			},
 		},
 		{

@@ -103,6 +103,9 @@ func registerShopperSurface() {
 				Description: "The product the link names.",
 			},
 		},
+		// PRIVATE: the answer is one buyer's own review, keyed by the token in
+		// their link. Never cached, and the link never leaves in a Referer.
+		Private:  true,
 		Refusals: LinkRefusals,
 	})
 

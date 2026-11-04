@@ -24,13 +24,13 @@ func dec(action string, revision int, minutes int) Decision {
 }
 
 func TestANewReviewIsWaiting(t *testing.T) {
-	if got := StateOf(1, nil); got != StateWaiting {
+	if got := StateOf(rv(1), nil); got != StateWaiting {
 		t.Fatalf("StateOf(no decisions) = %q, want waiting -- nothing is public until a person publishes it", got)
 	}
 }
 
 func TestPublishOnTheCurrentRevisionPublishes(t *testing.T) {
-	if got := StateOf(1, []Decision{dec(ActionPublish, 1, 0)}); got != StatePublished {
+	if got := StateOf(rv(1), []Decision{dec(ActionPublish, 1, 0)}); got != StatePublished {
 		t.Fatalf("got %q, want published", got)
 	}
 }
@@ -40,7 +40,7 @@ func TestPublishOnTheCurrentRevisionPublishes(t *testing.T) {
 func TestADecisionDoesNotCoverALaterRevision(t *testing.T) {
 	cases := map[string]string{ActionPublish: "a publish", ActionDecline: "a decline"}
 	for action, what := range cases {
-		if got := StateOf(2, []Decision{dec(action, 1, 0)}); got != StateWaiting {
+		if got := StateOf(rv(2), []Decision{dec(action, 1, 0)}); got != StateWaiting {
 			t.Fatalf("%s on revision 1 with the review at revision 2: got %q, want waiting", what, got)
 		}
 	}
@@ -48,30 +48,30 @@ func TestADecisionDoesNotCoverALaterRevision(t *testing.T) {
 
 func TestTheLatestVisibilityDecisionWins(t *testing.T) {
 	// Declined, then published after a second look: published.
-	if got := StateOf(1, []Decision{dec(ActionDecline, 1, 0), dec(ActionPublish, 1, 5)}); got != StatePublished {
+	if got := StateOf(rv(1), []Decision{dec(ActionDecline, 1, 0), dec(ActionPublish, 1, 5)}); got != StatePublished {
 		t.Fatalf("decline then publish: got %q, want published", got)
 	}
 	// Published, then removed: removed.
-	if got := StateOf(1, []Decision{dec(ActionPublish, 1, 0), dec(ActionRemove, 1, 5)}); got != StateRemoved {
+	if got := StateOf(rv(1), []Decision{dec(ActionPublish, 1, 0), dec(ActionRemove, 1, 5)}); got != StateRemoved {
 		t.Fatalf("publish then remove: got %q, want removed", got)
 	}
 	// Order of the slice must not matter: the log is read by time.
-	if got := StateOf(1, []Decision{dec(ActionPublish, 1, 5), dec(ActionDecline, 1, 0)}); got != StatePublished {
+	if got := StateOf(rv(1), []Decision{dec(ActionPublish, 1, 5), dec(ActionDecline, 1, 0)}); got != StatePublished {
 		t.Fatalf("unsorted input: got %q, want published", got)
 	}
 }
 
 func TestAskToFixAndEscalateChangeNothing(t *testing.T) {
-	if got := StateOf(1, []Decision{dec(ActionAskToFix, 1, 0), dec(ActionEscalate, 1, 1)}); got != StateWaiting {
+	if got := StateOf(rv(1), []Decision{dec(ActionAskToFix, 1, 0), dec(ActionEscalate, 1, 1)}); got != StateWaiting {
 		t.Fatalf("askToFix + escalate on a waiting review: got %q, want waiting", got)
 	}
-	if got := StateOf(1, []Decision{dec(ActionPublish, 1, 0), dec(ActionEscalate, 1, 1)}); got != StatePublished {
+	if got := StateOf(rv(1), []Decision{dec(ActionPublish, 1, 0), dec(ActionEscalate, 1, 1)}); got != StatePublished {
 		t.Fatalf("escalate on a published review: got %q, want published -- a safety concern is never a reason to withhold", got)
 	}
 }
 
 func TestEraseIsTerminal(t *testing.T) {
-	if got := StateOf(1, []Decision{dec(ActionErase, 1, 0), dec(ActionPublish, 1, 5)}); got != StateErased {
+	if got := StateOf(rv(1), []Decision{dec(ActionErase, 1, 0), dec(ActionPublish, 1, 5)}); got != StateErased {
 		t.Fatalf("erase then publish: got %q, want erased -- an erased review never comes back", got)
 	}
 }
@@ -79,10 +79,10 @@ func TestEraseIsTerminal(t *testing.T) {
 // A ROW WRITTEN BEFORE REVISIONS EXISTED CARRIES NONE. It is revision 1, and
 // so is a decision that names none.
 func TestAnAbsentRevisionIsRevisionOne(t *testing.T) {
-	if got := StateOf(0, []Decision{dec(ActionPublish, 0, 0)}); got != StatePublished {
+	if got := StateOf(rv(0), []Decision{dec(ActionPublish, 0, 0)}); got != StatePublished {
 		t.Fatalf("got %q, want published", got)
 	}
-	if got := StateOf(0, []Decision{dec(ActionPublish, 1, 0)}); got != StatePublished {
+	if got := StateOf(rv(0), []Decision{dec(ActionPublish, 1, 0)}); got != StatePublished {
 		t.Fatalf("got %q, want published", got)
 	}
 }
@@ -147,3 +147,5 @@ func TestValidateDecision(t *testing.T) {
 		}
 	}
 }
+
+func rv(n int) ReviewVersion { return ReviewVersion{Revision: n} }
