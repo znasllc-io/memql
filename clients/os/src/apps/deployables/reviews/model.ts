@@ -95,6 +95,8 @@ export interface ReviewSettingsValues {
   requestDelayDays: number;
   requestsEnabled: boolean;
   requestTemplateId: string;
+  /** The sending identity requests leave as; named only by the cluster's operators. */
+  requestSenderIdentityId: string;
   notifyEmail: string;
   removalApproverUserId: string;
 }
@@ -103,7 +105,7 @@ export interface ReviewSettings {
   /** False until the cluster's operators set the store up. */
   exists: boolean;
   values: ReviewSettingsValues;
-  may: { edit: boolean; nameApprover: boolean };
+  may: { edit: boolean; nameApprover: boolean; nameSender: boolean };
   viewer: { moderates: boolean; approvesRemovals: boolean };
 }
 
@@ -237,10 +239,11 @@ export function reviewSettingsFrom(row: Row | null): ReviewSettings {
       requestDelayDays: s !== null && s["requestDelayDays"] !== undefined ? whole(s, "requestDelayDays") : 14,
       requestsEnabled: flag(s, "requestsEnabled"),
       requestTemplateId: rowString(s, "requestTemplateId"),
+      requestSenderIdentityId: rowString(s, "requestSenderIdentityId"),
       notifyEmail: rowString(s, "notifyEmail"),
       removalApproverUserId: rowString(s, "removalApproverUserId"),
     },
-    may: { edit: flag(may, "edit"), nameApprover: flag(may, "nameApprover") },
+    may: { edit: flag(may, "edit"), nameApprover: flag(may, "nameApprover"), nameSender: flag(may, "nameSender") },
     viewer: { moderates: flag(viewer, "moderates"), approvesRemovals: flag(viewer, "approvesRemovals") },
   };
 }

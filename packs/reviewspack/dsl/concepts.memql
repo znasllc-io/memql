@@ -115,6 +115,7 @@ concept reviewSettings {
   requestDelayDays  int   @description("How many days after an order its review request goes out. Absent means 14.")
   requestsEnabled   bool  @description("Whether this store's review requests go out at all. Absent means off.")
   requestTemplateId string  @description("The v1:campaigns:template.id the review request email is rendered from: the store's own wording.")
+  requestSenderIdentityId string  @description("The v1:campaigns:senderIdentity.id the review request leaves as: the store organization's own, or the installation's standing in for an organization with no mailbox of its own. Named only by the cluster's operators.")
   notifyEmail       string  @description("Where 'a review is waiting' goes: one email per review revision, carrying no review text and no writer data.")
   removalApproverUserId string  @description("v1:identity:user.id of the store's owner, the one person who can remove a published review or erase a writer's data. Named by the current owner or the cluster's operators, never by a moderator.")
 }

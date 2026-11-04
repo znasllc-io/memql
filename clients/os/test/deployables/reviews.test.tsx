@@ -261,6 +261,27 @@ describe("the settings", () => {
     expect(call).not.toContain("publicDisplay");
   });
 
+  it("lets only the cluster's operators name the mailbox requests leave from", async () => {
+    // A moderator sees the sender and cannot change it.
+    await openReviews();
+    await click(screen.getByRole("button", { name: "Review settings" }));
+    expect(((await screen.findByLabelText("Request sender")) as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText(/Only the cluster's operators choose the mailbox/)).toBeTruthy();
+  });
+
+  it("saves the sender an operator names", async () => {
+    const seed = reviewsSeed({ settings: { exists: true, settings: { linkLifetimeDays: 14, requestDelayDays: 14 }, may: { edit: true, nameApprover: true, nameSender: true }, viewer: { moderates: false, approvesRemovals: false } } as unknown as Row });
+    const connection = await openReviews(seed);
+    await click(screen.getByRole("button", { name: "Review settings" }));
+    const sender = (await screen.findByLabelText("Request sender")) as HTMLInputElement;
+    expect(sender.disabled).toBe(false);
+    await typeInto(sender, "si-house");
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    expect(connection.callsNamed("reviewsUpdateSettings")[0]).toContain('requestSenderIdentityId: "si-house"');
+  });
+
   it("offers no Save for days out of range, and says what is wrong", async () => {
     await openReviews();
     await click(screen.getByRole("button", { name: "Review settings" }));

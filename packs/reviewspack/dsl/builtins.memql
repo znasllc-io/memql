@@ -55,7 +55,7 @@ builtin reviewsDecide {
 
 @executor("integration.reviews.updateSettings")
 @args(profile="object")
-@description("Change one store's reviews settings and keep the rest: every write merges into the store's one settings row. A store with no settings is set up by the cluster's operators; the owner who approves removals is named by the current owner or an operator.")
+@description("Change one store's reviews settings and keep the rest: every write merges into the store's one settings row. A store with no settings is set up by the cluster's operators; the owner who approves removals is named by the current owner or an operator; the mailbox requests leave from is named by an operator.")
 @requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsUpdateSettings {
   siteId  string  @required  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
@@ -65,6 +65,7 @@ builtin reviewsUpdateSettings {
   requestDelayDays       integer  @description("Days after an order its review request goes out, 0 to 365.")
   requestsEnabled        bool     @description("Send review requests.")
   requestTemplateId      string   @description("The template the request email is rendered from.")
+  requestSenderIdentityId string  @description("The sending identity the request email leaves as; the installation's own may stand in for an organization with none. Operators only.")
   notifyEmail            string   @description("Where 'a review is waiting' goes.")
   removalApproverUserId  string   @description("The store's owner, who alone removes published reviews and erases writer data.")
   criteriaText           string   @description("The store's own copy describing its criteria.")

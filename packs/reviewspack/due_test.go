@@ -79,7 +79,7 @@ func (f *fakeMailer) SendOrderMessage(_ context.Context, args map[string]any) (s
 func dueFixture() (*dueReader, *fakeWriter, *fakeMailer, *Provider) {
 	r := &dueReader{
 		settings: []map[string]any{{"storeId": "store-live", "accountId": "acct-shop", "requestsEnabled": true,
-			"requestTemplateId": "tmpl-ask", "requestDelayDays": 14, "linkLifetimeDays": 14}},
+			"requestTemplateId": "tmpl-ask", "requestSenderIdentityId": "si-house", "requestDelayDays": 14, "linkLifetimeDays": 14}},
 		sites: []map[string]any{liveSite},
 		orders: []map[string]any{{"gid": "gid://shopify/Order/9", "name": "#1009", "email": "buyer@example.com",
 			"displayFinancialStatus": "PAID", "totalPriceSet": money("24.00"),
@@ -161,6 +161,7 @@ func TestStoresThatAskNothing(t *testing.T) {
 	cases := map[string]func(map[string]any){
 		"requests off":    func(s map[string]any) { s["requestsEnabled"] = false },
 		"no template":     func(s map[string]any) { delete(s, "requestTemplateId") },
+		"no sender":       func(s map[string]any) { delete(s, "requestSenderIdentityId") },
 		"no organization": func(s map[string]any) { delete(s, "accountId") },
 	}
 	for name, change := range cases {
@@ -275,5 +276,41 @@ func TestTheLinkGoesToTheOneLiveSiteThatServesTheStore(t *testing.T) {
 		if url, _ := fields["reviewUrl"].(string); !strings.HasPrefix(url, "https://"+c.host+"/reviews/write?") {
 			t.Errorf("%s: link = %q, want it on %s", c.name, url, c.host)
 		}
+	}
+}
+
+// THE LINK'S PARTS AND THE CHOSEN SENDER TRAVEL WITH EVERY REQUEST. A template
+// may not let a value choose where its link goes, so it writes the store's own
+// address and takes the product and the token as fields; and a send under a
+// store's organization goes out only as the sender its operator named.
+func TestARequestCarriesItsLinksPartsAndTheChosenSender(t *testing.T) {
+	_, w, m, p := dueFixture()
+	if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) != 1 {
+		t.Fatalf("mails = %d, want one", len(m.calls))
+	}
+	mail := m.calls[0]
+	if mail["senderIdentityId"] != "si-house" || mail["installationSender"] != true {
+		t.Fatalf("mail = %v, want the operator's sender, which may be the installation's", mail)
+	}
+	fields, _ := mail["fields"].(map[string]any)
+	if fields["productHandle"] != "floss-picks" {
+		t.Fatalf("fields = %v, want the product's handle", fields)
+	}
+	token, _ := fields["reviewToken"].(string)
+	var pending map[string]any
+	for _, c := range w.calls {
+		if c.mutation == "putReviewRequest" {
+			pending = c.args
+			break
+		}
+	}
+	if token == "" || tokenHash(token) != pending["tokenHash"] {
+		t.Fatal("the mailed token does not hash to the stored hash")
+	}
+	if url, _ := fields["reviewUrl"].(string); !strings.HasSuffix(url, "&t="+token) {
+		t.Fatalf("reviewUrl = %q, want the same token", url)
 	}
 }

@@ -24,6 +24,7 @@ type Draft = {
   requestDelayDays: string;
   linkLifetimeDays: string;
   requestTemplateId: string;
+  requestSenderIdentityId: string;
   notifyEmail: string;
   removalApproverUserId: string;
 };
@@ -34,6 +35,7 @@ const draftOf = (v: ReviewSettingsValues): Draft => ({
   requestDelayDays: String(v.requestDelayDays),
   linkLifetimeDays: String(v.linkLifetimeDays),
   requestTemplateId: v.requestTemplateId,
+  requestSenderIdentityId: v.requestSenderIdentityId,
   notifyEmail: v.notifyEmail,
   removalApproverUserId: v.removalApproverUserId,
 });
@@ -47,7 +49,7 @@ function days(text: string, min: number, max: number): number | null {
 }
 
 /** Only what changed, typed as the engine takes it; or the first thing wrong with it. */
-export function settingsChanges(from: ReviewSettingsValues, draft: Draft, mayNameApprover: boolean): { changes: Partial<ReviewSettingsValues>; problem: string } {
+export function settingsChanges(from: ReviewSettingsValues, draft: Draft, may: { nameApprover: boolean; nameSender: boolean }): { changes: Partial<ReviewSettingsValues>; problem: string } {
   const changes: Partial<ReviewSettingsValues> = {};
   if (draft.publicDisplay !== from.publicDisplay) changes.publicDisplay = draft.publicDisplay;
   if (draft.requestsEnabled !== from.requestsEnabled) changes.requestsEnabled = draft.requestsEnabled;
@@ -59,11 +61,13 @@ export function settingsChanges(from: ReviewSettingsValues, draft: Draft, mayNam
   if (life !== from.linkLifetimeDays) changes.linkLifetimeDays = life;
   const template = draft.requestTemplateId.trim();
   if (template !== from.requestTemplateId) changes.requestTemplateId = template;
+  const sender = draft.requestSenderIdentityId.trim();
+  if (may.nameSender && sender !== from.requestSenderIdentityId) changes.requestSenderIdentityId = sender;
   const email = draft.notifyEmail.trim();
   if (email !== "" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { changes, problem: `${email} is not an email address.` };
   if (email !== from.notifyEmail) changes.notifyEmail = email;
   const approver = draft.removalApproverUserId.trim();
-  if (mayNameApprover && approver !== from.removalApproverUserId) changes.removalApproverUserId = approver;
+  if (may.nameApprover && approver !== from.removalApproverUserId) changes.removalApproverUserId = approver;
   return { changes, problem: "" };
 }
 
@@ -100,7 +104,7 @@ export function ReviewSettingsPage({ settings, writes, nameOf, viewerUserId, tra
   }
 
   const canEdit = value.may.edit;
-  const { changes, problem } = settingsChanges(value.values, draft, value.may.nameApprover);
+  const { changes, problem } = settingsChanges(value.values, draft, value.may);
   const dirty = Object.keys(changes).length > 0 || problem !== "";
   const saving = writes.busy === "settings";
   const set = <K extends keyof Draft>(key: K) => (next: Draft[K]) => setDraft((d) => (d === null ? d : { ...d, [key]: next }));
@@ -142,7 +146,10 @@ export function ReviewSettingsPage({ settings, writes, nameOf, viewerUserId, tra
           <Field label="Request email template">
             <Input id="review-request-template" label="Request email template" code value={draft.requestTemplateId} disabled={!canEdit} onChange={set("requestTemplateId")} placeholder="A Campaigns template id" />
           </Field>
-          <Caption>Each paid product of a paid order gets its own link, sent once. A link stays open until its review is published or it expires, and the buyer can change their review through it until then.</Caption>
+          <Field label="Request sender">
+            <Input id="review-request-sender" label="Request sender" code value={draft.requestSenderIdentityId} disabled={!canEdit || !value.may.nameSender} onChange={set("requestSenderIdentityId")} placeholder="A Campaigns sender identity id" />
+          </Field>
+          <Caption>Each paid product of a paid order gets its own link, sent once. A link stays open until its review is published or it expires, and the buyer can change their review through it until then.{value.may.nameSender ? "" : " Only the cluster's operators choose the mailbox requests leave from."}</Caption>
         </Panel>
         <Panel label="Moderation">
           <Field label="Email when a review is waiting">

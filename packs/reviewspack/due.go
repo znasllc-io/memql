@@ -87,7 +87,10 @@ func (p *Provider) sendDueRequests(ctx context.Context, args map[string]any, _ i
 		eff := EffectiveSettings(settings)
 		storeID := strings.TrimSpace(asString(settings["storeId"]))
 		accountID := strings.TrimSpace(asString(settings["accountId"]))
-		if storeID == "" || (only != "" && storeID != only) || !eff.RequestsEnabled || eff.RequestTemplateID == "" || accountID == "" {
+		// A STORE ASKS ONLY WHEN IT CAN BE ASKED FOR PROPERLY: requests on, its
+		// own wording, a sender an operator named, and its organization.
+		if storeID == "" || (only != "" && storeID != only) || !eff.RequestsEnabled || eff.RequestTemplateID == "" ||
+			eff.RequestSenderIdentityID == "" || accountID == "" {
 			continue
 		}
 		site, ambiguous := p.servingSite(sys, storeID, accountID)
@@ -179,8 +182,13 @@ func (p *Provider) askOrder(ctx, sys context.Context, site, settings map[string]
 		fields := map[string]any{
 			"productTitle": title,
 			"reviewUrl":    linkURL(strings.TrimSpace(asString(site["hostname"])), l.ProductHandle, token),
-			"expiresOn":    expires.Format("January 2, 2006"),
-			"orderName":    strings.TrimSpace(asString(order["name"])),
+			// THE LINK'S PARTS, for a template: a value may not choose where a
+			// template's link goes, so the template writes the store's own
+			// address and takes these in its query.
+			"productHandle": l.ProductHandle,
+			"reviewToken":   token,
+			"expiresOn":     expires.Format("January 2, 2006"),
+			"orderName":     strings.TrimSpace(asString(order["name"])),
 		}
 		if billing, _ := order["billingAddress"].(map[string]any); billing != nil {
 			setIfPresentAny(fields, "firstName", strings.TrimSpace(asString(billing["firstName"])))
@@ -188,6 +196,10 @@ func (p *Provider) askOrder(ctx, sys context.Context, site, settings map[string]
 		status, reason, err := p.mailer.SendOrderMessage(merchant, map[string]any{
 			"storeId": storeID, "orderGid": orderGid, "accountId": accountID,
 			"templateId": strings.TrimSpace(eff.RequestTemplateID), "requestId": requestID, "fields": fields,
+			// The sender the store's operator named, which may be the
+			// installation's own: naming it is an operator's act (settings.go),
+			// so the job may say it was chosen.
+			"senderIdentityId": eff.RequestSenderIdentityID, "installationSender": true,
 		})
 		// THE OUTCOME IS A NEW VERSION OF THE SAME ROW, written from its own
 		// copy: the pending version above stays what it was.

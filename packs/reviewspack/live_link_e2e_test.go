@@ -230,7 +230,7 @@ func TestLiveE2E_TheDailyAskIssuesTheLinkADueOrderEarned(t *testing.T) {
 	account := "acct-reviews-ask-" + n
 	seedSiteIn(t, eng, site, merchant, store, account)
 	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
-		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, requestsEnabled: true, requestTemplateId: "tmpl-ask")`); err != nil {
+		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, requestsEnabled: true, requestTemplateId: "tmpl-ask", requestSenderIdentityId: "si-house")`); err != nil {
 		t.Fatalf("settings: %v", err)
 	}
 	orderGid := "gid://shopify/Order/" + n

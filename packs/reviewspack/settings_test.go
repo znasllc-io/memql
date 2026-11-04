@@ -172,3 +172,34 @@ func TestAnUnsetSettingReadAsNullKeepsItsDefault(t *testing.T) {
 		t.Fatalf("an explicit 0-day delay was not kept: %+v", s)
 	}
 }
+
+// THE REQUEST SENDER IS AN OPERATOR'S CHOICE. It may be the installation's own
+// mailbox, standing in for an organization with none, and only the people who
+// run the installation may hand that mailbox to a store.
+func TestOnlyAnOperatorNamesTheRequestSender(t *testing.T) {
+	args := map[string]any{"siteId": "site-1", "storeId": "store-live", "requestSenderIdentityId": "si-house"}
+	if _, err := writeSettings(t, moderatorCtx("owner-1"), existingSettings(), args, false); err == nil {
+		t.Fatal("the store's own owner named the mailbox its requests leave from")
+	}
+	opCtx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "staff-1", Role: auth.RoleOwner})
+	out, err := writeSettings(t, opCtx, existingSettings(), args, false)
+	if err != nil {
+		t.Fatalf("an operator naming the sender was refused: %v", err)
+	}
+	if out["requestSenderIdentityId"] != "si-house" {
+		t.Fatalf("saved = %v, want the sender the operator named", out["requestSenderIdentityId"])
+	}
+	// And it survives every later write, whoever makes it.
+	kept := existingSettings()
+	kept["requestSenderIdentityId"] = "si-house"
+	again, err := writeSettings(t, moderatorCtx("owner-1"), kept, map[string]any{"siteId": "site-1", "storeId": "store-live", "notifyEmail": "a@example.com"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again["requestSenderIdentityId"] != "si-house" {
+		t.Fatalf("a later write lost the sender: %v", again)
+	}
+	if got := EffectiveSettings(kept).RequestSenderIdentityID; got != "si-house" {
+		t.Fatalf("effective sender = %q", got)
+	}
+}

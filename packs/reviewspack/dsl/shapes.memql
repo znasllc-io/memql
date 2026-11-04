@@ -97,6 +97,7 @@ shape reviewSettings reviewSettingsFull {
   requestDelayDays
   requestsEnabled
   requestTemplateId
+  requestSenderIdentityId
   notifyEmail
   removalApproverUserId
   row.createdAt

@@ -165,9 +165,10 @@ mutation reviewSettings putReviewSettings {
     requestTemplateId      string   @maxLength(200)
     notifyEmail            string   @maxLength(320)
     removalApproverUserId  string   @maxLength(200)
+    requestSenderIdentityId string  @maxLength(200)
   }
   insert {
-    accept { ownerUserId, storeId, accountId, publicDisplay, criteriaText, linkLifetimeDays, requestDelayDays, requestsEnabled, requestTemplateId, notifyEmail, removalApproverUserId }
+    accept { ownerUserId, storeId, accountId, publicDisplay, criteriaText, linkLifetimeDays, requestDelayDays, requestsEnabled, requestTemplateId, notifyEmail, removalApproverUserId, requestSenderIdentityId }
     stamp {
       id: args.settingsId
     }

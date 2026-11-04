@@ -35,13 +35,17 @@ const DefaultRequestDelayDays = 14
 
 // Settings is one store's effective settings.
 type Settings struct {
-	PublicDisplay         bool
-	LinkLifetimeDays      int
-	RequestDelayDays      int
-	RequestsEnabled       bool
-	RequestTemplateID     string
-	NotifyEmail           string
-	RemovalApproverUserID string
+	PublicDisplay     bool
+	LinkLifetimeDays  int
+	RequestDelayDays  int
+	RequestsEnabled   bool
+	RequestTemplateID string
+	// RequestSenderIdentityID is the sending identity the request email leaves
+	// as: the store organization's own, or the installation's standing in for
+	// an organization with no mailbox of its own. An operator's choice.
+	RequestSenderIdentityID string
+	NotifyEmail             string
+	RemovalApproverUserID   string
 }
 
 // EffectiveSettings reads a settings row with every default applied.
@@ -63,6 +67,7 @@ func EffectiveSettings(row map[string]any) Settings {
 		}
 	}
 	s.RequestTemplateID = strings.TrimSpace(asString(row["requestTemplateId"]))
+	s.RequestSenderIdentityID = strings.TrimSpace(asString(row["requestSenderIdentityId"]))
 	s.NotifyEmail = strings.TrimSpace(asString(row["notifyEmail"]))
 	s.RemovalApproverUserID = strings.TrimSpace(asString(row["removalApproverUserId"]))
 	return s
@@ -80,9 +85,10 @@ var settingFields = map[string]func(v any) (any, error){
 	"requestDelayDays": func(v any) (any, error) {
 		return intSetting(v, 0, 365, "the request goes out 0 to 365 days after the order")
 	},
-	"requestTemplateId":     stringSetting(200),
-	"removalApproverUserId": stringSetting(200),
-	"criteriaText":          stringSetting(4000),
+	"requestTemplateId":       stringSetting(200),
+	"requestSenderIdentityId": stringSetting(200),
+	"removalApproverUserId":   stringSetting(200),
+	"criteriaText":            stringSetting(4000),
 	"notifyEmail": func(v any) (any, error) {
 		s, ok := v.(string)
 		if !ok {
@@ -183,11 +189,13 @@ func stampOrganization(changes map[string]any, site map[string]any) {
 // writeSettings merges changes into the store's current settings row and
 // answers the new version.
 //
-// Two rules decide who may write. A store with no settings row yet is set up
+// Three rules decide who may write. A store with no settings row yet is set up
 // by the cluster's operators; after that, whoever can read the row may change
-// it. And the owner who approves removals is named only by the current owner
-// or by an operator -- a moderator who could name themselves would remove
-// reviews nobody approved.
+// it. The owner who approves removals is named only by the current owner or by
+// an operator -- a moderator who could name themselves would remove reviews
+// nobody approved. And the mailbox the store's requests leave from is named
+// only by an operator: it may be the installation's own, standing in for an
+// organization with none, and only the installation's people may lend it.
 func (p *Provider) writeSettings(ctx context.Context, storeID string, changes map[string]any) ([]memorynodes.MemoryNode, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || strings.TrimSpace(ac.UserId) == "" {
@@ -207,6 +215,10 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 	if acct, set := changes["accountId"]; set && !operator &&
 		bareAccount(asString(acct)) != bareAccount(asString(current["accountId"])) {
 		delete(changes, "accountId")
+	}
+	if next, naming := changes["requestSenderIdentityId"]; naming && !operator &&
+		strings.TrimSpace(asString(next)) != strings.TrimSpace(asString(current["requestSenderIdentityId"])) {
+		return nil, fmt.Errorf("reviews: only the cluster's operators name the mailbox a store's review requests leave from")
 	}
 	if next, naming := changes["removalApproverUserId"]; naming && next != asString(current["removalApproverUserId"]) {
 		now := strings.TrimSpace(asString(current["removalApproverUserId"]))
@@ -243,7 +255,7 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 // mutation declares them. Row intrinsics (id, createdAt) are not among them.
 var settingsRowFields = []string{
 	"ownerUserId", "accountId", "publicDisplay", "criteriaText", "linkLifetimeDays", "requestDelayDays",
-	"requestsEnabled", "requestTemplateId", "notifyEmail", "removalApproverUserId",
+	"requestsEnabled", "requestTemplateId", "notifyEmail", "removalApproverUserId", "requestSenderIdentityId",
 }
 
 // normalizeSetting turns a value read off a row into the type the write
