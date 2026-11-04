@@ -8,7 +8,7 @@
 #   # or: az acr build --registry acrmemql --image deploy-gate:<tag> \
 #   #        -f cmd/deploy-gate-check/Dockerfile .
 # CI emits the resulting @sha256 digest for the release lockfile (releases/).
-FROM golang:1.27.3@sha256:957861185dbf29d93668ace41e011d091c6e779953d47f0316ef2cc58e28fe2b AS build
+FROM golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 # The `wire` tier is a set of NESTED modules the root go.mod `replace`s by
